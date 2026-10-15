@@ -691,9 +691,9 @@ function Empty({ icon, title, children }: { icon: ReactNode; title: string; chil
 const WINDOWS = navigator.userAgent.includes("Windows");
 
 const FIRST_STEPS = [
-  ["Captions in your language", "Pick it in Captions. It starts as your computer's language."],
-  ["Cut silences and retakes", WINDOWS ? "In the transcript. AI agents can't edit in Nuzky on Windows yet." : "In the transcript, or let an AI agent cut them."],
-  ["Export for Reels & TikTok", "Vertical 1080p, ready to post."],
+  ["Captions in your language", "Pick the language in Captions. Nuzky starts with your computer's, or detects it."],
+  ["Cut pauses and retakes", WINDOWS ? "In the transcript. AI agents can't edit in Nuzky on Windows yet." : "In the transcript, or let an AI agent cut them."],
+  ["Export for Reels & TikTok", "1080p in 9:16. Switch Ratio first for a landscape video."],
 ];
 
 /** No projects yet: the way from a talking head video to a post, and the formats to start empty. */
