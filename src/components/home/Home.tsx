@@ -693,7 +693,7 @@ const WINDOWS = navigator.userAgent.includes("Windows");
 const FIRST_STEPS = [
   ["Captions in your language", "Pick the language in Captions. Nuzky starts with your computer's, or detects it."],
   ["Cut pauses and retakes", WINDOWS ? "In the transcript. AI agents can't edit in Nuzky on Windows yet." : "In the transcript, or let an AI agent cut them."],
-  ["Export for Reels & TikTok", "1080p in 9:16. Switch Ratio first for a landscape video."],
+  ["Export for Reels & TikTok", "1080p in 9:16. Switch Ratio first for any other shape."],
 ];
 
 /** No projects yet: the way from a talking head video to a post, and the formats to start empty. */

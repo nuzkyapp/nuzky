@@ -179,11 +179,11 @@ def hex_rgb(colour):
                      'CapCut had them, one list says what did not come over, Finish with AI, reopening, an encrypted draft, '
                      'and the draft stays unchanged', before=setup, home=True)
 def capcut_open(r):
-    r.check('the first start offers CapCut\'s drafts under the formats', wait(lambda: r.s.run(SECTION) == 'Continue a CapCut draft', 15), r.s.run(SECTION))
+    r.check('the first start offers CapCut\'s drafts under it', wait(lambda: r.s.run(SECTION) == 'Continue a CapCut draft', 15), r.s.run(SECTION))
     aligned = r.s.run("""const s = document.querySelector('section[aria-label="CapCut drafts"]').getBoundingClientRect();
-        const t = [...document.querySelectorAll('main button')].find((b) => b.textContent.includes('9:16')).getBoundingClientRect();
-        return Math.abs(s.left - t.left) < 2""")
-    r.check('lined up with the format tiles', aligned)
+        const t = document.querySelector('main ol').getBoundingClientRect();
+        return Math.abs(s.left - t.left) < 2 && Math.abs(s.right - t.right) < 2""")
+    r.check('as wide as the first-start steps and lined up with them', aligned)
     found = wait(lambda: r.s.run(DRAFT_CARDS), 10) or []
     names = [c['name'] for c in found]
     r.check('newest first, by name, without the empty one', names == ['Talking reel', 'From JianYing', 'Older reel'], names)
