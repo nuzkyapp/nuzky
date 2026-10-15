@@ -464,14 +464,54 @@ def launcher(r):
     r.check('no other error toast', not unexpected, unexpected)
 
 
-@flow('first-run', 'The first start offers the formats to begin with; choosing one shapes the project Nuzky made '
-      'instead of leaving a second empty file', home=True)
+FIRST_RUN_TEXT = "return document.querySelector('main')?.textContent ?? ''"
+FIRST_STEPS = ('Captions in your language', 'Cut silences and retakes', 'Export for Reels & TikTok')
+OPEN_VIDEO = 'Open a talking head video'
+NAMED_LANGUAGES = """const steps = [...document.querySelectorAll('main ol li')].map((li) => li.textContent).join(' ');
+const names = new Intl.DisplayNames(['en'], {type: 'language'});
+return [...new Set(['en', 'cs', 'de', 'es', 'fr', 'it', 'pt', 'pl', 'ru', 'uk', 'ja', 'zh', 'ko', 'nl', 'sv', 'tr', 'ar', 'hi', navigator.language]
+  .map((code) => names.of(code)))].filter((name) => steps.includes(name));"""
+# The native file dialog cannot be driven, so it answers with the given path. Tauri's `invoke` cannot be replaced, so
+# the answer comes from the fetch that carries the call to the app.
+ANSWER_FILE_DIALOG = """const fetch = window.fetch, picked = arguments[0];
+window.fetch = (url, init) => decodeURIComponent(String(url)).includes('plugin:dialog|open')
+  ? Promise.resolve(new Response(JSON.stringify([picked]), {headers: {'Content-Type': 'application/json', 'Tauri-Response': 'ok'}}))
+  : fetch(url, init);"""
+CLIPPED = """return [...document.querySelectorAll('main h2, main button, main ol li, main p')].filter((el) => {
+  const b = el.getBoundingClientRect(); return b.left < 0 || b.right > innerWidth; }).map((el) => el.textContent);"""
+
+
+@flow('first-run', 'The first start leads from a talking head video to captions, cuts and a vertical export; the video '
+      'starts a project, and a format still shapes the project Nuzky made instead of leaving a second empty file', home=True)
 def first_run(r):
-    r.check('the first start shows Start your first project',
-            wait(lambda: 'Start your first project' in r.s.run('return document.body.textContent'), 10))
+    text = lambda: r.s.run(FIRST_RUN_TEXT) or ''
+    r.check('the first start offers Open a talking head video and the three steps',
+            wait(lambda: OPEN_VIDEO in text() and all(step in text() for step in FIRST_STEPS), 10), text())
+    named = r.s.run(NAMED_LANGUAGES)
+    r.check('no step names a language', named == [], named)
     r.shot('first-run')
+    if r.check('the window goes to its smallest size', resize(r, 1024, 640)):
+        time.sleep(0.5)
+        clipped = r.s.run(CLIPPED)
+        r.check('nothing of the first start is cut off at the sides', clipped == [], clipped)
+        r.shot('first-run-1024')
+        resize(r, 1440, 900)
+
     click(r, '16:9', 'main')
     v = wait(lambda: view(r)['view'] == 'editor' and view(r), 5)
     r.check('a format opens the editor with that format', v and v['canvas'] == [1920, 1080], v)
     r.check('no second project file', wait(lambda: len(list(projects_dir(r).glob('*.nuzky'))) == 1, 3),
             sorted(p.name for p in projects_dir(r).iterdir()))
+    r.s.run("window.__nuzky.store.setState({view: 'home'})")
+    r.check('the project is still empty, so home still shows the first start', wait(lambda: OPEN_VIDEO in text(), 5), text())
+
+    r.s.run(ANSWER_FILE_DIALOG, str(FIXTURES / 'talk.mp4'))
+    r.check('Open a talking head video is a button', click(r, OPEN_VIDEO, 'main'))
+    v = wait(lambda: view(r)['view'] == 'editor' and len(r.track()) == 1 and view(r), 15)
+    assets = [a['name'] for a in r.state()['assets']]
+    r.check('it opens the editor with the video on the timeline', v and assets and 'talk' in assets[0], (view(r), assets))
+    r.s.run("window.__nuzky.store.setState({view: 'home'})")
+    r.check('after the first video, home shows the project instead of the first start',
+            wait(lambda: OPEN_VIDEO not in text() and (card(r, view(r)['name']) or {}).get('meta') == 'Open now', 10), (text(), cards(r)))
+    time.sleep(0.5)
+    r.shot('home-after-first-video')
