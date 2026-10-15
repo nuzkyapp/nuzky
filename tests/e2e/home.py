@@ -465,7 +465,7 @@ def launcher(r):
 
 
 FIRST_RUN_TEXT = "return document.querySelector('main')?.textContent ?? ''"
-FIRST_STEPS = ('Captions in your language', 'Cut silences and retakes', 'Export for Reels & TikTok')
+FIRST_STEPS = ('Captions in your language', 'Cut pauses and retakes', 'Export for Reels & TikTok')
 OPEN_VIDEO = 'Open a talking head video'
 NAMED_LANGUAGES = """const steps = [...document.querySelectorAll('main ol li')].map((li) => li.textContent).join(' ');
 const names = new Intl.DisplayNames(['en'], {type: 'language'});
@@ -477,8 +477,11 @@ ANSWER_FILE_DIALOG = """const fetch = window.fetch, picked = arguments[0];
 window.fetch = (url, init) => decodeURIComponent(String(url)).includes('plugin:dialog|open')
   ? Promise.resolve(new Response(JSON.stringify([picked]), {headers: {'Content-Type': 'application/json', 'Tauri-Response': 'ok'}}))
   : fetch(url, init);"""
-CLIPPED = """return [...document.querySelectorAll('main h2, main button, main ol li, main p')].filter((el) => {
-  const b = el.getBoundingClientRect(); return b.left < 0 || b.right > innerWidth; }).map((el) => el.textContent);"""
+CLIPPED = """const pane = document.querySelector('main .overflow-y-auto'), p = pane.getBoundingClientRect();
+const out = [...pane.querySelectorAll('h2, button, ol li, p')].filter((el) => {
+  const b = el.getBoundingClientRect(); return b.width && (b.left < p.left || b.right > p.right); }).map((el) => el.textContent);
+return pane.scrollWidth > pane.clientWidth ? [...out, `the pane scrolls sideways: ${pane.scrollWidth} > ${pane.clientWidth}`] : out;"""
+CONNECT_OPEN = "return !!document.querySelector('[role=dialog][aria-labelledby=connect-title]')"
 
 
 @flow('first-run', 'The first start leads from a talking head video to captions, cuts and a vertical export; the video '
@@ -504,6 +507,17 @@ def first_run(r):
             sorted(p.name for p in projects_dir(r).iterdir()))
     r.s.run("window.__nuzky.store.setState({view: 'home'})")
     r.check('the project is still empty, so home still shows the first start', wait(lambda: OPEN_VIDEO in text(), 5), text())
+
+    r.check('the first start asks Want AI to do the cutting?', 'Want AI to do the cutting?' in text(), text())
+    r.check('connect an agent is a button', click(r, 'connect an agent', 'main'))
+    if r.check('it opens the Connect dialog', wait(lambda: r.s.run(CONNECT_OPEN), 5)):
+        r.key('Escape')
+        r.check('Esc closes the Connect dialog', wait(lambda: not r.s.run(CONNECT_OPEN), 5))
+    r.check('Get set up is a button', click(r, 'Get set up', 'main'))
+    r.check('it opens the editor with the AI panel', wait(lambda: view(r)['view'] == 'editor' and r.s.run(
+        "return window.__nuzky.dock.getState().open && !!document.querySelector('aside[aria-label=AI]')"), 5), view(r))
+    r.s.run("window.__nuzky.dock.setState({open: false}); window.__nuzky.store.setState({view: 'home'})")
+    r.check('back home, the first start still shows', wait(lambda: OPEN_VIDEO in text(), 5), text())
 
     r.s.run(ANSWER_FILE_DIALOG, str(FIXTURES / 'talk.mp4'))
     r.check('Open a talking head video is a button', click(r, OPEN_VIDEO, 'main'))
