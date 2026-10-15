@@ -687,39 +687,58 @@ function Empty({ icon, title, children }: { icon: ReactNode; title: string; chil
   );
 }
 
-/** No projects yet: the formats to start with, and that dropping videos works too. */
+/** The AI panel refuses to run on Windows and `nuzky mcp --current` cannot attach there. */
+const WINDOWS = navigator.userAgent.includes("Windows");
+
+const FIRST_STEPS = [
+  ["Captions in your language", "Pick it in Captions. It starts as your computer's language."],
+  ["Cut silences and retakes", WINDOWS ? "In the transcript. AI agents can't edit in Nuzky on Windows yet." : "In the transcript, or let an AI agent cut them."],
+  ["Export for Reels & TikTok", "Vertical 1080p, ready to post."],
+];
+
+/** No projects yet: the way from a talking head video to a post, and the formats to start empty. */
 function FirstRun() {
   return (
-    <div className="flex flex-col items-center gap-6 pt-20">
-      <h2 className="text-[17px] font-semibold text-fg">Start your first project</h2>
-      <div className="flex flex-wrap justify-center gap-3">
-        {FORMATS.map((f) => (
-          <button
-            key={f.label}
-            type="button"
-            onClick={() => newProject(f.width, f.height)}
-            className="flex w-[140px] flex-col items-center gap-2 rounded-xl bg-white/[.05] px-3 pt-5 pb-4 text-fg/80 outline outline-1 -outline-offset-1 outline-white/[.07] transition-colors duration-[120ms] ease-out hover:bg-white/[.09] hover:text-fg"
-          >
-            <span className="flex h-12 items-center">
-              <FormatShape width={f.width} height={f.height} size={44} />
+    <div className="mx-auto flex max-w-[748px] flex-col items-center gap-6 pt-20 text-center">
+      <h2 className="text-[17px] font-semibold text-fg">Start your first video</h2>
+      <Button variant="primary" onClick={() => void pickVideosForNewProject()} className="-mt-2 h-9 px-4">
+        <Film size={16} /> Open a talking head video…
+      </Button>
+      <ol className="grid w-full grid-cols-3 gap-6 text-left">
+        {FIRST_STEPS.map(([title, line], i) => (
+          <li key={title} className="flex gap-2.5">
+            <span className="tabular flex size-5 shrink-0 items-center justify-center rounded-full bg-white/[.09] text-[11px] font-semibold text-fg">{i + 1}</span>
+            <span>
+              <span className="block text-[13px] font-semibold text-fg">{title}</span>
+              <span className="mt-0.5 block text-[12px] text-muted">{line}</span>
             </span>
-            <span className="tabular text-[13px] font-semibold text-fg">{f.label}</span>
-            <span className="text-[11px] text-muted">{f.hint}</span>
-          </button>
+          </li>
         ))}
-        <button
-          type="button"
-          onClick={() => void pickVideosForNewProject()}
-          className="flex w-[140px] flex-col items-center gap-2 rounded-xl bg-white/[.05] px-3 pt-5 pb-4 outline outline-1 -outline-offset-1 outline-white/[.07] transition-colors duration-[120ms] ease-out hover:bg-white/[.09]"
-        >
-          <span className="flex h-12 items-center text-muted">
-            <Film size={24} />
-          </span>
-          <span className="text-[13px] font-semibold text-fg">From videos…</span>
-          <span className="text-[11px] text-muted">First video's format</span>
-        </button>
+      </ol>
+      <div className="flex flex-col items-center gap-2 text-[13px] text-muted">
+        {!WINDOWS && (
+          <p>
+            Want AI to do the cutting?{" "}
+            <button type="button" onClick={openAi} className="text-accent hover:underline">
+              Get set up
+            </button>{" "}
+            or{" "}
+            <button type="button" onClick={() => useEditor.setState({ connectOpen: true })} className="text-accent hover:underline">
+              connect an agent
+            </button>{" "}
+            you already use, like Claude Code or Codex.
+          </p>
+        )}
+        <p>Or drop videos from your phone anywhere in this window.</p>
+        <div className="flex items-center gap-1">
+          Or start empty:
+          {FORMATS.map((f) => (
+            <Button key={f.label} variant="ghost" title={f.hint} onClick={() => newProject(f.width, f.height)} className="tabular h-7 px-2 text-[12px]">
+              <FormatShape width={f.width} height={f.height} size={12} /> {f.label}
+            </Button>
+          ))}
+        </div>
       </div>
-      <p className="text-[13px] text-muted">Or drop videos from your phone anywhere in this window.</p>
     </div>
   );
 }
