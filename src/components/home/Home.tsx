@@ -70,7 +70,7 @@ import { FeedbackRow } from "../Feedback";
 
 type MenuState = { items: MenuEntry[]; at: { x: number; y: number; align?: "start" | "end"; above?: boolean }; label: string; keyboard: boolean; back: HTMLElement | null; /** The card it acts on. */ target?: string };
 
-/** A ratio's shape, as on the format tiles and in the New project menu. */
+/** A ratio's shape, as in the New project menu and on the first start. */
 export function FormatShape({ width, height, size }: { width: number; height: number; size: number }) {
   const scale = size / Math.max(width, height);
   return <span className="inline-block rounded-[2px] border-[1.5px] border-current" style={{ width: Math.round(width * scale), height: Math.round(height * scale) }} />;
