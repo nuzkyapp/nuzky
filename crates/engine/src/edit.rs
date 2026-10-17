@@ -1542,27 +1542,33 @@ impl Project {
             Some((from, to)) => to - from,
             None => at - earliest,
         };
-        let starts: Vec<i64> = rest.iter().map(|c| c.clip.start_us + offset(c.clip.start_us)).collect();
-        // A clip copied from before the main-track clips never lands before the start.
-        let lift = -starts.iter().copied().min().unwrap_or(0).min(0);
         let mut groups: Vec<(String, TrackKind, bool, Vec<Clip>)> = Vec::new();
-        for (copied, start) in rest.into_iter().zip(starts) {
-            let clip = Clip { id: new_id(), start_us: start + lift, transition_in: None, ..copied.clip };
+        for copied in rest {
+            // A clip copied from before the main-track clips never lands before the start.
+            let start = (copied.clip.start_us + offset(copied.clip.start_us)).max(0);
+            let clip = Clip { id: new_id(), start_us: start, transition_in: None, ..copied.clip };
             match groups.iter_mut().find(|g| g.0 == copied.track_id) {
                 Some(group) => group.3.push(clip),
                 None => groups.push((copied.track_id, copied.track_kind, copied.keep_in_place, vec![clip])),
             }
         }
-        for (track_id, kind, keep, clips) in groups {
+        for (track_id, kind, keep, mut clips) in groups {
+            clips.sort_by_key(|c| c.start_us);
             let start = clips.iter().map(|c| c.start_us).min().unwrap_or(0);
             let end = clips.iter().map(Clip::end_us).max().unwrap_or(0);
-            let target = match self.track_index(&track_id).filter(|&i| i != 0 && self.tracks[i].kind == kind) {
+            let mut target = match self.track_index(&track_id).filter(|&i| i != 0 && self.tracks[i].kind == kind) {
                 Some(i) if clips.iter().all(|c| self.is_free(i, c.start_us, c.end_us(), None)) => i,
                 Some(i) => self.insert_track(i + 1, kind, keep),
                 None => self.free_track(kind, start, end, keep),
             };
-            out.select.extend(clips.iter().map(|c| c.id.clone()));
-            self.tracks[target].clips.extend(clips);
+            for clip in clips {
+                // Clips of one track that now overlap, as their takes closed a gap, go on a new track right above.
+                if !self.is_free(target, clip.start_us, clip.end_us(), None) {
+                    target = self.insert_track(target + 1, kind, keep);
+                }
+                out.select.push(clip.id.clone());
+                self.tracks[target].clips.push(clip);
+            }
         }
         Ok(())
     }
@@ -3788,6 +3794,24 @@ mod tests {
         // The takes go in at 13 s and 18 s, back to back; the title keeps its second into the second one.
         assert_eq!(main_layout(&p)[3..], [(13000, 5000), (18000, 5000)]);
         assert_eq!(p.tracks[1].clips.iter().map(|c| c.start_us).collect::<Vec<_>>(), [9_000_000, 19_000_000]);
+
+        // A title from 4.5 s, over the first take, lands 0.5 s before the end of its pasted copy and over the third
+        // take's title there, so it goes on a track of its own; one from before the third take, pasted at the
+        // start, starts at 0 while that take's own title keeps its second.
+        let style: TextStyle =
+            serde_json::from_value(serde_json::json!({"fontSize": 60.0, "color": "#ffffff"})).unwrap();
+        let early =
+            p.apply(EditCmd::AddText { start_us: 4_500_000, text: "Early".into(), style }).unwrap().select[0].clone();
+        let clips = vec![copied(&p, &takes[0]), copied(&p, &takes[2]), copied(&p, &early), copied(&p, &title)];
+        let out = p.apply(EditCmd::PasteClips { clips, at_us: i64::MAX / 4 }).unwrap();
+        let start =
+            |p: &Project, id: &str| p.find_clip(id).map(|(ti, ci)| (ti, p.tracks[ti].clips[ci].start_us)).unwrap();
+        let ((early_track, early_at), (title_track, title_at)) = (start(&p, &out.select[2]), start(&p, &out.select[3]));
+        assert_eq!((early_at, title_at), (27_500_000, 29_000_000));
+        assert_ne!(early_track, title_track);
+        let clips = vec![copied(&p, &takes[2]), copied(&p, &early), copied(&p, &title)];
+        let out = p.apply(EditCmd::PasteClips { clips, at_us: 0 }).unwrap();
+        assert_eq!((start(&p, &out.select[1]).1, start(&p, &out.select[2]).1), (0, 1_000_000));
     }
 
     #[test]
