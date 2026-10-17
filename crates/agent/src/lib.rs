@@ -12,6 +12,6 @@ mod event;
 mod turn;
 
 pub use chatgpt::{ChatGptRequest, Tools};
-pub use discover::{AgentId, AgentInfo, find};
+pub use discover::{AgentId, AgentInfo, SignIn, find, run, signed_in};
 pub use event::{AgentEvent, ErrorCode, ToolStatus};
 pub use turn::{McpServer, Turn, TurnRequest};

@@ -66,6 +66,15 @@ export type AgentKind = "claudeCode" | "codex";
  */
 export type AgentSetup = "claude" | "cursor" | "other";
 
+export type AgentStatus = {
+  agent: AgentKind,
+  name: string,
+  installed: boolean,
+  version: string | null,
+  signedIn: SignIn | null,
+  connection: AgentConnection,
+};
+
 export type Animation = {
   kind: AnimationKind,
   durationUs: number,
@@ -1075,6 +1084,8 @@ export type Shape = {
    */
   shadow: number,
 };
+
+export type SignIn = "signedIn" | "signedOut" | "unknown";
 
 export type Snapshot = {
   project: Project,

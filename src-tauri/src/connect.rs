@@ -33,6 +33,13 @@ impl Agent {
         }
     }
 
+    pub fn id(self) -> nuzky_agent::AgentId {
+        match self {
+            Agent::ClaudeCode => nuzky_agent::AgentId::Claude,
+            Agent::Codex => nuzky_agent::AgentId::Codex,
+        }
+    }
+
     /// Where the agent keeps its user-wide MCP servers, honouring its own override variable.
     pub fn config(self, home: &Path) -> PathBuf {
         let from = |var: &str| std::env::var_os(var).filter(|v| !v.is_empty()).map(PathBuf::from);
@@ -200,6 +207,152 @@ fn tilde(path: &str, home: &Path) -> String {
 /// Where the app's socket lives on Linux. Codex hands a server only a few variables, so its entry
 /// passes this one on; without it the server looks for Nuzky in another folder.
 const RUNTIME_DIR: &str = "XDG_RUNTIME_DIR";
+
+#[cfg(unix)]
+fn claude_fields(text: &str) -> (&str, &str, &str) {
+    let field = |name| text.lines().find_map(|line| line.trim().strip_prefix(name)).unwrap_or_default().trim();
+    (field("Status:"), field("Scope:"), field("Issue:"))
+}
+
+#[cfg(unix)]
+#[derive(Debug, Deserialize)]
+struct CodexServer {
+    enabled: bool,
+    transport: CodexTransport,
+}
+
+#[cfg(unix)]
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+enum CodexTransport {
+    Stdio(CodexStdio),
+    #[serde(other)]
+    Other,
+}
+
+#[cfg(unix)]
+#[derive(Debug, Deserialize)]
+struct CodexStdio {
+    command: String,
+    args: Vec<String>,
+    env: Option<std::collections::BTreeMap<String, String>>,
+    env_vars: Option<Vec<String>>,
+    cwd: Option<PathBuf>,
+}
+
+#[cfg(unix)]
+fn codex_server(text: &[u8]) -> std::result::Result<CodexStdio, String> {
+    let server: CodexServer =
+        serde_json::from_slice(text).map_err(|_| "Codex couldn't read its Nuzky settings. Press Connect again.")?;
+    if !server.enabled {
+        return Err("Codex has Nuzky turned off. Press Connect to turn it on.".into());
+    }
+    match server.transport {
+        CodexTransport::Other => Err("Codex's nuzky server isn't this Nuzky. Press Connect to replace it.".into()),
+        CodexTransport::Stdio(transport) => Ok(transport),
+    }
+}
+
+#[cfg(unix)]
+pub fn verify(agent: Agent, program: &Path, home: &Path) -> std::result::Result<(), String> {
+    use std::io::Read;
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    let nonce = nuzky_engine::edit::new_id();
+    if agent == Agent::ClaudeCode {
+        let failed = "Claude Code couldn't start Nuzky's server";
+        let output = nuzky_agent::run(
+            program,
+            &["mcp", "get", NAME],
+            &[(nuzky_mcp::bridge::VERIFY_VAR, &nonce)],
+            Some(home),
+            Duration::from_secs(20),
+        )
+        .map_err(|_| format!("{failed}. Try again."))?
+        .ok_or("Claude Code didn't answer within 20 seconds. Try again.")?;
+        let text = String::from_utf8_lossy(&output.stdout);
+        let (status, scope, issue) = claude_fields(&text);
+        let reached = nuzky_mcp::ipc::verified(&nonce);
+        if !output.status.success() && String::from_utf8_lossy(&output.stderr).contains("No MCP server named") {
+            return Err("Claude Code doesn't see Nuzky in its settings. Press Connect again.".into());
+        }
+        if ["Pending approval", "Rejected", "Disabled"].iter().any(|state| status.contains(state)) {
+            return Err("Claude Code has Nuzky turned off. Turn it on with /mcp in Claude Code, then try again.".into());
+        }
+        if status.contains("Connected") && !status.to_ascii_lowercase().contains("failed") {
+            return if reached {
+                Ok(())
+            } else {
+                Err(format!(
+                    "Claude Code uses another nuzky server ({scope}), not this Nuzky. Remove that one, then try again."
+                ))
+            };
+        }
+        let issue = if issue.is_empty() { String::new() } else { format!(": {issue}") };
+        return Err(format!("{failed}{issue}. Try again."));
+    }
+
+    let output = nuzky_agent::run(program, &["mcp", "get", NAME, "--json"], &[], Some(home), Duration::from_secs(10))
+        .map_err(|_| "Codex couldn't read its Nuzky settings. Try again.")?
+        .ok_or("Codex didn't answer within 10 seconds. Try again.")?;
+    if !output.status.success() {
+        return Err("Codex doesn't see Nuzky in its settings. Press Connect again.".into());
+    }
+    let CodexStdio { command, args, env, env_vars, cwd } = codex_server(&output.stdout)?;
+    // Mirrors the default environment variables Codex passes to its stdio servers.
+    const DEFAULT_ENV: &[&str] =
+        &["HOME", "LANG", "LOGNAME", "PATH", "SHELL", "TMPDIR", "USER", "__CF_USER_TEXT_ENCODING"];
+    let mut command = std::process::Command::new(command);
+    command.args(args).env_clear().current_dir(cwd.as_deref().unwrap_or(home));
+    for name in DEFAULT_ENV.iter().copied().chain(env_vars.as_deref().unwrap_or_default().iter().map(String::as_str)) {
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, value);
+        }
+    }
+    command.envs(env.unwrap_or_default()).env(nuzky_mcp::bridge::VERIFY_VAR, &nonce);
+    command.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped());
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    let stopped = "Codex's nuzky server stopped before it reached Nuzky";
+    let mut child = command.spawn().map_err(|error| format!("{stopped}: {error}. Try again."))?;
+    let mut stderr = child.stderr.take().unwrap();
+    let reader = std::thread::spawn(move || {
+        let mut text = String::new();
+        let _ = stderr.read_to_string(&mut text);
+        text
+    });
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let result = loop {
+        if nuzky_mcp::ipc::verified(&nonce) {
+            break Ok(());
+        }
+        if !matches!(child.try_wait(), Ok(None)) {
+            break Err(true);
+        }
+        if Instant::now() >= deadline {
+            break Err(false);
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    unsafe { libc::kill(-(child.id() as i32), libc::SIGKILL) };
+    let _ = child.kill();
+    let _ = child.wait();
+    let stderr = reader.join().unwrap_or_default();
+    match result {
+        Ok(()) => Ok(()),
+        Err(true) => {
+            let last = stderr.lines().rev().find(|line| !line.trim().is_empty()).unwrap_or_default().trim();
+            let issue = if last.is_empty() { String::new() } else { format!(": {last}") };
+            Err(format!("{stopped}{issue}. Try again."))
+        }
+        Err(false) => Err("Codex's nuzky server didn't reach Nuzky within 15 seconds. Try again.".into()),
+    }
+}
+
+#[cfg(not(unix))]
+pub fn verify(_agent: Agent, _program: &Path, _home: &Path) -> std::result::Result<(), String> {
+    Err("AI editing isn't available on Windows yet.".into())
+}
 
 pub fn status(agent: Agent, path: &Path, command: &Command) -> Connection {
     let runtime_dir = std::env::var_os(RUNTIME_DIR).is_some_and(|v| !v.is_empty());
@@ -425,6 +578,56 @@ fn with_codex_entry(text: Option<&str>, command: &Command) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn claude_verification_fields_keep_status_scope_and_issue() {
+        for status in [
+            "✔ Connected",
+            "✓ Connected",
+            "✗ Failed to connect",
+            "✗ Connection error",
+            "! Connected · tools fetch failed",
+            "Pending approval",
+            "Rejected",
+            "Disabled",
+        ] {
+            let text = format!(
+                "nuzky:\n  Scope: User config (available in all your projects)\n  Status: {status}\n  Command: nuzky\n  Issue: Missing executable\n"
+            );
+            assert_eq!(
+                claude_fields(&text),
+                (status, "User config (available in all your projects)", "Missing executable")
+            );
+        }
+        assert_eq!(claude_fields("No status here"), ("", "", ""));
+        assert_eq!(claude_fields("  Status: ✓ Connected\n"), ("✓ Connected", "", ""));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codex_verification_reads_stdio_and_rejects_disabled_or_other_transports() {
+        let text = br#"{"enabled":true,"transport":{"type":"stdio","command":"/opt/Nuzky/nuzky-app","args":["mcp","--current"],"env":{"A":"b"},"env_vars":["XDG_RUNTIME_DIR"],"cwd":"/home/me"}}"#;
+        let server = codex_server(text).unwrap();
+        assert_eq!(server.command, "/opt/Nuzky/nuzky-app");
+        assert_eq!(server.args, ["mcp", "--current"]);
+        assert_eq!(server.env.unwrap()["A"], "b");
+        assert_eq!(server.env_vars.unwrap(), [RUNTIME_DIR]);
+        assert_eq!(server.cwd.unwrap(), Path::new("/home/me"));
+        let nulls = br#"{"enabled":true,"transport":{"type":"stdio","command":"nuzky","args":[],"env":null,"env_vars":[],"cwd":null}}"#;
+        assert!(codex_server(nulls).unwrap().env.is_none());
+        let disabled = String::from_utf8_lossy(text).replace("\"enabled\":true", "\"enabled\":false");
+        assert_eq!(
+            codex_server(disabled.as_bytes()).unwrap_err(),
+            "Codex has Nuzky turned off. Press Connect to turn it on."
+        );
+        assert_eq!(
+            codex_server(br#"{"enabled":true,"transport":{"type":"streamable_http","url":"https://example.com"}}"#)
+                .unwrap_err(),
+            "Codex's nuzky server isn't this Nuzky. Press Connect to replace it."
+        );
+        assert!(codex_server(b"not json").is_err());
+    }
 
     fn command() -> Command {
         Command {

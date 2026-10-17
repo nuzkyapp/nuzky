@@ -26,6 +26,16 @@ struct SnapshotCanvas {
     safe_area: Option<SafeArea>,
 }
 
+// The agent crate has no ts-rs dependency; this mirrors its serialized SignIn.
+#[derive(TS)]
+#[ts(rename_all = "camelCase")]
+#[allow(dead_code, reason = "only its TypeScript declaration is used")]
+pub(crate) enum SignIn {
+    SignedIn,
+    SignedOut,
+    Unknown,
+}
+
 /// Every declaration the given types need, by TypeScript name.
 struct Declarations<'a> {
     cfg: &'a Config,
@@ -143,6 +153,8 @@ fn generate() -> String {
     types.visit::<nuzky_mcp::reels::MadeReel>();
     types.visit::<nuzky_mcp::reels::Framing>();
     types.visit::<crate::connect::Connection>();
+    types.visit::<crate::AgentStatus>();
+    types.visit::<SignIn>();
     types.visit::<crate::connect::Access>();
     types.visit::<crate::connect::Setup>();
     types.visit::<nuzky_mcp::style::StyleView>();

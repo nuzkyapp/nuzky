@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -85,29 +86,87 @@ fn version_of(text: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-fn version(path: &Path) -> Option<String> {
-    let mut child = Command::new(path)
-        .arg("--version")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-        }
+/// Runs a short CLI query, draining both pipes while it runs; None means it timed out.
+pub fn run(
+    program: &Path,
+    args: &[&str],
+    env: &[(&str, &str)],
+    cwd: Option<&Path>,
+    timeout: Duration,
+) -> std::io::Result<Option<Output>> {
+    let mut command = Command::new(program);
+    command.args(args).envs(env.iter().copied()).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    if let Some(cwd) = cwd {
+        command.current_dir(cwd);
     }
-    let mut out = String::new();
-    std::io::Read::read_to_string(child.stdout.as_mut()?, &mut out).ok()?;
-    version_of(&out)
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    let mut child = command.spawn()?;
+    let read = |mut pipe: Box<dyn Read + Send>| {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            pipe.read_to_end(&mut bytes).map(|_| bytes)
+        })
+    };
+    let stdout = read(Box::new(child.stdout.take().unwrap()));
+    let stderr = read(Box::new(child.stderr.take().unwrap()));
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Ok(Some(status)),
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+            Ok(None) => break Ok(None),
+            Err(error) => break Err(error),
+        }
+    };
+    // A CLI's server can still hold its pipes open after the CLI exits.
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(-(child.id() as i32), libc::SIGKILL)
+    };
+    let _ = child.kill();
+    let _ = child.wait();
+    let stdout = stdout.join().unwrap()?;
+    let stderr = stderr.join().unwrap()?;
+    Ok(status?.map(|status| Output { status, stdout, stderr }))
+}
+
+fn version(path: &Path) -> Option<String> {
+    let output = run(path, &["--version"], &[], None, Duration::from_secs(5)).ok()??;
+    version_of(&String::from_utf8_lossy(&output.stdout))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SignIn {
+    SignedIn,
+    SignedOut,
+    Unknown,
+}
+
+pub fn signed_in(id: AgentId, path: &Path) -> SignIn {
+    let args: &[&str] = match id {
+        AgentId::Claude => &["auth", "status", "--json"],
+        AgentId::Codex => &["login", "status"],
+        AgentId::ChatGpt => return SignIn::Unknown,
+    };
+    let Ok(Some(output)) = run(path, args, &[], None, Duration::from_secs(5)) else { return SignIn::Unknown };
+    let logged_in = match id {
+        AgentId::Claude => serde_json::from_slice::<serde_json::Value>(&output.stdout)
+            .ok()
+            .and_then(|value| value["loggedIn"].as_bool()),
+        AgentId::Codex => match output.status.code() {
+            Some(0) => Some(true),
+            Some(1) => Some(false),
+            _ => None,
+        },
+        AgentId::ChatGpt => None,
+    };
+    match logged_in {
+        Some(true) => SignIn::SignedIn,
+        Some(false) => SignIn::SignedOut,
+        None => SignIn::Unknown,
+    }
 }
 
 /// Finds the installed agent and its version; a missing one has no path.

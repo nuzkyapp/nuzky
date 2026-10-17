@@ -768,6 +768,50 @@ async fn agent_connections() -> CmdResult<Vec<connect::Connection>> {
     .map_err(err)?
 }
 
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentStatus {
+    agent: connect::Agent,
+    name: &'static str,
+    installed: bool,
+    version: Option<String>,
+    #[cfg_attr(test, ts(as = "Option<crate::typescript::SignIn>"))]
+    signed_in: Option<nuzky_agent::SignIn>,
+    connection: connect::Connection,
+}
+
+#[tauri::command]
+async fn agent_status(agent: connect::Agent) -> CmdResult<AgentStatus> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let info = nuzky_agent::find(agent.id());
+        let home = dirs::home_dir().ok_or("No home folder")?;
+        let command = connect::Command::this_app().map_err(err)?;
+        Ok(AgentStatus {
+            agent,
+            name: info.name,
+            installed: info.path.is_some(),
+            version: info.version,
+            signed_in: info.path.as_deref().map(|path| nuzky_agent::signed_in(agent.id(), path)),
+            connection: connect::status(agent, &agent.config(&home), &command).shown_from(&home),
+        })
+    })
+    .await
+    .map_err(err)?
+}
+
+#[tauri::command]
+async fn verify_agent(agent: connect::Agent) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let info = nuzky_agent::find(agent.id());
+        let program = info.path.ok_or_else(|| format!("Install {} first.", info.name))?;
+        let home = dirs::home_dir().ok_or("No home folder")?;
+        connect::verify(agent, &program, &home)
+    })
+    .await
+    .map_err(err)?
+}
+
 /// Writes the `nuzky` entry into the agent's config after a backup; nothing else changes. The agent
 /// it connects can edit right away and after every launch, as before Agent access existed.
 #[tauri::command]
@@ -1215,6 +1259,8 @@ pub fn run() {
             zooms::suggest_zooms,
             zooms::apply_zooms,
             agent_connections,
+            agent_status,
+            verify_agent,
             connect_agent,
             agent_setup,
             agent_access,
