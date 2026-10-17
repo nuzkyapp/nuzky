@@ -82,7 +82,7 @@ export function TranscriptTab() {
   const missing = view ? missingClips(project, view.untranscribed) : 0;
   const cutBlocker = missing > 0 ? "Transcribe the remaining clips first" : null;
   // Hesitations are heard in the sound; cutting before it is prepared would leave them in.
-  const preparing = useEditor((s) => Object.values(s.jobs).some((j) => j.kind === "audio" && j.status === "running"));
+  const preparing = useEditor((s) => Object.entries(s.jobs).some(([id, j]) => id.startsWith("audio:") && j.status === "running"));
   const retakesBlocker = cutBlocker ?? (preparing ? "Wait until the sound is prepared" : null);
   const busy = !!running;
   const zooms = useZoomSuggestions(view);
