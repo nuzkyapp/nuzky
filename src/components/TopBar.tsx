@@ -89,7 +89,7 @@ export function JobIndicator() {
   const running = Object.values(jobs).filter((j) => j.status === "running");
   if (running.length === 0) return null;
   const j =
-    // Its Stop is only here; an export and recognition have theirs in their dialog and tab.
+    // Its Stop is here (and in Get set up for the download it started); an export and recognition have theirs in their dialog and tab.
     running.find((x) => x.kind === "speech-model") ??
     running.find((x) => x.kind === "export") ??
     running.find((x) => x.kind === "captions" || x.kind === "transcript") ??

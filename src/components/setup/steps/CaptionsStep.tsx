@@ -74,13 +74,20 @@ function Step() {
   const language = useSpeech((s) => s.language);
   const model = useSpeech((s) => s.model);
   const job = useEditor((s) => s.jobs[JOB]);
+  // Every speech model download, also an agent's, can change what is downloaded.
+  const downloads = useEditor((s) =>
+    Object.values(s.jobs)
+      .filter((j) => j.kind === "speech-model")
+      .map((j) => j.status)
+      .join(),
+  );
   const done = useSetup((s) => s.states.captions === "done");
   const [models, setModels] = useState<SpeechModel[] | null>(null);
   const [setup, setSetup] = useState<SpeechSetup | null>(null);
   const [error, setError] = useState<string | null>(null);
   const running = job?.status === "running";
 
-  // Again when the download starts and ends, so the cards say what is downloaded and what is left.
+  // Again when a download starts and ends, so the cards say what is downloaded and what is left.
   useEffect(() => {
     let live = true;
     Promise.all([api.speechModels(), api.speechSetup(language)]).then(
@@ -94,7 +101,7 @@ function Step() {
     return () => {
       live = false;
     };
-  }, [language, job?.status]);
+  }, [language, downloads]);
 
   const recommended = setup && recommend(language, setup.gpu);
   // Until a model is picked anywhere, the step starts on the one it recommends.
@@ -234,10 +241,11 @@ function Step() {
           Stopped. Resume download goes on where it stopped.
         </p>
       ) : null}
-      {!running && missing > 0 && (
+      {/* A stop while the last file was checked leaves nothing to fetch, only to install. */}
+      {!running && (missing > 0 || !downloaded) && (
         <StepActions>
           <Button pill variant={done ? "secondary" : "primary"} onClick={download}>
-            {again === "failed" ? "Try again" : again === "cancelled" ? "Resume download" : `Download ${missing} MB`}
+            {again === "failed" ? "Try again" : again === "cancelled" ? "Resume download" : missing > 0 ? `Download ${missing} MB` : "Download"}
           </Button>
         </StepActions>
       )}

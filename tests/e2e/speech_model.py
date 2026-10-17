@@ -15,9 +15,9 @@ PROMPT = 'Cut retakes and long pauses'
 
 class Models:
     """Serves the fixtures' models under their Hugging Face paths and records every request. `rate` limits bytes per
-    second; a path in `fail` answers 503 once."""
+    second; a path in `fail` answers 503 once, after `fail_delay` seconds."""
     def __init__(self, paths=None):
-        self.rate, self.requests, self.fail = 0, [], set()
+        self.rate, self.requests, self.fail, self.fail_delay = 0, [], set(), 0
         server = self
         paths = paths or {f'/ggerganov/whisper.cpp/resolve/main/{MODEL}': MODELS / MODEL,
                           f'/ggml-org/whisper-vad/resolve/main/{VAD}': MODELS / VAD}
@@ -28,6 +28,7 @@ class Models:
                 server.requests.append({'path': self.path, 'range': ranged})
                 if self.path in server.fail:
                     server.fail.discard(self.path)
+                    time.sleep(server.fail_delay)
                     self.send_error(503)
                     return
                 if self.path not in paths:

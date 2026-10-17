@@ -1160,10 +1160,6 @@ export type SpeechSetup = {
    * What `start_speech_setup` would still download for each model in this language.
    */
   models: Array<SpeechSetupModel>,
-  /**
-   * None when the system does not say.
-   */
-  freeMb: number | null,
 };
 
 export type SpeechSetupModel = {

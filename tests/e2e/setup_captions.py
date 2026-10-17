@@ -14,12 +14,13 @@ SMALL, TURBO, VAD = 'ggml-small.bin', 'ggml-large-v3-turbo-q5_0.bin', 'ggml-sile
 CS_TIMING, EN_TIMING = 'wav2vec2-xls-r-300m-cs-250-q8_0.gguf', 'wav2vec2-base-960h.gguf'
 # The addresses the app asks Hugging Face for, as in src-tauri/src/jobs.rs and ALIGN_MODELS in crates/analysis/src/align.rs.
 CS_TIMING_PATH = f'/cstr/wav2vec2-xls-r-300m-cs-250-GGUF/resolve/a264af811793d1f32a6ff3ce7de7ad9b2dcfdd40/{CS_TIMING}'
+EN_TIMING_PATH = f'/cstr/wav2vec2-base-960h-GGUF/resolve/7c025ea07cffc65b211b360e5865dfe59df7e8af/{EN_TIMING}'
 SMALL_PATH = f'/ggerganov/whisper.cpp/resolve/main/{SMALL}'
 PATHS = {SMALL_PATH: MODELS / SMALL,
          f'/ggerganov/whisper.cpp/resolve/main/{TURBO}': MODELS / TURBO,
          f'/ggml-org/whisper-vad/resolve/main/{VAD}': MODELS / VAD,
          CS_TIMING_PATH: MODELS / CS_TIMING,
-         f'/cstr/wav2vec2-base-960h-GGUF/resolve/7c025ea07cffc65b211b360e5865dfe59df7e8af/{EN_TIMING}': MODELS / EN_TIMING}
+         EN_TIMING_PATH: MODELS / EN_TIMING}
 FREE_MB = 100
 STOP = 'Stop downloading the speech model'
 STEP = """const d = document.querySelector('[aria-labelledby=setup-title]');
@@ -229,6 +230,27 @@ def run(r):
     r.check('Captions model shows Balanced downloaded, nothing left to download, the header counts it and Next follows',
             d and d['count'] == '1 of 5 done' and d['buttons'] == ['Next'] and 'Downloaded' in card(d, 'small')['lines'], d)
     r.shot('done')
+
+    r.s.run(SET_LANGUAGE, 'en')
+    d = wait(lambda: (d := step(r)) and d['buttons'][0] == f'Download {mb(EN_TIMING)} MB' and d, 5)
+    r.check('in English only its word timing model is left to download', d, step(r))
+    r.models.fail.add(EN_TIMING_PATH)
+    r.models.fail_delay = 3
+    r.s.run(CLICK, 'Download', f'{BOX} footer')
+    r.check('it starts', wait(lambda: (job(r) or {}).get('status') == 'running', 5), job(r))
+    r.s.run(CLICK, 'Next', f'{BOX} footer')
+    r.check('Next shows Connect your AI while it downloads', wait(lambda: (step(r) or {}).get('panel') == 'Connect your AI', 3), step(r))
+    r.check('it fails there', wait(lambda: (job(r) or {}).get('status') == 'failed', 15), job(r))
+    errors = wait(lambda: r.errors(), 3)
+    r.check('with Captions model off screen, a toast says the word timing model could not be downloaded',
+            errors and 'word timing model could not be downloaded' in errors[-1], errors)
+    r.models.fail_delay = 0
+    r.s.run("window.__nuzky.store.setState({toasts: []})")
+    r.s.run(f"document.querySelector('{BOX} #setup-tab-captions').click()")
+    r.check('Captions model shows the failure with Try again', wait(lambda: (d := step(r)) and d['cards'] and d['alert']
+            and 'word timing model could not be downloaded' in d['alert'] and d['buttons'][0] == 'Try again', 5), step(r))
+    r.s.run(SET_LANGUAGE, 'cs')
+    r.check('Czech has nothing left to download', wait(lambda: (d := step(r)) and d['language'] == 'cs' and d['buttons'] == ['Next'], 5), step(r))
 
     make(r, 'reel.nuzky', 'First reel', [FIXTURES / 'first-reel.mov'], 0)
     downloaded, requests = files(r), len(r.models.requests)

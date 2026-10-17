@@ -574,8 +574,6 @@ pub struct SpeechSetup {
     pub word_timing_mb: Option<u32>,
     /// What `start_speech_setup` would still download for each model in this language.
     pub models: Vec<SpeechSetupModel>,
-    /// None when the system does not say.
-    pub free_mb: Option<u64>,
 }
 
 #[tauri::command]
@@ -588,10 +586,13 @@ pub async fn speech_setup(language: String) -> SpeechSetup {
             .iter()
             .map(|(id, .., integrity)| SpeechSetupModel {
                 id,
-                missing_mb: (missing_setup_bytes(id, &language, integrity.size) as f64 / 1_048_576.0).round() as u32,
+                // Never 0 while bytes are left, so Download stays offered for the last half MB.
+                missing_mb: match missing_setup_bytes(id, &language, integrity.size) {
+                    0 => 0,
+                    bytes => ((bytes as f64 / 1_048_576.0).round() as u32).max(1),
+                },
             })
             .collect(),
-        free_mb: free_bytes(&models_dir()).map(|bytes| bytes / 1_048_576),
     }
 }
 
