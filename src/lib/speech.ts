@@ -43,6 +43,19 @@ export function setSpeechLanguage(language: string) {
   useSpeech.setState({ language });
 }
 
+const MODEL_KEY = "nuzky.speechModel";
+/** The Whisper models the app downloads, as `MODELS` in src-tauri/src/jobs.rs. */
+const SPEECH_MODEL_IDS = ["base", "small", "large-v3-turbo-q5_0"];
+
+/** Whether a model was ever picked, in Get set up, Captions or Transcript. */
+export const speechModelPicked = () => SPEECH_MODEL_IDS.includes(localStorage.getItem(MODEL_KEY) ?? "");
+
+/** Picks the model for Captions and Transcript and remembers it for next time. */
+export function setSpeechModel(model: string) {
+  localStorage.setItem(MODEL_KEY, model);
+  useSpeech.setState({ model });
+}
+
 interface SpeechState {
   /** Shared by Captions and Transcript, so both use the same recognition. */
   model: string;
@@ -58,7 +71,7 @@ interface SpeechState {
 }
 
 export const useSpeech = create<SpeechState>(() => ({
-  model: "large-v3-turbo-q5_0",
+  model: speechModelPicked() ? localStorage.getItem(MODEL_KEY)! : "large-v3-turbo-q5_0",
   language: initialLanguage(),
   captionWords: 2,
   captionLook: { style: { ...CAPTION_STYLES[0].style, fontFamily: null }, animIn: null, animOut: null },

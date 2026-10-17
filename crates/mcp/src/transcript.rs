@@ -171,7 +171,8 @@ fn aligner(
     stage: &mut dyn FnMut(Stage),
 ) -> Result<Option<nuzky_analysis::Aligner>> {
     let integrity = crate::model_download::Integrity { size: model.size, sha256: model.sha256 };
-    let loaded = crate::model_download::download(model.url, &dir.join(model.file), integrity, cancel, |done| {
+    let url = crate::model_download::huggingface(model.url);
+    let loaded = crate::model_download::download(&url, &dir.join(model.file), integrity, cancel, |done| {
         stage(Stage::DownloadingAligner(done))
     })
     .and_then(|path| {

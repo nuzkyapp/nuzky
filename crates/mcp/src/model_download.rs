@@ -11,6 +11,13 @@ use anyhow::{Context, Result, bail, ensure};
 use nuzky_session::jobs::check_cancel;
 use sha2::{Digest, Sha256};
 
+/// Tests can replace Hugging Face with a loopback server without changing the pinned checksums.
+pub fn huggingface(url: &str) -> String {
+    let Some(path) = url.strip_prefix("https://huggingface.co/") else { return url.to_owned() };
+    let test = std::env::var("NUZKY_MODEL_URL").ok().filter(|url| url.starts_with("http://127.0.0.1:"));
+    format!("{}/{path}", test.as_deref().unwrap_or("https://huggingface.co"))
+}
+
 /// `path` with `suffix` appended to its file name.
 fn sidecar(path: &Path, suffix: &str) -> PathBuf {
     let mut name = path.as_os_str().to_os_string();

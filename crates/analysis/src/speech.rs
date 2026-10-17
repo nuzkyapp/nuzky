@@ -22,7 +22,7 @@ const WINDOW: usize = 30 * RATE;
 
 /// Vulkan where the `gpu` feature is on, Metal on a Mac that has a Metal device. whisper.cpp lists a
 /// Metal device even without one and then crashes allocating the model there, before the CPU retry.
-fn use_gpu() -> bool {
+pub fn use_gpu() -> bool {
     #[cfg(target_os = "macos")]
     {
         #[link(name = "Metal", kind = "framework")]

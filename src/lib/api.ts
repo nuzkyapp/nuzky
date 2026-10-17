@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AgentAccess, AgentConnection, AgentKind, AgentSetup, Animation, Boot, CapCutDraft, CaptionPreset, ChatGptModel, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, EditCmd, ExportRequest, Filmstrip, FontFamilies, LayerBounds, Library, PreviewStarted, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFraming, Said, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VisionModels, WordsCorrected, ZoomSuggestions, ZoomsApplied } from "./types";
+import type { AgentAccess, AgentConnection, AgentKind, AgentSetup, Animation, Boot, CapCutDraft, CaptionPreset, ChatGptModel, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, LayerBounds, Library, PreviewStarted, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFraming, Said, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VisionModels, WordsCorrected, ZoomSuggestions, ZoomsApplied } from "./types";
 
 /**
  * The session a change was made for. Mutating commands carry it, so a change still in flight when
@@ -120,6 +120,10 @@ export const api = {
     invoke<string>("start_recap", { out, runId, endCard, replaceExisting, expectedEpoch: epoch }),
   cancelJob: (id: string) => invoke<void>("cancel_job", { id }),
   speechModels: () => invoke<SpeechModel[]>("speech_models"),
+  /** What Get set up needs to know to offer the models for `language`: the GPU, the word timing model, what is missing and the free space. */
+  speechSetup: (language: string) => invoke<SpeechSetup>("speech_setup", { language }),
+  /** Downloads everything the first transcript of `language` with `model` needs, as the `speech-model:setup` job; refused with NO_SPACE when it does not fit. */
+  startSpeechSetup: (model: string, language: string) => invoke<string>("start_speech_setup", { model, language }),
   /** Download starts the speech model download an agent waits for; false tells the agent the user said not now. */
   answerSpeechModel: (id: string, download: boolean) => invoke<void>("answer_speech_model", { id, download }),
   /** Whether the face and person models covers need, or with "background" the person model of clip backgrounds,
@@ -240,6 +244,7 @@ const PLAIN: Record<string, string | ((detail: string) => string)> = {
   CRASHED: "Nuzky hit a bug and stopped. Try again, and if it happens again, report it with Send feedback, the speech bubble next to Projects.",
   DOWNLOAD_FAILED: (detail) => `The ${detail.split(":")[0]} could not be downloaded. Check the internet connection and free disk space, then try again.`,
   MODEL_INVALID: "The model did not download completely. Try again to download it anew.",
+  NO_SPACE: (detail) => `There isn't enough free space for the download. Free up ${detail} more on this computer, then try again.`,
   MEDIA_MISSING: (detail) => `${detail.split(/[\\/]/).pop()} is missing. Put the file back where it was, then try again.`,
   VISION_UNAVAILABLE:
     "Faces and people can't be found on this computer. Covers still let you choose the frame and add text, and a clip's background stays None.",

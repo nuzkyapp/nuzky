@@ -2,14 +2,14 @@ import { useShallow } from "zustand/react/shallow";
 import { useEffect, useState, type SelectHTMLAttributes } from "react";
 import { AlertCircle, ChevronDown, Loader2, X } from "lucide-react";
 import { api, errorText, plainError } from "../../lib/api";
-import { SPEECH_LANGUAGES, setSpeechLanguage, useSpeech } from "../../lib/speech";
+import { SPEECH_LANGUAGES, setSpeechLanguage, setSpeechModel, useSpeech } from "../../lib/speech";
 import { useEditor } from "../../lib/store";
 import type { JobEvent, SpeechModel } from "../../lib/types";
 import { Button, Field, ProgressBar } from "../ui";
 import { LogsButton } from "../Feedback";
 
 /** A native select drawn as a white 9 % field with a chevron, like the font picker. */
-function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
+export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <span className="relative flex has-[:disabled]:opacity-40">
       <select
@@ -71,7 +71,7 @@ export function SpeechFields({ disabled }: { disabled: boolean }) {
             Could not load the models: {modelsError}
           </span>
         ) : (
-          <Select value={model} disabled={disabled} onChange={(e) => useSpeech.setState({ model: e.target.value })}>
+          <Select value={model} disabled={disabled} onChange={(e) => setSpeechModel(e.target.value)}>
             {models.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.label} ({m.sizeMb} MB){m.downloaded ? "" : " · download"}

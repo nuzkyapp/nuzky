@@ -14,16 +14,22 @@ PROMPT = 'Cut retakes and long pauses'
 
 
 class Models:
-    def __init__(self):
-        self.rate, self.requests = 0, []
+    """Serves the fixtures' models under their Hugging Face paths and records every request. `rate` limits bytes per
+    second; a path in `fail` answers 503 once."""
+    def __init__(self, paths=None):
+        self.rate, self.requests, self.fail = 0, [], set()
         server = self
-        paths = {f'/ggerganov/whisper.cpp/resolve/main/{MODEL}': MODELS / MODEL,
-                 f'/ggml-org/whisper-vad/resolve/main/{VAD}': MODELS / VAD}
+        paths = paths or {f'/ggerganov/whisper.cpp/resolve/main/{MODEL}': MODELS / MODEL,
+                          f'/ggml-org/whisper-vad/resolve/main/{VAD}': MODELS / VAD}
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
                 ranged = self.headers.get('Range')
                 server.requests.append({'path': self.path, 'range': ranged})
+                if self.path in server.fail:
+                    server.fail.discard(self.path)
+                    self.send_error(503)
+                    return
                 if self.path not in paths:
                     self.send_error(404)
                     return

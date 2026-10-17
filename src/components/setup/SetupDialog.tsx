@@ -1,7 +1,8 @@
-import { useEffect, useRef, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Check, X } from "lucide-react";
 import { SETUP_STEPS, useSetup } from "../../lib/setup";
 import { Button, IconButton, trapTab } from "../ui";
+import { StepActionsSlot } from "./StepActions";
 import { STEPS } from "./steps";
 
 const LAST = SETUP_STEPS.length - 1;
@@ -10,6 +11,7 @@ const LAST = SETUP_STEPS.length - 1;
 export function SetupDialog() {
   const { open, states, current, closeSetup, showStep, skipStep } = useSetup();
   const rail = useRef<HTMLDivElement>(null);
+  const [actions, setActions] = useState<HTMLElement | null>(null);
   useEffect(() => {
     if (!open) return;
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -57,7 +59,7 @@ export function SetupDialog() {
           if (e.key === "Escape") closeSetup();
           else trapTab(e);
         }}
-        className="dialog-in overlay flex h-[420px] max-h-[calc(100vh-48px)] w-[640px] flex-col rounded-[20px] p-6 text-fg outline-none"
+        className="dialog-in overlay flex h-[560px] max-h-[calc(100vh-48px)] w-[640px] flex-col rounded-[20px] p-6 text-fg outline-none"
       >
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -73,7 +75,7 @@ export function SetupDialog() {
           </IconButton>
         </div>
         <div className="mt-5 flex min-h-0 flex-1">
-          <div ref={rail} role="tablist" aria-orientation="vertical" aria-label="Setup steps" onKeyDown={railKeys} className="flex w-[196px] shrink-0 flex-col gap-0.5 overflow-y-auto">
+          <div ref={rail} role="tablist" aria-orientation="vertical" aria-label="Setup steps" onKeyDown={railKeys} className="-m-1 flex w-[204px] shrink-0 flex-col gap-0.5 overflow-y-auto p-1">
             {SETUP_STEPS.map((step, i) => {
               const state = states[step];
               const on = step === current;
@@ -107,10 +109,14 @@ export function SetupDialog() {
           <div className="mx-4 w-px shrink-0 bg-white/[.07]" />
           <div role="tabpanel" id="setup-panel" aria-labelledby={`setup-tab-${current}`} className="flex min-w-0 flex-1 flex-col">
             <h3 className="text-[15px] font-semibold">{title}</h3>
-            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-              <Body />
+            {/* 4 px each side, so focus rings at the edges are not cut off. */}
+            <div className="-mx-1 flex min-h-0 flex-1 flex-col overflow-y-auto px-1">
+              <StepActionsSlot.Provider value={actions}>
+                <Body />
+              </StepActionsSlot.Provider>
             </div>
             <footer className="mt-4 flex justify-end gap-2">
+              <span ref={setActions} className="contents" />
               {!states[current] ? (
                 <Button pill onClick={() => skipStep(current)}>
                   Skip

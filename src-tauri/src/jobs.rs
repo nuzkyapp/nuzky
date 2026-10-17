@@ -16,7 +16,7 @@ use nuzky_engine::edit::{CaptionPreset, new_id};
 use nuzky_engine::export::{Delivery, ExportOptions, Quality, check_options, export};
 use nuzky_engine::model::{Animation, Asset, AssetKind, ClipContent, Project, TextStyle};
 use nuzky_engine::proxy;
-use nuzky_mcp::model_download::{self, Integrity};
+use nuzky_mcp::model_download::{self, Integrity, huggingface};
 use nuzky_mcp::transcript;
 use nuzky_session::{host::Host, transcripts::TranscriptStore};
 use serde::{Deserialize, Serialize};
@@ -559,6 +559,142 @@ pub fn speech_models() -> Vec<SpeechModel> {
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct SpeechSetupModel {
+    pub id: &'static str,
+    pub missing_mb: u32,
+}
+
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeechSetup {
+    /// Recognition runs on the GPU: Metal on macOS, Vulkan on Linux.
+    pub gpu: bool,
+    /// None when the language has no word timing model, so its word times are estimates.
+    pub word_timing_mb: Option<u32>,
+    /// What `start_speech_setup` would still download for each model in this language.
+    pub models: Vec<SpeechSetupModel>,
+    /// None when the system does not say.
+    pub free_mb: Option<u64>,
+}
+
+#[tauri::command]
+pub async fn speech_setup(language: String) -> SpeechSetup {
+    SpeechSetup {
+        gpu: nuzky_analysis::use_gpu(),
+        word_timing_mb: nuzky_analysis::align_model(&language)
+            .map(|model| (model.size as f64 / 1_048_576.0).round() as u32),
+        models: MODELS
+            .iter()
+            .map(|(id, .., integrity)| SpeechSetupModel {
+                id,
+                missing_mb: (missing_setup_bytes(id, &language, integrity.size) as f64 / 1_048_576.0).round() as u32,
+            })
+            .collect(),
+        free_mb: free_bytes(&models_dir()).map(|bytes| bytes / 1_048_576),
+    }
+}
+
+fn missing_model_bytes(path: &Path, size: u64) -> u64 {
+    if std::fs::metadata(path).is_ok_and(|file| file.is_file() && file.len() == size) {
+        return 0;
+    }
+    let mut part = path.as_os_str().to_os_string();
+    part.push(".part");
+    let fetched =
+        std::fs::metadata(part).ok().filter(|file| file.is_file() && file.len() <= size).map_or(0, |file| file.len());
+    size - fetched
+}
+
+fn missing_setup_bytes(id: &str, language: &str, model_size: u64) -> u64 {
+    missing_model_bytes(&model_path(id), model_size)
+        + missing_model_bytes(&models_dir().join(VAD_MODEL), VAD_INTEGRITY.size)
+        + nuzky_analysis::align_model(language)
+            .map_or(0, |model| missing_model_bytes(&models_dir().join(model.file), model.size))
+}
+
+fn free_bytes(path: &Path) -> Option<u64> {
+    #[cfg(debug_assertions)]
+    if let Some(mb) = std::env::var("NUZKY_TEST_FREE_MB").ok().and_then(|value| value.parse::<u64>().ok()) {
+        return Some(mb * 1_048_576);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let existing = path.ancestors().find(|ancestor| ancestor.exists())?;
+        let path = std::ffi::CString::new(existing.as_os_str().as_bytes()).ok()?;
+        let mut stats = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+        // SAFETY: path is NUL-terminated and stats points to writable storage of the required size.
+        if unsafe { libc::statvfs(path.as_ptr(), stats.as_mut_ptr()) } != 0 {
+            return None;
+        }
+        // SAFETY: statvfs initialized stats on success.
+        let stats = unsafe { stats.assume_init() };
+        #[allow(clippy::unnecessary_cast, reason = "statvfs field widths differ between Unix targets")]
+        Some(stats.f_bavail as u64 * stats.f_frsize as u64)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        None
+    }
+}
+
+#[tauri::command]
+pub fn start_speech_setup(app: AppHandle, model: String, language: String) -> Result<String, String> {
+    let Some((.., integrity)) = MODELS.iter().find(|(id, ..)| *id == model) else {
+        return Err("Unknown speech model".into());
+    };
+    if language != "auto" && (language.contains('\0') || whisper_rs::get_lang_id(&language).is_none()) {
+        return Err(format!("Unknown language: {language}"));
+    }
+    let missing = missing_setup_bytes(&model, &language, integrity.size);
+    if let Some(free) = free_bytes(&models_dir())
+        && missing > free
+    {
+        return Err(format!("NO_SPACE: {} MB", (missing - free).div_ceil(1_048_576)));
+    }
+    let id = "speech-model:setup".to_owned();
+    let cancel = register(&app, &id).ok_or("The speech model is already downloading")?;
+    let (worker_app, job_id) = (app.clone(), id.clone());
+    let speech_size = integrity.size;
+    let spawn = std::thread::Builder::new().name("speech-model-setup".into()).spawn(move || {
+        let mut rep = Reporter::new(&worker_app, &job_id, "speech-model", "Speech model".into());
+        let align = nuzky_analysis::align_model(&language);
+        let speech_bytes = speech_size + VAD_INTEGRITY.size;
+        let total = (speech_bytes + align.map_or(0, |model| model.size)) as f32;
+        let result = download_speech(&model, &cancel, |value, phase| {
+            let (offset, size) =
+                if phase == "Downloading speech model" { (0, speech_size) } else { (speech_size, VAD_INTEGRITY.size) };
+            rep.progress((offset as f32 + value * size as f32) / total, Some(phase));
+        })
+        .and_then(|_| {
+            if let Some(model) = align {
+                let url = huggingface(model.url);
+                let integrity = Integrity { size: model.size, sha256: model.sha256 };
+                model_download::download(&url, &models_dir().join(model.file), integrity, &cancel, |value| {
+                    rep.progress(
+                        (speech_bytes as f32 + value * model.size as f32) / total,
+                        Some("Downloading word timing model"),
+                    );
+                })
+                .map_err(|error| download_failed(error, "word timing model"))?;
+            }
+            Ok(None)
+        });
+        rep.finish(result, cancel.load(Ordering::Relaxed));
+        unregister(&worker_app, &job_id);
+    });
+    if let Err(error) = spawn {
+        unregister(&app, &id);
+        return Err(format!("Starting the speech model download: {error}"));
+    }
+    Ok(id)
+}
+
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct VisionModels {
     /// Download size of what is missing.
     pub size_mb: u64,
@@ -931,12 +1067,12 @@ pub(crate) fn download_speech(
     mut progress: impl FnMut(f32, &'static str),
 ) -> anyhow::Result<(PathBuf, PathBuf)> {
     let integrity = MODELS.iter().find(|(model, ..)| *model == id).context("Unknown speech model")?.3;
-    let url = huggingface(&format!("ggerganov/whisper.cpp/resolve/main/ggml-{id}.bin"));
+    let url = huggingface(&format!("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{id}.bin"));
     let model = model_download::download(&url, &model_path(id), integrity, cancel, |value| {
         progress(value, "Downloading speech model")
     })
     .map_err(|error| download_failed(error, "speech model"))?;
-    let url = huggingface(&format!("ggml-org/whisper-vad/resolve/main/{VAD_MODEL}"));
+    let url = huggingface(&format!("https://huggingface.co/ggml-org/whisper-vad/resolve/main/{VAD_MODEL}"));
     let vad = model_download::download(&url, &models_dir().join(VAD_MODEL), VAD_INTEGRITY, cancel, |value| {
         progress(value, "Downloading voice detector")
     })
@@ -951,13 +1087,6 @@ pub(crate) fn missing_speech_mb(id: &str) -> u32 {
     let model = MODELS.iter().find(|(model, ..)| *model == id).map_or(0, |(.., integrity)| integrity.size);
     let bytes = missing(model_path(id), model) + missing(models_dir().join(VAD_MODEL), VAD_INTEGRITY.size);
     (bytes as f64 / 1_048_576.0).round() as u32
-}
-
-/// Tests serve the models locally through `NUZKY_MODEL_URL`; no other address replaces Hugging Face, and the
-/// checksums stay the pinned ones.
-fn huggingface(path: &str) -> String {
-    let test = std::env::var("NUZKY_MODEL_URL").ok().filter(|url| url.starts_with("http://127.0.0.1:"));
-    format!("{}/{path}", test.as_deref().unwrap_or("https://huggingface.co"))
 }
 
 /// A download that failed without saying why in a code (`CANCELLED`, `MODEL_INVALID`…) reads as one the person can
@@ -1200,6 +1329,22 @@ pub(crate) fn crashed(p: &Box<dyn std::any::Any + Send>) -> anyhow::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn free_space_matches_df_available() {
+        let dir = std::env::current_dir().unwrap();
+        let output = std::process::Command::new("df").arg("-Pk").arg(&dir).output().unwrap();
+        assert!(output.status.success());
+        let output = String::from_utf8(output.stdout).unwrap();
+        let available_kb: u64 = output.lines().last().unwrap().split_whitespace().nth(3).unwrap().parse().unwrap();
+        let measured = free_bytes(&dir.join("missing-model-directory").join("models")).unwrap();
+        assert!(
+            measured.abs_diff(available_kb * 1024) <= 64 * 1_048_576,
+            "statvfs available: {measured} bytes, df available: {} bytes",
+            available_kb * 1024
+        );
+    }
 
     #[test]
     fn export_uses_shared_quality_and_confirmed_replacement() {

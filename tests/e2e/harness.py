@@ -80,7 +80,7 @@ class Session:
         if MACOS:
             # The app itself, started for each session as WebKitWebDriver starts it on Linux.
             RUN.socket.unlink(missing_ok=True)
-            RUN.app = start([str(APP)], RUN.work / 'app.log', dict(RUN.env, NUZKY_TEST_BRIDGE=RUN.token))
+            RUN.app = start([str(APP), *RUN.args], RUN.work / 'app.log', dict(RUN.env, NUZKY_TEST_BRIDGE=RUN.token))
             if not wait(lambda: RUN.app.poll() is not None or RUN.socket.exists(), 60) or RUN.app.poll() is not None:
                 raise RuntimeError('the app did not start, see app.log')
             caps = {}
@@ -88,7 +88,7 @@ class Session:
             # What tauri-driver sends on Linux. Talking to WebKitWebDriver directly avoids tauri-driver's connection
             # pool, whose stale connections now and then dropped a request mid-flow.
             caps = {'capabilities': {'alwaysMatch': {'browserName': 'wry',
-                                                     'webkitgtk:browserOptions': {'binary': str(APP), 'args': []}}}}
+                                                     'webkitgtk:browserOptions': {'binary': str(APP), 'args': RUN.args}}}}
         self.path = '/session/' + webdriver('POST', '/session', caps)['sessionId']
 
     def run(self, script, *args, retries=0):
@@ -154,6 +154,8 @@ class Run:
                         NUZKY_CHATGPT_ISSUER='http://127.0.0.1:9', NUZKY_TEST_KEYCHAIN=str(self.work / 'keychain.json'),
                         PYTHONDONTWRITEBYTECODE='1')
         self.checks, self.shots, self.s, self.app = [], [], None, None
+        # Arguments for the app, such as the system language on macOS (`-AppleLanguages (cs)`).
+        self.args = []
         if MACOS:
             # macOS keeps Nuzky's data and cache under ~/Library and WebKit's storage under the home folder, whatever
             # XDG_* say, so the app gets a home of its own whose Library folders are this run's.

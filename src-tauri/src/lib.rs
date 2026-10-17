@@ -1196,6 +1196,8 @@ pub fn run() {
             jobs::start_captions,
             jobs::start_reframe,
             jobs::speech_models,
+            jobs::speech_setup,
+            jobs::start_speech_setup,
             speech_model::answer_speech_model,
             jobs::vision_models,
             jobs::start_vision_models,

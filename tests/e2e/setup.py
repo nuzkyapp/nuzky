@@ -89,15 +89,14 @@ def setup(r):
     r.check('the header says 0 of 5 done', d and d['count'] == '0 of 5 done', d)
     r.check('Captions model is shown and selected', d and d['panel'] == 'Captions model' and d['steps'][0]['selected'], d)
     r.check("the focus is on the current step's row, not on Skip", d and d['focus'] == 'tab: Captions model', d)
-    r.check('a step still to do offers Skip', d and d['buttons'] == ['Skip'], d)
+    r.check('a step still to do offers Skip last', d and d['buttons'][-1:] == ['Skip'], d)
 
     for key, title in (('Down', 'Connect your AI'), ('End', 'Your first cut'), ('Up', 'Teach your style'), ('Home', 'Captions model')):
         press(key)
         d = wait(lambda: (dialog(r) or {}).get('panel') == title and dialog(r), 3)
         r.check(f'{key} shows {title} and the focus follows', d and d['focus'] == f'tab: {title}', dialog(r))
 
-    press('Tab')
-    r.check('Tab goes from the rail to Skip', wait(lambda: r.s.run(FOCUS) == 'Skip', 3), r.s.run(FOCUS))
+    r.check('Skip takes the focus', r.s.run(FOCUS_TEXT, 'Skip', BOX + ' footer') and r.s.run(FOCUS) == 'Skip', r.s.run(FOCUS))
     press('Return')
     d = wait(lambda: (dialog(r) or {}).get('panel') == 'Connect your AI' and dialog(r), 3)
     r.check('Enter on Skip marks Captions model Skipped and shows Connect your AI',

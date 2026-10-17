@@ -128,6 +128,7 @@ fn generate() -> String {
     types.visit::<crate::jobs::ExportRequest>();
     types.visit::<crate::recap::RecapInfo>();
     types.visit::<crate::jobs::SpeechModel>();
+    types.visit::<crate::jobs::SpeechSetup>();
     types.visit::<crate::speech_model::SpeechModelQuestion>();
     types.visit::<crate::jobs::VisionModels>();
     types.visit::<crate::store::ProjectSummary>();

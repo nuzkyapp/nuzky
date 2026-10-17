@@ -23,7 +23,7 @@ pub use emphasis::{Energy, Zoom, emphasis, key_words, prepared_word_energy, word
 pub use fillers::filler_words;
 pub use retakes::{Attempt, Filler, RetakeGroup, Retakes, Review, retakes};
 pub use scenes::{SceneCut, SceneParams, picture_difference, scene_cuts, scene_cuts_cancellable};
-pub use speech::{AudioSource, Segment, Transcript, Word, transcribe_words, transcribe_words_cancellable};
+pub use speech::{AudioSource, Segment, Transcript, Word, transcribe_words, transcribe_words_cancellable, use_gpu};
 
 use serde::{Deserialize, Serialize};
 
