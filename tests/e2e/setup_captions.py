@@ -228,7 +228,7 @@ def run(r):
     r.s.run(f"document.querySelector('{BOX} #setup-tab-captions').click()")
     d = wait(lambda: (d := step(r)) and d['panel'] == 'Captions model' and d['cards'] and d, 5)
     r.check('Captions model shows Balanced downloaded, nothing left to download, the header counts it and Next follows',
-            d and d['count'] == '1 of 5 done' and d['buttons'] == ['Next'] and 'Downloaded' in card(d, 'small')['lines'], d)
+            d and d['count'] == '1 of 2 done' and d['buttons'] == ['Next'] and 'Downloaded' in card(d, 'small')['lines'], d)
     r.shot('done')
 
     r.s.run(SET_LANGUAGE, 'en')

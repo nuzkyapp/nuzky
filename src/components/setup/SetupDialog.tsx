@@ -126,7 +126,8 @@ export function SetupDialog() {
                   Next
                 </Button>
               ) : (
-                <Button pill variant="primary" onClick={closeSetup}>
+                // A skipped step's own way on, such as Open a video…, is the prominent one.
+                <Button pill variant={states[current] === "skipped" ? "secondary" : "primary"} onClick={closeSetup}>
                   Done
                 </Button>
               )}

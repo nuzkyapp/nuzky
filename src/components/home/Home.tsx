@@ -43,7 +43,7 @@ import {
   openProjectFile,
   onlyPristine,
   periodOf,
-  pickVideoForReels,
+  pickOneVideo,
   pickVideosForNewProject,
   refreshLibrary,
   renameCollection,
@@ -84,7 +84,7 @@ function newProjectItems(): MenuEntry[] {
     "separator" as const,
     { label: "From videos…", shortcut: "First video's format", icon: <Film size={15} />, run: () => void pickVideosForNewProject() },
     { label: "From a CapCut draft…", shortcut: "Its cut, captions and zooms", icon: <FolderInput size={15} />, run: () => void addDraftFolder() },
-    { label: "Reels from a long video…", shortcut: "AI finds the moments", icon: <GalleryVerticalEnd size={15} />, run: () => void pickVideoForReels(openReelsToFind) },
+    { label: "Reels from a long video…", shortcut: "AI finds the moments", icon: <GalleryVerticalEnd size={15} />, run: () => void pickOneVideo(openReelsToFind) },
   ];
 }
 

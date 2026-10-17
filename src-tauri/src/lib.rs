@@ -806,7 +806,11 @@ async fn verify_agent(agent: connect::Agent) -> CmdResult<()> {
         let info = nuzky_agent::find(agent.id());
         let program = info.path.ok_or_else(|| format!("Install {} first.", info.name))?;
         let home = dirs::home_dir().ok_or("No home folder")?;
-        connect::verify(agent, &program, &home)
+        connect::verify(agent, &program, &home)?;
+        if !connect::access().on {
+            return Err(format!("Agent access is off, so {} can't edit your video. Try again turns it on.", info.name));
+        }
+        Ok(())
     })
     .await
     .map_err(err)?

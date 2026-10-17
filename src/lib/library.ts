@@ -326,8 +326,8 @@ export async function pickVideosForNewProject() {
   if (picked && picked.length > 0) newProjectFromMedia(Array.isArray(picked) ? picked : [picked]);
 }
 
-/** Reels from a long video: a project of the one video picked, opened on finding its reels. */
-export async function pickVideoForReels(then: () => void) {
+/** A project of the one video picked, then `then`: Reels opens on finding its reels, Get set up on its transcript. */
+export async function pickOneVideo(then: () => void) {
   const picked = await pickFiles({ multiple: false, filters: [{ name: "Video", extensions: VIDEO_EXTENSIONS }] });
   if (typeof picked === "string") newProjectFromMedia([picked], then);
 }

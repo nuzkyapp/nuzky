@@ -208,6 +208,20 @@ fn tilde(path: &str, home: &Path) -> String {
 /// passes this one on; without it the server looks for Nuzky in another folder.
 const RUNTIME_DIR: &str = "XDG_RUNTIME_DIR";
 
+/// What Nuzky's server said when it failed, for a person: without its code, and its agent-facing "no project is
+/// open" as what it means here.
+#[cfg(unix)]
+fn server_issue(said: &str) -> String {
+    match said.split_once(": ") {
+        _ if said.is_empty() => String::new(),
+        Some(("APP_NOT_RUNNING", _)) => ": it couldn't find this Nuzky".into(),
+        Some((code, rest)) if code.chars().all(|c| c.is_ascii_uppercase() || c == '_') => {
+            format!(": {}", rest.trim_end_matches('.'))
+        }
+        _ => format!(": {}", said.trim_end_matches('.')),
+    }
+}
+
 #[cfg(unix)]
 fn claude_fields(text: &str) -> (&str, &str, &str) {
     let field = |name| text.lines().find_map(|line| line.trim().strip_prefix(name)).unwrap_or_default().trim();
@@ -284,13 +298,14 @@ pub fn verify(agent: Agent, program: &Path, home: &Path) -> std::result::Result<
             return if reached {
                 Ok(())
             } else {
+                // "User config (available in all your projects)" reads as "its user config".
+                let scope = scope.split(" (").next().unwrap_or_default().to_lowercase();
                 Err(format!(
-                    "Claude Code uses another nuzky server ({scope}), not this Nuzky. Remove that one, then try again."
+                    "Claude Code uses another nuzky server, from its {scope}, not this Nuzky. Remove that one, then try again."
                 ))
             };
         }
-        let issue = if issue.is_empty() { String::new() } else { format!(": {issue}") };
-        return Err(format!("{failed}{issue}. Try again."));
+        return Err(format!("{failed}{}. Try again.", server_issue(issue)));
     }
 
     let output = nuzky_agent::run(program, &["mcp", "get", NAME, "--json"], &[], Some(home), Duration::from_secs(10))
@@ -342,8 +357,7 @@ pub fn verify(agent: Agent, program: &Path, home: &Path) -> std::result::Result<
         Ok(()) => Ok(()),
         Err(true) => {
             let last = stderr.lines().rev().find(|line| !line.trim().is_empty()).unwrap_or_default().trim();
-            let issue = if last.is_empty() { String::new() } else { format!(": {last}") };
-            Err(format!("{stopped}{issue}. Try again."))
+            Err(format!("{stopped}{}. Try again.", server_issue(last)))
         }
         Err(false) => Err("Codex's nuzky server didn't reach Nuzky within 15 seconds. Try again.".into()),
     }
@@ -602,6 +616,18 @@ mod tests {
         }
         assert_eq!(claude_fields("No status here"), ("", "", ""));
         assert_eq!(claude_fields("  Status: ✓ Connected\n"), ("✓ Connected", "", ""));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_server_is_explained_without_its_code() {
+        assert_eq!(
+            server_issue("APP_NOT_RUNNING: no project is open in Nuzky. Ask the user to open one, then call again"),
+            ": it couldn't find this Nuzky"
+        );
+        assert_eq!(server_issue("UNAUTHORIZED: endpoint rejected the token"), ": endpoint rejected the token");
+        assert_eq!(server_issue("Missing executable."), ": Missing executable");
+        assert_eq!(server_issue(""), "");
     }
 
     #[cfg(unix)]
