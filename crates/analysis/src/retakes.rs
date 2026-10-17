@@ -382,9 +382,7 @@ fn sentences(words: &[TimelineWord], languages: &HashMap<String, String>) -> Vec
         let lexical = languages.get(&word.asset_id).is_none_or(|l| matches!(l.as_str(), "cs" | "en"));
         for j in (k + 1..=i).filter(|_| lexical) {
             let after_filler = inner.last().is_some_and(|r| r[1] + 1 == j);
-            if is_filler(words, j, i)
-                && (SOUNDS.contains(&token(&words[j].text).as_str()) || after_filler || set_apart(words, j - 1))
-            {
+            if is_filler(words, j, i) && (sound(&words[j]) || after_filler || set_apart(words, j - 1)) {
                 match inner.last_mut() {
                     Some(run) if after_filler => run[1] = j,
                     _ => inner.push([j, j]),
@@ -401,8 +399,12 @@ fn sentences(words: &[TimelineWord], languages: &HashMap<String, String>) -> Vec
 /// Word `k` of a sentence ending at `last` is a filler when it is a hesitation sound, or a word
 /// such as "jakoby" set apart from what follows by a comma or a pause, or it ends the sentence.
 fn is_filler(words: &[TimelineWord], k: usize, last: usize) -> bool {
-    let token = token(&words[k].text);
-    SOUNDS.contains(&token.as_str()) || SET_APART.contains(&token.as_str()) && (k == last || set_apart(words, k))
+    sound(&words[k]) || SET_APART.contains(&token(&words[k].text).as_str()) && (k == last || set_apart(words, k))
+}
+
+/// A hesitation sound, not a contraction that reads like one: "get 'em".
+fn sound(word: &TimelineWord) -> bool {
+    SOUNDS.contains(&token(&word.text).as_str()) && !word.text.contains(['\'', '’'])
 }
 
 /// A comma or a pause of FILLER_PAUSE_US sets word `k` apart from the word after it.
@@ -1049,6 +1051,7 @@ mod tests {
             ("To je prostě, jednoduché.", 900_000),
             ("Světlo dejte, ehm, prostě, z boku.", 900_000),
             ("I'd like, if possible, a coffee.", 900_000),
+            ("I'll get 'em tomorrow.", 900_000),
         ]);
         let fillers: Vec<_> = found.fillers.iter().map(|f| (f.from, f.to, f.text.as_str())).collect();
         assert_eq!(fillers, [(2, 2, "ehm"), (7, 7, "jakoby,"), (20, 21, "ehm, prostě,")]);
