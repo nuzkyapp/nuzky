@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { AlertCircle, Check, Copy, ExternalLink, Loader2 } from "lucide-react";
-import { api, errorText } from "../../../lib/api";
+import { AlertCircle, AlertTriangle, Check, Copy, ExternalLink, Loader2 } from "lucide-react";
+import { api, errorText, plainError } from "../../../lib/api";
 import { copyText } from "../../../lib/clipboard";
 import { pickOneVideo } from "../../../lib/library";
 import { useSetup } from "../../../lib/setup";
@@ -19,7 +19,7 @@ const INSTALL: Record<AgentKind, string[]> = {
   codex: ["curl -fsSL", "https://chatgpt.com/codex/install.sh | sh"],
 };
 const SIGN_IN: Record<AgentKind, string[]> = { claudeCode: ["claude"], codex: ["codex login"] };
-const TERMINAL = navigator.userAgent.includes("Mac") ? "Terminal" : "a terminal";
+const MAC = navigator.userAgent.includes("Mac");
 
 /** A Connect (`wrote` once Nuzky is in the agent's settings), or the check of an agent connected before. */
 type Run = { phase: "writing" | "checking" | "connected" | "failed"; fresh: boolean; wrote: boolean; backup?: string | null; error?: string; started: number; took?: number };
@@ -108,13 +108,18 @@ function Agents() {
     const s = status[a];
     return !!s?.installed && s.signedIn !== "signedOut" && s.connection.state !== "unreadable" && runs[a]?.phase !== "connected";
   };
-  // One prominent button at a time: Try again, else the first Connect, else Check again.
-  const prominent = AGENTS.find((a) => runs[a]?.phase === "failed") ?? (done ? undefined : AGENTS.find((a) => connectable(a) && !runs[a]));
-  const waiting = AGENTS.some((a) => !status[a] || !connectable(a));
+  // One prominent button at a time: Try again, else the first Connect, else Check again; once done, Done.
+  const prominent = done ? undefined : (AGENTS.find((a) => runs[a]?.phase === "failed") ?? AGENTS.find((a) => connectable(a) && !runs[a]));
+  // An agent still to install, sign in or fix, which Check again looks for.
+  const waiting = AGENTS.some((a) => {
+    const s = status[a];
+    return !s || !s.installed || s.signedIn === "signedOut" || s.connection.state === "unreadable";
+  });
 
-  // Connect or Check again going away leaves the focus nowhere; it goes to the footer's first button.
+  // Connect or Check again going away leaves the focus nowhere; it goes to the prominent button, never to Skip.
   useEffect(() => {
-    if (document.activeElement === document.body) document.querySelector<HTMLElement>("#setup-panel footer button")?.focus();
+    if (document.activeElement !== document.body) return;
+    (document.querySelector<HTMLElement>("#setup-panel .btn-prominent") ?? document.querySelector<HTMLElement>("#setup-panel footer button"))?.focus();
   });
 
   return (
@@ -138,17 +143,17 @@ function Agents() {
         ))}
       </div>
       {!Object.keys(runs).length && AGENTS.some(connectable) && (
-        <p className="text-[12px] leading-4 text-muted">Connect backs up the agent's settings, adds Nuzky to them and turns on Agent access, also when Nuzky starts.</p>
+        <p className="text-[12px] leading-4 text-muted">Connect backs up the agent's settings and adds Nuzky to them, so it can edit your videos now and every time Nuzky starts.</p>
       )}
       {error && (
-        <p className="flex gap-1.5 text-[12px] text-fg" role="alert">
-          <AlertCircle size={14} className="mt-px shrink-0 text-danger" />
-          Could not look for the agents: {error}
+        <p className="flex gap-1.5 text-[12px] text-danger" role="alert">
+          <AlertTriangle size={14} className="mt-px shrink-0" />
+          Could not look for the agents: {plainError(error)}
         </p>
       )}
-      {!done && waiting && (
+      {waiting && (
         <StepActions>
-          <Button pill variant={prominent ? "secondary" : "primary"} disabled={looking} disabledReason="Looking for Claude Code and Codex…" onClick={() => void look()}>
+          <Button pill variant={prominent || done ? "secondary" : "primary"} disabled={looking} disabledReason="Looking for Claude Code and Codex…" onClick={() => void look()}>
             Check again
           </Button>
         </StepActions>
@@ -204,7 +209,7 @@ function AgentCard({
             {name}
             {status?.version && <span className="tabular ml-1.5 text-[12px] font-normal text-muted">{status.version}</span>}
           </span>
-          <span className={`flex items-center gap-[5px] text-[12px] leading-[15px] ${phase === "connected" || phase === "failed" ? "text-fg" : "text-muted"}`}>
+          <span aria-live="polite" className={`flex items-center gap-[5px] text-[12px] leading-[15px] ${phase === "connected" || phase === "failed" ? "text-fg" : "text-muted"}`}>
             {phase === "connected" && <Check size={13} strokeWidth={2.5} className="shrink-0 text-ok" />}
             {state}
           </span>
@@ -228,19 +233,21 @@ function AgentCard({
       </div>
       {status && !status.installed && (
         <>
-          <p className="mt-2.5 text-[12px] leading-4 text-muted">To install, paste this into {TERMINAL} and press Return.</p>
+          <p className="mt-2.5 text-[12px] leading-4 text-muted">
+            To install, paste this into {MAC ? "Terminal" : "a terminal"} and press {MAC ? "Return" : "Enter"}.
+          </p>
           <Command parts={INSTALL[agent]} />
         </>
       )}
       {status?.installed && status.signedIn === "signedOut" && (
         <>
-          <p className="mt-2.5 text-[12px] leading-4 text-muted">To sign in, run this in {TERMINAL} and follow its steps.</p>
+          <p className="mt-2.5 text-[12px] leading-4 text-muted">To sign in, run this in a new {MAC ? "Terminal" : "terminal"} window and follow its steps.</p>
           <Command parts={SIGN_IN[agent]} />
         </>
       )}
       {unreadable && (
         <p className="mt-2.5 text-[12px] leading-4 text-muted" title={status.connection.problem ?? undefined}>
-          Nuzky leaves a settings file it can't read alone. Fix {status.connection.path}, then press Check again.
+          {status.connection.path} can't be read, so Nuzky leaves it alone. Fix it, then press Check again.
         </p>
       )}
       {run && (

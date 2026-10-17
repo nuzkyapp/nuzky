@@ -181,7 +181,7 @@ def setup(r):
     r.s.run("window.__nuzky.setup.getState().finishStep('ai')")
     d = wait(lambda: (dialog(r) or {}).get('count') == '1 of 2 done' and dialog(r), 3)
     r.check('a finished step shows Done and the header 1 of 2 done', d and rail(d)[1] == ['Connect your AI', 'Done'], d)
-    r.check('done, the last step offers Done', d and d['buttons'] == ['Done'], d)
+    r.check('done, the last step offers Done last', d and d['buttons'][-1:] == ['Done'], d)
     r.check('with no step left, the row shows no count', wait(lambda: row(r).get('count') is None, 3), row(r))
     press('Home')
     d = wait(lambda: (dialog(r) or {}).get('panel') == 'Captions model' and dialog(r), 3)

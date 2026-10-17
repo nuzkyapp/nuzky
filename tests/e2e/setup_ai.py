@@ -120,7 +120,7 @@ def agents(r, home):
     r.check('Connect, from the keyboard', press_button(r, 'Connect'))
     c = wait(lambda: card_says(r, 'Claude Code', "Couldn't connect") and cards(r), 30)
     r.check("when Claude Code's own check does not reach Nuzky, it says Couldn't connect, why and what to do",
-            c and "Claude Code couldn't start Nuzky's server: it couldn't find this Nuzky. Try again." == c['Claude Code']['alert'], cards(r))
+            c and "Claude Code's check of Nuzky's server failed: it couldn't reach this Nuzky. Try again." == c['Claude Code']['alert'], cards(r))
     r.check('Connect turns into Try again and keeps the focus',
             c and c['Claude Code']['buttons'] == ['Try again'] and r.s.run(FOCUS) == 'Try again', (cards(r), r.s.run(FOCUS)))
     saved = json.loads((home / '.claude.json').read_text())
@@ -140,6 +140,7 @@ def agents(r, home):
     d = wait(lambda: (x := dialog(r)) and x['steps'][1]['lines'] == ['Connect your AI', 'Done'] and x, 5)
     r.check('the step is done and the header counts it', d and d['count'] == '1 of 2 done', dialog(r))
     r.check('the focus goes to Done', wait(lambda: r.s.run(FOCUS) == 'Done', 3), r.s.run(FOCUS))
+    r.check('Check again stays for Codex, still missing, before Done', d and d['buttons'] == ['Check again', 'Done'], d)
     time.sleep(0.3)
     r.shot('setup-ai-connected')
 
@@ -156,6 +157,7 @@ def agents(r, home):
     r.check('Codex connects and its check passes', c and 'Codex sees Nuzky' in c['Codex']['text'], cards(r))
     config = (home / '.codex/config.toml').read_text()
     r.check("Codex's entry passes on the runtime folder Codex would not hand its server", 'env_vars = ["XDG_RUNTIME_DIR"]' in config, config)
+    r.check('with both connected, only Done is left in the footer', (dialog(r) or {}).get('buttons') == ['Done'], dialog(r))
     press_button(r, 'Done')
     r.check('Done closes it', wait(lambda: not dialog(r), 3), dialog(r))
 

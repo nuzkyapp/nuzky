@@ -214,7 +214,7 @@ const RUNTIME_DIR: &str = "XDG_RUNTIME_DIR";
 fn server_issue(said: &str) -> String {
     match said.split_once(": ") {
         _ if said.is_empty() => String::new(),
-        Some(("APP_NOT_RUNNING", _)) => ": it couldn't find this Nuzky".into(),
+        Some(("APP_NOT_RUNNING", _)) => ": it couldn't reach this Nuzky".into(),
         Some((code, rest)) if code.chars().all(|c| c.is_ascii_uppercase() || c == '_') => {
             format!(": {}", rest.trim_end_matches('.'))
         }
@@ -262,7 +262,9 @@ fn codex_server(text: &[u8]) -> std::result::Result<CodexStdio, String> {
         return Err("Codex has Nuzky turned off. Press Connect to turn it on.".into());
     }
     match server.transport {
-        CodexTransport::Other => Err("Codex's nuzky server isn't this Nuzky. Press Connect to replace it.".into()),
+        CodexTransport::Other => {
+            Err("Codex's server named nuzky isn't this Nuzky. Press Connect to replace it.".into())
+        }
         CodexTransport::Stdio(transport) => Ok(transport),
     }
 }
@@ -275,7 +277,7 @@ pub fn verify(agent: Agent, program: &Path, home: &Path) -> std::result::Result<
 
     let nonce = nuzky_engine::edit::new_id();
     if agent == Agent::ClaudeCode {
-        let failed = "Claude Code couldn't start Nuzky's server";
+        let failed = "Claude Code's check of Nuzky's server failed";
         let output = nuzky_agent::run(
             program,
             &["mcp", "get", NAME],
@@ -284,7 +286,7 @@ pub fn verify(agent: Agent, program: &Path, home: &Path) -> std::result::Result<
             Duration::from_secs(20),
         )
         .map_err(|_| format!("{failed}. Try again."))?
-        .ok_or("Claude Code didn't answer within 20 seconds. Try again.")?;
+        .ok_or("Claude Code didn't answer within 20 seconds. Run claude in a terminal once to finish an update or sign-in it waits for, then try again.")?;
         let text = String::from_utf8_lossy(&output.stdout);
         let (status, scope, issue) = claude_fields(&text);
         let reached = nuzky_mcp::ipc::verified(&nonce);
@@ -301,7 +303,7 @@ pub fn verify(agent: Agent, program: &Path, home: &Path) -> std::result::Result<
                 // "User config (available in all your projects)" reads as "its user config".
                 let scope = scope.split(" (").next().unwrap_or_default().to_lowercase();
                 Err(format!(
-                    "Claude Code uses another nuzky server, from its {scope}, not this Nuzky. Remove that one, then try again."
+                    "Claude Code uses another server named nuzky, from its {scope}, not this Nuzky. Remove that one, then try again."
                 ))
             };
         }
@@ -310,7 +312,7 @@ pub fn verify(agent: Agent, program: &Path, home: &Path) -> std::result::Result<
 
     let output = nuzky_agent::run(program, &["mcp", "get", NAME, "--json"], &[], Some(home), Duration::from_secs(10))
         .map_err(|_| "Codex couldn't read its Nuzky settings. Try again.")?
-        .ok_or("Codex didn't answer within 10 seconds. Try again.")?;
+        .ok_or("Codex didn't answer within 10 seconds. Run codex in a terminal once to finish an update or sign-in it waits for, then try again.")?;
     if !output.status.success() {
         return Err("Codex doesn't see Nuzky in its settings. Press Connect again.".into());
     }
@@ -328,7 +330,7 @@ pub fn verify(agent: Agent, program: &Path, home: &Path) -> std::result::Result<
     command.envs(env.unwrap_or_default()).env(nuzky_mcp::bridge::VERIFY_VAR, &nonce);
     command.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped());
     std::os::unix::process::CommandExt::process_group(&mut command, 0);
-    let stopped = "Codex's nuzky server stopped before it reached Nuzky";
+    let stopped = "Nuzky's server for Codex stopped before it reached Nuzky";
     let mut child = command.spawn().map_err(|error| format!("{stopped}: {error}. Try again."))?;
     let mut stderr = child.stderr.take().unwrap();
     let reader = std::thread::spawn(move || {
@@ -359,7 +361,7 @@ pub fn verify(agent: Agent, program: &Path, home: &Path) -> std::result::Result<
             let last = stderr.lines().rev().find(|line| !line.trim().is_empty()).unwrap_or_default().trim();
             Err(format!("{stopped}{}. Try again.", server_issue(last)))
         }
-        Err(false) => Err("Codex's nuzky server didn't reach Nuzky within 15 seconds. Try again.".into()),
+        Err(false) => Err("Nuzky's server for Codex didn't reach Nuzky within 15 seconds. Try again.".into()),
     }
 }
 
@@ -623,7 +625,7 @@ mod tests {
     fn a_failed_server_is_explained_without_its_code() {
         assert_eq!(
             server_issue("APP_NOT_RUNNING: no project is open in Nuzky. Ask the user to open one, then call again"),
-            ": it couldn't find this Nuzky"
+            ": it couldn't reach this Nuzky"
         );
         assert_eq!(server_issue("UNAUTHORIZED: endpoint rejected the token"), ": endpoint rejected the token");
         assert_eq!(server_issue("Missing executable."), ": Missing executable");
@@ -650,7 +652,7 @@ mod tests {
         assert_eq!(
             codex_server(br#"{"enabled":true,"transport":{"type":"streamable_http","url":"https://example.com"}}"#)
                 .unwrap_err(),
-            "Codex's nuzky server isn't this Nuzky. Press Connect to replace it."
+            "Codex's server named nuzky isn't this Nuzky. Press Connect to replace it."
         );
         assert!(codex_server(b"not json").is_err());
     }
