@@ -1,7 +1,7 @@
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { Trash2, ZoomIn } from "lucide-react";
 import { followPointer } from "../../lib/drag";
-import { MAX_WORD_CHARS, paragraphs, tokenAt, type Token } from "../../lib/speech";
+import { MAX_WORD_CHARS, paragraphs, tokenAt, tokenCounts, type Token } from "../../lib/speech";
 import { aiLocked, useEditor } from "../../lib/store";
 import { formatDuration, formatTime } from "../../lib/time";
 import { Button, useLockReason } from "../ui";
@@ -120,7 +120,7 @@ const Paragraph = memo(function Paragraph({
           >
             {t.text}
           </span>
-        ) : (
+        ) : t.kind === "pause" ? (
           <span
             id={optionId(i)}
             data-t={i}
@@ -131,6 +131,18 @@ const Paragraph = memo(function Paragraph({
             className={`tabular cursor-pointer whitespace-nowrap rounded px-1 py-px text-[11px] ${selected ? look : `bg-raised hover:bg-line ${playing ? "text-accent" : "text-muted"}`}`}
           >
             {formatDuration(t.gapUs)}
+          </span>
+        ) : (
+          <span
+            id={optionId(i)}
+            data-t={i}
+            role="option"
+            aria-selected={selected}
+            aria-label={`Hesitation, ${formatDuration(t.endUs - t.startUs)}`}
+            title="A sound between words that recognition did not write, such as “eee”"
+            className={`tabular cursor-pointer whitespace-nowrap rounded border border-dashed px-1 text-[11px] ${selected ? `border-transparent ${look}` : `border-white/25 hover:bg-raised ${playing ? "text-accent" : "text-muted"}`}`}
+          >
+            Hesitation {formatDuration(t.endUs - t.startUs)}
           </span>
         )}
       </Fragment>,
@@ -310,9 +322,8 @@ export function TranscriptText({
   };
 
   const picked = lo >= 0 ? tokens.slice(lo, hi + 1) : [];
-  const words = picked.filter((t) => t.kind === "word").length;
   const lengthUs = lo >= 0 ? tokens[hi].endUs - tokens[lo].startUs : 0;
-  const summary = words > 0 ? `${words} word${words === 1 ? "" : "s"}` : `${picked.length} pause${picked.length === 1 ? "" : "s"}`;
+  const summary = tokenCounts(picked);
 
   return (
     <>

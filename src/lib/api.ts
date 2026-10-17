@@ -160,12 +160,13 @@ export const api = {
   /** Recognises the heard media without a transcript, or all of it with `refresh`. */
   startTranscript: (model: string, language: string, refresh: boolean, epoch: Epoch) => invoke<string>("start_transcript", { model, language, refresh, expectedEpoch: epoch }),
   transcriptView: (pauseUs: number) => invoke<TranscriptView>("transcript_view", { pauseUs: Math.round(pauseUs) }),
-  /** Inclusive word index ranges, as one undo step. */
-  cutWords: (key: string, ranges: [number, number][], epoch: Epoch) => invoke<TranscriptCut>("cut_words", { key, delete: ranges, expectedEpoch: epoch }),
-  /** The view's pauses at `pauseUs`, by index, or all of them. */
-  removePauses: (key: string, pauseUs: number, only: number[] | null, epoch: Epoch) =>
-    invoke<TranscriptCut>("remove_pauses", { key, pauseUs: Math.round(pauseUs), only, expectedEpoch: epoch }),
-  /** What the retake analysis suggests deleting and every pause longer than `pauseUs`, as one undo step. */
+  /** Inclusive word index ranges and the hesitations after these words, as one undo step. */
+  cutWords: (key: string, ranges: [number, number][], hesitations: number[], epoch: Epoch) =>
+    invoke<TranscriptCut>("cut_words", { key, delete: ranges, hesitations, expectedEpoch: epoch }),
+  /** The view's pauses at `pauseUs`, by index, or all of them, and the hesitations after these words. */
+  removePauses: (key: string, pauseUs: number, only: number[] | null, hesitations: number[], epoch: Epoch) =>
+    invoke<TranscriptCut>("remove_pauses", { key, pauseUs: Math.round(pauseUs), only, hesitations, expectedEpoch: epoch }),
+  /** What the retake analysis suggests deleting, every hesitation and every pause longer than `pauseUs`, as one undo step. */
   removeRetakes: (key: string, pauseUs: number, epoch: Epoch) => invoke<TranscriptCut>("remove_retakes", { key, pauseUs: Math.round(pauseUs), expectedEpoch: epoch }),
   /** Words by view index and the text they should read, with the captions that show them, as one undo step. */
   correctWords: (key: string, corrections: { i: number; text: string }[], epoch: Epoch) =>

@@ -271,7 +271,13 @@ function useBackendEvents() {
     const offStyle = listenStyle();
     void loadStyle();
     offs.push(listen("transcripts-changed", () => useSpeech.setState((s) => ({ stored: s.stored + 1 }))));
-    offs.push(listen<string>("audio-ready", (e) => useEditor.getState().reloadWaveform(e.payload)));
+    offs.push(
+      listen<string>("audio-ready", (e) => {
+        useEditor.getState().reloadWaveform(e.payload);
+        // Hesitations are heard in the sound.
+        useSpeech.setState((s) => ({ stored: s.stored + 1 }));
+      }),
+    );
     offs.push(listen<Snapshot>("project-changed", (e) => useEditor.getState().setSnap(e.payload, true)));
     // null: the preview recovered, e.g. after a failed frame.
     offs.push(listen<string | null>("engine-error", (e) => useEditor.setState({ engineError: e.payload })));

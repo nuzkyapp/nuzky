@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { AlertCircle, AlertTriangle, GalleryVerticalEnd, RefreshCw, ScrollText, Scissors } from "lucide-react";
-import { correctWord, cutWords, removePauses, removeRetakes, speechBlocker, startSpeech, tokenize, useSpeech, useTranscriptView, type Token } from "../../lib/speech";
+import { correctWord, cutWords, removePauses, removeRetakes, speechBlocker, startSpeech, tokenCounts, tokenize, useSpeech, useTranscriptView, type Token } from "../../lib/speech";
 import { offersReels, openReels } from "../../lib/reels";
 import { useEditor } from "../../lib/store";
 import { US, formatDuration } from "../../lib/time";
@@ -42,20 +42,21 @@ function missingClips(project: Project, untranscribed: string[]): number {
     .filter((c) => c.content.type === "media" && c.content.volume > 0 && untranscribed.includes(c.content.assetId)).length;
 }
 
-/** "3 words (1.2 s)", or pauses when no word is included. */
-const describe = (tokens: Token[]) => (removedUs: number) => {
-  const words = tokens.filter((t) => t.kind === "word").length;
-  const n = words || tokens.length;
-  return `${n} ${words ? "word" : "pause"}${n === 1 ? "" : "s"} (${formatDuration(removedUs)})`;
-};
+const count = (n: number, what: string) => (n > 0 ? `${n} ${what}${n === 1 ? "" : "s"}` : null);
+
+/** "3 words (1.2 s)", or the pauses and hesitations when no word is included: "1 pause, 1 hesitation (0.9 s)". */
+const describe = (tokens: Token[]) => (removedUs: number) => `${tokenCounts(tokens)} (${formatDuration(removedUs)})`;
 
 const total = (tokens: Token[]) => tokens.reduce((s, t) => s + t.endUs - t.startUs, 0);
 
-const count = (n: number, what: string) => (n > 0 ? `${n} ${what}${n === 1 ? "" : "s"}` : null);
-
-/** What removing retakes cuts, "2 retakes, 3 filler words and pauses over 0.5 s", or null when nothing. */
+/** What removing retakes cuts, "2 retakes, 3 filler words, 1 hesitation and pauses over 0.5 s", or null when nothing. */
 function retakeParts(view: TranscriptView, pauses: number, pauseUs: number): string | null {
-  const parts = [count(view.retakes, "retake"), count(view.fillers, "filler word"), pauses > 0 ? `pauses over ${formatDuration(pauseUs)}` : null].filter((p) => p !== null);
+  const parts = [
+    count(view.retakes, "retake"),
+    count(view.fillers, "filler word"),
+    count(view.hesitations.length, "hesitation"),
+    pauses > 0 ? `pauses over ${formatDuration(pauseUs)}` : null,
+  ].filter((p) => p !== null);
   return parts.length ? parts.slice(0, -1).join(", ") + (parts.length > 1 ? " and " : "") + parts[parts.length - 1] : null;
 }
 
@@ -83,16 +84,17 @@ export function TranscriptTab() {
   const busy = !!running;
   const zooms = useZoomSuggestions(view);
 
-  const removeAll = () => view && removePauses(view.key, pauseUs, null, describe(pauses));
+  const removeAll = () => view && removePauses(view.key, pauseUs, null, [], describe(pauses));
   const retakes = view ? retakeParts(view, pauses.length, pauseUs) : null;
   const removeAllRetakes = () => view && retakes && removeRetakes(view.key, pauseUs, (removedUs) => `${retakes} (${formatDuration(removedUs)})`);
   const deleteRange = async (lo: number, hi: number) => {
     if (!view) return false;
     const picked = tokens.slice(lo, hi + 1);
     const words = picked.filter((t) => t.kind === "word");
+    const hesitations = picked.filter((t) => t.kind === "hesitation").map((t) => t.i);
     const done = words.length
-      ? await cutWords(view.key, [[words[0].i, words[words.length - 1].i]], describe(picked))
-      : await removePauses(view.key, pauseUs, picked.map((t) => t.i), describe(picked));
+      ? await cutWords(view.key, [[words[0].i, words[words.length - 1].i]], hesitations, describe(picked))
+      : await removePauses(view.key, pauseUs, picked.filter((t) => t.kind === "pause").map((t) => t.i), hesitations, describe(picked));
     // The playhead lands on the cut, where what followed the deleted words now starts.
     if (done) useEditor.getState().seek(done.startUs);
     return !!done;
@@ -169,8 +171,8 @@ export function TranscriptTab() {
         <Button
           variant="primary"
           disabled={!retakes || !!cutBlocker}
-          disabledReason={cutBlocker ?? `No retakes, filler words or pauses over ${formatDuration(pauseUs)}`}
-          title={`Cut earlier attempts of repeated sentences, filler words that open a sentence and pauses over ${formatDuration(pauseUs)}`}
+          disabledReason={cutBlocker ?? `No retakes, filler words, hesitations or pauses over ${formatDuration(pauseUs)}`}
+          title={`Cut earlier attempts of repeated sentences, filler words, hesitations and pauses over ${formatDuration(pauseUs)}`}
           onClick={removeAllRetakes}
         >
           <Scissors size={15} /> Remove retakes and pauses

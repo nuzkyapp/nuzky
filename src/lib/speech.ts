@@ -66,7 +66,7 @@ interface SpeechState {
   captionLook: CaptionLook;
   /** Pauses longer than this are shown in the transcript and can be removed. */
   pauseUs: number;
-  /** Counts changes to the stored transcripts, so the transcript is fetched again. */
+  /** Counts changes to the stored transcripts and prepared sound, so the transcript is fetched again. */
   stored: number;
 }
 
@@ -94,7 +94,8 @@ export function speechBlocker(project: Project): string | null {
   return heard ? null : "Add a video with sound to the timeline first";
 }
 
-const sameView = (a: TranscriptView, b: TranscriptView) => a.key === b.key && JSON.stringify([a.pauses, a.untranscribed]) === JSON.stringify([b.pauses, b.untranscribed]);
+const sameView = (a: TranscriptView, b: TranscriptView) =>
+  a.key === b.key && JSON.stringify([a.pauses, a.hesitations, a.untranscribed]) === JSON.stringify([b.pauses, b.hesitations, b.untranscribed]);
 
 /**
  * The timeline's speech as it is now, fetched again after every edit, recognition or change of the
@@ -168,10 +169,11 @@ async function cut(run: (epoch: string | undefined) => Promise<TranscriptCut>, w
   return out.done;
 }
 
-export const cutWords = (key: string, ranges: [number, number][], what: (removedUs: number) => string) => cut((epoch) => api.cutWords(key, ranges, epoch), what);
+export const cutWords = (key: string, ranges: [number, number][], hesitations: number[], what: (removedUs: number) => string) =>
+  cut((epoch) => api.cutWords(key, ranges, hesitations, epoch), what);
 
-export const removePauses = (key: string, pauseUs: number, only: number[] | null, what: (removedUs: number) => string) =>
-  cut((epoch) => api.removePauses(key, pauseUs, only, epoch), what);
+export const removePauses = (key: string, pauseUs: number, only: number[] | null, hesitations: number[], what: (removedUs: number) => string) =>
+  cut((epoch) => api.removePauses(key, pauseUs, only, hesitations, epoch), what);
 
 export const removeRetakes = (key: string, pauseUs: number, what: (removedUs: number) => string) => cut((epoch) => api.removeRetakes(key, pauseUs, epoch), what);
 
@@ -194,13 +196,26 @@ export type Token =
   /** `original` is what recognition wrote, when the word was corrected. */
   | { kind: "word"; i: number; startUs: number; endUs: number; text: string; original?: string }
   /** The part of a pause that removing it cuts; `i` is its place in the view's pauses. */
-  | { kind: "pause"; i: number; startUs: number; endUs: number; gapUs: number };
+  | { kind: "pause"; i: number; startUs: number; endUs: number; gapUs: number }
+  /** Voice between words that recognition did not write; `i` is the word before it. */
+  | { kind: "hesitation"; i: number; startUs: number; endUs: number };
 
-/** Words and pauses in timeline order. */
+/** "3 words", or the pauses and hesitations when no word is included: "1 pause, 1 hesitation". */
+export function tokenCounts(tokens: Token[]): string {
+  const count = (kind: Token["kind"]) => {
+    const n = tokens.filter((t) => t.kind === kind).length;
+    return n > 0 ? `${n} ${kind}${n === 1 ? "" : "s"}` : null;
+  };
+  const parts = count("word") ? [count("word")] : [count("pause"), count("hesitation")];
+  return parts.filter((p) => p !== null).join(", ");
+}
+
+/** Words, pauses and hesitations in timeline order. */
 export function tokenize(view: TranscriptView): Token[] {
   const words = view.words.map((w): Token => ({ kind: "word", i: w.i, startUs: w.startUs, endUs: w.endUs, text: w.text, original: w.original }));
   const pauses = view.pauses.map((p, i): Token => ({ kind: "pause", i, ...p }));
-  return [...words, ...pauses].sort((a, b) => a.startUs - b.startUs);
+  const hesitations = view.hesitations.map((h): Token => ({ kind: "hesitation", i: h.afterWord, startUs: h.startUs, endUs: h.endUs }));
+  return [...words, ...pauses, ...hesitations].sort((a, b) => a.startUs - b.startUs);
 }
 
 /** Token index ranges [from, to) of paragraphs, split where speech pauses for a second or more. */
