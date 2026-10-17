@@ -144,6 +144,16 @@ def agents(r, home):
     time.sleep(0.3)
     r.shot('setup-ai-connected')
 
+    # The person takes Nuzky out of Claude Code's settings meanwhile: Check again no longer says Connected.
+    saved = json.loads((home / '.claude.json').read_text())
+    del saved['mcpServers']['nuzky']
+    (home / '.claude.json').write_text(json.dumps(saved, indent=2))
+    press_button(r, 'Check again')
+    c = wait(lambda: card_says(r, 'Claude Code', 'Signed in') and cards(r), 10)
+    r.check('with its entry gone, Check again shows Claude Code signed in with Connect, not Connected', c and c['Claude Code']['buttons'] == ['Connect'], cards(r))
+    press_button(r, 'Connect')
+    r.check('Connect puts it back and its check passes', wait(lambda: card_says(r, 'Claude Code', 'Claude Code sees Nuzky'), 30), cards(r))
+
     # Codex: Nuzky reads its entry with Codex's own command and starts that server as Codex would.
     agent(r, 'codex')
     press('Escape')
