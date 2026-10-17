@@ -203,8 +203,8 @@ pub enum EditCmd {
     },
     /// Pastes copied clips with new ids, keeping their offsets to each other. The clips of each track go back on
     /// it when they all fit there, else on a new track right above it, as when dragging. Clips from the main track
-    /// go in back to back at its cut nearest `at_us` and the others keep their offset to them; without them the
-    /// earliest clip starts at `at_us`. The pasted clips are selected.
+    /// go in back to back at its cut nearest `at_us`, and every other clip keeps its offset to the main-track clip it
+    /// starts over; without them the earliest clip starts at `at_us`. The pasted clips are selected.
     PasteClips {
         clips: Vec<CopiedClip>,
         at_us: i64,
@@ -1505,9 +1505,9 @@ impl Project {
         let (mut main, rest): (Vec<_>, Vec<_>) =
             clips.into_iter().partition(|c| c.track_id == MAIN_TRACK && c.track_kind == TrackKind::Video);
         main.sort_by_key(|c| c.clip.start_us);
-        let earliest = rest.iter().map(|c| c.clip.start_us).min().unwrap_or(0);
-        let mut offset = at - earliest;
-        if let Some(first) = main.first().map(|c| c.clip.start_us) {
+        // Where each copied main-track clip was and where it goes.
+        let mut anchors: Vec<(i64, i64)> = Vec::new();
+        if !main.is_empty() {
             let length: i64 = main.iter().map(|c| c.clip.duration_us).sum();
             let track = &mut self.tracks[0];
             // The cut nearest `at`, as when dragging: before the first clip whose middle is past it.
@@ -1527,20 +1527,27 @@ impl Project {
                     clip.transition_in = None;
                 }
                 previous_end = Some(clip.end_us());
+                anchors.push((clip.start_us, t));
                 clip.id = new_id();
                 clip.start_us = t;
                 t += clip.duration_us;
                 out.select.push(clip.id.clone());
                 track.clips.push(clip);
             }
-            offset = cut - first;
         }
+        // Each other clip keeps its offset to the main-track clip it starts over, so a take's sound and titles stay
+        // on it when the pasted takes close a gap between them.
+        let earliest = rest.iter().map(|c| c.clip.start_us).min().unwrap_or(0);
+        let offset = |start: i64| match anchors.iter().rev().find(|(from, _)| *from <= start).or(anchors.first()) {
+            Some((from, to)) => to - from,
+            None => at - earliest,
+        };
+        let starts: Vec<i64> = rest.iter().map(|c| c.clip.start_us + offset(c.clip.start_us)).collect();
         // A clip copied from before the main-track clips never lands before the start.
-        let offset = offset.max(-earliest);
+        let lift = -starts.iter().copied().min().unwrap_or(0).min(0);
         let mut groups: Vec<(String, TrackKind, bool, Vec<Clip>)> = Vec::new();
-        for copied in rest {
-            let clip =
-                Clip { id: new_id(), start_us: copied.clip.start_us + offset, transition_in: None, ..copied.clip };
+        for (copied, start) in rest.into_iter().zip(starts) {
+            let clip = Clip { id: new_id(), start_us: start + lift, transition_in: None, ..copied.clip };
             match groups.iter_mut().find(|g| g.0 == copied.track_id) {
                 Some(group) => group.3.push(clip),
                 None => groups.push((copied.track_id, copied.track_kind, copied.keep_in_place, vec![clip])),
@@ -3759,6 +3766,28 @@ mod tests {
         p.apply(EditCmd::RemoveAsset { asset_id: "b".into() }).unwrap();
         let gone = before.tracks[0].clips.iter().find(|c| c.id == b).unwrap().id.clone();
         assert!(p.apply(EditCmd::PasteClips { clips: vec![copied(&before, &gone)], at_us: 0 }).is_err());
+    }
+
+    #[test]
+    fn a_pasted_title_stays_on_its_take_when_the_pasted_takes_close_a_gap() {
+        let mut p = project();
+        let takes: Vec<String> = ["a", "b", "a"]
+            .into_iter()
+            .map(|a| {
+                p.apply(EditCmd::AddClip { asset_id: a.into(), start_us: None, track_id: None }).unwrap().select[0]
+                    .clone()
+            })
+            .collect();
+        let style: TextStyle =
+            serde_json::from_value(serde_json::json!({"fontSize": 60.0, "color": "#ffffff"})).unwrap();
+        // 1 s into the third take, which starts at 8 s.
+        let title =
+            p.apply(EditCmd::AddText { start_us: 9_000_000, text: "Hook".into(), style }).unwrap().select[0].clone();
+        let clips = vec![copied(&p, &takes[0]), copied(&p, &takes[2]), copied(&p, &title)];
+        p.apply(EditCmd::PasteClips { clips, at_us: i64::MAX / 4 }).unwrap();
+        // The takes go in at 13 s and 18 s, back to back; the title keeps its second into the second one.
+        assert_eq!(main_layout(&p)[3..], [(13000, 5000), (18000, 5000)]);
+        assert_eq!(p.tracks[1].clips.iter().map(|c| c.start_us).collect::<Vec<_>>(), [9_000_000, 19_000_000]);
     }
 
     #[test]

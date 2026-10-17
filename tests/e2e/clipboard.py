@@ -104,7 +104,6 @@ def clipboard_flow(r):
     tracks = {c['id']: i for i, c in clips(r)}
     empty = frame(r, 'engine-12.5s-empty', 12_500_000)
 
-    # Copy both, paste them at 11 s.
     before = project(r)
     select(r, [hook['id'], sticker['id']])
     r.key('c', ctrlKey=True)

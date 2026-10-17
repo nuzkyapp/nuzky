@@ -754,11 +754,11 @@ function copiesOf(project: Project, ids: string[]): CopiedClip[] {
 
 const clipCount = (n: number) => (n === 1 ? "1 clip" : `${n} clips`);
 
-/** Fills the clipboard and says so, replacing what an earlier copy said. */
-function keep(clips: CopiedClip[], verb: "copied" | "cut", action?: NonNullable<Toast["action"]>) {
+/** Says how many clips were copied or cut, replacing what an earlier copy said. */
+function sayCopied(n: number, verb: "copied" | "cut", action?: NonNullable<Toast["action"]>) {
   const { toasts, toast } = useEditor.getState();
-  useEditor.setState({ clipboard: clips, toasts: toasts.filter((t) => !/^(Clip|\d+ clips) copied$/.test(t.text)) });
-  toast({ kind: "info", text: clips.length === 1 ? `Clip ${verb}` : `${clips.length} clips ${verb}`, action });
+  useEditor.setState({ toasts: toasts.filter((t) => !/^(Clip|\d+ clips) copied$/.test(t.text)) });
+  toast({ kind: "info", text: n === 1 ? `Clip ${verb}` : `${n} clips ${verb}`, action });
 }
 
 /**
@@ -771,7 +771,9 @@ export function copySelection() {
   void enqueue(async () => {
     const snap = useEditor.getState().snap;
     const clips = snap ? copiesOf(snap.project, ids) : [];
-    if (clips.length > 0) keep(clips, "copied");
+    if (clips.length === 0) return null;
+    useEditor.setState({ clipboard: clips });
+    sayCopied(clips.length, "copied");
     return null;
   });
 }
@@ -789,7 +791,7 @@ export async function cutSelection() {
   });
   if (!snap) return;
   useEditor.getState().select(useEditor.getState().selection.filter((id) => !selection.includes(id)));
-  keep(clips, "cut", undoAction(snap));
+  sayCopied(clips.length, "cut", undoAction(snap));
 }
 
 export const NOTHING_COPIED = "Nothing to paste. Copy clips with Ctrl+C first.";
