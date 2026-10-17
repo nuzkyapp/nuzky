@@ -7,6 +7,14 @@ targets = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin", "x86_64-pc-window
 # Vulnerabilities always fail. An unmaintained crate fails only when we depend on it directly;
 # deeper ones (ttf-parser under cosmic-text, proc-macro-error under GTK) have no upgrade we control.
 unmaintained = "workspace"
+# zip 8 comes with candle-core 0.11, the newest candle, which does not take zip 9 yet. The flaws are in
+# ZipArchive::extract and ZipStreamReader::extract; candle never extracts, and Nuzky opens no zip archive through it
+# (only GGUF models). Remove these once candle-core moves to zip 9.
+ignore = [
+  { id = "RUSTSEC-2026-0367", reason = "zip extract only; candle-core 0.11 pins zip 8 and never extracts" },
+  { id = "RUSTSEC-2026-0368", reason = "zip extract only; candle-core 0.11 pins zip 8 and never extracts" },
+  { id = "RUSTSEC-2026-0369", reason = "zip extract only; candle-core 0.11 pins zip 8 and never extracts" },
+]
 
 [licenses]
 allow = [
