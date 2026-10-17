@@ -696,7 +696,7 @@ impl Backend {
                 AnalysisKind::Fillers => {
                     let t = transcript.context("Missing filler transcript")?;
                     nuzky_engine::audio::ensure_pcm(&cache, &asset, |_| check_cancel(&cancel))?;
-                    let (peaks, _) = nuzky_engine::audio::waveform_peaks(&cache, &asset, 0, usize::MAX)?;
+                    let peaks = nuzky_engine::audio::prepared_peaks(&cache, &asset).unwrap_or_default();
                     let gaps: Vec<_> = t.words.windows(2).map(|w| nuzky_analysis::Range { start_us: w[0].end_us, end_us: w[1].start_us })
                         .filter(|g| g.end_us - g.start_us >= nuzky_analysis::HESITATION_US).collect();
                     let hesitations: Vec<_> = nuzky_analysis::hesitations(&peaks, &gaps).into_iter().flatten().collect();

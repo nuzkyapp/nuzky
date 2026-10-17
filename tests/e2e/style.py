@@ -332,7 +332,7 @@ def style_auto(r):
     shown = answer(r, "window.__nuzky.api.transcriptView(700000)")
     texts = [w['text'].strip().lower().strip('.,') for w in shown['words']]
     remark = texts.index('by'), texts.index('now')
-    r.s.call(f"window.__nuzky.api.cutWords(arguments[0], [arguments[1]], {epoch})", shown['key'], list(remark))
+    r.s.call(f"window.__nuzky.api.cutWords(arguments[0], [arguments[1]], [], {epoch})", shown['key'], list(remark))
     shown = answer(r, "window.__nuzky.api.transcriptView(700000)")
     texts = [w['text'].strip().lower().strip('.,') for w in shown['words']]
     # As typed in the transcript: the recognised punctuation stays.

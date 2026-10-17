@@ -175,8 +175,8 @@ impl Sentence {
 }
 
 /// `words` are timeline words in timeline order, numbered as get_transcript numbers them.
-/// `languages` are the recognised languages of their files: fillers inside a sentence are only
-/// looked for in Czech and English, and in files missing from it.
+/// `languages` are the recognised languages of their files: filler words are only looked for in
+/// Czech and English, and in files missing from it.
 pub fn retakes(words: &[TimelineWord], languages: &HashMap<String, String>) -> Retakes {
     let sentences = sentences(words, languages);
     let mut group_of: Vec<Option<usize>> = vec![None; sentences.len()];
@@ -372,25 +372,26 @@ fn sentences(words: &[TimelineWord], languages: &HashMap<String, String>) -> Vec
         if !ends {
             continue;
         }
+        // Leading fillers are not compared with other sentences, in any language.
         let mut k = from;
         while k <= i && is_filler(words, k, i) {
             k += 1;
         }
         // Inside the sentence a word such as "jakoby" must be set apart before it too: "what it's
-        // like." and "I'd like, if possible" are not fillers.
+        // like." and "I'd um like, if possible" are not fillers.
         let mut inner: Vec<[usize; 2]> = Vec::new();
         let lexical = languages.get(&word.asset_id).is_none_or(|l| matches!(l.as_str(), "cs" | "en"));
         for j in (k + 1..=i).filter(|_| lexical) {
-            let after_filler = inner.last().is_some_and(|r| r[1] + 1 == j);
-            if is_filler(words, j, i) && (sound(&words[j]) || after_filler || set_apart(words, j - 1)) {
+            if is_filler(words, j, i) && (sound(&words[j]) || set_apart(words, j - 1)) {
                 match inner.last_mut() {
-                    Some(run) if after_filler => run[1] = j,
+                    Some(run) if run[1] + 1 == j => run[1] = j,
                     _ => inner.push([j, j]),
                 }
             }
         }
         let compared = (k..=i).map(|j| (j, token(&words[j].text))).filter(|(_, t)| !t.is_empty()).collect();
-        out.push(Sentence { from, to: i, filler_to: (k > from).then(|| k - 1), inner, words: compared });
+        let filler_to = (lexical && k > from).then(|| k - 1);
+        out.push(Sentence { from, to: i, filler_to, inner, words: compared });
         from = i + 1;
     }
     out
@@ -1052,10 +1053,11 @@ mod tests {
             ("Světlo dejte, ehm, prostě, z boku.", 900_000),
             ("I'd like, if possible, a coffee.", 900_000),
             ("I'll get 'em tomorrow.", 900_000),
+            ("I'd um like, if possible, a coffee.", 900_000),
         ]);
         let fillers: Vec<_> = found.fillers.iter().map(|f| (f.from, f.to, f.text.as_str())).collect();
-        assert_eq!(fillers, [(2, 2, "ehm"), (7, 7, "jakoby,"), (20, 21, "ehm, prostě,")]);
-        assert_eq!(found.suggested_delete, [[2, 2], [7, 7], [20, 21]]);
+        assert_eq!(fillers, [(2, 2, "ehm"), (7, 7, "jakoby,"), (20, 21, "ehm, prostě,"), (35, 35, "um")]);
+        assert_eq!(found.suggested_delete, [[2, 2], [7, 7], [20, 21], [35, 35]]);
         // Restarted sentences are found as before: the filler inside is compared like any word.
         let found = one(&[("Kamera musí, ehm, stát.", 900_000), ("Kamera musí stát pevně na stativu.", 900_000)]);
         assert_eq!(found.groups[0].delete, [[0, 3]]);
@@ -1093,13 +1095,18 @@ mod tests {
         assert!(fillers(words(FILLER_PAUSE_US, FILLER_PAUSE_US - 1)).is_empty());
     }
 
-    /// Other languages keep what they had: fillers that start a sentence, none inside one.
+    /// In other languages the words can mean something: German "Um zehn Uhr" is "at ten".
     #[test]
-    fn fillers_inside_a_sentence_are_only_looked_for_in_czech_and_english() {
-        let words =
-            timeline(&[&[("Ehm, kamera stojí ehm pevně.", 900_000)], &[("Ehm, die Kamera steht ehm fest.", 900_000)]]);
+    fn filler_words_are_only_looked_for_in_czech_and_english() {
+        let words = timeline(&[
+            &[("Ehm, kamera stojí ehm pevně.", 900_000)],
+            &[("Um zehn Uhr steht die Kamera.", 900_000), ("Um zehn Uhr steht die Kamera fest.", 900_000)],
+        ]);
         let languages = HashMap::from([("reel-0".to_owned(), "cs".to_owned()), ("reel-1".to_owned(), "de".to_owned())]);
-        let fillers: Vec<String> = retakes(&words, &languages).fillers.into_iter().map(|f| f.text).collect();
-        assert_eq!(fillers, ["Ehm,", "ehm", "Ehm,"]);
+        let found = retakes(&words, &languages);
+        let fillers: Vec<&str> = found.fillers.iter().map(|f| f.text.as_str()).collect();
+        assert_eq!(fillers, ["Ehm,", "ehm"]);
+        // Restarted sentences are found as before.
+        assert_eq!(found.groups.iter().map(|g| g.delete.clone()).collect::<Vec<_>>(), [vec![[5, 10]]]);
     }
 }

@@ -200,14 +200,13 @@ export type Token =
   /** Voice between words that recognition did not write; `i` is the word before it. */
   | { kind: "hesitation"; i: number; startUs: number; endUs: number };
 
-/** "3 words", or the pauses and hesitations when no word is included: "1 pause, 1 hesitation". */
+/** "3 words, 1 hesitation", or "1 pause, 1 hesitation"; pause chips count only without words, which take their gaps anyway. */
 export function tokenCounts(tokens: Token[]): string {
   const count = (kind: Token["kind"]) => {
     const n = tokens.filter((t) => t.kind === kind).length;
     return n > 0 ? `${n} ${kind}${n === 1 ? "" : "s"}` : null;
   };
-  const parts = count("word") ? [count("word")] : [count("pause"), count("hesitation")];
-  return parts.filter((p) => p !== null).join(", ");
+  return [count("word"), count("word") ? null : count("pause"), count("hesitation")].filter((p) => p !== null).join(", ");
 }
 
 /** Words, pauses and hesitations in timeline order. */

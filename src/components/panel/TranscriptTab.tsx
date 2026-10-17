@@ -81,6 +81,9 @@ export function TranscriptTab() {
   const pauses = tokens.filter((t) => t.kind === "pause");
   const missing = view ? missingClips(project, view.untranscribed) : 0;
   const cutBlocker = missing > 0 ? "Transcribe the remaining clips first" : null;
+  // Hesitations are heard in the sound; cutting before it is prepared would leave them in.
+  const preparing = useEditor((s) => Object.values(s.jobs).some((j) => j.kind === "audio" && j.status === "running"));
+  const retakesBlocker = cutBlocker ?? (preparing ? "Wait until the sound is prepared" : null);
   const busy = !!running;
   const zooms = useZoomSuggestions(view);
 
@@ -170,8 +173,8 @@ export function TranscriptTab() {
         </div>
         <Button
           variant="primary"
-          disabled={!retakes || !!cutBlocker}
-          disabledReason={cutBlocker ?? `No retakes, filler words, hesitations or pauses over ${formatDuration(pauseUs)}`}
+          disabled={!retakes || !!retakesBlocker}
+          disabledReason={retakesBlocker ?? `No retakes, filler words, hesitations or pauses over ${formatDuration(pauseUs)}`}
           title={`Cut earlier attempts of repeated sentences, filler words, hesitations and pauses over ${formatDuration(pauseUs)}`}
           onClick={removeAllRetakes}
         >

@@ -428,20 +428,19 @@ pub(crate) mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
-    /// The fixture's talk in the audio cache: a quiet room, each word loud and an "eee" between w2
-    /// (2.5-2.9 s) and w3 (3.5-3.9 s) at 3.1-3.4 s.
+    /// The fixture's talk prepared in the audio cache, as its 20 ms waveform peaks: a quiet room,
+    /// each word loud and an "eee" between w2 (2.5-2.9 s) and w3 (3.5-3.9 s) at 3.1-3.4 s.
     fn prepare_sound(host: &Host) {
         let project = host.session.state().unwrap().project;
-        let path = nuzky_engine::audio::pcm_path(&host.cache_dir, project.asset("talk").unwrap());
-        let mut samples = vec![0.002f32; 10 * 48_000 * 2];
-        let mut sound =
-            |from: f64, to: f64, level: f32| samples[(from * 96_000.0) as usize..(to * 96_000.0) as usize].fill(level);
+        let pcm = nuzky_engine::audio::pcm_path(&host.cache_dir, project.asset("talk").unwrap());
+        std::fs::create_dir_all(pcm.parent().unwrap()).unwrap();
+        std::fs::File::create(&pcm).unwrap().set_len(10 * 48_000 * 2 * 4).unwrap();
+        let mut peaks = vec![1u8; 500];
         for i in 0..8 {
-            sound(0.5 + f64::from(i), 0.9 + f64::from(i), 0.5);
+            peaks[25 + 50 * i..45 + 50 * i].fill(127);
         }
-        sound(3.1, 3.4, 0.4);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, samples.iter().flat_map(|s| s.to_le_bytes()).collect::<Vec<u8>>()).unwrap();
+        peaks[155..170].fill(102);
+        std::fs::write(nuzky_engine::audio::peaks_for(&pcm), peaks).unwrap();
     }
 
     #[test]
@@ -451,6 +450,13 @@ pub(crate) mod tests {
         prepare_sound(&host);
         let first = view(&host, 300_000).unwrap();
         assert_eq!(first.hesitations, [Hesitation { after_word: 2, start_us: 3_100_000, end_us: 3_400_000 }]);
+        // A split where nothing is cut away leaves it as it was.
+        let clip = host.session.state().unwrap().project.tracks[0].clips[0].id.clone();
+        host.session
+            .edit(vec![EditCmd::SplitClip { clip_id: clip, at_us: 3_200_000 }], None, Expect::default())
+            .unwrap();
+        assert_eq!(view(&host, 300_000).unwrap().hesitations, first.hesitations);
+        host.session.undo().unwrap();
         // As a deleted word: half the quiet on each side stays, at most 0.12 s after w2 and 0.08 s before w3.
         let (_, start_us, removed_us) =
             cut(&host, &first.key, Target::Pauses { pause_us: 300_000, only: Some(vec![]), hesitations: vec![2] })

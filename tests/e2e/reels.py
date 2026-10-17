@@ -217,7 +217,7 @@ def failure(r):
 def moved(r):
     fourth = pick(r, 'Moment 4')
     # The user cuts a word out of that moment meanwhile: its words no longer play where they did.
-    cut = r.s.call("""window.__nuzky.api.transcriptView(500000).then((v) => window.__nuzky.api.cutWords(v.key, [[arguments[0], arguments[0]]],
+    cut = r.s.call("""window.__nuzky.api.transcriptView(500000).then((v) => window.__nuzky.api.cutWords(v.key, [[arguments[0], arguments[0]]], [],
         window.__nuzky.store.getState().snap.sessionEpoch)).then((t) => { window.__nuzky.store.getState().setSnap(t.snapshot); return 'cut'; })""",
                    fourth['from'] + 1)
     r.check('a word of the fourth moment is cut out', cut.get('value') == 'cut', cut)

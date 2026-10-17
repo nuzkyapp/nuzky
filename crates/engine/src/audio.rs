@@ -91,7 +91,7 @@ pub(crate) const PCM_VERSION: &str = "v4";
 const PEAKS_VERSION: &str = "p1";
 
 /// Where the waveform peaks of the cache at `pcm` are: written while it is extracted.
-fn peaks_for(pcm: &Path) -> PathBuf {
+pub fn peaks_for(pcm: &Path) -> PathBuf {
     pcm.with_extension(format!("{PEAKS_VERSION}.peaks"))
 }
 
@@ -859,6 +859,14 @@ pub fn waveform_peaks(cache_dir: &Path, asset: &Asset, from: usize, to: usize) -
         }
     }
     Ok((out, true))
+}
+
+/// All waveform peaks of `asset`'s sound from their file, once its cache is prepared. None before, and
+/// for a cache extracted before peaks were written, whose peaks would take reading all of it.
+pub fn prepared_peaks(cache_dir: &Path, asset: &Asset) -> Option<Vec<u8>> {
+    let pcm = pcm_path(cache_dir, asset);
+    let total = (std::fs::metadata(&pcm).ok()?.len() as usize / (CHANNELS * 4)).div_ceil(PEAK_FRAMES);
+    std::fs::read(peaks_for(&pcm)).ok().filter(|peaks| peaks.len() == total)
 }
 
 /// Bytes `from..to` of the file, fewer where it ends.

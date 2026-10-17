@@ -8,7 +8,7 @@ use anyhow::{Context, Result, ensure};
 use nuzky_analysis::{AudioSource, CaptionGrouping, HESITATION_US, group_words};
 use nuzky_engine::{
     Project,
-    audio::waveform_peaks,
+    audio::prepared_peaks,
     edit::{CaptionPreset, EditCmd, TimeRange, merge_ranges},
     effects::source_time,
     model::{Asset, Clip, ClipContent, MAX_CORRECTION_CHARS, WordCorrection},
@@ -612,20 +612,34 @@ pub fn hesitations(project: &Project, derived: &Derived, cache_dir: &Path) -> Ve
     let words = &derived.words;
     let clips: HashMap<&str, &Clip> =
         project.tracks.iter().flat_map(|t| &t.clips).map(|c| (c.id.as_str(), c)).collect();
-    // Gaps between words of one clip, which are next to each other in the file too, by file.
+    // A clip split where nothing was cut away plays on as one: its pieces follow in the file too.
+    let continues = |a: &Clip, b: &Clip| match (&a.content, &b.content) {
+        (
+            ClipContent::Media { asset_id, speed, .. },
+            ClipContent::Media { asset_id: next, speed: next_speed, source_in_us, .. },
+        ) => {
+            a.id == b.id
+                || asset_id == next
+                    && speed == next_speed
+                    && b.start_us == a.end_us()
+                    && source_time(a, a.end_us()) == *source_in_us
+        }
+        _ => false,
+    };
+    // Gaps between words of one stretch of a file, by file.
     let mut gaps: HashMap<&str, Vec<(usize, &Clip)>> = HashMap::new();
     for (i, pair) in words.windows(2).enumerate() {
-        if pair[0].clip_id == pair[1].clip_id
-            && pair[1].start_us - pair[0].end_us >= HESITATION_US
-            && let Some(&clip) = clips.get(pair[0].clip_id.as_str())
+        if pair[1].start_us - pair[0].end_us >= HESITATION_US
+            && let (Some(&clip), Some(&next)) =
+                (clips.get(pair[0].clip_id.as_str()), clips.get(pair[1].clip_id.as_str()))
+            && continues(clip, next)
         {
             gaps.entry(&pair[0].asset_id).or_default().push((i, clip));
         }
     }
     let mut found = Vec::new();
     for (asset_id, gaps) in gaps {
-        let Some(asset) = project.asset(asset_id) else { continue };
-        let Ok((peaks, true)) = waveform_peaks(cache_dir, asset, 0, usize::MAX) else { continue };
+        let Some(peaks) = project.asset(asset_id).and_then(|asset| prepared_peaks(cache_dir, asset)) else { continue };
         let ranges: Vec<_> = gaps
             .iter()
             .map(|&(i, clip)| nuzky_analysis::Range {
@@ -698,7 +712,6 @@ pub fn deletion_ranges(
     let (Some(&first), Some(&last)) = (retained.first(), retained.last()) else {
         return Ok(speech.to_vec());
     };
-    // Where what goes between two times starts and ends: the deleted words and the hesitations.
     let gone = |deleted: &[TimelineWord], from: i64, to: i64| {
         let words = deleted.first().zip(deleted.last()).map(|(a, b)| (a.start_us, b.end_us));
         hesitations
