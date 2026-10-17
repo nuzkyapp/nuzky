@@ -154,12 +154,12 @@ mod tests {
         assert!(filler_words(&transcript("Je. Je to tak"), "cs").is_empty());
     }
 
-    /// Peaks of a file whose room is at 2 and speech at 120, with `voice` loud at those 20 ms peaks.
-    fn peaks(voice: &[std::ops::Range<usize>]) -> Vec<u8> {
+    /// Peaks of a file whose room is at 2 and speech at 120, with voice loud at the 20 ms peaks `from..to`.
+    fn peaks(voice: &[(usize, usize)]) -> Vec<u8> {
         let mut peaks = vec![2u8; 200];
         peaks[..30].fill(120);
-        for range in voice {
-            peaks[range.clone()].fill(110);
+        for &(from, to) in voice {
+            peaks[from..to].fill(110);
         }
         peaks
     }
@@ -171,22 +171,22 @@ mod tests {
     #[test]
     fn a_hesitation_parted_from_both_words_by_quiet_is_found_whole() {
         // An "eee" at 1.0-1.3 s in a gap at 0.8-1.5 s.
-        let found = hesitations(&peaks(&[50..65]), &[gap(800_000, 1_500_000)]);
+        let found = hesitations(&peaks(&[(50, 65)]), &[gap(800_000, 1_500_000)]);
         assert_eq!(found, [Some(gap(1_000_000, 1_300_000))]);
         // One quiet peak inside it does not split it; two stretches in one gap are one hesitation.
-        let found = hesitations(&peaks(&[50..57, 58..65, 68..76]), &[gap(800_000, 1_700_000)]);
+        let found = hesitations(&peaks(&[(50, 57), (58, 65), (68, 76)]), &[gap(800_000, 1_700_000)]);
         assert_eq!(found, [Some(gap(1_000_000, 1_520_000))]);
     }
 
     #[test]
     fn sound_running_into_a_word_is_the_word() {
         // The previous word's tail goes on past its measured end into the gap.
-        assert_eq!(hesitations(&peaks(&[40..60]), &[gap(800_000, 1_500_000)]), [None]);
+        assert_eq!(hesitations(&peaks(&[(40, 60)]), &[gap(800_000, 1_500_000)]), [None]);
         // Its tail, quiet, then an "eee": only the "eee".
-        let found = hesitations(&peaks(&[40..45, 50..60]), &[gap(800_000, 1_500_000)]);
+        let found = hesitations(&peaks(&[(40, 45), (50, 60)]), &[gap(800_000, 1_500_000)]);
         assert_eq!(found, [Some(gap(1_000_000, 1_200_000))]);
         // Voice up to the next word.
-        assert_eq!(hesitations(&peaks(&[60..75]), &[gap(800_000, 1_500_000)]), [None]);
+        assert_eq!(hesitations(&peaks(&[(60, 75)]), &[gap(800_000, 1_500_000)]), [None]);
     }
 
     /// The gap's edges: WORD_EDGE_US beside each word is the word's, and a peak must lie wholly inside.
@@ -195,20 +195,20 @@ mod tests {
         // In a gap at 0.80-1.20 s the words own 0.80-0.83 and 1.17-1.20 s, so the gap's peaks are
         // those wholly inside 0.83-1.17 s, 0.84-1.16 s, and its first and last must be quiet.
         let edge = gap(800_000, 1_200_000);
-        assert_eq!(hesitations(&peaks(&[42..57]), &[edge]), [None]);
-        assert_eq!(hesitations(&peaks(&[43..58]), &[edge]), [None]);
-        assert_eq!(hesitations(&peaks(&[43..57]), &[edge]), [Some(gap(860_000, 1_140_000))]);
+        assert_eq!(hesitations(&peaks(&[(42, 57)]), &[edge]), [None]);
+        assert_eq!(hesitations(&peaks(&[(43, 58)]), &[edge]), [None]);
+        assert_eq!(hesitations(&peaks(&[(43, 57)]), &[edge]), [Some(gap(860_000, 1_140_000))]);
         // A word ending at 0.81 s leaves the peak at 0.84 s to the gap; a microsecond later it is the word's.
-        assert_eq!(hesitations(&peaks(&[43..57]), &[gap(810_000, 1_200_000)]), [Some(gap(860_000, 1_140_000))]);
-        assert_eq!(hesitations(&peaks(&[43..57]), &[gap(810_001, 1_200_000)]), [None]);
+        assert_eq!(hesitations(&peaks(&[(43, 57)]), &[gap(810_000, 1_200_000)]), [Some(gap(860_000, 1_140_000))]);
+        assert_eq!(hesitations(&peaks(&[(43, 57)]), &[gap(810_001, 1_200_000)]), [None]);
         // Seven peaks of voice, 140 ms, are not HESITATION_US; eight, 160 ms, are.
-        assert_eq!(hesitations(&peaks(&[50..57]), &[gap(800_000, 1_500_000)]), [None]);
-        assert_eq!(hesitations(&peaks(&[50..58]), &[gap(800_000, 1_500_000)]), [Some(gap(1_000_000, 1_160_000))]);
+        assert_eq!(hesitations(&peaks(&[(50, 57)]), &[gap(800_000, 1_500_000)]), [None]);
+        assert_eq!(hesitations(&peaks(&[(50, 58)]), &[gap(800_000, 1_500_000)]), [Some(gap(1_000_000, 1_160_000))]);
     }
 
     #[test]
     fn without_a_quiet_room_nothing_is_a_hesitation() {
-        let mut loud_room = peaks(&[50..65]);
+        let mut loud_room = peaks(&[(50, 65)]);
         for p in &mut loud_room {
             *p = (*p).max(30);
         }
