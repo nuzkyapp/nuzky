@@ -1,17 +1,28 @@
 """A new user's first reel, every step from the app's own controls and no agent: a portrait HEVC video from a
-phone, Czech captions, retakes, filler words and pauses removed in one go, and the Reels preset. What it checks
-is what the viewer gets: the picture upright and filling the frame, captions that say exactly what is still
-heard, every kept phrase whole, no word clipped at a cut, and a file Instagram and TikTok take as it is.
+phone, Czech captions, retakes, filler words, an "eee" recognition did not write and pauses removed in one go,
+and the Reels preset. What it checks is what the viewer gets: the picture upright and filling the frame, captions
+that say exactly what is still heard, every kept phrase whole, no filler or "eee" left inside a sentence, no word
+clipped at a cut, and a file Instagram and TikTok take as it is.
 
 The save panel of Export… is native and cannot be driven, so the export starts with the options the dialog
 saved once Reels & TikTok was picked."""
 import difflib, json, subprocess, time
 
+from e2e.corrections import Hands
 from e2e.harness import FIXTURES, MODELS, flow, link_models, preview_crop, preview_rect, press, wait
 from e2e.layout import resize
-from e2e.reel import MODEL, check_captions, check_cut, check_file, check_words, phrases, recognise, truth, words
+from e2e.reel import (MODEL, RATE, check_captions, check_cut, check_file, check_words, db, heard, pcm, phrases, played,
+                      recognise, truth, words)
 
 VIDEO = FIXTURES / 'first-reel.mov'
+# The hesitation chips of the transcript, in timeline order.
+CHIPS = '[role=listbox][aria-label=Transcript] [role=option][aria-label^="Hesitation"]'
+CHIP = """const chip = [...document.querySelectorAll(arguments[0])][arguments[1]];
+    if (!chip) return null;
+    chip.scrollIntoView({block: 'center'});
+    const all = [...chip.closest('[role=listbox]').querySelectorAll('[role=option]')], i = all.indexOf(chip);
+    return {id: chip.id, label: chip.getAttribute('aria-label'), selected: chip.getAttribute('aria-selected'),
+            before: all[i - 1]?.textContent ?? null, after: all[i + 1]?.textContent ?? null};"""
 # The fixture's yellow square in the upright 1080x1920 picture: left, top, right, bottom.
 MARKER = (40, 40, 200, 200)
 FIND = "[...document.querySelectorAll('button')].find((b) => b.textContent.trim() === arguments[0])"
@@ -65,12 +76,127 @@ def upright(box, tolerance):
     return box is not None and all(abs(a - b) <= tolerance for a, b in zip(box, MARKER))
 
 
+def transcript_view(r):
+    return json.loads(r.s.call('window.__nuzky.api.transcriptView(500000).then(JSON.stringify)')['value'])
+
+
+def inside(truths):
+    """What goes from inside a sentence, with the kept parts around it: (before, filler or "eee", after). Phrases
+    are more than half a second apart, so closer parts are one sentence."""
+    return [(a, b, c) for a, b, c in zip(truths, truths[1:], truths[2:])
+            if b[1] != 'keep' and a[1] == c[1] == 'keep' and b[3] - a[4] < 0.5 and c[3] - b[4] < 0.5]
+
+
+def check_recognition(r, view, truths):
+    """What recognition wrote, before any cut, is what the cleanup is tested on: "jakoby" and "ehm" inside their
+    sentences where they are heard, nothing over the "eee", which lies inside a gap between two words shorter than
+    the 0.5 s pause, and the "jakoby" that means something not set apart. A fixture recognised otherwise no longer
+    tests that cleanup, so this fails here instead of passing or failing somewhere else. Returns whether it holds."""
+    # Before any cut the video starts the timeline, so timeline and file times are the same.
+    ws = [(w['text'], w['startUs'] / 1e6, w['endUs'] / 1e6) for w in view['words']]
+    over = lambda s, e: [i for i, (_, a, b) in enumerate(ws) if a < e and b > s]
+
+    def apart(i):
+        """Whether a comma or a pause of at least 0.15 s sets word `i` apart, before it and after it."""
+        return (i == 0 or ws[i][1] - ws[i - 1][2] >= 0.15 or ws[i - 1][0].endswith(','),
+                i + 1 == len(ws) or ws[i + 1][1] - ws[i][2] >= 0.15 or ws[i][0].endswith(','))
+
+    fillers, hesitations = [], []
+    for before, (_, role, text, s, e), after in inside(truths):
+        if role == 'filler':
+            found = [i for i in over(s, e) if words(ws[i][0]) == words(text)]
+            # Written over its own sound, not over the words around it; "jakoby" also set apart, or it means something.
+            ok = len(found) == 1 and before[4] - 0.03 <= ws[found[0]][1] and ws[found[0]][2] <= after[3] + 0.03
+            ok = ok and (words(text) != ['jakoby'] or apart(found[0]) == (True, True))
+            fillers.append({'said': text, 'heard': (round(s, 3), round(e, 3)), 'written': [ws[i] for i in over(s, e)], 'ok': ok})
+        else:
+            i = max((i for i, w in enumerate(ws) if w[2] <= s), default=0)
+            gap = ws[i + 1][1] - ws[i][2]
+            hesitations.append({'eee': (round(s, 3), round(e, 3)), 'word before': ws[i], 'word after': ws[i + 1],
+                                'gap': round(gap, 3), 'written over it': [ws[j] for j in over(s, e)],
+                                'ok': not over(s, e) and 0.15 <= gap < 0.5 and ws[i][2] > before[3] and ws[i + 1][1] < after[4]})
+    print(f'  recognition around the "eee": {hesitations}', flush=True)
+    controls = []
+    for _, role, text, s, e in truths:
+        if role == 'keep' and 'jakoby' in words(text):
+            found = [i for i in over(s, e) if words(ws[i][0]) == ['jakoby']]
+            controls.append({'said': text, 'written': [ws[i] for i in over(s, e)],
+                             'ok': len(found) == 1 and apart(found[0]) != (True, True)})
+    held = [r.check('precondition: recognition wrote "jakoby" and "ehm" inside their sentences, where they are heard, '
+                    'the "jakoby" set apart', len(fillers) == 2 and all(f['ok'] for f in fillers), fillers),
+            r.check('precondition: recognition wrote nothing over the "eee", which lies inside a gap of 0.15 to 0.5 s '
+                    'between two measured words', len(hesitations) == 1 and all(h['ok'] for h in hesitations), hesitations),
+            r.check('precondition: recognition wrote the "jakoby" that means something without a comma or pause on '
+                    'both sides', len(controls) == 1 and all(c['ok'] for c in controls), controls)]
+    return all(held)
+
+
+def check_hesitation_chip(r, view, truths, asset):
+    """The "eee" shows as a Hesitation chip between the words around it; a click and Delete cut it like a pause,
+    and undo brings it back."""
+    before_eee, (take, _, _, s, e), after_eee = next(x for x in inside(truths) if x[1][1] == 'hesitation')
+    # The transcript where the "eee" is, also when no chip shows there.
+    word = max(i for i, w in enumerate(view['words']) if w['endUs'] <= s * 1e6)
+    r.s.run("[...document.querySelectorAll('[role=listbox][aria-label=Transcript] [role=option]:not([aria-label])')]"
+            "[arguments[0]].scrollIntoView({block: 'center'})", word)
+    # Hesitations are read from the sound, once it is prepared.
+    find = lambda: [h for h in transcript_view(r).get('hesitations', []) if h['startUs'] < e * 1e6 and h['endUs'] > s * 1e6]
+    found = wait(find, 10) or []
+    view = transcript_view(r)
+    if not r.check('the transcript finds the hesitation where the "eee" is heard', len(found) == 1, view.get('hesitations')):
+        r.shot('hesitation-chip')
+        return
+    h = found[0]
+    chip = wait(lambda: r.s.run(CHIP, CHIPS, view['hesitations'].index(h)), 5)
+    around = [view['words'][h['afterWord']]['text'], view['words'][h['afterWord'] + 1]['text']]
+    time.sleep(0.3)
+    r.shot('hesitation-chip')
+    if not r.check(f'a Hesitation chip shows between "{around[0]}" and "{around[1]}"',
+                   chip and chip['label'].startswith('Hesitation, ') and [chip['before'], chip['after']] == around,
+                   {'chip': chip, 'words around the hesitation': around}):
+        return
+    before = project(r)
+    shown = lambda: r.s.run(CHIP, CHIPS, view['hesitations'].index(h)) or {}
+    r.check('clicking the chip selects it', Hands(r).click(f'#{chip["id"]}') and wait(lambda: shown().get('selected') == 'true', 3),
+            shown())
+    r.key('Delete')
+    toast = wait(lambda: next((t['text'] for t in r.state()['toasts'] if t['text'].startswith('Removed')), None), 10)
+    r.check('Delete cuts it and a toast says a hesitation went', toast and '1 hesitation' in toast, toast)
+    ranges, _ = played(project(r), {asset: take})
+    whole = [round(heard(ranges[take], x[3], x[4]) - (x[4] - x[3]), 3) for x in (before_eee, after_eee)]
+    r.check('the project no longer plays the "eee", and still plays the words around it whole',
+            heard(ranges[take], s, e) <= 0.01 and all(m > -0.002 for m in whole),
+            {'eee played s': round(heard(ranges[take], s, e), 3), 'missing of the words around it s': whole})
+    r.shot('hesitation-cut')
+    r.s.run('document.activeElement?.blur()')
+    r.key('z', ctrlKey=True)
+    r.check('undo brings the "eee" back', wait(lambda: project(r)['tracks'] == before['tracks'], 10))
+    r.s.run('window.__nuzky.store.setState({toasts: []})')
+
+
+def check_quiet_inside(r, out, state, asset, truths):
+    """The export where a filler or the "eee" was cut out of a sentence: between the words around it, located from
+    where the clips put them, it is as quiet as at a cut, so neither its words nor its sound are left."""
+    _, order = played(state, {asset: 1})
+    at = lambda s: next((c + s - a for _, a, b, c in order if a <= s <= b), None)
+    speech = db(pcm(out))
+    hop = RATE // 100
+    for before, (_, _, text, s, e), after in inside(truths):
+        start, end = at(before[4]), at(after[3])
+        found = {'export s': [None if t is None else round(t, 3) for t in (start, end)], 'speech dB': round(speech, 1)}
+        if start is not None and end is not None:
+            samples = pcm(out, start + 0.02, max(0.01, end - start - 0.04))
+            found['loudest dB'] = round(max(db(samples[i:i + hop]) for i in range(0, max(1, len(samples) - hop + 1), hop)), 1)
+        r.check(f'the export is quiet where "{text}" was, between "{before[2]}" and "{after[2]}"',
+                found.get('loudest dB', 0) < speech - 12, found)
+
+
 @flow('first-reel', 'A new user turns a portrait HEVC phone video into a Reel from the app alone: Czech captions, '
-      'retakes and pauses removed in one undo step, the Reels preset; captions match the speech, no word is clipped',
-      before=setup, home=True)
+      'retakes, fillers, an unwritten "eee" and pauses removed in one undo step, the Reels preset; captions match '
+      'the speech, no word is clipped', before=setup, home=True)
 def first_reel(r):
     from PIL import Image
-    truths = truth([(VIDEO, [p for p in phrases() if p[0] in (1, 2)])])
+    truths = truth([(VIDEO, [p for p in phrases() if p[0] in (1, 2, 4)])])
     r.s.call('window.__nuzky.newProjectFromMedia(arguments[0])', [str(VIDEO)])
     opened = wait(lambda: (p := project(r))['canvas']['width'] == 1080 and p['canvas']['height'] == 1920 and main_clips(p)
                   and r.s.run('return window.__nuzky.store.getState().view') == 'editor', 30)
@@ -105,20 +231,29 @@ def first_reel(r):
                         'return box.right <= innerWidth && box.bottom <= innerHeight && b.scrollWidth <= b.clientWidth', 'Remove retakes and pauses')
         r.check('in the smallest window, 1024 x 640, the button shows whole', whole)
         resize(r, 1440, 900)
+    if not check_recognition(r, transcript_view(r), truths):
+        return
+    asset = project(r)['assets'][0]['id']
+    check_hesitation_chip(r, transcript_view(r), truths, asset)
     before = project(r)
     r.s.run(f'{FIND}.focus()', 'Remove retakes and pauses')
     r.shot('remove-retakes')
     press('Return')
     r.check('Enter on the focused button cuts the video', wait(lambda: len(main_clips(project(r))) > 1, 15))
     toast = wait(lambda: next((t['text'] for t in r.state()['toasts'] if t['text'].startswith('Removed')), None), 5)
-    r.check('a toast says what went: retakes, filler words and pauses',
-            toast and 'retake' in toast and 'filler word' in toast and 'pauses over 0.5 s' in toast, toast)
+    fillers = sum(role == 'filler' for _, role, *_ in truths)
+    r.check(f'a toast says what went: retakes, {fillers} filler words, 1 hesitation and pauses', toast and 'retake' in toast
+            and f'{fillers} filler words' in toast and '1 hesitation' in toast and 'pauses over 0.5 s' in toast, toast)
     time.sleep(1)
     r.shot('cut')
 
     state = project(r)
-    cuts = check_cut(r, state, {state['assets'][0]['id']: 1}, truths, 0.6)
-    kept = json.loads(r.s.call('window.__nuzky.api.transcriptView(500000).then(JSON.stringify)')['value'])['words']
+    cuts = check_cut(r, state, {asset: 1}, truths, 0.6)
+    ranges, _ = played(state, {asset: 1})
+    meant = [(text, round(heard(ranges[1], s, e) - (e - s), 3)) for _, role, text, s, e in truths
+             if role == 'keep' and 'jakoby' in words(text)]
+    r.check('the "jakoby" that means something still plays whole', meant and all(m > -0.002 for _, m in meant), meant)
+    kept = transcript_view(r)['words']
     shown = words(' '.join(c['content']['text'] for c in captions(state)))
     said = words(' '.join(w['text'] for w in kept))
     r.check('the captions say exactly the words still heard, in order', shown == said,
@@ -161,6 +296,7 @@ def first_reel(r):
     print(f'  export took {time.time() - started:.0f} s', flush=True)
 
     check_file(r, out, max(c['startUs'] + c['durationUs'] for t in state['tracks'] for c in t['clips']) / 1e6, cuts)
+    check_quiet_inside(r, out, state, asset, truths)
     frame = r.work / 'export-start.png'
     subprocess.run(['ffmpeg', '-v', 'error', '-y', '-ss', '0.5', '-i', str(out), '-frames:v', '1', '-update', '1', str(frame)], check=True)
     r.shots.append(frame.name)

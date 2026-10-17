@@ -12,6 +12,7 @@ MODEL = 'large-v3-turbo-q5_0'
 RATE = 48_000
 SPEECH_DB = -42  # Room tone sits near -64 dBFS, espeak speech well above -30.
 FILLER_GAP_S = 0.18  # espeak pauses about 0.2 s at a comma; inside the rest of a phrase at most 0.14 s.
+HESITATION_GAP_S = 0.07  # 90 ms of quiet around an "eee"; inside the halves around it at most 0.05 s.
 SAFE = (60, 250, 900, 1420)  # The Reels and TikTok safe area of a 1080x1920 frame: left, top, right, bottom.
 
 
@@ -50,8 +51,9 @@ def spans(samples, gap_s):
 
 def truth(files=None):
     """Every phrase where it really is in its take, measured in the sound: (take, role, text, start_s, end_s).
-    A sentence that starts with a filler becomes the filler and the rest, split at its first pause.
-    `files`: [(path, its phrases)], numbered as takes from 1; by default the three takes."""
+    A sentence that starts with a filler becomes the filler and the rest, split at its first pause. One with a
+    filler or a hesitation inside becomes the part before it, the filler or "eee" and the part after it, split
+    at its two pauses. `files`: [(path, its phrases)], numbered as takes from 1; by default the three takes."""
     found = []
     files = files or [(path, [p for p in phrases() if p[0] == n]) for n, path in enumerate(TAKES, 1)]
     for n, (path, mine) in enumerate(files, 1):
@@ -59,14 +61,25 @@ def truth(files=None):
         pieces = spans(samples, 0.5)  # Every pause of the takes is longer than half a second.
         assert len(pieces) == len(mine), f'take {n}: {len(pieces)} spoken phrases for {len(mine)} in the list'
         for (_, _, role, text), (start, end) in zip(mine, pieces):
-            if role != 'filler-lead':
+            if role in ('keep', 'retake'):
                 found.append((n, role, text, start, end))
-                continue
-            inner = spans(samples[int(start * RATE):int(end * RATE)], 0.01)
-            split = next(i for i in range(1, len(inner)) if inner[i][0] - inner[i - 1][1] >= FILLER_GAP_S)
-            filler, rest = text.split(', ', 1)
-            found.append((n, 'filler', filler, start, start + inner[split - 1][1]))
-            found.append((n, 'keep', rest, start + inner[split][0], end))
+            elif role == 'filler-lead':
+                inner = spans(samples[int(start * RATE):int(end * RATE)], 0.01)
+                split = next(i for i in range(1, len(inner)) if inner[i][0] - inner[i - 1][1] >= FILLER_GAP_S)
+                filler, rest = text.split(', ', 1)
+                found.append((n, 'filler', filler, start, start + inner[split - 1][1]))
+                found.append((n, 'keep', rest, start + inner[split][0], end))
+            else:
+                if role == 'hesitation':
+                    (before, after), middle, gap = text.split(' eee '), ('hesitation', 'eee'), HESITATION_GAP_S
+                else:
+                    before, filler, after = text.split(', ')
+                    middle, gap = ('filler', filler), FILLER_GAP_S
+                # Half a 10 ms frame less than the pause, so a pause of exactly that length still splits.
+                said = spans(samples[int(start * RATE):int(end * RATE)], gap - 0.005)
+                assert len(said) == 3, f'take {n}: "{text}" sounds in {len(said)} parts, not 3: {said}'
+                found += [(n, kind, part, start + a, start + b)
+                          for (kind, part), (a, b) in zip((('keep', before), middle, ('keep', after)), said)]
     return found
 
 
@@ -259,7 +272,11 @@ def check_cut(r, state, assets, truths, longest_pause):
     r.check('every kept phrase plays whole', all(missing > -0.002 for *_, missing in whole),
             [w for w in whole if w[2] <= -0.002])
     gone = [(t, role, text, round(heard(ranges[t], s, e), 3)) for t, role, text, s, e in truths if role != 'keep']
-    r.check('earlier attempts and fillers are cut', all(h <= 0.01 for *_, h in gone), [g for g in gone if g[3] > 0.01])
+    left = [g for g in gone if g[1] != 'hesitation' and g[3] > 0.01]
+    r.check('earlier attempts and fillers are cut', not left, left)
+    if any(g[1] == 'hesitation' for g in gone):
+        left = [g for g in gone if g[1] == 'hesitation' and g[3] > 0.01]
+        r.check('the "eee" between words is cut', not left, left)
     timeline = []
     for t, role, text, s, e in truths:
         if role == 'keep':
@@ -313,8 +330,10 @@ def check_words(r, out, transcript, truths):
     joined = ' '.join(heard_words)
     r.check('the export says "Dneska vám ukážu" and "Kamera musí stát" once each',
             joined.count('dneska vam ukazu') == 1 and joined.count('kamera musi stat') == 1, ' '.join(exported))
-    r.check('no filler is left', not {'ehm', 'jakoby', 'proste'} & set(heard_words), ' '.join(exported))
     kept = [w for t, role, text, s, e in truths if role == 'keep' for w in words(text)]
+    # A "jakoby" that means something is kept: none is heard more often than the kept sentences say it.
+    r.check('no filler is left', all(heard_words.count(w) <= kept.count(w) for w in ('ehm', 'jakoby', 'proste')),
+            ' '.join(exported))
     ratio = difflib.SequenceMatcher(None, heard_words, kept).ratio()
     r.check('recognition of the export matches the kept sentences', ratio >= 0.85,
             {'ratio': round(ratio, 3), 'heard': ' '.join(exported)})
