@@ -3,7 +3,7 @@ import { useShallow } from "zustand/react/shallow";
 import { api, errorText, plainError } from "./api";
 import { clipOffset, keyframeTolerance, transformAt, upsertKeyframe } from "./keyframes";
 import { US } from "./time";
-import type { Asset, Background, Clip, Delivery, EditCmd, Filmstrip, JobEvent, Project, ProjectVersion, Snapshot, SpeechModelQuestion, TextStyle, TimeRange, Track, Transform, Transition, ZoomsApplied } from "./types";
+import type { Asset, Background, Clip, CopiedClip, Delivery, EditCmd, Filmstrip, JobEvent, Project, ProjectVersion, Snapshot, SpeechModelQuestion, TextStyle, TimeRange, Track, Transform, Transition, ZoomsApplied } from "./types";
 import type { CaptionLook } from "./speech";
 
 export interface Toast {
@@ -31,6 +31,8 @@ interface EditorState {
   selection: string[];
   /** Clip whose incoming cut (transition) is selected; exclusive with `selection`. */
   cut: string | null;
+  /** Clips copied or cut in the open project, never the system's clipboard: their media belongs to the project. */
+  clipboard: CopiedClip[] | null;
   playing: boolean;
   timeUs: number;
   /** Timeline zoom in pixels per second. */
@@ -372,6 +374,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   previewUrl: "",
   selection: [],
   cut: null,
+  clipboard: null,
   playing: false,
   timeUs: 0,
   zoom: 60,
@@ -426,7 +429,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       aiRun: snap.openRunLabel,
       // A copied project can reuse asset ids for other files, so media previews start over.
       // An agent's jobs end with their project, whose last events never arrive.
-      ...(switched ? { thumbs: {}, filmstrips: {}, waveforms: {}, jobs: Object.fromEntries(Object.entries(get().jobs).filter(([, j]) => j.kind !== "agent")) } : {}),
+      ...(switched ? { clipboard: null, thumbs: {}, filmstrips: {}, waveforms: {}, jobs: Object.fromEntries(Object.entries(get().jobs).filter(([, j]) => j.kind !== "agent")) } : {}),
       ...(rebound.length > 0 ? { thumbs: without(get().thumbs), filmstrips: without(get().filmstrips), waveforms: without(get().waveforms) } : {}),
     });
     if (switched) waveformUse.clear();
@@ -740,6 +743,103 @@ export async function duplicateSelection() {
   if (selection.length === 0) return;
   // One batch: one undo step, and the snapshot selects every copy.
   await edit(selection.map((id): EditCmd => ({ type: "duplicateClip", clipId: id })));
+}
+
+/** The clips in `ids` as copied, with their tracks, earliest first. */
+function copiesOf(project: Project, ids: string[]): CopiedClip[] {
+  return project.tracks
+    .flatMap((t) => t.clips.filter((c) => ids.includes(c.id)).map((clip) => ({ clip, trackId: t.id, trackKind: t.kind, keepInPlace: t.keepInPlace })))
+    .sort((a, b) => a.clip.startUs - b.clip.startUs);
+}
+
+const clipCount = (n: number) => (n === 1 ? "1 clip" : `${n} clips`);
+
+/** Fills the clipboard and says so, replacing what an earlier copy said. */
+function keep(clips: CopiedClip[], verb: "copied" | "cut", action?: NonNullable<Toast["action"]>) {
+  const { toasts, toast } = useEditor.getState();
+  useEditor.setState({ clipboard: clips, toasts: toasts.filter((t) => !/^(Clip|\d+ clips) copied$/.test(t.text)) });
+  toast({ kind: "info", text: clips.length === 1 ? `Clip ${verb}` : `${clips.length} clips ${verb}`, action });
+}
+
+/**
+ * Copies the selected clips as they are once the edits queued before are done; pastes queued after it get
+ * them. Copying changes nothing, so it works while the AI edits.
+ */
+export function copySelection() {
+  const ids = useEditor.getState().selection;
+  if (ids.length === 0) return;
+  void enqueue(async () => {
+    const snap = useEditor.getState().snap;
+    const clips = snap ? copiesOf(snap.project, ids) : [];
+    if (clips.length > 0) keep(clips, "copied");
+    return null;
+  });
+}
+
+/** Copies the selected clips and deletes them as one undo step; a toast offers Undo. */
+export async function cutSelection() {
+  const { selection, edit } = useEditor.getState();
+  if (selection.length === 0) return;
+  let clips: CopiedClip[] = [];
+  const snap = await edit((project) => {
+    clips = copiesOf(project, selection);
+    // Filled at its turn in the queue, so a paste pressed right after gets these clips.
+    if (clips.length > 0) useEditor.setState({ clipboard: clips });
+    return clips.length > 0 ? { type: "deleteClips", clipIds: clips.map((c) => c.clip.id) } : null;
+  });
+  if (!snap) return;
+  useEditor.getState().select(useEditor.getState().selection.filter((id) => !selection.includes(id)));
+  keep(clips, "cut", undoAction(snap));
+}
+
+export const NOTHING_COPIED = "Nothing to paste. Copy clips with Ctrl+C first.";
+
+/** Pastes the copied clips at the playhead as one undo step; the pasted clips are selected. */
+export async function pasteClips() {
+  const { timeUs, edit, toast } = useEditor.getState();
+  await edit(() => {
+    const clips = useEditor.getState().clipboard;
+    if (!clips) toast({ kind: "info", text: NOTHING_COPIED });
+    return clips && { type: "pasteClips", clips, atUs: Math.round(timeUs) };
+  });
+}
+
+/** Each selected clip with the copied clip it takes its attributes from: the earliest copied clip of its kind. */
+export function attributeTargets(project: Project, selection: string[], clipboard: CopiedClip[] | null): { source: CopiedClip; clipIds: string[] }[] {
+  const groups = new Map<string, { source: CopiedClip; clipIds: string[] }>();
+  for (const id of selection) {
+    const kind = findClip(project, id)?.track.kind;
+    const source = clipboard?.find((c) => c.trackKind === kind);
+    if (!kind || !source) continue;
+    groups.set(kind, { source, clipIds: [...(groups.get(kind)?.clipIds ?? []), id] });
+  }
+  return [...groups.values()];
+}
+
+/** Why the copied attributes cannot go on the selection, or null when they can. */
+export function pasteAttributesBlocker(project: Project, selection: string[], clipboard: CopiedClip[] | null): string | null {
+  if (!clipboard) return NOTHING_COPIED;
+  if (attributeTargets(project, selection, clipboard).length > 0) return null;
+  const names = { text: "a text clip", video: "a video or image clip", audio: "an audio clip" };
+  return `Select ${[...new Set(clipboard.map((c) => names[c.trackKind]))].join(" or ")} to paste the copied attributes onto.`;
+}
+
+/** Gives the selected clips the attributes of the copied clip of their kind, as one undo step; a toast offers Undo. */
+export async function pasteAttributes() {
+  const { selection, edit, toast } = useEditor.getState();
+  let pasted = 0;
+  const done = await edit((project) => {
+    const { clipboard } = useEditor.getState();
+    const blocker = pasteAttributesBlocker(project, selection, clipboard);
+    if (blocker) toast({ kind: "info", text: blocker });
+    const groups = blocker ? [] : attributeTargets(project, selection, clipboard);
+    pasted = groups.reduce((n, g) => n + g.clipIds.length, 0);
+    return groups.map(({ source, clipIds }): EditCmd => ({ type: "pasteAttributes", source, clipIds }));
+  });
+  if (!done) return;
+  const left = selection.length - pasted;
+  const rest = left > 0 ? `; ${clipCount(left)} of another kind left as ${left === 1 ? "it was" : "they were"}` : "";
+  toast({ kind: "info", text: `Attributes pasted to ${clipCount(pasted)}${rest}`, action: undoAction(done) });
 }
 
 /**

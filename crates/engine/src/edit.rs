@@ -201,6 +201,23 @@ pub enum EditCmd {
     DuplicateClip {
         clip_id: String,
     },
+    /// Pastes copied clips with new ids, keeping their offsets to each other. The clips of each track go back on
+    /// it when they all fit there, else on a new track right above it, as when dragging. Clips from the main track
+    /// go in back to back at its cut nearest `at_us` and the others keep their offset to them; without them the
+    /// earliest clip starts at `at_us`. The pasted clips are selected.
+    PasteClips {
+        clips: Vec<CopiedClip>,
+        at_us: i64,
+    },
+    /// Gives clips of the source's kind its look. Text: style, font, transform, keyframes and animations, never
+    /// the text; a caption keeps its wrap width. Video and images: Adjust, background, crop and shape, motion
+    /// (keyframes, moving each clip from its own framing) and animations. Sound: volume, fades, Voice and
+    /// ducking. Keyframes stretch to each clip's length, and what the source lacks the clips lose. Clips of
+    /// another kind are left alone and listed in the outcome's `skipped`.
+    PasteAttributes {
+        source: CopiedClip,
+        clip_ids: Vec<String>,
+    },
     /// Moves a video clip's sound to an audio track and silences the video clip.
     DetachAudio {
         clip_id: String,
@@ -294,6 +311,20 @@ pub enum EditCmd {
     UpdateReelCandidate {
         candidate: ReelCandidate,
     },
+}
+
+/// A clip as it was copied, with the track it was on, which may be gone by the time it is pasted.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CopiedClip {
+    pub clip: Clip,
+    pub track_id: String,
+    /// Sound detached from a video is a video asset on an audio track, so the kind comes from the track.
+    pub track_kind: TrackKind,
+    #[serde(default)]
+    pub keep_in_place: bool,
 }
 
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -674,6 +705,8 @@ impl Project {
             EditCmd::AddCaptions { .. } | EditCmd::ReplaceCaptions { .. } | EditCmd::RippleDeleteRanges { .. } => {
                 self.apply_captions(cmd, &mut out)?
             }
+            EditCmd::PasteClips { clips, at_us } => self.paste_clips(clips, at_us, &mut out)?,
+            EditCmd::PasteAttributes { source, clip_ids } => self.paste_attributes(source, clip_ids, &mut out)?,
             EditCmd::CorrectWords { corrections } => self.correct_words(corrections)?,
             EditCmd::ZoomRanges { ranges } => self.zoom_ranges(ranges, &mut out)?,
             EditCmd::ApplyMotion { clip_id, range, kind, strength } => {
@@ -1450,6 +1483,190 @@ impl Project {
             clip.keyframes = vec![at(start, from), at(end, to)];
         }
         Ok(())
+    }
+
+    fn paste_clips(&mut self, clips: Vec<CopiedClip>, at_us: i64, out: &mut EditOutcome) -> Result<()> {
+        ensure!(!clips.is_empty(), "Copy clips first");
+        for copied in &clips {
+            let kind_fits = match &copied.clip.content {
+                ClipContent::Text { .. } => copied.track_kind == TrackKind::Text,
+                ClipContent::Media { asset_id, background, .. } => {
+                    let gone = |id: &str| self.asset(id).is_none();
+                    ensure!(
+                        !gone(asset_id) && !matches!(background, Background::Image { asset_id } if gone(asset_id)),
+                        "The copied media is no longer in the project"
+                    );
+                    copied.track_kind != TrackKind::Text
+                }
+            };
+            ensure!(kind_fits, "A copied clip names a track of another kind");
+        }
+        let at = at_us.max(0);
+        let (mut main, rest): (Vec<_>, Vec<_>) =
+            clips.into_iter().partition(|c| c.track_id == MAIN_TRACK && c.track_kind == TrackKind::Video);
+        main.sort_by_key(|c| c.clip.start_us);
+        let earliest = rest.iter().map(|c| c.clip.start_us).min().unwrap_or(0);
+        let mut offset = at - earliest;
+        if let Some(first) = main.first().map(|c| c.clip.start_us) {
+            let length: i64 = main.iter().map(|c| c.clip.duration_us).sum();
+            let track = &mut self.tracks[0];
+            // The cut nearest `at`, as when dragging: before the first clip whose middle is past it.
+            let cut = track
+                .clips
+                .iter()
+                .find(|c| c.start_us + c.duration_us / 2 > at)
+                .map_or_else(|| track.clips.iter().map(Clip::end_us).max().unwrap_or(0), |c| c.start_us);
+            for c in track.clips.iter_mut().filter(|c| c.start_us >= cut) {
+                c.start_us += length;
+            }
+            let (mut t, mut previous_end) = (cut, None);
+            for copied in main {
+                let mut clip = copied.clip;
+                // A transition stays only between clips that were next to each other.
+                if previous_end != Some(clip.start_us) {
+                    clip.transition_in = None;
+                }
+                previous_end = Some(clip.end_us());
+                clip.id = new_id();
+                clip.start_us = t;
+                t += clip.duration_us;
+                out.select.push(clip.id.clone());
+                track.clips.push(clip);
+            }
+            offset = cut - first;
+        }
+        // A clip copied from before the main-track clips never lands before the start.
+        let offset = offset.max(-earliest);
+        let mut groups: Vec<(String, TrackKind, bool, Vec<Clip>)> = Vec::new();
+        for copied in rest {
+            let clip =
+                Clip { id: new_id(), start_us: copied.clip.start_us + offset, transition_in: None, ..copied.clip };
+            match groups.iter_mut().find(|g| g.0 == copied.track_id) {
+                Some(group) => group.3.push(clip),
+                None => groups.push((copied.track_id, copied.track_kind, copied.keep_in_place, vec![clip])),
+            }
+        }
+        for (track_id, kind, keep, clips) in groups {
+            let start = clips.iter().map(|c| c.start_us).min().unwrap_or(0);
+            let end = clips.iter().map(Clip::end_us).max().unwrap_or(0);
+            let target = match self.track_index(&track_id).filter(|&i| i != 0 && self.tracks[i].kind == kind) {
+                Some(i) if clips.iter().all(|c| self.is_free(i, c.start_us, c.end_us(), None)) => i,
+                Some(i) => self.insert_track(i + 1, kind, keep),
+                None => self.free_track(kind, start, end, keep),
+            };
+            out.select.extend(clips.iter().map(|c| c.id.clone()));
+            self.tracks[target].clips.extend(clips);
+        }
+        Ok(())
+    }
+
+    fn paste_attributes(&mut self, source: CopiedClip, clip_ids: Vec<String>, out: &mut EditOutcome) -> Result<()> {
+        let min = min_duration(self);
+        let from = source.clip;
+        let mut pasted = 0;
+        for id in clip_ids {
+            let (ti, ci) = self.find_clip(&id).ok_or_else(|| anyhow!("Unknown clip"))?;
+            let track = &self.tracks[ti];
+            let (kind, caption) = (track.kind, track.is_captions());
+            let sound = match &track.clips[ci].content {
+                ClipContent::Media { asset_id, .. } => self.asset(asset_id).is_some_and(crate::audio::has_audio),
+                ClipContent::Text { .. } => false,
+            };
+            let clip = &mut self.tracks[ti].clips[ci];
+            let span = clip.duration_us;
+            let stretch = |t_us: i64| (t_us as f64 * span as f64 / from.duration_us.max(1) as f64).round() as i64;
+            match (&from.content, &mut clip.content) {
+                _ if kind != source.track_kind => {
+                    out.skipped.push(id);
+                    continue;
+                }
+                (ClipContent::Text { style, transform, .. }, ClipContent::Text { style: s, transform: t, .. }) => {
+                    let max_width = if caption { s.max_width } else { style.max_width };
+                    *s = TextStyle { max_width, ..style.clone() };
+                    *t = *transform;
+                    clip.keyframes = from.keyframes.iter().map(|k| Keyframe { t_us: stretch(k.t_us), ..*k }).collect();
+                }
+                (
+                    ClipContent::Media { adjust, background, shape, transform, .. },
+                    ClipContent::Media { adjust: a, background: b, shape: sh, transform: t, .. },
+                ) if kind == TrackKind::Video => {
+                    *a = *adjust;
+                    *b = background.clone();
+                    *sh = shape.clone();
+                    t.crop = transform.crop;
+                    let t = &*t;
+                    clip.keyframes = from
+                        .keyframes
+                        .iter()
+                        .map(|k| Keyframe {
+                            t_us: stretch(k.t_us),
+                            transform: follow(transform, &k.transform, t),
+                            ..*k
+                        })
+                        .collect();
+                }
+                (
+                    ClipContent::Media {
+                        volume,
+                        fade_in_us,
+                        fade_out_us,
+                        clean_voice,
+                        dereverb,
+                        normalize,
+                        leveler,
+                        duck_db,
+                        ..
+                    },
+                    ClipContent::Media {
+                        volume: v,
+                        fade_in_us: fi,
+                        fade_out_us: fo,
+                        clean_voice: cv,
+                        dereverb: dr,
+                        normalize: n,
+                        leveler: l,
+                        duck_db: d,
+                        ..
+                    },
+                ) if kind == TrackKind::Audio => {
+                    *v = *volume;
+                    *fi = (*fade_in_us).clamp(0, span / 2);
+                    *fo = (*fade_out_us).clamp(0, span / 2);
+                    *d = *duck_db;
+                    if sound {
+                        (*cv, *dr, *n, *l) = (*clean_voice, *dereverb, *normalize, *leveler);
+                    }
+                    pasted += 1;
+                    continue;
+                }
+                _ => {
+                    out.skipped.push(id);
+                    continue;
+                }
+            }
+            let fit = |a: Option<Animation>| a.map(|a| Animation { duration_us: a.duration_us.clamp(min, span), ..a });
+            clip.anim_in = fit(from.anim_in);
+            clip.anim_out = fit(from.anim_out);
+            clip.keyframes.dedup_by_key(|k| k.t_us);
+            pasted += 1;
+        }
+        ensure!(pasted > 0, "None of these clips is of the copied clip's kind");
+        Ok(())
+    }
+}
+
+/// Where `key` takes a clip framed as `to` when it takes one framed as `base` there: zoomed as much about the same
+/// canvas point, so a motion keeps zooming into what it zoomed into; shifted, turned and faded as much; with the
+/// key's crop.
+fn follow(base: &Transform, key: &Transform, to: &Transform) -> Transform {
+    let zoom = if base.scale > 0.0 { key.scale / base.scale } else { 1.0 };
+    Transform {
+        x: to.x + key.x - base.x + (zoom - 1.0) * (to.x - base.x),
+        y: to.y + key.y - base.y + (zoom - 1.0) * (to.y - base.y),
+        scale: to.scale * zoom,
+        rotation: to.rotation + key.rotation - base.rotation,
+        opacity: (to.opacity + key.opacity - base.opacity).clamp(0.0, 1.0),
+        crop: key.crop,
     }
 }
 
@@ -3480,5 +3697,150 @@ mod tests {
         let difference = before.iter().zip(&after).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
         assert!(before.iter().any(|s| s.abs() > 0.1), "the mix is silent");
         assert!(difference < 1e-6, "zooming changed the sound by {difference}");
+    }
+
+    fn copied(p: &Project, id: &str) -> CopiedClip {
+        let (ti, ci) = p.find_clip(id).unwrap();
+        let t = &p.tracks[ti];
+        CopiedClip {
+            clip: t.clips[ci].clone(),
+            track_id: t.id.clone(),
+            track_kind: t.kind,
+            keep_in_place: t.keep_in_place,
+        }
+    }
+
+    #[test]
+    fn paste_keeps_offsets_and_tracks_and_puts_main_clips_in_at_the_nearest_cut() {
+        let mut p = project();
+        let a = p.apply(EditCmd::AddClip { asset_id: "a".into(), start_us: None, track_id: None }).unwrap().select[0]
+            .clone();
+        let b = p.apply(EditCmd::AddClip { asset_id: "b".into(), start_us: None, track_id: None }).unwrap().select[0]
+            .clone();
+        let dissolve = Transition { kind: crate::model::TransitionKind::Dissolve, duration_us: 500_000 };
+        p.apply(EditCmd::SetTransition { clip_id: b.clone(), transition: Some(dissolve) }).unwrap();
+        let style: TextStyle =
+            serde_json::from_value(serde_json::json!({"fontSize": 60.0, "color": "#ffffff"})).unwrap();
+        let title =
+            p.apply(EditCmd::AddText { start_us: 1_000_000, text: "Hook".into(), style }).unwrap().select[0].clone();
+        let text_track = p.tracks[1].id.clone();
+
+        // The take and its title, pasted at 6.4 s: the take goes in at the cut at 5 s and the title keeps its 1 s from it.
+        let clips = vec![copied(&p, &a), copied(&p, &title)];
+        let out = p.apply(EditCmd::PasteClips { clips: clips.clone(), at_us: 6_400_000 }).unwrap();
+        assert_eq!(main_layout(&p), vec![(0, 5000), (5000, 5000), (10000, 3000)]);
+        assert_eq!(p.tracks[0].clips[2].id, b);
+        assert!(p.tracks[0].clips[1].transition_in.is_none());
+        assert_eq!(p.tracks[1].id, text_track);
+        assert_eq!(p.tracks[1].clips.iter().map(|c| c.start_us).collect::<Vec<_>>(), [1_000_000, 6_000_000]);
+        assert_eq!(out.select, [p.tracks[0].clips[1].id.clone(), p.tracks[1].clips[1].id.clone()]);
+
+        // Pasted there again, the title's track is taken: it goes on a new text track right above.
+        p.apply(EditCmd::PasteClips { clips: clips[1..].to_vec(), at_us: 6_000_000 }).unwrap();
+        assert_eq!((p.tracks[2].kind, p.tracks[2].clips[0].start_us), (TrackKind::Text, 6_000_000));
+
+        // Clips that were next to each other keep the transition between them; the block's first one has none.
+        let ab = vec![copied(&p, &a), copied(&p, &p.tracks[0].clips[1].id.clone())];
+        p.apply(EditCmd::PasteClips { clips: ab, at_us: i64::MAX / 4 }).unwrap();
+        let last = &p.tracks[0].clips[3..];
+        assert!(last[0].transition_in.is_none() && last[1].transition_in.is_none());
+        let ab = vec![copied(&p, &p.tracks[0].clips[1].id.clone()), copied(&p, &b)];
+        p.apply(EditCmd::PasteClips { clips: ab, at_us: 0 }).unwrap();
+        assert_eq!(main_layout(&p)[..2], [(0, 5000), (5000, 3000)]);
+        assert_eq!(p.tracks[0].clips[1].transition_in, Some(dissolve));
+
+        // A cut emptied the title's track, so the paste makes a new one; a removed file pastes nothing.
+        let only = copied(&p, &p.tracks[2].clips[0].id.clone());
+        p.apply(EditCmd::DeleteClips { clip_ids: vec![only.clip.id.clone()] }).unwrap();
+        let tracks = p.tracks.len();
+        p.apply(EditCmd::PasteClips { clips: vec![only], at_us: 6_000_000 }).unwrap();
+        assert_eq!(p.tracks.len(), tracks + 1);
+        let before = p.clone();
+        p.apply(EditCmd::RemoveAsset { asset_id: "b".into() }).unwrap();
+        let gone = before.tracks[0].clips.iter().find(|c| c.id == b).unwrap().id.clone();
+        assert!(p.apply(EditCmd::PasteClips { clips: vec![copied(&before, &gone)], at_us: 0 }).is_err());
+    }
+
+    #[test]
+    fn paste_attributes_carries_the_look_of_its_kind_and_moves_each_clip_from_its_own_framing() {
+        let mut p = project();
+        p.assets.push(asset("still", AssetKind::Image, 0));
+        let source = p.apply(EditCmd::AddClip { asset_id: "a".into(), start_us: None, track_id: None }).unwrap().select
+            [0]
+        .clone();
+        let target = p
+            .apply(EditCmd::AddPictureInPicture { asset_id: "still".into(), start_us: 0, duration_us: Some(3_000_000) })
+            .unwrap()
+            .select[0]
+            .clone();
+        let crop = crate::model::Crop { left: 0.1, ..crate::model::Crop::default() };
+        let adjust = Adjust { contrast: 0.4, ..Adjust::default() };
+        let round = Shape { radius: 0.3, ..Shape::default() };
+        let look = serde_json::json!({
+            "transform": Transform { crop: Some(crop), ..Transform::default() },
+            "adjust": adjust,
+            "shape": round,
+            "background": Background::Blur { strength: 0.5 },
+        });
+        p.apply(changes(&source, look)).unwrap();
+        let motion = |id: &str| EditCmd::ApplyMotion {
+            clip_id: Some(id.into()),
+            range: None,
+            kind: MotionKind::PushIn,
+            strength: 0.1,
+        };
+        p.apply(motion(&source)).unwrap();
+        let fade = Animation { kind: crate::model::AnimationKind::Fade, duration_us: 4_000_000 };
+        p.apply(EditCmd::SetAnimation { clip_id: source.clone(), slot: AnimationSlot::In, animation: Some(fade) })
+            .unwrap();
+        let framing = |p: &Project| match &p.tracks[1].clips[0].content {
+            ClipContent::Media { transform, .. } => *transform,
+            ClipContent::Text { .. } => unreachable!(),
+        };
+        let own = framing(&p);
+
+        let out =
+            p.apply(EditCmd::PasteAttributes { source: copied(&p, &source), clip_ids: vec![target.clone()] }).unwrap();
+        assert!(out.skipped.is_empty());
+        let clip = &p.tracks[1].clips[0];
+        let ClipContent::Media { adjust: a, background, shape, transform, .. } = &clip.content else { panic!() };
+        assert_eq!((*a, background, shape), (adjust, &Background::Blur { strength: 0.5 }, &Some(round)));
+        // The window keeps its place and size, takes the crop, and zooms in over its own 3 s as the motion would.
+        assert_eq!(*transform, Transform { crop: Some(crop), ..own });
+        let mut expected = p.clone();
+        expected.tracks[1].clips[0].keyframes.clear();
+        expected.apply(motion(&target)).unwrap();
+        for (k, e) in clip.keyframes.iter().zip(&expected.tracks[1].clips[0].keyframes) {
+            assert_eq!((k.t_us, k.ease), (e.t_us, e.ease));
+            for (x, y) in
+                [(k.transform.x, e.transform.x), (k.transform.y, e.transform.y), (k.transform.scale, e.transform.scale)]
+            {
+                assert!((x - y).abs() < 1e-5, "{k:?} is not {e:?}");
+            }
+        }
+        assert_eq!(clip.keyframes.len(), 2);
+        assert_eq!(clip.anim_in, Some(Animation { duration_us: 3_000_000, ..fade }));
+
+        // Text takes the style and keeps its words; sound clips are another kind and stay as they were.
+        let style = |size: f32| {
+            serde_json::from_value::<TextStyle>(serde_json::json!({"fontSize": size, "color": "#ffcc00"})).unwrap()
+        };
+        let big = p.apply(EditCmd::AddText { start_us: 0, text: "Big".into(), style: style(120.0) }).unwrap().select[0]
+            .clone();
+        let small =
+            p.apply(EditCmd::AddText { start_us: 5_000_000, text: "small".into(), style: style(40.0) }).unwrap().select
+                [0]
+            .clone();
+        let music =
+            p.apply(EditCmd::AddClip { asset_id: "m".into(), start_us: Some(0), track_id: None }).unwrap().select[0]
+                .clone();
+        let out = p
+            .apply(EditCmd::PasteAttributes { source: copied(&p, &big), clip_ids: vec![small.clone(), music.clone()] })
+            .unwrap();
+        assert_eq!(out.skipped, std::slice::from_ref(&music));
+        let (ti, ci) = p.find_clip(&small).unwrap();
+        let ClipContent::Text { text, style: s, .. } = &p.tracks[ti].clips[ci].content else { panic!() };
+        assert_eq!((text.as_str(), s), ("small", &style(120.0)));
+        assert!(p.apply(EditCmd::PasteAttributes { source: copied(&p, &big), clip_ids: vec![music] }).is_err());
     }
 }

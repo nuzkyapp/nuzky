@@ -353,6 +353,19 @@ export type Collection = {
 };
 
 /**
+ * A clip as it was copied, with the track it was on, which may be gone by the time it is pasted.
+ */
+export type CopiedClip = {
+  clip: Clip,
+  trackId: string,
+  /**
+   * Sound detached from a video is a video asset on an audio track, so the kind comes from the track.
+   */
+  trackKind: TrackKind,
+  keepInPlace: boolean,
+};
+
+/**
  * One frame worth a cover, for the filmstrip of the cover editor.
  */
 export type CoverCandidate = {
@@ -581,6 +594,14 @@ export type EditCmd = {
 } | {
   "type": "duplicateClip",
   clipId: string,
+} | {
+  "type": "pasteClips",
+  clips: Array<CopiedClip>,
+  atUs: number,
+} | {
+  "type": "pasteAttributes",
+  source: CopiedClip,
+  clipIds: Array<string>,
 } | {
   "type": "detachAudio",
   clipId: string,

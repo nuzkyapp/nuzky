@@ -8,7 +8,7 @@ import { setLimits } from "./lib/limits";
 import { onReframeJob } from "./lib/reframe";
 import { canRetrySpeech, retrySpeech, useSpeech } from "./lib/speech";
 import { reportBug } from "./lib/diagnostics";
-import { currentEpoch, deleteSelection, deleteSide, duplicateSelection, openExport, projectDuration, runWasDiscarded, splitAtPlayhead, undoAction, useEditor } from "./lib/store";
+import { copySelection, currentEpoch, cutSelection, deleteSelection, deleteSide, duplicateSelection, openExport, pasteAttributes, pasteClips, projectDuration, runWasDiscarded, splitAtPlayhead, undoAction, useEditor } from "./lib/store";
 import { US, formatDuration } from "./lib/time";
 import type { JobEvent, ProjectSummary, Snapshot, SpeechModelQuestion, Transport } from "./lib/types";
 import { ChatGptDialog } from "./components/ChatGptDialog";
@@ -106,6 +106,10 @@ function useShortcuts() {
       if (isTyping(target) || document.querySelector("dialog[open], [aria-modal='true']")) return;
       const fps = s.snap?.project.canvas.fps ?? 30;
       const key = e.key.toLowerCase();
+      // Option+V types a character on macOS, so the key's place on the keyboard names it.
+      const clipboardKey = mod ? (e.altKey ? (e.code === "KeyV" ? "attributes" : null) : ({ c: "copy", x: "cut", v: "paste" } as const)[key]) : null;
+      // The transcript's words are not clips, and selected text, such as an error message, copies as text.
+      if (clipboardKey && (target?.closest("#library-panel-transcript") || (clipboardKey === "copy" && window.getSelection()?.toString()))) return;
       // A focused slider keeps its own arrow, Home and End keys.
       const onRange = target instanceof HTMLInputElement && target.type === "range";
       // In the cover editor the playhead is the cover's frame and nothing plays; the clip keys rest.
@@ -121,7 +125,7 @@ function useShortcuts() {
           void deleteText(cover.open, cover.selected);
           return;
         }
-        if (key === " " || (!mod && (key === "s" || key === "q" || key === "w")) || (mod && key === "d") || key === "delete" || key === "backspace") {
+        if (key === " " || (!mod && (key === "s" || key === "q" || key === "w")) || (mod && key === "d") || clipboardKey || key === "delete" || key === "backspace") {
           e.preventDefault();
           return;
         }
@@ -142,7 +146,7 @@ function useShortcuts() {
         return;
       }
       // Full screen hides the timeline; the keys that would change it unseen rest.
-      if (usePreview.getState().full && (key === "delete" || key === "backspace" || (!mod && (key === "s" || key === "q" || key === "w")) || (mod && (key === "d" || key === "i" || key === "y" || key === "z")))) {
+      if (usePreview.getState().full && (key === "delete" || key === "backspace" || (!mod && (key === "s" || key === "q" || key === "w")) || (mod && (key === "d" || key === "i" || key === "y" || key === "z")) || (clipboardKey && clipboardKey !== "copy"))) {
         e.preventDefault();
         return;
       }
@@ -168,6 +172,9 @@ function useShortcuts() {
         e.preventDefault();
         if (cover.open) void exportCover();
         else openExport();
+      } else if (clipboardKey) {
+        e.preventDefault();
+        void { copy: copySelection, cut: cutSelection, paste: pasteClips, attributes: pasteAttributes }[clipboardKey]();
       } else if (mod && key === "d") {
         e.preventDefault();
         duplicateSelection();

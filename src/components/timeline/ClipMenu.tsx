@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { Copy, ListChecks, Scissors, Trash2, Unlink } from "lucide-react";
-import { AI_EDITING, canSplitClip, deleteSelection, detachAudio, detachBlocker, duplicateSelection, findClip, selectTrack, splitAtPlayhead, useAiLocked, useEditor } from "../../lib/store";
+import { ClipboardCopy, ClipboardPaste, Copy, ListChecks, Paintbrush, Scissors, ScissorsLineDashed, Trash2, Unlink } from "lucide-react";
+import { AI_EDITING, NOTHING_COPIED, attributeTargets, canSplitClip, copySelection, cutSelection, deleteSelection, detachAudio, detachBlocker, duplicateSelection, findClip, pasteAttributes, pasteAttributesBlocker, pasteClips, selectTrack, splitAtPlayhead, useAiLocked, useEditor } from "../../lib/store";
 import type { Clip } from "../../lib/types";
 
 export interface MenuAt {
@@ -39,6 +39,7 @@ export function ClipMenu({ at, onClose }: { at: MenuAt; onClose: () => void }) {
   const found = findClip(project, at.clipId);
   const picked = selection.map((id) => findClip(project, id)?.clip).filter((c): c is Clip => !!c);
   const locked = useAiLocked();
+  const clipboard = useEditor((s) => s.clipboard);
   const splittable = useEditor((s) => picked.filter((c) => canSplitClip(c, s.timeUs, project.canvas.fps)).length);
 
   // Focus goes back where it was when the menu opened, unless an action moved it elsewhere.
@@ -87,6 +88,8 @@ export function ClipMenu({ at, onClose }: { at: MenuAt; onClose: () => void }) {
   const many = (one: string, verb: string) => (n === 1 ? one : `${verb} ${n} clips`);
   const detachable = picked.filter((c) => !detachBlocker(project, c));
   const detachReason = n === 1 ? detachBlocker(project, picked[0]) : "None of the selected clips has sound to detach";
+  const copies = clipboard?.length ?? 0;
+  const looks = attributeTargets(project, selection, clipboard).reduce((sum, g) => sum + g.clipIds.length, 0);
   const run = (fn: () => unknown) => () => {
     onClose();
     fn();
@@ -129,6 +132,25 @@ export function ClipMenu({ at, onClose }: { at: MenuAt; onClose: () => void }) {
         onSelect={run(() => detachAudio(detachable.map((c) => c.id)))}
       />
       <Item icon={<ListChecks size={14} />} label="Select all on track" onSelect={run(() => selectTrack(clip.id))} />
+      <div className="mx-2 my-1 h-px bg-white/[.08]" />
+      <Item icon={<ScissorsLineDashed size={14} />} label={many("Cut", "Cut")} shortcut="Ctrl+X" disabled={locked} reason={AI_EDITING} onSelect={run(cutSelection)} />
+      <Item icon={<ClipboardCopy size={14} />} label={many("Copy", "Copy")} shortcut="Ctrl+C" onSelect={run(copySelection)} />
+      <Item
+        icon={<ClipboardPaste size={14} />}
+        label={copies > 1 ? `Paste ${copies} clips at playhead` : "Paste at playhead"}
+        shortcut="Ctrl+V"
+        disabled={locked || copies === 0}
+        reason={locked ? AI_EDITING : NOTHING_COPIED}
+        onSelect={run(pasteClips)}
+      />
+      <Item
+        icon={<Paintbrush size={14} />}
+        label={looks > 1 ? `Paste attributes to ${looks} clips` : "Paste attributes"}
+        shortcut="Ctrl+Alt+V"
+        disabled={locked || looks === 0}
+        reason={locked ? AI_EDITING : pasteAttributesBlocker(project, selection, clipboard)}
+        onSelect={run(pasteAttributes)}
+      />
       <div className="mx-2 my-1 h-px bg-white/[.08]" />
       <Item icon={<Trash2 size={14} />} label={many("Delete", "Delete")} shortcut="Del" disabled={locked} reason={AI_EDITING} onSelect={run(deleteSelection)} />
     </div>

@@ -610,6 +610,40 @@ fn picture_in_picture_over_a_phrase_with_crop_and_shape_over_stdio() {
     assert_eq!((&content["shape"], &content["transform"]["crop"]["left"]), (&round, &json!(0.25)), "{content}");
 }
 
+/// The guide's repeat: a hook title read from get_state is pasted 20 s later on its track and another title takes
+/// its look but keeps its words; the retry pastes nothing twice and undoing the run takes all of it back.
+#[test]
+fn an_agent_pastes_a_hook_later_and_its_look_onto_another_title_over_stdio() {
+    let mut c = Client::new(true);
+    let run = c.call("begin_run", json!({"label":"repeat the hook"}));
+    let titles = json!([
+        {"type":"addText","startUs":0,"text":"Hook","style":{"fontSize":120.0,"color":"#ffcc00","bold":true}},
+        {"type":"addText","startUs":5_000_000,"text":"Later","style":{"fontSize":40.0,"color":"#ffffff"}}]);
+    c.call("apply_edits", json!({"run_id":run["run_id"],"request_id":"titles","edits":titles}));
+    let track = c.call("get_state", json!({}))["tracks"][1].clone();
+    let (hook, later) = (&track["clips"][0], &track["clips"][1]);
+    let copied =
+        json!({"clip":hook,"trackId":track["id"],"trackKind":track["kind"],"keepInPlace":track["keepInPlace"]});
+    let paste = json!({"run_id":run["run_id"],"request_id":"repeat","edits":[
+        {"type":"pasteClips","clips":[copied],"atUs":20_000_000},
+        {"type":"pasteAttributes","source":copied,"clipIds":[later["id"]]}]});
+    assert_eq!(c.call("apply_edits", paste.clone()), c.call("apply_edits", paste));
+    let tracks = c.call("get_state", json!({}))["tracks"].clone();
+    let clips = tracks[1]["clips"].as_array().unwrap();
+    assert_eq!(tracks.as_array().unwrap().len(), 2);
+    assert_eq!(clips.len(), 3);
+    assert_eq!((&clips[2]["startUs"], &clips[2]["content"]["text"]), (&json!(20_000_000), &json!("Hook")));
+    assert_ne!(clips[2]["id"], hook["id"]);
+    assert_eq!(
+        (&clips[1]["content"]["text"], &clips[1]["content"]["style"]),
+        (&json!("Later"), &hook["content"]["style"])
+    );
+    c.call("end_run", json!({"run_id":run["run_id"],"action":"keep"}));
+    c.call("undo_run", json!({"run_id":run["run_id"]}));
+    assert_eq!(c.call("get_state", json!({}))["tracks"].as_array().unwrap().len(), 1);
+    c.finish();
+}
+
 /// Headless, without the app: runs are versions that outlive the agent, a read-only agent lists them,
 /// and undo_to brings one back as one step, which undo_to the version before takes back.
 #[test]

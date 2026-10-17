@@ -201,6 +201,8 @@ pub(crate) fn label(cmds: &[EditCmd]) -> &'static str {
         EditCmd::SetTransition { .. } => "Transition",
         EditCmd::SetKeyframes { .. } => "Keyframes",
         EditCmd::DuplicateClip { .. } => "Duplicate",
+        EditCmd::PasteClips { .. } => "Paste",
+        EditCmd::PasteAttributes { .. } => "Paste attributes",
         EditCmd::DetachAudio { .. } => "Detach audio",
         EditCmd::UpdateTrack { .. } => "Change track",
         EditCmd::SetCanvas { .. } => "Change format",
