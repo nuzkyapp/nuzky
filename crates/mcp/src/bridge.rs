@@ -53,6 +53,10 @@ fn answer(result: Result<Result<CallToolResult>, tokio::task::JoinError>) -> Cal
 /// Set by the AI panel for its bridge: the conversation the app began, which owns the jobs its turns start.
 pub const CONVERSATION_VAR: &str = "NUZKY_CONVERSATION";
 
+/// Set by the app's check that an agent's own `--current` command reaches it: the server first hands
+/// the app this nonce, and without an app to take it, fails, so the agent's health check fails too.
+pub const VERIFY_VAR: &str = "NUZKY_VERIFY";
+
 /// Why `--current` found nothing to attach to.
 #[cfg(unix)]
 const NOT_OPEN: &str = "APP_NOT_RUNNING: no project is open in Nuzky. Ask the user to open one, then call again";
@@ -173,7 +177,13 @@ pub fn run_args(args: &[String], mut cache: PathBuf) -> Result<()> {
         (Some(_), true) => bail!("INVALID_ARGUMENTS: use --project <path> or --current, not both"),
         (Some(project), false) => run(&project, allow_write, cache),
         #[cfg(unix)]
-        (None, true) => serve(Target::Current(Arc::new(Current { allow_write, remote: Mutex::default() }))),
+        (None, true) => {
+            if let Some(nonce) = std::env::var_os(VERIFY_VAR) {
+                let project = crate::ipc::current_project()?.context(NOT_OPEN)?;
+                anyhow::ensure!(crate::ipc::verify(&project, &nonce.to_string_lossy())?, NOT_OPEN);
+            }
+            serve(Target::Current(Arc::new(Current { allow_write, remote: Mutex::default() })))
+        }
         #[cfg(not(unix))]
         (None, true) => bail!("UNSUPPORTED: --current needs the app's local socket, not available here yet"),
         (None, false) => bail!("INVALID_ARGUMENTS: mcp requires --project <path> or --current"),

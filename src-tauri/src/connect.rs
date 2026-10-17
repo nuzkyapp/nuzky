@@ -197,8 +197,13 @@ fn tilde(path: &str, home: &Path) -> String {
     }
 }
 
+/// Where the app's socket lives on Linux. Codex hands a server only a few variables, so its entry
+/// passes this one on; without it the server looks for Nuzky in another folder.
+const RUNTIME_DIR: &str = "XDG_RUNTIME_DIR";
+
 pub fn status(agent: Agent, path: &Path, command: &Command) -> Connection {
-    let (state, problem) = match read(path).and_then(|text| entry(agent, text.as_deref())) {
+    let runtime_dir = std::env::var_os(RUNTIME_DIR).is_some_and(|v| !v.is_empty());
+    let (state, problem) = match read(path).and_then(|text| entry(agent, text.as_deref(), runtime_dir)) {
         Ok(None) => (State::Missing, None),
         Ok(Some(found)) if &found == command => (State::Connected, None),
         Ok(Some(_)) => (State::Other, None),
@@ -289,7 +294,8 @@ fn replace(path: &Path, bytes: &[u8]) -> Result<()> {
     result.with_context(|| format!("Writing {}", path.display()))
 }
 
-fn entry(agent: Agent, text: Option<&str>) -> Result<Option<Command>> {
+/// `runtime_dir`: this app's socket is under XDG_RUNTIME_DIR, so a Codex entry that does not pass it on runs nothing that reaches it.
+fn entry(agent: Agent, text: Option<&str>, runtime_dir: bool) -> Result<Option<Command>> {
     let Some(text) = text.filter(|t| !t.trim().is_empty()) else { return Ok(None) };
     let found = match agent {
         Agent::ClaudeCode => {
@@ -304,9 +310,13 @@ fn entry(agent: Agent, text: Option<&str>) -> Result<Option<Command>> {
             let config: toml_edit::DocumentMut = text.parse().context("Not valid TOML")?;
             config.get("mcp_servers").and_then(|s| s.get(NAME)).map(|e| {
                 let value = |key| e.get(key).and_then(|i| i.as_value()).map(toml_to_json);
+                let passes_runtime_dir = value("env_vars")
+                    .and_then(|v| v.as_array().map(|vars| vars.iter().any(|v| v == RUNTIME_DIR)))
+                    .unwrap_or(false);
                 // Codex does not start a server turned off, so that entry runs nothing.
                 match e.get("enabled").and_then(|i| i.as_bool()) {
                     Some(false) => (None, None),
+                    _ if runtime_dir && !passes_runtime_dir => (None, None),
                     _ => (value("command"), value("args")),
                 }
             })
@@ -407,6 +417,7 @@ fn with_codex_entry(text: Option<&str>, command: &Command) -> Result<String> {
     let mut ours = toml_edit::Table::new();
     ours.insert("command", toml_edit::value(command.program.as_str()));
     ours.insert("args", toml_edit::value(command.args.iter().map(String::as_str).collect::<toml_edit::Array>()));
+    ours.insert("env_vars", toml_edit::value(toml_edit::Array::from_iter([RUNTIME_DIR])));
     servers.insert(NAME, toml_edit::Item::Table(ours));
     Ok(config.to_string())
 }
@@ -465,7 +476,7 @@ mod tests {
         assert_eq!((done.state, done.backup.is_some()), (State::Connected, true));
         let text = std::fs::read_to_string(&path).unwrap();
         // Without the new table the file is exactly what it was, comments included.
-        let ours = "[mcp_servers.nuzky]\ncommand = \"/opt/Nuzky/nuzky-app\"\nargs = [\"mcp\", \"--current\", \"--allow-write\"]\n\n";
+        let ours = "[mcp_servers.nuzky]\ncommand = \"/opt/Nuzky/nuzky-app\"\nargs = [\"mcp\", \"--current\", \"--allow-write\"]\nenv_vars = [\"XDG_RUNTIME_DIR\"]\n\n";
         assert!(text.contains(ours), "{text}");
         assert_eq!(text.replace(ours, ""), CODEX);
         // Another Nuzky entry is replaced, after a new backup.
@@ -481,6 +492,15 @@ mod tests {
         assert_eq!(connect(Agent::Codex, &path, &moved, 5).unwrap().state, State::Connected);
         assert!(!std::fs::read_to_string(&path).unwrap().contains("enabled"));
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_codex_entry_that_does_not_pass_on_the_runtime_dir_runs_nothing_where_the_socket_is_under_it() {
+        let old = "[mcp_servers.nuzky]\ncommand = \"/opt/Nuzky/nuzky-app\"\nargs = [\"mcp\", \"--current\", \"--allow-write\"]\n";
+        assert_eq!(entry(Agent::Codex, Some(old), false).unwrap(), Some(command()));
+        assert_ne!(entry(Agent::Codex, Some(old), true).unwrap(), Some(command()));
+        let new = with_codex_entry(Some(old), &command()).unwrap();
+        assert_eq!(entry(Agent::Codex, Some(&new), true).unwrap(), Some(command()));
     }
 
     #[cfg(unix)]

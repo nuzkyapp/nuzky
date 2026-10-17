@@ -256,3 +256,14 @@ fn token_is_ready_before_the_socket_and_a_failed_bind_leaves_neither() {
     drop(listener);
     assert!(!f.socket.exists() && !f.socket.with_extension("token").exists());
 }
+
+#[test]
+fn a_verify_hello_reaches_the_app_with_agent_access_off_and_is_answered_once() {
+    let f = Fixture::new();
+    assert!(handshake(&f.socket, Access::ReadOnly, false, Some("before".into())).unwrap().is_none());
+    let _listener = Listener::at(f.host.clone(), f.socket.clone(), Arc::new(AtomicBool::new(false))).unwrap();
+    assert!(!verified("nonce"));
+    assert!(handshake(&f.socket, Access::ReadOnly, false, Some("nonce".into())).unwrap().is_some());
+    assert!(verified("nonce"));
+    assert!(!verified("nonce") && !verified("before"));
+}

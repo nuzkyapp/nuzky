@@ -118,6 +118,18 @@ struct Hello {
     /// The AI panel's conversation, which owns the jobs this connection starts, so they outlive the turn.
     #[serde(default)]
     conversation: Option<String>,
+    /// Only says it reached this app, for the check that an agent's own command attaches; it edits nothing.
+    #[serde(default)]
+    verify: Option<String>,
+}
+
+/// The last nonces that reached this app, each answered once by [`verified`].
+static VERIFIED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Whether a server started with `nonce` (`bridge::VERIFY_VAR`) reached this app since the last ask.
+pub fn verified(nonce: &str) -> bool {
+    let mut seen = VERIFIED.lock().unwrap();
+    seen.iter().position(|n| n == nonce).map(|i| seen.remove(i)).is_some()
 }
 #[derive(Deserialize, Serialize)]
 struct Request {
@@ -300,6 +312,15 @@ fn connection(
             return Ok(());
         }
     };
+    if let Some(nonce) = hello.verify {
+        let mut seen = VERIFIED.lock().unwrap();
+        if seen.len() >= 16 {
+            seen.remove(0);
+        }
+        seen.push(nonce);
+        drop(seen);
+        return send(&mut stream, &json!({"ok":true}));
+    }
     // Only a conversation the app began: any other client's jobs end with its connection.
     let id = hello.conversation.filter(|id| host.jobs.in_conversation(id)).unwrap_or_else(new_id);
     let backend = Arc::new(Backend::shared(host, project, Client { id, access: hello.access })?);
@@ -349,6 +370,62 @@ fn serve_requests(
     backend.disconnect()
 }
 
+/// Tells the app that has `project` open that a server started with `nonce` reached it; false when none listens.
+pub fn verify(project: &Path, nonce: &str) -> Result<bool> {
+    Ok(handshake(&socket_path(project)?, Access::ReadOnly, false, Some(nonce.into()))?.is_some())
+}
+
+/// The trusted endpoint's accepted hello, or None when no app listens there.
+fn handshake(
+    path: &Path,
+    access: Access,
+    current: bool,
+    verify: Option<String>,
+) -> Result<Option<(UnixStream, BufReader<UnixStream>, Value)>> {
+    let directory = path.parent().context("IPC_UNTRUSTED: missing endpoint directory")?;
+    match fs::symlink_metadata(directory) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        _ => security::directory(directory)?,
+    }
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        _ => security::socket(path)?,
+    }
+    let mut stream = match UnixStream::connect(path) {
+        Ok(stream) => stream,
+        Err(error) if matches!(error.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused) => {
+            return Ok(None);
+        }
+        Err(error) => return Err(error).context("IPC_UNTRUSTED: connecting to endpoint"),
+    };
+    security::peer(&stream)?;
+    let token = security::token(&path.with_extension("token"))?;
+    stream.set_write_timeout(Some(HELLO_TIMEOUT))?;
+    let deadline = Instant::now() + HELLO_TIMEOUT;
+    send(
+        &mut stream,
+        &Hello {
+            nuzky: PROTOCOL,
+            token,
+            client: "nuzky-mcp".into(),
+            access,
+            current,
+            conversation: std::env::var(crate::bridge::CONVERSATION_VAR).ok(),
+            verify,
+        },
+    )?;
+    let mut reader = BufReader::new(stream.try_clone()?);
+    let hello: Value = receive(&mut reader, MAX_HELLO_BYTES, Some(deadline))?;
+    if hello["ok"] != true {
+        let error = hello["error"].as_str().unwrap_or("PROTOCOL_MISMATCH: missing hello response");
+        ensure!(!error.starts_with("UNAUTHORIZED:"), "UNAUTHORIZED: endpoint rejected the token");
+        ensure!(!error.starts_with("PROTOCOL_MISMATCH:"), "PROTOCOL_MISMATCH: endpoint rejected the protocol");
+        ensure!(!error.starts_with("AGENT_ACCESS_OFF:"), ACCESS_OFF);
+        anyhow::bail!("IPC_UNTRUSTED: endpoint rejected connection");
+    }
+    Ok(Some((stream, reader, hello)))
+}
+
 type Pending = Arc<Mutex<HashMap<u64, mpsc::Sender<CallToolResult>>>>;
 pub struct Remote {
     writer: Mutex<UnixStream>,
@@ -365,48 +442,8 @@ impl Remote {
     }
 
     fn at(path: &Path, allow_write: bool, current: bool) -> Result<Option<Self>> {
-        let directory = path.parent().context("IPC_UNTRUSTED: missing endpoint directory")?;
-        match fs::symlink_metadata(directory) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            _ => security::directory(directory)?,
-        }
-        match fs::symlink_metadata(path) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            _ => security::socket(path)?,
-        }
-        let mut stream = match UnixStream::connect(path) {
-            Ok(stream) => stream,
-            Err(error)
-                if matches!(error.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused) =>
-            {
-                return Ok(None);
-            }
-            Err(error) => return Err(error).context("IPC_UNTRUSTED: connecting to endpoint"),
-        };
-        security::peer(&stream)?;
-        let token = security::token(&path.with_extension("token"))?;
-        stream.set_write_timeout(Some(HELLO_TIMEOUT))?;
-        let deadline = Instant::now() + HELLO_TIMEOUT;
-        send(
-            &mut stream,
-            &Hello {
-                nuzky: PROTOCOL,
-                token,
-                client: "nuzky-mcp".into(),
-                access: if allow_write { Access::Write } else { Access::ReadOnly },
-                current,
-                conversation: std::env::var(crate::bridge::CONVERSATION_VAR).ok(),
-            },
-        )?;
-        let mut reader = BufReader::new(stream.try_clone()?);
-        let hello: Value = receive(&mut reader, MAX_HELLO_BYTES, Some(deadline))?;
-        if hello["ok"] != true {
-            let error = hello["error"].as_str().unwrap_or("PROTOCOL_MISMATCH: missing hello response");
-            ensure!(!error.starts_with("UNAUTHORIZED:"), "UNAUTHORIZED: endpoint rejected the token");
-            ensure!(!error.starts_with("PROTOCOL_MISMATCH:"), "PROTOCOL_MISMATCH: endpoint rejected the protocol");
-            ensure!(!error.starts_with("AGENT_ACCESS_OFF:"), ACCESS_OFF);
-            anyhow::bail!("IPC_UNTRUSTED: endpoint rejected connection");
-        }
+        let access = if allow_write { Access::Write } else { Access::ReadOnly };
+        let Some((stream, mut reader, hello)) = handshake(path, access, current, None)? else { return Ok(None) };
         ensure!(hello["session_epoch"].is_string(), "PROTOCOL_MISMATCH: missing session epoch");
         stream.set_read_timeout(None)?;
         let pending: Pending = Arc::default();
