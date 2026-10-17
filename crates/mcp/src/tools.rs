@@ -626,7 +626,7 @@ impl Backend {
                 "TRANSCRIPT_MISSING: transcribe every heard asset first, untranscribed: {}",
                 derived.untranscribed.join(", ")
             );
-            let mut result = serde_json::to_value(nuzky_analysis::retakes(&derived.words))?;
+            let mut result = serde_json::to_value(nuzky_analysis::retakes(&derived.words, &derived.languages))?;
             result["time_basis"] = json!("timeline");
             result["transcript_key"] = json!(transcript::word_key(&state.project, &derived.words));
             return Ok(result);
@@ -641,6 +641,24 @@ impl Backend {
             }
             let zooms = crate::zooms::suggest(&project, &derived, &self.host.cache_dir)?;
             return Ok(json!({"zooms": zooms, "time_basis": "timeline",
+                "transcript_key": transcript::word_key(&state.project, &derived.words)}));
+        }
+        if matches!(args.kind, AnalysisKind::Fillers) && args.asset_id.is_none() {
+            // Stored words and the prepared sound of their files, so it answers at once too.
+            let project = self.media_project(&state.project);
+            let derived = transcript::derive(&project, &self.host.transcripts)?;
+            ensure!(
+                derived.untranscribed.is_empty(),
+                "TRANSCRIPT_MISSING: transcribe every heard asset first, untranscribed: {}",
+                derived.untranscribed.join(", ")
+            );
+            self.prepare_sound(&project, state, "analyze")?;
+            let hesitations: Vec<_> = transcript::hesitations(&project, &derived, &self.host.cache_dir)
+                .into_iter()
+                .map(|h| json!({"after_word": h.after_word, "start_us": h.start_us, "end_us": h.end_us}))
+                .collect();
+            return Ok(json!({"fillers": nuzky_analysis::retakes(&derived.words, &derived.languages).fillers,
+                "hesitations": hesitations, "time_basis": "timeline",
                 "transcript_key": transcript::word_key(&state.project, &derived.words)}));
         }
         if matches!(args.kind, AnalysisKind::ThumbnailFrames) {
@@ -675,7 +693,15 @@ impl Backend {
                         "integrated_lufs": program.integrated_lufs, "true_peak_dbtp": program.true_peak_dbtp})
                 }
                 AnalysisKind::Scenes => json!({"cuts": nuzky_analysis::scene_cuts_cancellable(&asset, SceneParams { threshold: p.threshold.unwrap_or(0.18), min_gap_us: p.min_gap_us.unwrap_or(300_000) }, || cancel.load(Ordering::Relaxed))?}),
-                AnalysisKind::Fillers => { let t = transcript.context("Missing filler transcript")?; json!({"ranges": nuzky_analysis::filler_words(&t, &t.language)}) },
+                AnalysisKind::Fillers => {
+                    let t = transcript.context("Missing filler transcript")?;
+                    nuzky_engine::audio::ensure_pcm(&cache, &asset, |_| check_cancel(&cancel))?;
+                    let (peaks, _) = nuzky_engine::audio::waveform_peaks(&cache, &asset, 0, usize::MAX)?;
+                    let gaps: Vec<_> = t.words.windows(2).map(|w| nuzky_analysis::Range { start_us: w[0].end_us, end_us: w[1].start_us })
+                        .filter(|g| g.end_us - g.start_us >= nuzky_analysis::HESITATION_US).collect();
+                    let hesitations: Vec<_> = nuzky_analysis::hesitations(&peaks, &gaps).into_iter().flatten().collect();
+                    json!({"ranges": nuzky_analysis::filler_words(&t, &t.language), "hesitations": hesitations})
+                }
                 AnalysisKind::Retakes | AnalysisKind::Emphasis | AnalysisKind::ThumbnailFrames => {
                     anyhow::bail!("This kind is not an asset analysis")
                 }
@@ -1027,12 +1053,20 @@ impl Backend {
         let derived = transcript::derive(&self.media_project(&state.project), &self.host.transcripts)?;
         transcript::check_key(&state.project, &derived, &args.transcript_key)?;
         let before = state.project.duration_us();
+        let hesitations = match args.delete_hesitations.as_deref() {
+            Some(after) if !after.is_empty() => {
+                let project = self.media_project(&state.project);
+                transcript::pick_hesitations(&transcript::hesitations(&project, &derived, &self.host.cache_dir), after)?
+            }
+            _ => Vec::new(),
+        };
         let ranges = transcript::edit_ranges(
             &state.project,
             &derived,
             args.delete.as_deref(),
             args.keep.as_deref(),
             Some(args.shorten_pauses_us.unwrap_or(transcript::DEFAULT_PAUSE_US)),
+            &hesitations,
         )?;
         let cut = transcript::plan_cut(&state.project, &derived, ranges)?;
         let after = cut.preview.duration_us();

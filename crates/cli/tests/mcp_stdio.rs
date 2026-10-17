@@ -852,13 +852,110 @@ fn retakes_answer_at_once_even_for_read_only_clients() {
     for list in ["groups", "fillers", "review", "suggested_delete"] {
         assert_eq!(retakes[list], json!([]), "{retakes}");
     }
+    // So do the fillers of the whole timeline.
+    let fillers = c.call("analyze", json!({"kind":"fillers"}));
+    assert_eq!(fillers["transcript_key"], retakes["transcript_key"]);
+    assert_eq!((&fillers["fillers"], &fillers["hesitations"]), (&json!([]), &json!([])), "{fillers}");
     // The other kinds still need an asset and start a job, which a read-only client cannot.
     assert!(c.error("analyze", json!({"kind":"retakes","asset_id":"a"})).contains("omit asset_id"));
     assert!(c.error("analyze", json!({"kind":"silences","asset_id":"a"})).contains("READ_ONLY"));
+    assert!(c.error("analyze", json!({"kind":"fillers","asset_id":"a"})).contains("READ_ONLY"));
     c.finish();
     let mut writer = Client::start(true, None, Some(None));
-    assert!(writer.error("analyze", json!({"kind":"fillers"})).contains("asset_id is required"));
+    assert!(writer.error("analyze", json!({"kind":"silences"})).contains("asset_id is required"));
     writer.finish();
+}
+
+/// An "eee" recognition did not write lies between two words; analyze fillers names it by the
+/// word before it, beside a filler word inside the sentence, and edit_transcript cuts it.
+#[test]
+fn fillers_and_hesitations_reach_agents_over_stdio() {
+    use nuzky_session::transcripts::{Record, TranscriptStore, VERSION};
+    let mut c = Client::start(true, None, Some(None));
+    let mut samples = vec![0i16; 3 * 48_000];
+    let mut sound = |from_us: i64, to_us: i64, hz: f64| {
+        let first = (from_us * 48 / 1000) as usize;
+        for (i, sample) in samples[first..(to_us * 48 / 1000) as usize].iter_mut().enumerate() {
+            *sample = (0.4 * (i as f64 * hz / 48_000.0 * std::f64::consts::TAU).sin() * 32_767.0) as i16;
+        }
+    };
+    let said = [
+        (" Kamera", 300_000, 700_000),
+        (" ehm", 800_000, 1_000_000),
+        (" stojí", 1_100_000, 1_500_000),
+        (" pevně.", 2_100_000, 2_500_000),
+    ];
+    for (_, from, to) in said {
+        sound(from, to, 440.0);
+    }
+    sound(1_650_000, 1_950_000, 220.0);
+    let words: Vec<Value> = said
+        .iter()
+        .map(|(text, from, to)| json!({"start_us":from,"end_us":to,"text":text,"probability":0.9}))
+        .collect();
+    let wav = c.dir.join("speech.wav");
+    std::fs::write(&wav, wav_bytes(&samples)).unwrap();
+    let video = c.dir.join("talk.mp4");
+    let status = Command::new("ffmpeg")
+        .args(["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=360x640:r=30:d=3", "-i"])
+        .arg(&wav)
+        .args(["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest"])
+        .arg(&video)
+        .status()
+        .expect("ffmpeg makes the test video");
+    assert!(status.success());
+    let run = c.call("begin_run", json!({"label":"place"}))["run_id"].clone();
+    let asset_id = c.call("import_media", json!({"run_id":run,"paths":[video]}))["asset_ids"][0].clone();
+    c.call("apply_edits", json!({"run_id":run,"request_id":"place","edits":[{"type":"addClip","assetId":asset_id}]}));
+    c.call("end_run", json!({"run_id":run,"action":"keep"}));
+    let asset: nuzky_engine::model::Asset =
+        serde_json::from_value(c.call("get_state", json!({}))["assets"][0].clone()).unwrap();
+    let store = TranscriptStore::at(c.dir.join("data/nuzky/transcripts")).unwrap();
+    let record = Record {
+        version: VERSION,
+        fingerprint: store.fingerprint(&asset).unwrap(),
+        duration_us: asset.duration_us,
+        model: "fixture".into(),
+        language: "cs".into(),
+        words: serde_json::from_value(json!(words)).unwrap(),
+        segments: vec![],
+        alignment: None,
+    };
+    store.put(&asset, &record).unwrap();
+
+    let waiting: Value = serde_json::from_str(&c.error("analyze", json!({"kind":"fillers"}))).unwrap();
+    let waiting = waiting["error"].as_str().unwrap();
+    assert!(waiting.starts_with("AUDIO_NOT_READY"), "{waiting}");
+    let job_id = waiting.split("as job ").nth(1).and_then(|rest| rest.split(';').next()).unwrap();
+    assert_eq!(wait_job(&mut c, &json!({"job_id":job_id}), Duration::from_secs(60), |_| false)["status"], "done");
+    let found = c.call("analyze", json!({"kind":"fillers"}));
+    assert_eq!(found["time_basis"], "timeline");
+    assert_eq!(found["fillers"], json!([{"from":1,"to":1,"text":"ehm"}]), "{found}");
+    let hesitation = &found["hesitations"][0];
+    assert_eq!((found["hesitations"].as_array().unwrap().len(), &hesitation["after_word"]), (1, &json!(2)), "{found}");
+    let (start, end) = (hesitation["start_us"].as_i64().unwrap(), hesitation["end_us"].as_i64().unwrap());
+    assert!((1_600_000..=1_700_000).contains(&start) && (1_900_000..=2_000_000).contains(&end), "{found}");
+
+    let key = c.call("get_transcript", json!({}))["transcript_key"].clone();
+    let plan = c.call(
+        "edit_transcript",
+        json!({"transcript_key":key,"delete":[[1,1]],"delete_hesitations":[2],"dry_run":true}),
+    );
+    let cuts: Vec<(i64, i64)> = plan["ranges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| (r["startUs"].as_i64().unwrap(), r["endUs"].as_i64().unwrap()))
+        .collect();
+    assert!(cuts.iter().any(|&(a, b)| a <= start && end <= b), "{plan}");
+    let kept = [0, 2, 3].map(|i| (said[i].1, said[i].2));
+    assert!(
+        cuts.iter().all(|&(a, b)| kept.iter().all(|&(from, to)| b <= from || a >= to)),
+        "a cut takes a kept word: {plan}"
+    );
+    let error = c.error("edit_transcript", json!({"transcript_key":key,"delete_hesitations":[0],"dry_run":true}));
+    assert!(error.contains("INVALID_HESITATION"), "{error}");
+    c.finish();
 }
 
 #[test]

@@ -47,11 +47,14 @@ pub(crate) const TOOLS: &[Rules] = &[
     rules("activity", Always, false, true, true),
     // Only draws the sound of the timeline and its files; preparing missing sound runs as a job.
     rules("get_waveform", Always, false, true, true),
-    // Retakes and emphasis only read stored words and sound and answer at once; thumbnail frames
-    // only render the timeline.
+    // Retakes, emphasis and fillers of the whole timeline only read stored words and sound and
+    // answer at once; thumbnail frames only render the timeline.
     rules(
         "analyze",
-        When(|args| matches!(args["kind"].as_str(), Some("retakes" | "emphasis" | "thumbnail_frames"))),
+        When(|args| {
+            matches!(args["kind"].as_str(), Some("retakes" | "emphasis" | "thumbnail_frames"))
+                || args["kind"] == "fillers" && args["asset_id"].is_null()
+        }),
         false,
         false,
         true,
@@ -199,6 +202,7 @@ mod tests {
         let analyze = find("analyze").unwrap();
         assert!(analyze.reads(&json!({"kind":"retakes"})) && !analyze.reads(&json!({"kind":"silences"})));
         assert!(analyze.reads(&json!({"kind":"emphasis"})) && analyze.reads(&json!({"kind":"thumbnail_frames"})));
+        assert!(analyze.reads(&json!({"kind":"fillers"})) && !analyze.reads(&json!({"kind":"fillers","asset_id":"a"})));
         assert!(find("unknown").is_none());
     }
 }

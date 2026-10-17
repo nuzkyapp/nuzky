@@ -198,8 +198,9 @@ pub enum AnalysisKind {
     Silences,
     Loudness,
     Scenes,
+    /// Filler words and hesitations: over the whole timeline at once, or of one asset as a job.
     Fillers,
-    /// Restarted sentences and leading fillers over the whole timeline, returned at once.
+    /// Restarted sentences and filler words over the whole timeline, returned at once.
     Retakes,
     /// Sentences said with emphasis, for a punch-in, over the whole timeline, returned at once.
     Emphasis,
@@ -223,7 +224,7 @@ pub struct AnalysisParams {
 #[serde(deny_unknown_fields)]
 pub struct Analyze {
     pub kind: AnalysisKind,
-    /// Required for silences, loudness, scenes and fillers. Omit for retakes, emphasis and thumbnail_frames.
+    /// Required for silences, loudness and scenes; with fillers it reads that asset only. Omit for retakes, emphasis and thumbnail_frames.
     pub asset_id: Option<String>,
     #[serde(default)]
     pub params: AnalysisParams,
@@ -272,6 +273,8 @@ pub struct EditTranscript {
     pub delete: Option<Vec<[usize; 2]>>,
     /// Inclusive zero-based word indices [from,to]. Mutually exclusive with delete.
     pub keep: Option<Vec<[usize; 2]>>,
+    /// after_word of hesitations from analyze fillers, cut as deleted words would be.
+    pub delete_hesitations: Option<Vec<usize>>,
     pub shorten_pauses_us: Option<i64>,
     #[serde(default)]
     pub dry_run: bool,

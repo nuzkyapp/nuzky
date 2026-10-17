@@ -20,7 +20,7 @@ pub use audio::{
 pub use boundaries::{align_to_sound, align_words};
 pub use captions::{CaptionGrouping, group_words};
 pub use emphasis::{Energy, Zoom, emphasis, key_words, prepared_word_energy, word_energy};
-pub use fillers::filler_words;
+pub use fillers::{HESITATION_US, filler_words, hesitations};
 pub use retakes::{Attempt, Filler, RetakeGroup, Retakes, Review, retakes};
 pub use scenes::{SceneCut, SceneParams, picture_difference, scene_cuts, scene_cuts_cancellable};
 pub use speech::{AudioSource, Segment, Transcript, Word, transcribe_words, transcribe_words_cancellable, use_gpu};

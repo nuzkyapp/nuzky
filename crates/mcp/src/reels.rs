@@ -71,7 +71,7 @@ fn ends_sentence(words: &[TimelineWord], i: usize) -> bool {
 /// speech alone, so those before and after the clips that play the kept words go too.
 fn cut(project: &Project, derived: &Derived, from: usize, to: usize) -> Result<transcript::Cut> {
     let ranges =
-        transcript::edit_ranges(project, derived, None, Some(&[[from, to]]), Some(transcript::DEFAULT_PAUSE_US))?;
+        transcript::edit_ranges(project, derived, None, Some(&[[from, to]]), Some(transcript::DEFAULT_PAUSE_US), &[])?;
     let cut = transcript::plan_cut(project, derived, ranges)?;
     let preview = &cut.preview;
     // A clip playing any part of a word, so a word split across two clips keeps both pieces.

@@ -132,7 +132,7 @@ fn build(before: Project, after: Project, derived: &Derived) -> Recap {
     for cut in owners.iter().flatten() {
         recap.cuts[*cut].words += 1;
     }
-    let retakes = nuzky_analysis::retakes(&derived.words);
+    let retakes = nuzky_analysis::retakes(&derived.words, &derived.languages);
     // A take dropped whole is one retake, however many attempts at sentences it held.
     let gone = |i: usize| change.gone_assets.contains(&derived.words[i].asset_id);
     let removed = |from: usize, to: usize| !gone(from) && owners[from..=to].iter().all(Option::is_some);
@@ -249,7 +249,7 @@ mod tests {
         let p = project(&["take"]);
         let w = words("Dneska vám ukážu video. Dneska vám ukážu video.");
         let d = derived(&p, w.clone());
-        let groups = nuzky_analysis::retakes(&d.words).groups;
+        let groups = nuzky_analysis::retakes(&d.words, &d.languages).groups;
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].keep, 1);
         let r = build(p.clone(), delete(&p, &[(2_000_000, 4_000_000)]), &d);
@@ -264,7 +264,7 @@ mod tests {
         let p = project(&["take"]);
         let w = words("Měl jsem několik… Pak ale přišel domů.");
         let d = derived(&p, w);
-        assert_eq!(nuzky_analysis::retakes(&d.words).unfinished.len(), 1);
+        assert_eq!(nuzky_analysis::retakes(&d.words, &d.languages).unfinished.len(), 1);
         let r = build(p.clone(), delete(&p, &[(0, 1_500_000)]), &d);
         assert_eq!(r.totals().retakes, Some(1));
         let p = project(&["take", "other"]);
@@ -281,7 +281,7 @@ mod tests {
         let p = project(&["take", "other"]);
         let same = words("Dneska vám ukážu video.");
         let d = Derived::new(&p, HashMap::from([("take".into(), same.clone()), ("other".into(), same)]), vec![]);
-        assert_eq!(nuzky_analysis::retakes(&d.words).groups.len(), 1);
+        assert_eq!(nuzky_analysis::retakes(&d.words, &d.languages).groups.len(), 1);
         let r = build(p.clone(), delete(&p, &[(0, 10_000_000)]), &d);
         assert_eq!(r.totals().retakes, Some(1));
     }

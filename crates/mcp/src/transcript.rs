@@ -5,11 +5,13 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context, Result, ensure};
-use nuzky_analysis::{AudioSource, CaptionGrouping, group_words};
+use nuzky_analysis::{AudioSource, CaptionGrouping, HESITATION_US, group_words};
 use nuzky_engine::{
     Project,
+    audio::waveform_peaks,
     edit::{CaptionPreset, EditCmd, TimeRange, merge_ranges},
-    model::{Asset, ClipContent, MAX_CORRECTION_CHARS, WordCorrection},
+    effects::source_time,
+    model::{Asset, Clip, ClipContent, MAX_CORRECTION_CHARS, WordCorrection},
     speech::{TimelineWord, Word, is_heard, map_words},
 };
 use nuzky_session::{
@@ -278,6 +280,8 @@ pub struct Derived {
     pub untranscribed: Vec<String>,
     /// What corrected words were recognised as, by asset, start in the file and corrected text.
     pub originals: HashMap<(String, i64, String), String>,
+    /// The language recognised in each heard file.
+    pub languages: HashMap<String, String>,
 }
 
 impl Derived {
@@ -301,7 +305,7 @@ impl Derived {
                 }
             }
         }
-        Self { words: map_words(project, &sources), sources, untranscribed, originals }
+        Self { words: map_words(project, &sources), sources, untranscribed, originals, languages: HashMap::new() }
     }
 
     /// What `word` was recognised as, when the user corrected it.
@@ -312,17 +316,19 @@ impl Derived {
 
 pub fn derive(project: &Project, store: &TranscriptStore) -> Result<Derived> {
     let mut sources = HashMap::new();
+    let mut languages = HashMap::new();
     let mut untranscribed = Vec::new();
     let heard = heard_assets(project);
     for asset in project.assets.iter().filter(|a| heard.contains(&a.id)) {
         match store.get(asset)? {
             Some(record) => {
                 sources.insert(asset.id.clone(), record.words);
+                languages.insert(asset.id.clone(), record.language);
             }
             None => untranscribed.push(asset.id.clone()),
         }
     }
-    Ok(Derived::new(project, sources, untranscribed))
+    Ok(Derived { languages, ..Derived::new(project, sources, untranscribed) })
 }
 
 /// Word indices also change on re-recognition, even when the timeline layout stays put.
@@ -455,15 +461,17 @@ fn editing_bounds(project: &Project, derived: &Derived) -> (Vec<TimelineWord>, V
 }
 
 /// Timeline ranges that delete or keep the inclusive word ranges and, with `pause`, shorten
-/// longer pauses to it and trim the silence before the first and after the last word.
+/// longer pauses to it and trim the silence before the first and after the last word. The
+/// `hesitations` go as deleted words would there.
 pub fn edit_ranges(
     project: &Project,
     derived: &Derived,
     delete: Option<&[[usize; 2]]>,
     keep: Option<&[[usize; 2]]>,
     pause: Option<i64>,
+    hesitations: &[Hesitation],
 ) -> Result<Vec<TimeRange>> {
-    Ok(speech_cut(project, derived, delete, keep, pause)?.0)
+    Ok(speech_cut(project, derived, delete, keep, pause, hesitations)?.0)
 }
 
 /// The ranges of `edit_ranges` and where speech is.
@@ -473,9 +481,12 @@ fn speech_cut(
     delete: Option<&[[usize; 2]]>,
     keep: Option<&[[usize; 2]]>,
     pause: Option<i64>,
+    hesitations: &[Hesitation],
 ) -> Result<(Vec<TimeRange>, Vec<TimeRange>)> {
     let (bounds, unnumbered, speech) = editing_bounds(project, derived);
-    let mut ranges = deletion_ranges(&bounds, &speech, delete, keep, pause)?;
+    let hesitations: Vec<_> =
+        hesitations.iter().map(|h| TimeRange { start_us: h.start_us, end_us: h.end_us }).collect();
+    let mut ranges = deletion_ranges(&bounds, &speech, delete, keep, pause, &hesitations)?;
     // A surviving fragment whose midpoint was cut away has no selectable index. Keep it audible.
     for &protected in &unnumbered {
         ranges = ranges
@@ -570,7 +581,7 @@ pub struct Pause {
 
 /// What shortening every pause to `pause_us` cuts, in timeline order.
 pub fn pauses(project: &Project, derived: &Derived, pause_us: i64) -> Result<Vec<Pause>> {
-    let (ranges, speech) = speech_cut(project, derived, None, None, Some(pause_us))?;
+    let (ranges, speech) = speech_cut(project, derived, None, None, Some(pause_us), &[])?;
     Ok(ranges
         .into_iter()
         .map(|r| {
@@ -583,12 +594,87 @@ pub fn pauses(project: &Project, derived: &Derived, pause_us: i64) -> Result<Vec
         .collect())
 }
 
+/// Voice between two words of one clip that recognition did not write, such as an "eee": after
+/// word `after_word`, at `start_us..end_us` on the timeline (`nuzky_analysis::hesitations`).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts", ts(rename = "TranscriptHesitation"))]
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Hesitation {
+    pub after_word: usize,
+    pub start_us: i64,
+    pub end_us: i64,
+}
+
+/// The hesitations of the timeline, read from the waveform peaks of its files. A file whose sound
+/// is still being prepared has none yet.
+pub fn hesitations(project: &Project, derived: &Derived, cache_dir: &Path) -> Vec<Hesitation> {
+    let words = &derived.words;
+    let clips: HashMap<&str, &Clip> =
+        project.tracks.iter().flat_map(|t| &t.clips).map(|c| (c.id.as_str(), c)).collect();
+    // Gaps between words of one clip, which are next to each other in the file too, by file.
+    let mut gaps: HashMap<&str, Vec<(usize, &Clip)>> = HashMap::new();
+    for (i, pair) in words.windows(2).enumerate() {
+        if pair[0].clip_id == pair[1].clip_id
+            && pair[1].start_us - pair[0].end_us >= HESITATION_US
+            && let Some(&clip) = clips.get(pair[0].clip_id.as_str())
+        {
+            gaps.entry(&pair[0].asset_id).or_default().push((i, clip));
+        }
+    }
+    let mut found = Vec::new();
+    for (asset_id, gaps) in gaps {
+        let Some(asset) = project.asset(asset_id) else { continue };
+        let Ok((peaks, true)) = waveform_peaks(cache_dir, asset, 0, usize::MAX) else { continue };
+        let ranges: Vec<_> = gaps
+            .iter()
+            .map(|&(i, clip)| nuzky_analysis::Range {
+                start_us: source_time(clip, words[i].end_us),
+                end_us: source_time(clip, words[i + 1].start_us),
+            })
+            .collect();
+        for (&(i, clip), range) in gaps.iter().zip(nuzky_analysis::hesitations(&peaks, &ranges)) {
+            let (Some(range), ClipContent::Media { source_in_us, speed, .. }) = (range, &clip.content) else {
+                continue;
+            };
+            let place = |t: i64| {
+                (clip.start_us + ((t - source_in_us) as f64 / f64::from(*speed)).round() as i64)
+                    .clamp(words[i].end_us, words[i + 1].start_us)
+            };
+            let (start_us, end_us) = (place(range.start_us), place(range.end_us));
+            // Another speaker's words may play over the gap.
+            if words.iter().all(|w| w.end_us <= start_us || w.start_us >= end_us) {
+                found.push(Hesitation { after_word: i, start_us, end_us });
+            }
+        }
+    }
+    found.sort_by_key(|h| h.after_word);
+    found
+}
+
+/// The hesitations after words `after`, which must still be there.
+pub fn pick_hesitations(found: &[Hesitation], after: &[usize]) -> Result<Vec<Hesitation>> {
+    after
+        .iter()
+        .map(|&i| {
+            found
+                .iter()
+                .find(|h| h.after_word == i)
+                .cloned()
+                .context("INVALID_HESITATION: no hesitation after that word")
+        })
+        .collect()
+}
+
+/// Ranges that cut the deleted words, or keep the kept ones, and the `hesitations` between words;
+/// with `pause`, longer pauses between kept words are shortened to it.
 pub fn deletion_ranges(
     words: &[TimelineWord],
     speech: &[TimeRange],
     delete: Option<&[[usize; 2]]>,
     keep: Option<&[[usize; 2]]>,
     pause: Option<i64>,
+    hesitations: &[TimeRange],
 ) -> Result<Vec<TimeRange>> {
     ensure!(delete.is_none() || keep.is_none(), "INVALID_SELECTION: use delete OR keep");
     ensure!(pause.is_none_or(|p| p >= 0), "INVALID_PAUSE: shorten_pauses_us must be nonnegative");
@@ -612,11 +698,19 @@ pub fn deletion_ranges(
     let (Some(&first), Some(&last)) = (retained.first(), retained.last()) else {
         return Ok(speech.to_vec());
     };
+    // Where what goes between two times starts and ends: the deleted words and the hesitations.
+    let gone = |deleted: &[TimelineWord], from: i64, to: i64| {
+        let words = deleted.first().zip(deleted.last()).map(|(a, b)| (a.start_us, b.end_us));
+        hesitations
+            .iter()
+            .filter(|h| from <= h.start_us && h.end_us <= to)
+            .map(|h| (h.start_us, h.end_us))
+            .chain(words)
+            .reduce(|a, b| (a.0.min(b.0), a.1.max(b.1)))
+    };
     if first > 0 {
-        add(
-            start,
-            words[first].start_us - BEFORE_WORD_US.min((words[first].start_us - words[first - 1].end_us).max(0) / 2),
-        );
+        let (_, gone_end) = gone(&words[..first], start, words[first].start_us).unwrap_or_default();
+        add(start, words[first].start_us - BEFORE_WORD_US.min((words[first].start_us - gone_end).max(0) / 2));
     } else if let Some(pause) = pause
         && words[0].start_us - start > pause
     {
@@ -625,9 +719,9 @@ pub fn deletion_ranges(
     for pair in retained.windows(2) {
         let (a, b) = (pair[0], pair[1]);
         let (gap_start, gap_end) = (words[a].end_us, words[b].start_us);
-        if b > a + 1 {
-            let after = AFTER_WORD_US.min((words[a + 1].start_us - gap_start).max(0) / 2);
-            let before = BEFORE_WORD_US.min((gap_end - words[b - 1].end_us).max(0) / 2);
+        if let Some((gone_start, gone_end)) = gone(&words[a + 1..b], gap_start, gap_end) {
+            let after = AFTER_WORD_US.min((gone_start - gap_start).max(0) / 2);
+            let before = BEFORE_WORD_US.min((gap_end - gone_end).max(0) / 2);
             add(gap_start + after, gap_end - before);
         } else if let Some(pause) = pause
             && gap_end - gap_start > pause
@@ -636,7 +730,8 @@ pub fn deletion_ranges(
         }
     }
     if last + 1 < words.len() {
-        add(words[last].end_us + AFTER_WORD_US.min((words[last + 1].start_us - words[last].end_us).max(0) / 2), end);
+        let (gone_start, _) = gone(&words[last + 1..], words[last].end_us, end).unwrap_or_default();
+        add(words[last].end_us + AFTER_WORD_US.min((gone_start - words[last].end_us).max(0) / 2), end);
     } else if let Some(pause) = pause
         && end - words[last].end_us > pause
     {
@@ -668,6 +763,10 @@ pub fn deletion_ranges(
             "OVERLAPPING_SPEECH: removed word overlaps retained speech"
         );
     }
+    ensure!(
+        hesitations.iter().all(|h| ranges.iter().any(|r| r.start_us <= h.start_us && r.end_us >= h.end_us)),
+        "OVERLAPPING_SPEECH: a hesitation overlaps retained speech"
+    );
     Ok(ranges)
 }
 
@@ -1010,12 +1109,12 @@ pub(crate) mod tests {
     fn cutting_words_alone_keeps_the_other_pauses_and_the_edges() {
         let (project, sources) = fixture();
         let words = map_words(&project, &sources);
-        let ranges = deletion_ranges(&words, &whole(&project), Some(&[[3, 4]]), None, None).unwrap();
+        let ranges = deletion_ranges(&words, &whole(&project), Some(&[[3, 4]]), None, None, &[]).unwrap();
         assert_eq!(
             ranges,
             vec![TimeRange { start_us: words[2].end_us + AFTER_WORD_US, end_us: words[5].start_us - BEFORE_WORD_US }]
         );
-        assert!(deletion_ranges(&words, &whole(&project), None, None, None).unwrap().is_empty());
+        assert!(deletion_ranges(&words, &whole(&project), None, None, None, &[]).unwrap().is_empty());
     }
 
     #[test]
@@ -1083,7 +1182,7 @@ pub(crate) mod tests {
         assert!(found.contains(&Pause { start_us: 11_000_000, end_us: 11_350_000, gap_us: 500_000 }));
         for ranges in [
             found.iter().map(|p| TimeRange { start_us: p.start_us, end_us: p.end_us }).collect(),
-            edit_ranges(&project, &derived, Some(&[[4, 5]]), None, None).unwrap(),
+            edit_ranges(&project, &derived, Some(&[[4, 5]]), None, None, &[]).unwrap(),
         ] {
             let cut = plan_cut(&project, &derived, ranges).unwrap();
             let main = &cut.preview.tracks[0].clips;
@@ -1113,7 +1212,7 @@ pub(crate) mod tests {
         sources.insert("next".into(), vec![word(0, "next0"), word(1_000_000, "next1")]);
         let derived = Derived::new(&project, sources, vec![]);
         for (delete, last) in [(None, "word7"), (Some(&[[7, 7]][..]), "word6")] {
-            let ranges = edit_ranges(&project, &derived, delete, None, Some(300_000)).unwrap();
+            let ranges = edit_ranges(&project, &derived, delete, None, Some(300_000), &[]).unwrap();
             let cut = plan_cut(&project, &derived, ranges).unwrap();
             let main = &cut.preview.tracks[0].clips;
             assert!(main.iter().all(|c| c.duration_us >= 300_000), "{delete:?}: {main:?}");
@@ -1148,7 +1247,7 @@ pub(crate) mod tests {
         let derived = Derived::new(&project, sources, vec![]);
         // "half" has its middle past the take's end, so only "first" is numbered in the take.
         assert_eq!(derived.words.iter().filter(|w| w.asset_id == "talk").count(), 1);
-        let ranges = edit_ranges(&project, &derived, None, None, Some(300_000)).unwrap();
+        let ranges = edit_ranges(&project, &derived, None, None, Some(300_000), &[]).unwrap();
         let cut = plan_cut(&project, &derived, ranges).unwrap();
         let plays = |from: i64, to: i64| {
             cut.preview.tracks[0].clips.iter().any(|clip| {
@@ -1210,8 +1309,8 @@ pub(crate) mod tests {
         for mask in 0..256 {
             let keep: Vec<_> = (0..8).filter(|i| mask & (1 << i) != 0).map(|i| [i, i]).collect();
             let delete: Vec<_> = (0..8).filter(|i| mask & (1 << i) == 0).map(|i| [i, i]).collect();
-            let ranges = deletion_ranges(&words, &whole(&project), None, Some(&keep), Some(300_000)).unwrap();
-            let other = deletion_ranges(&words, &whole(&project), Some(&delete), None, Some(300_000)).unwrap();
+            let ranges = deletion_ranges(&words, &whole(&project), None, Some(&keep), Some(300_000), &[]).unwrap();
+            let other = deletion_ranges(&words, &whole(&project), Some(&delete), None, Some(300_000), &[]).unwrap();
             assert_eq!(serde_json::to_value(&ranges).unwrap(), serde_json::to_value(other).unwrap());
             for range in &ranges {
                 for boundary in [range.start_us, range.end_us] {
@@ -1233,7 +1332,7 @@ pub(crate) mod tests {
     fn shorten_pauses_and_trim_edges() {
         let (mut project, sources) = fixture();
         let words = map_words(&project, &sources);
-        let ranges = deletion_ranges(&words, &whole(&project), None, None, Some(300_000)).unwrap();
+        let ranges = deletion_ranges(&words, &whole(&project), None, None, Some(300_000), &[]).unwrap();
         project.apply(EditCmd::RippleDeleteRanges { ranges, keep_track_ids: None }).unwrap();
         let words = map_words(&project, &sources);
         assert_eq!(words[0].start_us, BEFORE_WORD_US);
@@ -1344,7 +1443,7 @@ pub(crate) mod tests {
                     if word_start == 4_800_000 {
                         assert_eq!(derived.words.last().unwrap().start_us, (5_000_000.0 / speed) as i64);
                     }
-                    let ranges = edit_ranges(&project, &derived, None, None, Some(DEFAULT_PAUSE_US)).unwrap();
+                    let ranges = edit_ranges(&project, &derived, None, None, Some(DEFAULT_PAUSE_US), &[]).unwrap();
                     let protected = TimeRange {
                         start_us: (word_start as f64 / speed) as i64,
                         end_us: (word_end as f64 / speed) as i64,
@@ -1431,7 +1530,7 @@ pub(crate) mod tests {
         let mut words = map_words(&project, &sources);
         words[0].end_us = words[1].start_us + 1;
         assert!(
-            deletion_ranges(&words, &whole(&project), Some(&[[1, 1]]), None, Some(300_000))
+            deletion_ranges(&words, &whole(&project), Some(&[[1, 1]]), None, Some(300_000), &[])
                 .unwrap_err()
                 .to_string()
                 .contains("OVERLAPPING_SPEECH")

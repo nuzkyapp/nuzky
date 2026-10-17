@@ -1,10 +1,12 @@
-//! Restarted sentences and fillers that start a sentence, found in the words of a whole timeline.
+//! Restarted sentences and filler words, found in the words of a whole timeline.
 //!
 //! A creator restarts sentences ("Dneska vám ukážu, jak natočit." "Dneska vám ukážu, jak natočit
-//! video za deset minut.") and starts them with fillers ("Jakoby, potom řešíte světlo."). This
-//! groups the attempts at one sentence, recommends keeping the last complete one and proposes
-//! deleting the others and the leading fillers. It only reads words: the same words always give
+//! video za deset minut.") and fills them ("Jakoby, potom řešíte světlo.", "Kamera stojí, ehm,
+//! pevně."). This groups the attempts at one sentence, recommends keeping the last complete one and
+//! proposes deleting the others and the fillers. It only reads words: the same words always give
 //! the same result, with fixed thresholds and no ordering taken from maps or sets.
+
+use std::collections::HashMap;
 
 use nuzky_engine::speech::TimelineWord;
 use serde::Serialize;
@@ -126,7 +128,7 @@ pub struct RetakeGroup {
     pub delete: Vec<[usize; 2]>,
 }
 
-/// Filler words that start a sentence, never the meaningful rest of it.
+/// Filler words, never the meaningful rest of a sentence.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Filler {
     pub from: usize,
@@ -154,12 +156,14 @@ pub struct Retakes {
     pub suggested_delete: Vec<[usize; 2]>,
 }
 
-/// A sentence: inclusive words, its leading fillers and the words compared with other sentences.
+/// A sentence: inclusive words, its fillers and the words compared with other sentences.
 struct Sentence {
     from: usize,
     to: usize,
     /// Last word of the fillers that start it.
     filler_to: Option<usize>,
+    /// Inclusive word ranges of the fillers inside it.
+    inner: Vec<[usize; 2]>,
     /// Compared words: word index and normalised token.
     words: Vec<(usize, String)>,
 }
@@ -171,8 +175,10 @@ impl Sentence {
 }
 
 /// `words` are timeline words in timeline order, numbered as get_transcript numbers them.
-pub fn retakes(words: &[TimelineWord]) -> Retakes {
-    let sentences = sentences(words);
+/// `languages` are the recognised languages of their files: fillers inside a sentence are only
+/// looked for in Czech and English, and in files missing from it.
+pub fn retakes(words: &[TimelineWord], languages: &HashMap<String, String>) -> Retakes {
+    let sentences = sentences(words, languages);
     let mut group_of: Vec<Option<usize>> = vec![None; sentences.len()];
     let mut groups: Vec<Vec<usize>> = Vec::new();
     let mut pairs: Vec<(usize, usize, String)> = Vec::new();
@@ -235,7 +241,8 @@ pub fn retakes(words: &[TimelineWord]) -> Retakes {
     review.sort_by_key(|r| r.sentences[0].from);
     let fillers: Vec<Filler> = sentences
         .iter()
-        .filter_map(|s| s.filler_to.map(|to| Filler { from: s.from, to, text: text(words, s.from, to) }))
+        .flat_map(|s| s.filler_to.map(|to| [s.from, to]).into_iter().chain(s.inner.iter().copied()))
+        .map(|[from, to]| Filler { from, to, text: text(words, from, to) })
         .collect();
     let grouped: Vec<[usize; 2]> = groups.iter().flat_map(|g| g.delete.iter().copied()).collect();
     let unfinished: Vec<Filler> = trailing_off(words)
@@ -355,7 +362,7 @@ fn restarts_within(sentence: &Sentence, words: &[TimelineWord]) -> (Vec<RetakeGr
 
 /// Sentences end at . ! ? …, at a pause of SENTENCE_GAP_US and where the timeline moves to
 /// another file: words of two recordings are never one sentence.
-fn sentences(words: &[TimelineWord]) -> Vec<Sentence> {
+fn sentences(words: &[TimelineWord], languages: &HashMap<String, String>) -> Vec<Sentence> {
     let mut out = Vec::new();
     let mut from = 0;
     for (i, word) in words.iter().enumerate() {
@@ -369,25 +376,39 @@ fn sentences(words: &[TimelineWord]) -> Vec<Sentence> {
         while k <= i && is_filler(words, k, i) {
             k += 1;
         }
+        // Inside the sentence a word such as "jakoby" must be set apart before it too: "what it's
+        // like." and "I'd like, if possible" are not fillers.
+        let mut inner: Vec<[usize; 2]> = Vec::new();
+        let lexical = languages.get(&word.asset_id).is_none_or(|l| matches!(l.as_str(), "cs" | "en"));
+        for j in (k + 1..=i).filter(|_| lexical) {
+            let after_filler = inner.last().is_some_and(|r| r[1] + 1 == j);
+            if is_filler(words, j, i)
+                && (SOUNDS.contains(&token(&words[j].text).as_str()) || after_filler || set_apart(words, j - 1))
+            {
+                match inner.last_mut() {
+                    Some(run) if after_filler => run[1] = j,
+                    _ => inner.push([j, j]),
+                }
+            }
+        }
         let compared = (k..=i).map(|j| (j, token(&words[j].text))).filter(|(_, t)| !t.is_empty()).collect();
-        out.push(Sentence { from, to: i, filler_to: (k > from).then(|| k - 1), words: compared });
+        out.push(Sentence { from, to: i, filler_to: (k > from).then(|| k - 1), inner, words: compared });
         from = i + 1;
     }
     out
 }
 
 /// Word `k` of a sentence ending at `last` is a filler when it is a hesitation sound, or a word
-/// such as "jakoby" set apart by a comma or a pause, or it ends the sentence.
+/// such as "jakoby" set apart from what follows by a comma or a pause, or it ends the sentence.
 fn is_filler(words: &[TimelineWord], k: usize, last: usize) -> bool {
-    let word = &words[k];
-    let token = token(&word.text);
-    if SOUNDS.contains(&token.as_str()) {
-        return true;
-    }
-    SET_APART.contains(&token.as_str())
-        && (k == last
-            || word.text.trim_end().ends_with([',', ';', ':', '…', '-', '–', '—'])
-            || words[k + 1].start_us - word.end_us >= FILLER_PAUSE_US)
+    let token = token(&words[k].text);
+    SOUNDS.contains(&token.as_str()) || SET_APART.contains(&token.as_str()) && (k == last || set_apart(words, k))
+}
+
+/// A comma or a pause of FILLER_PAUSE_US sets word `k` apart from the word after it.
+fn set_apart(words: &[TimelineWord], k: usize) -> bool {
+    words[k].text.trim_end().ends_with([',', ';', ':', '…', '-', '–', '—'])
+        || words[k + 1].start_us - words[k].end_us >= FILLER_PAUSE_US
 }
 
 enum Relation {
@@ -731,13 +752,13 @@ mod tests {
     }
 
     fn one(sentences: &[(&str, i64)]) -> Retakes {
-        retakes(&timeline(&[sentences]))
+        retakes(&timeline(&[sentences]), &HashMap::new())
     }
 
     #[test]
     fn the_reel_takes_give_two_restarted_sentences_and_three_leading_fillers() {
         let words = reel();
-        let found = retakes(&words);
+        let found = retakes(&words, &HashMap::new());
         assert_eq!(found.groups.len(), 2, "{found:#?}");
         assert_eq!(
             texts(&found.groups[0]),
@@ -761,7 +782,7 @@ mod tests {
         assert_eq!((kept.from, kept.to, kept.start_us, kept.end_us), (11, 19, words[11].start_us, words[19].end_us));
         // The same words give byte-identical output.
         let json = serde_json::to_string(&found).unwrap();
-        assert_eq!(json, serde_json::to_string(&retakes(&reel())).unwrap());
+        assert_eq!(json, serde_json::to_string(&retakes(&reel(), &HashMap::new())).unwrap());
     }
 
     #[test]
@@ -803,7 +824,7 @@ mod tests {
             w.start_us -= gap;
             w.end_us -= gap;
         }
-        let found = retakes(&words);
+        let found = retakes(&words, &HashMap::new());
         assert_eq!(found.groups.len(), 1, "{found:#?}");
         assert_eq!((found.groups[0].keep, &found.groups[0].delete), (1, &vec![[0, 2]]));
     }
@@ -1001,7 +1022,7 @@ mod tests {
     }
 
     #[test]
-    fn only_fillers_that_start_a_sentence_are_proposed() {
+    fn fillers_that_start_a_sentence_are_proposed() {
         let found = one(&[
             ("Jakoby to nešlo.", 900_000),
             ("To je prostě, jednoduché.", 900_000),
@@ -1015,5 +1036,67 @@ mod tests {
         assert_eq!(fillers, ["Ehm.", "Ehm, prostě,", "Um, like,"]);
         // "Ehm." and the next sentence's "Ehm, prostě," are one range: the deletion touches.
         assert_eq!(found.suggested_delete, [[7, 9], [12, 13]]);
+    }
+
+    /// Inside a sentence a hesitation sound always goes, and a word such as "jakoby" only when a
+    /// comma or a pause sets it apart on both sides.
+    #[test]
+    fn fillers_inside_a_sentence_are_proposed_when_set_apart() {
+        let found = one(&[
+            ("Kamera stojí ehm pevně na stativu.", 900_000),
+            ("Mluvte, jakoby, ke kamarádovi.", 900_000),
+            ("Vypadá to jakoby snadno.", 900_000),
+            ("To je prostě, jednoduché.", 900_000),
+            ("Světlo dejte, ehm, prostě, z boku.", 900_000),
+            ("I'd like, if possible, a coffee.", 900_000),
+        ]);
+        let fillers: Vec<_> = found.fillers.iter().map(|f| (f.from, f.to, f.text.as_str())).collect();
+        assert_eq!(fillers, [(2, 2, "ehm"), (7, 7, "jakoby,"), (20, 21, "ehm, prostě,")]);
+        assert_eq!(found.suggested_delete, [[2, 2], [7, 7], [20, 21]]);
+        // Restarted sentences are found as before: the filler inside is compared like any word.
+        let found = one(&[("Kamera musí, ehm, stát.", 900_000), ("Kamera musí stát pevně na stativu.", 900_000)]);
+        assert_eq!(found.groups[0].delete, [[0, 3]]);
+        assert_eq!(found.suggested_delete, [[0, 3]]);
+    }
+
+    /// A pause of FILLER_PAUSE_US on both sides sets "jakoby" apart; a microsecond less does not.
+    #[test]
+    fn a_filler_inside_a_sentence_needs_the_whole_pause_on_both_sides() {
+        let words = |before: i64, after: i64| {
+            let mut t = 0;
+            ["Je", "to", "jakoby", "snadné."]
+                .iter()
+                .enumerate()
+                .map(|(i, text)| {
+                    t += [0, 100_000, before, after][i];
+                    let word = TimelineWord {
+                        start_us: t,
+                        end_us: t + 300_000,
+                        text: (*text).into(),
+                        probability: 0.9,
+                        clip_id: "clip".into(),
+                        asset_id: "take".into(),
+                        source_start_us: t,
+                    };
+                    t += 300_000;
+                    word
+                })
+                .collect::<Vec<_>>()
+        };
+        let fillers =
+            |w: Vec<TimelineWord>| retakes(&w, &HashMap::new()).fillers.iter().map(|f| f.from).collect::<Vec<_>>();
+        assert_eq!(fillers(words(FILLER_PAUSE_US, FILLER_PAUSE_US)), [2]);
+        assert!(fillers(words(FILLER_PAUSE_US - 1, FILLER_PAUSE_US)).is_empty());
+        assert!(fillers(words(FILLER_PAUSE_US, FILLER_PAUSE_US - 1)).is_empty());
+    }
+
+    /// Other languages keep what they had: fillers that start a sentence, none inside one.
+    #[test]
+    fn fillers_inside_a_sentence_are_only_looked_for_in_czech_and_english() {
+        let words =
+            timeline(&[&[("Ehm, kamera stojí ehm pevně.", 900_000)], &[("Ehm, die Kamera steht ehm fest.", 900_000)]]);
+        let languages = HashMap::from([("reel-0".to_owned(), "cs".to_owned()), ("reel-1".to_owned(), "de".to_owned())]);
+        let fillers: Vec<String> = retakes(&words, &languages).fillers.into_iter().map(|f| f.text).collect();
+        assert_eq!(fillers, ["Ehm,", "ehm", "Ehm,"]);
     }
 }

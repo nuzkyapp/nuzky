@@ -1586,6 +1586,16 @@ export type TranscriptCut = {
 };
 
 /**
+ * Voice between two words of one clip that recognition did not write, such as an "eee": after
+ * word `after_word`, at `start_us..end_us` on the timeline (`nuzky_analysis::hesitations`).
+ */
+export type TranscriptHesitation = {
+  afterWord: number,
+  startUs: number,
+  endUs: number,
+};
+
+/**
  * A silence in speech longer than the pause length; shortening it cuts `start_us..end_us`
  * out of the whole `gap_us`.
  */
@@ -1606,12 +1616,16 @@ export type TranscriptView = {
   words: Array<TranscriptWord>,
   pauses: Array<TranscriptPause>,
   /**
+   * Voice between words that recognition did not write, such as an "eee".
+   */
+  hesitations: Array<TranscriptHesitation>,
+  /**
    * Heard media without a transcript yet.
    */
   untranscribed: Array<string>,
   /**
-   * Earlier attempts of restarted sentences, unfinished ones included, and the filler words that
-   * start a sentence: what removing retakes cuts besides the pauses.
+   * Earlier attempts of restarted sentences, unfinished ones included, and filler words: what
+   * removing retakes cuts besides the pauses and hesitations.
    */
   retakes: number,
   fillers: number,
