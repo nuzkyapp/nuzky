@@ -1,8 +1,11 @@
 # The Czech talking head of the reel flow: three takes as a phone records them, with restarted sentences,
-# fillers at the start of a sentence, long pauses and a closing call to action. scripts/fixtures.sh speaks
-# each phrase with espeak-ng and follows it with the pause; tests/e2e/reel.py knows from the role what a
+# fillers at the start of a sentence, long pauses and a closing call to action. The fourth take, only in the
+# first reel, has fillers and a hesitation inside sentences and a "jakoby" that means something. scripts/fixtures.sh
+# speaks each phrase with espeak-ng and follows it with the pause; tests/e2e/reel.py knows from the role what a
 # good rough cut keeps. Roles: keep; retake, an earlier attempt of a later sentence; filler-lead, a sentence
-# that starts with a filler, which ends at the first pause of the phrase (espeak pauses about 0.2 s at a comma).
+# that starts with a filler, which ends at the first pause of the phrase (espeak pauses about 0.2 s at a comma);
+# filler-mid, a sentence with a filler between its two commas; hesitation, a sentence with an "eee" recognition
+# does not write: the halves around "eee" are spoken apart, with 0.26 s of "eee" and 90 ms of quiet on either side.
 # take	pause_s	role	phrase
 1	0.9	retake	Dneska vám ukážu, jak natočit
 1	1.1	retake	Dneska vám ukážu, jak natočit video
@@ -15,3 +18,7 @@
 3	2.6	filler-lead	Prostě, hotové video nahrajte na Instagram a TikTok.
 3	1.2	keep	Celé to zabere deset minut.
 3	0.6	keep	Napište mi do komentáře, co chcete vidět příště.
+4	0.9	filler-mid	Mluvte, jakoby, ke kamarádovi.
+4	1.1	hesitation	Pozadí nechte eee úplně čisté.
+4	1.0	filler-mid	Na začátku, ehm, řekněte své jméno.
+4	0.8	keep	Celé to zní jakoby z rádia.

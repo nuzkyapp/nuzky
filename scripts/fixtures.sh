@@ -86,9 +86,20 @@ media engine-evidence/identity.png ff -f lavfi -i testsrc2=s=540x960 -frames:v 1
 reel_speech() {
   local numbers=$1 out=$2 dir n=0 inputs=()
   dir=$(mktemp -d)
-  while IFS=$'\t' read -r number pause _ phrase; do
+  while IFS=$'\t' read -r number pause role phrase; do
     [[ " $numbers " == *" $number "* ]] || continue
-    espeak-ng -v cs -s 150 -w "$dir/$n.wav" "$phrase"
+    if [ "$role" = hesitation ]; then
+      # The halves trimmed of espeak's silence where they meet, 90 ms of quiet, 0.26 s of "eee" fading out, 90 ms.
+      espeak-ng -v cs -s 150 -w "$dir/a.wav" "${phrase%% eee *}"
+      espeak-ng -v cs -s 150 -w "$dir/e.wav" eee
+      espeak-ng -v cs -s 150 -w "$dir/b.wav" "${phrase#* eee }"
+      ff -i "$dir/a.wav" -i "$dir/e.wav" -i "$dir/b.wav" -filter_complex \
+        "[0]aresample=48000,areverse,silenceremove=start_periods=1:start_threshold=-50dB,areverse[a];
+         [1]aresample=48000,silenceremove=start_periods=1:start_threshold=-50dB,atrim=duration=0.26,afade=t=out:st=0.2:d=0.06,adelay=90,apad=pad_dur=0.09[e];
+         [2]aresample=48000,silenceremove=start_periods=1:start_threshold=-50dB[b];[a][e][b]concat=n=3:v=0:a=1" "$dir/$n.wav"
+    else
+      espeak-ng -v cs -s 150 -w "$dir/$n.wav" "$phrase"
+    fi
     ff -i "$dir/$n.wav" -af "aresample=48000,apad=pad_dur=$pause" -ac 1 "$dir/p$n.wav"
     inputs+=(-i "$dir/p$n.wav")
     n=$((n + 1))
@@ -110,15 +121,15 @@ reel_take() {
 media reel-1.mp4 reel_take 1 0x2b3a4a
 media reel-2.mp4 reel_take 2 0x3a2b4a
 media reel-3.mp4 reel_take 3 0x2b4a3a
-# A new user's first reel (tests/e2e/first_reel.py): the first two takes in one recording, stored as an iPhone
-# stores a portrait video. HEVC at 30 fps, the picture on its side at 1920x1080 and a display matrix that
+# A new user's first reel (tests/e2e/first_reel.py): the first two takes and the fourth in one recording, stored
+# as an iPhone stores a portrait video. HEVC at 30 fps, the picture on its side at 1920x1080 and a display matrix that
 # turns it upright to 1080x1920. A yellow square marks the top-left corner of the upright picture, above the
 # Reels safe area.
 first_reel() {
   local dir seconds
   dir=$(mktemp -d)
   # Take 3 is left out: in one recording, recognition hears its opening "Prostě" as "Proske".
-  reel_speech "1 2" "$dir/speech.wav"
+  reel_speech "1 2 4" "$dir/speech.wav"
   seconds=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$dir/speech.wav")
   ff -i "$dir/speech.wav" -f lavfi -i "anoisesrc=color=pink:amplitude=0.004:seed=4:sample_rate=48000:duration=$seconds" \
     -f lavfi -i "color=c=0x2b3a4a:s=1080x1920:r=30:d=$seconds,noise=alls=10:allf=u,drawbox=x=40:y=40:w=160:h=160:color=0xf0c81e:t=fill,transpose=2" \
