@@ -66,7 +66,7 @@ function Agents() {
     }
   };
 
-  // An agent connected before is checked again, so Connected always means it reaches Nuzky now.
+  // A connected agent is checked again, also one checked before, so Connected always means it reaches Nuzky now.
   const look = () => {
     setLooking(true);
     setError(null);
@@ -77,8 +77,14 @@ function Agents() {
             if (!live.current) return;
             setStatus((all) => ({ ...all, [agent]: found }));
             const run = runsNow.current[agent];
-            const connected = found.installed && found.signedIn !== "signedOut" && found.connection.state === "connected";
-            if (connected && (!run || run.phase === "failed")) void connect(agent, false);
+            if (run?.phase === "writing" || run?.phase === "checking") return;
+            if (found.installed && found.signedIn !== "signedOut" && found.connection.state === "connected") void connect(agent, false);
+            else if (run)
+              setRuns((all) => {
+                const rest = { ...all };
+                delete rest[agent];
+                return rest;
+              });
           },
           (e) => live.current && setError(errorText(e)),
         ),
@@ -110,7 +116,6 @@ function Agents() {
   };
   // One prominent button at a time: Try again, else the first Connect, else Check again; once done, Done.
   const prominent = done ? undefined : (AGENTS.find((a) => runs[a]?.phase === "failed") ?? AGENTS.find((a) => connectable(a) && !runs[a]));
-  // An agent still to install, sign in or fix, which Check again looks for.
   const waiting = AGENTS.some((a) => {
     const s = status[a];
     return !s || !s.installed || s.signedIn === "signedOut" || s.connection.state === "unreadable";

@@ -772,8 +772,6 @@ async fn agent_connections() -> CmdResult<Vec<connect::Connection>> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentStatus {
-    agent: connect::Agent,
-    name: &'static str,
     installed: bool,
     version: Option<String>,
     #[cfg_attr(test, ts(as = "Option<crate::typescript::SignIn>"))]
@@ -788,8 +786,6 @@ async fn agent_status(agent: connect::Agent) -> CmdResult<AgentStatus> {
         let home = dirs::home_dir().ok_or("No home folder")?;
         let command = connect::Command::this_app().map_err(err)?;
         Ok(AgentStatus {
-            agent,
-            name: info.name,
             installed: info.path.is_some(),
             version: info.version,
             signed_in: info.path.as_deref().map(|path| nuzky_agent::signed_in(agent.id(), path)),

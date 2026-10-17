@@ -67,8 +67,6 @@ export type AgentKind = "claudeCode" | "codex";
 export type AgentSetup = "claude" | "cursor" | "other";
 
 export type AgentStatus = {
-  agent: AgentKind,
-  name: string,
   installed: boolean,
   version: string | null,
   signedIn: SignIn | null,
