@@ -19,6 +19,8 @@ const at = (type, x, y) => new PointerEvent(type, {bubbles: true, button: 0, cli
 document.querySelector('aside[aria-label=AI] button[aria-label="Move panel"]').dispatchEvent(at('pointerdown', g.left + 6, g.top + 6));
 window.dispatchEvent(at('pointermove', arguments[0], arguments[1]));
 if (arguments[2]) window.dispatchEvent(at('pointerup', arguments[0], arguments[1]));"""
+GRIP_AT = """const g = document.querySelector('aside[aria-label=AI] button[aria-label="Move panel"]').getBoundingClientRect();
+return g.left <= arguments[0] && arguments[0] <= g.right && g.top <= arguments[1] && arguments[1] <= g.bottom;"""
 
 
 def setup(r):
@@ -583,10 +585,11 @@ def ai_panel(r):
     r.check('no error toast along the way', not r.errors(), r.errors())
 
     # Its place: docked left, in the inspector's place, floating; resized; remembered; closed.
-    r.s.run(DRAG, 30, 400, False)
+    r.s.run(DRAG, 30, 200, False)
     r.check('dragging it to the left edge shows where it would dock', wait(lambda: 'Dock left' in r.s.run('return document.body.innerText'), 3))
+    r.check('the panel itself follows the pointer while it is dragged', r.s.run(GRIP_AT, 30, 200), panel(r))
     r.shot('dock-preview')
-    r.s.run("window.dispatchEvent(new PointerEvent('pointerup', {clientX: 30, clientY: 400, pointerId: 1}))")
+    r.s.run("window.dispatchEvent(new PointerEvent('pointerup', {clientX: 30, clientY: 200, pointerId: 1}))")
     r.check('dropped there, it docks as a column at the left edge', wait(lambda: panel(r)['left'] == 6 and panel(r)['width'] == 360, 3), panel(r))
     r.s.run("document.querySelector('[role=separator][aria-label=\"Resize AI panel\"]').focus()")
     r.key('ArrowRight')
@@ -612,6 +615,18 @@ def ai_panel(r):
     r.key('ArrowRight')
     r.check('a floating panel resizes from the keyboard too', wait(lambda: panel(r)['width'] == p['width'] + 24, 3), {'before': p['width'], 'after': panel(r)['width']})
     r.shot('floating')
+    before = panel(r)
+    r.s.run(DRAG, 600, 300, False)
+    r.check('a floating panel moves with the pointer, without a docking outline over the open editor',
+            wait(lambda: r.s.run(GRIP_AT, 600, 300), 3) and 'Floating' not in r.s.run('return document.body.innerText'), panel(r))
+    r.shot('moving')
+    r.key('Escape')
+    r.check('Esc puts the dragged panel back where it was', wait(lambda: (panel(r)['left'], panel(r)['top']) == (before['left'], before['top']), 3), panel(r))
+    r.s.run(DRAG, 600, 300, False)
+    shown = wait(lambda: (lambda q: q if r.s.run(GRIP_AT, 600, 300) else None)(panel(r)), 3)
+    r.s.run("window.dispatchEvent(new PointerEvent('pointerup', {clientX: 600, clientY: 300, pointerId: 1}))")
+    r.check('let go, it stays exactly where it was shown while dragging', shown and wait(lambda: (panel(r)['left'], panel(r)['top'], panel(r)['width']) == (shown['left'], shown['top'], shown['width']), 3),
+            {'shown': shown and {k: shown[k] for k in ('left', 'top', 'width')}, 'after': {k: panel(r)[k] for k in ('left', 'top', 'width')}})
     r.s.run("window.__nuzky.store.setState({view: 'home'})")
     r.check('on the home screen the floating panel does not show over the projects', wait(lambda: (panel(r) or {}).get('width') == 0, 3), panel(r))
     click(r, 'AI', 'div[aria-label=Projects] header')
