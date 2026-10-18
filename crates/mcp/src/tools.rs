@@ -604,12 +604,14 @@ impl Backend {
                     prepared.clone()
                 }
                 None => {
-                    let video = crate::videos::link(&args.link)?;
                     let stop = Arc::new(AtomicBool::new(false));
                     let (tx, rx) = std::sync::mpsc::channel();
-                    let (cache, worker_stop) = (self.host.cache_dir.clone(), stop.clone());
+                    let (cache, worker_stop, link) = (self.host.cache_dir.clone(), stop.clone(), args.link.clone());
+                    // The lookup runs here too, so a Stop while YouTube is slow to answer returns at once.
                     std::thread::Builder::new().name("youtube-video-download".into()).spawn(move || {
-                        tx.send(crate::videos::asset(&video, part, &cache, &worker_stop, |_| {})).ok();
+                        let asset = crate::videos::link(&link)
+                            .and_then(|video| crate::videos::asset(&video, part, &cache, &worker_stop, |_| {}));
+                        tx.send(asset).ok();
                     })?;
                     let asset = loop {
                         match rx.recv_timeout(std::time::Duration::from_millis(100)) {
@@ -621,6 +623,8 @@ impl Backend {
                                     stop.store(true, Ordering::Relaxed);
                                     anyhow::bail!("CANCELLED: the download stopped");
                                 }
+                                // A long download is work of the run, not idleness that ends it.
+                                self.host.session.touch_run(|run| run == args.run_id)?;
                             }
                             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                                 anyhow::bail!("SOURCE_FAILED: the download stopped unexpectedly");

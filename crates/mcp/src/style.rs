@@ -1050,12 +1050,15 @@ pub fn project_evidence(project: &Project, path: &Path, transcripts: &Transcript
     let (mut words, mut owners) = (Vec::new(), Vec::new());
     let mut recorded = 0;
     for (asset, _) in &records {
-        offsets.insert(asset.id.as_str(), recorded);
-        for word in &derived.sources[&asset.id] {
-            words.push(Word { start_us: word.start_us + recorded, end_us: word.end_us + recorded, ..word.clone() });
+        // Footage a YouTube video's part keeps hidden was never part of the recording the user saw.
+        let (from, to) = crate::recap::imported_span(project, asset);
+        offsets.insert(asset.id.as_str(), recorded - from);
+        for word in derived.sources[&asset.id].iter().filter(|w| w.start_us >= from && w.end_us <= to) {
+            let shift = recorded - from;
+            words.push(Word { start_us: word.start_us + shift, end_us: word.end_us + shift, ..word.clone() });
             owners.push((asset.id.as_str(), word.start_us));
         }
-        recorded += asset.duration_us;
+        recorded += to - from;
     }
     // Every clip that is heard playing a transcribed file is a piece of the recording.
     let mut clips: Vec<_> = project

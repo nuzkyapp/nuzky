@@ -28,18 +28,9 @@ pub fn raw_import(project: &Project, kept: &[Asset]) -> Result<Project> {
     for asset in kept.iter().chain(playing).filter(|a| a.kind == AssetKind::Video) {
         if !assets.iter().any(|a| a.id == asset.id) {
             let mut asset = project.asset(&asset.id).unwrap_or(asset).clone();
-            // A YouTube video's part is what was imported; footage around it the user revealed by extending a
-            // clip joins it, and the rest stays hidden.
-            if let Some(part) = asset.part.as_mut() {
-                for clip in project.tracks.iter().flat_map(|t| &t.clips) {
-                    if let ClipContent::Media { asset_id, source_in_us, speed, .. } = &clip.content
-                        && *asset_id == asset.id
-                    {
-                        part.start_us = part.start_us.min(*source_in_us).max(0);
-                        let end = *source_in_us + (clip.duration_us as f64 * *speed as f64).round() as i64;
-                        part.end_us = part.end_us.max(end).min(asset.duration_us);
-                    }
-                }
+            if asset.part.is_some() {
+                let (start_us, end_us) = imported_span(project, &asset);
+                asset.part = Some(nuzky_engine::model::Part { start_us, end_us });
             }
             assets.push(asset);
         }
@@ -52,6 +43,24 @@ pub fn raw_import(project: &Project, kept: &[Asset]) -> Result<Project> {
     }));
     editor.apply_batch(cmds, None)?;
     Ok(editor.project)
+}
+
+/// The stretch of the asset's file that was imported: a YouTube video's part, with the footage around it the user
+/// revealed by extending a clip, while the rest stays hidden; the whole file for anything else.
+pub(crate) fn imported_span(project: &Project, asset: &Asset) -> (i64, i64) {
+    let Some(part) = asset.part else { return (0, asset.duration_us) };
+    let (mut start, mut end) = (part.start_us, part.end_us);
+    for clip in project.tracks.iter().flat_map(|t| &t.clips) {
+        if let ClipContent::Media { asset_id, source_in_us, speed, .. } = &clip.content
+            && *asset_id == asset.id
+        {
+            start = start.min(*source_in_us).max(0);
+            end = end
+                .max(*source_in_us + (clip.duration_us as f64 * *speed as f64).round() as i64)
+                .min(asset.duration_us);
+        }
+    }
+    (start, end)
 }
 
 /// Missing transcripts only matter for files whose main-track picture is cut.

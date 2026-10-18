@@ -136,6 +136,12 @@ fn send(state: &AppState, msg: Msg) {
     }
 }
 
+/// Why the preview cannot draw, for a dialog that started listening after it said so.
+#[tauri::command]
+pub fn youtube_preview_error(state: State<'_, AppState>) -> Option<String> {
+    state.youtube.preview.lock().unwrap().as_ref().and_then(|(engine, _)| engine.error.lock().unwrap().clone())
+}
+
 #[tauri::command]
 pub fn youtube_preview_play(state: State<'_, AppState>) {
     send(&state, Msg::Play);

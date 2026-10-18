@@ -124,6 +124,8 @@ export const api = {
   youtubeVideoStopAdd: (addId: string) => invoke<void>("youtube_video_stop_add", { addId }),
   youtubePreviewClose: () => invoke<void>("youtube_preview_close"),
   youtubePreviewPlay: () => invoke<void>("youtube_preview_play"),
+  /** Why the dialog's preview cannot draw; later changes come as `youtube-preview-error`. */
+  youtubePreviewError: () => invoke<string | null>("youtube_preview_error"),
   youtubePreviewPause: () => invoke<void>("youtube_preview_pause"),
   youtubePreviewSeek: (tUs: number) => invoke<void>("youtube_preview_seek", { tUs: Math.round(tUs) }),
   youtubePreviewResize: (width: number, height: number) => invoke<void>("youtube_preview_resize", { width, height }),

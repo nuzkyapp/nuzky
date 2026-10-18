@@ -109,9 +109,12 @@ function Dialog() {
   };
 
   const installYtdlp = async (url: string) => {
+    const run = runs.current.n;
     setInstalling(0);
     try {
       await api.installYtdlp();
+      // Closed, or another link, meanwhile: nothing more to download for this one.
+      if (run !== runs.current.n) return;
       setInstalling(null);
       await go(url);
     } catch (e) {
@@ -419,12 +422,18 @@ function Chooser({ url, video, preview, onImport, onCancel }: { url: string; vid
     setTime(t);
   });
 
+  const [previewError, setPreviewError] = useState<string | null>(null);
   useEffect(() => {
-    const off = listen<{ playing: boolean; tUs: number }>("youtube-transport", (e) => {
-      setPlaying(e.payload.playing);
-      if (!e.payload.playing && stopAt.current === null) setTime(e.payload.tUs);
-    });
-    return () => void off.then((f) => f());
+    const offs = [
+      listen<{ playing: boolean; tUs: number }>("youtube-transport", (e) => {
+        setPlaying(e.payload.playing);
+        if (!e.payload.playing && stopAt.current === null) setTime(e.payload.tUs);
+      }),
+      listen<string | null>("youtube-preview-error", (e) => setPreviewError(e.payload)),
+    ];
+    // It may have failed before this listened.
+    api.youtubePreviewError().then((error) => error && setPreviewError(error));
+    return () => void offs.forEach((off) => off.then((f) => f()));
   }, []);
 
   useEffect(() => {
@@ -515,6 +524,12 @@ function Chooser({ url, video, preview, onImport, onCancel }: { url: string; vid
       <div ref={stage} className="relative mt-3 flex h-[clamp(160px,calc(100vh-480px),288px)] items-center justify-center bg-black shadow-[0_0_0_1px_rgb(255_255_255/.07)]">
         {/* Square corners and no blurred shadow, as the editor's preview: WebKitGTK would otherwise mask or blank the canvas. */}
         <canvas ref={canvas} style={{ width: fit.w, height: fit.h }} aria-label={`Preview of ${video.title}`} />
+        {previewError && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/80 p-6 text-center" role="alert">
+            <p className="text-[13px] font-medium text-danger">The preview is unavailable</p>
+            <p className="text-[12px] text-muted">{previewError} You can still choose the part by its times and import it.</p>
+          </div>
+        )}
       </div>
 
       <div className="mt-3 flex h-8 items-center gap-2.5">
