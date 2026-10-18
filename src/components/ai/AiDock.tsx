@@ -45,15 +45,28 @@ export function startMove(e: React.PointerEvent, panel: HTMLElement, onClick?: (
   // A floating panel moves with its frame (shadow and resize edges); a docked one lifts out of its column.
   const box = panel.closest<HTMLElement>("[data-floating]") ?? panel;
   const from = box.getBoundingClientRect();
-  const style = box.getAttribute("style");
+  const lift: Partial<CSSStyleDeclaration> =
+    box === panel
+      ? {
+          position: "fixed",
+          left: `${from.left}px`,
+          top: `${from.top}px`,
+          width: `${size.w}px`,
+          height: `${size.h}px`,
+          zIndex: "80",
+          boxShadow: "0 18px 50px rgb(0 0 0 / .55)",
+          outlineColor: "rgb(255 255 255 / .12)",
+        }
+      : {};
+  // Only what the drag set is taken back, so a left or top React wrote meanwhile stays.
+  const cleared = Object.fromEntries([...Object.keys(lift), "transform", "cursor"].map((k) => [k, ""]));
   // Taken before the panel moves: in the inspector's place the panel itself is the slot.
   const slot = document.querySelector<HTMLElement>("[data-dock-slot=inspector]")?.getBoundingClientRect();
   let moved = false;
   const end = () => {
     useDrag.setState(null, true);
     window.removeEventListener("keydown", onKey, true);
-    if (style === null) box.removeAttribute("style");
-    else box.setAttribute("style", style);
+    Object.assign(box.style, cleared);
   };
   const onKey = (k: KeyboardEvent) => {
     if (k.key !== "Escape") return;
@@ -65,21 +78,13 @@ export function startMove(e: React.PointerEvent, panel: HTMLElement, onClick?: (
   const stopFollowing = followPointer({
     move: (ev) => {
       if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 5) return;
-      if (!moved && box === panel) {
-        Object.assign(panel.style, {
-          position: "fixed",
-          left: `${from.left}px`,
-          top: `${from.top}px`,
-          width: `${size.w}px`,
-          height: `${size.h}px`,
-          zIndex: "80",
-          boxShadow: "0 18px 50px rgb(0 0 0 / .55)",
-        });
-      }
+      if (!moved) Object.assign(box.style, lift, { cursor: "grabbing" });
       moved = true;
-      const float = clampFloat({ x: ev.clientX - grabX, y: ev.clientY - grabY, w: size.w, h: size.h });
-      box.style.transform = `translate(${float.x - from.left}px, ${float.y - from.top}px)`;
-      useDrag.setState(targetAt(ev.clientX, ev.clientY, float, slot), true);
+      // It follows the pointer past the window's edge; dropped, it floats inside the window.
+      const x = ev.clientX - grabX;
+      const y = ev.clientY - grabY;
+      box.style.transform = `translate(${x - from.left}px, ${y - from.top}px)`;
+      useDrag.setState(targetAt(ev.clientX, ev.clientY, clampFloat({ x, y, w: size.w, h: size.h }), slot), true);
     },
     up: () => {
       const drop = useDrag.getState();
@@ -98,7 +103,7 @@ export function moveFloatBy(dx: number, dy: number) {
   useDock.setState({ float: clampFloat({ ...f, x: f.x + dx, y: f.y + dy }) });
 }
 
-/** The docking place the dragged panel would land in: an outline of that area, with the place's name. */
+/** The docking place the dragged panel would land in: an outline of that area under the panel, named at its bottom. */
 export function DockDragLayer() {
   const drag = useDrag();
   if (!drag || drag.target === "float") return null;
@@ -106,7 +111,7 @@ export function DockDragLayer() {
   return (
     <div
       aria-hidden
-      className="pointer-events-none fixed z-[100] flex items-center justify-center rounded-xl border-2 border-accent bg-accent/[.10]"
+      className="pointer-events-none fixed z-[70] flex items-end justify-center rounded-xl border-2 border-accent bg-accent/[.10] pb-4"
       style={{ left: zone.x, top: zone.y, width: zone.w, height: zone.h }}
     >
       <span className="rounded-md bg-black/60 px-2 py-1 text-[12px] font-medium text-fg">{DOCK_LABELS[target]}</span>
@@ -124,7 +129,9 @@ export function DockedAiPanel({ side, width, inspectorMax }: { side: "left" | "r
   const inspector = inspectorMax !== undefined;
   return (
     <div className={`relative flex shrink-0 flex-col pb-1.5 ${side === "right" ? "pr-1.5" : "pl-1.5"}`} style={{ width: width + GAP }}>
-      <AiPanel panelRef={panel} className="min-h-0 flex-1" />
+      {/* Shows the column's place while the panel is lifted out of it. */}
+      <div aria-hidden className={`pane absolute top-0 bottom-1.5 ${side === "right" ? "left-0 right-1.5" : "left-1.5 right-0"}`} />
+      <AiPanel panelRef={panel} className="relative min-h-0 flex-1" />
       {/* The 6 px gap between the editor and the column; the panel grows towards the editor. */}
       <Splitter
         what="AI panel"

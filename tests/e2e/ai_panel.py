@@ -623,6 +623,14 @@ def ai_panel(r):
     r.key('Escape')
     r.check('Esc puts the dragged panel back where it was', wait(lambda: (panel(r)['left'], panel(r)['top']) == (before['left'], before['top']), 3), panel(r))
     r.s.run(DRAG, 600, 300, False)
+    webdriver('POST', r.s.path + '/window/rect', {'width': 1024, 'height': 640})
+    wait(lambda: panel(r)['windowWidth'] <= 1030, 5)
+    r.key('Escape')
+    r.check('a drag cancelled after the window shrank leaves the panel inside the window',
+            wait(lambda: panel(r)['left'] >= 6 and panel(r)['right'] >= 6, 3), panel(r))
+    webdriver('POST', r.s.path + '/window/rect', {'width': 1440, 'height': 900})
+    wait(lambda: panel(r)['windowWidth'] >= 1430, 5)
+    r.s.run(DRAG, 600, 300, False)
     shown = wait(lambda: (lambda q: q if r.s.run(GRIP_AT, 600, 300) else None)(panel(r)), 3)
     r.s.run("window.dispatchEvent(new PointerEvent('pointerup', {clientX: 600, clientY: 300, pointerId: 1}))")
     r.check('let go, it stays exactly where it was shown while dragging', shown and wait(lambda: (panel(r)['left'], panel(r)['top'], panel(r)['width']) == (shown['left'], shown['top'], shown['width']), 3),

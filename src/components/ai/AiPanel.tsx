@@ -1126,7 +1126,7 @@ export function AiPanel({
       >
         {about === "project" && <PlaceMenu panel={panelRef} />}
         <AgentMenu />
-        <span className="flex-1 self-stretch" onPointerDown={about === "project" ? move : undefined} />
+        <span className={`flex-1 self-stretch ${about === "project" ? "cursor-grab" : ""}`} onPointerDown={about === "project" ? move : undefined} />
         <IconButton
           label={busy ? "New chat: wait for the answer, or stop it" : empty ? "New chat: there is nothing to clear yet" : left ? "New chat: stops what the agent is still doing" : "New chat"}
           disabled={busy || empty}
