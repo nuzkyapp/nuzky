@@ -13,8 +13,11 @@ use anyhow::{Context, Result, anyhow, bail, ensure};
 use nuzky_engine::edit::new_id;
 use serde::Deserialize;
 
-/// yt-dlp picks this; AAC in MP4 when YouTube has it, as it nearly always does.
-const FORMAT: &str = "bestaudio[ext=m4a]/bestaudio";
+/// The sound of a video: AAC in MP4 when YouTube has it, as it nearly always does.
+pub const SOUND: &str = "bestaudio[ext=m4a]/bestaudio";
+/// The picture of a video without its sound, which Nuzky joins itself, as users have no ffmpeg program for
+/// yt-dlp to merge them: up to 1080p, H.264 when YouTube has it, as every computer decodes it.
+pub const PICTURE: &str = "bestvideo[height<=1080][vcodec^=avc1]/bestvideo[height<=1080]/bestvideo";
 const MAX_JSON_BYTES: u64 = 16 << 20;
 const RESOLVE_TIMEOUT: Duration = Duration::from_secs(30);
 const PROGRESS: &str =
@@ -286,13 +289,13 @@ fn refresh() {
     });
 }
 
-fn command(args: &[&str]) -> Result<Command> {
+fn command(format: &str, args: &[&str]) -> Result<Command> {
     let program = find().ok_or_else(missing)?;
     // yt-dlp runs deno and ffmpeg from its PATH, which an app started from the Dock lacks.
     let path = std::env::join_paths(program.parent().map(Path::to_path_buf).into_iter().chain(search_dirs()))?;
     let mut command = Command::new(program);
     command
-        .args(["--ignore-config", "--no-playlist", "--encoding", "utf-8", "--socket-timeout", "20", "-f", FORMAT])
+        .args(["--ignore-config", "--no-playlist", "--encoding", "utf-8", "--socket-timeout", "20", "-f", format])
         .args(args)
         .env("PATH", path)
         .stdin(Stdio::null())
@@ -404,10 +407,11 @@ pub struct Video {
     live_status: Option<String>,
 }
 
-/// Looks up one video without downloading it: a few seconds, and at most half a minute.
-pub fn video(id: &str, max_bytes: u64) -> Result<Video> {
+/// Looks up one video and the size of its `format` without downloading it: a few seconds, and at most half a
+/// minute.
+pub fn video(id: &str, format: &str, max_bytes: u64) -> Result<Video> {
     ensure!(valid_id(id), "INVALID_LINK: {id:?} is not a YouTube video id");
-    let mut child = command(&["--skip-download", "--dump-single-json", "--no-warnings", "--", &watch_url(id)])?
+    let mut child = command(format, &["--skip-download", "--dump-single-json", "--no-warnings", "--", &watch_url(id)])?
         .spawn()
         .map_err(|e| anyhow!("YTDLP_FAILED: yt-dlp could not start ({e})"))?;
     let stderr = collect_stderr(&mut child);
@@ -440,31 +444,32 @@ pub fn video(id: &str, max_bytes: u64) -> Result<Video> {
     );
     ensure!(
         video.filesize.or(video.filesize_approx).is_none_or(|size| size <= max_bytes),
-        "SOUND_UNAVAILABLE: this video is too long to add as a sound"
+        "SOUND_UNAVAILABLE: this video is too long to download"
     );
     Ok(video)
 }
 
 // ---------- Downloading ----------
 
-/// Downloads the sound of the video to `path` through a temporary file beside it. `cancel` stops it
+/// Downloads the `format` of the video to `path` through a temporary file beside it. `cancel` stops it
 /// within 100 ms and leaves nothing behind.
 pub fn download(
     id: &str,
+    format: &str,
     path: &Path,
     max_bytes: u64,
     cancel: &AtomicBool,
     mut progress: impl FnMut(f32),
 ) -> Result<()> {
     ensure!(valid_id(id), "INVALID_LINK: {id:?} is not a YouTube video id");
-    let dir = path.parent().context("Sound needs a directory")?;
+    let dir = path.parent().context("The download needs a directory")?;
     std::fs::create_dir_all(dir)?;
     let part = dir.join(format!(".nuzky-part-{}", new_id()));
     let max = format!("{max_bytes}");
     let result = (|| {
         // yt-dlp reads -o as a template, where % starts a field.
         let output = part.to_str().context("The cache folder's name is not valid text")?.replace('%', "%%");
-        let mut child = command(&[
+        let mut child = command(format, &[
             "--quiet",
             "--progress",
             "--newline",
@@ -510,10 +515,10 @@ pub fn download(
         ensure!(status.success(), failure(&stderr, !executable(&own_copy())));
         // Over --max-filesize yt-dlp skips the download and still succeeds.
         let size = part.metadata().map(|m| m.len()).unwrap_or(0);
-        ensure!(size > 0, "SOUND_UNAVAILABLE: this video is too long to add as a sound");
-        ensure!(size <= max_bytes, "SOUND_UNAVAILABLE: this video is too long to add as a sound");
+        ensure!(size > 0, "SOUND_UNAVAILABLE: this video is too long to download");
+        ensure!(size <= max_bytes, "SOUND_UNAVAILABLE: this video is too long to download");
         std::fs::OpenOptions::new().write(true).open(&part)?.sync_all()?;
-        std::fs::rename(&part, path).context("Saving the sound")
+        std::fs::rename(&part, path).context("Saving the download")
     })();
     if result.is_err() {
         std::fs::remove_file(&part).ok();

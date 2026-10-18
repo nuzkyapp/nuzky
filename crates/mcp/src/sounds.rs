@@ -569,7 +569,7 @@ pub fn link(url: &str) -> Result<Sound> {
 }
 
 fn youtube_sound(id: &str) -> Result<Sound> {
-    let video = crate::youtube::video(id, MAX_FILE_BYTES)?;
+    let video = crate::youtube::video(id, crate::youtube::SOUND, MAX_FILE_BYTES)?;
     let author = [&video.artist, &video.channel, &video.uploader].into_iter().find_map(|a| a.as_deref());
     let sound = Sound {
         id: format!("youtube:{id}"),
@@ -756,7 +756,7 @@ fn fetch_here(id: &str, cache_dir: &Path, cancel: &AtomicBool, progress: impl Fn
             settings().youtube_rights,
             "RIGHTS_UNCONFIRMED: before the first song from a YouTube link, the user must agree that they are responsible for the rights to the music and for following YouTube's terms"
         );
-        crate::youtube::download(video, &path, MAX_FILE_BYTES, cancel, progress)?;
+        crate::youtube::download(video, crate::youtube::SOUND, &path, MAX_FILE_BYTES, cancel, progress)?;
     } else {
         download(&sound, &path, cancel, progress)?;
     }

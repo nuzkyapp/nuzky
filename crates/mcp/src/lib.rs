@@ -17,6 +17,7 @@ pub mod stickers;
 pub mod style;
 mod tools;
 pub mod transcript;
+pub mod videos;
 pub mod vision_models;
 mod waveform;
 pub mod youtube;
