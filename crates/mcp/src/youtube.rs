@@ -16,8 +16,8 @@ use serde::Deserialize;
 /// The sound of a video: AAC in MP4 when YouTube has it, as it nearly always does.
 pub const SOUND: &str = "bestaudio[ext=m4a]/bestaudio";
 /// The picture of a video without its sound, which Nuzky joins itself, as users have no ffmpeg program for
-/// yt-dlp to merge them: up to 1080p, H.264 when YouTube has it, as every computer decodes it.
-pub const PICTURE: &str = "bestvideo[height<=1080][vcodec^=avc1]/bestvideo[height<=1080]/bestvideo";
+/// yt-dlp to merge them: at most 1080p, H.264 when YouTube has it, as every computer decodes it.
+pub const PICTURE: &str = "bestvideo[height<=1080][vcodec^=avc1]/bestvideo[height<=1080]";
 const MAX_JSON_BYTES: u64 = 16 << 20;
 const RESOLVE_TIMEOUT: Duration = Duration::from_secs(30);
 const PROGRESS: &str =

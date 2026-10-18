@@ -1,5 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { AudioLines, Film, Image as ImageIcon, Plus } from "lucide-react";
+import { AudioLines, Film, Image as ImageIcon, Plus, X } from "lucide-react";
 import { api, errorText } from "../../lib/api";
 import { followPointer } from "../../lib/drag";
 import { MAIN_TRACK, aiLocked, allClips, currentEpoch, findClip, undoAction, useEditor } from "../../lib/store";
@@ -68,7 +68,7 @@ export async function importPaths(paths: string[], place?: { trackId: string | n
 }
 
 /** A file being imported: the name and a skeleton where its thumbnail will be. */
-export function ImportPlaceholder({ name, compact }: { name: string; compact?: boolean }) {
+export function ImportPlaceholder({ name, compact, onStop }: { name: string; compact?: boolean; onStop?: () => void }) {
   if (compact)
     return (
       <div className="flex items-center gap-2 rounded-xl p-1.5" role="status" aria-label={`Importing ${name}`}>
@@ -78,7 +78,19 @@ export function ImportPlaceholder({ name, compact }: { name: string; compact?: b
     );
   return (
     <div className="flex min-w-0 flex-col gap-1.5" role="status" aria-label={`Importing ${name}`}>
-      <div className="skeleton aspect-square rounded-[10px]" />
+      <div className="skeleton relative aspect-square rounded-[10px]">
+        {onStop && (
+          <button
+            type="button"
+            aria-label={`Stop adding ${name}`}
+            title="Stop"
+            onClick={onStop}
+            className="absolute right-1.5 bottom-1.5 flex h-[26px] w-[26px] items-center justify-center rounded-full bg-black/55 text-white shadow-[inset_0_0_0_1px_rgb(255_255_255/.18)] hover:bg-black/75"
+          >
+            <X size={14} />
+          </button>
+        )}
+      </div>
       <span className="truncate text-[11px] leading-[13px] text-muted">{name}</span>
     </div>
   );

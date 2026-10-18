@@ -30,7 +30,7 @@ def main():
     if url != f'https://www.youtube.com/watch?v={video}':
         fail('expected a canonical watch URL')
     base = ['--ignore-config', '--no-playlist', '--encoding', 'utf-8', '--socket-timeout', '20', '-f']
-    picture = 'bestvideo[height<=1080][vcodec^=avc1]/bestvideo[height<=1080]/bestvideo'
+    picture = 'bestvideo[height<=1080][vcodec^=avc1]/bestvideo[height<=1080]'
     if options[:len(base)] != base or options[len(base)] not in ('bestaudio[ext=m4a]/bestaudio', picture):
         fail('unexpected base arguments')
     picture = options[len(base)] == picture

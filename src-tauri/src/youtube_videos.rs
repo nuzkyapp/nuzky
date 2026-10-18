@@ -24,6 +24,8 @@ const SOUND: &str = "youtube-sound";
 #[derive(Default)]
 pub struct YoutubeVideos {
     download: Mutex<Option<Arc<AtomicBool>>>,
+    /// Videos being added, by the id the Media panel gave them: setting a flag stops one.
+    adding: Mutex<std::collections::HashMap<String, Arc<AtomicBool>>>,
     preview: Mutex<Option<(Engine, Asset)>>,
 }
 
@@ -171,11 +173,16 @@ pub async fn youtube_video_add(
     app: AppHandle,
     video: Video,
     part: Option<Part>,
+    add_id: String,
     expected_epoch: Option<String>,
 ) -> CmdResult<Snapshot> {
     let state = app.state::<AppState>();
     let cache = state.cache_dir.clone();
-    let asset = blocking(move || videos::asset(&video, part, &cache, &AtomicBool::new(false), |_| {})).await?;
+    let cancel = Arc::new(AtomicBool::new(false));
+    state.youtube.adding.lock().unwrap().insert(add_id.clone(), cancel.clone());
+    let result = blocking(move || videos::asset(&video, part, &cache, &cancel, |_| {})).await;
+    state.youtube.adding.lock().unwrap().remove(&add_id);
+    let asset = result?;
     let path = asset.path.clone();
     let snap = state
         .apply_batch(
@@ -187,6 +194,14 @@ pub async fn youtube_video_add(
         .inspect_err(|_| drop(std::fs::remove_file(&path)))?;
     crate::jobs::prepare_media(&state, &snap.project);
     Ok(snap)
+}
+
+/// Stops adding a video, as Stop on its tile in Media does.
+#[tauri::command]
+pub fn youtube_video_stop_add(state: State<'_, AppState>, add_id: String) {
+    if let Some(cancel) = state.youtube.adding.lock().unwrap().get(&add_id) {
+        cancel.store(true, Ordering::Relaxed);
+    }
 }
 
 /// The downloads of the last session, which nothing needs any more.

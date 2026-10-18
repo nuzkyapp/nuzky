@@ -119,7 +119,9 @@ export const api = {
   youtubeVideoFetch: (id: string) => invoke<VideoPreview>("youtube_video_fetch", { id }),
   youtubeVideoCancel: () => invoke<void>("youtube_video_cancel"),
   /** Adds the video, or its part with up to 3 s hidden around it, to the media as one undo step. */
-  youtubeVideoAdd: (video: YoutubeVideo, part: Part | null, epoch: Epoch) => invoke<Snapshot>("youtube_video_add", { video, part, expectedEpoch: epoch }),
+  youtubeVideoAdd: (video: YoutubeVideo, part: Part | null, addId: string, epoch: Epoch) =>
+    invoke<Snapshot>("youtube_video_add", { video, part, addId, expectedEpoch: epoch }),
+  youtubeVideoStopAdd: (addId: string) => invoke<void>("youtube_video_stop_add", { addId }),
   youtubePreviewClose: () => invoke<void>("youtube_preview_close"),
   youtubePreviewPlay: () => invoke<void>("youtube_preview_play"),
   youtubePreviewPause: () => invoke<void>("youtube_preview_pause"),

@@ -27,7 +27,8 @@ pub fn raw_import(project: &Project, kept: &[Asset]) -> Result<Project> {
     let mut assets: Vec<Asset> = Vec::new();
     for asset in kept.iter().chain(playing).filter(|a| a.kind == AssetKind::Video) {
         if !assets.iter().any(|a| a.id == asset.id) {
-            assets.push(project.asset(&asset.id).unwrap_or(asset).clone());
+            // The whole file, also the footage a YouTube video's part keeps hidden around it.
+            assets.push(Asset { part: None, ..project.asset(&asset.id).unwrap_or(asset).clone() });
         }
     }
     let mut cmds = vec![EditCmd::AddAssets { assets: assets.clone() }];

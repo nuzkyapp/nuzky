@@ -53,7 +53,8 @@ interface EditorState {
   /** Where files dragged in from the desktop are over the window, in CSS pixels, while they include media. */
   fileDrag: { x: number; y: number } | null;
   /** Files being probed by an import, shown as placeholders until they arrive. */
-  importing: { key: number; name: string; kind: Asset["kind"] }[];
+  /** Files and videos being added, shown as skeleton tiles; `stop` gives the tile a Stop. */
+  importing: { key: number; name: string; kind: Asset["kind"]; stop?: () => void }[];
   exportOpen: boolean;
   /** Open the export dialog on Recap, of this AI run or, with null, of everything cut since the import. */
   exportRecap: { runId: string | null } | null;

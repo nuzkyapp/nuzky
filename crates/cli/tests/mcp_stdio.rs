@@ -378,7 +378,9 @@ fn youtube_video_parts_download_with_mocked_ytdlp_and_require_rights() {
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     }
     let fake = dir.join("yt-dlp");
-    std::fs::write(&fake, r#"#!/usr/bin/env python3
+    std::fs::write(
+        &fake,
+        r#"#!/usr/bin/env python3
 import json, os, shutil, sys
 from pathlib import Path
 args = sys.argv[1:]
@@ -386,14 +388,16 @@ with open(os.environ['NUZKY_FAKE_YTDLP_LOG'], 'a') as out:
     out.write(json.dumps(args) + '\n')
 assert args[args.index('--') + 1:] == ['https://www.youtube.com/watch?v=ytVideo0001']
 fmt = args[args.index('-f') + 1]
-assert fmt in ('bestvideo[height<=1080][vcodec^=avc1]/bestvideo[height<=1080]/bestvideo', 'bestaudio[ext=m4a]/bestaudio'), fmt
+assert fmt in ('bestvideo[height<=1080][vcodec^=avc1]/bestvideo[height<=1080]', 'bestaudio[ext=m4a]/bestaudio'), fmt
 source = os.environ['NUZKY_FAKE_YTDLP_PICTURE' if fmt.startswith('bestvideo') else 'NUZKY_FAKE_YTDLP_AUDIO']
 if '--skip-download' in args:
     print(json.dumps({'id': 'ytVideo0001', 'title': 'Test video', 'duration': 10,
                       'filesize': Path(source).stat().st_size, 'live_status': 'not_live'}))
 else:
     shutil.copyfile(source, args[args.index('-o') + 1])
-"#).unwrap();
+"#,
+    )
+    .unwrap();
     std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o700)).unwrap();
     let (log, home, data, cache, runtime) =
         (dir.join("ytdlp.jsonl"), dir.join("home"), dir.join("data"), dir.join("cache"), dir.join("runtime"));

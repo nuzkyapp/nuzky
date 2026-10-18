@@ -132,7 +132,7 @@ export function MediaTab() {
               <MediaItem key={a.id} asset={a} />
             ))}
             {importing.map((i) => (
-              <ImportPlaceholder key={i.key} name={i.name} />
+              <ImportPlaceholder key={i.key} name={i.name} onStop={i.stop} />
             ))}
           </div>
         </>

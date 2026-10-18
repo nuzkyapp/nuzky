@@ -51,9 +51,13 @@ function ClipInspector({ clip, kind, asset, chosen, onChoose }: { clip: Clip; ki
   const tabs = tabsFor(kind, hasSound);
   const tab = tabs.find((t) => t.id === chosen[kind])?.id ?? tabs[0].id;
   const title = kind === "caption" ? "Caption" : kind === "text" ? "Text" : (asset?.name ?? "Missing media");
+  // A YouTube video's hidden footage stays hidden: until the clip reaches into it, times count within the part.
+  const part = asset?.part;
+  const within = !!part && c.type === "media" && c.sourceInUs >= part.startUs && c.sourceInUs + clip.durationUs * c.speed <= part.endUs + 1000;
+  const [origin, length] = within && part ? [part.startUs, part.endUs - part.startUs] : [0, asset?.durationUs ?? 0];
   const detail =
     formatDuration(clip.durationUs) +
-    (asset && asset.kind !== "image" && c.type === "media" ? ` · from ${formatDuration(c.sourceInUs)} of ${formatDuration(asset.durationUs)}` : "");
+    (asset && asset.kind !== "image" && c.type === "media" ? ` · from ${formatDuration(c.sourceInUs - origin)} of ${formatDuration(length)}` : "");
 
   return (
     <>

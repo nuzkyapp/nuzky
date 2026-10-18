@@ -17,11 +17,13 @@ let adds = 0;
 export async function addYoutubeVideo(video: YoutubeVideo, part: Part | null, url: string) {
   if (aiLocked()) return;
   const { setSnap, toast } = useEditor.getState();
-  const pending = { key: -++adds, name: video.title, kind: "video" as const };
+  const addId = `youtube-${++adds}`;
+  const pending = { key: -adds, name: video.title, kind: "video" as const, stop: () => api.youtubeVideoStopAdd(addId) };
   useEditor.setState({ importing: [...useEditor.getState().importing, pending] });
   try {
-    setSnap(await api.youtubeVideoAdd(video, part, currentEpoch()));
+    setSnap(await api.youtubeVideoAdd(video, part, addId, currentEpoch()));
   } catch (e) {
+    if (errorText(e).startsWith("CANCELLED")) return;
     toast({ kind: "error", text: `Couldn't add ${video.title}. ${plainError(errorText(e))}`, action: { label: "Open again", run: () => openYoutube(url) } });
   } finally {
     useEditor.setState({ importing: useEditor.getState().importing.filter((i) => i !== pending) });

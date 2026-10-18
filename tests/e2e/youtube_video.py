@@ -155,6 +155,9 @@ return b.getBoundingClientRect().bottom <= window.innerHeight && document.queryS
     clip = clip_of(r, asset['id'])
     r.check('a new clip takes only the part',
             clip['content']['sourceInUs'] == part['startUs'] and abs(clip['durationUs'] - length) < 40_000, clip)
+    r.s.run('window.__nuzky.store.getState().select([arguments[0]])', clip['id'])
+    detail = wait(lambda: r.s.run('return [...document.querySelectorAll("div")].filter((e) => e.children.length === 0).map((e) => e.textContent).find((t) => /· from .* of /.test(t ?? "")) ?? ""'), 5)
+    r.check('the inspector counts within the part, so nothing shows there is more', detail and detail.endswith('from 0.0 s of 3.0 s'), detail)
     trimmed = r.s.call("""window.__nuzky.store.getState().edit({type: 'trimClip', clipId: arguments[0], sourceInUs: 0,
         startUs: arguments[1], durationUs: arguments[2]})""", clip['id'], clip['startUs'], clip['durationUs'] + part['startUs'])
     r.check('the clip\'s edge drags out over the hidden footage', trimmed['ok'] and clip_of(r, asset['id'])['content']['sourceInUs'] == 0, trimmed)

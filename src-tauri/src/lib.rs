@@ -1250,6 +1250,7 @@ pub fn run() {
             youtube_videos::youtube_video_fetch,
             youtube_videos::youtube_video_cancel,
             youtube_videos::youtube_video_add,
+            youtube_videos::youtube_video_stop_add,
             youtube_videos::youtube_preview_close,
             youtube_videos::youtube_preview_play,
             youtube_videos::youtube_preview_pause,
