@@ -99,6 +99,8 @@ export async function searchSounds(kind: SoundKind, query: string, page = 1) {
 
 let links = 0;
 let rightsRead = false;
+/** What the user asked of the linked song when their own yt-dlp could not get it, done once Nuzky has its own. */
+let afterYtdlp: { id: string; run: () => void } | null = null;
 
 /** Looks up the video of a YouTube link; the first time, the user reads whose the music's rights are. */
 export async function openLink(url: string) {
@@ -138,7 +140,10 @@ export async function answerRights(agree: boolean) {
   }
 }
 
-/** Downloads yt-dlp, then looks the link up again; stopped, the link still says yt-dlp is missing. */
+/**
+ * Downloads yt-dlp, looks the link up again and plays or adds the song when that is what failed;
+ * stopped, the link still offers the download.
+ */
 export async function installYtdlp() {
   if (useSounds.getState().installing) return;
   useSounds.setState({ installing: true });
@@ -146,6 +151,9 @@ export async function installYtdlp() {
     await api.installYtdlp();
     useSounds.setState({ installing: false });
     await openLink(useSounds.getState().link.url);
+    const next = afterYtdlp;
+    afterYtdlp = null;
+    if (next && useSounds.getState().link.sound?.id === next.id) next.run();
   } catch (e) {
     const text = errorText(e);
     useSounds.setState((s) => ({ installing: false, link: text.startsWith("CANCELLED") ? s.link : { ...s.link, error: text } }));
@@ -155,9 +163,10 @@ export async function installYtdlp() {
 }
 
 /** When the user's own yt-dlp could not download the linked song, the link offers Nuzky's copy in its place. */
-function offerOwnYtdlp(sound: Sound, text: string) {
+function offerOwnYtdlp(sound: Sound, text: string, run: () => void) {
   const { link } = useSounds.getState();
   if (!text.startsWith("YTDLP_OUTDATED") || link.sound?.id !== sound.id) return false;
+  afterYtdlp = { id: sound.id, run };
   useSounds.setState({ link: { ...NO_LINK, url: link.url, error: text } });
   return true;
 }
@@ -180,7 +189,7 @@ export async function togglePreview(sound: Sound) {
     const text = errorText(e);
     if (useSounds.getState().preview?.id !== sound.id || text.startsWith("CANCELLED")) return;
     useSounds.setState({ preview: null });
-    if (!offerOwnYtdlp(sound, text)) toast({ kind: "error", text });
+    if (!offerOwnYtdlp(sound, text, () => togglePreview(sound))) toast({ kind: "error", text });
   }
 }
 
@@ -193,7 +202,7 @@ export async function addSound(sound: Sound) {
     setSnap(await api.soundAdd(sound.id, timeUs, currentEpoch()));
   } catch (e) {
     const text = errorText(e);
-    if (!text.includes("CANCELLED") && !offerOwnYtdlp(sound, text)) toast({ kind: "error", text: `Could not add ${sound.title}: ${text}` });
+    if (!text.includes("CANCELLED") && !offerOwnYtdlp(sound, text, () => addSound(sound))) toast({ kind: "error", text: `Could not add ${sound.title}: ${text}` });
   } finally {
     useSounds.setState((s) => ({ adding: s.adding.filter((id) => id !== sound.id), progress: { ...s.progress, [sound.id]: 0 } }));
   }

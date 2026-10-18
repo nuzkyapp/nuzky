@@ -210,20 +210,6 @@ input.dispatchEvent(new Event('input', {bubbles: true}));""", FIELD, f'https://y
     r.check('Enter also looks up a typed link without another rights notice',
             wait(lambda: r.s.run('return !!document.querySelector(arguments[0])', ROW), 10) and not dialog(r))
 
-    forbidden = '[data-sound="youtube:ytForbid001"]'
-    paste(r, 'https://youtu.be/ytForbid001')
-    wait(lambda: r.s.run('return !!document.querySelector(arguments[0])', forbidden), 10)
-    before = r.s.run(PROJECT)
-    r.s.run(CLICK, forbidden + ' button[aria-label^=Add]')
-    offer = wait(lambda: (text := alert(r)) and 'out of date' in text and text, 10) or ''
-    r.check('a download the installed yt-dlp fails offers Download yt-dlp in place of the row, without a code',
-            "couldn't get this song, probably because it's out of date" in offer
-            and r.s.run('return document.querySelector("[role=alert] button")?.textContent') == 'Download yt-dlp'
-            and not r.s.run('return !!document.querySelector(arguments[0])', forbidden)
-            and 'YTDLP_OUTDATED' not in offer and '403' not in offer, offer)
-    r.check('the failed download adds nothing and shows no error toast', r.s.run(PROJECT) == before and not r.errors(), r.errors())
-    r.shot('outdated-ytdlp-offer')
-
     slow = '[data-sound="youtube:ytSlow00001"]'
     paste(r, 'https://youtu.be/ytSlow00001')
     wait(lambda: r.s.run('return !!document.querySelector(arguments[0])', slow), 10)
@@ -243,7 +229,7 @@ input.dispatchEvent(new Event('input', {bubbles: true}));""", FIELD, f'https://y
             stopped and took < 3 and len(r.state()['assets']) == assets and left == [] and running == [],
             (round(took, 1), left, running))
     r.check('every invocation gets only a canonical watch URL',
-            bool(invocations(r)) and all(args[args.index('--') + 1:] in ([f'https://www.youtube.com/watch?v={v}'] for v in (SONG, 'ytPrivate01', 'ytForbid001', 'ytSlow00001'))
+            bool(invocations(r)) and all(args[args.index('--') + 1:] in ([f'https://www.youtube.com/watch?v={v}'] for v in (SONG, 'ytPrivate01', 'ytSlow00001'))
                                          for args in invocations(r)), invocations(r))
     if r.check('the window goes to its smallest size', resize(r, 1024, 640)):
         time.sleep(0.5)
@@ -328,6 +314,57 @@ def youtube_missing(r):
         r.check('the added song uses the fake audio and never contacts YouTube',
                 asset and Path(asset['path']).read_bytes() == (r.work / 'tone.m4a').read_bytes()
                 and len(invocations(r)) == 2 and '-o' in invocations(r)[1], invocations(r))
+    finally:
+        r.releases.shutdown()
+        r.releases.server_close()
+        r.release_worker.join(timeout=5)
+
+
+def outdated(r):
+    missing(r)
+    r.env['NUZKY_YTDLP'] = str(Path(__file__).with_name('fake_ytdlp'))
+    r.releases.correct = True
+
+
+@flow('youtube-outdated', 'An installed yt-dlp YouTube refuses offers Nuzky\'s own and then adds the song', before=outdated)
+def youtube_outdated(r):
+    try:
+        forbidden = '[data-sound="youtube:ytForbid001"]'
+        r.import_media(SOURCE)
+        r.add_clip(SOURCE.name)
+        music(r)
+        paste(r, 'https://youtu.be/ytForbid001')
+        wait(lambda: dialog(r), 5)
+        answer(r, 'I understand')
+        r.check('the installed yt-dlp looks the song up',
+                wait(lambda: r.s.run('return !!document.querySelector(arguments[0])', forbidden), 10))
+        before = r.s.run(PROJECT)
+        r.s.run(CLICK, forbidden + ' button[aria-label^=Add]')
+        offer = wait(lambda: (text := alert(r)) and 'out of date' in text and text, 10) or ''
+        r.check('a download the installed yt-dlp fails offers Download yt-dlp in place of the row, without a code',
+                "couldn't get this song, probably because it's out of date" in offer
+                and r.s.run('return document.querySelector("[role=alert] button")?.textContent') == 'Download yt-dlp'
+                and not r.s.run('return !!document.querySelector(arguments[0])', forbidden)
+                and 'YTDLP_OUTDATED' not in offer and '403' not in offer, offer)
+        r.check('the failed download adds nothing, downloads no yt-dlp and shows no error toast',
+                r.s.run(PROJECT) == before and r.releases.requests == [] and not r.errors(), r.errors())
+        r.shot('outdated-ytdlp-offer')
+
+        r.s.run(CLICK, '[role=alert] button')
+        added = wait(lambda: any(a['name'] == 'Old Song' for a in r.state()['assets']), 15)
+        project = r.s.run(PROJECT)
+        asset = next((a for a in project['assets'] if a['name'] == 'Old Song'), None)
+        placed = [c for t in project['tracks'] for c in t['clips'] if asset and c['content'].get('assetId') == asset['id']]
+        r.check('after Download yt-dlp the song is added by itself, once, without another click',
+                added and len(placed) == 1 and asset['kind'] == 'audio'
+                and Path(asset['path']).read_bytes() == (r.work / 'tone.m4a').read_bytes(), placed)
+        own = r.work / 'data/nuzky/tools/yt-dlp'
+        downloads = [args for args in invocations(r) if '-o' in args]
+        r.check("Nuzky's own copy came from the release server and did the second download",
+                r.releases.requests == ['/latest', '/' + r.release] and own.read_bytes() == r.tool and len(downloads) == 2,
+                (r.releases.requests, len(downloads)))
+        r.shot('song-added-after-download')
+        r.check('no error toasts', not r.errors(), r.errors())
     finally:
         r.releases.shutdown()
         r.releases.server_close()

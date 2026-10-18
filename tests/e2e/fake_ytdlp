@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Offline yt-dlp for the tests: yt_Song0001 downloads at once, ytSlow00001 slowly, ytPrivate01 is private,
-ytForbid001 looks up but YouTube refuses its download, as it does an outdated yt-dlp."""
+ytForbid001 looks up but YouTube refuses its download, as it does an outdated yt-dlp, unless this runs as Nuzky's own copy."""
 import json, os, re, shutil, subprocess, sys
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -65,7 +65,7 @@ def main():
                           'duration': 20, 'ext': 'm4a', 'filesize': total,
                           'filesize_approx': total, 'live_status': 'not_live'}), flush=True)
         return
-    if video == 'ytForbid001':
+    if video == 'ytForbid001' and Path(__file__).parent.name != 'tools':
         fail('unable to download video data: HTTP Error 403: Forbidden')
     if total > limit:
         return
