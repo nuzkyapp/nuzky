@@ -642,6 +642,9 @@ impl Project {
     /// Moves the time from `at` on by `delta` on every track that follows the main track: a negative
     /// `delta` cuts `at..at - delta` out of them, a positive one opens that much time at `at`.
     fn ripple_others(&mut self, at: i64, delta: i64, min: i64) {
+        if delta == 0 {
+            return;
+        }
         for thumbnail in self.thumbnails.iter_mut().filter(|t| t.time_us >= at) {
             thumbnail.time_us = (thumbnail.time_us + delta).max(at);
         }
@@ -2543,6 +2546,12 @@ mod tests {
             keep_in_place: Some(false),
         })
         .unwrap();
+
+        // An edge dragged and put back changes nothing.
+        let before = p.clone();
+        p.apply(EditCmd::TrimClip { clip_id: first.clone(), start_us: 0, duration_us: 3_000_000, source_in_us: None })
+            .unwrap();
+        assert_eq!(p.tracks, before.tracks);
 
         p.apply(EditCmd::TrimClip { clip_id: first, start_us: 0, duration_us: 4_000_000, source_in_us: None }).unwrap();
         let spoken: Vec<_> = p
