@@ -1,5 +1,18 @@
 export const US = 1_000_000;
 
+/** When frame `index` starts, rounded to the microsecond as the engine renders it (`frame_time_us`). */
+export const frameTime = (index: number, fps: number) => Math.round((index * US) / fps);
+
+export const nearestFrame = (us: number, fps: number) => frameTime(Math.round((us * fps) / US), fps);
+
+/** The frame start after (`dir` 1) or before (-1) `us`, so a playhead between frames lands on the next one. */
+export function stepFrame(us: number, dir: 1 | -1, fps: number): number {
+  let index = Math.round((us * fps) / US);
+  while (dir > 0 ? frameTime(index, fps) <= us : frameTime(index, fps) >= us) index += dir;
+  while (dir > 0 ? frameTime(index - 1, fps) > us : frameTime(index + 1, fps) < us) index -= dir;
+  return frameTime(index, fps);
+}
+
 /** 00:12.40 style timecode; hours appear only when needed. */
 export function formatTime(us: number, withFraction = true): string {
   const total = Math.max(0, us) / US;

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Copy, Magnet, Maximize2, PanelLeftClose, PanelRightClose, Scissors, Trash2, ZoomIn, ZoomOut } from "lucide-react";
-import { MAIN_TRACK, allClips, contentEnd, deleteSelection, deleteSide, displayTracks, duplicateSelection, editClip, findClip, mainClips, projectDuration, splitAtPlayhead, splitTargets, useAiLocked, useEditor } from "../../lib/store";
+import { MAIN_TRACK, allClips, contentEnd, deleteSelection, deleteSide, displayTracks, duplicateSelection, editClip, findClip, mainClips, projectDuration, splitAtPlayhead, splitBlocker, useAiLocked, useEditor } from "../../lib/store";
 import { US, formatDuration, formatTime } from "../../lib/time";
 import type { Clip, EditCmd, Project, Track } from "../../lib/types";
 import { candidateReason, useCandidates, useCover } from "../../lib/cover";
@@ -147,7 +147,7 @@ export function Timeline({ height }: { height: number }) {
   const selection = useEditor((s) => s.selection);
   const cut = useEditor((s) => s.cut);
   // A boolean, so playback re-renders the timeline only when it changes.
-  const canSplit = useEditor((s) => (s.snap ? splitTargets(s.snap.project, s.selection, s.timeUs).length > 0 : false));
+  const splitBlocked = useEditor((s) => (s.snap ? splitBlocker(s.snap.project, s.selection, s.timeUs) : "move the playhead over a clip"));
   const zoom = useEditor((s) => s.zoom);
   // Media dragged from the panel, or files dragged in from the desktop.
   const assetDrag = useEditor((s) => s.assetDrag ?? s.fileDrag);
@@ -390,21 +390,21 @@ export function Timeline({ height }: { height: number }) {
           <p className="truncate pl-1.5 text-[12px] text-muted">Click or drag on the timeline to choose the cover's frame.</p>
         ) : (
           <div className="bar flex items-center rounded-full">
-            <IconButton round label={locked ? lockedLabel("Split") : canSplit ? "Split at playhead (S)" : "Split: move the playhead over a clip"} disabled={locked || !canSplit} onClick={splitAtPlayhead}>
+            <IconButton round label={locked ? lockedLabel("Split") : splitBlocked ? `Split: ${splitBlocked}` : "Split at playhead (S)"} disabled={locked || !!splitBlocked} onClick={splitAtPlayhead}>
               <Scissors size={16} />
             </IconButton>
             <IconButton
               round
-              label={locked ? lockedLabel("Delete left") : canSplit ? "Delete left of playhead (Q)" : "Delete left: move the playhead over a clip"}
-              disabled={locked || !canSplit}
+              label={locked ? lockedLabel("Delete left") : splitBlocked ? `Delete left: ${splitBlocked}` : "Delete left of playhead (Q)"}
+              disabled={locked || !!splitBlocked}
               onClick={() => deleteSide("left")}
             >
               <PanelLeftClose size={16} />
             </IconButton>
             <IconButton
               round
-              label={locked ? lockedLabel("Delete right") : canSplit ? "Delete right of playhead (W)" : "Delete right: move the playhead over a clip"}
-              disabled={locked || !canSplit}
+              label={locked ? lockedLabel("Delete right") : splitBlocked ? `Delete right: ${splitBlocked}` : "Delete right of playhead (W)"}
+              disabled={locked || !!splitBlocked}
               onClick={() => deleteSide("right")}
             >
               <PanelRightClose size={16} />
@@ -477,7 +477,7 @@ export function Timeline({ height }: { height: number }) {
           {/* Ruler */}
           <div className="sticky top-0 z-40 flex shrink-0" style={{ height: RULER_H }}>
             <div className="shrink-0" style={{ width: HEADER_W }} />
-            <div className="relative flex-1 cursor-pointer border-b border-white/[.07] bg-panel" onPointerDown={startScrub}>
+            <div data-ruler className="relative flex-1 cursor-pointer border-b border-white/[.07] bg-panel" onPointerDown={startScrub}>
               {ticks.map((t) => (
                 <div key={t} className="absolute top-0 h-full" style={{ left: t * zoom }}>
                   <span className="tabular absolute left-1 top-[5px] text-[11px] leading-[13px] text-muted">{formatTime(t * US, step < 1)}</span>

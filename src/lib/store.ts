@@ -595,6 +595,22 @@ export const projectDuration: (project: Project) => number = perProject((project
   return end(false) || end(true);
 });
 
+/**
+ * Every start and end of a clip on any track, captions included, and the start of the video, in order. Music
+ * running past the video's end has no edge there, as the playhead cannot go past it.
+ */
+export const clipEdges: (project: Project) => number[] = perProject((project) =>
+  [...new Set([0, ...allClips(project).flatMap((c) => [c.startUs, c.startUs + c.durationUs])])]
+    .filter((e) => e <= projectDuration(project))
+    .sort((a, b) => a - b),
+);
+
+/** The edge of a clip before (`dir` -1) or after (1) `timeUs`, else null. */
+export function edgeBeside(project: Project, timeUs: number, dir: 1 | -1): number | null {
+  const edges = clipEdges(project);
+  return (dir > 0 ? edges.find((e) => e > timeUs) : edges.findLast((e) => e < timeUs)) ?? null;
+}
+
 /** The end of the last clip of any kind, so the timeline also shows music past the video's end. */
 export const contentEnd: (project: Project) => number = perProject((project) => allClips(project).reduce((m, c) => Math.max(m, c.startUs + c.durationUs), 0));
 
@@ -728,15 +744,26 @@ export function splitTargets(project: Project, selection: string[], timeUs: numb
   return (touched.length > 0 ? touched : mainClips(project)).filter(under);
 }
 
+/** Why `S`, `Q` and `W` have no clip to act on, as what to do next; null when they have one. */
+export function splitBlocker(project: Project, selection: string[], timeUs: number): string | null {
+  if (splitTargets(project, selection, timeUs).length > 0) return null;
+  const candidates = [...allClips(project).filter((c) => selection.includes(c.id)), ...mainClips(project)];
+  const atEdge = candidates.some((c) => timeUs >= c.startUs && timeUs <= c.startUs + c.durationUs);
+  return atEdge ? "move the playhead at least a frame away from the clip's edge" : "move the playhead over a clip";
+}
+
+const sentence = (text: string) => text[0].toUpperCase() + text.slice(1);
+
 export async function splitAtPlayhead() {
   const { snap, selection, timeUs, edit, toast } = useEditor.getState();
   if (!snap) return;
   const at = Math.round(timeUs);
-  const ids = splitTargets(snap.project, selection, at).map((c) => c.id);
-  if (ids.length === 0) {
-    toast({ kind: "info", text: "Move the playhead over a clip to split it." });
+  const blocker = splitBlocker(snap.project, selection, at);
+  if (blocker) {
+    toast({ kind: "info", text: `${sentence(blocker)} to split it.` });
     return;
   }
+  const ids = splitTargets(snap.project, selection, at).map((c) => c.id);
   // One batch: one undo step, and every second half stays selected. An earlier queued edit may
   // have removed a target; it is skipped rather than replaced by another clip.
   await edit((project) =>
@@ -862,11 +889,12 @@ export async function deleteSide(side: "left" | "right") {
   const { snap, selection, timeUs, edit, seek, toast } = useEditor.getState();
   if (!snap) return;
   const t = Math.round(timeUs);
-  const ids = splitTargets(snap.project, selection, t).map((c) => c.id);
-  if (ids.length === 0) {
-    toast({ kind: "info", text: "Move the playhead over a clip to delete one side of it." });
+  const blocker = splitBlocker(snap.project, selection, t);
+  if (blocker) {
+    toast({ kind: "info", text: `${sentence(blocker)} to delete one side of it.` });
     return;
   }
+  const ids = splitTargets(snap.project, selection, t).map((c) => c.id);
   let cutAt: number | null = null;
   const done = await edit((project) => {
     const trims: EditCmd[] = [];

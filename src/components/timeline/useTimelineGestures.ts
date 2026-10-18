@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent, type RefObject } from "react";
 import { followPointer } from "../../lib/drag";
-import { FADE_STEP_US, allClips, maxFadeUs, useEditor } from "../../lib/store";
-import { US } from "../../lib/time";
+import { FADE_STEP_US, allClips, clipEdges, maxFadeUs, useEditor } from "../../lib/store";
+import { US, nearestFrame } from "../../lib/time";
 import type { Clip, Project, Track } from "../../lib/types";
 import { EDGE, clipAsset } from "./ClipView";
 
@@ -236,7 +236,14 @@ export function useTimelineGestures({
   const startScrub = useCallback((e: PointerEvent) => {
     if (e.button !== 0) return;
     const { seek } = useEditor.getState();
-    seek(live.current.timeAt(e.clientX));
+    // The playhead lands on a frame, or on the edge of a clip within 8 px while snapping is on.
+    const timeAt = (x: number) => {
+      const { project, zoom, snapping, timeAt } = live.current;
+      const t = timeAt(x);
+      if (!project) return t;
+      return (snapping ? snap(t, clipEdges(project), (SNAP_PX / zoom) * US) : null) ?? nearestFrame(t, project.canvas.fps);
+    };
+    seek(timeAt(e.clientX));
     let raf = 0;
     let lastX = e.clientX;
     followPointer({
@@ -245,7 +252,7 @@ export function useTimelineGestures({
         if (!raf)
           raf = requestAnimationFrame(() => {
             raf = 0;
-            seek(live.current.timeAt(lastX));
+            seek(timeAt(lastX));
           });
       },
     });

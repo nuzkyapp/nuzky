@@ -8,8 +8,8 @@ import { setLimits } from "./lib/limits";
 import { onReframeJob } from "./lib/reframe";
 import { canRetrySpeech, retrySpeech, useSpeech } from "./lib/speech";
 import { reportBug } from "./lib/diagnostics";
-import { copySelection, currentEpoch, cutSelection, deleteSelection, deleteSide, duplicateSelection, openExport, pasteAttributes, pasteClips, projectDuration, runWasDiscarded, splitAtPlayhead, undoAction, useEditor } from "./lib/store";
-import { US, formatDuration } from "./lib/time";
+import { copySelection, currentEpoch, cutSelection, deleteSelection, deleteSide, duplicateSelection, openExport, pasteAttributes, pasteClips, edgeBeside, projectDuration, runWasDiscarded, splitAtPlayhead, undoAction, useEditor } from "./lib/store";
+import { US, formatDuration, nearestFrame, stepFrame } from "./lib/time";
 import type { JobEvent, ProjectSummary, Snapshot, ModelQuestion, Transport } from "./lib/types";
 import { ChatGptDialog } from "./components/ChatGptDialog";
 import { ConnectAgentDialog } from "./components/ConnectAgentDialog";
@@ -191,7 +191,12 @@ function useShortcuts() {
       } else if ((key === "arrowleft" || key === "arrowright") && !onRange) {
         e.preventDefault();
         const dir = key === "arrowleft" ? -1 : 1;
-        s.seek(s.timeUs + dir * (e.shiftKey ? US : US / fps));
+        s.seek(e.shiftKey ? nearestFrame(s.timeUs + dir * US, fps) : stepFrame(s.timeUs, dir, fps));
+      } else if ((key === "arrowup" || key === "arrowdown") && !onRange && !cover.open && !e.defaultPrevented && s.snap) {
+        // CapCut's previous and next cut; a focused clip keeps these keys to move between tracks.
+        e.preventDefault();
+        const edge = edgeBeside(s.snap.project, s.timeUs, key === "arrowup" ? -1 : 1);
+        if (edge !== null) s.seek(edge);
       } else if (key === "home" && !onRange) {
         s.seek(0);
       } else if (key === "end" && !onRange) {
