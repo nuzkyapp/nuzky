@@ -228,7 +228,9 @@ fn recognition_params(language: &str) -> FullParams<'_, '_> {
     params.set_no_context(true);
     params.set_temperature(0.0);
     params.set_temperature_inc(0.0);
-    params.set_suppress_nst(true);
+    // Suppressing symbols also bans the opening quote Whisper sometimes needs before a word, and it then
+    // skips the word: a restarted "Hele, mě…" lost its "Hele". Annotations are dropped in WordBuilder instead.
+    params.set_suppress_nst(false);
     params.set_print_progress(false);
     params.set_print_realtime(false);
     params.set_print_special(false);
@@ -373,13 +375,14 @@ impl WordBuilder {
             if part.first().is_some_and(u8::is_ascii_whitespace) {
                 self.flush();
             }
+            // Quotation marks are not heard, so a quote token gives no time to the word it opens.
             let content = part.trim_ascii();
-            if !content.is_empty() {
+            if content.iter().any(|&b| b != b'"') {
                 if self.bytes.is_empty() {
                     self.start = start;
                 }
                 self.end = end;
-                self.bytes.extend_from_slice(content);
+                self.bytes.extend(content.iter().filter(|&&b| b != b'"'));
                 self.probability += if probability.is_finite() { probability.clamp(0.0, 1.0) as f64 } else { 0.0 };
                 self.tokens += 1;
             }
@@ -491,5 +494,19 @@ mod tests {
         assert_eq!(words[0].text, "Příklad.");
         assert!((words[0].probability - 0.9).abs() < 1e-6);
         assert_eq!(words[1].text, "Ahoj");
+    }
+
+    #[test]
+    fn quotes_neither_show_nor_move_word_times() {
+        let mut builder = WordBuilder::default();
+        builder.push(b" \"", 50_000, 50_000, 0.5);
+        builder.push(b"He", 110_000, 150_000, 0.9);
+        builder.push(b"le,", 150_000, 250_000, 0.9);
+        builder.push(b"\"", 250_000, 300_000, 0.5);
+        builder.push(b" m\xc4\x9b", 300_000, 400_000, 0.9);
+        let words = builder.finish();
+        assert_eq!(words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>(), ["Hele,", "mě"]);
+        assert_eq!((words[0].start_us, words[0].end_us), (110_000, 250_000));
+        assert!((words[0].probability - 0.9).abs() < 1e-6);
     }
 }
