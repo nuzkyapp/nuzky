@@ -43,6 +43,9 @@ pub(crate) fn ensure(needed: &[Model], refused: &Refused, cancel: &AtomicBool, p
     if models::missing(needed, &nuzky_analysis::models_dir()).is_empty() {
         return Ok(());
     }
+    if let Some(reason) = refused.lock().unwrap().clone() {
+        bail!(reason);
+    }
     ask(needed, cancel, progress).inspect_err(|error| {
         if !error.to_string().starts_with("CANCELLED") {
             *refused.lock().unwrap() = Some(format!("{error:#}"));

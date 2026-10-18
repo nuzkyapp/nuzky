@@ -5,7 +5,7 @@ import json, re, subprocess, time
 
 from e2e.ai_panel import agent, click, panel, send
 from e2e.harness import CLI, FIXTURES, MODELS, ROOT, Bridge, flow, wait
-from e2e.setup import BOX
+from e2e.setup import BOX, relaunch
 from e2e.speech_model import Models
 
 # Every model with the path the loopback server answers it on: the address's host, then its path.
@@ -126,6 +126,12 @@ def vision_models(r):
                 and r.s.run("return window.__nuzky.setup.getState().states.vision") == 'done', 180), step())
         r.check('every model is installed', all((models / name).exists() for name in URLS), sorted(p.name for p in models.iterdir()))
         r.shot('setup-done')
+
+        # Someone who has the models already, from covers or an earlier version, is not asked for them after a restart.
+        r.s.run("window.__nuzky.setup.setState({states: {}, open: false})")
+        relaunch(r)
+        r.check('with the models in place the step is done at start', wait(lambda: r.s.run(
+            "return window.__nuzky.setup.getState().states.vision") == 'done', 10), r.s.run("return window.__nuzky.setup.getState().states"))
     finally:
         r.models.http.shutdown()
         r.models.http.server_close()

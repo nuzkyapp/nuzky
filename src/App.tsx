@@ -16,6 +16,7 @@ import { ConnectAgentDialog } from "./components/ConnectAgentDialog";
 import { SetupDialog } from "./components/setup/SetupDialog";
 import { ExportDialog } from "./components/ExportDialog";
 import { AGENT_VISION_MODELS, ModelQuestionDialog } from "./components/ModelQuestionDialog";
+import { showsVisionDownload } from "./components/setup/steps/VisionStep";
 import { Inspector } from "./components/inspector/Inspector";
 import { LeftPanel } from "./components/panel/LeftPanel";
 import { MEDIA_EXTENSIONS, dropResolver, importPaths, pickAndImport } from "./components/panel/assets";
@@ -244,7 +245,7 @@ function onJob(job: JobEvent) {
       action: { label: "Try again", run: () => api.startVisionModels(false, "background").catch((e) => toast({ kind: "error", text: plainError(errorText(e)) })) },
     });
   // Get set up and the cover editor show their own download's failure while they are on screen.
-  if (job.kind === "vision-models" && job.label === "Cover models" && job.status === "failed" && !(setup.open && setup.current === "vision") && !useCover.getState().open)
+  if (job.kind === "vision-models" && job.label === "Cover models" && job.status === "failed" && !showsVisionDownload(job.id) && !useCover.getState().open)
     toast({ kind: "error", text: `Face and person models failed: ${plainError(job.message ?? "")}`, action: { label: "Get set up", run: () => (useSetup.getState().showStep("vision"), useSetup.getState().openSetup()) } });
   // The AI went on without them; Get set up downloads them later.
   if (job.kind === "vision-models" && job.label === AGENT_VISION_MODELS && job.status === "failed")

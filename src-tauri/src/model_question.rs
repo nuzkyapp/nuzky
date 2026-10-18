@@ -43,7 +43,6 @@ struct Round {
     vision: Vec<Model>,
     /// Jobs waiting for the answer; when the last one stops before the user answered, the question closes.
     waiting: usize,
-    /// The user chose Download.
     downloading: bool,
     /// How it ended, for every job that waited on it.
     outcome: Arc<OnceLock<Result<(), String>>>,

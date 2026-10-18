@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { AlertCircle, AlertTriangle, Check, Loader2 } from "lucide-react";
-import { api } from "../../../lib/api";
+import { api, plainError } from "../../../lib/api";
 import { downloadModels, loadModels, useCover } from "../../../lib/cover";
 import { useSetup } from "../../../lib/setup";
 import { useEditor } from "../../../lib/store";
@@ -10,24 +10,24 @@ import { StepActions } from "../StepActions";
 
 const STOP = "Stop downloading the face and person models";
 
-/** Whether Download was pressed here, so the step shows only its own download's failure, not one of a cover pick. */
-let asked = false;
+/** The last download this step showed, also one the cover editor started; its failure shows here instead of a toast. */
+let shown: string | null = null;
+
+export const showsVisionDownload = (id: string) => {
+  const { open, current } = useSetup.getState();
+  return open && current === "vision" && id === shown;
+};
 
 /** Face and person models: what they are for and Download for all of them, so neither covers nor an agent ask later. */
 export function VisionStep() {
   const models = useCover((s) => s.models);
-  const job = useEditor((s) => {
-    const id = useCover.getState().modelsJob;
-    return id ? s.jobs[id] : undefined;
-  });
-  const failed = useCover((s) => s.failed);
-  const done = useSetup((s) => s.states.vision === "done");
+  const id = useCover((s) => s.modelsJob);
+  if (id) shown = id;
+  const job = useEditor((s) => (shown ? s.jobs[shown] : undefined));
   const running = job?.status === "running";
+  const failed = job?.status === "failed" ? plainError(job.message ?? "") : null;
 
   useEffect(() => void loadModels(), []);
-  useEffect(() => {
-    if (models?.downloaded && !done) useSetup.getState().finishStep("vision");
-  }, [models?.downloaded, done]);
   // Starting or ending the download removes the button that was pressed; the focus goes to what took its place.
   useEffect(() => {
     if (document.activeElement !== document.body) return;
@@ -69,7 +69,6 @@ export function VisionStep() {
           <ProgressBar value={job.progress} label="Downloading the face and person models" />
         </div>
       ) : (
-        asked &&
         failed && (
           <div className="mt-3 flex gap-1.5 text-[12px] text-danger" role="alert">
             <AlertCircle size={14} className="mt-px shrink-0" />
@@ -85,12 +84,9 @@ export function VisionStep() {
           <Button
             pill
             variant="primary"
-            onClick={() => {
-              asked = true;
-              void downloadModels();
-            }}
+            onClick={() => void downloadModels()}
           >
-            {asked && failed ? "Try again" : `Download ${models.sizeMb} MB`}
+            {failed ? "Try again" : `Download ${models.sizeMb} MB`}
           </Button>
         </StepActions>
       )}
