@@ -491,6 +491,12 @@ def ai_panel(r):
             and r.s.run(TEXT, "Don't show the agent the frame at the playhead") == 'Frame',
             panel(r)['text'])
     r.shot('panel-open')
+    r.check('× on the Frame chip stops sending the frame and brings back the playhead chip',
+            click(r, "Don't send the frame") == 'false'
+            and wait(lambda: r.s.run(CHIPS) == ["Don't send the selected clips", "Don't send the playhead"], 5)
+            and not r.s.run('return window.__nuzky.agent.getState().frame')
+            and r.s.run(TEXT, 'Show the agent the frame at the playhead') == '', r.s.run(CHIPS))
+    click(r, 'Show the agent the frame at the playhead')
 
     # A cut with captions: live, explained by what changed, undone in one step.
     before = r.track()
@@ -522,11 +528,6 @@ def ai_panel(r):
     r.check('the message carried the selection, the playhead and the frame',
             f"Selected clips: {clip['id']}" in first['prompt'] and '[Nuzky] Playhead' in first['prompt'] and 'points at the frame at the playhead' in first['prompt'],
             first['prompt'])
-    click(r, "Don't send the frame")
-    r.check('× on the Frame chip stops sending the frame and brings back the playhead chip',
-            wait(lambda: r.s.run(CHIPS) == ["Don't send the selected clips", "Don't send the playhead"], 5)
-            and not r.s.run('return window.__nuzky.agent.getState().frame')
-            and r.s.run(TEXT, 'Show the agent the frame at the playhead') == '', r.s.run(CHIPS))
     r.shot('run-done')
     # A real key press, as the clipboard takes text only from something the user did. On macOS it is the person's
     # own clipboard, so their text goes back right after.
