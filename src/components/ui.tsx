@@ -303,7 +303,8 @@ export function NumberInput({
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => {
         const v = draft === null || draft.trim() === "" ? NaN : parse(draft);
-        if (!cancel.current && Number.isFinite(v) && (mixed || format(clamp(v)) !== format(value))) onChange(clamp(v));
+        // Only a typed change is written: leaving a value outside the range untouched must not clamp it.
+        if (!cancel.current && Number.isFinite(v) && (mixed || format(v) !== format(value))) onChange(clamp(v));
         cancel.current = false;
         setDraft(null);
       }}

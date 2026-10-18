@@ -953,7 +953,7 @@ export function rotateSelection() {
   return editClips(useEditor.getState().selection, (clip, track): EditCmd[] | null => {
     if (track.kind === "audio") return null;
     const { transform } = clip.content;
-    // Past 180° the clip turns the short way round to the same angle, so the inspector's slider still holds it.
+    // Past 180° the clip's own angle goes the short way round; keyframes move by the same amount so their sweep stays.
     const turn = transform.rotation + 90 > 180 ? -270 : 90;
     const cmds: EditCmd[] = [{ type: "updateClip", clipId: clip.id, transform: { ...transform, rotation: transform.rotation + turn } }];
     if (clip.keyframes.length > 0)
