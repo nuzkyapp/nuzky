@@ -20,7 +20,6 @@ export interface Drag {
   startX: number;
   startY: number;
   moved: boolean;
-  /** Shift, or Cmd/Ctrl: a click adds the clip to the selection or takes it out. */
   toggle: boolean;
   dxUs: number;
   /** undefined: same track, null: a new track, string: another track. */
