@@ -2111,6 +2111,32 @@ mod tests {
         }
     }
 
+    /// A project saved before parts existed, and any file imported but a YouTube video's part, has no part:
+    /// its new clips read the whole file from its start, as before. With a part they read only the part.
+    #[test]
+    fn new_clips_read_the_whole_file_unless_the_asset_has_a_part() {
+        let saved = serde_json::json!({"id": "v", "name": "v", "path": "/tmp/v", "kind": "video", "durationUs": 9_000_000,
+            "width": 1080, "height": 1920, "fps": 30.0, "hasAudio": true, "rotation": 0});
+        let old: Asset = serde_json::from_value(saved).unwrap();
+        let mut part = old.clone();
+        part.id = "p".into();
+        part.part = Some(crate::model::Part { start_us: 3_000_000, end_us: 6_000_000 });
+        let mut p = Project::new("t");
+        p.apply(EditCmd::AddAssets { assets: vec![old, part] }).unwrap();
+        for (id, from, length) in [("v", 0, 9_000_000), ("p", 3_000_000, 3_000_000)] {
+            for cmd in [
+                EditCmd::AddClip { asset_id: id.into(), start_us: Some(0), track_id: None },
+                EditCmd::AddPictureInPicture { asset_id: id.into(), start_us: 0, duration_us: None },
+                EditCmd::AddSticker { asset_id: id.into(), start_us: 0, duration_us: None, transform: None },
+            ] {
+                let added = p.apply(cmd).unwrap().select[0].clone();
+                let clip = p.tracks.iter().flat_map(|t| &t.clips).find(|c| c.id == added).unwrap();
+                let ClipContent::Media { source_in_us, .. } = clip.content else { unreachable!() };
+                assert_eq!((source_in_us, clip.duration_us), (from, length), "{id}");
+            }
+        }
+    }
+
     fn project() -> Project {
         let mut p = Project::new("t");
         p.apply(EditCmd::AddAssets {
