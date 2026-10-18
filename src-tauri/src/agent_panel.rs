@@ -330,41 +330,45 @@ fn send(
     Ok(())
 }
 
-/// A message the user sends while the agent works on `turn`. True when the agent takes it in this turn;
-/// false when the panel sends it as the next message once this turn ends. Codex reads one message per
-/// turn, so once it has kept this turn's it stops for it: its run ends first, as on Stop, while the
-/// conversation's jobs go on.
+/// A message the user sends while the agent works on `turn`: "taken" in this turn, or "next" when the panel
+/// sends it as the next message once this turn ends. Codex reads one message per turn, so once it has kept
+/// this turn's it is "stopped" for it: its run ends first, as when its bridge disconnects, so the jobs it
+/// started go on.
 #[tauri::command]
-pub async fn agent_steer(app: AppHandle, turn: String, text: String, context: PromptContext) -> CmdResult<bool> {
+pub async fn agent_steer(
+    app: AppHandle,
+    turn: String,
+    text: String,
+    context: PromptContext,
+) -> CmdResult<&'static str> {
     tauri::async_runtime::spawn_blocking(move || steer(&app, &turn, &text, &context)).await.map_err(err)?
 }
 
-fn steer(app: &AppHandle, turn: &str, text: &str, context: &PromptContext) -> CmdResult<bool> {
+fn steer(app: &AppHandle, turn: &str, text: &str, context: &PromptContext) -> CmdResult<&'static str> {
     let (panel, state) = (app.state::<AgentPanel>(), app.state::<AppState>());
     let project = state.session.lock().unwrap().host.session.state().map_err(err)?.project;
     let prompt = prompt(text, context, &project);
     let this = |(id, started): &&(String, Turn)| id == turn && started.running();
     let resumable = match panel.active.lock().unwrap().as_ref().filter(this) {
-        None => return Ok(false),
+        None => return Ok("next"),
         Some((_, started)) => {
             if started.steer(&prompt) {
-                return Ok(true);
+                return Ok("taken");
             }
             started.resumable()
         }
     };
-    if resumable {
-        let ended = state.session.lock().unwrap().host.stop_run();
-        if let Some((_, started)) = panel.active.lock().unwrap().as_ref().filter(this) {
-            started.stop();
-        }
-        if let Err(error) = ended
-            && !error.to_string().starts_with("INVALID_RUN")
-        {
-            return Err(err(error));
-        }
+    if !resumable {
+        return Ok("next");
     }
-    Ok(false)
+    let ended = state.session.lock().unwrap().host.session.stop_run();
+    if let Some((_, started)) = panel.active.lock().unwrap().as_ref().filter(this) {
+        started.stop();
+    }
+    match ended {
+        Err(error) if !error.to_string().starts_with("INVALID_RUN") => Err(err(error)),
+        _ => Ok("stopped"),
+    }
 }
 
 /// Stops the agent: Nuzky ends the run first, so the editor unlocks at once whatever the agent does.

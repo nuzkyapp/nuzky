@@ -126,8 +126,8 @@ interface AgentState {
   frame: boolean;
   /** Make a thumbnail is in the field: the message asks for a cover and a YouTube thumbnail, the text is an optional note. */
   thumbnail: boolean;
-  /** Sent while the agent worked, but it could not take it in that turn: it goes as the next message once the turn ends. */
-  next: { text: string; context: PromptContext } | null;
+  /** Sent while the agent worked, but it could not take it in that turn: it goes as the next message once the turn ends. `stopped`: Codex stopped for it. */
+  next: { text: string; context: PromptContext; stopped: boolean } | null;
 }
 
 const AGENT_KEY = "nuzky.aiAgent";
@@ -166,8 +166,8 @@ const agentApi = {
   send: (agent: AgentId, chat: string, turn: string, text: string, context: PromptContext, model: string | null) =>
     invoke<void>("agent_send", { agent, chat, turn, text, context, model }),
   stop: (turn: string) => invoke<void>("agent_stop", { turn }),
-  /** True when the working agent takes the message in this turn. */
-  steer: (turn: string, text: string, context: PromptContext) => invoke<boolean>("agent_steer", { turn, text, context }),
+  /** Whether the working agent took the message in this turn, it goes next, or Codex stopped for it to go next. */
+  steer: (turn: string, text: string, context: PromptContext) => invoke<"taken" | "next" | "stopped">("agent_steer", { turn, text, context }),
   jobs: () => invoke<AgentJob[]>("agent_jobs"),
 };
 
@@ -396,6 +396,8 @@ export function steerBlocked(): string | null {
   const s = useAgent.getState();
   if (s.status === "stopping") return "Wait until it stops";
   if (s.thumbnail) return "Make a thumbnail waits for the answer, or stop it";
+  // A second would go with the first one's selection and playhead.
+  if (s.next || steering) return `${agentName(s.agent)} answers your last message first`;
   return null;
 }
 
@@ -416,10 +418,10 @@ export async function steer(text = useAgent.getState().draft.trim()) {
     frame: false,
   });
   const call = agentApi.steer(s.turn, text, context);
-  const mine = (steering = call.catch(() => false));
-  let taken = false;
+  const mine = (steering = call.catch(() => null));
+  let steered;
   try {
-    taken = await call;
+    steered = await call;
   } catch (e) {
     // It did not reach the agent, so it is not part of the conversation.
     useAgent.setState((now) => ({ items: now.items.filter((it) => it !== shown), draft: now.draft ? `${text}\n${now.draft}` : text }));
@@ -428,8 +430,8 @@ export async function steer(text = useAgent.getState().draft.trim()) {
   } finally {
     if (steering === mine) steering = null;
   }
-  if (taken || useAgent.getState().chat !== s.chat) return;
-  useAgent.setState((now) => ({ next: now.next ? { text: `${now.next.text}\n\n${text}`, context } : { text, context } }));
+  if (steered === "taken" || useAgent.getState().chat !== s.chat) return;
+  useAgent.setState({ next: { text, context, stopped: steered === "stopped" } });
 }
 
 /** Starts a turn for a message the conversation already shows. */
@@ -487,8 +489,10 @@ function fail(code: AgentErrorCode, message: string) {
   // A message waiting for the next turn goes back to the field; it is the last one shown when nothing came after it.
   if (s.next && last?.kind !== "user") draft = draft ? `${s.next.text}\n${draft}` : s.next.text;
   if (last?.kind === "user") {
-    items = items.slice(0, -1);
-    draft = draft ? `${last.text}\n${draft}` : last.text;
+    // With the messages sent while it worked, which it did not answer either.
+    const unanswered = items.slice(items.findLastIndex((it) => it.kind !== "user") + 1);
+    items = items.slice(0, -unanswered.length);
+    draft = [...unanswered.map((it) => (it.kind === "user" ? it.text : "")), ...(draft ? [draft] : [])].join("\n");
   } else {
     const asked = [...items].reverse().find((i) => i.kind === "user");
     retry = asked?.kind === "user" ? asked.text : undefined;
@@ -534,8 +538,8 @@ function onEvent(e: AgentEvent) {
     fail(e.code, e.message);
     void watchJobs();
   } else {
-    // Codex stops for a message sent while it worked, which then goes next; the user's Stop sends nothing more.
-    const next = s.status === "working" ? s.next : null;
+    // Codex stops for a message sent while it worked, which then goes next; the user's Stop, also Stop and edit, sends nothing more.
+    const next = s.status === "working" && (!e.stopped || s.next?.stopped) ? s.next : null;
     const stopped = e.stopped && !next;
     // A stopped turn marks the step it was on; one that changed nothing says so.
     const marked = items.map((it) => (it.kind === "steps" ? { ...it, steps: it.steps.map((x) => (x.status === "running" ? { ...x, status: e.stopped ? ("stopped" as const) : ("done" as const) } : x)) } : it));

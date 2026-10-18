@@ -397,11 +397,31 @@ def ai_panel_codex(r):
             {'runs': [(x['pid'], x['prompt'][:20]) for x in runs(r)[6:]], 'text': panel(r)['text'][-300:]})
     idle(r)
 
+    # Stop and edit while a message waits stops for good: the message goes back to the field.
+    r.s.run("[...document.querySelectorAll('aside[aria-label=AI] button')].filter((b) => b.textContent.trim() === 'Undo').at(-1).click()")
+    wait(lambda: r.track() == before, 10)
+    send(r, 'think first, then a slow edit')
+    wait(lambda: len(runs(r)) == 9, 10)
+    send(r, 'Then that')
+    wait(lambda: r.s.run("return !!window.__nuzky.agent.getState().next"), 5)
+    send(r, 'And this')
+    r.check('a second message while one waits says why it was not sent', wait(lambda: 'Codex answers your last message first' in panel(r)['text'], 3)
+            and agent(r)['draft'] == 'And this', {'draft': agent(r)['draft']})
+    r.s.run("window.__nuzky.agent.setState({draft: ''})")
+    r.check('the waiting Codex opens its run', wait(lambda: r.state()['aiRun'], 15))
+    click(r, 'Stop and edit', 'header')
+    r.check('Stop and edit sends nothing more and puts the waiting message back into the field',
+            wait(lambda: not r.state()['aiRun'] and agent(r)['status'] == 'idle' and agent(r)['draft'] == 'Then that', 10)
+            and not wait(lambda: len(runs(r)) > 9, 3), {'runs': len(runs(r)), 'agent': agent(r)})
+    r.s.run("window.__nuzky.agent.setState({draft: ''})")
+    r.s.run('window.__nuzky.store.getState().undo()')
+    wait(lambda: r.track() == before, 5)
+
     started = time.monotonic()
     send(r, 'signin please')
     hint = wait(lambda: "Codex isn't signed in." in panel(r)['text'] and agent(r)['draft'] == 'signin please', 7, 0.05)
     text = panel(r)['text']
-    gone = wait(lambda: len(runs(r)) == 9 and not alive(runs(r)[-1]['pid']), 1, 0.05)
+    gone = wait(lambda: len(runs(r)) == 10 and not alive(runs(r)[-1]['pid']), 1, 0.05)
     r.check('not signed in gives the login steps and the message back within 5 s, with Codex already stopped',
             hint and 'codex login' in text and 'Sign in with ChatGPT' in text and gone and time.monotonic() - started < 5,
             {'seconds': round(time.monotonic() - started, 2), 'draft': agent(r)['draft'], 'text': text, 'gone': gone})
