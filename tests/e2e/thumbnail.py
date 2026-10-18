@@ -99,6 +99,9 @@ def thumbnail(r):
     r.check('the cover editor names its view and offers Back to video and Export cover in the top bar', r.s.run("""
         const h = document.querySelector('header'); const buttons = [...h.querySelectorAll('button')].map((b) => b.textContent.trim());
         return h.textContent.includes('Cover') && buttons.includes('Back to video') && buttons.includes('Export cover');"""))
+    r.check('the cover editor, which has no timeline toolbar, keeps Undo and Redo in the top bar', r.s.run(
+        """const labels = [...document.querySelectorAll('header button')].map((b) => b.getAttribute('aria-label') ?? '');
+        return labels.some((l) => l.startsWith('Undo')) && labels.some((l) => l.startsWith('Redo'));"""))
     r.check('before the first cover Make it with AI leads Frames and Pick for me is secondary', r.s.run("""
         const buttons = [...document.querySelectorAll('[data-testid=cover-frames] button')];
         return buttons.find((b) => b.textContent.trim() === 'Make it with AI')?.classList.contains('btn-prominent')

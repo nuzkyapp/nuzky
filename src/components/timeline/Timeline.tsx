@@ -1,6 +1,25 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { Copy, Magnet, Maximize2, PanelLeftClose, PanelRightClose, Scissors, Trash2, ZoomIn, ZoomOut } from "lucide-react";
-import { MAIN_TRACK, allClips, contentEnd, deleteSelection, deleteSide, displayTracks, duplicateSelection, editClip, findClip, mainClips, projectDuration, splitAtPlayhead, splitBlocker, useAiLocked, useEditor } from "../../lib/store";
+import { Copy, Magnet, Maximize2, PanelLeftClose, PanelRightClose, Redo2, RotateCw, Scissors, Trash2, Undo2, Unlink, ZoomIn, ZoomOut } from "lucide-react";
+import {
+  MAIN_TRACK,
+  allClips,
+  contentEnd,
+  deleteSelection,
+  deleteSide,
+  detachAudio,
+  detachBlocker,
+  displayTracks,
+  duplicateSelection,
+  editClip,
+  findClip,
+  mainClips,
+  projectDuration,
+  rotateSelection,
+  splitAtPlayhead,
+  splitBlocker,
+  useAiLocked,
+  useEditor,
+} from "../../lib/store";
 import { US, formatDuration, formatTime } from "../../lib/time";
 import type { Clip, EditCmd, Project, Track } from "../../lib/types";
 import { candidateReason, useCandidates, useCover } from "../../lib/cover";
@@ -155,7 +174,7 @@ export function Timeline({ height }: { height: number }) {
   // In the cover editor the timeline chooses the cover's frame: clicks and drags move the playhead, which is the frame.
   const cover = useCover((s) => s.open);
   const candidates = useCandidates();
-  const { select, setZoom } = useEditor.getState();
+  const { select, setZoom, undo, redo } = useEditor.getState();
   const scroller = useRef<HTMLDivElement>(null);
   const rows = useRef(new Map<string, HTMLDivElement>());
   const [snapping, setSnapping] = useState(true);
@@ -379,6 +398,22 @@ export function Timeline({ height }: { height: number }) {
     }
   };
   const dragKind = drag ? project.tracks.find((t) => t.id === drag.trackId)?.kind : null;
+  const picked = selection.flatMap((id) => {
+    const found = findClip(project, id);
+    return found ? [found] : [];
+  });
+  const detachable = picked.filter((f) => !detachBlocker(project, f.clip)).map((f) => f.clip.id);
+  const detachLabel = detachable.length
+    ? detachable.length === 1
+      ? "Detach audio"
+      : `Detach audio of ${detachable.length} clips`
+    : picked.length === 1
+      ? `Detach audio: ${detachBlocker(project, picked[0].clip)?.toLowerCase()}`
+      : picked.length
+        ? "Detach audio: none of the selected clips has sound to detach"
+        : "Detach audio: select a video first";
+  const rotatable = picked.some((f) => f.track.kind !== "audio");
+  const rotateLabel = rotatable ? "Rotate 90°" : picked.length ? "Rotate: audio has no picture to turn" : "Rotate: select a clip first";
   const deleteLabel = cut ? "Delete transition (Delete)" : selection.length ? "Delete selection (Delete)" : "Delete: select a clip first";
   // While the AI edits, the editing buttons say so instead of what they would need.
   const lockedLabel = (action: string) => `${action}: the AI is editing`;
@@ -390,6 +425,13 @@ export function Timeline({ height }: { height: number }) {
           <p className="truncate pl-1.5 text-[12px] text-muted">Click or drag on the timeline to choose the cover's frame.</p>
         ) : (
           <div className="bar flex items-center rounded-full">
+            <IconButton round label={locked ? "Undo is available when the AI is done" : "Undo (Ctrl+Z)"} disabled={locked || !snap0?.canUndo} onClick={undo}>
+              <Undo2 size={16} />
+            </IconButton>
+            <IconButton round label={locked ? "Redo is available when the AI is done" : "Redo (Ctrl+Shift+Z)"} disabled={locked || !snap0?.canRedo} onClick={redo}>
+              <Redo2 size={16} />
+            </IconButton>
+            <span aria-hidden className="mx-1 h-4 w-px bg-white/[.12]" />
             <IconButton round label={locked ? lockedLabel("Split") : splitBlocked ? `Split: ${splitBlocked}` : "Split at playhead (S)"} disabled={locked || !!splitBlocked} onClick={splitAtPlayhead}>
               <Scissors size={16} />
             </IconButton>
@@ -412,6 +454,7 @@ export function Timeline({ height }: { height: number }) {
             <IconButton round label={locked ? lockedLabel("Delete") : deleteLabel} disabled={locked || (selection.length === 0 && !cut)} onClick={deleteSelection}>
               <Trash2 size={16} />
             </IconButton>
+            <span aria-hidden className="mx-1 h-4 w-px bg-white/[.12]" />
             <IconButton
               round
               label={locked ? lockedLabel("Duplicate") : selection.length ? "Duplicate (Ctrl+D)" : "Duplicate: select a clip first"}
@@ -419,6 +462,12 @@ export function Timeline({ height }: { height: number }) {
               onClick={duplicateSelection}
             >
               <Copy size={15} />
+            </IconButton>
+            <IconButton round label={locked ? lockedLabel("Detach audio") : detachLabel} disabled={locked || detachable.length === 0} onClick={() => void detachAudio(detachable)}>
+              <Unlink size={15} />
+            </IconButton>
+            <IconButton round label={locked ? lockedLabel("Rotate") : rotateLabel} disabled={locked || !rotatable} onClick={rotateSelection}>
+              <RotateCw size={15} />
             </IconButton>
             <span aria-hidden className="mx-1 h-4 w-px bg-white/[.12]" />
             <IconButton round label={snapping ? "Snapping on" : "Snapping off"} active={snapping} onClick={() => setSnapping(!snapping)}>

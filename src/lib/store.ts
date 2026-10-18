@@ -948,6 +948,20 @@ export async function detachAudio(clipIds: string[]) {
   if (snap) toast({ kind: "info", text, action: undoAction(snap) });
 }
 
+/** Turns the selected pictures and texts a quarter turn clockwise, keyframes by the same angle, as one undo step. */
+export function rotateSelection() {
+  return editClips(useEditor.getState().selection, (clip, track): EditCmd[] | null => {
+    if (track.kind === "audio") return null;
+    const { transform } = clip.content;
+    // Past 180° the clip turns the short way round to the same angle, so the inspector's slider still holds it.
+    const turn = transform.rotation + 90 > 180 ? -270 : 90;
+    const cmds: EditCmd[] = [{ type: "updateClip", clipId: clip.id, transform: { ...transform, rotation: transform.rotation + turn } }];
+    if (clip.keyframes.length > 0)
+      cmds.push({ type: "setKeyframes", clipId: clip.id, keyframes: clip.keyframes.map((k) => ({ ...k, transform: { ...k.transform, rotation: k.transform.rotation + turn } })) });
+    return cmds;
+  });
+}
+
 /** Sound fades move in steps of 0.1 s, in the inspector and on the timeline alike. */
 export const FADE_STEP_US = US / 10;
 

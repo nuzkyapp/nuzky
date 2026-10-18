@@ -302,12 +302,17 @@ export function TopBar() {
       <JobIndicator />
       <AiToggle />
       <div className="bar flex items-center rounded-full">
-        <IconButton round label={aiRun ? "Undo is available when the AI is done" : "Undo (Ctrl+Z)"} disabled={!snap?.canUndo || !!aiRun} onClick={undo}>
-          <Undo2 size={16} />
-        </IconButton>
-        <IconButton round label={aiRun ? "Redo is available when the AI is done" : "Redo (Ctrl+Shift+Z)"} disabled={!snap?.canRedo || !!aiRun} onClick={redo}>
-          <Redo2 size={16} />
-        </IconButton>
+        {/* Undo and Redo lead the timeline's toolbar; the cover editor and the reels list have none. */}
+        {(cover || reels) && (
+          <>
+            <IconButton round label={aiRun ? "Undo is available when the AI is done" : "Undo (Ctrl+Z)"} disabled={!snap?.canUndo || !!aiRun} onClick={undo}>
+              <Undo2 size={16} />
+            </IconButton>
+            <IconButton round label={aiRun ? "Redo is available when the AI is done" : "Redo (Ctrl+Shift+Z)"} disabled={!snap?.canRedo || !!aiRun} onClick={redo}>
+              <Redo2 size={16} />
+            </IconButton>
+          </>
+        )}
         <VersionsButton />
       </div>
       {!reels && (
