@@ -53,11 +53,11 @@ export function HistoryButton({ redo, locked, lines, onPeek }: { redo: boolean; 
     };
   }, [live, revision, redo, keyboard, onPeek]);
 
-  // Esc hides the preview wherever focus is, before it would clear the selection.
+  // Esc hides the preview wherever focus is, before it would clear the selection; an open menu or dialog keeps it.
   useEffect(() => {
     if (!shown) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+      if (e.key !== "Escape" || document.querySelector("[role=menu], [role=dialog]")) return;
       e.stopPropagation();
       setDismissed(true);
     };

@@ -85,9 +85,9 @@ function changeText(name: string, now: Clip, then: Clip) {
 }
 
 /**
- * How the timeline changes from `now` to `then`, the project undo or redo would restore. When the step only takes
- * clips away, the lanes draw `now` with those clips marked, so they are seen where they are; otherwise they draw
- * `then`. `marks` are for the drawn project's clips; `lines` say it in words. Clips that only shift with a cut are
+ * How the timeline changes from `now` to `then`, the project undo or redo would restore. When the step takes
+ * clips away and the others keep their lengths and only shift, the lanes draw `now` with the removed clips marked,
+ * so they are seen where they are; otherwise they draw `then`. `marks` are for the drawn project's clips; `lines` say it in words. Clips that only shift with a cut are
  * marked but not described, since the cut says it.
  */
 export function describePeek(now: Project, then: Project): { draw: "now" | "then"; marks: Map<string, PeekMark>; lines: string[] } {
@@ -143,5 +143,6 @@ export function describePeek(now: Project, then: Project): { draw: "now" | "then
   const shown = lines.length > 5 ? [...lines.slice(0, 4), `and ${lines.length - 4} more changes`] : lines;
   const [from, to] = [projectDuration(now), projectDuration(then)];
   if (from !== to) shown.push(`Video length ${formatDuration(from)} → ${formatDuration(to)}`);
-  return { draw: gone.length && !back.length ? "now" : "then", marks, lines: shown };
+  // Clips that only shift or change their look sit where they are now too; a new length or place needs `then`.
+  return { draw: gone.length && !back.length && !trimmed.length && !moved.length ? "now" : "then", marks, lines: shown };
 }
