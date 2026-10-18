@@ -51,13 +51,36 @@ pub fn filmstrip(cache_dir: &Path, asset: &Asset) -> Result<Option<crate::Filmst
     }
     let (frame_width, frame_height, count) = filmstrip_size(asset)?;
     let interval_us = (asset.duration_us / count as i64).max(500_000);
+    strip(cache_dir, asset, 0, interval_us, (frame_width, frame_height, count)).map(Some)
+}
+
+/// `count` frames of a video `interval_us` apart from `from_us`, for a strip that shows only a stretch of it.
+pub fn filmstrip_of(
+    cache_dir: &Path,
+    asset: &Asset,
+    from_us: i64,
+    interval_us: i64,
+    count: u32,
+) -> Result<crate::Filmstrip> {
+    let (frame_width, frame_height, most) = filmstrip_size(asset)?;
+    let count = count.clamp(1, most.max(1));
+    strip(cache_dir, asset, from_us.max(0), interval_us.max(1), (frame_width, frame_height, count))
+}
+
+fn strip(
+    cache_dir: &Path,
+    asset: &Asset,
+    from_us: i64,
+    interval_us: i64,
+    (frame_width, frame_height, count): (u32, u32, u32),
+) -> Result<crate::Filmstrip> {
     let (dw, dh) = if asset.rotation % 180 == 90 { (frame_height, frame_width) } else { (frame_width, frame_height) };
     let width = frame_width * count;
     let mut sprite = vec![0; (width * frame_height * 4) as usize];
     let mut decoder = nuzky_engine::proxy::open_decoder(cache_dir, Path::new(&asset.path))?;
     let mut frames = [None, None];
     for i in 0..count {
-        let target = i as i64 * interval_us;
+        let target = (from_us + i as i64 * interval_us).min(asset.duration_us.saturating_sub(1).max(0));
         if i == 0 || interval_us >= 2_000_000 {
             decoder.seek(target)?;
             frames = [None, None];
@@ -81,7 +104,7 @@ pub fn filmstrip(cache_dir: &Path, asset: &Asset) -> Result<Option<crate::Filmst
         enc.write_header()?.write_image_data(&sprite)?;
     }
     let url = format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes));
-    Ok(Some(crate::Filmstrip { url, frame_width, frame_height, interval_us, count }))
+    Ok(crate::Filmstrip { url, frame_width, frame_height, interval_us, count })
 }
 
 fn filmstrip_size(asset: &Asset) -> Result<(u32, u32, u32)> {

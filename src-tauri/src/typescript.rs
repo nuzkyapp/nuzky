@@ -167,6 +167,8 @@ fn generate() -> String {
     types.visit::<nuzky_mcp::sounds::Page>();
     types.visit::<nuzky_mcp::stickers::StickerCatalog>();
     types.visit::<crate::sounds::PreviewStarted>();
+    types.visit::<nuzky_mcp::videos::Video>();
+    types.visit::<crate::youtube_videos::VideoPreview>();
     types.visit::<crate::sounds::SoundSettings>();
     types.visit::<crate::jobs::StyleTimelineResult>();
     types.visit::<nuzky_mcp::style::TimelinePlan>();

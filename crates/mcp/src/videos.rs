@@ -7,7 +7,7 @@ use std::sync::atomic::AtomicBool;
 use anyhow::{Result, anyhow, ensure};
 use nuzky_engine::edit::new_id;
 use nuzky_engine::model::{Asset, AssetKind, Part};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::youtube::{PICTURE, SOUND};
 
@@ -16,7 +16,8 @@ const MAX_BYTES: u64 = 4 << 30;
 /// The share of a download the picture takes; the sound is the rest.
 const PICTURE_SHARE: f32 = 0.9;
 
-#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "YoutubeVideo"))]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Video {
     pub id: String,

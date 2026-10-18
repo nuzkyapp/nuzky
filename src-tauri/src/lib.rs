@@ -13,6 +13,7 @@ mod preview_server;
 mod recap;
 mod reels;
 mod sounds;
+mod youtube_videos;
 mod stickers;
 mod store;
 mod style;
@@ -69,6 +70,7 @@ pub struct AppState {
     startup_notice: Option<String>,
     library: Arc<library::Library>,
     sounds: sounds::Sounds,
+    youtube: youtube_videos::YoutubeVideos,
     /// What the last learning from imported timelines learned, by job, until the creator uses it,
     /// with the version of the style its EDIT.md was shown over.
     timeline_lessons: Mutex<Option<(String, Vec<nuzky_mcp::style::Evidence>, u64)>>,
@@ -1183,6 +1185,7 @@ pub fn run() {
             let (session, events, startup_notice) = initial_project()?;
             let project = session.host.session.state()?.project;
             let cache_dir = store::cache_dir();
+            youtube_videos::forget(&cache_dir);
             let engine =
                 Engine::start(app.handle().clone(), server.clone(), Arc::new(project.clone()), cache_dir.clone());
             let state = AppState {
@@ -1206,6 +1209,7 @@ pub fn run() {
                 startup_notice,
                 library: Arc::default(),
                 sounds: Default::default(),
+                youtube: Default::default(),
                 timeline_lessons: Mutex::new(None),
             };
             // Jobs look the state up from their threads, so it must be managed first.
@@ -1241,6 +1245,16 @@ pub fn run() {
             sounds::sound_stop,
             sounds::sound_cancel,
             sounds::sound_add,
+            youtube_videos::youtube_video_link,
+            youtube_videos::youtube_video_fetch,
+            youtube_videos::youtube_video_cancel,
+            youtube_videos::youtube_video_add,
+            youtube_videos::youtube_preview_close,
+            youtube_videos::youtube_preview_play,
+            youtube_videos::youtube_preview_pause,
+            youtube_videos::youtube_preview_seek,
+            youtube_videos::youtube_preview_resize,
+            youtube_videos::youtube_filmstrip,
             sounds::sound_credits,
             sounds::sound_settings,
             sounds::set_sound_settings,

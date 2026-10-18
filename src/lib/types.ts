@@ -111,6 +111,11 @@ export type Asset = {
    * user's own files.
    */
   credit?: Credit | null,
+  /**
+   * The part of the file the user chose, as from a YouTube video. A new clip takes only this part;
+   * the footage around it stays hidden until a clip's edge is dragged out over it.
+   */
+  part?: Part | null,
 };
 
 export type AssetKind = "video" | "audio" | "image";
@@ -893,6 +898,14 @@ export type ModelQuestion = {
 };
 
 export type MotionKind = "pushIn" | "pullOut" | "kenBurns";
+
+/**
+ * A span of a media file, in microseconds from its start.
+ */
+export type Part = {
+  startUs: number,
+  endUs: number,
+};
 
 export type PlannedRecording = {
   path: string,
@@ -1715,6 +1728,13 @@ export type Transport = {
   tUs: number,
 };
 
+export type VideoPreview = {
+  url: string,
+  width: number,
+  height: number,
+  durationUs: number,
+};
+
 export type VisionModels = {
   /**
    * Download size of what is missing.
@@ -1751,6 +1771,13 @@ export type WordsCorrected = {
    * Caption clips that now show the corrected words.
    */
   captions: number,
+};
+
+export type YoutubeVideo = {
+  id: string,
+  title: string,
+  channel: string,
+  durationUs: number,
 };
 
 /**

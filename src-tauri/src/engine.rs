@@ -55,6 +55,24 @@ impl Events for AppHandle {
     }
 }
 
+/// A preview of something other than the project, such as a video before it is added, reporting under its
+/// own event names.
+struct Other {
+    app: AppHandle,
+    transport: &'static str,
+    error: &'static str,
+}
+
+impl Events for Other {
+    fn transport(&self, transport: Transport) {
+        self.app.emit(self.transport, transport).ok();
+    }
+
+    fn error(&self, error: Option<&str>) {
+        self.app.emit(self.error, error).ok();
+    }
+}
+
 /// Draws preview frames: the GPU renderer in the app.
 trait Frames {
     fn frame(&mut self, project: &Project, t_us: i64, w: u32, h: u32, wait: Wait, playing: bool) -> Result<Vec<u8>>;
@@ -77,17 +95,19 @@ pub struct Engine {
 
 impl Engine {
     pub fn start(app: AppHandle, server: Arc<PreviewServer>, project: Arc<Project>, cache_dir: PathBuf) -> Self {
-        let proxies = cache_dir.clone();
-        let renderer = move || {
-            let mut renderer = Renderer::new()?;
-            log::info!("Preview renderer on {}", renderer.adapter_name());
-            crate::diagnostics::set_graphics(renderer.adapter_name());
-            renderer.use_proxies(proxies.clone());
-            // Clips with a background show as recorded until their person outline is made.
-            renderer.use_mattes(proxies.clone(), Pending::Original);
-            Ok(renderer)
-        };
-        Self::start_with(app, server, project, cache_dir, renderer)
+        Self::start_with(app, server, project, cache_dir.clone(), renderer(cache_dir))
+    }
+
+    /// A second preview, of `project` rather than the open one, reporting through the `transport` and `error`
+    /// events. It stops when dropped.
+    pub fn start_other(
+        app: AppHandle,
+        (transport, error): (&'static str, &'static str),
+        server: Arc<PreviewServer>,
+        project: Arc<Project>,
+        cache_dir: PathBuf,
+    ) -> Self {
+        Self::start_with(Other { app, transport, error }, server, project, cache_dir.clone(), renderer(cache_dir))
     }
 
     fn start_with<F: Frames>(
@@ -111,6 +131,18 @@ impl Engine {
 
     pub fn send(&self, msg: Msg) {
         self.tx.send(msg).ok();
+    }
+}
+
+fn renderer(cache_dir: PathBuf) -> impl Fn() -> Result<Renderer> + Send + 'static {
+    move || {
+        let mut renderer = Renderer::new()?;
+        log::info!("Preview renderer on {}", renderer.adapter_name());
+        crate::diagnostics::set_graphics(renderer.adapter_name());
+        renderer.use_proxies(cache_dir.clone());
+        // Clips with a background show as recorded until their person outline is made.
+        renderer.use_mattes(cache_dir.clone(), Pending::Original);
+        Ok(renderer)
     }
 }
 
