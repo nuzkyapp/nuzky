@@ -126,6 +126,8 @@ interface AgentState {
   frame: boolean;
   /** Make a thumbnail is in the field: the message asks for a cover and a YouTube thumbnail, the text is an optional note. */
   thumbnail: boolean;
+  /** Sent while the agent worked, but it could not take it in that turn: it goes as the next message once the turn ends. */
+  next: { text: string; context: PromptContext } | null;
 }
 
 const AGENT_KEY = "nuzky.aiAgent";
@@ -156,6 +158,7 @@ export const useAgent = create<AgentState>(() => ({
   dropPlayhead: false,
   frame: false,
   thumbnail: false,
+  next: null,
 }));
 
 const agentApi = {
@@ -163,6 +166,8 @@ const agentApi = {
   send: (agent: AgentId, chat: string, turn: string, text: string, context: PromptContext, model: string | null) =>
     invoke<void>("agent_send", { agent, chat, turn, text, context, model }),
   stop: (turn: string) => invoke<void>("agent_stop", { turn }),
+  /** True when the working agent takes the message in this turn. */
+  steer: (turn: string, text: string, context: PromptContext) => invoke<boolean>("agent_steer", { turn, text, context }),
   jobs: () => invoke<AgentJob[]>("agent_jobs"),
 };
 
@@ -373,17 +378,9 @@ export async function send(text = useAgent.getState().draft.trim(), about: AiAbo
   if ((!text && !(s.thumbnail && about === "project")) || sendBlocked()) return;
   const context = promptContext(about);
   const fromDraft = text === s.draft.trim();
-  // The chat is named here, before sending, so even an agent that fails at once is heard.
-  const chat = s.chat ?? crypto.randomUUID();
-  const turn = crypto.randomUUID();
   useAgent.setState({
-    chat,
-    turn,
     // Earlier problems are over once a new message goes; their Try again would send this one.
     items: [...s.items.filter((i) => i.kind !== "error"), { kind: "user", text: text || "Make a thumbnail", context: text ? describeContext(context) : describeContext({ ...context, thumbnail: false }) }],
-    jobs: [],
-    status: "working",
-    startedAt: Date.now(),
     about,
     draft: fromDraft ? "" : s.draft,
     dropSelection: false,
@@ -391,6 +388,57 @@ export async function send(text = useAgent.getState().draft.trim(), about: AiAbo
     frame: false,
     thumbnail: false,
   });
+  await start(text, context);
+}
+
+/** Why a message cannot go to the agent while it works, or null. */
+export function steerBlocked(): string | null {
+  const s = useAgent.getState();
+  if (s.status === "stopping") return "Wait until it stops";
+  if (s.thumbnail) return "Make a thumbnail waits for the answer, or stop it";
+  return null;
+}
+
+/** The turn's end waits for a message on its way to the working agent, as that decides whether it goes next. */
+let steering: Promise<unknown> | null = null;
+
+/** Sends a message to the agent while it works: it takes it at its next step, or as the next message when it cannot in this turn. */
+export async function steer(text = useAgent.getState().draft.trim()) {
+  const s = useAgent.getState();
+  if (!text || s.status !== "working" || !s.turn || steerBlocked()) return;
+  const context = promptContext(s.about);
+  const shown = { kind: "user" as const, text, context: describeContext(context) };
+  useAgent.setState({
+    items: [...s.items, shown],
+    draft: text === s.draft.trim() ? "" : s.draft,
+    dropSelection: false,
+    dropPlayhead: false,
+    frame: false,
+  });
+  const call = agentApi.steer(s.turn, text, context);
+  const mine = (steering = call.catch(() => false));
+  let taken = false;
+  try {
+    taken = await call;
+  } catch (e) {
+    // It did not reach the agent, so it is not part of the conversation.
+    useAgent.setState((now) => ({ items: now.items.filter((it) => it !== shown), draft: now.draft ? `${text}\n${now.draft}` : text }));
+    useEditor.getState().toast({ kind: "error", text: plainError(errorText(e)) });
+    return;
+  } finally {
+    if (steering === mine) steering = null;
+  }
+  if (taken || useAgent.getState().chat !== s.chat) return;
+  useAgent.setState((now) => ({ next: now.next ? { text: `${now.next.text}\n\n${text}`, context } : { text, context } }));
+}
+
+/** Starts a turn for a message the conversation already shows. */
+async function start(text: string, context: PromptContext) {
+  const s = useAgent.getState();
+  // The chat is named here, before sending, so even an agent that fails at once is heard.
+  const chat = s.chat ?? crypto.randomUUID();
+  const turn = crypto.randomUUID();
+  useAgent.setState({ chat, turn, jobs: [], status: "working", startedAt: Date.now() });
   try {
     await agentApi.send(s.agent, chat, turn, text, context, s.agent === "chatgpt" ? useChatGpt.getState().model : null);
   } catch (e) {
@@ -436,6 +484,8 @@ function fail(code: AgentErrorCode, message: string) {
   let draft = s.draft;
   let retry: string | undefined;
   const last = items[items.length - 1];
+  // A message waiting for the next turn goes back to the field; it is the last one shown when nothing came after it.
+  if (s.next && last?.kind !== "user") draft = draft ? `${s.next.text}\n${draft}` : s.next.text;
   if (last?.kind === "user") {
     items = items.slice(0, -1);
     draft = draft ? `${last.text}\n${draft}` : last.text;
@@ -443,7 +493,7 @@ function fail(code: AgentErrorCode, message: string) {
     const asked = [...items].reverse().find((i) => i.kind === "user");
     retry = asked?.kind === "user" ? asked.text : undefined;
   }
-  useAgent.setState({ items: [...items, { kind: "error", code, message, retry }], draft, status: "idle" });
+  useAgent.setState({ items: [...items, { kind: "error", code, message, retry }], draft, status: "idle", next: null });
   // The sign-in ended or lost the plan meanwhile: the panel stops saying it uses the plan.
   if (s.agent === "chatgpt" && (code === "NOT_SIGNED_IN" || code === "PLAN_UNAVAILABLE")) void checkChatGpt(false);
 }
@@ -451,6 +501,7 @@ function fail(code: AgentErrorCode, message: string) {
 function onEvent(e: AgentEvent) {
   const s = useAgent.getState();
   if (e.chat !== s.chat) return;
+  if ((e.type === "done" || e.type === "error") && steering) return void steering.then(() => onEvent(e));
   const items = [...s.items];
   const last = items[items.length - 1];
   if (e.type === "text") {
@@ -483,16 +534,21 @@ function onEvent(e: AgentEvent) {
     fail(e.code, e.message);
     void watchJobs();
   } else {
+    // Codex stops for a message sent while it worked, which then goes next; the user's Stop sends nothing more.
+    const next = s.status === "working" ? s.next : null;
+    const stopped = e.stopped && !next;
     // A stopped turn marks the step it was on; one that changed nothing says so.
     const marked = items.map((it) => (it.kind === "steps" ? { ...it, steps: it.steps.map((x) => (x.status === "running" ? { ...x, status: e.stopped ? ("stopped" as const) : ("done" as const) } : x)) } : it));
     const turnStart = marked.map((it) => it.kind).lastIndexOf("user") + 1;
     const turn = marked.slice(turnStart);
     // What the turn changed comes last, after the agent's closing words.
     // A run of a stopped turn was stopped, whether by the panel's Stop or Stop and edit in the top bar.
-    const runs = turn.filter((it) => it.kind === "run").map((it) => (e.stopped ? { ...it, stopped: true } : it));
+    const runs = turn.filter((it) => it.kind === "run").map((it) => (stopped ? { ...it, stopped: true } : it));
     const ordered = [...marked.slice(0, turnStart), ...turn.filter((it) => it.kind !== "run"), ...runs];
-    useAgent.setState({ items: e.stopped && !runs.length ? [...ordered, { kind: "stopped" }] : ordered, status: "idle" });
-    void watchJobs();
+    const draft = s.next && !next ? (s.draft ? `${s.next.text}\n${s.draft}` : s.next.text) : s.draft;
+    useAgent.setState({ items: stopped && !runs.length ? [...ordered, { kind: "stopped" }] : ordered, status: "idle", next: null, draft });
+    if (next) void start(next.text, next.context);
+    else void watchJobs();
   }
 }
 
@@ -523,7 +579,7 @@ export function panelRunEnded(label: string, snap: Snapshot | null): boolean {
 
 // Another project starts a new conversation; the backend stops an agent still working on the old one.
 useEditor.subscribe((s, prev) => {
-  if (prev.snap && s.snap?.sessionEpoch !== prev.snap.sessionEpoch) useAgent.setState({ chat: null, items: [], jobs: [], status: "idle" });
+  if (prev.snap && s.snap?.sessionEpoch !== prev.snap.sessionEpoch) useAgent.setState({ chat: null, items: [], jobs: [], status: "idle", next: null });
 });
 
 /**

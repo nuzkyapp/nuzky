@@ -363,11 +363,45 @@ def ai_panel_codex(r):
             and wait(lambda: 'Rozumím: hello after stop' in panel(r)['text'], 10), runs(r)[-1])
     idle(r)
 
+    # Codex reads one message per turn: a message while it works stops it and goes on in the same conversation.
+    r.s.run("[...document.querySelectorAll('aside[aria-label=AI] button')].filter((b) => b.textContent.trim() === 'Undo').at(-1).click()")
+    wait(lambda: r.track() == before, 10)
+    said = lambda: panel(r)['text'].count('Pracuju')
+    working = said()
+    send(r, 'steer me please')
+    r.check('a steerable Codex edit locks the editor', wait(lambda: r.state()['aiRun'] and said() > working, 15))
+    pid = runs(r)[-1]['pid']
+    started = time.monotonic()
+    send(r, 'Do this instead')
+    r.check('the message stops Codex within seconds and resumes the conversation with it',
+            wait(lambda: not alive(pid), 5, 0.05) and wait(lambda: len(runs(r)) == 6, 10) and runs(r)[5]['resume']
+            and runs(r)[5]['session'] == first['session'] and runs(r)[5]['prompt'].startswith('Do this instead')
+            and wait(lambda: 'Rozumím: do this instead' in panel(r)['text'], 10),
+            {'seconds': round(time.monotonic() - started, 2), 'run': runs(r)[-1]})
+    idle(r)
+    kinds = r.s.run("return window.__nuzky.agent.getState().items.map((i) => i.kind === 'run' ? `run:${i.label}:${i.stopped}` : i.kind === 'user' ? `user:${i.text}` : i.kind)")
+    steered = kinds[kinds.index('user:steer me please'):]
+    r.check('the interrupted run keeps its split in its own card, not called stopped, before the next answer',
+            'run:Slow edit:false' in steered and 'stopped' not in steered and len(r.track()) == len(before) + 1
+            and not any('AI edit done' in t for t in r.s.run("return document.body.innerText").split('\n')), steered)
+    r.shot('codex-steered')
+
+    # Before Codex has kept anything of its turn, stopping it would lose that message, so the new one waits.
+    send(r, 'think first')
+    wait(lambda: len(runs(r)) == 7, 10)
+    send(r, 'Then this')
+    r.check('a message sent before Codex did anything waits for its answer, then goes in the same conversation',
+            wait(lambda: 'Rozumím: think first' in panel(r)['text'] and 'Rozumím: then this' in panel(r)['text'], 15)
+            and len(runs(r)) == 8 and runs(r)[7]['resume'] and runs(r)[7]['prompt'].startswith('Then this')
+            and panel(r)['text'].index('Rozumím: think first') < panel(r)['text'].index('Rozumím: then this'),
+            {'runs': [(x['pid'], x['prompt'][:20]) for x in runs(r)[6:]], 'text': panel(r)['text'][-300:]})
+    idle(r)
+
     started = time.monotonic()
     send(r, 'signin please')
     hint = wait(lambda: "Codex isn't signed in." in panel(r)['text'] and agent(r)['draft'] == 'signin please', 7, 0.05)
     text = panel(r)['text']
-    gone = wait(lambda: len(runs(r)) == 5 and not alive(runs(r)[-1]['pid']), 1, 0.05)
+    gone = wait(lambda: len(runs(r)) == 9 and not alive(runs(r)[-1]['pid']), 1, 0.05)
     r.check('not signed in gives the login steps and the message back within 5 s, with Codex already stopped',
             hint and 'codex login' in text and 'Sign in with ChatGPT' in text and gone and time.monotonic() - started < 5,
             {'seconds': round(time.monotonic() - started, 2), 'draft': agent(r)['draft'], 'text': text, 'gone': gone})
@@ -567,16 +601,38 @@ def ai_panel(r):
     r.check('it is marked chosen and the other is off', state[1][1] == 'true' and state[0][2] == 'true', state)
     idle(r)
 
+    # A message while it works steers the same agent process, inside the same run.
+    send(r, 'steer me please')
+    r.check('a steerable edit locks the editor', wait(lambda: r.state()['aiRun'] and 'Pracuju. Napiš mi' in panel(r)['text'], 15))
+    pid, count = runs(r)[-1]['pid'], len(runs(r))
+    r.s.run("""const t = document.querySelector('aside[aria-label=AI] textarea');
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(t, arguments[0]);
+        t.dispatchEvent(new Event('input', {bubbles: true}));""", 'Also split it at 4 s')
+    r.check('while it works, typed text offers Send now beside Stop',
+            wait(lambda: r.s.run("return !!document.querySelector('aside[aria-label=AI] button[aria-label=\"Send now\"]')"), 3)
+            and 'Tell Claude Code more while it works' in r.s.run("return document.querySelector('aside[aria-label=AI] textarea').placeholder"))
+    r.shot('steer-typed')
+    r.key('Enter')
+    r.check('the agent takes the message in the same process and answers it',
+            wait(lambda: 'Beru v potaz: Also split it at 4 s' in panel(r)['text'], 15) and len(runs(r)) == count and runs(r)[-1]['pid'] == pid,
+            {'runs': len(runs(r)), 'text': panel(r)['text']})
+    r.check('the message shows in the conversation where it was sent', wait(lambda: agent(r)['status'] == 'idle', 15)
+            and r.s.run("const i = window.__nuzky.agent.getState().items; return i.map((x) => x.kind === 'user' ? x.text : x.kind)").count('Also split it at 4 s') == 1,
+            r.s.run("return window.__nuzky.agent.getState().items.map((x) => x.kind)"))
+    r.check('it is answered once, by that process', len(runs(r)) == count and 'Rozumím: also split' not in panel(r)['text'],
+            {'runs': len(runs(r)), 'text': panel(r)['text']})
+    text = panel(r)['text']
+    r.check('both splits are one run with one card', text.count('Steerable edit') == 1 and 'Split talk.mp4\n00:02' in text and '00:04' in text
+            and len(r.track()) == len(before) + 2, text)
+    r.shot('steered')
+    r.s.run("[...document.querySelectorAll('aside[aria-label=AI] button')].filter((b) => b.textContent.trim() === 'Undo').at(-1).click()")
+    r.check("the card's Undo takes back both splits at once", wait(lambda: len(r.track()) == len(before), 10), r.track())
+
     # Stop, in the panel and in the top bar.
     for where in ('Stop', 'Stop and edit'):
         send(r, 'slow edit please')
         r.check(f'a slow edit locks the editor ({where})', wait(lambda: r.state()['aiRun'] and 'Pracuju' in panel(r)['text'], 15))
         pid = runs(r)[-1]['pid']
-        if where == 'Stop':
-            send(r, 'one more thing')
-            r.check('Enter while it works says why nothing was sent', wait(lambda: 'Wait for the answer, or stop it' in panel(r)['text'], 3)
-                    and runs(r)[-1]['pid'] == pid and agent(r)['draft'] == 'one more thing', panel(r)['text'])
-            r.s.run("window.__nuzky.agent.setState({draft: ''})")
         started = time.time()
         click(r, where, 'aside[aria-label=AI]' if where == 'Stop' else 'header')
         gone = wait(lambda: not alive(pid), 5, 0.05)

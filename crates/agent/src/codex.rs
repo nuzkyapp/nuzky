@@ -182,10 +182,11 @@ mod tests {
         let steps = lines
             .iter()
             .flat_map(|l| p.line(l))
-            .map(|s| match s {
-                Step::Event(e) => Ok(e),
-                Step::Fail(c, m) => Err((c, m)),
-                Step::ResultError(m) => Err((ErrorCode::AgentFailed, m)),
+            .filter_map(|s| match s {
+                Step::Event(e) => Some(Ok(e)),
+                Step::Fail(c, m) => Some(Err((c, m))),
+                Step::ResultError(m) => Some(Err((ErrorCode::AgentFailed, m))),
+                Step::Answered => None,
             })
             .collect();
         (steps, p.session())

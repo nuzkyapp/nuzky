@@ -16,15 +16,28 @@ pub(crate) fn command(req: &TurnRequest) -> Command {
     let env: Map<String, Value> = req.mcp.env.iter().map(|(k, v)| (k.clone(), Value::String(v.clone()))).collect();
     let mcp = json!({"mcpServers": {"nuzky": {"type": "stdio", "command": req.mcp.command, "args": req.mcp.args, "env": env}}});
     let mut c = Command::new(&req.exe);
-    c.args(["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"])
-        // The user's login, model and gateway stay; the folder's settings, hooks and MCP servers do not.
-        .args(["--setting-sources", "user", "--settings", &settings().to_string()])
-        .args(["--strict-mcp-config", "--mcp-config", &mcp.to_string()])
-        // No shell, files or web: only Nuzky's tools, allowed without asking.
-        .args(["--tools", "", "--allowedTools", "mcp__nuzky", "--permission-mode", "dontAsk"])
-        .args(["--disable-slash-commands", "--append-system-prompt", SYSTEM])
-        .args([if req.resume { "--resume" } else { "--session-id" }, &req.session]);
+    c.args([
+        "-p",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+    ])
+    // The user's login, model and gateway stay; the folder's settings, hooks and MCP servers do not.
+    .args(["--setting-sources", "user", "--settings", &settings().to_string()])
+    .args(["--strict-mcp-config", "--mcp-config", &mcp.to_string()])
+    // No shell, files or web: only Nuzky's tools, allowed without asking.
+    .args(["--tools", "", "--allowedTools", "mcp__nuzky", "--permission-mode", "dontAsk"])
+    .args(["--disable-slash-commands", "--append-system-prompt", SYSTEM])
+    .args([if req.resume { "--resume" } else { "--session-id" }, &req.session]);
     c
+}
+
+/// A message for Claude's stream-json input, one line.
+pub(crate) fn message(text: &str) -> String {
+    format!("{}\n", json!({"type": "user", "message": {"role": "user", "content": text}}))
 }
 
 #[derive(Default)]
@@ -114,12 +127,12 @@ impl Parser {
                 .collect(),
             Some("result") if v["is_error"] == true => {
                 let text = v["result"].as_str().unwrap_or("").to_owned();
-                vec![Step::ResultError(if text.is_empty() {
-                    "Claude Code stopped with an error.".into()
-                } else {
-                    text
-                })]
+                vec![
+                    Step::ResultError(if text.is_empty() { "Claude Code stopped with an error.".into() } else { text }),
+                    Step::Answered,
+                ]
             }
+            Some("result") => vec![Step::Answered],
             _ => Vec::new(),
         }
     }
@@ -162,10 +175,11 @@ mod tests {
         lines
             .iter()
             .flat_map(|l| p.line(&l.to_string()))
-            .map(|s| match s {
-                Step::Event(e) => Ok(e),
-                Step::Fail(c, m) => Err((c, m)),
-                Step::ResultError(m) => Err((ErrorCode::AgentFailed, m)),
+            .filter_map(|s| match s {
+                Step::Event(e) => Some(Ok(e)),
+                Step::Fail(c, m) => Some(Err((c, m))),
+                Step::ResultError(m) => Some(Err((ErrorCode::AgentFailed, m))),
+                Step::Answered => None,
             })
             .collect()
     }

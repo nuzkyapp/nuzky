@@ -5,7 +5,7 @@ use anyhow::{Context, Result, bail};
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
-use std::process::Stdio;
+use std::process::{ChildStdin, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -49,6 +49,8 @@ pub(crate) enum Step {
     Fail(ErrorCode, String),
     /// The agent's own closing error, which a stopped turn also produces.
     ResultError(String),
+    /// Claude finished answering what it was sent; a message sent later starts no more work in this turn.
+    Answered,
 }
 
 enum Parser {
@@ -76,12 +78,23 @@ impl Parser {
 /// How long a stopped agent gets to finish before it is killed.
 const STOP_GRACE: Duration = Duration::from_secs(2);
 
+/// Where messages the user sends while the agent works go; None once the turn takes no more.
+pub(crate) enum Inbox {
+    /// Claude Code reads them on its input and takes each at its next step.
+    Claude(Arc<Mutex<Option<ChildStdin>>>),
+    /// ChatGPT's turn adds them to the conversation before it asks again.
+    ChatGpt(Arc<Mutex<Option<Vec<String>>>>),
+    /// Codex reads one message per turn; true once it has kept this turn's, so a stop for the next loses nothing.
+    Codex(Arc<AtomicBool>),
+}
+
 /// One message to the agent: an installed CLI running as its own process group, or ChatGPT running in Nuzky.
 pub struct Turn {
     /// The CLI's process group; None for ChatGPT, whose turn ends itself once it sees `stopping`.
     pub(crate) pid: Option<u32>,
     pub(crate) stopping: Arc<AtomicBool>,
     pub(crate) finished: Arc<AtomicBool>,
+    pub(crate) inbox: Inbox,
 }
 
 /// Variables of a parent Claude Code session (Nuzky started from one, as in development),
@@ -125,11 +138,20 @@ impl Turn {
         let finished = Arc::new(AtomicBool::new(false));
 
         let mut stdin = child.stdin.take().context("Agent input")?;
-        let prompt = req.prompt;
-        std::thread::spawn(move || {
-            // Closing input tells the agent that the message is complete.
-            let _ = stdin.write_all(prompt.as_bytes());
-        });
+        let inbox = if req.agent == AgentId::Claude {
+            // Its input stays open for what the user sends while it works.
+            let _ = stdin.write_all(claude::message(&req.prompt).as_bytes());
+            Arc::new(Mutex::new(Some(stdin)))
+        } else {
+            std::thread::spawn(move || {
+                // Closing input tells Codex that the message is complete.
+                let _ = stdin.write_all(req.prompt.as_bytes());
+            });
+            Arc::new(Mutex::new(None))
+        };
+        let open = inbox.clone();
+        let kept = Arc::new(AtomicBool::new(false));
+        let kept_now = kept.clone();
         let tail = Arc::new(Mutex::new(VecDeque::<String>::new()));
         let stderr = child.stderr.take().context("Agent errors")?;
         let errors = tail.clone();
@@ -170,8 +192,15 @@ impl Turn {
                         Step::ResultError(message) if failed.is_none() && !stop_flag.load(Ordering::Acquire) => {
                             failed = Some((ErrorCode::AgentFailed, message));
                         }
+                        // Claude answers what is already on its input after this, then exits.
+                        Step::Answered => drop(open.lock().unwrap().take()),
                         _ => {}
                     }
+                }
+                if let Parser::Codex(p) = &parser
+                    && p.session().is_some()
+                {
+                    kept_now.store(true, Ordering::Release);
                 }
             }
             let status = child.wait();
@@ -195,13 +224,43 @@ impl Turn {
             }
             emit(end);
         });
-        Ok(Turn { pid: Some(pid), stopping, finished })
+        let inbox = if req.agent == AgentId::Claude { Inbox::Claude(inbox) } else { Inbox::Codex(kept) };
+        Ok(Turn { pid: Some(pid), stopping, finished, inbox })
+    }
+
+    /// Gives the working agent another message, which it takes at its next step. False when it cannot
+    /// take one: Codex reads only one message per turn, and a turn that is ending or stopping takes none.
+    pub fn steer(&self, prompt: &str) -> bool {
+        if !self.running() || self.stopping.load(Ordering::Acquire) {
+            return false;
+        }
+        match &self.inbox {
+            Inbox::Claude(stdin) => stdin
+                .lock()
+                .unwrap()
+                .as_mut()
+                .is_some_and(|stdin| stdin.write_all(claude::message(prompt).as_bytes()).is_ok()),
+            Inbox::ChatGpt(queue) => {
+                queue.lock().unwrap().as_mut().map(|queue| queue.push(prompt.to_owned())).is_some()
+            }
+            Inbox::Codex(_) => false,
+        }
+    }
+
+    /// Whether the agent can stop for a message it cannot take and go on with it in the next turn without
+    /// losing this one: Codex, once it has kept this turn's message.
+    pub fn resumable(&self) -> bool {
+        matches!(&self.inbox, Inbox::Codex(kept) if kept.load(Ordering::Acquire))
     }
 
     /// Asks the agent to stop, and kills it and its MCP bridge if it has not after a short grace.
     pub fn stop(&self) {
         if self.finished.load(Ordering::Acquire) || self.stopping.swap(true, Ordering::AcqRel) {
             return;
+        }
+        if let Inbox::Claude(stdin) = &self.inbox {
+            // A message still on its input would otherwise be answered after the stop.
+            drop(stdin.lock().unwrap().take());
         }
         let Some(pid) = self.pid else { return };
         signal(pid, false);

@@ -6,6 +6,7 @@ use std::thread::{self, JoinHandle};
 struct Server {
     api: String,
     requests: Arc<Mutex<Vec<Value>>>,
+    stream_wait: Arc<Mutex<Option<Receiver<()>>>>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
@@ -16,6 +17,8 @@ impl Server {
         listener.set_nonblocking(true).unwrap();
         let api = format!("http://{}", listener.local_addr().unwrap());
         let requests = Arc::new(Mutex::new(Vec::new()));
+        let stream_wait = Arc::new(Mutex::new(None::<Receiver<()>>));
+        let wait = stream_wait.clone();
         let stop = Arc::new(AtomicBool::new(false));
         let (recorded, stopping) = (requests.clone(), stop.clone());
         let thread = thread::spawn(move || {
@@ -53,10 +56,18 @@ impl Server {
                 let (status, body) = replies.next().expect("unexpected request");
                 let headers =
                     format!("HTTP/1.1 {status} Test\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n");
-                socket.write_all(format!("{headers}{body}").as_bytes()).unwrap();
+                socket.write_all(headers.as_bytes()).unwrap();
+                if let Some(release) = wait.lock().unwrap().take() {
+                    let (first, rest) = body.split_once("\n\n").unwrap();
+                    socket.write_all(format!("{first}\n\n").as_bytes()).unwrap();
+                    release.recv_timeout(Duration::from_secs(3)).unwrap();
+                    socket.write_all(rest.as_bytes()).unwrap();
+                } else {
+                    socket.write_all(body.as_bytes()).unwrap();
+                }
             }
         });
-        Self { api, requests, stop, thread: Some(thread) }
+        Self { api, requests, stream_wait, stop, thread: Some(thread) }
     }
 }
 
@@ -190,6 +201,80 @@ fn error(event: &AgentEvent, expected: ErrorCode) -> &str {
     let AgentEvent::Error { code, message } = event else { panic!("expected error, got {event:?}") };
     assert_eq!(*code, expected);
     message
+}
+
+#[test]
+fn steering_during_tool_follows_its_output_and_stays_in_history() {
+    let server = Server::new(vec![sse(vec![item(call()), completed()]), answer()]);
+    let (release, blocked) = mpsc::channel();
+    let f = Fixture::start(&server, tool_reply(), None, Some(blocked), vec![]);
+    f.calls.recv_timeout(Duration::from_secs(3)).unwrap();
+    let accepted = f.turn.steer("Keep the ending");
+    let also_accepted = f.turn.steer("Keep the sound too");
+    release.send(()).unwrap();
+    let events = f.finish();
+    assert!(accepted && also_accepted);
+    assert_eq!(events.last(), Some(&AgentEvent::Done { stopped: false }));
+    let mut input_call = call();
+    input_call.as_object_mut().unwrap().remove("id");
+    let input = vec![
+        user(),
+        input_call,
+        json!({"type": "function_call_output", "call_id": "call-1", "output": "Edited"}),
+        json!({"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Keep the ending"}]}),
+        json!({"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Keep the sound too"}]}),
+    ];
+    let requests = server.requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0]["input"], json!([user()]));
+    assert_eq!(requests[1]["input"], json!(input));
+    let mut kept = input;
+    kept.push(message());
+    assert_eq!(*f.history.lock().unwrap(), kept);
+}
+
+#[test]
+fn steering_during_final_stream_asks_again_and_stays_in_history() {
+    let server = Server::new(vec![answer(), answer()]);
+    let (release, blocked) = mpsc::channel();
+    *server.stream_wait.lock().unwrap() = Some(blocked);
+    let f = Fixture::start(&server, tool_reply(), None, None, vec![]);
+    assert_eq!(f.events.recv_timeout(Duration::from_secs(3)).unwrap(), AgentEvent::Text { text: "Cut ".into() });
+    let accepted = f.turn.steer("Keep the ending");
+    release.send(()).unwrap();
+    let events = f.finish();
+    assert!(accepted);
+    assert_eq!(events.last(), Some(&AgentEvent::Done { stopped: false }));
+    assert_eq!(events.iter().filter(|event| matches!(event, AgentEvent::Done { .. })).count(), 1);
+    let input = vec![
+        user(),
+        message(),
+        json!({"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Keep the ending"}]}),
+    ];
+    let requests = server.requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[1]["input"], json!(input));
+    let mut kept = input;
+    kept.push(message());
+    assert_eq!(*f.history.lock().unwrap(), kept);
+}
+
+#[test]
+fn steering_inbox_closes_before_done_or_error() {
+    for reply in [answer(), (429, json!({"error": {"message": "Usage limit"}}).to_string())] {
+        let server = Server::new(vec![reply]);
+        let f = Fixture::start(&server, tool_reply(), None, None, vec![]);
+        loop {
+            let event = f.events.recv_timeout(Duration::from_secs(3)).unwrap();
+            if matches!(event, AgentEvent::Done { .. } | AgentEvent::Error { .. }) {
+                break;
+            }
+        }
+        assert!(!f.turn.steer("Too late"));
+        let crate::turn::Inbox::ChatGpt(inbox) = &f.turn.inbox else { panic!("missing ChatGPT inbox") };
+        assert!(inbox.lock().unwrap().is_none());
+        f.finish();
+    }
 }
 
 #[test]
@@ -345,6 +430,9 @@ fn stop_during_tool_ends_promptly_and_answers_pending_call() {
     assert_eq!(f.events.recv_timeout(Duration::from_secs(1)).unwrap(), AgentEvent::Done { stopped: true });
     assert!(f.run.ended.load(Ordering::Acquire));
     assert!(!f.turn.running());
+    assert!(!f.turn.steer("Too late"));
+    let crate::turn::Inbox::ChatGpt(inbox) = &f.turn.inbox else { panic!("missing ChatGPT inbox") };
+    assert!(inbox.lock().unwrap().is_none());
     let history = f.history.lock().unwrap();
     assert_eq!(history.len(), 3);
     assert_eq!(history[2]["type"], "function_call_output");

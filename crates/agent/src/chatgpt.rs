@@ -4,7 +4,7 @@
 //! docs/AI-ARCHITECTURE.md, "AI panel".
 
 use crate::event::{AgentEvent, ErrorCode, ToolStatus};
-use crate::turn::{SYSTEM, Turn};
+use crate::turn::{Inbox, SYSTEM, Turn};
 use anyhow::Result;
 use serde_json::{Value, json};
 use std::collections::HashSet;
@@ -73,21 +73,23 @@ impl Turn {
             anyhow::bail!("The AI panel is not available on Windows yet. Connect your agent in a terminal instead.");
         }
         let (stopping, finished) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
-        let (stop, done) = (stopping.clone(), finished.clone());
+        let inbox = Arc::new(Mutex::new(Some(Vec::new())));
+        let (stop, done, waiting) = (stopping.clone(), finished.clone(), inbox.clone());
         std::thread::spawn(move || {
-            let end = run(&req, &stop, &mut emit);
+            let end = run(&req, &stop, &waiting, &mut emit);
+            waiting.lock().unwrap().take();
             done.store(true, Ordering::Release);
             emit(end);
         });
-        Ok(Turn { pid: None, stopping, finished })
+        Ok(Turn { pid: None, stopping, finished, inbox: Inbox::ChatGpt(inbox) })
     }
 }
 
-fn run(req: &ChatGptRequest, stop: &Arc<AtomicBool>, emit: &mut dyn FnMut(AgentEvent)) -> AgentEvent {
+fn run(req: &ChatGptRequest, stop: &Arc<AtomicBool>, inbox: &Waiting, emit: &mut dyn FnMut(AgentEvent)) -> AgentEvent {
     let before = req.history.lock().unwrap().clone();
     let mut items = before.clone();
-    items.push(json!({"type": "message", "role": "user", "content": [{"type": "input_text", "text": req.prompt}]}));
-    let (mut end, answered) = converse(req, &mut items, stop, emit);
+    items.push(user(&req.prompt));
+    let (mut end, answered) = converse(req, &mut items, stop, inbox, emit);
     // A run ChatGPT left open that could not be kept leaves the editor locked, so the panel says so.
     if let Err(error) = req.run.end()
         && !matches!(end, AgentEvent::Error { .. })
@@ -111,12 +113,20 @@ fn run(req: &ChatGptRequest, stop: &Arc<AtomicBool>, emit: &mut dyn FnMut(AgentE
     end
 }
 
+/// Messages the user sent while ChatGPT works; None once the turn takes no more.
+type Waiting = Arc<Mutex<Option<Vec<String>>>>;
+
+fn user(text: &str) -> Value {
+    json!({"type": "message", "role": "user", "content": [{"type": "input_text", "text": text}]})
+}
+
 /// Asks ChatGPT and runs the tools it calls until it answers without calling one. Also says whether
 /// ChatGPT completed any answer, which decides what the conversation keeps of this turn.
 fn converse(
     req: &ChatGptRequest,
     items: &mut Vec<Value>,
     stop: &Arc<AtomicBool>,
+    inbox: &Waiting,
     emit: &mut dyn FnMut(AgentEvent),
 ) -> (AgentEvent, bool) {
     let http = http();
@@ -154,7 +164,12 @@ fn converse(
         let calls: Vec<Value> = output.iter().filter(|item| item["type"] == "function_call").cloned().collect();
         items.extend(output.into_iter().filter_map(as_input));
         if calls.is_empty() {
-            return (AgentEvent::Done { stopped: false }, true);
+            let mut waiting = inbox.lock().unwrap();
+            // A message that came with the answer is asked about at once rather than ending the turn.
+            if waiting.as_ref().is_none_or(Vec::is_empty) {
+                *waiting = None;
+                return (AgentEvent::Done { stopped: false }, true);
+            }
         }
         for call in &calls {
             let Some(output) = run_call(req, call, stop, emit) else {
@@ -162,6 +177,8 @@ fn converse(
             };
             items.push(json!({"type": "function_call_output", "call_id": call["call_id"], "output": output}));
         }
+        let waiting = inbox.lock().unwrap().as_mut().map(std::mem::take).unwrap_or_default();
+        items.extend(waiting.iter().map(|text| user(text)));
     }
     let message = format!(
         "ChatGPT stopped after {MAX_ROUNDS} rounds of tools in one message, so a model going in circles can't use up your plan. Send \"go on\" to let it continue."

@@ -42,6 +42,8 @@ import {
   newChat,
   send,
   sendBlocked,
+  steer,
+  steerBlocked,
   stop,
   useAgent,
   type AgentErrorCode,
@@ -842,7 +844,7 @@ function Composer() {
   const name = agentName(agent, agents);
   const plan = useChatGpt((s) => agent === "chatgpt" && planReady(s.status));
   const working = status !== "idle";
-  const blocked = sendBlocked();
+  const blocked = working ? steerBlocked() : sendBlocked();
 
   useLayoutEffect(() => {
     const el = field.current;
@@ -865,10 +867,28 @@ function Composer() {
   // Fresh from the store: Enter can come before React has drawn the latest text.
   const submit = () => {
     if (!useAgent.getState().draft.trim() && !useAgent.getState().thumbnail) return;
-    const reason = sendBlocked();
+    const reason = useAgent.getState().status === "idle" ? sendBlocked() : steerBlocked();
     if (reason) setWhy(reason);
-    else void send(undefined, about);
+    else if (useAgent.getState().status === "idle") void send(undefined, about);
+    else void steer();
   };
+  const sendTitle = !working
+    ? "Send (Enter)"
+    : agent === "codex"
+      ? `Send now (Enter). ${name} stops its current step and goes on with this, or answers it next when it has not started yet`
+      : `Send now (Enter). ${name} takes it after its current step`;
+  const sendButton = (
+    <button
+      type="button"
+      aria-label={working ? "Send now" : "Send"}
+      title={blocked ?? (draft.trim() || (thumbnail && !working) ? sendTitle : "Type a message first")}
+      aria-disabled={!!blocked || (!draft.trim() && !thumbnail) || undefined}
+      onClick={submit}
+      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent-strong text-white transition-colors duration-[120ms] hover:bg-[#0064c8] aria-disabled:cursor-not-allowed aria-disabled:bg-white/[.08] aria-disabled:text-white/40"
+    >
+      <ArrowUp size={16} />
+    </button>
+  );
 
   return (
     <div className="shrink-0 px-2.5 pb-2.5">
@@ -882,7 +902,7 @@ function Composer() {
         </div>
       )}
       <div onClick={() => field.current?.focus()} className="rounded-xl border border-white/[.08] bg-white/[.055] px-2.5 pb-1.5 pt-2 transition-colors duration-[120ms] has-[textarea:focus]:border-accent">
-        {!working && about === "style" && (
+        {about === "style" && (
           <div className="mb-2 flex flex-wrap gap-1.5">
             <span className="flex h-[22px] items-center gap-1.5 rounded-md bg-white/[.08] px-2 text-[12px] text-fg" title="Messages here are about your style, for all your videos">
               <Scissors size={12} className="text-muted" />
@@ -890,7 +910,7 @@ function Composer() {
             </span>
           </div>
         )}
-        {!working && about === "project" && ((selected > 0 && !dropSelection) || !dropPlayhead || frame || thumbnail) && (
+        {about === "project" && ((selected > 0 && !dropSelection) || !dropPlayhead || frame || thumbnail) && (
           <div className="mb-2 flex flex-wrap gap-1.5">
             {thumbnail && (
               <Chip icon={<ImageIcon size={12} />} label="Make a thumbnail" onRemove={() => useAgent.setState({ thumbnail: false })}>
@@ -963,7 +983,7 @@ function Composer() {
           rows={2}
           value={draft}
           aria-label={`Message to ${name}`}
-          placeholder={working ? `${name} is working…` : agent === "chatgpt" && !plan ? "Sign in to ChatGPT to start" : thumbnail ? "Add a note, e.g. the hook (optional)" : about === "style" ? "What should change in how you edit?" : hasItems ? "Ask for changes…" : `Ask ${name} to edit…`}
+          placeholder={working ? `Tell ${name} more while it works…` : agent === "chatgpt" && !plan ? "Sign in to ChatGPT to start" : thumbnail ? "Add a note, e.g. the hook (optional)" : about === "style" ? "What should change in how you edit?" : hasItems ? "Ask for changes…" : `Ask ${name} to edit…`}
           onChange={(e) => useAgent.setState({ draft: e.target.value })}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -978,7 +998,6 @@ function Composer() {
           <IconButton
             label={frame ? "Don't show the agent the frame at the playhead" : "Show the agent the frame at the playhead"}
             active={frame}
-            disabled={working}
             onClick={() => useAgent.setState(frame ? { frame: false } : { frame: true, dropPlayhead: false })}
             className={frame ? "h-7 w-auto gap-1.5 px-2 text-[12px] font-medium" : "h-7 w-7"}
           >
@@ -1010,18 +1029,10 @@ function Composer() {
               <Button className="h-7 px-2.5 text-[12px]" disabled={status === "stopping"} title="Stop the agent. What it did so far stays, and Undo takes it back." onClick={() => void stop()}>
                 <CircleStop size={13} /> Stop
               </Button>
+              {draft.trim() && sendButton}
             </>
           ) : (
-            <button
-              type="button"
-              aria-label="Send"
-              title={blocked ?? (draft.trim() || thumbnail ? "Send (Enter)" : "Type a message first")}
-              aria-disabled={!!blocked || (!draft.trim() && !thumbnail) || undefined}
-              onClick={submit}
-              className="flex h-7 w-7 items-center justify-center rounded-full bg-accent-strong text-white transition-colors duration-[120ms] hover:bg-[#0064c8] aria-disabled:cursor-not-allowed aria-disabled:bg-white/[.08] aria-disabled:text-white/40"
-            >
-              <ArrowUp size={16} />
-            </button>
+            sendButton
           )}
         </div>
       </div>
