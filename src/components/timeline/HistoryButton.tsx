@@ -14,14 +14,15 @@ const PEEK_DELAY_MS = 300;
 /**
  * Undo or Redo. Resting the pointer on it, or reaching it with the keyboard, reads the project the step would
  * restore and hands it to the timeline (`onPeek`), which draws it; `lines` say in words what changes. Nothing
- * changes until the click. After a click the next step shows the same way.
+ * changes until the click. After a click the timeline shows the result; the next step shows once the pointer
+ * or focus comes back.
  */
 export function HistoryButton({ redo, locked, lines, onPeek }: { redo: boolean; locked: boolean; lines: string[] | null; onPeek: (peek: Peek | null) => void }) {
   const can = useEditor((s) => !!(redo ? s.snap?.canRedo : s.snap?.canUndo));
   const revision = useEditor((s) => s.snap?.revision);
   const [pointer, setPointer] = useState(false);
   const [keyboard, setKeyboard] = useState(false);
-  // Esc hides the preview until the pointer or focus leaves.
+  // A click or Esc hides the preview until the pointer or focus leaves.
   const [dismissed, setDismissed] = useState(false);
   const [shown, setShown] = useState<Peek | null>(null);
   const ref = useRef<HTMLButtonElement>(null);
@@ -59,11 +60,14 @@ export function HistoryButton({ redo, locked, lines, onPeek }: { redo: boolean; 
       <IconButton
         ref={ref}
         round
-        label={locked ? `${name} is available when the AI is done` : redo ? "Redo (Ctrl+Shift+Z)" : "Undo (Ctrl+Z)"}
+        label={locked ? `${name} is available when the AI is done` : !can ? `Nothing to ${name.toLowerCase()}` : redo ? "Redo (Ctrl+Shift+Z)" : "Undo (Ctrl+Z)"}
         disabled={locked || !can}
-        onClick={() => void useEditor.getState()[redo ? "redo" : "undo"]()}
+        onClick={() => {
+          setDismissed(true);
+          void useEditor.getState()[redo ? "redo" : "undo"]();
+        }}
         // The tip below says more than the native tooltip would.
-        {...(can && !locked ? { title: "" } : {})}
+        {...(at ? { title: "" } : {})}
         aria-describedby={at ? tipId : undefined}
         data-peek-button={redo ? "redo" : "undo"}
         onPointerEnter={() => setPointer(true)}
@@ -98,7 +102,7 @@ export function HistoryButton({ redo, locked, lines, onPeek }: { redo: boolean; 
             <div className="flex items-center gap-1.5 font-semibold">
               {shown.ai && <Sparkles size={12} className="shrink-0 text-accent" />}
               <span className="truncate">
-                {shown.ai ? `${name} AI` : name}
+                {shown.ai ? `${name} AI run` : name}
                 {shown.label && ` · ${shown.label}`}
               </span>
               <span className="ml-auto shrink-0 pl-3 font-normal text-muted">{redo ? "Ctrl+Shift+Z" : "Ctrl+Z"}</span>

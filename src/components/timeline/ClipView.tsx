@@ -2,7 +2,7 @@ import { memo, useEffect } from "react";
 import { AudioLines, Film, Gauge, Image as ImageIcon, Type } from "lucide-react";
 import { MAIN_TRACK, isCaptionTrack, useEditor } from "../../lib/store";
 import { US, formatDuration } from "../../lib/time";
-import type { PeekMark } from "../../lib/peek";
+import { PEEK_WORDS, type PeekMark } from "../../lib/peek";
 import type { Asset, Clip, Filmstrip, Project, Track } from "../../lib/types";
 import { Waveform } from "./Waveform";
 
@@ -73,6 +73,7 @@ export const ClipView = memo(function ClipView({
   visible,
   fades,
   mark,
+  dimmed,
   onPointerDown,
   onContextMenu,
 }: {
@@ -94,6 +95,8 @@ export const ClipView = memo(function ClipView({
   fades?: { inUs: number; outUs: number };
   /** While Undo or Redo is hovered: how this clip changes when the step is taken. */
   mark?: PeekMark;
+  /** While Undo or Redo is hovered: the clip stays as it is, so it steps back for the ones that change. */
+  dimmed?: boolean;
   onPointerDown?: (e: React.PointerEvent, clip: Clip, track: Track) => void;
   onContextMenu?: (e: React.MouseEvent, clip: Clip) => void;
 }) {
@@ -138,7 +141,7 @@ export const ClipView = memo(function ClipView({
       onContextMenu={onContextMenu ? (e) => onContextMenu(e, clip) : undefined}
       // No blur or large shadow here: there is one of these per clip. Only the dragged copy casts a small shadow.
       className={`group absolute top-1 bottom-1 overflow-hidden rounded-[7px] ${bg} ${ghost ? "z-30 opacity-85 shadow-[0_4px_12px_rgb(0_0_0/.5)]" : selected ? "z-10" : ""} ${
-        track.hidden ? "opacity-40" : ""
+        track.hidden ? "opacity-40" : dimmed ? "opacity-35" : ""
       } ${locked ? "cursor-default" : "cursor-grab active:cursor-grabbing"}`}
       style={{
         left,
@@ -205,17 +208,24 @@ export const ClipView = memo(function ClipView({
       <span
         className={`pointer-events-none absolute inset-0 rounded-[7px] ${
           mark === "back"
-            ? "border-2 border-dashed border-accent bg-black/40"
-            : mark === "changed"
-              ? "inset-ring-2 inset-ring-accent bg-accent/15"
-              : mark === "moved"
-                ? "inset-ring-[1.5px] inset-ring-accent"
+            ? "border-2 border-dashed border-accent"
+            : mark === "gone"
+              ? "border-2 border-dashed border-danger bg-[repeating-linear-gradient(135deg,rgb(0_0_0/.55)_0_6px,rgb(255_69_58/.25)_6px_12px)]"
+              : mark
+                ? "inset-ring-2 inset-ring-accent"
                 : selected
                   ? "inset-ring-2 inset-ring-accent"
                   : "inset-ring inset-ring-white/10 group-hover:inset-ring-white/30"
         }`}
       />
 
+      {mark && width > 56 && (
+        <span
+          className={`pointer-events-none absolute right-1 top-1 flex h-[17px] items-center rounded-[5px] px-1.5 text-[10px] font-semibold ${mark === "gone" ? "bg-black/75 text-danger" : "bg-accent-strong text-white"}`}
+        >
+          {PEEK_WORDS[mark]}
+        </span>
+      )}
       {clip.animIn && (
         <div
           className="pointer-events-none absolute left-0 top-0 h-[3px] rounded-br bg-fg/80"

@@ -194,7 +194,7 @@ export function Timeline({ height }: { height: number }) {
   const [peek, setPeek] = useState<Peek | null>(null);
   const peekShown = peek && !locked && project && peek.revision === snap0?.revision ? peek : null;
   const described = useMemo(() => (peekShown && project ? describePeek(project, peekShown.project) : null), [peekShown, project]);
-  const drawn = peekShown?.project ?? project;
+  const drawn = peekShown && described?.draw === "then" ? peekShown.project : project;
 
   const tracks = useMemo(() => (drawn ? displayTracks(drawn) : []), [drawn]);
   const duration = drawn ? contentEnd(drawn) : 0;
@@ -411,7 +411,7 @@ export function Timeline({ height }: { height: number }) {
     const lane: [number, number] = [view.left, view.left + view.width - HEADER_W];
     let before = 0;
     let after = 0;
-    for (const t of peekShown.project.tracks)
+    for (const t of drawn.tracks)
       for (const c of t.clips) {
         if (!described.marks.has(c.id)) continue;
         if (((c.startUs + c.durationUs) / US) * zoom < lane[0]) before++;
@@ -639,6 +639,7 @@ export function Timeline({ height }: { height: number }) {
                           selected={!peekShown && selection.includes(clip.id)}
                           locked={locked || !!peekShown}
                           mark={described?.marks.get(clip.id)}
+                          dimmed={!!peekShown && !described?.marks.has(clip.id)}
                           tabbable={!cover && clip.id === tabStop}
                           timing={isMain ? layout?.timing.get(clip.id) : undefined}
                           fades={fading?.clip.id === clip.id ? fades : undefined}

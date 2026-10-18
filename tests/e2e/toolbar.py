@@ -29,9 +29,10 @@ def toolbar(r):
     r.focus_clip(clip)
     time.sleep(1.5)
     labels = [label for label, _ in r.s.run(BUTTONS)]
-    r.check('the toolbar reads Undo, Redo, Split, Delete left, Delete right, Delete, Duplicate, Detach audio, Rotate, Snapping',
-            [l.split(' (')[0].split(':')[0] for l in labels] == ['Undo', 'Redo', 'Split at playhead', 'Delete left of playhead',
+    r.check('the toolbar reads Undo, Nothing to redo, Split, Delete left, Delete right, Delete, Duplicate, Detach audio, Rotate, Snapping',
+            [l.split(' (')[0].split(':')[0] for l in labels] == ['Undo', 'Nothing to redo', 'Split at playhead', 'Delete left of playhead',
              'Delete right of playhead', 'Delete selection', 'Duplicate', 'Detach audio', 'Rotate 90°', 'Snapping on'], labels)
+    r.check('with nothing to redo, Redo says so', labels[1] == 'Nothing to redo', labels[1])
     r.check('the top bar has no Undo or Redo of its own', not r.s.run(HEADER_UNDO))
     r.shot('before')
     # talk.mp4 is portrait and fills the 9:16 canvas; turned a quarter it lies across the middle, black above it.
@@ -113,6 +114,9 @@ HOVER = """const b = document.querySelector(`[data-peek-button=${arguments[0]}]`
 b.dispatchEvent(new PointerEvent(arguments[1] ? 'pointerover' : 'pointerout', {bubbles: true, pointerId: 1,
   relatedTarget: arguments[1] ? null : document.body}));"""
 TIP_TEXT = "return document.querySelector('[data-testid=history-peek]')?.innerText ?? null"
+DIMMED = "return [...document.querySelectorAll('[data-clip-id].opacity-35')].map((el) => el.dataset.clipId)"
+WORDS = """return Object.fromEntries([...document.querySelectorAll('[data-peek]')].map((el) => [el.dataset.clipId,
+  [...el.querySelectorAll('span')].find((s) => s.classList.contains('right-1'))?.textContent ?? null]))"""
 MARKS = "return Object.fromEntries([...document.querySelectorAll('[data-peek]')].map((el) => [el.dataset.clipId, el.dataset.peek]))"
 
 
@@ -145,8 +149,9 @@ def undo_preview(r):
     r.check('resting on Undo names the step and what it brings back',
             tip and tip.startswith('Undo · Delete') and 'Brings back talk.mp4' in tip, tip)
     marks = r.s.run(MARKS)
-    r.check('the timeline draws the deleted piece back in its place and outlines the clip it pushes along',
-            marks == {piece['id']: 'back', wide['id']: 'moved'}, marks)
+    r.check('the timeline draws the deleted piece back in its place, marks the clip it pushes along and dims the rest',
+            marks == {piece['id']: 'back', wide['id']: 'moved'} and r.s.run(DIMMED) == [deleted[0]['id']], [marks, r.s.run(DIMMED)])
+    r.check('each marked clip says how it changes in words', r.s.run(WORDS) == {piece['id']: 'Back', wide['id']: 'Moved'}, r.s.run(WORDS))
     r.shot('undo-hover')
     r.check('nothing changed yet, in the editor or on disk', r.track() == deleted and saved() == [c['id'] for c in deleted])
     r.s.run(HOVER, 'undo', False)
@@ -173,12 +178,29 @@ def undo_preview(r):
     r.shot('undo-hover-opacity')
     r.s.run("document.querySelector('[data-peek-button=undo]').click()")
     r.check('clicking Undo takes the opacity back', wait(lambda: r.s.run(CLIP_OPACITY, first) == 1, 5), r.s.run(CLIP_OPACITY, first))
-    tip = wait(lambda: (t := r.s.run(TIP_TEXT)) and t.startswith('Undo · Delete') and t, 5)
-    r.check('with the pointer still there, the tip moves on to the step before', tip, r.s.run(TIP_TEXT))
+    time.sleep(1)
+    r.check('after the click the timeline shows the result, not the next step', r.s.run(TIP_TEXT) is None and r.s.run(MARKS) == {},
+            [r.s.run(TIP_TEXT), r.s.run(MARKS)])
+    r.s.run(HOVER, 'undo', False)
+    r.s.run(HOVER, 'undo', True)
+    tip = wait(lambda: r.s.run(TIP_TEXT), 5)
+    r.check('coming back to Undo shows the step before', tip and tip.startswith('Undo · Delete'), tip)
     r.s.run(HOVER, 'undo', False)
     r.s.run(HOVER, 'redo', True)
     tip = wait(lambda: r.s.run(TIP_TEXT), 5)
     r.check('Redo says what it would do again', tip and tip.startswith('Redo · Change clip') and 'Opacity 100 % → 40 %' in tip, tip)
+    r.s.run(HOVER, 'redo', False)
+
+    # Redo of the delete only takes a clip away: the timeline stays and the piece is hatched where it is.
+    r.s.run("document.querySelector('[data-peek-button=undo]').click()")
+    wait(lambda: len(r.track()) == 3, 5)
+    r.s.run(HOVER, 'undo', False)
+    r.s.run(HOVER, 'redo', True)
+    tip = wait(lambda: r.s.run(TIP_TEXT), 5)
+    r.check('Redo of a delete names the piece it removes', tip and tip.startswith('Redo · Delete') and 'Removes talk.mp4' in tip, tip)
+    r.check('and marks it Removed where it is now', r.s.run(MARKS).get(piece['id']) == 'gone' and r.s.run(WORDS).get(piece['id']) == 'Removed',
+            [r.s.run(MARKS), r.s.run(WORDS)])
+    r.shot('redo-hover-removes')
     r.s.run("document.querySelector('[data-peek-button=redo]').dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}))")
     r.check('Esc hides the preview', wait(lambda: r.s.run(TIP_TEXT) is None and r.s.run(MARKS) == {}, 2), r.s.run(TIP_TEXT))
     r.s.run(HOVER, 'redo', False)
