@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Offline yt-dlp for the tests: yt_Song0001 downloads at once, ytSlow00001 slowly, ytPrivate01 is private,
-ytForbid001 looks up but YouTube refuses its download, as it does an outdated yt-dlp, unless this runs as Nuzky's own copy."""
+ytForbid001 looks up but YouTube refuses its download, as it does an outdated yt-dlp, unless this runs as Nuzky's own copy.
+The videos in NUZKY_FAKE_YTDLP_VIDEOS, <id>.mp4 for the picture and <id>.m4a for the sound, download as videos."""
 import json, os, re, shutil, subprocess, sys
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -28,10 +29,12 @@ def main():
         fail('invalid video id')
     if url != f'https://www.youtube.com/watch?v={video}':
         fail('expected a canonical watch URL')
-    base = ['--ignore-config', '--no-playlist', '--encoding', 'utf-8',
-            '--socket-timeout', '20', '-f', 'bestaudio[ext=m4a]/bestaudio']
-    if options[:len(base)] != base:
+    base = ['--ignore-config', '--no-playlist', '--encoding', 'utf-8', '--socket-timeout', '20', '-f']
+    picture = 'bestvideo[height<=1080][vcodec^=avc1]/bestvideo[height<=1080]/bestvideo'
+    if options[:len(base)] != base or options[len(base)] not in ('bestaudio[ext=m4a]/bestaudio', picture):
         fail('unexpected base arguments')
+    picture = options[len(base)] == picture
+    base.append(options[len(base)])
     more = options[len(base):]
     lookup = '--skip-download' in more
     if lookup:
@@ -54,6 +57,21 @@ def main():
     if video == 'ytPrivate01':
         print('WARNING: synthetic yt-dlp warning', file=sys.stderr)
         fail(f"[youtube] {video}: Private video. Sign in if you've been granted access to this video")
+    videos = Path(os.environ.get('NUZKY_FAKE_YTDLP_VIDEOS', '/nonexistent'))
+    if (videos / f'{video}.mp4').exists():
+        audio = videos / f'{video}.{"mp4" if picture else "m4a"}'
+        total = audio.stat().st_size
+        if lookup:
+            seconds = float(subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0',
+                                            str(videos / f'{video}.mp4')], capture_output=True, text=True).stdout)
+            print(json.dumps({'id': video, 'title': f'Test video {video}', 'channel': 'Test Channel', 'duration': seconds,
+                              'ext': 'mp4' if picture else 'm4a', 'filesize': total, 'live_status': 'not_live'}), flush=True)
+            return
+        output.parent.mkdir(parents=True, exist_ok=True)
+        print(f'nuzky {total // 2} {total} NA', flush=True)
+        shutil.copyfile(audio, output)
+        print(f'nuzky {total} {total} NA', flush=True)
+        return
     if video not in ('yt_Song0001', 'ytSlow00001', 'ytForbid001'):
         fail(f'[youtube] {video}: This video is unavailable')
     audio = Path(os.environ['NUZKY_FAKE_YTDLP_AUDIO'])

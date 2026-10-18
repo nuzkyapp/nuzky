@@ -20,7 +20,9 @@ pub fn picture(cache_dir: &Path, asset: &Asset, height: f32) -> Result<Option<St
         return Ok(None);
     }
     let mut decoder = nuzky_engine::proxy::open_decoder(cache_dir, Path::new(&asset.path))?;
-    let target = if asset.kind == AssetKind::Image { 0 } else { (asset.duration_us / 10).min(1_000_000) };
+    // From the part the user chose, when the file has more around it.
+    let (from, length) = asset.part.map_or((0, asset.duration_us), |p| (p.start_us, p.end_us - p.start_us));
+    let target = if asset.kind == AssetKind::Image { 0 } else { from + (length / 10).min(1_000_000) };
     decoder.seek(target)?;
     let mut picked = None;
     while let Some((t, f)) = decoder.next_frame()? {

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AgentAccess, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, Boot, CapCutDraft, CaptionPreset, ChatGptModel, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, PreviewStarted, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFraming, Said, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VisionModels, WordsCorrected, ZoomSuggestions, ZoomsApplied } from "./types";
+import type { AgentAccess, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, Boot, CapCutDraft, CaptionPreset, ChatGptModel, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Part, PreviewStarted, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFraming, Said, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied } from "./types";
 
 /**
  * The session a change was made for. Mutating commands carry it, so a change still in flight when
@@ -113,6 +113,20 @@ export const api = {
   /** The credits the video's description needs; null when no CC BY sound is heard in it. */
   soundCredits: (epoch: Epoch) => invoke<string | null>("sound_credits", { expectedEpoch: epoch }),
   soundSettings: () => invoke<SoundSettings>("sound_settings"),
+  /** The video a YouTube link points at. */
+  youtubeVideoLink: (url: string) => invoke<YoutubeVideo>("youtube_video_link", { url }),
+  /** Downloads the whole video, with `youtube-video-progress`, and starts its own preview. */
+  youtubeVideoFetch: (id: string) => invoke<VideoPreview>("youtube_video_fetch", { id }),
+  youtubeVideoCancel: () => invoke<void>("youtube_video_cancel"),
+  /** Adds the video, or its part with up to 3 s hidden around it, to the media as one undo step. */
+  youtubeVideoAdd: (video: YoutubeVideo, part: Part | null, epoch: Epoch) => invoke<Snapshot>("youtube_video_add", { video, part, expectedEpoch: epoch }),
+  youtubePreviewClose: () => invoke<void>("youtube_preview_close"),
+  youtubePreviewPlay: () => invoke<void>("youtube_preview_play"),
+  youtubePreviewPause: () => invoke<void>("youtube_preview_pause"),
+  youtubePreviewSeek: (tUs: number) => invoke<void>("youtube_preview_seek", { tUs: Math.round(tUs) }),
+  youtubePreviewResize: (width: number, height: number) => invoke<void>("youtube_preview_resize", { width, height }),
+  youtubeFilmstrip: (fromUs: number, intervalUs: number, count: number) =>
+    invoke<Filmstrip>("youtube_filmstrip", { fromUs: Math.round(fromUs), intervalUs: Math.max(1, Math.round(intervalUs)), count }),
   /** `key`: a new Freesound key, "" to remove it, undefined to keep it. */
   setSoundSettings: (freesound: boolean, key?: string) => invoke<SoundSettings>("set_sound_settings", { freesound, key: key ?? null }),
   openSoundPage: (url: string) => invoke<void>("open_sound_page", { url }),

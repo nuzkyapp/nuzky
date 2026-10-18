@@ -52,6 +52,7 @@ pub struct VideoPreview {
     width: u32,
     height: u32,
     duration_us: i64,
+    fps: f64,
 }
 
 /// Downloads the video, with `youtube-video-progress`, and starts its preview: frames on the returned socket,
@@ -100,6 +101,7 @@ pub async fn youtube_video_fetch(app: AppHandle, id: String) -> CmdResult<VideoP
         width: project.canvas.width,
         height: project.canvas.height,
         duration_us: picture.duration_us,
+        fps: picture.fps,
     };
     let engine = Engine::start_other(
         app.clone(),

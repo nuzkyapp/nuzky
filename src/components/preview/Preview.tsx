@@ -36,8 +36,16 @@ function SafeZone({ area, width, height }: { area: SafeArea; width: number; heig
   );
 }
 
-/** Receives rendered frames from the engine and paints the newest one per display frame. */
-function useFrameStream(url: string, canvas: React.RefObject<HTMLCanvasElement | null>) {
+/** The project's playhead follows the frames while playing. */
+const followPlayhead = (t: number, playing: boolean) => {
+  // A frame rendered just before a pause can arrive after it; the pause already set the time.
+  if (playing && useEditor.getState().playing) useEditor.setState({ timeUs: t });
+};
+
+/** Receives rendered frames from an engine and paints the newest one per display frame; `onFrame` gets its time. */
+export function useFrameStream(url: string, canvas: React.RefObject<HTMLCanvasElement | null>, onFrame: (t: number, playing: boolean) => void) {
+  const frame = useRef(onFrame);
+  frame.current = onFrame;
   const [connected, setConnected] = useState(false);
   useEffect(() => {
     if (!url) return;
@@ -67,8 +75,7 @@ function useFrameStream(url: string, canvas: React.RefObject<HTMLCanvasElement |
       el.getContext("2d", { alpha: false })?.putImageData(new ImageData(new Uint8ClampedArray(buf, HEADER, w * h * 4), w, h), 0, 0);
       // The time of the frame on screen. After a seek the previous frame stays a moment; the UI flows wait for this.
       el.dataset.us = String(t);
-      // A frame rendered just before a pause can arrive after it; the pause already set the time.
-      if (playing && useEditor.getState().playing) useEditor.setState({ timeUs: t });
+      frame.current(t, playing);
     };
 
     const connect = () => {
@@ -128,7 +135,7 @@ export function Preview() {
   const boxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
-  const connected = useFrameStream(url, canvasRef);
+  const connected = useFrameStream(url, canvasRef, followPlayhead);
 
   useEffect(() => void api.setPreviewMuted(muted), [muted]);
   // The home screen sits under the preview's full screen; leaving the editor leaves full screen first.

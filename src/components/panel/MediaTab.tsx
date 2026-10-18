@@ -1,7 +1,8 @@
 import { useEffect } from "react";
-import { AudioLines, Film, PictureInPicture2, Plus, Trash2 } from "lucide-react";
+import { AudioLines, Film, Link2, PictureInPicture2, Plus, Trash2 } from "lucide-react";
 import { useEditor } from "../../lib/store";
 import { formatDuration } from "../../lib/time";
+import { openYoutube } from "../../lib/youtube";
 import type { Asset } from "../../lib/types";
 import { ProgressBar, lockedProps, useLockReason } from "../ui";
 import { ImportPlaceholder, ImportTile, KindIcon, addAtPlayhead, addPictureInPicture, assetDragHandler, pickAndImport, removeAsset } from "./assets";
@@ -46,7 +47,7 @@ function MediaItem({ asset }: { asset: Asset }) {
           </div>
         )}
         <span className="tabular absolute right-1 bottom-1 rounded-[4px] bg-black/60 px-1 text-[11px] leading-[15px] font-semibold text-white group-focus-within:opacity-0 group-hover:opacity-0">
-          {asset.kind === "image" ? "Image" : formatDuration(asset.durationUs)}
+          {asset.kind === "image" ? "Image" : formatDuration(asset.part ? asset.part.endUs - asset.part.startUs : asset.durationUs)}
         </span>
         <div className="absolute inset-x-0 bottom-0 flex items-end gap-1.5 bg-linear-to-b from-transparent to-black/45 p-1.5 pt-6 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100">
           <button
@@ -88,11 +89,29 @@ function MediaItem({ asset }: { asset: Asset }) {
   );
 }
 
+/** Opens Video from YouTube; beside Import media, as an icon when the panel is narrow. */
+function YoutubeTile({ compact = false, className = "" }: { compact?: boolean; className?: string }) {
+  const lock = useLockReason();
+  return (
+    <button
+      type="button"
+      aria-label="Video from YouTube"
+      title={lock ?? "Video from YouTube"}
+      onClick={() => openYoutube()}
+      {...lockedProps(lock)}
+      className={`flex h-[46px] shrink-0 items-center justify-center gap-2 rounded-xl bg-white/[.055] px-4 text-[13px] font-semibold text-fg shadow-[inset_0_0_0_1px_rgb(255_255_255/.07)] transition-colors duration-[120ms] ease-out hover:bg-white/[.09] aria-disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:hover:bg-white/[.055] ${compact ? "@max-[300px]:w-[46px] @max-[300px]:px-0" : ""} ${className}`}
+    >
+      <Link2 size={16} className="shrink-0 text-muted" />
+      <span className={compact ? "@max-[300px]:hidden" : ""}>From YouTube</span>
+    </button>
+  );
+}
+
 export function MediaTab() {
   const assets = useEditor((s) => s.snap?.project.assets ?? []);
   const importing = useEditor((s) => s.importing);
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3.5 pt-3.5">
+    <div className="@container flex min-h-0 flex-1 flex-col gap-3.5 pt-3.5">
       {assets.length === 0 && importing.length === 0 ? (
         // Empty: one invitation in the middle, rather than an import tile above a second frame saying the same.
         <div className="mx-3.5 mb-3.5 flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
@@ -100,10 +119,14 @@ export function MediaTab() {
           <p className="text-[13px] font-medium text-fg">No media yet</p>
           <p className="max-w-[240px] text-[12px] text-muted">Import videos, music or images, or drop files anywhere on the window.</p>
           <ImportTile label="Import media" hint="Ctrl+I" shortcut="Control+I" onClick={() => pickAndImport()} className="mt-3 w-full max-w-[240px]" />
+          <YoutubeTile className="w-full max-w-[240px]" />
         </div>
       ) : (
         <>
-          <ImportTile label="Import media" hint="Ctrl+I" shortcut="Control+I" onClick={() => pickAndImport()} className="mx-3.5" />
+          <div className="mx-3.5 flex gap-2">
+            <ImportTile label="Import media" hint="Ctrl+I" shortcut="Control+I" onClick={() => pickAndImport()} className="min-w-0 flex-1" />
+            <YoutubeTile compact />
+          </div>
           <div className="grid min-h-0 grid-cols-[repeat(auto-fill,minmax(100px,1fr))] content-start gap-x-2 gap-y-3 overflow-y-auto px-3.5 pb-3.5">
             {assets.map((a) => (
               <MediaItem key={a.id} asset={a} />

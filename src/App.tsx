@@ -17,6 +17,8 @@ import { SetupDialog } from "./components/setup/SetupDialog";
 import { ExportDialog } from "./components/ExportDialog";
 import { AGENT_VISION_MODELS, ModelQuestionDialog } from "./components/ModelQuestionDialog";
 import { showsVisionDownload } from "./components/setup/steps/VisionStep";
+import { YoutubeDialog } from "./components/YoutubeDialog";
+import { useYoutube } from "./lib/youtube";
 import { Inspector } from "./components/inspector/Inspector";
 import { LeftPanel } from "./components/panel/LeftPanel";
 import { MEDIA_EXTENSIONS, dropResolver, importPaths, pickAndImport } from "./components/panel/assets";
@@ -456,7 +458,7 @@ useEditor.subscribe((s, prev) => {
 // Test hook for WebDriver runs; native file dialogs cannot be automated.
 if (import.meta.env.DEV)
   Object.assign(window, {
-    __nuzky: { importPaths, store: useEditor, cover: useCover, reels: useReels, openReelsToFind, speech: useSpeech, api, agent: useAgent, dock: useDock, setup: useSetup, library: useLibrary, style: useStyle, addProjects, findDrafts, newProjectFromMedia, capcut: useCapCut, openDraft, openDraftFolder, openProject, refreshLibrary, trashProjects, updates: useUpdates, checkForUpdates, sounds: useSounds, stickers: useStickers, previewWindow: appWindow },
+    __nuzky: { importPaths, store: useEditor, cover: useCover, reels: useReels, openReelsToFind, speech: useSpeech, api, agent: useAgent, dock: useDock, setup: useSetup, library: useLibrary, style: useStyle, addProjects, findDrafts, newProjectFromMedia, capcut: useCapCut, openDraft, openDraftFolder, openProject, refreshLibrary, trashProjects, updates: useUpdates, checkForUpdates, sounds: useSounds, stickers: useStickers, youtube: useYoutube, previewWindow: appWindow },
   });
 
 async function startEditor() {
@@ -653,6 +655,7 @@ export default function App() {
       )}
       {launcherOpen && !home && <Launcher />}
       <ExportDialog />
+      <YoutubeDialog />
       <SetupDialog />
       <ConnectAgentDialog />
       <ChatGptDialog />

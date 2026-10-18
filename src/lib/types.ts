@@ -1733,6 +1733,7 @@ export type VideoPreview = {
   width: number,
   height: number,
   durationUs: number,
+  fps: number,
 };
 
 export type VisionModels = {
