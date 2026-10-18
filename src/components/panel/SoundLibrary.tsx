@@ -5,7 +5,7 @@ import { addSound, answerRights, copyCredits, installYtdlp, loadBuiltIn, openLin
 import { useEditor } from "../../lib/store";
 import { formatDuration } from "../../lib/time";
 import type { Sound, SoundKind, SoundSettings } from "../../lib/types";
-import { Button, Checkbox, IconButton, SearchField, lockedProps, trapTab, useLockReason } from "../ui";
+import { Button, Checkbox, IconButton, LockReason, SearchField, lockedProps, trapTab, useLockReason } from "../ui";
 
 /** Round row action, as on the project's own audio. */
 const ACTION = "flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors duration-[120ms] ease-out aria-disabled:cursor-not-allowed aria-disabled:opacity-40";
@@ -476,7 +476,8 @@ function RightsDialog() {
       className="dialog-in overlay fixed inset-0 m-auto w-[440px] rounded-[20px] p-6 text-fg outline-none backdrop:bg-black/45"
     >
       {open && (
-        <>
+        // Answering edits no project, so an agent's run does not lock it.
+        <LockReason.Provider value={null}>
           <h2 id="youtube-rights-title" className="text-[17px] font-semibold leading-[22px] tracking-[-0.025em]">
             Music from YouTube is yours to clear
           </h2>
@@ -497,7 +498,7 @@ function RightsDialog() {
               I understand
             </Button>
           </div>
-        </>
+        </LockReason.Provider>
       )}
     </dialog>
   );
