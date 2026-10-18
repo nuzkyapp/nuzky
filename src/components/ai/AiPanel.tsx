@@ -285,13 +285,15 @@ const STEP_ICON: Record<Step["status"], ReactNode> = {
   stopped: <CircleStop size={14} className="text-muted" />,
 };
 
-/** The same step again and again, such as reading clip after clip, is one row with how many times; a failure keeps its own row. */
 function grouped(steps: Step[]): (Step & { times: number })[] {
   const rows: (Step & { times: number })[] = [];
   for (const s of steps) {
     const last = rows[rows.length - 1];
-    if (last && last.title === s.title && last.status !== "failed" && s.status !== "failed") rows[rows.length - 1] = { ...s, id: last.id, times: last.times + 1 };
-    else rows.push({ ...s, times: 1 });
+    if (last && last.title === s.title && last.status !== "failed" && s.status !== "failed") {
+      // Calls can run side by side, so the row runs until every one of them is done.
+      const status = [last.status, s.status].includes("running") ? "running" : [last.status, s.status].includes("stopped") ? "stopped" : s.status;
+      rows[rows.length - 1] = { ...s, id: last.id, status, times: last.times + 1 };
+    } else rows.push({ ...s, times: 1 });
   }
   return rows;
 }
