@@ -6,6 +6,8 @@ import type { Clip, Project, Track } from "../../lib/types";
 import { EDGE, clipAsset } from "./ClipView";
 
 const SNAP_PX = 8;
+// Cmd on a Mac, where Ctrl-click is a right click.
+const MAC = navigator.userAgent.includes("Mac");
 
 type Mode = "move" | "trimL" | "trimR" | "fadeIn" | "fadeOut";
 
@@ -18,7 +20,8 @@ export interface Drag {
   startX: number;
   startY: number;
   moved: boolean;
-  shift: boolean;
+  /** Shift, or Cmd/Ctrl: a click adds the clip to the selection or takes it out. */
+  toggle: boolean;
   dxUs: number;
   /** undefined: same track, null: a new track, string: another track. */
   target: string | null | undefined;
@@ -142,7 +145,7 @@ export function useTimelineGestures({
     const { select, edit } = useEditor.getState();
     if (!d.moved) {
       const sel = useEditor.getState().selection;
-      if (d.shift) select(sel.includes(d.clip.id) ? sel.filter((id) => id !== d.clip.id) : [...sel, d.clip.id]);
+      if (d.toggle) select(sel.includes(d.clip.id) ? sel.filter((id) => id !== d.clip.id) : [...sel, d.clip.id]);
       else select([d.clip.id]);
       return;
     }
@@ -186,7 +189,7 @@ export function useTimelineGestures({
       for (const c of allClips(project)) if (c.id !== clip.id) candidates.push(c.startUs, c.startUs + c.durationUs);
       // While the AI edits, pressing a clip only selects it.
       const locked = !!useEditor.getState().aiRun;
-      let d: Drag = { clip, trackId: track.id, mode, startX: e.clientX, startY: e.clientY, moved: false, shift: e.shiftKey, dxUs: 0, target: undefined, snapUs: null, candidates, maxDurUs, sourceInUs, speed: media?.speed ?? 1, fadeUs: (mode === "fadeIn" ? media?.fadeInUs : media?.fadeOutUs) ?? 0, maxFadeUs: maxFadeUs(clip.durationUs) };
+      let d: Drag = { clip, trackId: track.id, mode, startX: e.clientX, startY: e.clientY, moved: false, toggle: e.shiftKey || (MAC ? e.metaKey : e.ctrlKey), dxUs: 0, target: undefined, snapUs: null, candidates, maxDurUs, sourceInUs, speed: media?.speed ?? 1, fadeUs: (mode === "fadeIn" ? media?.fadeInUs : media?.fadeOutUs) ?? 0, maxFadeUs: maxFadeUs(clip.durationUs) };
       setDrag(d);
 
       // Pointer moves are handled once per display frame: a fast mouse sends several per frame, and each

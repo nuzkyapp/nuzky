@@ -1,7 +1,7 @@
 import json, statistics, subprocess, time
 
 from e2e.ducking import RATE, TONE, WINDOW, decode, tone_levels
-from e2e.harness import FIXTURES, Bridge, export, flow, preview_brightness, wait, webdriver
+from e2e.harness import FIXTURES, MACOS, Bridge, export, flow, preview_brightness, wait, webdriver
 
 # Presses what is under the middle of a fade dot of a clip and drags it `arguments[2]` px along the timeline, without
 # letting go.
@@ -21,6 +21,12 @@ UNDER = """const b = document.querySelector(`[data-clip-id='${arguments[0]}'] [d
 return document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)?.closest('[data-fade]')?.dataset.fade ?? null;"""
 KNOBS = "return document.querySelectorAll(`[data-clip-id='${arguments[0]}'] [data-fade]`).length"
 SELECTION = 'return window.__nuzky.store.getState().selection'
+# Clicks the middle of a clip with the modifier keys in `arguments[1]`.
+CLICK_CLIP = """const b = document.querySelector(`[data-clip-id='${arguments[0]}']`).getBoundingClientRect();
+const at = (type) => new PointerEvent(type, Object.assign({bubbles: true, button: 0, pointerId: 1,
+  clientX: b.left + b.width / 2, clientY: b.top + b.height / 2}, arguments[1]));
+document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2).dispatchEvent(at('pointerdown'));
+window.dispatchEvent(at('pointerup'));"""
 
 
 @flow('edit', 'Import two clips, split one with S, delete a piece with Delete, undo, find the result saved, see imported music '
@@ -53,6 +59,15 @@ def edit(r):
     r.check('the preview shows the restored piece under the playhead', top > 40, round(top, 1))
     saved = lambda: len(json.loads(r.saved_project().read_text())['tracks'][0]['clips'])
     r.check('the project file on disk has the same three clips', wait(lambda: saved() == 3, 10), saved())
+    # Cmd on a Mac, where Ctrl-click is a right click.
+    add = {'metaKey': True} if MACOS else {'ctrlKey': True}
+    first, second = undone[0]['id'], undone[2]['id']
+    r.s.run(CLICK_CLIP, first, {})
+    r.s.run(CLICK_CLIP, second, add)
+    r.check('Cmd/Ctrl-click adds a second clip to the selection', wait(lambda: r.s.run(SELECTION) == [first, second], 5), r.s.run(SELECTION))
+    r.shot('two-selected')
+    r.s.run(CLICK_CLIP, second, add)
+    r.check('Cmd/Ctrl-click on a selected clip takes it out', wait(lambda: r.s.run(SELECTION) == [first], 5), r.s.run(SELECTION))
     # Opening the Audio tab once blanked the whole window: its store selector built a new list on every read.
     r.import_media(FIXTURES / 'music.mp3')
     r.s.run("[...document.querySelectorAll('[role=tab]')].find((t) => t.textContent.trim() === 'Audio').click()")
