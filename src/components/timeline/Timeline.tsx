@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { Copy, Magnet, Maximize2, PanelLeftClose, PanelRightClose, Redo2, RotateCw, Scissors, Trash2, Undo2, Unlink, ZoomIn, ZoomOut } from "lucide-react";
+import { Copy, Magnet, Maximize2, PanelLeftClose, PanelRightClose, Redo2, RotateCwSquare, Scissors, Trash2, Undo2, Unlink, ZoomIn, ZoomOut } from "lucide-react";
 import {
   MAIN_TRACK,
   allClips,
@@ -467,7 +467,7 @@ export function Timeline({ height }: { height: number }) {
               <Unlink size={15} />
             </IconButton>
             <IconButton round label={locked ? lockedLabel("Rotate") : rotateLabel} disabled={locked || !rotatable} onClick={rotateSelection}>
-              <RotateCw size={15} />
+              <RotateCwSquare size={15} />
             </IconButton>
             <span aria-hidden className="mx-1 h-4 w-px bg-white/[.12]" />
             <IconButton round label={snapping ? "Snapping on" : "Snapping off"} active={snapping} onClick={() => setSnapping(!snapping)}>
