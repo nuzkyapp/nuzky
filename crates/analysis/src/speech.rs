@@ -436,7 +436,10 @@ impl WordBuilder {
 
 fn is_annotation(text: &str) -> bool {
     let text = text.trim_matches(|c: char| c.is_whitespace() || c == '.');
-    [('[', ']'), ('(', ')'), ('*', '*')].iter().any(|&(a, b)| text.starts_with(a) && text.ends_with(b))
+    // One annotation only: "[Hudba] Ahoj. [Hudba]" is speech between two of them.
+    [('[', ']'), ('(', ')'), ('*', '*')]
+        .iter()
+        .any(|&(a, b)| text.strip_prefix(a).is_some_and(|rest| rest.find(b) == Some(rest.len() - b.len_utf8())))
         || text.chars().all(|c| c == '♪' || c == '♫' || c.is_whitespace())
 }
 
@@ -494,6 +497,14 @@ mod tests {
         assert_eq!(words[0].text, "Příklad.");
         assert!((words[0].probability - 0.9).abs() < 1e-6);
         assert_eq!(words[1].text, "Ahoj");
+    }
+
+    #[test]
+    fn speech_between_annotations_is_not_an_annotation() {
+        assert!(is_annotation(" [Hudba]"));
+        assert!(is_annotation("(smích)."));
+        assert!(!is_annotation(" [Hudba] Ahoj, vítejte u dalšího videa. [Hudba]"));
+        assert!(!is_annotation("*smích* No to je super. *smích*"));
     }
 
     #[test]
