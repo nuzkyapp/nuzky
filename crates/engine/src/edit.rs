@@ -653,8 +653,29 @@ impl Project {
             if delta < 0 {
                 self.ripple_delete_track(ti, TimeRange { start_us: at, end_us: at - delta }, min);
             } else {
+                let across = self.tracks[ti].clips.iter().position(|c| c.start_us < at && at < c.end_us());
                 for c in self.tracks[ti].clips.iter_mut().filter(|c| c.start_us >= at) {
                     c.start_us += delta;
+                }
+                // A clip across the edge opens there too: video, sound and a caption split, the caption between
+                // its words; other text and images grow rather than showing twice.
+                let Some(ci) = across else { continue };
+                let still = self.source_limit(&self.tracks[ti].clips[ci]).is_none();
+                let clip = &mut self.tracks[ti].clips[ci];
+                match heard_sides(clip, at - clip.start_us, at - clip.start_us) {
+                    Some((before, _)) if before.is_empty() => clip.start_us += delta,
+                    Some((_, after)) if after.is_empty() => {}
+                    None if still => clip.duration_us += delta,
+                    sides => {
+                        if let Some((_, after)) = &sides {
+                            set_words(clip, after.clone());
+                        }
+                        let second = self.split_clip(ti, ci, at);
+                        self.tracks[ti].clips[second].start_us += delta;
+                        if let Some((before, _)) = sides {
+                            set_words(&mut self.tracks[ti].clips[ci], before);
+                        }
+                    }
                 }
             }
         }
@@ -963,11 +984,11 @@ impl Project {
                 let (old_start, old_end) = (clip.start_us, clip.end_us());
                 let mut start = start_us.max(0);
                 let mut duration = duration_us.max(min);
-                let mut left_edge = false;
+                // An image has no source time, so its left edge moves without one.
+                let left_edge = start_us != old_start && (source_in_us.is_some() || limit.is_none());
                 if let ClipContent::Media { source_in_us: src, .. } = &mut clip.content {
                     let mut new_src = source_in_us.unwrap_or(*src).max(0);
                     if source_in_us.is_some() && start_us != old_start {
-                        left_edge = true;
                         // Trimming the left edge: keep the right edge in place.
                         let shift = ((new_src - *src) as f64 / speed).round() as i64;
                         start = (old_start + shift).max(0);
@@ -2487,6 +2508,97 @@ mod tests {
             assert_eq!(starts(&p), (texts, 5_000_000), "{step}");
         }
         assert_eq!(main_layout(&p), vec![(0, 5000), (5000, 3000)]);
+    }
+
+    #[test]
+    fn opening_time_at_a_main_cut_splits_what_crosses_it() {
+        let mut p = project();
+        p.apply(EditCmd::AddClip { asset_id: "a".into(), start_us: None, track_id: None }).unwrap();
+        let first = p.tracks[0].clips[0].id.clone();
+        p.apply(EditCmd::SplitClip { clip_id: first.clone(), at_us: 3_000_000 }).unwrap();
+        let style: TextStyle =
+            serde_json::from_value(serde_json::json!({"fontSize": 60.0, "color": "#ffffff"})).unwrap();
+        let word =
+            |text: &str, start_us| CaptionWord { text: text.into(), start_us, end_us: start_us + 400_000, key: false };
+        p.apply(EditCmd::AddCaptions {
+            segments: vec![CaptionSegment {
+                start_us: 2_000_000,
+                end_us: 4_000_000,
+                text: "one two".into(),
+                words: vec![word("one", 2_100_000), word("two", 3_200_000)],
+            }],
+            style: style.clone(),
+            anim_in: None,
+            anim_out: None,
+        })
+        .unwrap();
+        p.apply(EditCmd::AddText { start_us: 2_500_000, text: "title".into(), style }).unwrap();
+        // Sound cut with the picture, as detached sound is.
+        p.apply(EditCmd::AddClip { asset_id: "m".into(), start_us: Some(1_000_000), track_id: None }).unwrap();
+        let sound = p.tracks.iter().find(|t| t.kind == TrackKind::Audio).unwrap().id.clone();
+        p.apply(EditCmd::UpdateTrack {
+            track_id: sound.clone(),
+            muted: None,
+            hidden: None,
+            keep_in_place: Some(false),
+        })
+        .unwrap();
+
+        p.apply(EditCmd::TrimClip { clip_id: first, start_us: 0, duration_us: 4_000_000, source_in_us: None }).unwrap();
+        let spoken: Vec<_> = p
+            .tracks
+            .iter()
+            .find(|t| t.is_captions())
+            .unwrap()
+            .clips
+            .iter()
+            .map(|c| match &c.content {
+                ClipContent::Text { text, words, .. } => (text.clone(), c.start_us + words[0].start_us),
+                ClipContent::Media { .. } => unreachable!(),
+            })
+            .collect();
+        assert_eq!(spoken, vec![("one".to_string(), 2_100_000), ("two".to_string(), 4_200_000)]);
+        let title = p
+            .tracks
+            .iter()
+            .flat_map(|t| &t.clips)
+            .find(|c| matches!(&c.content, ClipContent::Text { text, .. } if text == "title"))
+            .unwrap();
+        assert_eq!(
+            (title.start_us, title.duration_us),
+            (2_500_000, 4_000_000),
+            "a title grows rather than showing twice"
+        );
+        let pieces: Vec<_> = p.tracks[p.track_index(&sound).unwrap()]
+            .clips
+            .iter()
+            .map(|c| match c.content {
+                ClipContent::Media { source_in_us, .. } => (c.start_us, source_in_us),
+                ClipContent::Text { .. } => unreachable!(),
+            })
+            .collect();
+        assert_eq!(pieces, vec![(1_000_000, 0), (4_000_000, 2_000_000)]);
+    }
+
+    #[test]
+    fn trimming_an_image_from_the_left_cuts_the_other_tracks_at_its_start() {
+        let mut p = project();
+        p.apply(EditCmd::AddAssets { assets: vec![asset("i", AssetKind::Image, 0)] }).unwrap();
+        p.apply(EditCmd::AddClip { asset_id: "a".into(), start_us: None, track_id: None }).unwrap();
+        p.apply(EditCmd::AddClip { asset_id: "i".into(), start_us: None, track_id: None }).unwrap();
+        let image = p.tracks[0].clips[1].clone();
+        let style: TextStyle =
+            serde_json::from_value(serde_json::json!({"fontSize": 60.0, "color": "#ffffff"})).unwrap();
+        p.apply(EditCmd::AddText { start_us: 7_000_000, text: "over the image".into(), style }).unwrap();
+        p.apply(EditCmd::TrimClip {
+            clip_id: image.id,
+            start_us: 6_000_000,
+            duration_us: image.duration_us - 1_000_000,
+            source_in_us: None,
+        })
+        .unwrap();
+        let text = p.tracks.iter().find(|t| t.kind == TrackKind::Text).unwrap();
+        assert_eq!(text.clips[0].start_us, 6_000_000);
     }
 
     #[test]
