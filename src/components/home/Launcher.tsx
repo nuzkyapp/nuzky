@@ -328,9 +328,9 @@ export function Launcher() {
           ) : (
             <>
               <div className="mt-1 flex shrink-0 items-center gap-1.5 border-t border-white/[.08] px-1 pt-2.5">
-                <span className="pr-1 pl-1 text-[12px] text-muted">New</span>
+                <span className="pr-1 pl-1 text-[12px] text-muted">Empty project</span>
                 {FORMATS.map((f) => (
-                  <Button key={f.label} pill title={`New ${f.label} project · ${f.hint}`} onClick={() => newProject(f.width, f.height)} className="tabular h-7 gap-1.5 px-2.5 text-[12px]">
+                  <Button key={f.label} pill title={`New empty ${f.label} project · ${f.hint}`} onClick={() => newProject(f.width, f.height)} className="tabular h-7 gap-1.5 px-2.5 text-[12px]">
                     <FormatShape width={f.width} height={f.height} size={11} />
                     {f.label}
                   </Button>

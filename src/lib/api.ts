@@ -58,6 +58,7 @@ export const api = {
   /** The signed-in account's models, as ChatGPT orders them. */
   chatgptModels: () => invoke<ChatGptModel[]>("chatgpt_models"),
   newProject: (width: number, height: number) => invoke<Snapshot>("new_project", { width, height }),
+  maximizeWindow: () => invoke<void>("maximize_window"),
   openProject: (path: string) => invoke<Snapshot>("open_project", { path }),
   /** A new project with the media on its timeline, in the format of the first picture. */
   newProjectFromMedia: (paths: string[]) =>

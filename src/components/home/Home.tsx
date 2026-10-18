@@ -80,7 +80,7 @@ export function FormatShape({ width, height, size }: { width: number; height: nu
 
 function newProjectItems(): MenuEntry[] {
   return [
-    ...FORMATS.map((f) => ({ label: f.label, shortcut: f.hint, icon: <FormatShape width={f.width} height={f.height} size={14} />, run: () => newProject(f.width, f.height) })),
+    ...FORMATS.map((f) => ({ label: `Empty ${f.label}`, shortcut: f.hint, icon: <FormatShape width={f.width} height={f.height} size={14} />, run: () => newProject(f.width, f.height) })),
     "separator" as const,
     { label: "From videos…", shortcut: "First video's format", icon: <Film size={15} />, run: () => void pickVideosForNewProject() },
     { label: "From a CapCut draft…", shortcut: "Its cut, captions and zooms", icon: <FolderInput size={15} />, run: () => void addDraftFolder() },

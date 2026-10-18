@@ -43,6 +43,10 @@ fn token() -> Option<&'static str> {
     TOKEN.get().and_then(|token| token.as_deref())
 }
 
+pub fn active() -> bool {
+    token().is_some()
+}
+
 /// Creates the window hidden and without a frame, and keeps the app from ever becoming the active app: wry
 /// activates it when it creates the webview and tao when it has launched.
 pub fn prepare(

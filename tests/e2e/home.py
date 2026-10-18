@@ -315,6 +315,12 @@ def home(r):
         agent.close()
 
 
+# Records when the app maximizes its window; a UI flow keeps its window as it is (src-tauri/src/lib.rs, maximize_window).
+MAXIMIZED = """const api = window.__nuzky.api, maximize = api.maximizeWindow;
+window.__maximized = [];
+api.maximizeWindow = () => (window.__maximized.push('asked'), maximize().then(() => window.__maximized.push('done')));"""
+
+
 def launcher_seed(r):
     make(r, 'talk.nuzky', 'Talk to camera', [FIXTURES / 'talk.mp4'], 0)
     make(r, 'reel.nuzky', 'Morning reel', [FIXTURES / 'portrait.mp4'], 1)
@@ -326,6 +332,7 @@ def launcher_seed(r):
       before=launcher_seed)
 def launcher(r):
     r.check('the flow starts in the editor of the newest project', view(r)['view'] == 'editor' and view(r)['name'] == 'Talk to camera', view(r))
+    r.s.run(MAXIMIZED)
     r.s.run('document.activeElement?.blur()')
     r.key('k', ctrlKey=True)
     r.check('Ctrl+K opens the launcher with the open project and the recent ones',
@@ -334,6 +341,8 @@ def launcher(r):
                    and r.s.run("return [...document.querySelectorAll('#launcher-list [role=option]')].map((o) => o.textContent)"), 10)
     r.check('Continue, the two other projects and All projects', options and 'Talk to camera' in options[0] and 'Morning reel' in options[1]
             and 'All projects' in options[3], options)
+    r.check('the launcher offers empty projects by name',
+            'Empty project' in (r.s.run("return document.querySelector('[role=dialog][aria-label=Projects]').textContent") or ''))
     r.check('focus is in the search field', r.s.run("return document.activeElement?.getAttribute('role')") == 'combobox')
     time.sleep(0.3)
     r.shot('launcher')
@@ -345,6 +354,7 @@ def launcher(r):
     r.check('typing narrows to the project', wait(lambda: 'Croatia day 2' in (r.s.run("return document.querySelector('#launcher-list [role=option][aria-selected=true]')?.textContent") or ''), 5))
     press(r, 'Enter', '[role=combobox]')
     r.check('Enter opens it in the editor', wait(lambda: view(r)['name'] == 'Croatia day 2' and not view(r)['launcher'], 10), view(r))
+    r.check('switching projects in the editor leaves the window as it is', r.s.run('return window.__maximized') == [])
     r.check('opening a project counts as opening it: it is first in the list next time',
             wait(lambda: r.s.call('window.__nuzky.api.library().then((l) => l.projects[0].name)')['value'] == 'Croatia day 2', 5))
 
@@ -441,9 +451,11 @@ def launcher(r):
     wait(lambda: r.s.run("return !!document.querySelector('[role=menu]')"), 3)
     time.sleep(0.2)
     r.shot('new-project-menu')
-    click(r, '16:9', '[role=menu]')
+    click(r, 'Empty 16:9', '[role=menu]')
     v = wait(lambda: view(r)['view'] == 'editor' and view(r)['name'] == 'Untitled project' and view(r), 10)
     r.check('New project, 16:9, opens an empty 16:9 project', v and v['canvas'] == [1920, 1080], v)
+    r.check('opening the editor from the home screen asks the app to maximize the window',
+            wait(lambda: r.s.run('return window.__maximized') == ['asked', 'done'], 5), r.s.run('return window.__maximized'))
     r.check('it is a new file', len(list(projects_dir(r).glob('*.nuzky'))) == count + 1)
     r.s.call('window.__nuzky.newProjectFromMedia(arguments[0])', [str(FIXTURES / 'portrait.mp4')])
     v = wait(lambda: view(r)['canvas'] == [1080, 1920] and len(r.track()) == 1 and view(r), 15)

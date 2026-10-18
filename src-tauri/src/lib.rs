@@ -496,6 +496,20 @@ fn boot(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Boot> {
     })
 }
 
+/// Opening a project from the home screen gives the editor the whole screen, as CapCut does. A UI flow keeps
+/// the window it set up: the size it chose on Linux, off every screen on macOS.
+#[tauri::command]
+fn maximize_window(window: tauri::Window) -> CmdResult<()> {
+    #[cfg(all(target_os = "macos", debug_assertions))]
+    let flow = test_bridge::active();
+    #[cfg(not(all(target_os = "macos", debug_assertions)))]
+    let flow = std::env::var_os("TAURI_WEBVIEW_AUTOMATION").is_some();
+    if !flow {
+        window.maximize().map_err(err)?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn apply_edit(
     state: State<'_, AppState>,
@@ -1178,6 +1192,7 @@ pub fn run() {
             caption_styles::rename_caption_style,
             caption_styles::delete_caption_style,
             boot,
+            maximize_window,
             set_ui_context,
             stickers::sticker_catalog,
             stickers::sticker_search,
