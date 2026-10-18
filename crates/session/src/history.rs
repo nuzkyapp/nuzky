@@ -486,8 +486,9 @@ impl ProjectSession {
         let changed = inner.editor.revision != revision;
         if changed {
             inner.changed(Origin::Restore);
-            let label = version.label.strip_prefix("Restore: ").unwrap_or(&version.label);
-            inner.history.tip = Some(Tip::user(format!("Restore: {label}")));
+            let label = format!("Restore: {}", version.label.strip_prefix("Restore: ").unwrap_or(&version.label));
+            inner.editor.name_step(&label);
+            inner.history.tip = Some(Tip::user(label));
             inner.record();
         }
         inner.flush()?;

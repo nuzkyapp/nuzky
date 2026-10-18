@@ -1209,3 +1209,27 @@ fn recap_kept_main_assets_includes_takes_that_left() {
     let readonly = ProjectSession::open(&f.0, Mode::ReadOnly, None).unwrap();
     assert_eq!(ids(readonly.kept_main_assets().unwrap()), ["take"]);
 }
+
+#[test]
+fn peek_names_the_step_undo_and_redo_would_take_back() {
+    let f = Fixture::new();
+    let s = f.open();
+    assert!(s.peek(false).is_none() && s.peek(true).is_none());
+    s.edit(rename("Typed"), None, Expect::default()).unwrap();
+    for name in ["B", "Burst"] {
+        s.edit(rename(name), Some("typing".into()), Expect::default()).unwrap();
+    }
+    let peek = s.peek(false).unwrap();
+    assert_eq!((peek.label.as_str(), peek.ai, peek.project.name.as_str()), ("Rename project", false, "Typed"));
+    assert_eq!(peek.revision, s.state().unwrap().stamp.revision);
+    let run = s.begin_run("Tighten".into()).unwrap().run_id;
+    apply(&s, &run, "Run 1");
+    apply(&s, &run, "Run 2");
+    s.end_run(&run, EndAction::Keep).unwrap();
+    let peek = s.peek(false).unwrap();
+    assert_eq!((peek.label.as_str(), peek.ai, peek.project.name.as_str()), ("Tighten", true, "Burst"));
+    s.undo().unwrap();
+    let redo = s.peek(true).unwrap();
+    assert_eq!((redo.label.as_str(), redo.ai, redo.project.name.as_str()), ("Tighten", true, "Run 2"));
+    assert_eq!(s.peek(false).unwrap().project.name, "Typed", "undo now reaches the typing burst");
+}

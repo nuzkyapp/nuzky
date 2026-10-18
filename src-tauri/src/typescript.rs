@@ -132,6 +132,7 @@ fn generate() -> String {
     types.visit::<nuzky_engine::edit::CaptionPreset>();
     types.visit::<Filmstrip>();
     types.visit::<crate::ProjectVersion>();
+    types.visit::<crate::HistoryPeek>();
     types.visit::<LayerBounds>();
     types.visit::<FontFamilies>();
     types.visit::<crate::jobs::JobEvent>();

@@ -2,6 +2,7 @@ import { memo, useEffect } from "react";
 import { AudioLines, Film, Gauge, Image as ImageIcon, Type } from "lucide-react";
 import { MAIN_TRACK, isCaptionTrack, useEditor } from "../../lib/store";
 import { US, formatDuration } from "../../lib/time";
+import type { PeekMark } from "../../lib/peek";
 import type { Asset, Clip, Filmstrip, Project, Track } from "../../lib/types";
 import { Waveform } from "./Waveform";
 
@@ -71,6 +72,7 @@ export const ClipView = memo(function ClipView({
   timing,
   visible,
   fades,
+  mark,
   onPointerDown,
   onContextMenu,
 }: {
@@ -90,6 +92,8 @@ export const ClipView = memo(function ClipView({
   visible: [number, number];
   /** While a fade handle is dragged, the fades it would set. */
   fades?: { inUs: number; outUs: number };
+  /** While Undo or Redo is hovered: how this clip changes when the step is taken. */
+  mark?: PeekMark;
   onPointerDown?: (e: React.PointerEvent, clip: Clip, track: Track) => void;
   onContextMenu?: (e: React.MouseEvent, clip: Clip) => void;
 }) {
@@ -126,6 +130,7 @@ export const ClipView = memo(function ClipView({
   return (
     <div
       data-clip-id={ghost ? undefined : clip.id}
+      data-peek={mark}
       role={ghost ? undefined : "option"}
       aria-selected={ghost ? undefined : selected}
       tabIndex={ghost ? undefined : tabbable ? 0 : -1}
@@ -197,7 +202,19 @@ export const ClipView = memo(function ClipView({
       )}
 
       {/* The edge goes over the frames: a hairline, or the selection ring. */}
-      <span className={`pointer-events-none absolute inset-0 rounded-[7px] ${selected ? "inset-ring-2 inset-ring-accent" : "inset-ring inset-ring-white/10 group-hover:inset-ring-white/30"}`} />
+      <span
+        className={`pointer-events-none absolute inset-0 rounded-[7px] ${
+          mark === "back"
+            ? "border-2 border-dashed border-accent bg-black/40"
+            : mark === "changed"
+              ? "inset-ring-2 inset-ring-accent bg-accent/15"
+              : mark === "moved"
+                ? "inset-ring-[1.5px] inset-ring-accent"
+                : selected
+                  ? "inset-ring-2 inset-ring-accent"
+                  : "inset-ring inset-ring-white/10 group-hover:inset-ring-white/30"
+        }`}
+      />
 
       {clip.animIn && (
         <div

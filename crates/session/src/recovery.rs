@@ -27,6 +27,7 @@ impl ProjectSession {
             })??;
             if inner.editor.revision != revision {
                 inner.changed(Origin::Recovery);
+                inner.editor.name_step("Restore previous version");
                 inner.history.tip = Some(Tip::user("Restore previous version"));
                 inner.record();
             }

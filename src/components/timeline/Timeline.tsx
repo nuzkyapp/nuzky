@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { Copy, Magnet, Maximize2, PanelLeftClose, PanelRightClose, Redo2, RotateCwSquare, Scissors, Trash2, Undo2, Unlink, ZoomIn, ZoomOut } from "lucide-react";
+import { Copy, Magnet, Maximize2, PanelLeftClose, PanelRightClose, RotateCwSquare, Scissors, Trash2, Unlink, ZoomIn, ZoomOut } from "lucide-react";
 import {
   MAIN_TRACK,
   allClips,
@@ -23,11 +23,13 @@ import {
 import { US, formatDuration, formatTime } from "../../lib/time";
 import type { Clip, EditCmd, Project, Track } from "../../lib/types";
 import { candidateReason, useCandidates, useCover } from "../../lib/cover";
+import { describePeek } from "../../lib/peek";
 import { setDropResolver } from "../panel/assets";
 import { IconButton, RangeInput } from "../ui";
 import { ClipMenu, type MenuAt } from "./ClipMenu";
 import { ClipView } from "./ClipView";
 import { CutMarkers } from "./CutMarkers";
+import { HistoryButton, type Peek } from "./HistoryButton";
 import { TrackHeader } from "./TrackHeader";
 import { dragFade, dragResult, isFade, useTimelineGestures, type Drag } from "./useTimelineGestures";
 
@@ -174,7 +176,7 @@ export function Timeline({ height }: { height: number }) {
   // In the cover editor the timeline chooses the cover's frame: clicks and drags move the playhead, which is the frame.
   const cover = useCover((s) => s.open);
   const candidates = useCandidates();
-  const { select, setZoom, undo, redo } = useEditor.getState();
+  const { select, setZoom } = useEditor.getState();
   const scroller = useRef<HTMLDivElement>(null);
   const rows = useRef(new Map<string, HTMLDivElement>());
   const [snapping, setSnapping] = useState(true);
@@ -187,9 +189,15 @@ export function Timeline({ height }: { height: number }) {
   /** The project as last shown, where a deleted clip's neighbours are found. */
   const shown = useRef(project);
   const closeMenu = useCallback(() => setMenu(null), []);
+  // While Undo or Redo is hovered, the lanes draw the project that step would restore, with what changes marked.
+  // Only the drawing: selection, focus and edits keep working on the project as it is.
+  const [peek, setPeek] = useState<Peek | null>(null);
+  const peekShown = peek && !locked && project && peek.revision === snap0?.revision ? peek : null;
+  const described = useMemo(() => (peekShown && project ? describePeek(project, peekShown.project) : null), [peekShown, project]);
+  const drawn = peekShown?.project ?? project;
 
-  const tracks = useMemo(() => (project ? displayTracks(project) : []), [project]);
-  const duration = project ? contentEnd(project) : 0;
+  const tracks = useMemo(() => (drawn ? displayTracks(drawn) : []), [drawn]);
+  const duration = drawn ? contentEnd(drawn) : 0;
   const fps = project?.canvas.fps ?? 30;
   const minUs = Math.ceil(US / fps);
   const laneWidth = Math.max(view.width - HEADER_W, (duration / US + 30) * zoom);
@@ -300,10 +308,10 @@ export function Timeline({ height }: { height: number }) {
     setMenu({ clipId: clip.id, x: e.clientX, y: e.clientY });
   }, []);
 
-  if (!project) return <section className="pane shrink-0" style={{ height }} />;
+  if (!project || !drawn) return <section className="pane shrink-0" style={{ height }} />;
 
   // The video ends at its last picture or text; music running past it is cut on export.
-  const videoEnd = projectDuration(project);
+  const videoEnd = projectDuration(drawn);
   const endX = (videoEnd / US) * zoom;
   const pastEnd = videoEnd > 0 && duration > videoEnd;
   const step = tickStep(zoom);
@@ -333,7 +341,7 @@ export function Timeline({ height }: { height: number }) {
           return i < main.length ? main[i].startUs : main.reduce((end, c) => Math.max(end, c.startUs + c.durationUs), 0);
         })()
       : null;
-  const emptyTimeline = allClips(project).length === 0;
+  const emptyTimeline = allClips(drawn).length === 0;
   // One tab stop for all clips: the last focused, else the first selected, else the first main-track clip.
   const known = (id: string | null | undefined) => !!id && allClips(project).some((c) => c.id === id);
   const tabStop = known(focusId) ? focusId : known(selection[0]) ? selection[0] : (mainClips(project)[0]?.id ?? tracks.find((t) => t.clips.length > 0)?.clips[0]?.id ?? null);
@@ -397,6 +405,21 @@ export function Timeline({ height }: { height: number }) {
       else select([clip.id]);
     }
   };
+  // Changes the lanes draw out of view are named, with the side to scroll to; the timeline itself stays where it is.
+  const peekLines = (() => {
+    if (!described || !peekShown) return null;
+    const lane: [number, number] = [view.left, view.left + view.width - HEADER_W];
+    let before = 0;
+    let after = 0;
+    for (const t of peekShown.project.tracks)
+      for (const c of t.clips) {
+        if (!described.marks.has(c.id)) continue;
+        if (((c.startUs + c.durationUs) / US) * zoom < lane[0]) before++;
+        else if ((c.startUs / US) * zoom > lane[1]) after++;
+      }
+    const off = (n: number, side: string) => `${n} changed clip${n === 1 ? "" : "s"} off screen, to the ${side}`;
+    return [...described.lines, ...(before ? [off(before, "left")] : []), ...(after ? [off(after, "right")] : [])];
+  })();
   const dragKind = drag ? project.tracks.find((t) => t.id === drag.trackId)?.kind : null;
   const picked = selection.flatMap((id) => {
     const found = findClip(project, id);
@@ -425,12 +448,8 @@ export function Timeline({ height }: { height: number }) {
           <p className="truncate pl-1.5 text-[12px] text-muted">Click or drag on the timeline to choose the cover's frame.</p>
         ) : (
           <div className="bar flex items-center rounded-full">
-            <IconButton round label={locked ? "Undo is available when the AI is done" : "Undo (Ctrl+Z)"} disabled={locked || !snap0?.canUndo} onClick={undo}>
-              <Undo2 size={16} />
-            </IconButton>
-            <IconButton round label={locked ? "Redo is available when the AI is done" : "Redo (Ctrl+Shift+Z)"} disabled={locked || !snap0?.canRedo} onClick={redo}>
-              <Redo2 size={16} />
-            </IconButton>
+            <HistoryButton redo={false} locked={locked} lines={peekShown && !peekShown.redo ? peekLines : null} onPeek={setPeek} />
+            <HistoryButton redo locked={locked} lines={peekShown?.redo ? peekLines : null} onPeek={setPeek} />
             <span aria-hidden className="mx-1 h-4 w-px bg-white/[.12]" />
             <IconButton round label={locked ? lockedLabel("Split") : splitBlocked ? `Split: ${splitBlocked}` : "Split at playhead (S)"} disabled={locked || !!splitBlocked} onClick={splitAtPlayhead}>
               <Scissors size={16} />
@@ -591,7 +610,7 @@ export function Timeline({ height }: { height: number }) {
                       }
                     }}
                   >
-                    {isMain && emptyTimeline && (
+                    {isMain && emptyTimeline && !peekShown && (
                       <div className="pointer-events-none absolute inset-1 flex items-center justify-center rounded-[7px] border border-dashed border-white/15 text-[12px] text-muted">
                         Drag media here, or press + on a media item
                       </div>
@@ -613,12 +632,13 @@ export function Timeline({ height }: { height: number }) {
                           key={clip.id}
                           clip={clip}
                           track={track}
-                          project={project}
+                          project={drawn}
                           zoom={zoom}
                           height={h}
                           visible={visible}
-                          selected={selection.includes(clip.id)}
-                          locked={locked}
+                          selected={!peekShown && selection.includes(clip.id)}
+                          locked={locked || !!peekShown}
+                          mark={described?.marks.get(clip.id)}
                           tabbable={!cover && clip.id === tabStop}
                           timing={isMain ? layout?.timing.get(clip.id) : undefined}
                           fades={fading?.clip.id === clip.id ? fades : undefined}
@@ -637,7 +657,7 @@ export function Timeline({ height }: { height: number }) {
                         <div className="pointer-events-none absolute -top-0.5 -bottom-0.5 z-20 w-0.5 -translate-x-1/2 rounded-full bg-accent" style={{ left: (layout.slotUs / US) * zoom }} />
                       </>
                     )}
-                    {isMain && !drag?.moved && <CutMarkers project={project} zoom={zoom} locked={locked} />}
+                    {isMain && !drag?.moved && !peekShown && <CutMarkers project={project} zoom={zoom} locked={locked} />}
                     {drag?.moved && ghostTiming && ghostTrackId === track.id && (
                       <ClipView clip={drag.clip} track={track} project={project} zoom={zoom} height={h} visible={visible} selected ghost timing={ghostTiming} />
                     )}

@@ -14,6 +14,8 @@ KEYS = """return window.__nuzky.store.getState().snap.project.tracks.flatMap((t)
   .find((c) => c.id === arguments[0]).keyframes.map((k) => k.transform.rotation)"""
 CLIP = """const c = window.__nuzky.store.getState().snap.project.tracks.flatMap((t) => t.clips).find((c) => c.id === arguments[0]);
 return {rotation: c.content.transform.rotation, volume: c.content.volume};"""
+CLIP_OPACITY = """return window.__nuzky.store.getState().snap.project.tracks.flatMap((t) => t.clips)
+  .find((c) => c.id === arguments[0]).content.transform.opacity"""
 
 
 @flow('toolbar', "The timeline's toolbar leads with Undo and Redo, which leave the top bar; Rotate 90° turns the picture "
@@ -102,6 +104,93 @@ def toolbar(r):
         r.check('while the AI edits, every editing button is off and says so',
                 all(off for label, off in buttons if not label.startswith('Snapping'))
                 and all('AI' in label for label in editing), buttons)
+        bridge.call('end_run', {'run_id': run['run_id'], 'action': 'keep'})
+    finally:
+        bridge.close()
+
+
+HOVER = """const b = document.querySelector(`[data-peek-button=${arguments[0]}]`);
+b.dispatchEvent(new PointerEvent(arguments[1] ? 'pointerover' : 'pointerout', {bubbles: true, pointerId: 1,
+  relatedTarget: arguments[1] ? null : document.body}));"""
+TIP_TEXT = "return document.querySelector('[data-testid=history-peek]')?.innerText ?? null"
+MARKS = "return Object.fromEntries([...document.querySelectorAll('[data-peek]')].map((el) => [el.dataset.clipId, el.dataset.peek]))"
+
+
+@flow('undo_preview', 'Resting the pointer on Undo or Redo shows on the timeline what the step changes, a clip that comes '
+      'back dashed in its place and the clips it pushes along outlined, and names it in a tip, also a change the timeline '
+      'cannot show and clips out of view; nothing changes until the click, after which the next step shows')
+def undo_preview(r):
+    r.import_media(FIXTURES / 'talk.mp4', FIXTURES / 'wide.mp4')
+    for name in ('talk.mp4', 'wide.mp4'):
+        r.add_clip(name)
+    r.seek(2_000_000)
+    r.focus_clip(r.track()[0]['id'])
+    r.key('s')
+    split = wait(lambda: (c := r.track()) and len(c) == 3 and c)
+    piece, wide = split[1], split[2]
+    r.focus_clip(piece['id'])
+    r.key('Delete')
+    deleted = wait(lambda: (c := r.track()) and len(c) == 2 and c)
+    saved = lambda: [c['id'] for c in json.loads(r.saved_project().read_text())['tracks'][0]['clips']]
+    wait(lambda: len(saved()) == 2, 10)
+    r.seek(0)
+    # The pointer goes to the toolbar; focus leaves the clips, as a click elsewhere would.
+    r.s.run('document.activeElement?.blur()')
+    time.sleep(0.5)
+
+    r.s.run(HOVER, 'undo', True)
+    time.sleep(0.12)
+    r.check('passing over Undo for a moment shows nothing', r.s.run(TIP_TEXT) is None and r.s.run(MARKS) == {}, r.s.run(MARKS))
+    tip = wait(lambda: r.s.run(TIP_TEXT), 5)
+    r.check('resting on Undo names the step and what it brings back',
+            tip and tip.startswith('Undo · Delete') and 'Brings back talk.mp4' in tip, tip)
+    marks = r.s.run(MARKS)
+    r.check('the timeline draws the deleted piece back in its place and outlines the clip it pushes along',
+            marks == {piece['id']: 'back', wide['id']: 'moved'}, marks)
+    r.shot('undo-hover')
+    r.check('nothing changed yet, in the editor or on disk', r.track() == deleted and saved() == [c['id'] for c in deleted])
+    r.s.run(HOVER, 'undo', False)
+    r.check('leaving Undo puts the timeline back', wait(lambda: r.s.run(TIP_TEXT) is None and r.s.run(MARKS) == {}, 2), r.s.run(MARKS))
+
+    # Zoomed in at the start, the clip the undo pushes along lies past the right edge.
+    r.s.run('window.__nuzky.store.getState().setZoom(600)')
+    time.sleep(0.5)
+    r.s.run(HOVER, 'undo', True)
+    tip = wait(lambda: r.s.run(TIP_TEXT), 5)
+    r.check('a change out of view is named with the side it is on', tip and '1 changed clip off screen, to the right' in tip, tip)
+    r.s.run(HOVER, 'undo', False)
+    r.s.run('window.__nuzky.store.getState().setZoom(60)')
+
+    # A change the lanes cannot show: the tip says the values.
+    first = deleted[0]['id']
+    r.s.call("""window.__nuzky.store.getState().edit((p) => { const c = p.tracks[0].clips.find((c) => c.id === arguments[0]);
+        return {type: 'updateClip', clipId: c.id, transform: {...c.content.transform, opacity: 0.4}}; })""", first)
+    wait(lambda: r.s.run(CLIP_OPACITY, first) == 0.4, 5)
+    r.s.run(HOVER, 'undo', True)
+    tip = wait(lambda: r.s.run(TIP_TEXT), 5)
+    r.check('Undo of an opacity change says the opacity it brings back', tip and 'talk.mp4: Opacity 40 % → 100 %' in tip, tip)
+    r.check('and rings the clip it changes', r.s.run(MARKS) == {first: 'changed'}, r.s.run(MARKS))
+    r.shot('undo-hover-opacity')
+    r.s.run("document.querySelector('[data-peek-button=undo]').click()")
+    r.check('clicking Undo takes the opacity back', wait(lambda: r.s.run(CLIP_OPACITY, first) == 1, 5), r.s.run(CLIP_OPACITY, first))
+    tip = wait(lambda: (t := r.s.run(TIP_TEXT)) and t.startswith('Undo · Delete') and t, 5)
+    r.check('with the pointer still there, the tip moves on to the step before', tip, r.s.run(TIP_TEXT))
+    r.s.run(HOVER, 'undo', False)
+    r.s.run(HOVER, 'redo', True)
+    tip = wait(lambda: r.s.run(TIP_TEXT), 5)
+    r.check('Redo says what it would do again', tip and tip.startswith('Redo · Change clip') and 'Opacity 100 % → 40 %' in tip, tip)
+    r.s.run("document.querySelector('[data-peek-button=redo]').dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}))")
+    r.check('Esc hides the preview', wait(lambda: r.s.run(TIP_TEXT) is None and r.s.run(MARKS) == {}, 2), r.s.run(TIP_TEXT))
+    r.s.run(HOVER, 'redo', False)
+
+    bridge = Bridge(r, r.saved_project())
+    try:
+        run = bridge.call('begin_run', {'label': 'Look at undo'})
+        wait(lambda: r.state()['aiRun'], 10)
+        r.s.run(HOVER, 'undo', True)
+        time.sleep(1)
+        r.check('while the AI edits, resting on Undo shows nothing', r.s.run(TIP_TEXT) is None and r.s.run(MARKS) == {}, r.s.run(MARKS))
+        r.s.run(HOVER, 'undo', False)
         bridge.call('end_run', {'run_id': run['run_id'], 'action': 'keep'})
     finally:
         bridge.close()

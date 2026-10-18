@@ -557,6 +557,36 @@ fn redo(state: State<'_, AppState>, expected_epoch: Option<String>) -> CmdResult
     current.snapshot(Vec::new())
 }
 
+/// The project an undo or redo step would restore, for the timeline to show before the click.
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryPeek {
+    label: String,
+    /// The step is a whole AI run.
+    ai: bool,
+    /// The revision the step was read at; it describes undo or redo only while the project is still there.
+    revision: u64,
+    // With the safe area, as in `Snapshot`.
+    #[serde(serialize_with = "snapshot_project")]
+    project: Project,
+}
+
+#[tauri::command]
+fn peek_history(
+    state: State<'_, AppState>,
+    expected_epoch: Option<String>,
+    redo: bool,
+) -> CmdResult<Option<HistoryPeek>> {
+    let current = lock_session(&state.session, expected_epoch.as_deref())?;
+    Ok(current.host.session.peek(redo).map(|peek| HistoryPeek {
+        label: peek.label,
+        ai: peek.ai,
+        revision: peek.revision,
+        project: peek.project,
+    }))
+}
+
 /// A kept version of the open project, for the list of versions in the top bar.
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[derive(Serialize)]
@@ -1221,6 +1251,7 @@ pub fn run() {
             apply_edits,
             undo,
             redo,
+            peek_history,
             list_versions,
             restore_version,
             import_media,

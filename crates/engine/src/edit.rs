@@ -1903,10 +1903,19 @@ fn shift_words(clip: &mut Clip, by: i64) {
     }
 }
 
-/// One undo or redo entry: the project to return to and the coalesce key that made it.
+/// One undo or redo entry: the project to return to, the coalesce key that made it and what the
+/// step was called, for the UI to say what undo or redo will change.
 struct Step {
     project: Project,
     key: Option<String>,
+    label: String,
+}
+
+/// Where undo or redo would take the project, without going there.
+pub struct Peek<'a> {
+    pub project: &'a Project,
+    pub key: Option<&'a str>,
+    pub label: &'a str,
 }
 
 /// Owns the current project and its undo history.
@@ -1989,7 +1998,7 @@ impl Editor {
         }
         let merge = coalesce.is_some() && coalesce == self.coalesce;
         if !merge {
-            self.undo.push(Step { project: before, key: coalesce.clone() });
+            self.undo.push(Step { project: before, key: coalesce.clone(), label: String::new() });
             if self.undo.len() > UNDO_LIMIT {
                 self.undo.remove(0);
             }
@@ -2002,7 +2011,7 @@ impl Editor {
     pub fn undo(&mut self) -> bool {
         let Some(step) = self.undo.pop() else { return false };
         let current = std::mem::replace(&mut self.project, step.project);
-        self.redo.push(Step { project: current, key: step.key });
+        self.redo.push(Step { project: current, key: step.key, label: step.label });
         self.coalesce = None;
         self.revision += 1;
         true
@@ -2011,7 +2020,7 @@ impl Editor {
     pub fn redo(&mut self) -> bool {
         let Some(step) = self.redo.pop() else { return false };
         let current = std::mem::replace(&mut self.project, step.project);
-        self.undo.push(Step { project: current, key: step.key });
+        self.undo.push(Step { project: current, key: step.key, label: step.label });
         self.coalesce = None;
         self.revision += 1;
         true
@@ -2046,6 +2055,19 @@ impl Editor {
             self.revision += 1;
         }
         true
+    }
+
+    /// Names the newest undo step; the label stays with it through undo and redo.
+    pub fn name_step(&mut self, label: &str) {
+        if let Some(step) = self.undo.last_mut() {
+            step.label = label.into();
+        }
+    }
+
+    /// The project undo (or with `redo`, redo) would restore, and the step's key and name.
+    pub fn peek(&self, redo: bool) -> Option<Peek<'_>> {
+        let step = if redo { self.redo.last() } else { self.undo.last() }?;
+        Some(Peek { project: &step.project, key: step.key.as_deref(), label: &step.label })
     }
 
     pub fn can_undo(&self) -> bool {

@@ -75,6 +75,15 @@ struct Inner {
     events: Option<Sender<SessionEvent>>,
 }
 
+/// The project an undo or redo step would restore and what the step was called.
+pub struct HistoryPeek {
+    pub label: String,
+    /// The step is a whole AI run.
+    pub ai: bool,
+    pub revision: u64,
+    pub project: Project,
+}
+
 pub struct ProjectSession {
     inner: Arc<Mutex<Inner>>,
     stop: Arc<(Mutex<bool>, Condvar)>,
@@ -159,6 +168,18 @@ impl ProjectSession {
                 return Ok((state, inner.editor.can_undo(), inner.editor.can_redo()));
             }
         }
+    }
+
+    /// What undo (or with `redo`, redo) would restore, at the revision it was read at; None when there is nothing to.
+    pub fn peek(&self, redo: bool) -> Option<HistoryPeek> {
+        let inner = self.inner.lock().unwrap();
+        let peek = inner.editor.peek(redo)?;
+        Some(HistoryPeek {
+            label: peek.label.into(),
+            ai: peek.key.is_some_and(|key| key.starts_with("run:")),
+            revision: inner.editor.revision,
+            project: peek.project.clone(),
+        })
     }
 
     pub fn set_ui_context(&self, selection: Vec<String>, playhead_us: i64) {
@@ -307,6 +328,9 @@ impl Inner {
         outcome.select.retain(|id| self.editor.project.tracks.iter().any(|t| t.clips.iter().any(|c| &c.id == id)));
         let (changed, clips) = changes(&before, &self.editor.project, &outcome);
         if self.editor.project != before {
+            if !continues {
+                self.editor.name_step(&tip.label);
+            }
             self.changed(origin);
             match &mut self.history.tip {
                 Some(open) if continues => open.at_ms = tip.at_ms,

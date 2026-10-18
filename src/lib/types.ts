@@ -716,6 +716,22 @@ export type FontFamilies = {
 };
 
 /**
+ * The project an undo or redo step would restore, for the timeline to show before the click.
+ */
+export type HistoryPeek = {
+  label: string,
+  /**
+   * The step is a whole AI run.
+   */
+  ai: boolean,
+  /**
+   * The revision the step was read at; it describes undo or redo only while the project is still there.
+   */
+  revision: number,
+  project: Project,
+};
+
+/**
  * A timeline cut in another editor, such as a CapCut draft, as it was opened into this project.
  */
 export type Imported = {
