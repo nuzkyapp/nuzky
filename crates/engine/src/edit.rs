@@ -668,7 +668,13 @@ impl Project {
                 match heard_sides(clip, at - clip.start_us, at - clip.start_us) {
                     Some((before, _)) if before.is_empty() => clip.start_us += delta,
                     Some((_, after)) if after.is_empty() => {}
-                    None if still => clip.duration_us += delta,
+                    None if still => {
+                        let offset = at - clip.start_us;
+                        for k in clip.keyframes.iter_mut().filter(|k| k.t_us >= offset) {
+                            k.t_us += delta;
+                        }
+                        clip.duration_us += delta;
+                    }
                     sides => {
                         if let Some((_, after)) = &sides {
                             set_words(clip, after.clone());
@@ -2488,7 +2494,8 @@ mod tests {
         for (start_us, text) in [(1_000_000, "over a"), (6_000_000, "over b")] {
             p.apply(EditCmd::AddText { start_us, text: text.into(), style: style.clone() }).unwrap();
         }
-        p.apply(EditCmd::AddClip { asset_id: "m".into(), start_us: Some(5_000_000), track_id: None }).unwrap();
+        let music = 5_000_000;
+        p.apply(EditCmd::AddClip { asset_id: "m".into(), start_us: Some(music), track_id: None }).unwrap();
         let starts = |p: &Project| {
             let text = p.tracks.iter().find(|t| t.kind == TrackKind::Text).unwrap();
             let music = p.tracks.iter().find(|t| t.keep_in_place).unwrap();
@@ -2500,7 +2507,6 @@ mod tests {
             duration_us,
             source_in_us,
         };
-        // Music kept in place stays at 5 s throughout.
         for (cmd, texts, step) in [
             (trim(&a, 0, 4_000_000, None), vec![1_000_000, 5_000_000], "right edge in"),
             (trim(&a, 0, 5_000_000, None), vec![1_000_000, 6_000_000], "right edge out"),
@@ -2508,7 +2514,7 @@ mod tests {
             (trim(&b, 4_000_000, 3_000_000, Some(0)), vec![1_000_000, 6_000_000], "left edge out"),
         ] {
             p.apply(cmd).unwrap();
-            assert_eq!(starts(&p), (texts, 5_000_000), "{step}");
+            assert_eq!(starts(&p), (texts, music), "{step}");
         }
         assert_eq!(main_layout(&p), vec![(0, 5000), (5000, 3000)]);
     }
@@ -2535,7 +2541,10 @@ mod tests {
             anim_out: None,
         })
         .unwrap();
-        p.apply(EditCmd::AddText { start_us: 2_500_000, text: "title".into(), style }).unwrap();
+        let title =
+            p.apply(EditCmd::AddText { start_us: 2_500_000, text: "title".into(), style }).unwrap().select[0].clone();
+        let key = |t_us| Keyframe { t_us, transform: Transform::default(), ease: Default::default() };
+        p.apply(EditCmd::SetKeyframes { clip_id: title.clone(), keyframes: vec![key(0), key(1_000_000)] }).unwrap();
         // Sound cut with the picture, as detached sound is.
         p.apply(EditCmd::AddClip { asset_id: "m".into(), start_us: Some(1_000_000), track_id: None }).unwrap();
         let sound = p.tracks.iter().find(|t| t.kind == TrackKind::Audio).unwrap().id.clone();
@@ -2567,17 +2576,15 @@ mod tests {
             })
             .collect();
         assert_eq!(spoken, vec![("one".to_string(), 2_100_000), ("two".to_string(), 4_200_000)]);
-        let title = p
-            .tracks
-            .iter()
-            .flat_map(|t| &t.clips)
-            .find(|c| matches!(&c.content, ClipContent::Text { text, .. } if text == "title"))
-            .unwrap();
+        let (ti, ci) = p.find_clip(&title).unwrap();
+        let title = &p.tracks[ti].clips[ci];
         assert_eq!(
             (title.start_us, title.duration_us),
             (2_500_000, 4_000_000),
             "a title grows rather than showing twice"
         );
+        let keys: Vec<_> = title.keyframes.iter().map(|k| k.t_us).collect();
+        assert_eq!(keys, vec![0, 2_000_000], "its motion after the edge moves with the picture");
         let pieces: Vec<_> = p.tracks[p.track_index(&sound).unwrap()]
             .clips
             .iter()
