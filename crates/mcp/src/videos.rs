@@ -30,7 +30,8 @@ pub struct Video {
 pub fn link(url: &str) -> Result<Video> {
     let id = crate::youtube::video_id(url)?;
     let video = crate::youtube::video(&id, PICTURE, MAX_BYTES)?;
-    let text = |t: Option<&str>| t.map(|t| t.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|t| !t.is_empty());
+    let text =
+        |t: Option<&str>| t.map(|t| t.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|t| !t.is_empty());
     let channel = [&video.channel, &video.uploader, &video.artist].into_iter().find_map(|a| text(a.as_deref()));
     Ok(Video {
         id,

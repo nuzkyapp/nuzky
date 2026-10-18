@@ -24,6 +24,7 @@ mod transcripts;
 #[cfg(test)]
 mod typescript;
 mod updates;
+mod youtube_videos;
 mod zooms;
 
 use std::collections::HashMap;

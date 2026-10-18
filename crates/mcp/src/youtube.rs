@@ -469,22 +469,25 @@ pub fn download(
     let result = (|| {
         // yt-dlp reads -o as a template, where % starts a field.
         let output = part.to_str().context("The cache folder's name is not valid text")?.replace('%', "%%");
-        let mut child = command(format, &[
-            "--quiet",
-            "--progress",
-            "--newline",
-            "--progress-template",
-            PROGRESS,
-            "--no-part",
-            "--no-mtime",
-            "--abort-on-unavailable-fragments",
-            "--max-filesize",
-            &max,
-            "-o",
-            &output,
-            "--",
-            &watch_url(id),
-        ])?
+        let mut child = command(
+            format,
+            &[
+                "--quiet",
+                "--progress",
+                "--newline",
+                "--progress-template",
+                PROGRESS,
+                "--no-part",
+                "--no-mtime",
+                "--abort-on-unavailable-fragments",
+                "--max-filesize",
+                &max,
+                "-o",
+                &output,
+                "--",
+                &watch_url(id),
+            ],
+        )?
         .spawn()
         .map_err(|e| anyhow!("YTDLP_FAILED: yt-dlp could not start ({e})"))?;
         let stderr = collect_stderr(&mut child);

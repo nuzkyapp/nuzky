@@ -157,12 +157,7 @@ pub fn youtube_preview_resize(state: State<'_, AppState>, width: u32, height: u3
 
 /// `count` frames of the downloaded video `interval_us` apart from `from_us`, for the dialog's strips.
 #[tauri::command]
-pub async fn youtube_filmstrip(
-    app: AppHandle,
-    from_us: i64,
-    interval_us: i64,
-    count: u32,
-) -> CmdResult<Filmstrip> {
+pub async fn youtube_filmstrip(app: AppHandle, from_us: i64, interval_us: i64, count: u32) -> CmdResult<Filmstrip> {
     let state = app.state::<AppState>();
     let picture = state.youtube.preview.lock().unwrap().as_ref().map(|(_, picture)| picture.clone());
     let picture = picture.ok_or("CANCELLED: the video is no longer open")?;
@@ -183,7 +178,12 @@ pub async fn youtube_video_add(
     let asset = blocking(move || videos::asset(&video, part, &cache, &AtomicBool::new(false), |_| {})).await?;
     let path = asset.path.clone();
     let snap = state
-        .apply_batch(vec![EditCmd::AddAssets { assets: vec![asset] }], None, Expect::default(), expected_epoch.as_deref())
+        .apply_batch(
+            vec![EditCmd::AddAssets { assets: vec![asset] }],
+            None,
+            Expect::default(),
+            expected_epoch.as_deref(),
+        )
         .inspect_err(|_| drop(std::fs::remove_file(&path)))?;
     crate::jobs::prepare_media(&state, &snap.project);
     Ok(snap)
