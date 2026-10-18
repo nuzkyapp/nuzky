@@ -358,6 +358,115 @@ fn stickers_are_added_by_emoji_and_name_as_one_asset() {
 
 #[cfg(unix)]
 #[test]
+fn youtube_video_parts_download_with_mocked_ytdlp_and_require_rights() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let dir = root.join("tmp-test").join(format!("youtube-video-mcp-{}", new_id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let project = dir.join("project.nuzky");
+    std::fs::write(&project, serde_json::to_vec(&Project::new("YouTube video test")).unwrap()).unwrap();
+    let picture = dir.join("picture.mp4");
+    let audio = dir.join("sound.m4a");
+    for (source, codec, path) in
+        [("testsrc2=s=64x64:r=25:d=10", "libx264", &picture), ("sine=frequency=1000:duration=10", "aac", &audio)]
+    {
+        let out = Command::new("ffmpeg")
+            .args(["-v", "error", "-f", "lavfi", "-i", source, "-c", codec])
+            .arg(path)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    }
+    let fake = dir.join("yt-dlp");
+    std::fs::write(&fake, r#"#!/usr/bin/env python3
+import json, os, shutil, sys
+from pathlib import Path
+args = sys.argv[1:]
+with open(os.environ['NUZKY_FAKE_YTDLP_LOG'], 'a') as out:
+    out.write(json.dumps(args) + '\n')
+assert args[args.index('--') + 1:] == ['https://www.youtube.com/watch?v=ytVideo0001']
+fmt = args[args.index('-f') + 1]
+assert fmt in ('bestvideo[height<=1080][vcodec^=avc1]/bestvideo[height<=1080]/bestvideo', 'bestaudio[ext=m4a]/bestaudio'), fmt
+source = os.environ['NUZKY_FAKE_YTDLP_PICTURE' if fmt.startswith('bestvideo') else 'NUZKY_FAKE_YTDLP_AUDIO']
+if '--skip-download' in args:
+    print(json.dumps({'id': 'ytVideo0001', 'title': 'Test video', 'duration': 10,
+                      'filesize': Path(source).stat().st_size, 'live_status': 'not_live'}))
+else:
+    shutil.copyfile(source, args[args.index('-o') + 1])
+"#).unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let (log, home, data, cache, runtime) =
+        (dir.join("ytdlp.jsonl"), dir.join("home"), dir.join("data"), dir.join("cache"), dir.join("runtime"));
+    let env = [
+        ("NUZKY_YTDLP", fake.as_path()),
+        ("NUZKY_FAKE_YTDLP_PICTURE", &picture),
+        ("NUZKY_FAKE_YTDLP_AUDIO", &audio),
+        ("NUZKY_FAKE_YTDLP_LOG", &log),
+        ("HOME", &home),
+        ("XDG_DATA_HOME", &data),
+        ("XDG_CACHE_HOME", &cache),
+        ("XDG_RUNTIME_DIR", &runtime),
+    ];
+    let mut c = Client::spawn_at_env(dir, &project, true, Some(None), &env);
+    let run = c.call("begin_run", json!({"label": "Add YouTube video"}))["run_id"].clone();
+    let args = json!({"run_id": run, "link": "https://youtu.be/ytVideo0001?si=test",
+        "start_us": 2_000_000, "end_us": 4_000_000, "at_us": 0, "request_id": "video-part"});
+    let unchanged = c.call("get_state", json!({}));
+    assert!(c.error("add_youtube_video", args.clone()).contains("RIGHTS_UNCONFIRMED"));
+    assert_eq!(c.call("get_state", json!({})), unchanged);
+    let mut confirmed = args.clone();
+    confirmed["rights_confirmed"] = json!(true);
+    let added = c.call("add_youtube_video", confirmed);
+    assert_eq!(c.call("add_youtube_video", args.clone()), added);
+    assert_eq!(added["start_us"], 0);
+    assert_eq!(added["duration_us"], 2_000_000);
+    let mut conflict = args.clone();
+    conflict["at_us"] = json!(5_000_000);
+    assert!(c.error("add_youtube_video", conflict).contains("REQUEST_CONFLICT"));
+    assert!(
+        c.error("add_youtube_video", json!({"run_id": run, "link": args["link"], "start_us": 2_000_000}))
+            .contains("INVALID_ARGUMENTS")
+    );
+    let whole = c.call("add_youtube_video", json!({"run_id": run, "link": args["link"]}));
+    assert!(whole["part"].is_null() && whole["clip_id"].is_null());
+    assert_eq!(whole["duration_us"], whole["asset_duration_us"]);
+    c.call("end_run", json!({"run_id": run, "action": "keep"}));
+    let disk: Value = serde_json::from_slice(&std::fs::read(&project).unwrap()).unwrap();
+    let assets = disk["assets"].as_array().unwrap();
+    assert_eq!(assets.len(), 2);
+    let asset = assets.iter().find(|a| a["id"] == added["asset_id"]).unwrap();
+    let part = &asset["part"];
+    let (start, end) = (part["startUs"].as_i64().unwrap(), part["endUs"].as_i64().unwrap());
+    assert!(0 <= start && start < end && end <= asset["durationUs"].as_i64().unwrap());
+    assert_eq!(added["part"], *part);
+    assert_eq!(added["asset_duration_us"], asset["durationUs"]);
+    for asset in assets {
+        let path = PathBuf::from(asset["path"].as_str().unwrap());
+        assert!(path.is_file() && path.starts_with(c.dir.join("data/nuzky/videos")), "{path:?}");
+        assert_eq!(asset["hasAudio"], true);
+    }
+    assert!(assets.iter().find(|a| a["id"] == whole["asset_id"]).unwrap()["part"].is_null());
+    let track = disk["tracks"].as_array().unwrap().iter().find(|t| t["id"] == added["track_id"]).unwrap();
+    let clip = &track["clips"][0];
+    assert_eq!(clip["id"], added["clip_id"]);
+    assert_eq!(clip["content"]["assetId"], added["asset_id"]);
+    assert_eq!(clip["content"]["sourceInUs"], start);
+    assert_eq!(clip["durationUs"], end - start);
+    assert_eq!(clip["startUs"], added["start_us"]);
+    for line in std::fs::read_to_string(&log).unwrap().lines() {
+        let args: Vec<String> = serde_json::from_str(line).unwrap();
+        assert_eq!(
+            &args[args.iter().position(|a| a == "--").unwrap() + 1..],
+            &["https://www.youtube.com/watch?v=ytVideo0001"]
+        );
+    }
+    c.call("undo_run", json!({"run_id": run}));
+    assert_eq!(c.call("get_state", json!({}))["assets"], json!([]));
+    c.finish();
+}
+
+#[cfg(unix)]
+#[test]
 fn youtube_links_download_with_mocked_ytdlp_and_require_rights() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
     let dir = root.join("tmp-test").join(format!("youtube-mcp-{}", new_id()));
@@ -534,10 +643,14 @@ fn initialize_list_state_edit_end_undo_over_stdio() {
     let mut c = Client::new(true);
     let list = c.rpc("tools/list", json!({}));
     let tools = list["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 34);
+    assert_eq!(tools.len(), 35);
     let search = tools.iter().find(|t| t["name"] == "search_sounds").unwrap();
     assert_eq!(search["annotations"]["openWorldHint"], true);
     assert_eq!(search["annotations"]["readOnlyHint"], true);
+    let video = tools.iter().find(|t| t["name"] == "add_youtube_video").unwrap();
+    assert_eq!(video["annotations"]["openWorldHint"], true);
+    assert_eq!(video["annotations"]["readOnlyHint"], false);
+    assert_eq!(video["inputSchema"]["required"], json!(["run_id", "link"]));
     let apply = tools.iter().find(|t| t["name"] == "apply_edits").unwrap();
     assert!(apply["inputSchema"]["$defs"]["EditCmd"].is_object());
     assert!(apply["inputSchema"]["properties"]["expected_speech_layout_key"].is_object());

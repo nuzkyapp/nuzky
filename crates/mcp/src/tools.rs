@@ -64,6 +64,7 @@ pub struct Backend {
     transcript_requests: Mutex<HashMap<(String, String), PreparedTranscriptEdit>>,
     import_requests: Mutex<HashMap<(String, String), PreparedImport>>,
     sound_requests: Mutex<HashMap<(String, String), (String, PreparedSound)>>,
+    video_requests: Mutex<HashMap<(String, String), PreparedVideo>>,
     sticker_requests: Mutex<HashMap<(String, String), PreparedSticker>>,
     /// Why this agent cannot have the speech model: the user said not now, stopped the download or it failed.
     model_refused: Arc<Mutex<Option<String>>>,
@@ -72,6 +73,7 @@ pub struct Backend {
 
 /// The asset the sound became and the edits that add it.
 type PreparedSound = (String, Vec<EditCmd>, Expect);
+type PreparedVideo = (Value, String, Vec<EditCmd>, Expect);
 type PreparedSticker = (Value, crate::stickers::Prepared, Expect);
 
 impl Backend {
@@ -99,6 +101,7 @@ impl Backend {
             transcript_requests: Mutex::default(),
             import_requests: Mutex::default(),
             sound_requests: Mutex::default(),
+            video_requests: Mutex::default(),
             sticker_requests: Mutex::default(),
             model_refused: Arc::default(),
             vision_refused: Arc::default(),
@@ -271,6 +274,7 @@ impl Backend {
             "import_media" => self.import(parse(arguments)?, state),
             "search_sounds" => search_sounds(parse(arguments)?),
             "add_sound" => self.add_sound(parse(arguments)?, state),
+            "add_youtube_video" => self.add_youtube_video(parse(arguments)?, state),
             "add_sticker" => self.add_sticker(parse(arguments)?, state),
             "activity" => self.activity(parse(arguments)?, state),
             "analyze" => self.analyze(parse(arguments)?, state),
@@ -574,6 +578,85 @@ impl Backend {
             "start_us": clip.map(|c| c.clip.start_us), "duration_us": clip.map(|c| c.clip.duration_us),
             "needs_credit": credit.is_some_and(|c| c.license == nuzky_engine::model::License::CcBy),
             "credit": credit,
+        }))
+    }
+
+    fn add_youtube_video(&self, args: AddYoutubeVideo, state: &SessionState) -> Result<Value> {
+        owns_run(state, &args.run_id)?;
+        ensure!(args.at_us.is_none_or(|t| t >= 0), "INVALID_ARGUMENTS: at_us must not be negative");
+        let part = match (args.start_us, args.end_us) {
+            (Some(start_us), Some(end_us)) => Some(nuzky_engine::model::Part { start_us, end_us }),
+            (None, None) => None,
+            _ => anyhow::bail!("INVALID_ARGUMENTS: pass both start_us and end_us, or neither"),
+        };
+        if args.rights_confirmed == Some(true) {
+            crate::sounds::confirm_youtube_rights()?;
+        }
+        let request_id = args.request_id.unwrap_or_else(new_id);
+        let tag = json!([args.link, args.start_us, args.end_us, args.at_us]);
+        let (_, asset_id, edits, expect) = {
+            let mut requests = self.video_requests.lock().unwrap();
+            requests.retain(|(run, _), _| run == &args.run_id);
+            let key = (args.run_id.clone(), request_id.clone());
+            match requests.get(&key) {
+                Some(prepared) => {
+                    ensure!(prepared.0 == tag, "REQUEST_CONFLICT: request_id was used with other video arguments");
+                    prepared.clone()
+                }
+                None => {
+                    let video = crate::videos::link(&args.link)?;
+                    let stop = Arc::new(AtomicBool::new(false));
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    let (cache, worker_stop) = (self.host.cache_dir.clone(), stop.clone());
+                    std::thread::Builder::new().name("youtube-video-download".into()).spawn(move || {
+                        tx.send(crate::videos::asset(&video, part, &cache, &worker_stop, |_| {})).ok();
+                    })?;
+                    let asset = loop {
+                        match rx.recv_timeout(std::time::Duration::from_millis(100)) {
+                            Ok(result) => break result?,
+                            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                                if self.closed.load(Ordering::Acquire)
+                                    || self.host.session.check_run(&args.run_id).is_err()
+                                {
+                                    stop.store(true, Ordering::Relaxed);
+                                    anyhow::bail!("CANCELLED: the download stopped");
+                                }
+                            }
+                            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                                anyhow::bail!("SOURCE_FAILED: the download stopped unexpectedly");
+                            }
+                        }
+                    };
+                    let asset_id = asset.id.clone();
+                    let mut edits = vec![EditCmd::AddAssets { assets: vec![asset] }];
+                    if let Some(at_us) = args.at_us {
+                        edits.push(EditCmd::AddClip {
+                            asset_id: asset_id.clone(),
+                            start_us: Some(at_us),
+                            track_id: None,
+                        });
+                    }
+                    let prepared = (
+                        tag,
+                        asset_id,
+                        edits,
+                        Expect { revision: Some(state.stamp.revision), speech_layout_key: None },
+                    );
+                    requests.insert(key, prepared.clone());
+                    prepared
+                }
+            }
+        };
+        let result = self.host.session.apply_edits(&args.run_id, &request_id, edits, expect)?;
+        let snapshot = self.host.session.state()?.project;
+        let asset = snapshot.asset(&asset_id).context("Added video is missing")?;
+        let clip = result.clips.iter().find(|c| matches!(&c.clip.content, nuzky_engine::model::ClipContent::Media { asset_id: a, .. } if a == &asset_id));
+        Ok(json!({
+            "revision": result.stamp.revision, "session_epoch": result.stamp.session_epoch,
+            "asset_id": asset_id, "asset_duration_us": asset.duration_us, "part": asset.part,
+            "clip_id": clip.map(|c| &c.clip.id), "track_id": clip.map(|c| &c.track_id),
+            "start_us": clip.map(|c| c.clip.start_us),
+            "duration_us": clip.map_or(asset.duration_us, |c| c.clip.duration_us),
         }))
     }
 
@@ -1901,6 +1984,7 @@ mod transcript_tests {
             transcript_requests: Mutex::default(),
             import_requests: Mutex::default(),
             sound_requests: Mutex::default(),
+            video_requests: Mutex::default(),
             sticker_requests: Mutex::default(),
             model_refused: Arc::default(),
             vision_refused: Arc::default(),

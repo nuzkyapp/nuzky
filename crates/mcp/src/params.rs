@@ -121,6 +121,22 @@ pub struct AddSound {
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct AddYoutubeVideo {
+    pub run_id: String,
+    /// The YouTube link the user gave.
+    pub link: String,
+    /// The part in the video's own microseconds. Set both start_us and end_us, or neither for the whole video.
+    pub start_us: Option<i64>,
+    pub end_us: Option<i64>,
+    /// When set, also place a clip at this timeline time.
+    pub at_us: Option<i64>,
+    /// true only after the user agreed that the rights to the video are theirs to check.
+    pub rights_confirmed: Option<bool>,
+    /// Reuse with the same link, part and placement after a failed save to avoid adding it twice.
+    pub request_id: Option<String>,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct AddSticker {
     pub run_id: String,
     /// One emoji, an English emoji name, :shortcode: or Nuzky sticker id.
