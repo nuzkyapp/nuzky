@@ -2,7 +2,8 @@ import json, os, shutil, subprocess, threading, time, uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from e2e.harness import CLI, FIXTURES, MACOS, clipboard, flow, press, wait, webdriver
+from e2e.harness import CLI, FIXTURES, MACOS, Session, clipboard, close_window, flow, press, wait, webdriver
+from e2e.history import alive as window_alive
 
 FAKE = Path(__file__).resolve().parent / 'fake_agent'
 PANEL = """const p = document.querySelector('aside[aria-label=AI]'); if (!p) return null; const b = p.getBoundingClientRect();
@@ -517,6 +518,105 @@ def ai_panel_jobs(r):
     r.check('no error toast along the way', not r.errors(), r.errors())
 
 
+@flow('ai_panel_chats', 'Project chats list newest first, reopen with the keyboard, resume the right session, survive a restart '
+      'and keep the message when the agent has lost its session', before=setup)
+def ai_panel_chats(r):
+    def check(name, ok, detail=None):
+        if not r.check(name, ok, detail):
+            r.shot('failed')
+            raise RuntimeError(name)
+
+    cut = 'Cut the pause at the start and add captions'
+    field = "return document.querySelector('aside[aria-label=AI] textarea')?.value"
+    items = 'return window.__nuzky.agent.getState().items'
+    files = lambda: sorted((r.work / 'data/nuzky/chats').glob('*/*'))
+    r.s.run('document.body.focus()')
+    r.key('j', ctrlKey=True)
+    check('Ctrl+J opens the panel with Claude Code ready',
+          wait(lambda: panel(r) and r.s.run('return window.__nuzky.agent.getState().agents'), 10)
+          and r.s.run("return window.__nuzky.agent.getState().agent === 'claude'"), panel(r))
+    send(r, cut)
+    check('the first chat shows the cut message, answer and completed run card',
+          wait(lambda: idle(r) and 'run' in agent(r)['kinds'] and 'Hotovo.' in panel(r)['text'], 30)
+          and cut in panel(r)['text'] and 'Cut out 1 passage, 2.0 s in total' in panel(r)['text'], panel(r)['text'])
+    first = runs(r)[0]
+    click(r, 'New chat')
+    check('New chat clears the conversation', wait(lambda: not r.s.run(items), 5), agent(r))
+    send(r, 'Hello there')
+    check('the second chat echoes Hello there and enables Past chats',
+          wait(lambda: 'Rozumím: hello there' in r.s.run(MESSAGES) and agent(r)['status'] == 'idle', 15)
+          and wait(lambda: r.s.run("""const b = document.querySelector('aside[aria-label=AI] button[aria-label="Past chats in this project"]');
+              return b && !b.disabled && b.getAttribute('aria-disabled') !== 'true';"""), 5), panel(r)['text'])
+
+    click(r, 'Past chats in this project')
+    rows = "return [...document.querySelectorAll('ul[aria-label=\"Past chats\"] button')].map((b) => b.innerText)"
+    check('Past chats lists two Claude Code chats, newest Hello there open, then the cut',
+          wait(lambda: len(r.s.run(rows)) == 2, 5)
+          and r.s.run(rows)[0].startswith('Hello there\nOpen now') and r.s.run(rows)[1].startswith(cut)
+          and 'Open now' not in r.s.run(rows)[1] and all('Claude Code' in row for row in r.s.run(rows)), r.s.run(rows))
+    r.shot('chat-list')
+    check('keyboard focus starts on the open chat',
+          r.s.run('return document.activeElement?.getAttribute("aria-current")') == 'true')
+    r.key('ArrowDown')
+    check('ArrowDown focuses the cut chat', r.s.run('return document.activeElement?.innerText') == r.s.run(rows)[1])
+    press('Return')
+    check('Enter reopens the cut chat with its messages, run card, date and Claude Code, without Undo',
+          wait(lambda: panel(r) and cut in panel(r)['text'] and 'run' in agent(r)['kinds'], 10)
+          and 'Hotovo.' in panel(r)['text'] and 'Cut out 1 passage, 2.0 s in total' in panel(r)['text']
+          and 'Hello there' not in panel(r)['text'] and r.s.run("""const p = document.querySelector('aside[aria-label=AI]');
+              return !!p.querySelector('[role=separator]')?.textContent.trim()
+                && ![...p.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Undo')
+                && window.__nuzky.agent.getState().agent === 'claude';"""), panel(r)['text'])
+    r.shot('reopened')
+    send(r, 'Hello again')
+    check('Hello again resumes the cut chat session and its answer shows',
+          wait(lambda: len(runs(r)) == 3 and 'Rozumím: hello again' in r.s.run(MESSAGES)
+               and agent(r)['status'] == 'idle', 15)
+          and runs(r)[-1]['resume'] and runs(r)[-1]['session'] == first['session'], runs(r)[-1])
+    kept = r.s.run(items)
+    check('both chats are saved and the continued chat keeps every message and run card',
+          wait(lambda: len(files()) == 2 and any(json.loads(p.read_text()).get('items') == kept for p in files()), 10),
+          [str(p.relative_to(r.work)) for p in files()])
+
+    close_window()
+    check('the window closes', wait(lambda: not window_alive(r), 15))
+    r.s.close()
+    r.s = Session()
+    check('the app starts again with the project',
+          wait(lambda: r.s.run('return !!window.__nuzky?.store.getState().snap', retries=3), 60))
+    r.s.run("window.__nuzky.store.setState({view: 'editor'})")
+    if not panel(r):
+        r.s.run('document.body.focus()')
+        r.key('j', ctrlKey=True)
+    check('restart automatically reopens the last continued chat with Hello again, the original cut and nothing lost',
+          wait(lambda: panel(r) and 'Hello again' in panel(r)['text'] and cut in panel(r)['text']
+               and r.s.run(items) == kept, 10), {'panel': panel(r), 'items': r.s.run(items)})
+    (Path(r.env['NUZKY_FAKE_AGENT_LOG']) / 'sessions' / first['session']).unlink()
+    send(r, 'Still there?')
+    check('a missing session shows the recovery card and returns Still there? to the field',
+          wait(lambda: agent(r)['status'] == 'idle' and 'Claude Code no longer has this chat' in panel(r)['text']
+               and agent(r)['draft'] == r.s.run(field) == 'Still there?', 15), panel(r)['text'])
+    count = len(runs(r))
+    r.s.run("document.querySelector('aside[aria-label=AI] textarea').focus()")
+    r.key('Enter')
+    check('Enter explains that this chat cannot continue and starts no fake run',
+          wait(lambda: "can't continue this chat. Start a new one" in panel(r)['text'], 5)
+          and len(runs(r)) == count and agent(r)['status'] == 'idle' and r.s.run(field) == 'Still there?', panel(r)['text'])
+    r.shot('session-gone')
+    click(r, 'New chat with this message')
+    check('New chat with this message clears the conversation and keeps the draft without sending it',
+          wait(lambda: not r.s.run(items), 5) and agent(r)['draft'] == r.s.run(field) == 'Still there?'
+          and len(runs(r)) == count, agent(r))
+    beside = sorted((r.work / 'data/nuzky/projects').glob('*chat*'))
+    saved = files()
+    check('chat storage has exactly two JSON files in one 16-hex project folder and none beside the project',
+          not beside and len(saved) == 2 and len({p.parent for p in saved}) == 1
+          and all(p.suffix == '.json' and len(p.parent.name) == 16
+                  and all(c in '0123456789abcdef' for c in p.parent.name) for p in saved)
+          and {json.loads(p.read_text())['title'] for p in saved} == {cut, 'Hello there'},
+          {'beside': beside, 'chats': [str(p.relative_to(r.work)) for p in saved]})
+
+
 @flow('ai_panel', "The AI panel runs the user's agent with only Nuzky's tools: it edits live, says exactly what changed, "
       'offers choices, stops at once, keeps a failed message, and docks, floats and resizes where the user put it',
       before=setup)
@@ -706,7 +806,7 @@ def ai_panel(r):
     r.check('the grip also opens the places as a menu', wait(lambda: click(r, 'Floating') is not None, 3))
     p = wait(lambda: (lambda p: p if p and p['slot'] is None and p['inspector'] else None)(panel(r)), 3)
     r.check('floating, it sits over the editor and the inspector is back', p, panel(r))
-    r.s.run("document.querySelector('aside[aria-label=AI]').parentElement.querySelector('[role=separator]').focus()")
+    r.s.run("document.querySelector('aside[aria-label=AI]').parentElement.querySelector('[role=separator][aria-label=\"Resize AI panel\"]').focus()")
     r.key('ArrowRight')
     r.check('a floating panel resizes from the keyboard too', wait(lambda: panel(r)['width'] == p['width'] + 24, 3), {'before': p['width'], 'after': panel(r)['width']})
     r.shot('floating')

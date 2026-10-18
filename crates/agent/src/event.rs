@@ -48,4 +48,5 @@ pub enum ErrorCode {
     /// Signed in to ChatGPT, but it does not let Nuzky use the account's plan.
     PlanUnavailable,
     AgentFailed,
+    SessionGone,
 }

@@ -1,7 +1,8 @@
-import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Fragment, createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
   AlertCircle,
   AlertTriangle,
+  ArrowLeft,
   ArrowUp,
   Captions,
   Check,
@@ -21,6 +22,7 @@ import {
   Info,
   Loader2,
   Plug,
+  MessagesSquare,
   MessageSquareText,
   RefreshCw,
   ScanFace,
@@ -38,8 +40,10 @@ import {
   jobText,
   markUndone,
   loadAgents,
+  loadChats,
   makeThumbnail,
   newChat,
+  openChat,
   send,
   sendBlocked,
   steer,
@@ -60,6 +64,7 @@ import { FINISH_DRAFT } from "../../lib/capcut";
 import { downloadModels, useCover } from "../../lib/cover";
 import { openRecap, undoAction, undoStep, useEditor } from "../../lib/store";
 import { formatTime } from "../../lib/time";
+import { whenLabel } from "../../lib/library";
 import { Button, IconButton, LockReason, ProgressBar } from "../ui";
 import { MODEL_QUESTION, answerModelQuestion } from "../ModelQuestionDialog";
 import { Markdown } from "./Markdown";
@@ -287,6 +292,7 @@ const STEP_ICON: Record<Step["status"], ReactNode> = {
   done: <Check size={14} className="text-ok" />,
   failed: <AlertCircle size={14} className="text-danger" />,
   stopped: <CircleStop size={14} className="text-muted" />,
+  interrupted: <CircleStop size={14} className="text-muted" />,
 };
 
 function grouped(steps: Step[]): (Step & { times: number })[] {
@@ -295,7 +301,7 @@ function grouped(steps: Step[]): (Step & { times: number })[] {
     const last = rows[rows.length - 1];
     if (last && last.title === s.title && last.status !== "failed" && s.status !== "failed") {
       // Calls can run side by side, so the row runs until every one of them is done.
-      const status = [last.status, s.status].includes("running") ? "running" : [last.status, s.status].includes("stopped") ? "stopped" : s.status;
+      const status = [last.status, s.status].includes("running") ? "running" : [last.status, s.status].includes("stopped") ? "stopped" : [last.status, s.status].includes("interrupted") ? "interrupted" : s.status;
       rows[rows.length - 1] = { ...s, id: last.id, status, times: last.times + 1 };
     } else rows.push({ ...s, times: 1 });
   }
@@ -320,7 +326,7 @@ function Steps({ steps, collapsed }: { steps: Step[]; collapsed: boolean }) {
           {STEP_ICON[s.status]}
           <span className={s.status === "running" ? "text-fg" : "text-fg/80"}>{s.title}</span>
           <span className="tabular truncate text-right text-muted" title={s.detail ?? undefined}>
-            {s.status === "stopped" ? "Stopped" : s.times > 1 ? `${s.times} times` : s.detail}
+            {s.status === "stopped" ? "Stopped" : s.status === "interrupted" ? "Interrupted" : s.times > 1 ? `${s.times} times` : s.detail}
           </span>
         </li>
       ))}
@@ -328,21 +334,21 @@ function Steps({ steps, collapsed }: { steps: Step[]; collapsed: boolean }) {
   );
 }
 
-function Options({ item }: { item: Extract<ChatItem, { kind: "options" }> }) {
+function Options({ item, past }: { item: Extract<ChatItem, { kind: "options" }>; past: boolean }) {
   const busy = useAgent((s) => s.status !== "idle");
   return (
     <div className="flex flex-col gap-1.5" role="group" aria-label={item.question ?? "Options"}>
       {item.question && <p className="leading-[20px] text-fg/90">{item.question}</p>}
       {item.options.map((o) => {
         const chosen = item.chosen === o.label;
-        const off = item.chosen !== null || busy;
+        const off = item.chosen !== null || busy || past;
         return (
           <button
             key={o.label}
             type="button"
             aria-disabled={off || undefined}
             aria-pressed={chosen}
-            title={off && !chosen ? (item.chosen ? "Already answered" : "Wait for the answer, or stop it") : undefined}
+            title={off && !chosen ? (item.chosen ? "Already answered" : past ? "From an earlier visit. Write your answer below." : "Wait for the answer, or stop it") : undefined}
             onClick={off ? undefined : () => choose(item.id, o.label)}
             className={`flex flex-col items-start gap-0.5 rounded-[10px] px-3 py-2 text-left transition-colors duration-[120ms] ${
               chosen ? "bg-accent/[.18] shadow-[inset_0_0_0_1px_rgb(41_151_255/.6)]" : off ? "cursor-not-allowed bg-raised opacity-50" : "bg-raised hover:bg-[#35353a]"
@@ -360,14 +366,15 @@ function Options({ item }: { item: Extract<ChatItem, { kind: "options" }> }) {
   );
 }
 
-function ChangeRow({ change, undone }: { change: RunChange; undone: boolean }) {
+function ChangeRow({ change, undone, past }: { change: RunChange; undone: boolean; past: boolean }) {
   // Recomputed when the project changes, never with the playhead while playing.
   const project = useEditor((s) => s.snap?.project);
   const ids = useMemo(() => {
     const all = new Set(project?.tracks.flatMap((t) => t.clips.map((c) => c.id)));
     return change.clipIds.filter((id) => all.has(id));
   }, [project, change]);
-  const go = !undone && (ids.length > 0 || change.atUs !== null);
+  // The clips and times of an earlier visit may be gone since.
+  const go = !undone && !past && (ids.length > 0 || change.atUs !== null);
   const show = () => {
     const s = useEditor.getState();
     if (ids.length) s.select(ids);
@@ -389,7 +396,8 @@ function ChangeRow({ change, undone }: { change: RunChange; undone: boolean }) {
   );
 }
 
-function RunCard({ item, index }: { item: Extract<ChatItem, { kind: "run" }>; index: number }) {
+/** `past`: from an earlier visit, which this session's Undo cannot take back; Versions can. */
+function RunCard({ item, index, past }: { item: Extract<ChatItem, { kind: "run" }>; index: number; past: boolean }) {
   // Undo is checked each render, so it turns off once later changes are on top of the run.
   useEditor((s) => `${s.snap?.sessionEpoch}:${s.snap?.revision}`);
   const locked = useEditor((s) => !!s.aiRun);
@@ -424,11 +432,11 @@ function RunCard({ item, index }: { item: Extract<ChatItem, { kind: "run" }>; in
       {item.changes && item.changes.length > 0 ? (
         <ul className="-mx-1.5 flex flex-col" aria-label="What changed">
           {item.changes.map((c, i) => (
-            <ChangeRow key={i} change={c} undone={!!item.undone} />
+            <ChangeRow key={i} change={c} undone={!!item.undone} past={past} />
           ))}
         </ul>
       ) : (
-        !item.snap && <p className="text-[12px] text-muted">Nothing in the project changed.</p>
+        !item.snap && !past && <p className="text-[12px] text-muted">Nothing in the project changed.</p>
       )}
       {item.runId && item.cut && !item.undone && (
         <Button
@@ -470,7 +478,17 @@ function ErrorNotice({ code, message, retryText }: { code: AgentErrorCode; messa
   // A message that failed after the agent began answering stays in the conversation, with Try again, not in the field.
   const kept = retryText ? message : <>{message} Your message is still here.</>;
   const [icon, title, body, buttons]: [ReactNode, string, ReactNode, ReactNode] =
-    agent === "chatgpt"
+    code === "SESSION_GONE"
+      ? [
+          <AlertTriangle size={16} className="text-warn" />,
+          `${name} no longer has this chat`,
+          "It clears old chats after a while, so it can't pick this one up. Start a new chat with your message; this one stays here to read.",
+          button("New chat with this message", () => {
+            newChat();
+            document.querySelector<HTMLTextAreaElement>('aside[aria-label="AI"] textarea')?.focus();
+          }),
+        ]
+      : agent === "chatgpt"
       ? code === "NOT_SIGNED_IN"
         ? [<AlertCircle size={16} className="text-danger" />, "ChatGPT isn't signed in.", kept, <>{button("Sign in…", continueWithChatGpt)}{retry}{switchTo}</>]
         : code === "USAGE_LIMIT"
@@ -653,7 +671,7 @@ function UserMessage({ text, context }: { text: string; context: string | null }
   );
 }
 
-function Item({ item, index, collapsed }: { item: ChatItem; index: number; collapsed: boolean }) {
+function Item({ item, index, collapsed, past }: { item: ChatItem; index: number; collapsed: boolean; past: boolean }) {
   switch (item.kind) {
     case "user":
       return <UserMessage text={item.text} context={item.context} />;
@@ -666,9 +684,9 @@ function Item({ item, index, collapsed }: { item: ChatItem; index: number; colla
     case "steps":
       return <Steps steps={item.steps} collapsed={collapsed} />;
     case "options":
-      return <Options item={item} />;
+      return <Options item={item} past={past} />;
     case "run":
-      return <RunCard item={item} index={index} />;
+      return <RunCard item={item} index={index} past={past} />;
     case "stopped":
       return (
         <div className="flex items-center gap-2 rounded-[10px] bg-raised p-3 text-[12px]">
@@ -735,6 +753,23 @@ function VisionModelsQuestion() {
   );
 }
 
+/** "Today 10:42", "Yesterday 21:47", "Monday 09:15", "Sep 28 18:02". */
+function dayAndTime(ms: number) {
+  const time = new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const today = new Date(ms).toDateString() === new Date().toDateString();
+  return `${today ? "Today" : whenLabel(ms)} ${time}`;
+}
+
+function DateLine({ ms }: { ms: number }) {
+  return (
+    <div className="flex items-center gap-3 text-[12px] text-muted" role="separator">
+      <span className="h-px flex-1 bg-white/[.06]" />
+      <span className="tabular">{dayAndTime(ms)}</span>
+      <span className="h-px flex-1 bg-white/[.06]" />
+    </div>
+  );
+}
+
 function Conversation() {
   const items = useAgent((s) => s.items);
   const visionQuestion = useEditor((s) => s.visionModelQuestion);
@@ -745,6 +780,7 @@ function Conversation() {
     useEditor.setState((s) => ({ aiChats: s.aiChats + 1 }));
     return () => useEditor.setState((s) => ({ aiChats: s.aiChats - 1 }));
   }, [project]);
+  const pastCount = useAgent((s) => s.pastCount);
   const working = useAgent((s) => s.status !== "idle");
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
@@ -754,6 +790,18 @@ function Conversation() {
     if (el && pinned.current) el.scrollTop = el.scrollHeight;
   }, [items, visionQuestion]);
   const lastUser = items.map((i) => i.kind).lastIndexOf("user");
+  // A reopened chat says when it was, and when today's part of it starts.
+  const sentAt = (from: number) => {
+    const user = items.slice(from).find((i) => i.kind === "user");
+    return user?.kind === "user" ? (user.at ?? null) : null;
+  };
+  const lines = new Map<number, number>();
+  if (pastCount !== null) {
+    const first = sentAt(0);
+    if (first !== null) lines.set(0, first);
+    const later = sentAt(pastCount);
+    if (later !== null) lines.set(pastCount, later);
+  }
   return (
     <div
       ref={scroller}
@@ -765,8 +813,11 @@ function Conversation() {
     >
       {items.length === 0 ? <Empty /> : <div className="mt-auto" />}
       {items.map((item, i) => (
-        // Steps fold away once the agent has answered after them.
-        <Item key={i} item={item} index={i} collapsed={item.kind === "steps" && (i < lastUser || (!working && items.slice(i + 1).some((x) => x.kind === "agent")))} />
+        <Fragment key={i}>
+          {lines.has(i) && <DateLine ms={lines.get(i)!} />}
+          {/* Steps fold away once the agent has answered after them. */}
+          <Item item={item} index={i} past={pastCount !== null && i < pastCount} collapsed={item.kind === "steps" && (i < lastUser || (!working && items.slice(i + 1).some((x) => x.kind === "agent")))} />
+        </Fragment>
       ))}
       {project && <VisionModelsQuestion />}
     </div>
@@ -983,7 +1034,7 @@ function Composer() {
           rows={2}
           value={draft}
           aria-label={`Message to ${name}`}
-          placeholder={working ? `Tell ${name} more while it works…` : agent === "chatgpt" && !plan ? "Sign in to ChatGPT to start" : thumbnail ? "Add a note, e.g. the hook (optional)" : about === "style" ? "What should change in how you edit?" : hasItems ? "Ask for changes…" : `Ask ${name} to edit…`}
+          placeholder={working ? `Tell ${name} more while it works…` : blocked?.includes("can't continue this chat") ? `${name} can't continue this chat` : agent === "chatgpt" && !plan ? "Sign in to ChatGPT to start" : thumbnail ? "Add a note, e.g. the hook (optional)" : about === "style" ? "What should change in how you edit?" : hasItems ? "Ask for changes…" : `Ask ${name} to edit…`}
           onChange={(e) => useAgent.setState({ draft: e.target.value })}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -1123,6 +1174,13 @@ export function AiPanel({
   const busy = useAgent((s) => s.status !== "idle");
   const empty = useAgent((s) => s.items.length === 0);
   const left = useAgent((s) => s.jobs.some((j) => j.status === "running"));
+  const kept = useAgent((s) => s.chats?.length ?? 0);
+  const projectName = useEditor((s) => s.snap?.project.name);
+  const [listing, setListing] = useState(false);
+  // An answer starting elsewhere, such as Make it with AI, brings the conversation back.
+  useEffect(() => {
+    if (busy) setListing(false);
+  }, [busy]);
   const { mode } = useDockLayout();
   useEffect(() => {
     if (useAgent.getState().agents === null) void loadAgents();
@@ -1143,8 +1201,28 @@ export function AiPanel({
         className="flex h-12 shrink-0 items-center gap-1 border-b border-white/[.07] pl-1.5 pr-2"
       >
         {about === "project" && <PlaceMenu panel={panelRef} />}
-        <AgentMenu />
+        {listing ? (
+          <>
+            <IconButton label="Back to the chat (Esc)" onClick={() => setListing(false)} className="h-7 w-7">
+              <ArrowLeft size={15} />
+            </IconButton>
+            <h2 className="min-w-0 truncate px-1 text-[13px] font-semibold text-fg">Chats in {projectName ?? "this project"}</h2>
+          </>
+        ) : (
+          <AgentMenu />
+        )}
         <span className={`flex-1 self-stretch ${about === "project" ? "cursor-grab" : ""}`} onPointerDown={about === "project" ? move : undefined} />
+        {about === "project" && !listing && (
+          <IconButton
+            label={busy ? "Past chats: wait for the answer, or stop it" : kept === 0 ? "Past chats: none in this project yet" : "Past chats in this project"}
+            disabled={busy || kept === 0}
+            onClick={() => setListing(true)}
+            className="h-7 w-7"
+          >
+            <MessagesSquare size={15} />
+          </IconButton>
+        )}
+        {!listing && (
         <IconButton
           label={busy ? "New chat: wait for the answer, or stop it" : empty ? "New chat: there is nothing to clear yet" : left ? "New chat: stops what the agent is still doing" : "New chat"}
           disabled={busy || empty}
@@ -1153,13 +1231,82 @@ export function AiPanel({
         >
           <SquarePen size={15} />
         </IconButton>
+        )}
         <IconButton label={about === "style" ? "Close AI" : "Close AI (Ctrl+J)"} onClick={onClose ?? (() => useDock.setState({ open: false }))} className="h-7 w-7">
           <X size={16} />
         </IconButton>
       </header>
-      <Conversation />
-      <Composer />
+      {listing ? (
+        <ChatList onBack={() => setListing(false)} />
+      ) : (
+        <>
+          <Conversation />
+          <Composer />
+        </>
+      )}
     </aside>
     </About>
+  );
+}
+
+/** The chats this project keeps, newest first: one opens to read and continue. ↑/↓, Home and End move, Enter opens, Esc goes back. */
+function ChatList({ onBack }: { onBack: () => void }) {
+  const chats = useAgent((s) => s.chats);
+  const current = useAgent((s) => s.chat);
+  const agents = useAgent((s) => s.agents);
+  const left = useAgent((s) => s.jobs.find((j) => j.status === "running"));
+  const list = useRef<HTMLUListElement>(null);
+  const loaded = chats !== null;
+  useEffect(() => void loadChats(), []);
+  // Focus starts on the open chat, so Enter goes back to it and ↑/↓ reach the others.
+  useEffect(() => {
+    const rows = [...(list.current?.querySelectorAll<HTMLElement>("button") ?? [])];
+    (rows.find((el) => el.dataset.current) ?? rows[0])?.focus();
+  }, [loaded]);
+  const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    if (e.key === "Escape") return onBack();
+    const rows = [...(list.current?.querySelectorAll<HTMLElement>("button") ?? [])];
+    const i = rows.indexOf(document.activeElement as HTMLElement);
+    const next = { ArrowDown: i + 1, ArrowUp: i - 1, Home: 0, End: rows.length - 1 }[e.key];
+    if (next === undefined) return;
+    e.preventDefault();
+    rows[Math.max(0, Math.min(rows.length - 1, next))]?.focus();
+  };
+  return (
+    <div onKeyDown={onKey} className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 py-2 text-[13px]">
+      {left && <p className="mb-1 px-2 text-[12px] leading-[17px] text-muted">Opening another chat stops {jobText(left)}.</p>}
+      {chats === null ? (
+        <p className="px-2 py-1.5 text-[12px] text-muted">Loading your chats…</p>
+      ) : (
+        <ul ref={list} aria-label="Past chats" className="flex flex-col gap-0.5">
+          {chats.map((c) => {
+            const open = c.id === current;
+            return (
+              <li key={c.id}>
+                <button
+                  type="button"
+                  data-current={open || undefined}
+                  aria-current={open || undefined}
+                  onClick={() => {
+                    if (!open) void openChat(c.id);
+                    onBack();
+                  }}
+                  className="flex w-full flex-col gap-0.5 rounded-lg px-2.5 py-2 text-left hover:bg-white/[.06]"
+                >
+                  <span className="flex w-full items-baseline gap-2">
+                    <span className="min-w-0 truncate font-medium text-fg">{c.title || "Untitled chat"}</span>
+                    {open && <span className="shrink-0 text-[12px] text-accent">Open now</span>}
+                  </span>
+                  <span className="tabular text-[12px] text-muted">
+                    {agentName(c.agent, agents)} · {dayAndTime(c.updatedMs)}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
   );
 }

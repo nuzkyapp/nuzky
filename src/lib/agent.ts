@@ -21,7 +21,8 @@ export interface AgentInfo {
 }
 
 /** What went wrong with a turn, so the panel can say what to do next. */
-export type AgentErrorCode = "NOT_INSTALLED" | "NOT_SIGNED_IN" | "USAGE_LIMIT" | "PLAN_UNAVAILABLE" | "AGENT_FAILED";
+/** `SESSION_GONE`: Claude Code or Codex no longer has the conversation a reopened chat would continue. */
+export type AgentErrorCode = "NOT_INSTALLED" | "NOT_SIGNED_IN" | "USAGE_LIMIT" | "PLAN_UNAVAILABLE" | "AGENT_FAILED" | "SESSION_GONE";
 
 /** Events from the backend for one chat, in order. */
 export type AgentEvent =
@@ -50,7 +51,7 @@ interface RunSummary {
 export interface Step {
   id: string;
   title: string;
-  status: "running" | "done" | "failed" | "stopped";
+  status: "running" | "done" | "failed" | "stopped" | "interrupted";
   detail: string | null;
 }
 
@@ -70,7 +71,8 @@ export interface Choice {
 }
 
 export type ChatItem =
-  | { kind: "user"; text: string; context: string | null }
+  /** `at`: when it was sent, in ms. */
+  | { kind: "user"; text: string; context: string | null; at?: number }
   /** `ended`: a tool call the panel does not show came after it, so the agent's next words are a new message. */
   | { kind: "agent"; text: string; ended?: boolean }
   | { kind: "steps"; steps: Step[] }
@@ -89,6 +91,14 @@ export type ChatItem =
   | { kind: "stopped" }
   /** `retry`: the message that failed after the agent had begun answering, for Try again. */
   | { kind: "error"; code: AgentErrorCode; message: string; retry?: string };
+
+/** A chat this project keeps, as the list of past chats shows it. */
+export interface ChatSummary {
+  id: string;
+  agent: AgentId;
+  title: string;
+  updatedMs: number;
+}
 
 export interface PromptContext {
   /** Selected clips at send time, or null when the user removed the chip or nothing is selected. */
@@ -109,6 +119,10 @@ interface AgentState {
   agentsError: string | null;
   agent: AgentId;
   chat: string | null;
+  /** How many items came from a reopened chat: their runs can no longer be undone and their choices no longer answered. */
+  pastCount: number | null;
+  /** The chats this project keeps, newest first; null until loaded. */
+  chats: ChatSummary[] | null;
   /** The message being answered, so Stop reaches it even while it is starting. */
   turn: string | null;
   items: ChatItem[];
@@ -147,6 +161,8 @@ export const useAgent = create<AgentState>(() => ({
   agentsError: null,
   agent: AGENTS.includes(localStorage.getItem(AGENT_KEY) as AgentId) ? (localStorage.getItem(AGENT_KEY) as AgentId) : "claude",
   chat: null,
+  pastCount: null,
+  chats: null,
   turn: null,
   items: [],
   jobs: [],
@@ -169,6 +185,9 @@ const agentApi = {
   /** Whether the working agent took the message in this turn, it goes next, or Codex stopped for it to go next. */
   steer: (turn: string, text: string, context: PromptContext) => invoke<"taken" | "next" | "stopped">("agent_steer", { turn, text, context }),
   jobs: () => invoke<AgentJob[]>("agent_jobs"),
+  chats: () => invoke<ChatSummary[]>("agent_chats"),
+  open: (chat: string) => invoke<{ id: string; agent: AgentId; model: string | null; items: ChatItem[] }>("agent_chat_open", { chat }),
+  save: (chat: string, title: string, items: ChatItem[]) => invoke<void>("agent_chat_save", { chat, title, items }),
 };
 
 /** Tool names as the agent reports them: `mcp__nuzky__get_state` (Claude) or `nuzky.get_state` (Codex). */
@@ -283,7 +302,48 @@ export function newChat() {
 function endChat() {
   const { turn } = useAgent.getState();
   if (turn) void agentApi.stop(turn).catch((e) => useEditor.getState().toast({ kind: "error", text: plainError(errorText(e)) }));
-  return { chat: null, items: [], jobs: [] };
+  return { chat: null, pastCount: null, items: [], jobs: [] };
+}
+
+/** Lists the chats the open project keeps. */
+export async function loadChats() {
+  try {
+    useAgent.setState({ chats: await agentApi.chats() });
+  } catch (e) {
+    useAgent.setState({ chats: [] });
+    useEditor.getState().toast({ kind: "error", text: `Your past chats didn't load. ${plainError(errorText(e))}` });
+  }
+}
+
+/** Opens a chat the project keeps, to read and continue it; it stops what the current one left running. */
+export async function openChat(id: string) {
+  const s = useAgent.getState();
+  if (s.status !== "idle" || s.chat === id) return;
+  try {
+    const opened = await agentApi.open(id);
+    if (useAgent.getState().status !== "idle") return;
+    // What was still running when Nuzky closed did not finish.
+    const items = (opened.items ?? []).map((it): ChatItem => (it.kind === "steps" ? { ...it, steps: it.steps.map((x) => (x.status === "running" ? { ...x, status: "interrupted" } : x)) } : it));
+    useAgent.setState({ ...endChat(), agent: opened.agent, chat: opened.id, items, pastCount: items.length });
+  } catch (e) {
+    useEditor.getState().toast({ kind: "error", text: `That chat didn't open. ${plainError(errorText(e))}` });
+    void loadChats();
+  }
+}
+
+/** Keeps the chat with its project: after each turn, and when something in it changes between turns. */
+async function saveChat(chat: string, items: ChatItem[]) {
+  const first = items.find((i) => i.kind === "user");
+  const title = first?.kind === "user" ? first.text.replace(/\s+/g, " ").trim().slice(0, 120) : "";
+  // A run's snapshot is the whole project, and only undoes it while this session lasts.
+  const kept = items.map((it) => (it.kind === "run" ? { ...it, snap: null } : it));
+  try {
+    await agentApi.save(chat, title, kept);
+  } catch (e) {
+    useEditor.getState().toast({ kind: "error", text: `This chat wasn't saved. ${plainError(errorText(e))}` });
+    return;
+  }
+  void loadChats();
 }
 
 let watching = false;
@@ -335,6 +395,8 @@ export function sendBlocked(thumbnail = useAgent.getState().thumbnail): string |
     if (!models || !model) return modelsError ? `Your ChatGPT models didn't load. ${modelsError}` : "Loading your ChatGPT models…";
   } else if (s.agents && !s.agents.find((a) => a.id === s.agent)?.path) return `${agentName(s.agent)} is not installed`;
   if (s.status !== "idle") return "Wait for the answer, or stop it";
+  const last = s.items[s.items.length - 1];
+  if (last?.kind === "error" && last.code === "SESSION_GONE") return `${agentName(s.agent)} can't continue this chat. Start a new one`;
   if (useEditor.getState().aiRun) return "Another agent is editing. Wait for it, or stop it in the top bar";
   const models = useCover.getState().models;
   if (thumbnail && models?.unavailable) return "Finding faces doesn't work on this computer, so the AI can't make a thumbnail here";
@@ -380,7 +442,7 @@ export async function send(text = useAgent.getState().draft.trim(), about: AiAbo
   const fromDraft = text === s.draft.trim();
   useAgent.setState({
     // Earlier problems are over once a new message goes; their Try again would send this one.
-    items: [...s.items.filter((i) => i.kind !== "error"), { kind: "user", text: text || "Make a thumbnail", context: text ? describeContext(context) : describeContext({ ...context, thumbnail: false }) }],
+    items: [...s.items.filter((i) => i.kind !== "error"), { kind: "user", text: text || "Make a thumbnail", context: text ? describeContext(context) : describeContext({ ...context, thumbnail: false }), at: Date.now() }],
     about,
     draft: fromDraft ? "" : s.draft,
     dropSelection: false,
@@ -409,7 +471,7 @@ export async function steer(text = useAgent.getState().draft.trim()) {
   const s = useAgent.getState();
   if (!text || s.status !== "working" || !s.turn || steerBlocked()) return;
   const context = promptContext(s.about);
-  const shown = { kind: "user" as const, text, context: describeContext(context) };
+  const shown = { kind: "user" as const, text, context: describeContext(context), at: Date.now() };
   useAgent.setState({
     items: [...s.items, shown],
     draft: text === s.draft.trim() ? "" : s.draft,
@@ -443,6 +505,8 @@ async function start(text: string, context: PromptContext) {
   useAgent.setState({ chat, turn, jobs: [], status: "working", startedAt: Date.now() });
   try {
     await agentApi.send(s.agent, chat, turn, text, context, s.agent === "chatgpt" ? useChatGpt.getState().model : null);
+    // Kept from its first message, so a crash during the answer does not lose the chat.
+    if (useAgent.getState().chat === chat) void saveChat(chat, useAgent.getState().items);
   } catch (e) {
     const text = errorText(e);
     fail(text.startsWith("NOT_INSTALLED") ? "NOT_INSTALLED" : "AGENT_FAILED", plainError(text));
@@ -581,9 +645,19 @@ export function panelRunEnded(label: string, snap: Snapshot | null): boolean {
   return true;
 }
 
-// Another project starts a new conversation; the backend stops an agent still working on the old one.
+// Another project, or the app starting, reopens that project's last chat; the backend stops an agent still working on the old one.
 useEditor.subscribe((s, prev) => {
-  if (prev.snap && s.snap?.sessionEpoch !== prev.snap.sessionEpoch) useAgent.setState({ chat: null, items: [], jobs: [], status: "idle", next: null });
+  if (!s.snap || s.snap.sessionEpoch === prev.snap?.sessionEpoch) return;
+  useAgent.setState({ chat: null, pastCount: null, chats: null, items: [], jobs: [], status: "idle", next: null });
+  void loadChats().then(() => {
+    const { chats, chat, items, status } = useAgent.getState();
+    if (chats?.length && chat === null && !items.length && status === "idle") void openChat(chats[0].id);
+  });
+});
+
+// Between turns, a change such as a chosen option or an undone run is kept too.
+useAgent.subscribe((s, prev) => {
+  if (s.chat && s.items.length && s.items !== prev.items && s.status === "idle" && s.chat === prev.chat) void saveChat(s.chat, s.items);
 });
 
 /**

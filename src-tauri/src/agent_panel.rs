@@ -2,16 +2,17 @@
 //! as its only tools, or ChatGPT on the user's plan with Nuzky's tools run in the app, and streams
 //! what it does to the UI as `agent` events.
 
-use crate::{AppState, CmdResult, chatgpt, connect, err};
+use crate::{AppState, CmdResult, chatgpt, connect, err, library, store};
 use nuzky_agent::{AgentEvent, AgentId, AgentInfo, ChatGptRequest, McpServer, Tools, Turn, TurnRequest};
 use nuzky_mcp::{Access, Backend, Client};
 use nuzky_session::host::Host;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
+use std::time::SystemTime;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 /// One conversation with an agent; a later message resumes its session.
@@ -23,6 +24,81 @@ struct Chat {
     /// ChatGPT's conversation, which Nuzky keeps, and the model it was last with.
     history: Arc<Mutex<Vec<Value>>>,
     model: Option<String>,
+    project: PathBuf,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedChat {
+    #[serde(default = "default_agent")]
+    agent: AgentId,
+    #[serde(default)]
+    session: String,
+    #[serde(default)]
+    resumable: bool,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    history: Vec<Value>,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    updated_ms: u64,
+    #[serde(default)]
+    items: Value,
+}
+
+fn default_agent() -> AgentId {
+    AgentId::Claude
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatSummary {
+    #[serde(skip_deserializing)]
+    id: String,
+    #[serde(default = "default_agent")]
+    agent: AgentId,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    updated_ms: u64,
+}
+
+#[derive(Serialize)]
+pub struct OpenedChat {
+    id: String,
+    agent: AgentId,
+    model: Option<String>,
+    items: Value,
+}
+
+fn validate_chat_id(chat: &str) -> CmdResult<()> {
+    if chat.is_empty() || chat.len() > 64 || !chat.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-') {
+        return Err("INVALID_CHAT: A chat id must contain 1 to 64 letters, digits or hyphens.".into());
+    }
+    Ok(())
+}
+
+fn chats_dir(project: &Path) -> PathBuf {
+    use nuzky_session::hash::{FNV_OFFSET, hash_bytes};
+    let mut hash = FNV_OFFSET;
+    hash_bytes(&mut hash, library::key(project).as_bytes());
+    store::data_dir().join("chats").join(format!("{hash:016x}"))
+}
+
+/// Frames stay in the live conversation, but never in its saved copy.
+fn strip_images(value: &mut Value) {
+    if value.get("type").and_then(Value::as_str) == Some("input_image") {
+        *value =
+            serde_json::json!({"type": "input_text", "text": "[A frame Nuzky showed you earlier; it is not kept.]"});
+    } else {
+        match value {
+            Value::Array(values) => values.iter_mut().for_each(strip_images),
+            Value::Object(values) => values.values_mut().for_each(strip_images),
+            _ => {}
+        }
+    }
 }
 
 enum Start {
@@ -47,6 +123,8 @@ impl Tools for InApp {
 #[derive(Default)]
 pub struct AgentPanel {
     chats: Mutex<HashMap<String, Chat>>,
+    /// Serialize snapshots and writes so an earlier save cannot replace a later one.
+    save: Mutex<()>,
     /// The message the agent is working on, by the id the UI gave it.
     active: Mutex<Option<(String, Turn)>>,
     /// A message the user stopped while it was still starting; written under the `active` lock.
@@ -191,6 +269,114 @@ pub async fn agent_list() -> CmdResult<Vec<AgentInfo>> {
         .map_err(err)
 }
 
+#[tauri::command]
+pub async fn agent_chats(app: AppHandle) -> CmdResult<Vec<ChatSummary>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = app.state::<AppState>().session.lock().unwrap().path.clone();
+        let entries = match std::fs::read_dir(chats_dir(&path)) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(err(error)),
+        };
+        let mut chats = Vec::new();
+        for entry in entries {
+            let path = entry.map_err(err)?.path();
+            let Some(id) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+            if path.extension().is_none_or(|s| s != "json") || validate_chat_id(id).is_err() {
+                continue;
+            }
+            let summary = std::fs::File::open(&path)
+                .map_err(err)
+                .and_then(|file| serde_json::from_reader::<_, ChatSummary>(std::io::BufReader::new(file)).map_err(err));
+            match summary {
+                Ok(mut summary) => {
+                    summary.id = id.to_owned();
+                    chats.push(summary);
+                }
+                Err(error) => log::warn!("Skipping saved chat {}: {error}", path.display()),
+            }
+        }
+        chats.sort_by_key(|chat| std::cmp::Reverse(chat.updated_ms));
+        Ok(chats)
+    })
+    .await
+    .map_err(err)?
+}
+
+#[tauri::command]
+pub async fn agent_chat_open(app: AppHandle, chat: String) -> CmdResult<OpenedChat> {
+    validate_chat_id(&chat)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let panel = app.state::<AgentPanel>();
+        if panel.active.lock().unwrap().as_ref().is_some_and(|(_, turn)| turn.running()) {
+            return Err("AGENT_BUSY: The agent is still answering. Wait for it, or stop it.".into());
+        }
+        let project = app.state::<AppState>().session.lock().unwrap().path.clone();
+        let file = std::fs::File::open(chats_dir(&project).join(format!("{chat}.json"))).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                "CHAT_GONE: This chat is no longer saved.".to_owned()
+            } else {
+                err(error)
+            }
+        })?;
+        let saved: SavedChat = serde_json::from_reader(std::io::BufReader::new(file)).map_err(err)?;
+        panel.chats.lock().unwrap().insert(
+            chat.clone(),
+            Chat {
+                agent: saved.agent,
+                session: saved.session,
+                resumable: saved.resumable,
+                history: Arc::new(Mutex::new(saved.history)),
+                model: saved.model.clone(),
+                project,
+            },
+        );
+        Ok(OpenedChat { id: chat, agent: saved.agent, model: saved.model, items: saved.items })
+    })
+    .await
+    .map_err(err)?
+}
+
+#[tauri::command]
+pub async fn agent_chat_save(app: AppHandle, chat: String, title: String, items: Value) -> CmdResult<()> {
+    validate_chat_id(&chat)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let panel = app.state::<AgentPanel>();
+        let _save = panel.save.lock().unwrap();
+        let (project, mut saved) = {
+            let chats = panel.chats.lock().unwrap();
+            let Some(chat) = chats.get(&chat) else { return Ok(()) };
+            (
+                chat.project.clone(),
+                SavedChat {
+                    agent: chat.agent,
+                    session: chat.session.clone(),
+                    resumable: chat.resumable,
+                    model: chat.model.clone(),
+                    history: chat.history.lock().unwrap().clone(),
+                    title,
+                    updated_ms: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map_err(err)?.as_millis()
+                        as u64,
+                    items,
+                },
+            )
+        };
+        saved.history.iter_mut().for_each(strip_images);
+        let dir = chats_dir(&project);
+        let mut builder = std::fs::DirBuilder::new();
+        builder.recursive(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            builder.mode(0o700);
+        }
+        builder.create(&dir).map_err(err)?;
+        nuzky_session::write_json_atomic(&dir.join(format!("{chat}.json")), &saved).map_err(err)
+    })
+    .await
+    .map_err(err)?
+}
+
 /// Sends a message in the chat the UI named, under the id it gave the message; the answer arrives
 /// as `agent` events for the chat. The UI names both before sending, so even an agent that fails
 /// at once reaches it, and Stop works while the message is still starting.
@@ -220,6 +406,7 @@ fn send(
     context: &PromptContext,
     model: Option<String>,
 ) -> CmdResult<()> {
+    validate_chat_id(&chat)?;
     let panel = app.state::<AgentPanel>();
     // Another project opening, or Stop, while this starts must stop it once it runs.
     let stops = panel.stops.load(Ordering::Acquire);
@@ -252,6 +439,7 @@ fn send(
             resumable: false,
             history: Arc::default(),
             model: None,
+            project: path.clone(),
         });
         if chat.model != model {
             // ChatGPT's reasoning goes back only to the model that wrote it.
@@ -405,6 +593,37 @@ pub fn agent_jobs(panel: State<'_, AgentPanel>) -> Vec<serde_json::Value> {
 mod tests {
     use super::*;
     use nuzky_engine::Project;
+
+    #[test]
+    fn saved_chat_ids_cannot_escape_their_directory() {
+        for id in ["a", "Chat-123", &"a".repeat(64)] {
+            assert!(validate_chat_id(id).is_ok(), "{id}");
+        }
+        for id in ["", "../chat", "a/b", "a\\b", "a.json", "é", &"a".repeat(65)] {
+            assert!(validate_chat_id(id).unwrap_err().starts_with("INVALID_CHAT:"), "{id}");
+        }
+    }
+
+    #[test]
+    fn saved_chat_history_keeps_text_without_frames() {
+        let history = serde_json::json!([{"output": [{"type": "input_text", "text": "Look"},
+            {"type": "input_image", "image_url": "data:image/png;base64,private"}]}]);
+        let mut saved = history.clone();
+        strip_images(&mut saved);
+        assert_eq!(saved[0]["output"][0], history[0]["output"][0]);
+        assert_eq!(
+            saved[0]["output"][1],
+            serde_json::json!({"type": "input_text",
+            "text": "[A frame Nuzky showed you earlier; it is not kept.]"})
+        );
+        assert_eq!(history[0]["output"][1]["type"], "input_image");
+        let defaults: SavedChat = serde_json::from_str("{}").unwrap();
+        assert!(defaults.history.is_empty() && !defaults.resumable && defaults.items.is_null());
+        let mut summary: ChatSummary =
+            serde_json::from_value(serde_json::json!({"history": history, "items": []})).unwrap();
+        summary.id = "chat-1".into();
+        assert_eq!(serde_json::to_value(summary).unwrap()["id"], "chat-1");
+    }
 
     #[test]
     fn the_prompt_carries_what_was_selected_when_sent() {

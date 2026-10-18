@@ -106,6 +106,17 @@ fn parent_session_var(name: &str) -> bool {
         || name.starts_with("CLAUDE_AGENT_SDK")
 }
 
+fn failure_code(resume: bool, message: &str) -> ErrorCode {
+    if resume
+        && (message.contains("No conversation found with session ID")
+            || message.contains("no rollout found for thread id"))
+    {
+        ErrorCode::SessionGone
+    } else {
+        ErrorCode::AgentFailed
+    }
+}
+
 impl Turn {
     /// Starts the turn; `emit` gets its events from a reader thread, ending with `Done` or `Error`.
     pub fn start(req: TurnRequest, mut emit: impl FnMut(AgentEvent) + Send + 'static) -> Result<Turn> {
@@ -219,6 +230,12 @@ impl Turn {
                     message: if tail.trim().is_empty() { format!("The agent exited with {code}.") } else { tail },
                 }
             };
+            let end = match end {
+                AgentEvent::Error { code: ErrorCode::AgentFailed, message } => {
+                    AgentEvent::Error { code: failure_code(req.resume, &message), message }
+                }
+                end => end,
+            };
             if let Some(id) = parser.session(&end) {
                 emit(AgentEvent::Session { id });
             }
@@ -293,4 +310,19 @@ fn signal(pid: u32, kill: bool) {
     }
     #[cfg(not(unix))]
     let _ = (pid, kill);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_gone_only_classifies_missing_resumed_conversations() {
+        for message in ["No conversation found with session ID: abc", "error: no rollout found for thread id abc"] {
+            assert_eq!(failure_code(true, message), ErrorCode::SessionGone);
+            assert_eq!(failure_code(false, message), ErrorCode::AgentFailed);
+        }
+        assert_eq!(failure_code(true, "connection failed"), ErrorCode::AgentFailed);
+        assert_eq!(serde_json::to_value(ErrorCode::SessionGone).unwrap(), "SESSION_GONE");
+    }
 }
