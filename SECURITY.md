@@ -4,7 +4,7 @@ Nuzky opens project files and media that can come from anyone, so a bug there ca
 
 ## Report a vulnerability
 
-Use [Report a vulnerability](https://github.com/tomasmach/nuzky/security/advisories/new) on the repository's Security tab. Do not open a public issue or pull request for it.
+Use [Report a vulnerability](https://github.com/nuzkyapp/nuzky/security/advisories/new) on the repository's Security tab. Do not open a public issue or pull request for it.
 
 Include what an attacker controls (a project file, a media file, a model download), what they can do with it, and the steps or a file that shows it.
 

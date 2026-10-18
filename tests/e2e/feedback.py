@@ -68,7 +68,7 @@ def feedback(r):
     r.s.run(CLIPBOARD)
     version = r.s.run('return window.__nuzky.updates.getState().version')
     this_system = f'{system()} · {platform.machine().replace("arm64", "aarch64")}'
-    form = 'https://github.com/tomasmach/nuzky/issues/new'
+    form = 'https://github.com/nuzkyapp/nuzky/issues/new'
 
     r.check('the foot of the home sidebar offers Send feedback, above the version',
             r.s.run("""const f = document.querySelector(arguments[0]), v = document.querySelector('nav + div p, [data-version]');

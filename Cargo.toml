@@ -7,7 +7,7 @@ version = "0.1.0-alpha"
 edition = "2024"
 license = "GPL-3.0-or-later"
 homepage = "https://nuzky.app"
-repository = "https://github.com/tomasmach/nuzky"
+repository = "https://github.com/nuzkyapp/nuzky"
 
 [workspace.dependencies]
 nuzky-session = { path = "crates/session" }

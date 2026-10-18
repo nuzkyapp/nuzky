@@ -13,9 +13,9 @@ use crate::{CmdResult, err};
 
 /// GitHub serves this from the newest release that is neither a draft nor a prerelease, so
 /// publishing a draft is what tells installed copies about it.
-const LATEST_JSON: &str = "https://github.com/tomasmach/nuzky/releases/latest/download/latest.json";
+const LATEST_JSON: &str = "https://github.com/nuzkyapp/nuzky/releases/latest/download/latest.json";
 /// Download opens this fixed page, never an address from the file.
-const RELEASE_PAGE: &str = "https://github.com/tomasmach/nuzky/releases/latest";
+const RELEASE_PAGE: &str = "https://github.com/nuzkyapp/nuzky/releases/latest";
 const X_PROFILE: &str = "https://x.com/mach_builds";
 /// Tests serve the file locally through `NUZKY_UPDATE_URL`; no other address replaces GitHub.
 const TEST_SERVER: &str = "http://127.0.0.1:";
@@ -94,7 +94,7 @@ fn feedback_url(kind: FeedbackKind, version: &str, system: &str) -> String {
         FeedbackKind::Idea => &[("template", "feature_request.yml"), ("version", version)],
         FeedbackKind::Message => return X_PROFILE.into(),
     };
-    let mut url = tauri::Url::parse("https://github.com/tomasmach/nuzky/issues/new").unwrap();
+    let mut url = tauri::Url::parse("https://github.com/nuzkyapp/nuzky/issues/new").unwrap();
     url.query_pairs_mut().extend_pairs(fields);
     url.into()
 }
@@ -156,7 +156,7 @@ mod tests {
         let fields = |kind| {
             let url = tauri::Url::parse(&feedback_url(kind, "0.2.0", "Linux (Fedora Linux 44) · x86_64")).unwrap();
             assert_eq!(url.origin().ascii_serialization(), "https://github.com");
-            assert_eq!(url.path(), "/tomasmach/nuzky/issues/new");
+            assert_eq!(url.path(), "/nuzkyapp/nuzky/issues/new");
             url.query_pairs().map(|(k, v)| (k.into_owned(), v.into_owned())).collect::<Vec<_>>()
         };
         let pair = |k: &str, v: &str| (k.to_owned(), v.to_owned());

@@ -37,7 +37,7 @@ Nuzky itself sends nothing you edit anywhere. It goes online only to download mo
 
 ## Install
 
-Download the installer for your system from [Releases](https://github.com/tomasmach/nuzky/releases). Nuzky has no Apple or Microsoft signing certificate yet, so your system warns you the first time you open it.
+Download the installer for your system from [Releases](https://github.com/nuzkyapp/nuzky/releases). Nuzky has no Apple or Microsoft signing certificate yet, so your system warns you the first time you open it.
 
 - **macOS 14 or newer on Apple Silicon**: open the `.dmg` and drag Nuzky to Applications. When macOS says it can't open Nuzky, close the message, open System Settings → Privacy & Security, click Open Anyway next to Nuzky and confirm.
 - **Windows 10 or 11, x64**: run the `-setup.exe`. When SmartScreen says "Windows protected your PC", click More info, then Run anyway. The installer downloads Microsoft WebView2 if it is missing.

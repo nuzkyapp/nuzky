@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Report a security problem
-    url: https://github.com/tomasmach/nuzky/security/advisories/new
+    url: https://github.com/nuzkyapp/nuzky/security/advisories/new
     about: Report it privately, as SECURITY.md describes.
   - name: Read the security policy
-    url: https://github.com/tomasmach/nuzky/blob/main/SECURITY.md
+    url: https://github.com/nuzkyapp/nuzky/blob/main/SECURITY.md
     about: Read how to report security problems privately.

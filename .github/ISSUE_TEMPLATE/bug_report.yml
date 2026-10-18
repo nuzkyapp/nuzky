@@ -7,7 +7,7 @@ body:
       value: |
         This report is public. Never attach a private video or a project you do not want public. A short clip recorded for this report that shows the problem is fine.
 
-        Report security problems privately as [SECURITY.md](https://github.com/tomasmach/nuzky/blob/main/SECURITY.md) describes, using [Report a security problem](https://github.com/tomasmach/nuzky/security/advisories/new), not here.
+        Report security problems privately as [SECURITY.md](https://github.com/nuzkyapp/nuzky/blob/main/SECURITY.md) describes, using [Report a security problem](https://github.com/nuzkyapp/nuzky/security/advisories/new), not here.
   - type: input
     id: version
     attributes:

@@ -7,7 +7,7 @@ export const url = "https://nuzky.app";
 export const description =
   "A free video editor for TikTok, Reels, Shorts and YouTube. AI writes the captions in your language and cuts the ums, pauses and retakes. No subscription, no watermark.";
 
-export const repo = "https://github.com/tomasmach/nuzky";
+export const repo = "https://github.com/nuzkyapp/nuzky";
 export const releaseNotes = `${repo}/releases`;
 export const buildFromSource = `${repo}/blob/main/docs/BUILDING.md`;
 export const license = `${repo}/blob/main/LICENSE`;

@@ -171,7 +171,7 @@ def diagnostics(r):
     url = urllib.parse.urlsplit(opened(r)[-1] if len(opened(r)) > before else '')
     query = dict(urllib.parse.parse_qsl(url.query))
     r.check('Report a bug… opens the bug form with this version and system',
-            f'{url.scheme}://{url.netloc}{url.path}' == 'https://github.com/tomasmach/nuzky/issues/new'
+            f'{url.scheme}://{url.netloc}{url.path}' == 'https://github.com/nuzkyapp/nuzky/issues/new'
             and query.get('template') == 'bug_report.yml' and query.get('version') == version and query.get('system'), (url, query))
     r.check('and copies the diagnostics to paste into it', wait(lambda: (r.s.run(COPIED) or [''])[-1].startswith(f'Nuzky {version}'), 3))
 

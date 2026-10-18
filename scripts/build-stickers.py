@@ -215,7 +215,7 @@ def sources(own_revision, added):
                'Unicode-3.0', 'LICENSE-Unicode-3.0.txt', 'English names and keywords joined by sequence without presentation selectors.'),
         source('unicode', 'Unicode Emoji 18.0', UNICODE, '18.0.0', 'Unicode-3.0', 'LICENSE-Unicode-3.0.txt',
                f'Fully qualified sequences; {added} missing families added to People; names used when CLDR has no annotation.'),
-        source('nuzky', 'Nuzky stickers', 'https://github.com/tomasmach/nuzky', own_revision,
+        source('nuzky', 'Nuzky stickers', 'https://github.com/nuzkyapp/nuzky', own_revision,
                'CC0-1.0', 'CC0-1.0.txt', packed),
     ]
 
