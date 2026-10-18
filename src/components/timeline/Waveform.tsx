@@ -18,7 +18,10 @@ function peakAt(blocks: Record<number, WaveBlock> | undefined, i: number): numbe
   return j < block.peaks.length ? block.peaks[j] : block.complete ? 0 : undefined;
 }
 
-/** The peak a bar over peaks `a..b` stands for, or undefined while one of them is not loaded. */
+/**
+ * The peak a bar over peaks `a..b` stands for, or undefined while one of them is not loaded. Blending keeps the first
+ * peak alone while the next one is missing, so a bar at the end of the sound still draws.
+ */
 function barPeak(blocks: Record<number, WaveBlock> | undefined, a: number, b: number): number | undefined {
   if (b - a < 1) {
     // Zoomed in past a peak per bar: blend the two peaks around the bar's middle, so bars do not repeat one height in steps.
@@ -67,6 +70,7 @@ export function Waveform({
   const epoch = useEditor((s) => s.snap?.sessionEpoch);
   const fits = !visible;
   const [fitted, setFitted] = useState(0);
+  const [dpr, setDpr] = useState(window.devicePixelRatio || 1);
   const across = fits ? fitted || width : width;
   const first = (sourceInUs / US) * PEAKS_PER_SECOND;
   const span = ((durationUs * speed) / US) * PEAKS_PER_SECOND;
@@ -83,10 +87,16 @@ export function Waveform({
     observer.observe(el);
     return () => observer.disconnect();
   }, [fits, shown]);
+  // Moving the window to a screen of another pixel density draws the bars again, sharp there.
+  useEffect(() => {
+    const density = matchMedia(`(resolution: ${dpr}dppx)`);
+    const changed = () => setDpr(window.devicePixelRatio || 1);
+    density.addEventListener("change", changed);
+    return () => density.removeEventListener("change", changed);
+  }, [dpr]);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const dpr = window.devicePixelRatio || 1;
     el.width = Math.round((to - from) * dpr);
     el.height = Math.round((el.clientHeight || 24) * dpr);
     const h = el.height;
@@ -102,7 +112,7 @@ export function Waveform({
       const left = Math.round((x - from) * dpr);
       ctx.fillRect(left, h - bar, Math.round((x + BAR - from) * dpr) - left, bar);
     }
-  }, [blocks, from, to, first, span, across, color]);
+  }, [blocks, from, to, first, span, across, color, dpr]);
   if (!shown) return null;
   return <canvas ref={ref} className={`pointer-events-none ${fits ? "w-full" : ""} ${className}`} style={visible && { left: from, width: to - from }} />;
 }

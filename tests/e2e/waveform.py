@@ -42,7 +42,7 @@ for (const canvas of clip.querySelectorAll('canvas')) {
     bars.push({local, bar: rising(Math.floor((local + 1 - offset) / scale)), gap: drawn(Math.floor((local + 2.5 - offset) / scale)), height: canvas.height});
   }
 }
-return {bars, width: box.width, lane: to - from, dpr: window.devicePixelRatio || 1};"""
+return {bars, lane: to - from, dpr: window.devicePixelRatio || 1};"""
 
 CLIP = """const st = window.__nuzky.store.getState();
 for (const t of st.snap.project.tracks) for (const c of t.clips)
