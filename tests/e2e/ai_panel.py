@@ -568,6 +568,9 @@ def ai_panel_chats(r):
                 && ![...p.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Undo')
                 && window.__nuzky.agent.getState().agent === 'claude';"""), panel(r)['text'])
     r.shot('reopened')
+    check('the reopened chat becomes the one last used, first in the list',
+          wait(lambda: r.s.run("const a = window.__nuzky.agent.getState(); return a.chats?.[0]?.id === a.chat"), 5),
+          r.s.run("return window.__nuzky.agent.getState().chats"))
     send(r, 'Hello again')
     check('Hello again resumes the cut chat session and its answer shows',
           wait(lambda: len(runs(r)) == 3 and 'Rozumím: hello again' in r.s.run(MESSAGES)

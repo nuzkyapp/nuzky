@@ -69,7 +69,6 @@ pub struct ChatSummary {
 pub struct OpenedChat {
     id: String,
     agent: AgentId,
-    model: Option<String>,
     items: Value,
 }
 
@@ -321,18 +320,17 @@ pub async fn agent_chat_open(app: AppHandle, chat: String) -> CmdResult<OpenedCh
             }
         })?;
         let saved: SavedChat = serde_json::from_reader(std::io::BufReader::new(file)).map_err(err)?;
-        panel.chats.lock().unwrap().insert(
-            chat.clone(),
-            Chat {
-                agent: saved.agent,
-                session: saved.session,
-                resumable: saved.resumable,
-                history: Arc::new(Mutex::new(saved.history)),
-                model: saved.model.clone(),
-                project,
-            },
-        );
-        Ok(OpenedChat { id: chat, agent: saved.agent, model: saved.model, items: saved.items })
+        // A chat this run of Nuzky already talked in is newer in memory: its file may predate a turn another
+        // project's opening cut short.
+        panel.chats.lock().unwrap().entry(chat.clone()).or_insert_with(|| Chat {
+            agent: saved.agent,
+            session: saved.session,
+            resumable: saved.resumable,
+            history: Arc::new(Mutex::new(saved.history)),
+            model: saved.model,
+            project,
+        });
+        Ok(OpenedChat { id: chat, agent: saved.agent, items: saved.items })
     })
     .await
     .map_err(err)?

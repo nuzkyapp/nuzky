@@ -186,7 +186,7 @@ const agentApi = {
   steer: (turn: string, text: string, context: PromptContext) => invoke<"taken" | "next" | "stopped">("agent_steer", { turn, text, context }),
   jobs: () => invoke<AgentJob[]>("agent_jobs"),
   chats: () => invoke<ChatSummary[]>("agent_chats"),
-  open: (chat: string) => invoke<{ id: string; agent: AgentId; model: string | null; items: ChatItem[] }>("agent_chat_open", { chat }),
+  open: (chat: string) => invoke<{ id: string; agent: AgentId; items: ChatItem[] }>("agent_chat_open", { chat }),
   save: (chat: string, title: string, items: ChatItem[]) => invoke<void>("agent_chat_save", { chat, title, items }),
 };
 
@@ -333,6 +333,8 @@ export async function openChat(id: string) {
     const items = (opened.items ?? []).map((it): ChatItem => (it.kind === "steps" ? { ...it, steps: it.steps.map((x) => (x.status === "running" ? { ...x, status: "interrupted" } : x)) } : it));
     drafts.set(useAgent.getState().chat, useAgent.getState().draft);
     useAgent.setState({ ...endChat(), agent: opened.agent, chat: opened.id, items, pastCount: items.length, draft: drafts.get(opened.id) ?? "" });
+    // Saved again as the chat last used, so the project reopens it next time.
+    void saveChat(opened.id, items);
   } catch (e) {
     useEditor.getState().toast({ kind: "error", text: `That chat didn't open. ${plainError(errorText(e))}` });
     void loadChats();
@@ -341,11 +343,19 @@ export async function openChat(id: string) {
 
 /** Keeps the chat with its project: after each turn, and when something in it changes between turns. */
 async function saveChat(chat: string, items: ChatItem[]) {
-  const first = items.find((i) => i.kind === "user");
-  const title = first?.kind === "user" ? first.text.replace(/\s+/g, " ").trim().slice(0, 120) : "";
   // A run's snapshot is the whole project, and only undoes it while this session lasts. A problem is about that moment:
-  // reopened, its Try again or "Your message is still here" would no longer be true.
-  const kept = items.filter((it) => it.kind !== "error").map((it) => (it.kind === "run" ? { ...it, snap: null } : it));
+  // reopened, its Try again or "Your message is still here" would no longer be true. What was said on the Your style
+  // page, which shares the conversation, is about every project.
+  let style = false;
+  const kept = items
+    .filter((it) => {
+      if (it.kind === "user") style = it.context === "Your style";
+      return !style && it.kind !== "error";
+    })
+    .map((it) => (it.kind === "run" ? { ...it, snap: null } : it));
+  const first = kept.find((i) => i.kind === "user");
+  if (first?.kind !== "user") return;
+  const title = first.text.replace(/\s+/g, " ").trim().slice(0, 120);
   try {
     await agentApi.save(chat, title, kept);
   } catch (e) {
@@ -657,6 +667,9 @@ export function panelRunEnded(label: string, snap: Snapshot | null): boolean {
 // Another project, or the app starting, reopens that project's last chat; the backend stops an agent still working on the old one.
 useEditor.subscribe((s, prev) => {
   if (!s.snap || s.snap.sessionEpoch === prev.snap?.sessionEpoch) return;
+  // What the agent did before another project opened is kept, even when it was cut short mid-answer.
+  const old = useAgent.getState();
+  if (old.chat) void saveChat(old.chat, old.items);
   useAgent.setState({ chat: null, pastCount: null, chats: null, items: [], jobs: [], status: "idle", next: null });
   void loadChats().then(() => {
     const { chats, chat, items, status } = useAgent.getState();
@@ -664,10 +677,9 @@ useEditor.subscribe((s, prev) => {
   });
 });
 
-// Between turns, a change such as a chosen option or an undone run is kept too. Your style is about every project, so its
-// conversation is kept by none.
+// Between turns, a change such as a chosen option or an undone run is kept too.
 useAgent.subscribe((s, prev) => {
-  if (s.chat && s.items.length && s.items !== prev.items && s.status === "idle" && s.chat === prev.chat && s.about === "project") void saveChat(s.chat, s.items);
+  if (s.chat && s.items !== prev.items && s.status === "idle" && s.chat === prev.chat) void saveChat(s.chat, s.items);
 });
 
 /**
