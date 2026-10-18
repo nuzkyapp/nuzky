@@ -4,6 +4,7 @@ import json, subprocess, time
 from pathlib import Path
 
 from e2e.harness import flow, wait
+from e2e.layout import resize
 
 LONG = 'ytVideo0001'
 SHORT = 'ytShort0001'
@@ -110,6 +111,8 @@ def youtube_video(r):
             all(t in text(r) for t in (f'Test video {LONG}', 'Test Channel · 1:30', 'Import whole video')), text(r))
     r.check('a long video gets the overview and the zoom', r.s.run('return !!document.querySelector("button[aria-label=\\"Zoom in\\"]")'))
     r.check('the strip shows frames of the video', wait(lambda: strip(r), 10))
+    r.check('Play has focus, so Space, I, O and Enter work at once',
+            r.s.run('return document.activeElement?.getAttribute("aria-label") === "Play (Space)"'))
     r.shot('downloaded')
 
     type_time(r, 'Start of the part', '0:30')
@@ -125,6 +128,13 @@ def youtube_video(r):
     r.check('Space plays the part and stops at its end', stopped and abs(frame_time(r) - 34_000_000) < 100_000, frame_time(r))
     time.sleep(0.3)
     r.shot('part')
+    resize(r, 1024, 640)
+    time.sleep(0.5)
+    r.check('at the smallest window Import is in view without scrolling',
+            r.s.run("""const b = [...document.querySelectorAll(arguments[0] + ' button')].find((b) => b.textContent.startsWith('Import'));
+return b.getBoundingClientRect().bottom <= window.innerHeight && document.querySelector(arguments[0]).scrollHeight <= document.querySelector(arguments[0]).clientHeight""", DIALOG))
+    r.shot('part-small')
+    resize(r, 1440, 900)
 
     key(r, 'Enter')
     r.check('Enter imports: the dialog closes at once', wait(lambda: not is_open(r), 3))

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { AlertCircle, Link2, Pause, Play, WifiOff, X, ZoomIn, ZoomOut } from "lucide-react";
 import { api, errorText, plainError } from "../lib/api";
-import { useEditor } from "../lib/store";
+import { AI_EDITING, useAiLocked, useEditor } from "../lib/store";
 import { formatLength, US } from "../lib/time";
 import type { Filmstrip, Part, VideoPreview, YoutubeVideo } from "../lib/types";
 import { addYoutubeVideo, useYoutube } from "../lib/youtube";
@@ -146,6 +146,11 @@ function Dialog() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // A step that removes the focused button, such as Stop or I understand, leaves focus in the dialog.
+  useEffect(() => {
+    if (!dialog.current?.contains(document.activeElement)) (field.current ?? dialog.current)?.focus();
+  }, [step.kind]);
+
   const video = "video" in step ? step.video : null;
   return (
     <div data-scrim className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/45" onPointerDown={(e) => e.target === e.currentTarget && close()}>
@@ -154,6 +159,7 @@ function Dialog() {
         role="dialog"
         aria-modal="true"
         aria-labelledby="youtube-title"
+        tabIndex={-1}
         onKeyDown={(e) => {
           // Fields that use Escape themselves, such as a time being typed, stop it first.
           if (e.key === "Escape") {
@@ -162,7 +168,7 @@ function Dialog() {
           }
           trapTab(e);
         }}
-        className="overlay flex max-h-[calc(100vh-48px)] w-[720px] max-w-[calc(100vw-48px)] flex-col overflow-y-auto rounded-[20px] p-6 dialog-in"
+        className="overlay overlay-solid flex max-h-[calc(100vh-48px)] outline-none w-[720px] max-w-[calc(100vw-48px)] flex-col overflow-y-auto rounded-[20px] p-6 dialog-in"
       >
         <div className="mb-4 flex items-center justify-between gap-3">
           <h2 id="youtube-title" className="text-[17px] font-semibold leading-[22px] tracking-[-0.025em]">
@@ -277,7 +283,7 @@ function Dialog() {
           ))}
 
         {(step.kind === "download" || step.kind === "stopped") && (
-          <div className="mt-3 flex h-[clamp(160px,calc(100vh-440px),288px)] flex-col items-center justify-center gap-3 bg-black shadow-[0_0_0_1px_rgb(255_255_255/.07)]">
+          <div className="mt-3 flex h-[clamp(160px,calc(100vh-480px),288px)] flex-col items-center justify-center gap-3 bg-black shadow-[0_0_0_1px_rgb(255_255_255/.07)]">
             {step.kind === "stopped" ? (
               <>
                 <p className="text-[13px] text-muted">The download stopped.</p>
@@ -299,6 +305,9 @@ function Dialog() {
               <>
                 <p className="text-[13px]">Preparing the preview…</p>
                 <ProgressBar value={0} label="Preparing the preview" className="w-60" />
+                <Button pill className="mt-1" onClick={stop}>
+                  Stop
+                </Button>
               </>
             )}
           </div>
@@ -374,6 +383,10 @@ function Chooser({ url, video, preview, onImport, onCancel }: { url: string; vid
   // Playback that starts inside a chosen part stops at its end, so the user hears exactly the cut.
   const stopAt = useRef<number | null>(null);
   const whole = part.startUs === 0 && part.endUs === duration;
+  const locked = useAiLocked();
+  const playButton = useRef<HTMLButtonElement>(null);
+  // Space, I, O and Enter work from the start, rather than typing into the link field.
+  useEffect(() => playButton.current?.focus(), []);
 
   const seek = (t: number) => {
     t = Math.max(0, Math.min(duration, Math.round(t)));
@@ -446,6 +459,7 @@ function Chooser({ url, video, preview, onImport, onCancel }: { url: string; vid
     });
 
   const add = () => {
+    if (locked) return;
     onImport();
     addYoutubeVideo(video, whole ? null : part, url);
   };
@@ -471,9 +485,11 @@ function Chooser({ url, video, preview, onImport, onCancel }: { url: string; vid
           seek(time + (key === "ArrowLeft" ? -1 : 1) * (e.shiftKey ? US : frame));
           return true;
         case "Home":
+          if ((e.target as HTMLElement).getAttribute?.("role") === "slider") return false;
           seek(0);
           return true;
         case "End":
+          if ((e.target as HTMLElement).getAttribute?.("role") === "slider") return false;
           seek(duration);
           return true;
         case "Enter":
@@ -496,13 +512,14 @@ function Chooser({ url, video, preview, onImport, onCancel }: { url: string; vid
 
   return (
     <div onKeyDown={onKeyDown} className="flex min-h-0 flex-col">
-      <div ref={stage} className="relative mt-3 flex h-[clamp(160px,calc(100vh-440px),288px)] items-center justify-center bg-black shadow-[0_0_0_1px_rgb(255_255_255/.07)]">
+      <div ref={stage} className="relative mt-3 flex h-[clamp(160px,calc(100vh-480px),288px)] items-center justify-center bg-black shadow-[0_0_0_1px_rgb(255_255_255/.07)]">
         {/* Square corners and no blurred shadow, as the editor's preview: WebKitGTK would otherwise mask or blank the canvas. */}
         <canvas ref={canvas} style={{ width: fit.w, height: fit.h }} aria-label={`Preview of ${video.title}`} />
       </div>
 
       <div className="mt-3 flex h-8 items-center gap-2.5">
         <button
+          ref={playButton}
           type="button"
           aria-label={playing ? "Pause (Space)" : "Play (Space)"}
           title={playing ? "Pause (Space)" : "Play (Space)"}
@@ -564,7 +581,7 @@ function Chooser({ url, video, preview, onImport, onCancel }: { url: string; vid
         <Button pill onClick={onCancel}>
           Cancel
         </Button>
-        <Button pill variant="primary" onClick={add}>
+        <Button pill variant="primary" disabled={locked} disabledReason={AI_EDITING} onClick={add}>
           {whole ? "Import whole video" : `Import ${lengthText(length)}`}
         </Button>
       </div>
@@ -595,7 +612,7 @@ function Overview({ duration, view, part, time, onView }: { duration: number; vi
       <div className="absolute inset-x-0 top-[5px] h-1 rounded-full bg-white/[.13]" />
       {part && <div className="absolute top-1 h-1.5 min-w-[3px] rounded-[2px] bg-accent" style={{ left: at(part.startUs), width: at(part.endUs - part.startUs) }} />}
       <div className="absolute top-0 h-3.5 min-w-2.5 rounded-[4px] bg-white/[.08] shadow-[inset_0_0_0_1px_rgb(255_255_255/.38)]" style={{ left: at(view.startUs), width: at(view.lengthUs) }} />
-      <div className="absolute top-px h-3 w-[1.5px] -translate-x-[.75px] rounded-[1px] bg-fg" style={{ left: at(time) }} />
+      <div className="absolute top-px -ml-px h-3 w-0.5 rounded-[1px] bg-fg" style={{ left: at(time) }} />
     </div>
   );
 }
@@ -671,7 +688,8 @@ function Strip({
     let last = e.clientX;
     const apply = () => {
       raf = 0;
-      const t = Math.max(0, Math.min(duration, timeAt(last)));
+      // Inside the stretch in view: past its edge the view would move under the pointer and run away.
+      const t = Math.max(view.startUs, Math.min(view.startUs + view.lengthUs, timeAt(last)));
       to(t);
     };
     apply();
@@ -774,8 +792,9 @@ function Strip({
         />
       )}
       {time >= view.startUs && time <= view.startUs + view.lengthUs && (
-        <div className="pointer-events-none absolute top-1 z-20 h-[66px] w-[1.5px] -translate-x-[.75px] bg-fg" style={{ left: x(time) }}>
-          <div className="absolute -top-0.5 -left-[4.25px] h-3 w-2.5 rounded-[3px_3px_5px_5px] bg-fg" />
+        // Whole pixels and no transform: WebKitGTK left slivers of the knob behind where it moved from.
+        <div className="pointer-events-none absolute top-1 z-20 h-[66px] w-0.5 bg-fg" style={{ left: Math.round(x(time)) - 1 }}>
+          <div className="absolute -top-0.5 -left-1 h-3 w-2.5 rounded-[3px_3px_5px_5px] bg-fg" />
         </div>
       )}
     </div>

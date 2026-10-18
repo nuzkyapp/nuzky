@@ -122,7 +122,9 @@ select {
     backdrop-filter: blur(28px) saturate(1.1);
   }
   /* While the video plays (App.tsx sets the attribute), the blur would be redone on every frame under it. */
-  [data-playing] .overlay {
+  [data-playing] .overlay,
+  /* An overlay that plays a video of its own, as Video from YouTube does, for the same reason. */
+  .overlay.overlay-solid {
     background: rgb(42 42 47 / 0.97);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
