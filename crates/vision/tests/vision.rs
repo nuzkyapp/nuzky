@@ -200,6 +200,7 @@ fn missing_models_fail_with_a_code_before_any_work() {
         rotation: 0,
         mirror: false,
         credit: None,
+        part: None,
     };
     let chunks = std::collections::BTreeSet::from([0]);
     let error =

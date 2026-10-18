@@ -18,6 +18,7 @@ fn asset(id: &str, duration: i64) -> Asset {
         rotation: 0,
         mirror: false,
         credit: None,
+        part: None,
     }
 }
 fn editor() -> Editor {

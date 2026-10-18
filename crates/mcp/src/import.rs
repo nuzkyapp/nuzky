@@ -206,6 +206,7 @@ fn assets(timeline: &timeline::ImportedTimeline, project: &Project, left: &mut L
                     rotation: 0,
                     mirror: false,
                     credit: None,
+                    part: None,
                 }
             });
             out.by_path.insert(key, asset.id.clone());

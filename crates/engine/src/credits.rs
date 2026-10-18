@@ -146,6 +146,7 @@ mod tests {
                 },
                 url: format!("https://example.org/{id}"),
             }),
+            part: None,
         }
     }
 

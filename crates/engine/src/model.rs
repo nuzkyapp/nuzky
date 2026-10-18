@@ -313,6 +313,20 @@ pub struct Asset {
     /// user's own files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credit: Option<Credit>,
+    /// The part of the file the user chose, as from a YouTube video. A new clip takes only this part;
+    /// the footage around it stays hidden until a clip's edge is dragged out over it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part: Option<Part>,
+}
+
+/// A span of a media file, in microseconds from its start.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Part {
+    pub start_us: i64,
+    pub end_us: i64,
 }
 
 /// The licences the sound library offers: both allow monetized videos.

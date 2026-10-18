@@ -363,6 +363,7 @@ pub fn probe(path: &Path, id: String) -> Result<Asset> {
         rotation: 0,
         mirror: false,
         credit: None,
+        part: None,
     };
 
     if let Some(grid) = tile_grid(&input) {
@@ -1083,6 +1084,7 @@ mod tests {
             rotation: 90,
             mirror: true,
             credit: None,
+            part: None,
         };
         let (out, w, h) = orient(&pixels, 3, 2, &asset);
         assert_eq!(

@@ -179,6 +179,7 @@ mod tests {
             rotation: 0,
             mirror: false,
             credit: None,
+            part: None,
         };
         let fingerprint = store.fingerprint(&asset).unwrap();
         let record = Record {
@@ -233,6 +234,7 @@ mod tests {
             rotation: 0,
             mirror: false,
             credit: None,
+            part: None,
         };
         let fingerprint = store.fingerprint(&asset).unwrap();
         let record = Record {

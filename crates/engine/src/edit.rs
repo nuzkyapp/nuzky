@@ -426,10 +426,10 @@ fn stays_in_place(track: &Track) -> bool {
     track.keep_in_place && track.kind == TrackKind::Audio
 }
 
-fn media(asset_id: String, transform: Transform, shape: Option<Shape>) -> ClipContent {
+fn media(asset: &Asset, transform: Transform, shape: Option<Shape>) -> ClipContent {
     ClipContent::Media {
-        asset_id,
-        source_in_us: 0,
+        asset_id: asset.id.clone(),
+        source_in_us: source_span(asset).0,
         volume: 1.0,
         transform,
         speed: 1.0,
@@ -473,10 +473,20 @@ fn picture_in_picture(canvas: &Canvas, asset: &Asset) -> Transform {
     }
 }
 
+/// Where a new clip of the asset starts reading and how much it reads: the part the user chose, or
+/// the whole file.
+fn source_span(asset: &Asset) -> (i64, i64) {
+    match asset.part {
+        Some(part) if asset.kind != AssetKind::Image => (part.start_us, part.end_us - part.start_us),
+        _ => (0, asset.duration_us),
+    }
+}
+
 fn overlay_duration(asset: &Asset, duration_us: Option<i64>, min: i64) -> i64 {
+    let (source_in, length) = source_span(asset);
     match (asset.kind, duration_us) {
         (AssetKind::Image, d) => d.unwrap_or(IMAGE_DURATION_US).max(min),
-        (_, d) => d.unwrap_or(asset.duration_us).clamp(min, asset.duration_us.max(min)),
+        (_, d) => d.unwrap_or(length).clamp(min, (asset.duration_us - source_in).max(min)),
     }
 }
 
@@ -797,7 +807,7 @@ impl Project {
 
     fn add_overlay(
         &mut self,
-        asset_id: String,
+        asset: &Asset,
         start_us: i64,
         duration: i64,
         transform: Transform,
@@ -805,7 +815,7 @@ impl Project {
         out: &mut EditOutcome,
     ) {
         let start = start_us.max(0);
-        let clip = Clip::new(new_id(), start, duration, media(asset_id, transform, shape));
+        let clip = Clip::new(new_id(), start, duration, media(asset, transform, shape));
         let track = self.free_track(TrackKind::Video, start, start + duration, false);
         out.select.push(clip.id.clone());
         self.tracks[track].clips.push(clip);
@@ -840,8 +850,8 @@ impl Project {
                 let kind = track_kind_for(&asset);
                 let keep = asset.kind == AssetKind::Audio;
                 let duration =
-                    if asset.kind == AssetKind::Image { IMAGE_DURATION_US } else { asset.duration_us.max(min) };
-                let clip = Clip::new(new_id(), 0, duration, media(asset_id, Transform::default(), None));
+                    if asset.kind == AssetKind::Image { IMAGE_DURATION_US } else { source_span(&asset).1.max(min) };
+                let clip = Clip::new(new_id(), 0, duration, media(&asset, Transform::default(), None));
                 out.select.push(clip.id.clone());
                 let requested = track_id.and_then(|id| self.track_index(&id)).filter(|&i| self.tracks[i].kind == kind);
                 let target = match (kind, requested) {
@@ -869,7 +879,7 @@ impl Project {
                 let duration = overlay_duration(&asset, duration_us, min);
                 let shape = Shape { radius: PIP_RADIUS, shadow: PIP_SHADOW, ..Shape::default() };
                 self.add_overlay(
-                    asset_id,
+                    &asset,
                     start_us,
                     duration,
                     picture_in_picture(&self.canvas, &asset),
@@ -878,12 +888,12 @@ impl Project {
                 );
             }
             EditCmd::AddSticker { asset_id, start_us, duration_us, transform } => {
-                let asset = self.asset(&asset_id).ok_or_else(|| anyhow!("Unknown media"))?;
+                let asset = self.asset(&asset_id).ok_or_else(|| anyhow!("Unknown media"))?.clone();
                 ensure!(
                     asset.kind != AssetKind::Audio && asset.width > 0 && asset.height > 0,
                     "Only a video or an image can be a sticker"
                 );
-                let duration = overlay_duration(asset, duration_us, min);
+                let duration = overlay_duration(&asset, duration_us, min);
                 let transform = transform.unwrap_or_else(|| {
                     let (cw, ch) = (self.canvas.width as f32, self.canvas.height as f32);
                     let fit = (cw / asset.width as f32).min(ch / asset.height as f32);
@@ -892,7 +902,7 @@ impl Project {
                         ..Transform::default()
                     }
                 });
-                self.add_overlay(asset_id, start_us, duration, transform, None, out);
+                self.add_overlay(&asset, start_us, duration, transform, None, out);
             }
             EditCmd::AddText { start_us, text, style } => {
                 let start = start_us.max(0);
@@ -2097,6 +2107,7 @@ mod tests {
             rotation: 0,
             mirror: false,
             credit: None,
+            part: None,
         }
     }
 

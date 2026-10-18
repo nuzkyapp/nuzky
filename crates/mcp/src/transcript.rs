@@ -1099,6 +1099,7 @@ pub(crate) mod tests {
                     rotation: 0,
                     mirror: false,
                     credit: None,
+                    part: None,
                 }],
             })
             .unwrap();
@@ -1162,6 +1163,7 @@ pub(crate) mod tests {
                     rotation: 0,
                     mirror: false,
                     credit: None,
+                    part: None,
                 }],
             })
             .unwrap();

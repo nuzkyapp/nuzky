@@ -152,6 +152,7 @@ mod tests {
             rotation: 0,
             mirror: false,
             credit: None,
+            part: None,
         };
         let mut words = Vec::new();
         let mut samples = vec![0f32; 30 * 48_000 * CHANNELS];

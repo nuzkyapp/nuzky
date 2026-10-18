@@ -319,6 +319,7 @@ pub(crate) mod tests {
                 rotation: 0,
                 mirror: false,
                 credit: None,
+                part: None,
             }
         };
         let mut project = Project::new("transcript");

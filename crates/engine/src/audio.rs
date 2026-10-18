@@ -1018,6 +1018,7 @@ mod tests {
             rotation: 0,
             mirror: false,
             credit: None,
+            part: None,
         };
         let (first, second) = (asset(&one), asset(&two));
         assert_ne!(pcm_path(&cache, &first), pcm_path(&cache, &second));
@@ -1051,6 +1052,7 @@ mod tests {
             rotation: 0,
             mirror: false,
             credit: None,
+            part: None,
         };
         let legacy = cache.join("pcm/same-id.v2.f32");
         std::fs::write(&legacy, b"old cache").unwrap();
@@ -1107,6 +1109,7 @@ mod tests {
                 rotation: 0,
                 mirror: false,
                 credit: None,
+                part: None,
             };
             std::fs::write(pcm_path(&cache, &asset), bytemuck::cast_slice(&vec![value; 96000 * CHANNELS])).unwrap();
             project.assets.push(asset);
@@ -1177,6 +1180,7 @@ mod tests {
                 rotation: 0,
                 mirror: false,
                 credit: None,
+                part: None,
             };
             let samples = vec![value; 144000 * CHANNELS];
             std::fs::write(pcm_path(&cache, &asset), bytemuck::cast_slice(&samples)).unwrap();
@@ -1247,6 +1251,7 @@ mod tests {
             rotation: 0,
             mirror: false,
             credit: None,
+            part: None,
         };
         // A rising level, so a cut jumps between different values.
         let samples: Vec<f32> = (0..192_000).flat_map(|i| [i as f32 / 192_000.0; CHANNELS]).collect();
@@ -1292,6 +1297,7 @@ mod tests {
             rotation: 0,
             mirror: false,
             credit: None,
+            part: None,
         };
         let samples: Vec<f32> = (0..96_000).flat_map(|n| [level(n as f64 / 48_000.0); CHANNELS]).collect();
         std::fs::write(pcm_path(cache, &asset), bytemuck::cast_slice(&samples)).unwrap();

@@ -1109,6 +1109,7 @@ fn correct_words_fixes_the_transcript_and_captions_over_stdio() {
         rotation: 0,
         mirror: false,
         credit: None,
+        part: None,
     };
     let said = ["Mikrofon", "vejte", "co", "nejblíž."];
     let words = said

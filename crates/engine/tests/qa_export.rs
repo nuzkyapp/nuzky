@@ -244,6 +244,7 @@ fn export_ignores_missing_unused_muted_and_zero_volume_audio() {
             rotation: 0,
             mirror: false,
             credit: None,
+            part: None,
         });
     }
     let mut muted = p.tracks[0].clone();

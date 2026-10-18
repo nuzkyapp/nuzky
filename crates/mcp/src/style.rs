@@ -1705,6 +1705,7 @@ mod tests {
             rotation: 0,
             mirror: false,
             credit: None,
+            part: None,
         };
         let words = (0..6)
             .flat_map(|s: i64| {

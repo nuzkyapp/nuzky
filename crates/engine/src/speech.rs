@@ -112,6 +112,7 @@ mod tests {
             rotation: 0,
             mirror: false,
             credit: None,
+            part: None,
         }
     }
 

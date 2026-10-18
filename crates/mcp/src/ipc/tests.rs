@@ -227,6 +227,7 @@ fn cancelled_transcription_never_loads_models() {
         rotation: 0,
         mirror: false,
         credit: None,
+        part: None,
     };
     let error = nuzky_analysis::transcribe_words_cancellable(
         nuzky_analysis::AudioSource::Asset { asset: &asset, cache: missing },

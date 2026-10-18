@@ -114,6 +114,7 @@ mod tests {
             rotation: 0,
             mirror: false,
             credit: None,
+            part: None,
         };
         let (w, h, count) = filmstrip_size(&asset).unwrap();
         assert_eq!(count, 4);

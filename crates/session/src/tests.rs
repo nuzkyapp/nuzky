@@ -298,6 +298,7 @@ fn asset() -> Asset {
         rotation: 0,
         mirror: false,
         credit: None,
+        part: None,
     }
 }
 fn media_clip() -> Clip {

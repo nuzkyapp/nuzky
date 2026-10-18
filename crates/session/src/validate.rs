@@ -39,6 +39,13 @@ pub fn validate(project: &Project) -> Result<()> {
             asset.id
         );
         local_media_path(&asset.path)?;
+        if let Some(part) = asset.part {
+            ensure!(
+                0 <= part.start_us && part.start_us < part.end_us && part.end_us <= asset.duration_us,
+                "INVALID_PROJECT: the part of asset {} lies outside its file",
+                asset.id
+            );
+        }
         if let Some(credit) = &asset.credit {
             sound_credit(credit).with_context(|| format!("INVALID_PROJECT: credit of asset {}", asset.id))?;
         }
@@ -556,6 +563,7 @@ mod tests {
             rotation: 0,
             mirror: false,
             credit: None,
+            part: None,
         });
         validate(&project).unwrap();
         for path in [
@@ -606,6 +614,7 @@ mod tests {
                 license_url: "https://creativecommons.org/licenses/by/3.0/".into(),
                 url: "https://www.jamendo.com/track/317391".into(),
             }),
+            part: None,
         });
         validate(&project).unwrap();
         for bad in ["javascript:alert(1)", "file:///etc/passwd", "http://example.org", "https://a b"] {
@@ -712,6 +721,7 @@ mod tests {
             rotation: 0,
             mirror: false,
             credit: None,
+            part: None,
         });
         let mut editor = nuzky_engine::edit::Editor::new(project.clone());
         let correct = |text: &str| vec![EditCmd::CorrectWords { corrections: vec![fix("word", text)] }];
@@ -738,6 +748,7 @@ mod tests {
             rotation: 0,
             mirror: false,
             credit: None,
+            part: None,
         });
         project.apply(EditCmd::AddClip { asset_id: "ramp".into(), start_us: None, track_id: None }).unwrap();
         validate(&project).unwrap();
@@ -873,6 +884,7 @@ mod tests {
                 rotation: 0,
                 mirror: false,
                 credit: None,
+                part: None,
             });
             project.apply(EditCmd::AddClip { asset_id: id.into(), start_us: None, track_id: None }).unwrap();
         }
