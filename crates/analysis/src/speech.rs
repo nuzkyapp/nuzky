@@ -414,6 +414,7 @@ impl WordBuilder {
         let mut closing = None;
         self.words.retain(|word| {
             let text = word.text.trim_matches('.');
+            let mut rest = text;
             if closing.is_none() {
                 closing = match text.chars().next() {
                     Some('[') => Some(']'),
@@ -421,9 +422,13 @@ impl WordBuilder {
                     Some('*') => Some('*'),
                     _ => None,
                 };
+                // The opener itself does not close: a lone "*" starts "* music playing *".
+                if closing.is_some() {
+                    rest = &text[1..];
+                }
             }
             if let Some(end) = closing {
-                if text.ends_with(end) {
+                if rest.trim_end_matches(|c: char| c.is_ascii_punctuation() && c != end).ends_with(end) {
                     closing = None;
                 }
                 return false;
@@ -497,6 +502,14 @@ mod tests {
         assert_eq!(words[0].text, "Příklad.");
         assert!((words[0].probability - 0.9).abs() < 1e-6);
         assert_eq!(words[1].text, "Ahoj");
+    }
+
+    #[test]
+    fn an_annotation_ends_before_punctuation_and_a_lone_star_opens_one() {
+        let mut builder = WordBuilder::default();
+        builder.push(b" (sm\xc3\xadch), Ahoj. * music playing * Hello", 0, 500_000, 0.9);
+        let words = builder.finish();
+        assert_eq!(words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>(), ["Ahoj.", "Hello"]);
     }
 
     #[test]
