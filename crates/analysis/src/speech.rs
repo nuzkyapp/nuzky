@@ -439,7 +439,7 @@ fn is_annotation(text: &str) -> bool {
     // One annotation only: "[Hudba] Ahoj. [Hudba]" is speech between two of them.
     [('[', ']'), ('(', ')'), ('*', '*')]
         .iter()
-        .any(|&(a, b)| text.strip_prefix(a).is_some_and(|rest| rest.find(b) == Some(rest.len() - b.len_utf8())))
+        .any(|&(a, b)| text.strip_prefix(a).and_then(|rest| rest.find(b).map(|i| i + 1 == rest.len())) == Some(true))
         || text.chars().all(|c| c == '♪' || c == '♫' || c.is_whitespace())
 }
 
@@ -505,6 +505,8 @@ mod tests {
         assert!(is_annotation("(smích)."));
         assert!(!is_annotation(" [Hudba] Ahoj, vítejte u dalšího videa. [Hudba]"));
         assert!(!is_annotation("*smích* No to je super. *smích*"));
+        assert!(!is_annotation(" ["));
+        assert!(!is_annotation("*"));
     }
 
     #[test]
