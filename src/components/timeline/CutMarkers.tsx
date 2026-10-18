@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import { DEFAULT_TRANSITION_US, TRANSITIONS } from "../../lib/presets";
 import { mainCuts, useEditor } from "../../lib/store";
@@ -6,17 +6,13 @@ import { US, formatDuration } from "../../lib/time";
 import type { Project } from "../../lib/types";
 import { TRANSITION_ICONS } from "../panel/TransitionsTab";
 
-/** How close to a cut, in px, the pointer brings up its "+". */
-const NEAR = 12;
+const NEAR_PX = 12;
 
-/**
- * A square on the top edge of every main-track cut that has a transition, which opens it. An empty cut shows "+",
- * which adds a Dissolve, only while the pointer is near it or it has keyboard focus, so it never covers the trim edges.
- */
+/** A square on every main-track cut with a transition; an empty cut shows "+" (adds a Dissolve) only near the pointer or focus. */
 export const CutMarkers = memo(function CutMarkers({ project, zoom, locked }: { project: Project; zoom: number; locked: boolean }) {
   const selected = useEditor((s) => s.cut);
   const { edit, selectCut } = useEditor.getState();
-  const cuts = useMemo(() => mainCuts(project), [project]);
+  const cuts = mainCuts(project);
   const anchor = useRef<HTMLSpanElement>(null);
   const [near, setNear] = useState<string | null>(null);
 
@@ -28,7 +24,7 @@ export const CutMarkers = memo(function CutMarkers({ project, zoom, locked }: { 
       if (e.buttons) return;
       const x = e.clientX - lane.getBoundingClientRect().left;
       let found: string | null = null;
-      let best = NEAR;
+      let best = NEAR_PX;
       for (const cut of cuts) {
         const d = Math.abs((cut.atUs / US) * zoom - x);
         if (d <= best) [best, found] = [d, cut.clipId];
