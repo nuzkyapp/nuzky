@@ -451,7 +451,12 @@ function RunCard({ item, index, past }: { item: Extract<ChatItem, { kind: "run" 
   );
 }
 
-function ErrorNotice({ code, message, retryText }: { code: AgentErrorCode; message: string; retryText?: string }) {
+/** `last`: the conversation ends with it, so its way on takes focus when it has only one. */
+function ErrorNotice({ code, message, retryText, last = false }: { code: AgentErrorCode; message: string; retryText?: string; last?: boolean }) {
+  const actions = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (last && code === "SESSION_GONE") actions.current?.querySelector("button")?.focus();
+  }, [last, code]);
   const agents = useAgent((s) => s.agents);
   const agent = useAgent((s) => s.agent);
   const chatgptReady = useChatGpt((s) => planReady(s.status));
@@ -524,7 +529,11 @@ function ErrorNotice({ code, message, retryText }: { code: AgentErrorCode; messa
         <span className="flex flex-col items-start break-words">
           <span>{body}</span>
         </span>
-        {buttons && <div className="mt-2 flex flex-wrap gap-1.5">{buttons}</div>}
+        {buttons && (
+          <div ref={actions} className="mt-2 flex flex-wrap gap-1.5">
+            {buttons}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -671,7 +680,7 @@ function UserMessage({ text, context }: { text: string; context: string | null }
   );
 }
 
-function Item({ item, index, collapsed, past }: { item: ChatItem; index: number; collapsed: boolean; past: boolean }) {
+function Item({ item, index, collapsed, past, last }: { item: ChatItem; index: number; collapsed: boolean; past: boolean; last: boolean }) {
   switch (item.kind) {
     case "user":
       return <UserMessage text={item.text} context={item.context} />;
@@ -696,7 +705,7 @@ function Item({ item, index, collapsed, past }: { item: ChatItem; index: number;
         </div>
       );
     case "error":
-      return <ErrorNotice code={item.code} message={item.message} retryText={item.retry} />;
+      return <ErrorNotice code={item.code} message={item.message} retryText={item.retry} last={last} />;
   }
 }
 
@@ -755,7 +764,7 @@ function VisionModelsQuestion() {
 
 /** "Today 10:42", "Yesterday 21:47", "Monday 09:15", "Sep 28 18:02". */
 function dayAndTime(ms: number) {
-  const time = new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const time = new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   const today = new Date(ms).toDateString() === new Date().toDateString();
   return `${today ? "Today" : whenLabel(ms)} ${time}`;
 }
@@ -816,7 +825,7 @@ function Conversation() {
         <Fragment key={i}>
           {lines.has(i) && <DateLine ms={lines.get(i)!} />}
           {/* Steps fold away once the agent has answered after them. */}
-          <Item item={item} index={i} past={pastCount !== null && i < pastCount} collapsed={item.kind === "steps" && (i < lastUser || (!working && items.slice(i + 1).some((x) => x.kind === "agent")))} />
+          <Item item={item} index={i} last={i === items.length - 1} past={pastCount !== null && i < pastCount} collapsed={item.kind === "steps" && (i < lastUser || (!working && items.slice(i + 1).some((x) => x.kind === "agent")))} />
         </Fragment>
       ))}
       {project && <VisionModelsQuestion />}
@@ -876,6 +885,7 @@ function Composer() {
   const agents = useAgent((s) => s.agents);
   const agent = useAgent((s) => s.agent);
   const hasItems = useAgent((s) => s.items.length > 0);
+  const reopened = useAgent((s) => s.pastCount !== null) && about === "project";
   const selected = useEditor((s) => s.selection.length);
   // From the selection and the project only, so playing does not recompute it every frame.
   const selection = useEditor((s) => s.selection);
@@ -1034,7 +1044,7 @@ function Composer() {
           rows={2}
           value={draft}
           aria-label={`Message to ${name}`}
-          placeholder={working ? `Tell ${name} more while it works…` : blocked?.includes("can't continue this chat") ? `${name} can't continue this chat` : agent === "chatgpt" && !plan ? "Sign in to ChatGPT to start" : thumbnail ? "Add a note, e.g. the hook (optional)" : about === "style" ? "What should change in how you edit?" : hasItems ? "Ask for changes…" : `Ask ${name} to edit…`}
+          placeholder={working ? `Tell ${name} more while it works…` : blocked === "Start a new chat to send this" ? `${name} can't continue this chat` : reopened ? `Continue with ${name}` : agent === "chatgpt" && !plan ? "Sign in to ChatGPT to start" : thumbnail ? "Add a note, e.g. the hook (optional)" : about === "style" ? "What should change in how you edit?" : hasItems ? "Ask for changes…" : `Ask ${name} to edit…`}
           onChange={(e) => useAgent.setState({ draft: e.target.value })}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -1174,13 +1184,17 @@ export function AiPanel({
   const busy = useAgent((s) => s.status !== "idle");
   const empty = useAgent((s) => s.items.length === 0);
   const left = useAgent((s) => s.jobs.some((j) => j.status === "running"));
-  const kept = useAgent((s) => s.chats?.length ?? 0);
+  const kept = useAgent((s) => (s.chats === null ? null : s.chats.length));
   const projectName = useEditor((s) => s.snap?.project.name);
   const [listing, setListing] = useState(false);
   // An answer starting elsewhere, such as Make it with AI, brings the conversation back.
   useEffect(() => {
     if (busy) setListing(false);
   }, [busy]);
+  // Your style is about every project, so a project's reopened chat does not continue there.
+  useEffect(() => {
+    if (about === "style" && useAgent.getState().pastCount !== null) newChat();
+  }, [about]);
   const { mode } = useDockLayout();
   useEffect(() => {
     if (useAgent.getState().agents === null) void loadAgents();
@@ -1214,8 +1228,8 @@ export function AiPanel({
         <span className={`flex-1 self-stretch ${about === "project" ? "cursor-grab" : ""}`} onPointerDown={about === "project" ? move : undefined} />
         {about === "project" && !listing && (
           <IconButton
-            label={busy ? "Past chats: wait for the answer, or stop it" : kept === 0 ? "Past chats: none in this project yet" : "Past chats in this project"}
-            disabled={busy || kept === 0}
+            label={busy ? "Past chats: wait for the answer, or stop it" : kept === null ? "Past chats: loading…" : kept === 0 ? "Past chats: none in this project yet" : "Past chats in this project"}
+            disabled={busy || !kept}
             onClick={() => setListing(true)}
             className="h-7 w-7"
           >
@@ -1254,7 +1268,7 @@ function ChatList({ onBack }: { onBack: () => void }) {
   const chats = useAgent((s) => s.chats);
   const current = useAgent((s) => s.chat);
   const agents = useAgent((s) => s.agents);
-  const left = useAgent((s) => s.jobs.find((j) => j.status === "running"));
+  const left = useAgent((s) => s.jobs.some((j) => j.status === "running"));
   const list = useRef<HTMLUListElement>(null);
   const loaded = chats !== null;
   useEffect(() => void loadChats(), []);
@@ -1264,18 +1278,19 @@ function ChatList({ onBack }: { onBack: () => void }) {
     (rows.find((el) => el.dataset.current) ?? rows[0])?.focus();
   }, [loaded]);
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
-    e.stopPropagation();
-    if (e.key === "Escape") return onBack();
     const rows = [...(list.current?.querySelectorAll<HTMLElement>("button") ?? [])];
     const i = rows.indexOf(document.activeElement as HTMLElement);
     const next = { ArrowDown: i + 1, ArrowUp: i - 1, Home: 0, End: rows.length - 1 }[e.key];
-    if (next === undefined) return;
+    if (e.key !== "Escape" && next === undefined) return;
+    // Only the list's own keys stay here; Ctrl+J and the editor's shortcuts still work.
+    e.stopPropagation();
     e.preventDefault();
-    rows[Math.max(0, Math.min(rows.length - 1, next))]?.focus();
+    if (e.key === "Escape") onBack();
+    else rows[Math.max(0, Math.min(rows.length - 1, next!))]?.focus();
   };
   return (
     <div onKeyDown={onKey} className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 py-2 text-[13px]">
-      {left && <p className="mb-1 px-2 text-[12px] leading-[17px] text-muted">Opening another chat stops {jobText(left)}.</p>}
+      {left && <p className="mb-1 px-2 text-[12px] leading-[17px] text-muted">Opening another chat stops what the agent is still doing.</p>}
       {chats === null ? (
         <p className="px-2 py-1.5 text-[12px] text-muted">Loading your chats…</p>
       ) : (
@@ -1288,14 +1303,13 @@ function ChatList({ onBack }: { onBack: () => void }) {
                   type="button"
                   data-current={open || undefined}
                   aria-current={open || undefined}
-                  onClick={() => {
-                    if (!open) void openChat(c.id);
-                    onBack();
-                  }}
+                  onClick={() => (open ? onBack() : void openChat(c.id).then(onBack))}
                   className="flex w-full flex-col gap-0.5 rounded-lg px-2.5 py-2 text-left hover:bg-white/[.06]"
                 >
                   <span className="flex w-full items-baseline gap-2">
-                    <span className="min-w-0 truncate font-medium text-fg">{c.title || "Untitled chat"}</span>
+                    <span className="min-w-0 truncate font-medium text-fg" title={c.title || undefined}>
+                      {c.title || "Untitled chat"}
+                    </span>
                     {open && <span className="shrink-0 text-[12px] text-accent">Open now</span>}
                   </span>
                   <span className="tabular text-[12px] text-muted">

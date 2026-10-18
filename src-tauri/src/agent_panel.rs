@@ -80,7 +80,8 @@ fn validate_chat_id(chat: &str) -> CmdResult<()> {
     Ok(())
 }
 
-fn chats_dir(project: &Path) -> PathBuf {
+/// The project's chats, in Nuzky's own data rather than beside the project, which may be shared.
+pub(crate) fn chats_dir(project: &Path) -> PathBuf {
     use nuzky_session::hash::{FNV_OFFSET, hash_bytes};
     let mut hash = FNV_OFFSET;
     hash_bytes(&mut hash, library::key(project).as_bytes());

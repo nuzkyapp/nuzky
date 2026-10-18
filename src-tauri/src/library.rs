@@ -335,7 +335,10 @@ impl Library {
         // Read again under the lock: it may have changed since it was listed.
         // Its versions may hold what it had before it was emptied.
         let Some(project) = store::load(path).ok().filter(pristine) else { return false };
-        if sidecar(path, ".checkpoint.json").exists() || nuzky_session::other_versions(path, &project) {
+        if sidecar(path, ".checkpoint.json").exists()
+            || nuzky_session::other_versions(path, &project)
+            || crate::agent_panel::chats_dir(path).exists()
+        {
             return false;
         }
         if let Err(error) = std::fs::remove_file(path) {
@@ -481,6 +484,8 @@ impl Library {
     fn move_to_trash(&self, path: &Path) -> Result<()> {
         // Nobody may be editing it: another window or an agent could have opened it meanwhile.
         let lock = nuzky_session::lock_project(path, true)?;
+        // Named by the project's canonical path, which is gone once the project is in the Trash.
+        let chats = crate::agent_panel::chats_dir(path);
         to_trash(path).context("Moving the project to the Trash")?;
         let checkpoint = sidecar(path, ".checkpoint.json");
         if checkpoint.exists() {
@@ -489,6 +494,10 @@ impl Library {
         let versions = sidecar(path, nuzky_session::HISTORY_SUFFIX);
         if versions.exists() {
             to_trash(&versions).context("Moving the project's versions to the Trash")?;
+        }
+        // A project saved at this path later must not reopen these chats.
+        if chats.exists() {
+            to_trash(&chats).context("Moving the project's AI chats to the Trash")?;
         }
         drop(lock);
         let _ = std::fs::remove_file(sidecar(path, ".lock"));

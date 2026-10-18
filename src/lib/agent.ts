@@ -307,24 +307,32 @@ function endChat() {
 
 /** Lists the chats the open project keeps. */
 export async function loadChats() {
+  const epoch = useEditor.getState().snap?.sessionEpoch;
   try {
-    useAgent.setState({ chats: await agentApi.chats() });
+    const chats = await agentApi.chats();
+    // Another project may have opened meanwhile.
+    if (useEditor.getState().snap?.sessionEpoch === epoch) useAgent.setState({ chats });
   } catch (e) {
     useAgent.setState({ chats: [] });
     useEditor.getState().toast({ kind: "error", text: `Your past chats didn't load. ${plainError(errorText(e))}` });
   }
 }
 
+/** What was typed in each chat of this session, so a draft stays with its own chat. */
+const drafts = new Map<string | null, string>();
+
 /** Opens a chat the project keeps, to read and continue it; it stops what the current one left running. */
 export async function openChat(id: string) {
   const s = useAgent.getState();
   if (s.status !== "idle" || s.chat === id) return;
+  const epoch = useEditor.getState().snap?.sessionEpoch;
   try {
     const opened = await agentApi.open(id);
-    if (useAgent.getState().status !== "idle") return;
+    if (useAgent.getState().status !== "idle" || useEditor.getState().snap?.sessionEpoch !== epoch) return;
     // What was still running when Nuzky closed did not finish.
     const items = (opened.items ?? []).map((it): ChatItem => (it.kind === "steps" ? { ...it, steps: it.steps.map((x) => (x.status === "running" ? { ...x, status: "interrupted" } : x)) } : it));
-    useAgent.setState({ ...endChat(), agent: opened.agent, chat: opened.id, items, pastCount: items.length });
+    drafts.set(useAgent.getState().chat, useAgent.getState().draft);
+    useAgent.setState({ ...endChat(), agent: opened.agent, chat: opened.id, items, pastCount: items.length, draft: drafts.get(opened.id) ?? "" });
   } catch (e) {
     useEditor.getState().toast({ kind: "error", text: `That chat didn't open. ${plainError(errorText(e))}` });
     void loadChats();
@@ -335,8 +343,9 @@ export async function openChat(id: string) {
 async function saveChat(chat: string, items: ChatItem[]) {
   const first = items.find((i) => i.kind === "user");
   const title = first?.kind === "user" ? first.text.replace(/\s+/g, " ").trim().slice(0, 120) : "";
-  // A run's snapshot is the whole project, and only undoes it while this session lasts.
-  const kept = items.map((it) => (it.kind === "run" ? { ...it, snap: null } : it));
+  // A run's snapshot is the whole project, and only undoes it while this session lasts. A problem is about that moment:
+  // reopened, its Try again or "Your message is still here" would no longer be true.
+  const kept = items.filter((it) => it.kind !== "error").map((it) => (it.kind === "run" ? { ...it, snap: null } : it));
   try {
     await agentApi.save(chat, title, kept);
   } catch (e) {
@@ -396,7 +405,7 @@ export function sendBlocked(thumbnail = useAgent.getState().thumbnail): string |
   } else if (s.agents && !s.agents.find((a) => a.id === s.agent)?.path) return `${agentName(s.agent)} is not installed`;
   if (s.status !== "idle") return "Wait for the answer, or stop it";
   const last = s.items[s.items.length - 1];
-  if (last?.kind === "error" && last.code === "SESSION_GONE") return `${agentName(s.agent)} can't continue this chat. Start a new one`;
+  if (last?.kind === "error" && last.code === "SESSION_GONE") return "Start a new chat to send this";
   if (useEditor.getState().aiRun) return "Another agent is editing. Wait for it, or stop it in the top bar";
   const models = useCover.getState().models;
   if (thumbnail && models?.unavailable) return "Finding faces doesn't work on this computer, so the AI can't make a thumbnail here";
@@ -655,9 +664,10 @@ useEditor.subscribe((s, prev) => {
   });
 });
 
-// Between turns, a change such as a chosen option or an undone run is kept too.
+// Between turns, a change such as a chosen option or an undone run is kept too. Your style is about every project, so its
+// conversation is kept by none.
 useAgent.subscribe((s, prev) => {
-  if (s.chat && s.items.length && s.items !== prev.items && s.status === "idle" && s.chat === prev.chat) void saveChat(s.chat, s.items);
+  if (s.chat && s.items.length && s.items !== prev.items && s.status === "idle" && s.chat === prev.chat && s.about === "project") void saveChat(s.chat, s.items);
 });
 
 /**

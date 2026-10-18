@@ -596,11 +596,14 @@ def ai_panel_chats(r):
     check('a missing session shows the recovery card and returns Still there? to the field',
           wait(lambda: agent(r)['status'] == 'idle' and 'Claude Code no longer has this chat' in panel(r)['text']
                and agent(r)['draft'] == r.s.run(field) == 'Still there?', 15), panel(r)['text'])
+    check('focus moves to New chat with this message, so Enter takes the way on',
+          wait(lambda: r.s.run('return document.activeElement?.textContent.trim()') == 'New chat with this message', 3),
+          r.s.run('return document.activeElement?.outerHTML'))
     count = len(runs(r))
     r.s.run("document.querySelector('aside[aria-label=AI] textarea').focus()")
     r.key('Enter')
-    check('Enter explains that this chat cannot continue and starts no fake run',
-          wait(lambda: "can't continue this chat. Start a new one" in panel(r)['text'], 5)
+    check('Enter in the field explains that this chat cannot continue and starts no fake run',
+          wait(lambda: 'Start a new chat to send this' in panel(r)['text'], 5)
           and len(runs(r)) == count and agent(r)['status'] == 'idle' and r.s.run(field) == 'Still there?', panel(r)['text'])
     r.shot('session-gone')
     click(r, 'New chat with this message')
