@@ -96,11 +96,13 @@ def run(r):
     r.check('no toast repeats it over Get set up', not r.errors(), r.errors())
     r.shot('music-failed')
 
-    r.releases.correct, r.releases.silent = True, True
+    r.releases.correct, r.releases.half = True, True
     press('Return')
     d = wait(lambda: (x := dialog(r)) and x['focus'] == 'Stop' and x, 10)
     r.check('Try again downloads: the step shows Downloading yt-dlp and Stop, which takes the focus',
             d and 'Downloading yt-dlp' in (step(r).get('status') or ''), {'step': step(r), 'dialog': dialog(r)})
+    shown = wait(lambda: (t := step(r).get('status') or '') and '50%' in t and t, 5)
+    r.check('the step shows how far the download is, though the sound library never opened', shown, step(r))
     r.check('the Music tab sees the same download', r.s.run('return window.__nuzky.sounds.getState().installing'))
     second = r.s.call('window.__nuzky.api.installYtdlp()')
     r.check('a second download meanwhile is refused', not second['ok'] and 'already downloading' in second['error'], second)
@@ -135,26 +137,26 @@ def run(r):
 
     # Get set up's download fails while it is closed: Music says it under the link, and no toast says it again.
     view(r, 'home')
-    r.releases.correct, r.releases.silent = False, False
+    r.releases.half, r.releases.broken = False, True
     r.releases.requests.clear()
     r.check('Get set up opens on Music from YouTube, still with Resume download', (d := open_setup(r)) and d['buttons'] == ['Resume download', 'Skip'], dialog(r))
     r.s.run(f"""[...document.querySelectorAll('{BOX} footer button')].find((b) => b.textContent === 'Resume download').click();
 document.querySelector('{BOX} button[aria-label=Close]').click();""")
     ended = wait(lambda: (s := r.s.run(SOUNDS)) and not s['installing'] and s['installError'], 10) or ''
     time.sleep(0.5)
-    r.check('the download fails its check with Get set up closed', ended.startswith('YTDLP_CORRUPT') and not dialog(r), ended)
+    r.check('the download fails with Get set up closed, as GitHub answers with an error', ended.startswith('SOURCE_FAILED') and not dialog(r), ended)
     r.check('Music shows it under the link, so no toast says it again', not r.errors(), r.errors())
     view(r, 'editor')
-    shown = wait(lambda: (t := alert(r)) and 'did not download correctly' in t and t, 5)
+    shown = wait(lambda: (t := alert(r)) and 'GitHub answered with an error' in t and t, 5)
     r.check('Music shows it under the link', shown, alert(r))
 
     # Get set up's download succeeds: the step is done at once, and the song + asked for in Music waits for Music.
     view(r, 'home')
-    r.releases.correct = True
+    r.releases.broken = False
     r.releases.requests.clear()
     calls = len(invocations(r))
     d = open_setup(r)
-    r.check('Get set up shows that failure with Try again', d and 'did not download correctly' in (step(r).get('alert') or '')
+    r.check('Get set up shows that failure with Try again', d and 'GitHub answered with an error' in (step(r).get('alert') or '')
             and d['buttons'] == ['Try again', 'Skip'], {'step': step(r), 'dialog': d})
     r.s.run(WATCH, BOX)
     r.s.run(FOCUS_TEXT, 'Try again', f'{BOX} footer')

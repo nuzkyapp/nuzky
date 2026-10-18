@@ -36,6 +36,9 @@ def missing(r):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             r.releases.requests.append(self.path)
+            if self.path == '/latest' and r.releases.broken:
+                self.send_error(500)
+                return
             if self.path == '/latest':
                 sha = hashlib.sha256(r.tool).hexdigest() if r.releases.correct else '0' * 64
                 body = json.dumps({'tag_name': '2099.01.01', 'assets': [
@@ -43,6 +46,14 @@ def missing(r):
                      'browser_download_url': f'http://127.0.0.1:{r.releases.server_port}/{r.release}'}]}).encode()
             elif self.path == '/' + r.release:
                 if r.releases.silent:
+                    time.sleep(20)
+                    return
+                if r.releases.half:
+                    self.send_response(200)
+                    self.send_header('Content-Length', str(len(r.tool)))
+                    self.end_headers()
+                    self.wfile.write(r.tool[:len(r.tool) // 2])
+                    self.wfile.flush()
                     time.sleep(20)
                     return
                 body = r.tool
@@ -59,6 +70,7 @@ def missing(r):
 
     r.releases = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     r.releases.requests, r.releases.correct, r.releases.silent = [], False, False
+    r.releases.broken, r.releases.half = False, False
     r.release_worker = threading.Thread(target=r.releases.serve_forever, daemon=True)
     r.release_worker.start()
     r.env['NUZKY_YTDLP_RELEASES'] = f'http://127.0.0.1:{r.releases.server_port}/latest'

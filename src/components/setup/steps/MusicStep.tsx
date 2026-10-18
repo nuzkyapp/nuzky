@@ -17,7 +17,6 @@ async function download() {
   if (error && !error.startsWith("CANCELLED") && !(open && current === "music") && link.error !== error) useEditor.getState().toast({ kind: "error", text: plainError(error) });
 }
 
-/** Music from YouTube: Download yt-dlp, so a YouTube link in Music works the first time. */
 export function MusicStep() {
   return (
     <AiLock>

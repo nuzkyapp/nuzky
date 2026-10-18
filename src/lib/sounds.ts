@@ -154,6 +154,11 @@ export async function answerRights(agree: boolean) {
  */
 export async function installYtdlp(finishAsked: boolean) {
   if (useSounds.getState().installing) return;
+  // Get set up can start this before the sound library ever opened.
+  listenOnce();
+  const { link: asked, installError } = useSounds.getState();
+  // A link whose download of yt-dlp failed, as when GitHub could not be reached, still waits for yt-dlp.
+  const waits = (link: Link) => waitsForYtdlp(link) || (link.url === asked.url && !!installError && asked.error === installError);
   useSounds.setState({ installing: true, installError: null });
   try {
     await api.installYtdlp();
@@ -161,13 +166,13 @@ export async function installYtdlp(finishAsked: boolean) {
     const next = finishAsked ? afterYtdlp : null;
     afterYtdlp = null;
     const { link } = useSounds.getState();
-    if (waitsForYtdlp(link)) await openLink(link.url);
+    if (waits(link)) await openLink(link.url);
     if (!next || useSounds.getState().link.sound?.id !== next.sound.id) return;
     if (!next.add) await togglePreview(next.sound);
     else if (next.add.epoch === currentEpoch()) await addSound(next.sound, next.add.timeUs);
   } catch (e) {
     const text = errorText(e);
-    useSounds.setState((s) => ({ installing: false, installError: text, link: !text.startsWith("CANCELLED") && waitsForYtdlp(s.link) ? { ...s.link, error: text } : s.link }));
+    useSounds.setState((s) => ({ installing: false, installError: text, link: !text.startsWith("CANCELLED") && waits(s.link) ? { ...s.link, error: text } : s.link }));
   } finally {
     useSounds.setState((s) => ({ progress: { ...s.progress, "yt-dlp": 0 } }));
   }
