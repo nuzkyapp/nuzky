@@ -14,6 +14,8 @@ const all = [...scope.querySelectorAll('button, [role^=menuitem]')];
 const b = all.find((b) => b.textContent.trim() === arguments[0] || b.getAttribute('aria-label') === arguments[0])
   ?? all.find((b) => b.textContent.trim().startsWith(arguments[0]));
 if (!b) return null; b.click(); return b.getAttribute('aria-disabled') ?? 'false';"""
+CHIPS = "return [...document.querySelectorAll('aside[aria-label=AI] button[aria-label^=\"Don\\'t send\"]')].map((b) => b.getAttribute('aria-label'))"
+PRESSED = "return document.querySelector('aside[aria-label=AI]').querySelector(`button[aria-label=\"${arguments[0]}\"]`)?.getAttribute('aria-pressed')"
 DRAG = """const g = document.querySelector('aside[aria-label=AI] button[aria-label="Move panel"]').getBoundingClientRect();
 const at = (type, x, y) => new PointerEvent(type, {bubbles: true, button: 0, clientX: x, clientY: y, pointerId: 1});
 document.querySelector('aside[aria-label=AI] button[aria-label="Move panel"]').dispatchEvent(at('pointerdown', g.left + 6, g.top + 6));
@@ -479,6 +481,13 @@ def ai_panel(r):
     clip = r.track()[0]
     r.s.run('window.__nuzky.store.getState().select([arguments[0]])', clip['id'])
     r.check('the selection shows as a chip that goes with the message', wait(lambda: '1 clip' in panel(r)['text'], 5), panel(r)['text'])
+    click(r, "Don't send the playhead")
+    click(r, 'Show the agent the frame at the playhead')
+    r.check('the camera button shows the agent the frame: the playhead comes back as a Frame chip with ×',
+            wait(lambda: 'Frame 00:00' in panel(r)['text'] and 'Playhead' not in panel(r)['text'], 5)
+            and r.s.run(CHIPS) == ["Don't send the selected clips", "Don't send the frame"]
+            and r.s.run(PRESSED, "Don't show the agent the frame at the playhead") == 'true',
+            panel(r)['text'])
     r.shot('panel-open')
 
     # A cut with captions: live, explained by what changed, undone in one step.
@@ -508,7 +517,13 @@ def ai_panel(r):
     first = runs(r)[0]
     r.check("the agent ran with Nuzky's tools only: built-ins and hooks off, in a folder outside home",
             not first['missing'] and not first['cwd'].startswith(os.environ['HOME']) and not first['resume'], first)
-    r.check('the message carried the selection and the playhead', f"Selected clips: {clip['id']}" in first['prompt'] and '[Nuzky] Playhead' in first['prompt'], first['prompt'])
+    r.check('the message carried the selection, the playhead and the frame',
+            f"Selected clips: {clip['id']}" in first['prompt'] and '[Nuzky] Playhead' in first['prompt'] and 'points at the frame at the playhead' in first['prompt'],
+            first['prompt'])
+    click(r, "Don't send the frame")
+    r.check('× on the Frame chip stops sending the frame and brings back the playhead chip',
+            wait(lambda: r.s.run(CHIPS) == ["Don't send the selected clips", "Don't send the playhead"], 5)
+            and not r.s.run('return window.__nuzky.agent.getState().frame'), r.s.run(CHIPS))
     r.shot('run-done')
     # A real key press, as the clipboard takes text only from something the user did. On macOS it is the person's
     # own clipboard, so their text goes back right after.

@@ -7,6 +7,7 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  Camera,
   ChevronRight,
   CircleStop,
   Clapperboard,
@@ -17,7 +18,6 @@ import {
   Film,
   GripVertical,
   Image as ImageIcon,
-  ImagePlus,
   Info,
   Loader2,
   Plug,
@@ -890,7 +890,7 @@ function Composer() {
             </span>
           </div>
         )}
-        {!working && about === "project" && ((selected > 0 && !dropSelection) || !dropPlayhead || thumbnail) && (
+        {!working && about === "project" && ((selected > 0 && !dropSelection) || !dropPlayhead || frame || thumbnail) && (
           <div className="mb-2 flex flex-wrap gap-1.5">
             {thumbnail && (
               <Chip icon={<ImageIcon size={12} />} label="Make a thumbnail" onRemove={() => useAgent.setState({ thumbnail: false })}>
@@ -903,10 +903,16 @@ function Composer() {
                 {range && <span className="tabular text-muted">· {range}</span>}
               </Chip>
             )}
-            {!dropPlayhead && (
-              <Chip icon={<Crosshair size={12} />} label="the playhead" onRemove={() => useAgent.setState({ dropPlayhead: true })}>
-                <span className="tabular">Playhead {playhead}</span>
+            {frame ? (
+              <Chip icon={<Camera size={12} />} label="the frame" onRemove={() => useAgent.setState({ frame: false })}>
+                <span className="tabular">Frame {playhead}</span>
               </Chip>
+            ) : (
+              !dropPlayhead && (
+                <Chip icon={<Crosshair size={12} />} label="the playhead" onRemove={() => useAgent.setState({ dropPlayhead: true })}>
+                  <span className="tabular">Playhead {playhead}</span>
+                </Chip>
+              )
             )}
           </div>
         )}
@@ -970,13 +976,13 @@ function Composer() {
         <div className="mt-1 flex items-center gap-2">
           {about === "project" && (
           <IconButton
-            label={frame ? "Don't send the frame at the playhead" : "Send the frame at the playhead too"}
+            label={frame ? "Don't show the agent the frame at the playhead" : "Show the agent the frame at the playhead"}
             active={frame}
             disabled={working}
-            onClick={() => useAgent.setState({ frame: !frame })}
+            onClick={() => useAgent.setState(frame ? { frame: false } : { frame: true, dropPlayhead: false })}
             className="h-7 w-7"
           >
-            <ImagePlus size={15} />
+            <Camera size={15} />
           </IconButton>
           )}
           {plan && <ModelMenu disabled={working} />}

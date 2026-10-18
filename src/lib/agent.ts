@@ -316,8 +316,7 @@ function describeContext(c: PromptContext): string | null {
   if (c.style) return "Your style";
   const parts: string[] = c.thumbnail ? ["Make a thumbnail"] : [];
   if (c.selection) parts.push(c.selection.length === 1 ? "1 clip" : `${c.selection.length} clips`);
-  if (c.playheadUs !== null) parts.push(`Playhead ${formatTime(c.playheadUs, false)}`);
-  if (c.frame) parts.push("Frame");
+  if (c.playheadUs !== null) parts.push(`${c.frame ? "Frame" : "Playhead"} ${formatTime(c.playheadUs, false)}`);
   return parts.length ? parts.join(" · ") : null;
 }
 
