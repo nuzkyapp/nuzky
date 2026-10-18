@@ -284,6 +284,7 @@ const PLAIN: Record<string, string | ((detail: string) => string)> = {
   YTDLP_CORRUPT: (detail) => detail,
   YTDLP_DOWNLOAD_FAILED: (detail) => detail.replace(/ \(.*\)$/, ""),
   YTDLP_FAILED: "yt-dlp is installed but didn't start. Reinstall it, then try again.",
+  YTDLP_OUTDATED: "The yt-dlp on this computer is out of date. Download Nuzky's own under the link field in the Music tab.",
   NOT_LEARNED: "What was learned is gone. Learn from the projects again.",
   SIGN_IN_DENIED: "Signing in was cancelled in the browser. Continue with ChatGPT to try again.",
   SIGN_IN_TIMEOUT: "Nuzky stopped waiting for the browser after 5 minutes. Continue with ChatGPT to try again.",

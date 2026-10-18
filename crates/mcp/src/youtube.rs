@@ -336,8 +336,9 @@ fn collect_stderr(child: &mut Child) -> std::thread::JoinHandle<String> {
     })
 }
 
-/// The plain error for what yt-dlp printed when it failed.
-fn failure(stderr: &str) -> anyhow::Error {
+/// The plain error for what yt-dlp printed when it failed. `installed` is a yt-dlp the user installed,
+/// which Nuzky can't update, so a failure it can't name offers Nuzky's own copy instead.
+fn failure(stderr: &str, installed: bool) -> anyhow::Error {
     let error = stderr.lines().rev().find(|l| l.starts_with("ERROR:")).unwrap_or_default();
     let has = |text: &str| error.to_lowercase().contains(text);
     if has("private video") {
@@ -368,7 +369,13 @@ fn failure(stderr: &str) -> anyhow::Error {
         anyhow!("OFFLINE: Can't reach YouTube. Check your internet connection. ({})", error.trim())
     } else {
         let error = error.trim_start_matches("ERROR:").trim();
-        anyhow!("SOURCE_FAILED: yt-dlp could not get this video. Updating yt-dlp often helps. ({error})")
+        if installed {
+            anyhow!(
+                "YTDLP_OUTDATED: The yt-dlp installed on this computer could not get this video, most likely because it is out of date. The user can paste the link in the Music tab of Nuzky's sound library and click Download yt-dlp under it; Nuzky keeps its own copy up to date. ({error})"
+            )
+        } else {
+            anyhow!("SOURCE_FAILED: yt-dlp could not get this video. Updating yt-dlp often helps. ({error})")
+        }
     }
 }
 
@@ -417,7 +424,7 @@ pub fn video(id: &str, max_bytes: u64) -> Result<Video> {
     };
     let stderr = stderr.join().unwrap_or_default();
     refresh();
-    ensure!(status.success(), failure(&stderr));
+    ensure!(status.success(), failure(&stderr, !executable(&own_copy())));
     let bytes = reader.join().map_err(|_| anyhow!("yt-dlp output was lost"))??;
     let video: Video = serde_json::from_slice(&bytes)
         .map_err(|e| anyhow!("SOURCE_FAILED: yt-dlp sent something unexpected. Updating yt-dlp often helps. ({e})"))?;
@@ -495,7 +502,7 @@ pub fn download(
         };
         let stderr = stderr.join().unwrap_or_default();
         refresh();
-        ensure!(status.success(), failure(&stderr));
+        ensure!(status.success(), failure(&stderr, !executable(&own_copy())));
         // Over --max-filesize yt-dlp skips the download and still succeeds.
         let size = part.metadata().map(|m| m.len()).unwrap_or(0);
         ensure!(size > 0, "SOUND_UNAVAILABLE: this video is too long to add as a sound");
@@ -579,7 +586,7 @@ mod tests {
 
     #[test]
     fn yt_dlp_errors_become_plain_ones() {
-        let code = |stderr: &str| failure(stderr).to_string().split(':').next().unwrap().to_owned();
+        let code = |stderr: &str| failure(stderr, false).to_string().split(':').next().unwrap().to_owned();
         assert_eq!(
             code("ERROR: [youtube] abc: Private video. Sign in if you've been granted access"),
             "SOUND_UNAVAILABLE"
@@ -598,6 +605,8 @@ mod tests {
         );
         assert_eq!(code("ERROR: something new"), "SOURCE_FAILED");
         assert_eq!(code(""), "SOURCE_FAILED");
+        let installed = failure("ERROR: unable to download video data: HTTP Error 403: Forbidden", true).to_string();
+        assert!(installed.starts_with("YTDLP_OUTDATED:"), "{installed}");
     }
 
     #[test]

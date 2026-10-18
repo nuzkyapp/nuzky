@@ -154,6 +154,14 @@ export async function installYtdlp() {
   }
 }
 
+/** When the user's own yt-dlp could not download the linked song, the link offers Nuzky's copy in its place. */
+function offerOwnYtdlp(sound: Sound, text: string) {
+  const { link } = useSounds.getState();
+  if (!text.startsWith("YTDLP_OUTDATED") || link.sound?.id !== sound.id) return false;
+  useSounds.setState({ link: { ...NO_LINK, url: link.url, error: text } });
+  return true;
+}
+
 export function stopPreview() {
   useSounds.setState({ preview: null });
   api.soundStop();
@@ -172,7 +180,7 @@ export async function togglePreview(sound: Sound) {
     const text = errorText(e);
     if (useSounds.getState().preview?.id !== sound.id || text.startsWith("CANCELLED")) return;
     useSounds.setState({ preview: null });
-    toast({ kind: "error", text });
+    if (!offerOwnYtdlp(sound, text)) toast({ kind: "error", text });
   }
 }
 
@@ -185,7 +193,7 @@ export async function addSound(sound: Sound) {
     setSnap(await api.soundAdd(sound.id, timeUs, currentEpoch()));
   } catch (e) {
     const text = errorText(e);
-    if (!text.includes("CANCELLED")) toast({ kind: "error", text: `Could not add ${sound.title}: ${text}` });
+    if (!text.includes("CANCELLED") && !offerOwnYtdlp(sound, text)) toast({ kind: "error", text: `Could not add ${sound.title}: ${text}` });
   } finally {
     useSounds.setState((s) => ({ adding: s.adding.filter((id) => id !== sound.id), progress: { ...s.progress, [sound.id]: 0 } }));
   }

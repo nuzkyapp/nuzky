@@ -210,6 +210,20 @@ input.dispatchEvent(new Event('input', {bubbles: true}));""", FIELD, f'https://y
     r.check('Enter also looks up a typed link without another rights notice',
             wait(lambda: r.s.run('return !!document.querySelector(arguments[0])', ROW), 10) and not dialog(r))
 
+    forbidden = '[data-sound="youtube:ytForbid001"]'
+    paste(r, 'https://youtu.be/ytForbid001')
+    wait(lambda: r.s.run('return !!document.querySelector(arguments[0])', forbidden), 10)
+    before = r.s.run(PROJECT)
+    r.s.run(CLICK, forbidden + ' button[aria-label^=Add]')
+    offer = wait(lambda: (text := alert(r)) and 'out of date' in text and text, 10) or ''
+    r.check('a download the installed yt-dlp fails offers Download yt-dlp in place of the row, without a code',
+            "couldn't get this song, probably because it's out of date" in offer
+            and r.s.run('return document.querySelector("[role=alert] button")?.textContent') == 'Download yt-dlp'
+            and not r.s.run('return !!document.querySelector(arguments[0])', forbidden)
+            and 'YTDLP_OUTDATED' not in offer and '403' not in offer, offer)
+    r.check('the failed download adds nothing and shows no error toast', r.s.run(PROJECT) == before and not r.errors(), r.errors())
+    r.shot('outdated-ytdlp-offer')
+
     slow = '[data-sound="youtube:ytSlow00001"]'
     paste(r, 'https://youtu.be/ytSlow00001')
     wait(lambda: r.s.run('return !!document.querySelector(arguments[0])', slow), 10)
@@ -229,7 +243,7 @@ input.dispatchEvent(new Event('input', {bubbles: true}));""", FIELD, f'https://y
             stopped and took < 3 and len(r.state()['assets']) == assets and left == [] and running == [],
             (round(took, 1), left, running))
     r.check('every invocation gets only a canonical watch URL',
-            bool(invocations(r)) and all(args[args.index('--') + 1:] in ([f'https://www.youtube.com/watch?v={v}'] for v in (SONG, 'ytPrivate01', 'ytSlow00001'))
+            bool(invocations(r)) and all(args[args.index('--') + 1:] in ([f'https://www.youtube.com/watch?v={v}'] for v in (SONG, 'ytPrivate01', 'ytForbid001', 'ytSlow00001'))
                                          for args in invocations(r)), invocations(r))
     if r.check('the window goes to its smallest size', resize(r, 1024, 640)):
         time.sleep(0.5)

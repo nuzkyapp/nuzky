@@ -393,6 +393,7 @@ function LinkResult() {
   if (link.sound) return <SoundRow sound={link.sound} inProject={inProject.has(link.sound.id)} />;
   if (!link.error) return null;
   if (link.error.startsWith("YTDLP_MISSING")) return <GetYtdlp />;
+  if (link.error.startsWith("YTDLP_OUTDATED")) return <GetYtdlp outdated />;
   const offline = link.error.startsWith("OFFLINE");
   return (
     <div role="alert" className="mx-1.5 mb-1 flex items-start gap-2 text-[12px] text-muted">
@@ -414,8 +415,8 @@ function LinkResult() {
 /** Keeps "yt-dlp" whole, as a name split at its hyphen reads as two words. */
 const Nowrap = ({ children }: { children: string }) => <span className="whitespace-nowrap">{children}</span>;
 
-/** Nuzky downloads yt-dlp itself, so music from YouTube needs no terminal. */
-function GetYtdlp() {
+/** Nuzky downloads yt-dlp itself, so music from YouTube needs no terminal; it also replaces an outdated one the user installed. */
+function GetYtdlp({ outdated = false }: { outdated?: boolean }) {
   const installing = useSounds((s) => s.installing);
   const progress = useSounds((s) => s.progress["yt-dlp"] ?? 0);
   return (
@@ -424,6 +425,10 @@ function GetYtdlp() {
         {installing ? (
           <>
             Downloading <Nowrap>yt-dlp</Nowrap>… <span className="tabular">{Math.round(progress * 100)}%</span>
+          </>
+        ) : outdated ? (
+          <>
+            The <Nowrap>yt-dlp</Nowrap> on this computer couldn't get this song, probably because it's out of date. Nuzky can download its own and keep it updated.
           </>
         ) : (
           <>
