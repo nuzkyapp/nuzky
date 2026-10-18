@@ -8,11 +8,11 @@ mod diagnostics;
 mod engine;
 mod jobs;
 mod library;
+mod model_question;
 mod preview_server;
 mod recap;
 mod reels;
 mod sounds;
-mod speech_model;
 mod stickers;
 mod store;
 mod style;
@@ -1143,7 +1143,11 @@ pub fn run() {
             }
             let handle = app.handle().clone();
             nuzky_mcp::transcript::ask_for_model_with(move |cancel, progress| {
-                speech_model::ask(&handle, cancel, progress)
+                model_question::ask_speech(&handle, cancel, progress)
+            });
+            let handle = app.handle().clone();
+            nuzky_mcp::vision_models::ask_for_models_with(move |needed, cancel, progress| {
+                model_question::ask_vision(&handle, needed, cancel, progress)
             });
             let server = Arc::new(PreviewServer::start()?);
             let (session, events, startup_notice) = initial_project()?;
@@ -1256,7 +1260,7 @@ pub fn run() {
             jobs::speech_models,
             jobs::speech_setup,
             jobs::start_speech_setup,
-            speech_model::answer_speech_model,
+            model_question::answer_model_question,
             jobs::vision_models,
             jobs::start_vision_models,
             mattes_missing,

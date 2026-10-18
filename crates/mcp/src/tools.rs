@@ -21,7 +21,7 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
-use crate::{activity, media, params::*, reels, transcript, waveform};
+use crate::{activity, media, params::*, reels, transcript, vision_models, waveform};
 
 const PREVIEW_CHARS: usize = 400;
 /// How long activity waits for its job before handing it over to the client.
@@ -67,6 +67,7 @@ pub struct Backend {
     sticker_requests: Mutex<HashMap<(String, String), PreparedSticker>>,
     /// Why this agent cannot have the speech model: the user said not now, stopped the download or it failed.
     model_refused: Arc<Mutex<Option<String>>>,
+    vision_refused: vision_models::Refused,
 }
 
 /// The asset the sound became and the edits that add it.
@@ -100,6 +101,7 @@ impl Backend {
             sound_requests: Mutex::default(),
             sticker_requests: Mutex::default(),
             model_refused: Arc::default(),
+            vision_refused: Arc::default(),
         })
     }
 
@@ -711,8 +713,7 @@ impl Backend {
         })
     }
 
-    /// Renders the timeline without text and scores frames for a cover, as a job. The face models
-    /// must be installed; this never downloads them.
+    /// Renders the timeline without text and scores frames for a cover, as a job.
     fn thumbnail_frames(&self, args: Analyze, state: &SessionState) -> Result<Value> {
         ensure!(args.asset_id.is_none(), "INVALID_ARGUMENTS: thumbnail_frames reads the whole timeline; omit asset_id");
         let format = match args.params.format.as_deref() {
@@ -725,7 +726,8 @@ impl Backend {
         activity::timeline_range(&project, None)?;
         media::check_media(&project)?;
         let models = nuzky_analysis::models_dir();
-        nuzky_vision::models::require(nuzky_vision::models::FRAMES, &models)?;
+        vision_models::check(nuzky_vision::models::FRAMES, &self.vision_refused)?;
+        let refused = self.vision_refused.clone();
         let format = format.unwrap_or(nuzky_vision::Format::of(&project.canvas));
         // Which frame suits a cover does not depend on what is behind the person.
         let project = nuzky_engine::matte::without_backgrounds(&project);
@@ -735,6 +737,7 @@ impl Backend {
             "analysis",
             state.stamp.clone(),
             move |cancel, progress| {
+                vision_models::ensure(nuzky_vision::models::FRAMES, &refused, &cancel, &progress)?;
                 let candidates = nuzky_vision::thumbnail_frames(&project, &models, Some(format), &cancel, &mut |phase, done| {
                     let phase = match phase {
                         nuzky_vision::thumbnails::Phase::Looking => "looking",
@@ -757,7 +760,8 @@ impl Backend {
         };
         let project = self.media_project(&state.project);
         let models = nuzky_analysis::models_dir();
-        nuzky_vision::models::require(nuzky_vision::models::REFRAME, &models)?;
+        vision_models::check(nuzky_vision::models::REFRAME, &self.vision_refused)?;
+        let refused = self.vision_refused.clone();
         let host = Arc::downgrade(&self.host);
         let revision = state.stamp.revision;
         let run_id = args.run_id.clone();
@@ -767,6 +771,7 @@ impl Backend {
             "reframe",
             state.stamp.clone(),
             move |cancel, progress| {
+                vision_models::ensure(nuzky_vision::models::REFRAME, &refused, &cancel, &progress)?;
                 let result = nuzky_vision::reframe::reframe(
                     &project,
                     &models,
@@ -805,18 +810,18 @@ impl Backend {
         ensure!((start..end).contains(&args.time_us), "INVALID_RANGE: time_us must be inside 0..{end}");
         media::check_media(&project)?;
         let models = nuzky_analysis::models_dir();
-        nuzky_vision::models::require(nuzky_vision::models::MASK, &models)?;
+        vision_models::check(nuzky_vision::models::MASK, &self.vision_refused)?;
         let cache = self.host.cache_dir.clone();
         let t = args.time_us;
+        let refused = self.vision_refused.clone();
         self.host.start_job(
             &self.client.id,
             state.open_run.as_ref().map(|run| run.run_id.as_str()),
             "segment",
             state.stamp.clone(),
             move |cancel, progress| {
-                nuzky_vision::matte::prepare(&project, &cache, &models, &cancel, &mut |p| {
-                    progress.set("finding_the_person", Some(p))
-                })?;
+                vision_models::ensure(nuzky_vision::models::MASK, &refused, &cancel, &progress)?;
+                vision_models::prepare_mattes(&project, &cache, &refused, &cancel, &progress)?;
                 let mask = nuzky_vision::segment_subject(&project, t, &models, &cache, &cancel, &mut |phase| {
                     progress.set(
                         match phase {
@@ -1282,6 +1287,7 @@ impl Backend {
         media::check_media(&project)?;
         let cache = self.host.cache_dir.clone();
         let queue = self.export_queue.clone();
+        let refused = self.vision_refused.clone();
         // What the creator's cut teaches, checked against the project as exported. This state may
         // hide another client's open run, so the session is asked too.
         let run_open = state.open_run.is_some() || self.host.session.state()?.open_run.is_some();
@@ -1296,9 +1302,7 @@ impl Backend {
                 progress.set("waiting_for_export", None);
                 let _export = queue.lock().unwrap();
                 check_cancel(&cancel)?;
-                nuzky_vision::matte::prepare(&project, &cache, &nuzky_analysis::models_dir(), &cancel, &mut |p| {
-                    progress.set("finding_the_person", Some(p))
-                })?;
+                vision_models::prepare_mattes(&project, &cache, &refused, &cancel, &progress)?;
                 export(&project, &cache, &out, &options, &cancel, |p| {
                     let phase = match p.phase {
                         ExportPhase::Loudness => "measuring_loudness",
@@ -1339,7 +1343,7 @@ impl Backend {
         let mask = match thumbnail.needs_mask() {
             false => None,
             true => {
-                nuzky_vision::models::require(nuzky_vision::models::MASK, &nuzky_analysis::models_dir())?;
+                vision_models::check(nuzky_vision::models::MASK, &self.vision_refused)?;
                 let size = (frame.width, frame.height);
                 match nuzky_vision::cached_alpha(&frame.data, size, &self.host.cache_dir) {
                     Some(alpha) => Some(alpha),
@@ -1383,18 +1387,20 @@ impl Backend {
         media::check_media(&project)?;
         let models = nuzky_analysis::models_dir();
         if thumbnail.needs_mask() {
-            nuzky_vision::models::require(nuzky_vision::models::MASK, &models)?;
+            vision_models::check(nuzky_vision::models::MASK, &self.vision_refused)?;
         }
         let cache = self.host.cache_dir.clone();
+        let refused = self.vision_refused.clone();
         self.host.start_job(
             &self.client.id,
             state.open_run.as_ref().map(|run| run.run_id.as_str()),
             "export",
             state.stamp.clone(),
             move |cancel, progress| {
-                nuzky_vision::matte::prepare(&project, &cache, &models, &cancel, &mut |p| {
-                    progress.set("finding_the_person", Some(p))
-                })?;
+                if thumbnail.needs_mask() {
+                    vision_models::ensure(nuzky_vision::models::MASK, &refused, &cancel, &progress)?;
+                }
+                vision_models::prepare_mattes(&project, &cache, &refused, &cancel, &progress)?;
                 progress.set("rendering", None);
                 let mut renderer = Renderer::new().context("Starting frame renderer")?;
                 renderer.use_mattes(cache.clone(), Pending::Fail);
@@ -1441,21 +1447,19 @@ impl Backend {
         if nuzky_engine::matte::missing(&cache, project).is_empty() {
             return Ok(());
         }
-        let models = nuzky_analysis::models_dir();
-        nuzky_vision::models::require(nuzky_vision::models::BACKGROUND, &models)?;
+        vision_models::check(nuzky_vision::models::BACKGROUND, &self.vision_refused)?;
         let job = match self.host.jobs.running_id("matte") {
             Some(job) => job,
             None => {
                 let project = project.clone();
+                let refused = self.vision_refused.clone();
                 let started = self.host.start_job(
                     &self.client.id,
                     state.open_run.as_ref().map(|run| run.run_id.as_str()),
                     "matte",
                     state.stamp.clone(),
                     move |cancel, progress| {
-                        nuzky_vision::matte::prepare(&project, &cache, &models, &cancel, &mut |p| {
-                            progress.set("finding_the_person", Some(p))
-                        })?;
+                        vision_models::prepare_mattes(&project, &cache, &refused, &cancel, &progress)?;
                         Ok(json!({"prepared": true}))
                     },
                 )?;
@@ -1899,6 +1903,7 @@ mod transcript_tests {
             sound_requests: Mutex::default(),
             sticker_requests: Mutex::default(),
             model_refused: Arc::default(),
+            vision_refused: Arc::default(),
         };
         (dir, backend, project)
     }

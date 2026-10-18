@@ -7,7 +7,7 @@ from e2e.corrections import Hands
 from e2e.harness import FIXTURES, Session, flow, press, wait
 from e2e.home import FIRST_RUN_TEXT, OPEN_VIDEO, make, resize
 
-TITLES = ['Captions model', 'Connect your AI']
+TITLES = ['Captions model', 'Face and person models', 'Connect your AI']
 BOX = '[aria-labelledby=setup-title]'
 DIALOG = """const d = document.querySelector('[aria-labelledby=setup-title]');
 if (!d) return null;
@@ -85,34 +85,38 @@ def setup(r):
     r.check('Enter on it opens the Get set up dialog', d and d['title'] == 'Get set up', d)
     r.check('it stays on the home screen', r.s.run("return window.__nuzky.store.getState().view") == 'home')
     r.check('the rail lists the built steps in order, none done, and no step that is not ready', rail(d) == [[t] for t in TITLES], rail(d))
-    r.check('the header says 0 of 2 done', d and d['count'] == '0 of 2 done', d)
+    r.check('the header says 0 of 3 done', d and d['count'] == '0 of 3 done', d)
     r.check('Captions model is shown and selected', d and d['panel'] == 'Captions model' and d['steps'][0]['selected'], d)
     r.check("the focus is on the current step's row, not on Skip", d and d['focus'] == 'tab: Captions model', d)
     r.check('a step still to do offers Skip last', d and d['buttons'][-1:] == ['Skip'], d)
 
-    for key, title in (('Down', 'Connect your AI'), ('Up', 'Captions model'), ('End', 'Connect your AI'), ('Home', 'Captions model')):
+    for key, title in (('Down', 'Face and person models'), ('Down', 'Connect your AI'), ('Up', 'Face and person models'),
+                       ('Up', 'Captions model'), ('End', 'Connect your AI'), ('Home', 'Captions model')):
         press(key)
         d = wait(lambda: (dialog(r) or {}).get('panel') == title and dialog(r), 3)
         r.check(f'{key} shows {title} and the focus follows', d and d['focus'] == f'tab: {title}', dialog(r))
 
     r.check('Skip takes the focus', r.s.run(FOCUS_TEXT, 'Skip', BOX + ' footer') and r.s.run(FOCUS) == 'Skip', r.s.run(FOCUS))
     press('Return')
-    d = wait(lambda: (dialog(r) or {}).get('panel') == 'Connect your AI' and dialog(r), 3)
-    r.check('Enter on Skip marks Captions model Skipped and shows Connect your AI',
+    d = wait(lambda: (dialog(r) or {}).get('panel') == 'Face and person models' and dialog(r), 3)
+    r.check('Enter on Skip marks Captions model Skipped and shows Face and person models',
             d and rail(d)[0] == ['Captions model', 'Skipped'] and d['steps'][1]['selected'], d)
-    r.check('a skipped step does not count as done', d and d['count'] == '0 of 2 done', d)
+    r.check('a skipped step does not count as done', d and d['count'] == '0 of 3 done', d)
 
     press('Escape')
     r.check('Esc closes it', wait(lambda: not dialog(r), 3))
     r.check('the focus is back on Get set up', wait(lambda: r.s.run(FOCUS) == 'Get set up', 3), r.s.run(FOCUS))
     r.check('closed, nothing of it stays in the page', r.s.run(CLOSED))
 
-    r.check('the sidebar row counts 1 step left, as news', row(r).get('count') == '1 step left', row(r))
+    r.check('the sidebar row counts 2 steps left, as news', row(r).get('count') == '2 steps left', row(r))
     r.s.run(CLICK, 'Get set up', 'nav[aria-label=Collections]')
     d = wait(lambda: dialog(r), 5)
-    r.check('the sidebar row opens it again on Connect your AI', d and d['panel'] == 'Connect your AI' and d['focus'] == 'tab: Connect your AI', d)
+    r.check('the sidebar row opens it again on Face and person models',
+            d and d['panel'] == 'Face and person models' and d['focus'] == 'tab: Face and person models', d)
     r.check('with Captions model still Skipped', d and rail(d)[0] == ['Captions model', 'Skipped'], d)
     r.check('the row is not a page', row(r).get('current') is None, row(r))
+    press('End')
+    r.check('End reaches Connect your AI', wait(lambda: (dialog(r) or {}).get('panel') == 'Connect your AI', 3), dialog(r))
 
     r.s.run("window.__nuzky.store.setState({connectOpen: true})")
     r.check('a dialog a step opens, Connect, shows above Get set up', wait(lambda: r.s.run(CONNECT_ON_TOP), 5))
@@ -144,12 +148,12 @@ def setup(r):
     r.check('× closes it', wait(lambda: not dialog(r), 3))
 
     relaunch(r)
-    r.check('after a restart the row still counts 1 step left', wait(lambda: row(r).get('count') == '1 step left', 10), row(r))
+    r.check('after a restart the row still counts 2 steps left', wait(lambda: row(r).get('count') == '2 steps left', 10), row(r))
     r.check('the sidebar row takes the focus', r.s.run(FOCUS_TEXT, 'Get set up', 'nav[aria-label=Collections]'))
     press('Return')
     d = wait(lambda: dialog(r), 5)
     r.check('after a restart it opens on the step shown before, with the same states',
-            d and d['panel'] == 'Connect your AI' and rail(d) == [['Captions model', 'Skipped'], ['Connect your AI']] and d['count'] == '0 of 2 done', d)
+            d and d['panel'] == 'Connect your AI' and rail(d) == [['Captions model', 'Skipped'], ['Face and person models'], ['Connect your AI']] and d['count'] == '0 of 3 done', d)
 
     hands = Hands(r)
     r.check('a click on the step text', hands.click(f'{BOX} [role=tabpanel] p'))
@@ -171,7 +175,7 @@ def setup(r):
     r.s.run(CLICK, 'Get set up', 'nav[aria-label=Collections]')
     d = wait(lambda: dialog(r), 5)
     r.check('it opens again where it was, with the same states',
-            d and d['panel'] == 'Connect your AI' and rail(d) == [['Captions model', 'Skipped'], ['Connect your AI']], d)
+            d and d['panel'] == 'Connect your AI' and rail(d) == [['Captions model', 'Skipped'], ['Face and person models'], ['Connect your AI']], d)
     r.s.run('document.activeElement?.blur()')
     press('Tab')
     r.check('with the focus lost, Tab goes into Get set up, never to the home screen under it',
@@ -179,16 +183,23 @@ def setup(r):
     r.s.run(f"document.querySelector('{BOX} [role=tab][aria-selected=true]').focus()")
 
     r.s.run("window.__nuzky.setup.getState().finishStep('ai')")
-    d = wait(lambda: (dialog(r) or {}).get('count') == '1 of 2 done' and dialog(r), 3)
-    r.check('a finished step shows Done and the header 1 of 2 done', d and rail(d)[1] == ['Connect your AI', 'Done'], d)
+    d = wait(lambda: (dialog(r) or {}).get('count') == '1 of 3 done' and dialog(r), 3)
+    r.check('a finished step shows Done and the header 1 of 3 done', d and rail(d)[2] == ['Connect your AI', 'Done'], d)
     r.check('done, the last step offers Done last', d and d['buttons'][-1:] == ['Done'], d)
-    r.check('with no step left, the row shows no count', wait(lambda: row(r).get('count') is None, 3), row(r))
+    r.check('with Face and person models still to do, the row counts 1 step left',
+            wait(lambda: row(r).get('count') == '1 step left', 3), row(r))
     press('Home')
     d = wait(lambda: (dialog(r) or {}).get('panel') == 'Captions model' and dialog(r), 3)
     r.check('a skipped step offers Next last', d and d['buttons'][-1:] == ['Next'], d)
     r.s.run(FOCUS_TEXT, 'Next', BOX + ' footer')
     press('Return')
-    r.check('Enter on Next shows the next step', wait(lambda: (dialog(r) or {}).get('panel') == 'Connect your AI', 3), dialog(r))
+    r.check('Enter on Next shows the next step', wait(lambda: (dialog(r) or {}).get('panel') == 'Face and person models', 3), dialog(r))
+    r.s.run(FOCUS_TEXT, 'Skip', BOX + ' footer')
+    press('Return')
+    d = wait(lambda: (dialog(r) or {}).get('panel') == 'Connect your AI' and dialog(r), 3)
+    r.check('Enter on Skip marks Face and person models Skipped and shows Connect your AI',
+            d and rail(d)[1] == ['Face and person models', 'Skipped'] and d['steps'][2]['selected'], d)
+    r.check('with no step left, the row shows no count', wait(lambda: row(r).get('count') is None, 3), row(r))
     r.s.run(FOCUS_TEXT, 'Done', BOX + ' footer')
     press('Return')
     r.check('Done closes it', wait(lambda: not dialog(r), 3), dialog(r))

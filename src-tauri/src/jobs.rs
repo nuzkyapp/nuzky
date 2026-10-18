@@ -176,7 +176,7 @@ pub fn prepare_media(state: &AppState, project: &Project) {
 /// a job per file; the preview shows them as recorded until then and switches as parts get done. Work no clip needs
 /// any more stops (the background turned off, the clip deleted, another project opened); what is done stays. Nothing
 /// starts while the person model is missing, and a file that failed is not tried again until the app restarts.
-fn ensure_mattes(state: &AppState, project: &Project) {
+pub(crate) fn ensure_mattes(state: &AppState, project: &Project) {
     let app = state.app.clone();
     let missing = nuzky_engine::matte::missing(&state.cache_dir, project);
     let wanted: HashSet<&str> = missing.iter().map(|(asset, _)| asset.path.as_str()).collect();
@@ -1092,7 +1092,7 @@ pub(crate) fn missing_speech_mb(id: &str) -> u32 {
 
 /// A download that failed without saying why in a code (`CANCELLED`, `MODEL_INVALID`…) reads as one the person can
 /// act on: the connection or the disk.
-fn download_failed(error: anyhow::Error, what: &str) -> anyhow::Error {
+pub(crate) fn download_failed(error: anyhow::Error, what: &str) -> anyhow::Error {
     let text = error.to_string();
     let code = text
         .split_once(':')

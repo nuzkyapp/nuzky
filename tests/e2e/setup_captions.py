@@ -217,7 +217,7 @@ def run(r):
     r.check('the speech model goes on with a Range request from where it stopped', resumed and int(resumed[-1]['range'][6:-1]) > 0, r.models.requests)
     r.s.run(FOCUS_TEXT, 'Skip', f'{BOX} footer')
     press('Return')
-    d = wait(lambda: (d := step(r)) and d['panel'] == 'Connect your AI' and d, 5)
+    d = wait(lambda: (d := step(r)) and d['panel'] == 'Face and person models' and d, 5)
     r.check('Skip during the download marks the step Skipped and shows the next one', d and d['rail'][0] == ['Captions model', 'Skipped']
             and (job(r) or {}).get('status') == 'running', {'step': d, 'job': job(r)})
     r.check('the download goes on, and once it is done Captions model is done', wait(lambda: (job(r) or {}).get('status') == 'done', 120)
@@ -228,7 +228,7 @@ def run(r):
     r.s.run(f"document.querySelector('{BOX} #setup-tab-captions').click()")
     d = wait(lambda: (d := step(r)) and d['panel'] == 'Captions model' and d['cards'] and d, 5)
     r.check('Captions model shows Balanced downloaded, nothing left to download, the header counts it and Next follows',
-            d and d['count'] == '1 of 2 done' and d['buttons'] == ['Next'] and 'Downloaded' in card(d, 'small')['lines'], d)
+            d and d['count'] == '1 of 3 done' and d['buttons'] == ['Next'] and 'Downloaded' in card(d, 'small')['lines'], d)
     r.shot('done')
 
     r.s.run(SET_LANGUAGE, 'en')
@@ -239,7 +239,7 @@ def run(r):
     r.s.run(CLICK, 'Download', f'{BOX} footer')
     r.check('it starts', wait(lambda: (job(r) or {}).get('status') == 'running', 5), job(r))
     r.s.run(CLICK, 'Next', f'{BOX} footer')
-    r.check('Next shows Connect your AI while it downloads', wait(lambda: (step(r) or {}).get('panel') == 'Connect your AI', 3), step(r))
+    r.check('Next shows Face and person models while it downloads', wait(lambda: (step(r) or {}).get('panel') == 'Face and person models', 3), step(r))
     r.check('it fails there', wait(lambda: (job(r) or {}).get('status') == 'failed', 15), job(r))
     errors = wait(lambda: r.errors(), 3)
     r.check('with Captions model off screen, a toast says the word timing model could not be downloaded',

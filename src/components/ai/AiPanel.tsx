@@ -23,6 +23,7 @@ import {
   Plug,
   MessageSquareText,
   RefreshCw,
+  ScanFace,
   Scissors,
   Sparkles,
   SquarePen,
@@ -57,7 +58,8 @@ import { FINISH_DRAFT } from "../../lib/capcut";
 import { downloadModels, useCover } from "../../lib/cover";
 import { openRecap, undoAction, undoStep, useEditor } from "../../lib/store";
 import { formatTime } from "../../lib/time";
-import { Button, IconButton } from "../ui";
+import { Button, IconButton, LockReason, ProgressBar } from "../ui";
+import { MODEL_QUESTION, answerModelQuestion } from "../ModelQuestionDialog";
 import { Markdown } from "./Markdown";
 import { ChatGptLogo } from "../ChatGptLogo";
 import { ContinueButton, USAGE_PAGE } from "../ChatGptDialog";
@@ -678,8 +680,69 @@ function Item({ item, index, collapsed }: { item: ChatItem; index: number; colla
   }
 }
 
+/** An agent's job waits for the face and person models: Download here, and the agent goes on once they are in. */
+function VisionModelsQuestion() {
+  const question = useEditor((s) => s.visionModelQuestion);
+  const job = useEditor((s) => (s.visionModelJob ? s.jobs[s.visionModelJob] : undefined));
+  const running = job?.status === "running";
+  const card = useRef<HTMLDivElement>(null);
+  // Download and Not now go away when pressed; the focus goes to Stop, or back to the field.
+  useEffect(() => {
+    if (document.activeElement !== document.body) return;
+    if (running) card.current?.querySelector("button")?.focus();
+    else if (!question) document.querySelector<HTMLElement>("aside[aria-label=AI] textarea")?.focus();
+  }, [running, question]);
+  if (question)
+    return (
+      <div role="group" aria-labelledby="vision-question-title" className="grid grid-cols-[20px_1fr] gap-2 rounded-[10px] bg-raised p-3 text-[12px] leading-[18px] text-fg/85">
+        <ScanFace size={16} className="mt-px text-accent" />
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span id="vision-question-title" className="text-[13px] font-semibold text-fg">
+            {MODEL_QUESTION.vision.title}
+          </span>
+          <span>The AI needs them to find faces and the person in your video. They run on this computer, a one-time download.</span>
+          {/* The agent waits for this answer, so the AI lock does not hold it. */}
+          <LockReason.Provider value={null}>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              <Button variant="primary" className="h-7 px-2.5 text-[12px]" onClick={() => answerModelQuestion("vision", true)}>
+                Download {question.sizeMb} MB
+              </Button>
+              <Button variant="ghost" className="h-7 px-2.5 text-[12px]" onClick={() => answerModelQuestion("vision", false)}>
+                Not now
+              </Button>
+            </div>
+          </LockReason.Provider>
+        </div>
+      </div>
+    );
+  if (!running) return null;
+  return (
+    <div ref={card} className="flex flex-col gap-1.5 rounded-[10px] bg-raised p-3 text-[12px]" role="status">
+      <div className="flex items-center gap-2">
+        <Loader2 size={13} className="shrink-0 animate-spin text-accent" />
+        <span className="min-w-0 flex-1 truncate text-fg">Downloading face and person models</span>
+        {job.progress > 0 && <span className="tabular text-muted">{Math.round(job.progress * 100)}%</span>}
+        <LockReason.Provider value={null}>
+          <Button className="h-6 px-2 text-[12px]" title="The AI goes on without them" onClick={() => void api.cancelJob(job.id)}>
+            Stop
+          </Button>
+        </LockReason.Provider>
+      </div>
+      <ProgressBar value={job.progress} label="Downloading face and person models" />
+    </div>
+  );
+}
+
 function Conversation() {
   const items = useAgent((s) => s.items);
+  const visionQuestion = useEditor((s) => s.visionModelQuestion);
+  // The editor's conversation asks for the face and person models; Your style's is about the style.
+  const project = useContext(About) === "project";
+  useEffect(() => {
+    if (!project) return;
+    useEditor.setState((s) => ({ aiChats: s.aiChats + 1 }));
+    return () => useEditor.setState((s) => ({ aiChats: s.aiChats - 1 }));
+  }, [project]);
   const working = useAgent((s) => s.status !== "idle");
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
@@ -687,7 +750,7 @@ function Conversation() {
   useLayoutEffect(() => {
     const el = scroller.current;
     if (el && pinned.current) el.scrollTop = el.scrollHeight;
-  }, [items]);
+  }, [items, visionQuestion]);
   const lastUser = items.map((i) => i.kind).lastIndexOf("user");
   return (
     <div
@@ -703,6 +766,7 @@ function Conversation() {
         // Steps fold away once the agent has answered after them.
         <Item key={i} item={item} index={i} collapsed={item.kind === "steps" && (i < lastUser || (!working && items.slice(i + 1).some((x) => x.kind === "agent")))} />
       ))}
+      {project && <VisionModelsQuestion />}
     </div>
   );
 }

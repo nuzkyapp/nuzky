@@ -4,6 +4,7 @@ import { create } from "zustand";
 import presets from "../../assets/presets/thumbnails.json";
 import { api, errorText, plainError } from "./api";
 import { DEFAULT_TRANSFORM } from "./presets";
+import { useSetup } from "./setup";
 import { aiLocked, currentEpoch, openExport, projectDuration, undoAction, useEditor } from "./store";
 import { US } from "./time";
 import type { CoverCandidate, CoverPick, JobEvent, Project, TextStyle, Thumbnail, ThumbnailFormat, ThumbnailText, Transform, VisionModels } from "./types";
@@ -88,7 +89,10 @@ export function setSafeZones(on: boolean) {
 /** Asks again whether the cover models can run here and what is left to download. */
 export async function loadModels() {
   try {
-    useCover.setState({ models: await api.visionModels() });
+    const models = await api.visionModels();
+    useCover.setState({ models });
+    // Downloaded by covers, an agent or an earlier version: Get set up has nothing left to do there.
+    if (models.downloaded) useSetup.getState().finishStep("vision");
   } catch {
     useCover.setState({ models: null });
   }
@@ -399,7 +403,8 @@ export function onCoverJob(job: JobEvent) {
     if (job.status === "failed") toast({ kind: "error", text: `Cover export failed: ${plainError(job.message ?? "")}`, action: { label: "Details", run: () => useEditor.setState({ exportOpen: true }) } });
     if (job.status !== "failed") useCover.setState({ exportJob: null });
   }
-  if (job.id === s.modelsJob || job.id === s.pickJob || job.id === s.maskJob) void loadModels();
+  // Any download, also one an agent asked the user for, changes what is left.
+  if (job.kind === "vision-models" || job.id === s.pickJob || job.id === s.maskJob) void loadModels();
   if (job.id === s.modelsJob) {
     useCover.setState({ modelsJob: null, afterModels: null, ...(job.status === "failed" ? failure(job.message) : { failed: null }) });
     const then = s.afterModels;

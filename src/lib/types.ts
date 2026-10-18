@@ -862,6 +862,20 @@ export type MadeReel = {
   durationUs: number,
 };
 
+export type ModelKind = "speech" | "vision";
+
+/**
+ * What the user is asked, sent as `speech-model-question` or `vision-model-question`; null closes it.
+ */
+export type ModelQuestion = {
+  id: string,
+  kind: ModelKind,
+  /**
+   * What the download adds up to.
+   */
+  sizeMb: number,
+};
+
 export type MotionKind = "pushIn" | "pullOut" | "kenBurns";
 
 export type PlannedRecording = {
@@ -1164,17 +1178,6 @@ export type SpeechModel = {
   label: string,
   sizeMb: number,
   downloaded: boolean,
-};
-
-/**
- * What the dialog asks, sent as `speech-model-question`; null closes the dialog.
- */
-export type SpeechModelQuestion = {
-  id: string,
-  /**
-   * What the download adds up to.
-   */
-  sizeMb: number,
 };
 
 export type SpeechSetup = {

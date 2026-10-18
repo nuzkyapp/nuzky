@@ -18,6 +18,20 @@ pub fn huggingface(url: &str) -> String {
     format!("{}/{path}", test.as_deref().unwrap_or("https://huggingface.co"))
 }
 
+/// GitHub, where the face and person models come from, likewise; the loopback server gets the host as the first
+/// part of the path.
+pub fn github(url: &str) -> String {
+    let test = std::env::var("NUZKY_MODEL_URL").ok().filter(|url| url.starts_with("http://127.0.0.1:"));
+    let rest = url.strip_prefix("https://").filter(|rest| {
+        let host = rest.split('/').next().unwrap_or_default();
+        host == "github.com" || host.ends_with(".githubusercontent.com")
+    });
+    match (test, rest) {
+        (Some(test), Some(rest)) => format!("{test}/{rest}"),
+        _ => url.to_owned(),
+    }
+}
+
 /// `path` with `suffix` appended to its file name.
 fn sidecar(path: &Path, suffix: &str) -> PathBuf {
     let mut name = path.as_os_str().to_os_string();

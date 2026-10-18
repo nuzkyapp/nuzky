@@ -3,7 +3,7 @@ import { useShallow } from "zustand/react/shallow";
 import { api, errorText, plainError } from "./api";
 import { clipOffset, keyframeTolerance, transformAt, upsertKeyframe } from "./keyframes";
 import { US } from "./time";
-import type { Asset, Background, Clip, CopiedClip, Delivery, EditCmd, Filmstrip, JobEvent, Project, ProjectVersion, Snapshot, SpeechModelQuestion, TextStyle, TimeRange, Track, Transform, Transition, ZoomsApplied } from "./types";
+import type { Asset, Background, Clip, CopiedClip, Delivery, EditCmd, Filmstrip, JobEvent, Project, ProjectVersion, Snapshot, ModelQuestion, TextStyle, TimeRange, Track, Transform, Transition, ZoomsApplied } from "./types";
 import type { CaptionLook } from "./speech";
 
 export interface Toast {
@@ -68,7 +68,13 @@ interface EditorState {
   /** The launcher over the editor: recent projects, new ones and search. */
   launcherOpen: boolean;
   /** An agent needs the speech model and Nuzky asks whether to download it. */
-  speechModelQuestion: SpeechModelQuestion | null;
+  speechModelQuestion: ModelQuestion | null;
+  /** An agent needs the face and person models and Nuzky asks whether to download them. */
+  visionModelQuestion: ModelQuestion | null;
+  /** How many AI conversations are on screen; one asks for the face and person models instead of a dialog. */
+  aiChats: number;
+  /** The download of the face and person models the user agreed to for an agent. */
+  visionModelJob: string | null;
 
   /** `opened`: the snapshot of a project just opened, created or booted; others must belong to the open session. */
   setSnap: (snap: Snapshot, keepSelection?: boolean, opened?: boolean) => void;
@@ -400,6 +406,9 @@ export const useEditor = create<EditorState>((set, get) => ({
   view: "home",
   launcherOpen: false,
   speechModelQuestion: null,
+  visionModelQuestion: null,
+  aiChats: 0,
+  visionModelJob: null,
 
   setSnap: (snap, keepSelection = true, opened = false) => {
     const previous = get().snap;

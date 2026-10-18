@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export const SETUP_STEPS = ["captions", "ai"] as const;
+export const SETUP_STEPS = ["captions", "vision", "ai"] as const;
 export type SetupStep = (typeof SETUP_STEPS)[number];
 type StepState = "done" | "skipped";
 type Saved = { states: Partial<Record<SetupStep, StepState>>; current: SetupStep };

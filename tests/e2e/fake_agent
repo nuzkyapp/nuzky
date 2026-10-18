@@ -378,6 +378,29 @@ elif 'retakes' in message:
             raise RuntimeError(error)
     else:
         say('Bez přepisu můžu vystřihnout dlouhá ticha.')
+elif 'cover frames' in message:
+    # Asks twice, as an agent might after a refusal; the second must fail at once.
+    for attempt in range(1, 3):
+        started, error = time.monotonic(), None
+        try:
+            job = call('analyze', {'kind': 'thumbnail_frames'})
+            while (status := call('job', {'job_id': job['job_id'], 'action': 'get'}))['status'] == 'running':
+                time.sleep(0.3)
+            if status['status'] != 'done':
+                raise RuntimeError(status['error'])
+        except RuntimeError as failed:
+            error = str(failed)
+        with open(LOG / 'frames.jsonl', 'a') as f:
+            f.write(json.dumps({'attempt': attempt, 'ok': error is None, 'error': error,
+                                'seconds': time.monotonic() - started}) + '\n')
+        if error is None:
+            best = status['result']['candidates'][0]['time_us']
+            say(f'Nejlepší snímek je v {best / 1e6:.1f} s.')
+            break
+        if 'MODEL_DECLINED' not in error:
+            raise RuntimeError(error)
+    else:
+        say('Bez modelů vyberu snímek sám.')
 elif 'cut' in message:
     state = call('get_state', {})
     call('activity', {})

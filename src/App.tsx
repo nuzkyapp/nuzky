@@ -10,12 +10,12 @@ import { canRetrySpeech, retrySpeech, useSpeech } from "./lib/speech";
 import { reportBug } from "./lib/diagnostics";
 import { copySelection, currentEpoch, cutSelection, deleteSelection, deleteSide, duplicateSelection, openExport, pasteAttributes, pasteClips, projectDuration, runWasDiscarded, splitAtPlayhead, undoAction, useEditor } from "./lib/store";
 import { US, formatDuration } from "./lib/time";
-import type { JobEvent, ProjectSummary, Snapshot, SpeechModelQuestion, Transport } from "./lib/types";
+import type { JobEvent, ProjectSummary, Snapshot, ModelQuestion, Transport } from "./lib/types";
 import { ChatGptDialog } from "./components/ChatGptDialog";
 import { ConnectAgentDialog } from "./components/ConnectAgentDialog";
 import { SetupDialog } from "./components/setup/SetupDialog";
 import { ExportDialog } from "./components/ExportDialog";
-import { SpeechModelDialog } from "./components/SpeechModelDialog";
+import { AGENT_VISION_MODELS, ModelQuestionDialog } from "./components/ModelQuestionDialog";
 import { Inspector } from "./components/inspector/Inspector";
 import { LeftPanel } from "./components/panel/LeftPanel";
 import { MEDIA_EXTENSIONS, dropResolver, importPaths, pickAndImport } from "./components/panel/assets";
@@ -39,7 +39,7 @@ import { checkForUpdates, startUpdates, useUpdates } from "./lib/updates";
 import { useSounds } from "./lib/sounds";
 import { useStickers } from "./lib/stickers";
 import { addProjects, findDrafts, listenStyle, loadStyle, useStyle } from "./lib/style";
-import { closeCover, deleteText, exportCover, onCoverJob, useCover } from "./lib/cover";
+import { closeCover, deleteText, exportCover, loadModels as loadVisionModels, onCoverJob, useCover } from "./lib/cover";
 import { candidateOf, closeReels, onReelsJob, openReelsToFind, playEnding, toggleReelPlay, useReels } from "./lib/reels";
 import { ReelList } from "./components/reels/ReelList";
 import { appWindow, toggleFullPreview, toggleMuted, usePreview } from "./lib/preview";
@@ -243,6 +243,16 @@ function onJob(job: JobEvent) {
       text: `${job.label} failed: ${plainError(job.message ?? "")}`,
       action: { label: "Try again", run: () => api.startVisionModels(false, "background").catch((e) => toast({ kind: "error", text: plainError(errorText(e)) })) },
     });
+  // Get set up and the cover editor show their own download's failure while they are on screen.
+  if (job.kind === "vision-models" && job.label === "Cover models" && job.status === "failed" && !(setup.open && setup.current === "vision") && !useCover.getState().open)
+    toast({ kind: "error", text: `Face and person models failed: ${plainError(job.message ?? "")}`, action: { label: "Get set up", run: () => (useSetup.getState().showStep("vision"), useSetup.getState().openSetup()) } });
+  // The AI went on without them; Get set up downloads them later.
+  if (job.kind === "vision-models" && job.label === AGENT_VISION_MODELS && job.status === "failed")
+    toast({
+      kind: "error",
+      text: `Face and person models failed: ${plainError(job.message ?? "")}`,
+      action: { label: "Get set up", run: () => (useSetup.getState().showStep("vision"), useSetup.getState().openSetup()) },
+    });
   // A cover shows the background once the person behind whom it goes is found.
   if (job.kind === "matte" && job.status === "done") useCover.setState((s) => ({ masks: s.masks + 1 }));
   // The dialog shows the result itself; with it closed, a toast reports it.
@@ -267,7 +277,10 @@ function useBackendEvents() {
       }),
     );
     offs.push(listen<JobEvent>("job", (e) => onJob(e.payload)));
-    offs.push(listen<SpeechModelQuestion | null>("speech-model-question", (e) => useEditor.setState({ speechModelQuestion: e.payload })));
+    offs.push(listen<ModelQuestion | null>("speech-model-question", (e) => useEditor.setState({ speechModelQuestion: e.payload })));
+    offs.push(listen<ModelQuestion | null>("vision-model-question", (e) => useEditor.setState({ visionModelQuestion: e.payload })));
+    // Whether Get set up still offers the face and person models.
+    void loadVisionModels();
     const offStyle = listenStyle();
     void loadStyle();
     offs.push(listen("transcripts-changed", () => useSpeech.setState((s) => ({ stored: s.stored + 1 }))));
@@ -636,7 +649,8 @@ export default function App() {
       <ChatGptDialog />
       {learnOpen && <LearnDialog />}
       <SwitchDialog />
-      <SpeechModelDialog />
+      <ModelQuestionDialog kind="speech" />
+      <ModelQuestionDialog kind="vision" />
       <OpenedDraftDialog />
       {/* On the home screen they sit at the grid's left edge, clear of the sidebar; in the editor, clear of a panel docked left. */}
       <Toasts bottom={home ? 18 : panes.timeline + 18} left={home ? 268 : dock.open && dock.mode === "left" ? dock.width + 24 : 18} />

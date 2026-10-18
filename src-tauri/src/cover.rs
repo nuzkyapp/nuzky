@@ -279,9 +279,13 @@ pub fn download_models(
     let mut before = 0;
     for model in &missing {
         let integrity = nuzky_mcp::model_download::Integrity { size: model.size, sha256: model.sha256 };
-        nuzky_mcp::model_download::download(model.url, &model.path(&dir), integrity, cancel, |part| {
-            rep.progress((before as f32 + part * model.size as f32) / total, Some(phase))
-        })?;
+        nuzky_mcp::model_download::download(
+            &nuzky_mcp::model_download::github(model.url),
+            &model.path(&dir),
+            integrity,
+            cancel,
+            |part| rep.progress((before as f32 + part * model.size as f32) / total, Some(phase)),
+        )?;
         before += model.size;
     }
     Ok(())

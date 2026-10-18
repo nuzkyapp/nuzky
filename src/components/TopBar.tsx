@@ -8,10 +8,11 @@ import { useReels } from "../lib/reels";
 import { useStyle } from "../lib/style";
 import { when } from "../lib/time";
 import { AI_EDITING, openExport, projectDuration, restoreVersion, stopAiRun, useAiLocked, useEditor, whenIdle } from "../lib/store";
-import type { ProjectVersion } from "../lib/types";
+import type { JobEvent, ProjectVersion } from "../lib/types";
 import { Button, IconButton, Menu, ProgressBar } from "./ui";
 import { UpdateButton } from "./Updates";
 import { FeedbackButton } from "./Feedback";
+import { AGENT_VISION_MODELS } from "./ModelQuestionDialog";
 
 function SaveStatus() {
   const saveState = useEditor((s) => s.saveState);
@@ -88,9 +89,11 @@ export function JobIndicator() {
   const jobs = useEditor((s) => s.jobs);
   const running = Object.values(jobs).filter((j) => j.status === "running");
   if (running.length === 0) return null;
+  // The face and person models an agent asked for; the cover editor's own downloads open it.
+  const asked = (x: JobEvent) => x.kind === "vision-models" && x.label === AGENT_VISION_MODELS;
   const j =
     // Its Stop is here (and in Get set up for the download it started); an export and recognition have theirs in their dialog and tab.
-    running.find((x) => x.kind === "speech-model") ??
+    running.find((x) => x.kind === "speech-model" || asked(x)) ??
     running.find((x) => x.kind === "export") ??
     running.find((x) => x.kind === "captions" || x.kind === "transcript") ??
     // Ahead of the audio prepared beside them, so their Stop is there.
@@ -127,15 +130,17 @@ export function JobIndicator() {
         </Button>
       </span>
     );
-  if (j.kind === "speech-model")
+  if (j.kind === "speech-model" || asked(j)) {
+    const stop = j.kind === "speech-model" ? "Stop downloading the speech model" : "Stop downloading the face and person models";
     return (
       <span className="bar flex h-8 items-center gap-1.5 rounded-full pl-3 pr-1 text-[12px] font-medium text-fg" role="status">
         {body}
-        <Button pill className="h-6 shrink-0 px-2.5 text-[12px]" aria-label="Stop downloading the speech model" title="Stop downloading the speech model" onClick={() => void api.cancelJob(j.id)}>
+        <Button pill className="h-6 shrink-0 px-2.5 text-[12px]" aria-label={stop} title={stop} onClick={() => void api.cancelJob(j.id)}>
           Stop
         </Button>
       </span>
     );
+  }
   // A cover export reopens the Export dialog; picking frames, masks and model downloads open the cover editor.
   const coverExport = j.id.startsWith("cover-export:");
   const cover = (j.kind === "cover" && !coverExport) || j.kind === "vision-models";

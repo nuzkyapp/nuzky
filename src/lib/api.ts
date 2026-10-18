@@ -130,7 +130,7 @@ export const api = {
   /** Downloads everything the first transcript of `language` with `model` needs, as the `speech-model:setup` job; refused with NO_SPACE when it does not fit. */
   startSpeechSetup: (model: string, language: string) => invoke<string>("start_speech_setup", { model, language }),
   /** Download starts the speech model download an agent waits for; false tells the agent the user said not now. */
-  answerSpeechModel: (id: string, download: boolean) => invoke<void>("answer_speech_model", { id, download }),
+  answerModelQuestion: (id: string, download: boolean) => invoke<void>("answer_model_question", { id, download }),
   /** Whether the face and person models covers need, or with "background" the person model of clip backgrounds,
    * can run here, are installed and what is left to download. */
   visionModels: (set?: "background") => invoke<VisionModels>("vision_models", { set }),
