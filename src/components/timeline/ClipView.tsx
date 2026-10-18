@@ -146,7 +146,7 @@ export const ClipView = memo(function ClipView({
     >
       {strip && c.type === "media" && <FilmstripTiles strip={strip} sourceInUs={c.sourceInUs} speed={speed} zoom={zoom} width={width} height={innerH} visible={local} />}
       {sound && asset && c.type === "media" && (
-        <Waveform assetId={asset.id} sourceInUs={c.sourceInUs} durationUs={durationUs} speed={speed} width={width} visible={local} color="#30d158" />
+        <Waveform assetId={asset.id} sourceInUs={c.sourceInUs} durationUs={durationUs} speed={speed} width={width} visible={local} color="#5fd497" className="absolute top-[5px] h-[calc(100%-8px)]" />
       )}
       {(fadeIn > 0 || fadeOut > 0) && (
         // The fades as ramps over the waveform: the shaded corner above the line is how much quieter the sound plays there.
@@ -167,7 +167,7 @@ export const ClipView = memo(function ClipView({
       )}
       {soundStrip && (
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-3.5 bg-black/55">
-          <Waveform assetId={asset.id} sourceInUs={c.sourceInUs} durationUs={durationUs} speed={speed} width={width} visible={local} color="#7ee2a8" className="absolute inset-y-0 h-full" />
+          <Waveform assetId={asset.id} sourceInUs={c.sourceInUs} durationUs={durationUs} speed={speed} width={width} visible={local} color="#7ee2a8" />
         </div>
       )}
 
@@ -182,13 +182,13 @@ export const ClipView = memo(function ClipView({
         // Over pictures and waveforms the name sits in a dark chip, readable over bright footage. A plain fill, not a blur: there is one per clip.
         // On sound it sits at the bottom, clear of the fade dots in the top corners.
         <div className={`pointer-events-none absolute inset-x-0 ${sound ? "bottom-1" : "top-1"} flex items-center gap-1 px-2.5 text-[11px] font-medium text-fg`}>
-          <span className="flex h-[17px] min-w-0 items-center gap-1 rounded-[5px] bg-black/60 pl-[5px] pr-1.5">
+          <span className={`flex h-[17px] min-w-0 items-center gap-1 rounded-[5px] ${sound ? "bg-black/80" : "bg-black/60"} pl-[5px] pr-1.5`}>
             <Icon size={11} className="shrink-0" />
             <span className="truncate">{label}</span>
             {width > 110 && <span className="tabular shrink-0 pl-0.5 font-normal text-fg/80">{formatDuration(durationUs)}</span>}
           </span>
           {speed !== 1 && width > 40 && (
-            <span className="tabular ml-auto flex h-[17px] shrink-0 items-center gap-0.5 rounded-[5px] bg-black/60 px-1 font-semibold">
+            <span className={`tabular ml-auto flex h-[17px] shrink-0 items-center gap-0.5 rounded-[5px] ${sound ? "bg-black/80" : "bg-black/60"} px-1 font-semibold`}>
               <Gauge size={11} />
               {Number(speed.toFixed(2))}x
             </span>

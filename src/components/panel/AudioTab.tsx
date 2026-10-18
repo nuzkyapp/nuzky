@@ -36,7 +36,7 @@ function AudioItem({ asset }: { asset: Asset }) {
           {job?.status === "running" ? (
             <ProgressBar value={job.progress} label={job.label} className="mt-1" />
           ) : (
-            <Waveform assetId={asset.id} sourceInUs={0} durationUs={asset.durationUs} speed={1} width={180} color="#5fd3a5" className="h-full" />
+            <Waveform assetId={asset.id} sourceInUs={0} durationUs={asset.durationUs} speed={1} width={180} color="#5fd497" className="h-full" />
           )}
         </div>
       </div>

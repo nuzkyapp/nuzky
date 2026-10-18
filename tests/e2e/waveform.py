@@ -11,35 +11,38 @@ from e2e.harness import APP, FIXTURES, MACOS, flow, wait, webdriver
 
 SOURCE = FIXTURES / 'hour.m4a'
 RATE, PER_SECOND = 48_000, 50
+# Waveform.tsx: a bar every PITCH px, its height RANGE_DB under full scale.
+PITCH, RANGE_DB = 3, 42
 BUCKET = RATE // PER_SECOND
 HEADER_W = 140
 # The first screen (about 20 s of sound) decodes in a few milliseconds, and the timeline asks again every 250 ms
 # while what it shows is still being decoded. 1 s leaves room for a slow machine; the whole hour takes 1.5 to 3 s.
 FIRST_WAVEFORM_S = 1.0
 
-# For each waveform canvas of the clip: its pixel columns on screen, what each one shows (the bar height) and
-# which stretch of the clip it stands for.
+# For each waveform canvas of the clip: its bar slots on screen (one every PITCH px from the clip's start), how high
+# the bar rises from the bottom edge in device pixels and how much is drawn in the gap after it.
 BARS = """const clip = document.querySelector(`[data-clip-id='${arguments[0]}']`);
 if (!clip) return null;
 const scroller = clip.closest('.overflow-auto');
 const lane = scroller.getBoundingClientRect();
 const box = clip.getBoundingClientRect();
 const from = Math.max(lane.left + arguments[1], box.left), to = Math.min(lane.right, box.right);
-const columns = [];
+const bars = [];
 for (const canvas of clip.querySelectorAll('canvas')) {
   const rect = canvas.getBoundingClientRect();
   if (!canvas.width || !rect.width) continue;
   const scale = rect.width / canvas.width;
   const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
-  for (let x = 0; x < canvas.width; x++) {
-    const centre = rect.left + (x + 0.5) * scale;
-    if (centre < from || centre >= to) continue;
-    let bar = 0;
-    for (let y = 0; y < canvas.height; y++) if (pixels[(y * canvas.width + x) * 4 + 3] > 0) bar++;
-    columns.push({local: rect.left - box.left + x * scale, scale, bar, height: canvas.height});
+  const alpha = (x, y) => pixels[(y * canvas.width + x) * 4 + 3];
+  const rising = (x) => { let n = 0; while (n < canvas.height && alpha(x, canvas.height - 1 - n) > 0) n++; return n; };
+  const drawn = (x) => { let n = 0; for (let y = 0; y < canvas.height; y++) if (alpha(x, y) > 0) n++; return n; };
+  const offset = Math.round(rect.left - box.left);
+  for (let local = Math.ceil(offset / 3) * 3; local + 3 <= offset + rect.width; local += 3) {
+    if (box.left + local + 1 < from || box.left + local + 3 > to) continue;
+    bars.push({local, bar: rising(Math.floor((local + 1 - offset) / scale)), gap: drawn(Math.floor((local + 2.5 - offset) / scale)), height: canvas.height});
   }
 }
-return {columns, width: box.width, lane: to - from};"""
+return {bars, width: box.width, lane: to - from, dpr: window.devicePixelRatio || 1};"""
 
 CLIP = """const st = window.__nuzky.store.getState();
 for (const t of st.snap.project.tracks) for (const c of t.clips)
@@ -70,13 +73,21 @@ def compare(seen, clip, peaks_from, peaks):
     span = clip['durationUs'] * clip['speed'] / 1e6 * PER_SECOND
     width = seen['width']
     wrong, worst = 0, 0
-    for column in seen['columns']:
-        a = int(np.floor(first + column['local'] / width * span))
-        b = max(a + 1, int(np.floor(first + (column['local'] + column['scale']) / width * span)))
-        window = peaks[a - peaks_from:b - peaks_from]
-        if a < peaks_from or len(window) < b - a:
-            raise RuntimeError(f'the reference does not cover peaks {a}..{b}')
-        expected = max(1, round(np.sqrt(int(window.max()) / 255) * column['height']))
+    for column in seen['bars']:
+        a = first + column['local'] / width * span
+        b = min(first + span, first + (column['local'] + PITCH) / width * span)
+        if b - a < 1:
+            x = max(0.0, (a + b) / 2 - 0.5)
+            lo = int(np.floor(x))
+            hi = lo + 2
+        else:
+            lo, hi = int(np.floor(a)), int(np.floor(b))
+        if lo < peaks_from or hi - peaks_from > len(peaks):
+            raise RuntimeError(f'the reference does not cover peaks {lo}..{hi}')
+        window = peaks[lo - peaks_from:hi - peaks_from].astype(float)
+        peak = window[0] + (window[1] - window[0]) * (x - lo) if b - a < 1 else window.max()
+        level = max(0.0, 1 + 20 * np.log10(peak / 255) / RANGE_DB) if peak > 0 else 0.0
+        expected = max(int(np.floor(seen['dpr'] + 0.5)), int(np.floor(level * column['height'] + 0.5)))
         worst = max(worst, abs(column['bar'] - expected))
         wrong += column['bar'] != expected
     return wrong, worst
@@ -147,20 +158,23 @@ def scroll(r, clip_id, left):
 
 def visible_bars(r, clip_id):
     seen = r.s.run(BARS, clip_id, HEADER_W)
-    # Every pixel column of the clip on screen has its bar: blocks still missing leave columns empty.
-    if not seen or not seen['columns']:
+    # Every bar slot of the clip on screen has its bar: blocks still missing leave bars out.
+    if not seen or not seen['bars']:
         return None
-    covered = sum(c['scale'] for c in seen['columns'])
-    return seen if covered >= seen['lane'] - max(c['scale'] for c in seen['columns']) - 1 and all(
-        c['bar'] > 0 for c in seen['columns']) else None
+    return seen if len(seen['bars']) * PITCH >= seen['lane'] - 2 * PITCH and all(c['bar'] > 0 for c in seen['bars']) else None
 
 
 def check_against_reference(r, name, seen, clip, start_s):
-    seconds = int(seen['lane'] / r.s.run('return window.__nuzky.store.getState().zoom')) + 4
+    zoom = r.s.run('return window.__nuzky.store.getState().zoom')
+    # The clip's width as ClipView gives it to the waveform, not its laid-out box, which rounds.
+    seen = dict(seen, width=max(2, clip['durationUs'] / 1e6 * zoom - 2))
+    seconds = int(seen['lane'] / zoom) + 4
     peaks_from, peaks = reference(start_s, seconds)
     wrong, worst = compare(seen, clip, peaks_from, peaks)
-    r.check(f'{name}: all {len(seen["columns"])} bars on screen match the whole-file decode',
+    r.check(f'{name}: all {len(seen["bars"])} bars on screen match the whole-file decode, rising from the bottom edge',
             wrong == 0, {'wrong': wrong, 'largest difference px': worst})
+    joined = sum(c['gap'] > 0 for c in seen['bars'])
+    r.check(f'{name}: every bar stands apart from the next one', joined == 0, {'bars touching the next': joined})
 
 
 @flow('waveform', 'One-hour recording: the waveform on screen shows while the sound is prepared and matches FFmpeg')
@@ -224,6 +238,16 @@ def waveform(r):
     r.check('back at the start, its waveform draws again', again)
     if again:
         check_against_reference(r, 'the start again, zoomed out', again, clip, 0)
+
+    # Zoomed in past a peak per bar, each bar blends the two peaks around its middle instead of repeating one.
+    r.s.run("window.__nuzky.store.getState().setZoom(600)")
+    wait(lambda: r.s.run('return window.__nuzky.store.getState().zoom') == 600, 5)
+    close = wait(lambda: visible_bars(r, clip['id']), 10, 0.05)
+    r.shot('3b-start-zoomed-in')
+    if r.check('zoomed in, the waveform at the start draws', close):
+        check_against_reference(r, 'the start zoomed in, bars blending between peaks', close, clip, 0)
+    r.s.run("window.__nuzky.store.getState().setZoom(4)")
+    wait(lambda: r.s.run('return window.__nuzky.store.getState().zoom') == 4, 5)
 
     # The Audio tab's overview of the whole hour loads all its blocks and fits its row; closing it lets the store
     # drop the blocks past the cap without waiting for another block to arrive.
