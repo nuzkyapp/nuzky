@@ -658,17 +658,78 @@ fn hlg_and_pq_sources_are_tone_mapped_like_libplacebo() {
         let theirs: Vec<_> = (0..PATCHES.len()).map(|i| patch(&reference, i)).collect();
         eprintln!("QA HDR {transfer}: Nuzky {ours:.0?}\n  libplacebo {theirs:.0?}");
         // The old curve showed the 75 % grey at 246 and the wall at (255, 235, 198) against libplacebo's
-        // 179 and (221, 203, 172). Saturated red is left out: libplacebo also remaps the gamut.
-        for i in 0..7 {
+        // 179 and (221, 203, 172).
+        for i in 0..5 {
             let off = (0..3).map(|c| (ours[i][c] - theirs[i][c]).abs()).fold(0.0, f64::max);
             assert!(off <= 12.0, "{transfer} patch {i}: Nuzky {:?}, libplacebo {:?}", ours[i], theirs[i]);
         }
+        // Skin and the wall keep libplacebo's hue but come out darker. libplacebo maps luminance, which
+        // clipped the red of 12 % of a lit face in an iPhone clip; Nuzky maps the brightest channel. Apple's
+        // AVFoundation shows these patches darker still, at (132, 103, 94) and (198, 180, 150).
+        for i in [5, 6] {
+            let (o, t) = (ours[i], theirs[i]);
+            let hue = (1..3).map(|c| (o[c] / o[0] - t[c] / t[0]).abs()).fold(0.0, f64::max);
+            assert!(
+                o[0] <= t[0] + 4.0 && o[0] >= t[0] - 20.0 && hue <= 0.04,
+                "{transfer} patch {i}: Nuzky {o:?}, libplacebo {t:?}"
+            );
+        }
         // Highlights above reference white keep their steps instead of all clipping to white.
         assert!(ours[4][1] - ours[3][1] > 20.0, "{transfer}: highlights {:?} {:?}", ours[3], ours[4]);
-        // Shown untouched, the red is (179, 77, 64).
+        // Shown untouched, the red is (179, 77, 64); Apple shows it at (178, 26, 41). It is left out of the
+        // comparison because libplacebo also remaps the gamut.
         let red = ours[7];
-        assert!(red[0] > 175.0 && red[1] < 60.0, "{transfer}: red {red:?}");
+        assert!(red[0] > 160.0 && red[1] < 60.0, "{transfer}: red {red:?}");
     }
+}
+
+#[test]
+fn lit_skin_from_a_phone_keeps_its_shades() {
+    if !available() {
+        return;
+    }
+    let encoders =
+        String::from_utf8_lossy(&run(Command::new("ffmpeg").args(["-hide_banner", "-encoders"])).stdout).into_owned();
+    if !encoders.contains("libx265") {
+        eprintln!("SKIP: ffmpeg without libx265");
+        return;
+    }
+    // HLG skin of an iPhone clip lit by a window, from the face's median to the brightest spot on the
+    // forehead. Its red used to reach SDR white from the middle of this ramp on, so foreheads and cheeks
+    // showed as flat orange patches.
+    const MEDIAN: [f64; 3] = [0.71, 0.60, 0.51];
+    const LIT: [f64; 3] = [0.94, 0.89, 0.82];
+    const STEPS: usize = 8;
+    let d = dir("hdr-skin");
+    let source = d.join("skin.ppm");
+    let mut ppm = format!("P6\n{} 40\n65535\n", STEPS * 40).into_bytes();
+    for _ in 0..40 {
+        for x in 0..STEPS * 40 {
+            let t = (x / 40) as f64 / (STEPS - 1) as f64;
+            ppm.extend(
+                (0..3).flat_map(|c| (((MEDIAN[c] + (LIT[c] - MEDIAN[c]) * t) * 65535.0).round() as u16).to_be_bytes()),
+            );
+        }
+    }
+    std::fs::write(&source, ppm).unwrap();
+    let path = d.join("skin.mp4");
+    let yuv = "scale=in_range=pc:out_color_matrix=bt2020nc:out_range=tv,format=yuv420p10le";
+    let x265 = "pools=1:frame-threads=1:log-level=error:crf=4:colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc:range=limited";
+    ff(&["-i", source.to_str().unwrap(), "-vf", yuv, "-c:v", "libx265", "-x265-params", x265, "-frames:v", "1"], &path);
+    let width = STEPS * 40;
+    let frame =
+        Renderer::new().unwrap().render(&project(&path, 200_000), 0, width as u32, 40, Wait::Exact, false).unwrap();
+    let frame = &frame[..];
+    let reds: Vec<f64> = (0..STEPS)
+        .map(|i| {
+            let pixels: Vec<f64> = (10..30)
+                .flat_map(|y| (i * 40 + 10..i * 40 + 30).map(move |x| frame[(y * width + x) * 4] as f64))
+                .collect();
+            pixels.iter().sum::<f64>() / pixels.len() as f64
+        })
+        .collect();
+    eprintln!("QA HDR lit skin red: {reds:.0?}");
+    assert!(reds.windows(2).all(|w| w[1] - w[0] >= 2.0) && reds[STEPS - 1] < 248.0, "red of lit skin: {reds:?}");
 }
 
 /// Black where the frame shows nothing; the gradient below is never black.

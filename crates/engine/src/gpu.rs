@@ -99,8 +99,11 @@ fn tone_map_nits(nits: f32) -> f32 {
 
 // PQ or HLG BT.2020 colour to SDR BT.709. The curve compresses the whole range instead of keeping
 // everything up to HDR reference white (203 nits) and clipping above it: phone HLG puts walls and
-// faces above reference white, which then washed out. Luminance is mapped and the colour scaled
-// with it to keep hue and saturation; the result is encoded for a BT.1886 display like SDR video.
+// faces above reference white, which then washed out. The curve maps the brightest BT.709 channel and
+// the colour is scaled with it, keeping hue and saturation. Mapping luminance instead, as libplacebo
+// does, left the red of lit skin above SDR white, and clipping it turned foreheads and cheeks into flat
+// orange patches. Greys come out the same either way. The result is encoded for a BT.1886 display like
+// SDR video.
 fn hdr_to_sdr(rgb: vec3<f32>, transfer: f32) -> vec3<f32> {
     let e = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
     var nits: vec3<f32>;
@@ -111,9 +114,9 @@ fn hdr_to_sdr(rgb: vec3<f32>, transfer: f32) -> vec3<f32> {
         // HLG's OOTF on a 1000 nit display (system gamma 1.2).
         nits = 1000.0 * pow(dot(scene, BT2020_LUMA), 0.2) * scene;
     }
-    let luma = dot(nits, BT2020_LUMA);
-    let mapped = nits * (tone_map_nits(luma) / max(luma, 1e-6));
-    let sdr = clamp(BT2020_TO_BT709 * (mapped / SDR_WHITE_NITS), vec3<f32>(0.0), vec3<f32>(1.0));
+    let bt709 = BT2020_TO_BT709 * nits;
+    let peak = max(max(bt709.r, bt709.g), max(bt709.b, 1e-6));
+    let sdr = clamp(bt709 * (tone_map_nits(peak) / peak / SDR_WHITE_NITS), vec3<f32>(0.0), vec3<f32>(1.0));
     return pow(sdr, vec3<f32>(1.0 / 2.4));
 }
 
