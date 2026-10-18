@@ -339,7 +339,13 @@ def youtube_outdated(r):
         r.check('the installed yt-dlp looks the song up',
                 wait(lambda: r.s.run('return !!document.querySelector(arguments[0])', forbidden), 10))
         before = r.s.run(PROJECT)
-        r.s.run(CLICK, forbidden + ' button[aria-label^=Add]')
+        r.seek(1_000_000)
+        wait(lambda: r.s.run('return window.__nuzky.store.getState().timeUs') == 1_000_000, 5)
+        # A double click on the row plays and adds at once, so both downloads fail.
+        r.s.run("""const row = document.querySelector(arguments[0]);
+row.dispatchEvent(new MouseEvent('click', {bubbles: true, detail: 1}));
+row.dispatchEvent(new MouseEvent('click', {bubbles: true, detail: 2}));
+row.dispatchEvent(new MouseEvent('dblclick', {bubbles: true, detail: 2}));""", forbidden)
         offer = wait(lambda: (text := alert(r)) and 'out of date' in text and text, 10) or ''
         r.check('a download the installed yt-dlp fails offers Download yt-dlp in place of the row, without a code',
                 "couldn't get this song, probably because it's out of date" in offer
@@ -350,18 +356,20 @@ def youtube_outdated(r):
                 r.s.run(PROJECT) == before and r.releases.requests == [] and not r.errors(), r.errors())
         r.shot('outdated-ytdlp-offer')
 
+        r.seek(3_000_000)
+        wait(lambda: r.s.run('return window.__nuzky.store.getState().timeUs') == 3_000_000, 5)
         r.s.run(CLICK, '[role=alert] button')
         added = wait(lambda: any(a['name'] == 'Old Song' for a in r.state()['assets']), 15)
         project = r.s.run(PROJECT)
         asset = next((a for a in project['assets'] if a['name'] == 'Old Song'), None)
         placed = [c for t in project['tracks'] for c in t['clips'] if asset and c['content'].get('assetId') == asset['id']]
-        r.check('after Download yt-dlp the song is added by itself, once, without another click',
-                added and len(placed) == 1 and asset['kind'] == 'audio'
+        r.check('after Download yt-dlp the double-clicked song is added by itself, once, where it was asked',
+                added and len(placed) == 1 and asset['kind'] == 'audio' and placed[0]['startUs'] == 1_000_000
                 and Path(asset['path']).read_bytes() == (r.work / 'tone.m4a').read_bytes(), placed)
         own = r.work / 'data/nuzky/tools/yt-dlp'
         downloads = [args for args in invocations(r) if '-o' in args]
         r.check("Nuzky's own copy came from the release server and did the second download",
-                r.releases.requests == ['/latest', '/' + r.release] and own.read_bytes() == r.tool and len(downloads) == 2,
+                r.releases.requests == ['/latest', '/' + r.release] and own.read_bytes() == r.tool and len(downloads) >= 2,
                 (r.releases.requests, len(downloads)))
         r.shot('song-added-after-download')
         r.check('no error toasts', not r.errors(), r.errors())
