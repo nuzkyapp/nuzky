@@ -146,7 +146,7 @@ export function Timeline({ height }: { height: number }) {
   const project = snap0?.project;
   const selection = useEditor((s) => s.selection);
   const cut = useEditor((s) => s.cut);
-  // A boolean, so playback re-renders the timeline only when it changes.
+  // A string or null, so playback re-renders the timeline only when it changes.
   const splitBlocked = useEditor((s) => (s.snap ? splitBlocker(s.snap.project, s.selection, s.timeUs) : "move the playhead over a clip"));
   const zoom = useEditor((s) => s.zoom);
   // Media dragged from the panel, or files dragged in from the desktop.

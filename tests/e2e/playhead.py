@@ -1,3 +1,5 @@
+import time as clock
+
 from e2e.harness import FIXTURES, flow, wait
 
 TIME = 'return window.__nuzky.store.getState().timeUs'
@@ -29,8 +31,12 @@ def playhead(r):
     r.check('a caption is added between two frames', added['ok'] and caption and caption['startUs'] == caption_at, caption)
     r.s.run(CALM)
     time = lambda: r.s.run(TIME)
-    # The engine echoes every seek back a moment later, so a check waits for the time to settle on what it expects.
-    settles = lambda ok: wait(lambda: ok(time()), 5)
+    # The engine echoes every seek back a moment later, so a check waits for the time it expects and for it to stay.
+    def settles(ok):
+        if not wait(lambda: ok(time()), 5):
+            return False
+        clock.sleep(0.3)
+        return ok(time())
 
     between = 512_345
     r.seek(between)
@@ -68,3 +74,19 @@ def playhead(r):
     r.check('Q less than a frame from the edge says to move a frame away',
             said == ["Move the playhead at least a frame away from the clip's edge to delete one side of it."], r.state()['toasts'])
     r.check('and changes nothing', r.track()[0] == cut, r.track())
+
+    # A video that ends between two frames: → stops on its last frame, ↓ and End reach the end itself.
+    end_at = cut['durationUs'] + 5_000
+    r.s.call(ADD_CAPTION, end_at)
+    end = wait(lambda: max(c['startUs'] + c['durationUs'] for t in r.state()['tracks'] for c in t['clips']) == end_at + 3_000_000 and end_at + 3_000_000)
+    r.s.run(CALM)
+    last = max(f for f in [round(i * 1_000_000 / fps) for i in range(30 * fps)] if f <= end)
+    r.check('the video ends between two frames', end and end != last, (end, last))
+    r.key('End')
+    r.check('End goes to the very end', settles(lambda t: t == end), time())
+    r.key('ArrowRight')
+    r.check('→ at the end stays there', settles(lambda t: t == end), time())
+    r.key('ArrowLeft')
+    r.check('← from the end lands on the last frame', settles(lambda t: t == last), time())
+    r.key('ArrowRight')
+    r.check('→ from the last frame does not leave the frames', settles(lambda t: t == last), time())

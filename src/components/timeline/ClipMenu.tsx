@@ -41,6 +41,7 @@ export function ClipMenu({ at, onClose }: { at: MenuAt; onClose: () => void }) {
   const locked = useAiLocked();
   const clipboard = useEditor((s) => s.clipboard);
   const splittable = useEditor((s) => picked.filter((c) => canSplitClip(c, s.timeUs, project.canvas.fps)).length);
+  const atEdge = useEditor((s) => picked.some((c) => s.timeUs >= c.startUs && s.timeUs <= c.startUs + c.durationUs));
 
   // Focus goes back where it was when the menu opened, unless an action moved it elsewhere.
   const [opener] = useState(() => document.activeElement as HTMLElement | null);
@@ -120,7 +121,15 @@ export function ClipMenu({ at, onClose }: { at: MenuAt; onClose: () => void }) {
         label={n === 1 || splittable === 0 ? "Split at playhead" : splittable === n ? `Split ${n} clips` : `Split ${splittable} of ${n} clips at playhead`}
         shortcut="S"
         disabled={locked || splittable === 0}
-        reason={locked ? AI_EDITING : n === 1 ? "Move the playhead over this clip to split it" : "Move the playhead over the selected clips to split them"}
+        reason={
+          locked
+            ? AI_EDITING
+            : atEdge
+              ? "Move the playhead at least a frame away from the clip's edge to split it"
+              : n === 1
+                ? "Move the playhead over this clip to split it"
+                : "Move the playhead over the selected clips to split them"
+        }
         onSelect={run(splitAtPlayhead)}
       />
       <Item icon={<Copy size={14} />} label={many("Duplicate", "Duplicate")} shortcut="Ctrl+D" disabled={locked} reason={AI_EDITING} onSelect={run(duplicateSelection)} />

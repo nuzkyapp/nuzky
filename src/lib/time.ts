@@ -13,6 +13,9 @@ export function stepFrame(us: number, dir: 1 | -1, fps: number): number {
   return frameTime(index, fps);
 }
 
+/** The start of the last frame not past `endUs`, so the playhead stays on a frame at the video's end. */
+export const lastFrame = (endUs: number, fps: number) => stepFrame(endUs + 1, -1, fps);
+
 /** 00:12.40 style timecode; hours appear only when needed. */
 export function formatTime(us: number, withFraction = true): string {
   const total = Math.max(0, us) / US;
