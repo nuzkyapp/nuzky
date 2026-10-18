@@ -104,26 +104,28 @@ def youtube(r):
     # The notice changes no project, so it answers while an agent's run locks the editor.
     bridge = Bridge(r, r.saved_project())
     run = bridge.call('begin_run', {'label': 'Rough cut'})
-    r.check('an agent run locks the editor', wait(lambda: r.state()['aiRun'], 10))
-    paste(r, f'https://music.youtube.com/watch?v={SONG}&si=test')
-    r.check('pasting first opens the rights notice with Cancel and I understand',
-            wait(lambda: dialog(r), 5) and r.s.run("return document.querySelector(arguments[0]).innerText.includes('Music from YouTube is yours to clear') && [...document.querySelectorAll(arguments[0] + ' button')].map((b) => b.textContent).join('|') === 'Cancel|I understand'", DIALOG))
-    r.check('yt-dlp has not run before the notice is answered', invocations(r) == [], invocations(r))
-    r.check('the notice buttons are not locked by the agent run',
-            r.s.run("return [...document.querySelectorAll(arguments[0] + ' button')].every((b) => !b.hasAttribute('aria-disabled'))", DIALOG))
-    time.sleep(0.4)
-    r.shot('rights-dialog')
-    answer(r, 'Cancel')
-    r.check('Cancel closes the notice without looking up or adding anything',
-            wait(lambda: not dialog(r), 5) and invocations(r) == [] and len(r.state()['assets']) == 1)
-    paste(r, f'https://youtu.be/{SONG}?si=test')
-    r.check('pasting after Cancel asks again and still runs nothing', wait(lambda: dialog(r), 5) and invocations(r) == [])
-    answer(r, 'I understand')
-    row = wait(lambda: r.s.run('return document.querySelector(arguments[0])?.innerText ?? ""', ROW), 10) or ''
-    r.check('the song row has its title, artist, YouTube and duration',
-            all(text in row for text in ('Steady Song', 'Test Artist · YouTube', '20.0 s')), row)
-    bridge.call('end_run', {'run_id': run['run_id'], 'action': 'keep'})
-    bridge.close()
+    try:
+        r.check('an agent run locks the editor', wait(lambda: r.state()['aiRun'], 10))
+        paste(r, f'https://music.youtube.com/watch?v={SONG}&si=test')
+        r.check('pasting first opens the rights notice with Cancel and I understand',
+                wait(lambda: dialog(r), 5) and r.s.run("return document.querySelector(arguments[0]).innerText.includes('Music from YouTube is yours to clear') && [...document.querySelectorAll(arguments[0] + ' button')].map((b) => b.textContent).join('|') === 'Cancel|I understand'", DIALOG))
+        r.check('yt-dlp has not run before the notice is answered', invocations(r) == [], invocations(r))
+        r.check('the notice buttons are not locked by the agent run',
+                r.s.run("return [...document.querySelectorAll(arguments[0] + ' button')].every((b) => !b.hasAttribute('aria-disabled'))", DIALOG))
+        time.sleep(0.4)
+        r.shot('rights-dialog')
+        answer(r, 'Cancel')
+        r.check('Cancel closes the notice without looking up or adding anything',
+                wait(lambda: not dialog(r), 5) and invocations(r) == [] and len(r.state()['assets']) == 1)
+        paste(r, f'https://youtu.be/{SONG}?si=test')
+        r.check('pasting after Cancel asks again and still runs nothing', wait(lambda: dialog(r), 5) and invocations(r) == [])
+        answer(r, 'I understand')
+        row = wait(lambda: r.s.run('return document.querySelector(arguments[0])?.innerText ?? ""', ROW), 10) or ''
+        r.check('the song row has its title, artist, YouTube and duration',
+                all(text in row for text in ('Steady Song', 'Test Artist · YouTube', '20.0 s')), row)
+        bridge.call('end_run', {'run_id': run['run_id'], 'action': 'keep'})
+    finally:
+        bridge.close()
     r.check('the lock ends with the run', wait(lambda: not r.state()['aiRun'], 10))
     r.check('YouTube has no licence chip', r.s.run('return !!document.querySelector(arguments[0]) && !document.querySelector(arguments[0] + " button[aria-label^=CC]")', ROW))
     settings = r.work / 'data/nuzky/sound-library.json'
