@@ -14,6 +14,13 @@ document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2).dispatchEv
 window.dispatchEvent(at('pointermove', arguments[2]));
 return true;"""
 RELEASE = "window.dispatchEvent(new PointerEvent('pointerup', {bubbles: true, button: 0, pointerId: 1}))"
+# Presses a clip just inside its right edge and drags that edge `arguments[1]` px along the timeline, without letting go.
+TRIM_RIGHT = """const el = document.querySelector(`[data-clip-id='${arguments[0]}']`);
+const b = el.getBoundingClientRect();
+const at = (type, dx) => new PointerEvent(type, {bubbles: true, button: 0, pointerId: 1,
+  clientX: b.right - 3 + dx, clientY: b.top + b.height / 2});
+el.dispatchEvent(at('pointerdown', 0));
+window.dispatchEvent(at('pointermove', arguments[1]));"""
 TIP = "return [...document.querySelectorAll('section[aria-label=Timeline] div')].some((d) => d.textContent === arguments[0])"
 FADES = """const c = window.__nuzky.store.getState().snap.project.tracks.flatMap((t) => t.clips).find((c) => c.id === arguments[0]);
 return [c.content.fadeInUs, c.content.fadeOutUs];"""
@@ -29,7 +36,8 @@ document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2).dispatchEv
 window.dispatchEvent(at('pointerup'));"""
 
 
-@flow('edit', 'Import two clips, split one with S, delete a piece with Delete, undo, find the result saved, see imported music '
+@flow('edit', 'Import two clips, split one with S, delete a piece with Delete, undo, find the result saved, drag a clip edge '
+      'and see a title move with the clip after it, see imported music '
       'in the Audio tab, and fade a sound in by dragging the dot on its clip, heard in the export; Esc cancels such a drag')
 def edit(r):
     r.import_media(FIXTURES / 'talk.mp4', FIXTURES / 'wide.mp4')
@@ -68,6 +76,30 @@ def edit(r):
     r.shot('two-selected')
     r.s.run(CLICK_CLIP, second, add)
     r.check('Cmd/Ctrl-click on a selected clip takes it out', wait(lambda: r.s.run(SELECTION) == [first], 5), r.s.run(SELECTION))
+
+    # Dragging a main-track clip's right edge out shows more of its video and moves what follows, a title over it too.
+    wide = undone[2]
+    r.s.call("window.__nuzky.store.getState().edit({type: 'addText', startUs: arguments[0], text: 'Wide',"
+             " style: {fontSize: 80, color: '#ffffff'}})", wide['startUs'])
+    title = lambda: next((c for t in r.state()['tracks'] if t['kind'] == 'text' for c in t['clips']), None)
+    r.check('a title starts with the wide clip', wait(lambda: (c := title()) and c['startUs'] == wide['startUs'], 5), title())
+    r.seek(0)
+    r.s.run('window.__nuzky.store.getState().setZoom(100)')
+    time.sleep(0.5)
+    r.s.run(TRIM_RIGHT, undone[0]['id'], 100)
+    time.sleep(0.3)
+    r.s.run(RELEASE)
+    grown = wait(lambda: (c := r.track()) and c[0]['durationUs'] > undone[0]['durationUs'] and c, 5)
+    moved = grown and grown[2]['startUs'] - wide['startUs']
+    r.check('dragging the first clip\'s right edge out moves the wide clip later', grown and moved > 0, grown)
+    r.check('the title moves with the wide clip', grown and title()['startUs'] == grown[2]['startUs'],
+            {'title': title(), 'wide': grown and grown[2]})
+    r.s.run('window.__nuzky.store.getState().setZoom(40)')
+    time.sleep(1)
+    r.shot('trim-moves-title')
+    for _ in range(2):
+        r.key('z', ctrlKey=True)
+    r.check('undo puts the clip and the title back', wait(lambda: r.track() == undone and title() is None, 5), r.track())
     # Opening the Audio tab once blanked the whole window: its store selector built a new list on every read.
     r.import_media(FIXTURES / 'music.mp3')
     r.s.run("[...document.querySelectorAll('[role=tab]')].find((t) => t.textContent.trim() === 'Audio').click()")

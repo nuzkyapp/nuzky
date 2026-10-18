@@ -134,6 +134,7 @@ pub enum EditCmd {
         track_id: Option<String>,
         start_us: i64,
     },
+    /// On the main track the other tracks, except audio kept in place, gain or lose the same time at the moved edge.
     TrimClip {
         clip_id: String,
         start_us: i64,
@@ -420,6 +421,11 @@ fn min_duration(project: &Project) -> i64 {
     project.frame_duration_us().ceil() as i64
 }
 
+/// Music and sound files keep playing across cuts of the main track; everything else follows them.
+fn stays_in_place(track: &Track) -> bool {
+    track.keep_in_place && track.kind == TrackKind::Audio
+}
+
 fn media(asset_id: String, transform: Transform, shape: Option<Shape>) -> ClipContent {
     ClipContent::Media {
         asset_id,
@@ -630,6 +636,27 @@ impl Project {
         clips.retain(|c| !(c.start_us >= range.start_us && c.end_us() <= range.end_us) && c.duration_us >= min);
         for c in clips.iter_mut().filter(|c| c.start_us >= range.end_us) {
             c.start_us -= length;
+        }
+    }
+
+    /// Moves the time from `at` on by `delta` on every track that follows the main track: a negative
+    /// `delta` cuts `at..at - delta` out of them, a positive one opens that much time at `at`.
+    fn ripple_others(&mut self, at: i64, delta: i64, min: i64) {
+        for thumbnail in self.thumbnails.iter_mut().filter(|t| t.time_us >= at) {
+            thumbnail.time_us = (thumbnail.time_us + delta).max(at);
+        }
+        for ti in 0..self.tracks.len() {
+            let track = &self.tracks[ti];
+            if track.id == MAIN_TRACK || stays_in_place(track) {
+                continue;
+            }
+            if delta < 0 {
+                self.ripple_delete_track(ti, TimeRange { start_us: at, end_us: at - delta }, min);
+            } else {
+                for c in self.tracks[ti].clips.iter_mut().filter(|c| c.start_us >= at) {
+                    c.start_us += delta;
+                }
+            }
         }
     }
 
@@ -936,9 +963,11 @@ impl Project {
                 let (old_start, old_end) = (clip.start_us, clip.end_us());
                 let mut start = start_us.max(0);
                 let mut duration = duration_us.max(min);
+                let mut left_edge = false;
                 if let ClipContent::Media { source_in_us: src, .. } = &mut clip.content {
                     let mut new_src = source_in_us.unwrap_or(*src).max(0);
                     if source_in_us.is_some() && start_us != old_start {
+                        left_edge = true;
                         // Trimming the left edge: keep the right edge in place.
                         let shift = ((new_src - *src) as f64 / speed).round() as i64;
                         start = (old_start + shift).max(0);
@@ -961,6 +990,15 @@ impl Project {
                 shift_words(clip, shift);
                 clip.start_us = start;
                 clip.duration_us = duration;
+                if self.tracks[ti].id == MAIN_TRACK {
+                    // Packing keeps the clip's start, so the other tracks gain or lose the time at the moved edge.
+                    if left_edge {
+                        self.ripple_others(old_start, old_start - start, min);
+                    } else {
+                        let old_duration = old_end - old_start;
+                        self.ripple_others(old_start + duration.min(old_duration), duration - old_duration, min);
+                    }
+                }
                 if ti != 0 {
                     let end = start + duration;
                     if !self.is_free(ti, start, end, Some(&clip_id)) {
@@ -1269,7 +1307,7 @@ impl Project {
                 let kept: Vec<bool> = match &keep_track_ids {
                     Some(ids) => self.tracks.iter().map(|t| ids.contains(&t.id)).collect(),
                     // Only audio keeps its place, also in projects written before that was checked.
-                    None => self.tracks.iter().map(|t| t.keep_in_place && t.kind == TrackKind::Audio).collect(),
+                    None => self.tracks.iter().map(stays_in_place).collect(),
                 };
                 let mut ranges = merge_ranges(ranges);
                 if let Some(main) = self.track_index(MAIN_TRACK).filter(|&ti| !kept[ti]) {
@@ -2412,6 +2450,42 @@ mod tests {
         p.apply(EditCmd::TrimClip { clip_id: a.clone(), start_us: 0, duration_us: 5_000_000, source_in_us: None })
             .unwrap();
         assert_eq!(p.tracks[0].clips[0].id, a);
+        assert_eq!(main_layout(&p), vec![(0, 5000), (5000, 3000)]);
+    }
+
+    #[test]
+    fn trimming_a_main_clip_moves_the_other_tracks_with_its_edge() {
+        let mut p = project();
+        p.apply(EditCmd::AddClip { asset_id: "a".into(), start_us: None, track_id: None }).unwrap();
+        p.apply(EditCmd::AddClip { asset_id: "b".into(), start_us: None, track_id: None }).unwrap();
+        let (a, b) = (p.tracks[0].clips[0].id.clone(), p.tracks[0].clips[1].id.clone());
+        let style: TextStyle =
+            serde_json::from_value(serde_json::json!({"fontSize": 60.0, "color": "#ffffff"})).unwrap();
+        for (start_us, text) in [(1_000_000, "over a"), (6_000_000, "over b")] {
+            p.apply(EditCmd::AddText { start_us, text: text.into(), style: style.clone() }).unwrap();
+        }
+        p.apply(EditCmd::AddClip { asset_id: "m".into(), start_us: Some(5_000_000), track_id: None }).unwrap();
+        let starts = |p: &Project| {
+            let text = p.tracks.iter().find(|t| t.kind == TrackKind::Text).unwrap();
+            let music = p.tracks.iter().find(|t| t.keep_in_place).unwrap();
+            (text.clips.iter().map(|c| c.start_us).collect::<Vec<_>>(), music.clips[0].start_us)
+        };
+        let trim = |clip_id: &String, start_us, duration_us, source_in_us| EditCmd::TrimClip {
+            clip_id: clip_id.clone(),
+            start_us,
+            duration_us,
+            source_in_us,
+        };
+        // Music kept in place stays at 5 s throughout.
+        for (cmd, texts, step) in [
+            (trim(&a, 0, 4_000_000, None), vec![1_000_000, 5_000_000], "right edge in"),
+            (trim(&a, 0, 5_000_000, None), vec![1_000_000, 6_000_000], "right edge out"),
+            (trim(&b, 6_000_000, 2_000_000, Some(1_000_000)), vec![1_000_000, 5_000_000], "left edge in"),
+            (trim(&b, 4_000_000, 3_000_000, Some(0)), vec![1_000_000, 6_000_000], "left edge out"),
+        ] {
+            p.apply(cmd).unwrap();
+            assert_eq!(starts(&p), (texts, 5_000_000), "{step}");
+        }
         assert_eq!(main_layout(&p), vec![(0, 5000), (5000, 3000)]);
     }
 
