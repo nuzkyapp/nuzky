@@ -390,6 +390,9 @@ elif 'cut' in message:
     style = {'fontSize': 95.0, 'color': '#ffffff', 'strokeWidth': 7.5}
     call('apply_edits', {'run_id': run, 'request_id': 'captions', 'edits': [{'type': 'addCaptions', 'style': style, 'segments': [
         {'startUs': 0, 'endUs': 1_000_000, 'text': 'Dneska vám'}, {'startUs': 1_000_000, 'endUs': 2_000_000, 'text': 'ukážu jak'}]}]})
+    # Reads clip after clip, as agents do after a cut gives clips new ids.
+    for _ in range(3):
+        call('get_state', {'clip_ids': [state['tracks'][0]['clips'][0]['id']]})
     call('inspect_frames', {'times_us': [500_000, 1_500_000]})
     call('end_run', {'run_id': run, 'action': 'keep'})
     say(f"Hotovo. Video bylo {state['duration_us'] / 1e6:.1f} s, teď je o 2 s kratší a má dva titulky.")

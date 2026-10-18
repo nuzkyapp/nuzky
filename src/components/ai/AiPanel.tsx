@@ -285,24 +285,36 @@ const STEP_ICON: Record<Step["status"], ReactNode> = {
   stopped: <CircleStop size={14} className="text-muted" />,
 };
 
+/** The same step again and again, such as reading clip after clip, is one row with how many times; a failure keeps its own row. */
+function grouped(steps: Step[]): (Step & { times: number })[] {
+  const rows: (Step & { times: number })[] = [];
+  for (const s of steps) {
+    const last = rows[rows.length - 1];
+    if (last && last.title === s.title && last.status !== "failed" && s.status !== "failed") rows[rows.length - 1] = { ...s, id: last.id, times: last.times + 1 };
+    else rows.push({ ...s, times: 1 });
+  }
+  return rows;
+}
+
 function Steps({ steps, collapsed }: { steps: Step[]; collapsed: boolean }) {
   const [open, setOpen] = useState(!collapsed);
   useEffect(() => setOpen(!collapsed), [collapsed]);
+  const rows = grouped(steps);
   if (!open)
     return (
       <button type="button" onClick={() => setOpen(true)} className="-ml-1 flex items-center gap-1 self-start rounded-md px-1 py-0.5 text-[12px] text-muted hover:bg-white/[.06] hover:text-fg">
         <ChevronRight size={14} />
-        {steps.length === 1 ? "1 step" : `${steps.length} steps`}
+        {rows.length === 1 ? "1 step" : `${rows.length} steps`}
       </button>
     );
   return (
     <ol className="flex flex-col border-y border-white/[.06] py-1.5" aria-label="Steps">
-      {steps.map((s) => (
+      {rows.map((s) => (
         <li key={s.id} className="grid min-h-[26px] grid-cols-[18px_auto_minmax(0,1fr)] items-center gap-x-1.5 text-[12px]">
           {STEP_ICON[s.status]}
           <span className={s.status === "running" ? "text-fg" : "text-fg/80"}>{s.title}</span>
           <span className="tabular truncate text-right text-muted" title={s.detail ?? undefined}>
-            {s.status === "stopped" ? "Stopped" : s.detail}
+            {s.status === "stopped" ? "Stopped" : s.times > 1 ? `${s.times} times` : s.detail}
           </span>
         </li>
       ))}

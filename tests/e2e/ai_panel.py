@@ -498,6 +498,9 @@ def ai_panel(r):
     r.s.run("[...document.querySelectorAll('aside[aria-label=AI] button')].filter((b) => /^\\d+ steps?$/.test(b.textContent.trim())).forEach((b) => b.click())")
     r.check('unfolded steps name the scan and the frames it checked',
             wait(lambda: 'Scanning picture and sound' in panel(r)['text'] and 'Checking frames' in panel(r)['text'] and '00:00 · 00:01' in panel(r)['text'], 5), panel(r)['text'])
+    rows = r.s.run("return [...document.querySelectorAll('aside[aria-label=AI] ol[aria-label=Steps] li')].map((li) => li.innerText.replace(/\\s+/g, ' ').trim())")
+    r.check('the same step three times in a row is one row that says so, not three rows',
+            rows.count('Read the project 3 times') == 1 and rows.count('Read the project') == 1, rows)
     r.check('the card takes the place of the "AI edit done" toast', not any('AI edit done' in t['text'] for t in r.state()['toasts']), r.state()['toasts'])
     saved = json.loads(r.saved_project().read_text())
     captions = [t for t in saved['tracks'] if t['name'] == 'Captions']
