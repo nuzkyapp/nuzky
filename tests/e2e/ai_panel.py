@@ -16,6 +16,7 @@ const b = all.find((b) => b.textContent.trim() === arguments[0] || b.getAttribut
 if (!b) return null; b.click(); return b.getAttribute('aria-disabled') ?? 'false';"""
 CHIPS = "return [...document.querySelectorAll('aside[aria-label=AI] button[aria-label^=\"Don\\'t send\"]')].map((b) => b.getAttribute('aria-label'))"
 PRESSED = "return document.querySelector('aside[aria-label=AI]').querySelector(`button[aria-label=\"${arguments[0]}\"]`)?.getAttribute('aria-pressed')"
+TEXT = "return document.querySelector('aside[aria-label=AI]').querySelector(`button[aria-label=\"${arguments[0]}\"]`)?.textContent.trim()"
 DRAG = """const g = document.querySelector('aside[aria-label=AI] button[aria-label="Move panel"]').getBoundingClientRect();
 const at = (type, x, y) => new PointerEvent(type, {bubbles: true, button: 0, clientX: x, clientY: y, pointerId: 1});
 document.querySelector('aside[aria-label=AI] button[aria-label="Move panel"]').dispatchEvent(at('pointerdown', g.left + 6, g.top + 6));
@@ -486,7 +487,8 @@ def ai_panel(r):
     r.check('the camera button shows the agent the frame: the playhead comes back as a Frame chip with ×',
             wait(lambda: 'Frame 00:00' in panel(r)['text'] and 'Playhead' not in panel(r)['text'], 5)
             and r.s.run(CHIPS) == ["Don't send the selected clips", "Don't send the frame"]
-            and r.s.run(PRESSED, "Don't show the agent the frame at the playhead") == 'true',
+            and r.s.run(PRESSED, "Don't show the agent the frame at the playhead") == 'true'
+            and r.s.run(TEXT, "Don't show the agent the frame at the playhead") == 'Frame',
             panel(r)['text'])
     r.shot('panel-open')
 
@@ -523,7 +525,8 @@ def ai_panel(r):
     click(r, "Don't send the frame")
     r.check('× on the Frame chip stops sending the frame and brings back the playhead chip',
             wait(lambda: r.s.run(CHIPS) == ["Don't send the selected clips", "Don't send the playhead"], 5)
-            and not r.s.run('return window.__nuzky.agent.getState().frame'), r.s.run(CHIPS))
+            and not r.s.run('return window.__nuzky.agent.getState().frame')
+            and r.s.run(TEXT, 'Show the agent the frame at the playhead') == '', r.s.run(CHIPS))
     r.shot('run-done')
     # A real key press, as the clipboard takes text only from something the user did. On macOS it is the person's
     # own clipboard, so their text goes back right after.

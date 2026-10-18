@@ -980,9 +980,10 @@ function Composer() {
             active={frame}
             disabled={working}
             onClick={() => useAgent.setState(frame ? { frame: false } : { frame: true, dropPlayhead: false })}
-            className="h-7 w-7"
+            className={frame ? "h-7 w-auto gap-1.5 px-2 text-[12px] font-medium" : "h-7 w-7"}
           >
             <Camera size={15} />
+            {frame && "Frame"}
           </IconButton>
           )}
           {plan && <ModelMenu disabled={working} />}
