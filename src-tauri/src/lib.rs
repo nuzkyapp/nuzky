@@ -13,7 +13,6 @@ mod preview_server;
 mod recap;
 mod reels;
 mod sounds;
-mod youtube_videos;
 mod stickers;
 mod store;
 mod style;
