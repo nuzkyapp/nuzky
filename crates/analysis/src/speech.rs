@@ -411,29 +411,36 @@ impl WordBuilder {
 
     fn finish(mut self) -> Vec<Word> {
         self.flush();
-        let mut closing = None;
+        // An annotation runs from its opener to the word that closes it, punctuation after the closer
+        // allowed: "(smích), Ahoj" or "* music playing * Hello". An opener nothing closes is speech.
+        let mut annotation = vec![false; self.words.len()];
+        let mut i = 0;
+        while i < self.words.len() {
+            let text = self.words[i].text.trim_matches('.');
+            let end = match text.chars().next() {
+                Some('[') => Some(']'),
+                Some('(') => Some(')'),
+                Some('*') => Some('*'),
+                _ => None,
+            };
+            let close = end.and_then(|end| {
+                (i..self.words.len()).find(|&j| {
+                    let word = if j == i { &text[1..] } else { self.words[j].text.as_str() };
+                    word.trim_end_matches(|c: char| !c.is_alphanumeric() && c != end).ends_with(end)
+                })
+            });
+            match close {
+                Some(j) => {
+                    annotation[i..=j].fill(true);
+                    i = j + 1;
+                }
+                None => i += 1,
+            }
+        }
+        let mut annotation = annotation.into_iter();
         self.words.retain(|word| {
             let text = word.text.trim_matches('.');
-            let mut rest = text;
-            if closing.is_none() {
-                closing = match text.chars().next() {
-                    Some('[') => Some(']'),
-                    Some('(') => Some(')'),
-                    Some('*') => Some('*'),
-                    _ => None,
-                };
-                // The opener itself does not close: a lone "*" starts "* music playing *".
-                if closing.is_some() {
-                    rest = &text[1..];
-                }
-            }
-            if let Some(end) = closing {
-                if rest.trim_end_matches(|c: char| c.is_ascii_punctuation() && c != end).ends_with(end) {
-                    closing = None;
-                }
-                return false;
-            }
-            !is_annotation(text) && text.chars().any(char::is_alphanumeric)
+            !annotation.next().unwrap_or(false) && !is_annotation(text) && text.chars().any(char::is_alphanumeric)
         });
         self.words
     }
@@ -505,11 +512,16 @@ mod tests {
     }
 
     #[test]
-    fn an_annotation_ends_before_punctuation_and_a_lone_star_opens_one() {
+    fn annotations_close_after_punctuation_and_need_a_closer() {
         let mut builder = WordBuilder::default();
         builder.push(b" (sm\xc3\xadch), Ahoj. * music playing * Hello", 0, 500_000, 0.9);
         let words = builder.finish();
         assert_eq!(words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>(), ["Ahoj.", "Hello"]);
+
+        let mut builder = WordBuilder::default();
+        builder.push(" [Hudba]… Ahoj, * jak se máš?".as_bytes(), 0, 500_000, 0.9);
+        let words = builder.finish();
+        assert_eq!(words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>(), ["Ahoj,", "jak", "se", "máš?"]);
     }
 
     #[test]
