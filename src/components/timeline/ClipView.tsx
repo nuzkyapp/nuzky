@@ -212,7 +212,7 @@ export const ClipView = memo(function ClipView({
         />
       )}
 
-      {/* The main track's cut markers sit at mid-height, so its diamonds run along the bottom. All stay clear of the trim handles. */}
+      {/* The main track's diamonds run along the bottom, clear of its cut markers on the top edge. All stay clear of the trim handles. */}
       {selected && !ghost && clip.keyframes.length > 0 && (
         <div className={`absolute inset-x-0 ${track.id === MAIN_TRACK ? "bottom-[7px]" : "top-1/2"}`}>
           {clip.keyframes.map((k) => (
