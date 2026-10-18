@@ -53,6 +53,18 @@ export function HistoryButton({ redo, locked, lines, onPeek }: { redo: boolean; 
     };
   }, [live, revision, redo, keyboard, onPeek]);
 
+  // Esc hides the preview wherever focus is, before it would clear the selection.
+  useEffect(() => {
+    if (!shown) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      setDismissed(true);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [shown]);
+
   const name = redo ? "Redo" : "Undo";
   const at = shown && lines && ref.current?.getBoundingClientRect();
   return (
@@ -79,11 +91,6 @@ export function HistoryButton({ redo, locked, lines, onPeek }: { redo: boolean; 
         onBlur={() => {
           setKeyboard(false);
           setDismissed(false);
-        }}
-        onKeyDown={(e) => {
-          if (e.key !== "Escape" || !shown) return;
-          e.stopPropagation();
-          setDismissed(true);
         }}
       >
         {redo ? <Redo2 size={16} /> : <Undo2 size={16} />}

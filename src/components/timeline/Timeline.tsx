@@ -200,7 +200,8 @@ export function Timeline({ height }: { height: number }) {
   const duration = drawn ? contentEnd(drawn) : 0;
   const fps = project?.canvas.fps ?? 30;
   const minUs = Math.ceil(US / fps);
-  const laneWidth = Math.max(view.width - HEADER_W, (duration / US + 30) * zoom);
+  // A shorter preview never narrows the lanes, so the scroll position survives it.
+  const laneWidth = Math.max(view.width - HEADER_W, (Math.max(duration, project ? contentEnd(project) : 0) / US + 30) * zoom);
   // Clips get the window they draw filmstrip tiles in. It moves in steps, with at least 200 px of margin on
   // each side, so scrolling re-renders the clips once per step instead of on every scroll event.
   const windowFrom = Math.floor(view.left / VISIBLE_STEP) * VISIBLE_STEP;
@@ -301,6 +302,14 @@ export function Timeline({ height }: { height: number }) {
     select([next.id]);
     scroller.current?.querySelector<HTMLElement>(`[data-clip-id="${next.id}"]`)?.focus({ preventScroll: true });
   }, [project, select]);
+
+  // A preview can take the focused clip off screen for a moment; when it ends, the clip gets focus back.
+  const peeking = !!peekShown;
+  useEffect(() => {
+    const id = focusPlace.current;
+    if (peeking || !id || (document.activeElement && document.activeElement !== document.body)) return;
+    scroller.current?.querySelector<HTMLElement>(`[data-clip-id="${id}"]`)?.focus({ preventScroll: true });
+  }, [peeking]);
 
   const openMenu = useCallback((e: React.MouseEvent, clip: Clip) => {
     e.preventDefault();
@@ -643,8 +652,8 @@ export function Timeline({ height }: { height: number }) {
                           tabbable={!cover && clip.id === tabStop}
                           timing={isMain ? layout?.timing.get(clip.id) : undefined}
                           fades={fading?.clip.id === clip.id ? fades : undefined}
-                          onPointerDown={startClipDrag}
-                          onContextMenu={openMenu}
+                          onPointerDown={peekShown ? undefined : startClipDrag}
+                          onContextMenu={peekShown ? undefined : openMenu}
                         />
                       );
                     })}

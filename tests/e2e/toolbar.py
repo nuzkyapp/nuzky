@@ -113,6 +113,7 @@ def toolbar(r):
 HOVER = """const b = document.querySelector(`[data-peek-button=${arguments[0]}]`);
 b.dispatchEvent(new PointerEvent(arguments[1] ? 'pointerover' : 'pointerout', {bubbles: true, pointerId: 1,
   relatedTarget: arguments[1] ? null : document.body}));"""
+SELECTION = 'return window.__nuzky.store.getState().selection'
 TIP_TEXT = "return document.querySelector('[data-testid=history-peek]')?.innerText ?? null"
 DIMMED = "return [...document.querySelectorAll('[data-clip-id].opacity-35')].map((el) => el.dataset.clipId)"
 WORDS = """return Object.fromEntries([...document.querySelectorAll('[data-peek]')].map((el) => [el.dataset.clipId,
@@ -201,8 +202,12 @@ def undo_preview(r):
     r.check('and marks it Removed where it is now', r.s.run(MARKS).get(piece['id']) == 'gone' and r.s.run(WORDS).get(piece['id']) == 'Removed',
             [r.s.run(MARKS), r.s.run(WORDS)])
     r.shot('redo-hover-removes')
-    r.s.run("document.querySelector('[data-peek-button=redo]').dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}))")
-    r.check('Esc hides the preview', wait(lambda: r.s.run(TIP_TEXT) is None and r.s.run(MARKS) == {}, 2), r.s.run(TIP_TEXT))
+    # The pointer rests on Redo while focus is on a clip, which Esc would otherwise deselect.
+    r.focus_clip(piece['id'])
+    r.key('Escape')
+    r.check('Esc hides the preview and leaves the selection alone',
+            wait(lambda: r.s.run(TIP_TEXT) is None and r.s.run(MARKS) == {}, 2) and r.s.run(SELECTION) == [piece['id']],
+            [r.s.run(TIP_TEXT), r.s.run(SELECTION)])
     r.s.run(HOVER, 'redo', False)
 
     bridge = Bridge(r, r.saved_project())
