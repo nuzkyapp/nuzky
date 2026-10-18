@@ -496,8 +496,7 @@ fn boot(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Boot> {
     })
 }
 
-/// Opening a project from the home screen gives the editor the whole screen, as CapCut does. A UI flow keeps
-/// the window it set up: the size it chose on Linux, off every screen on macOS.
+/// A UI flow keeps the window it set up: the size it chose on Linux, off every screen on macOS.
 #[tauri::command]
 fn maximize_window(window: tauri::Window) -> CmdResult<()> {
     #[cfg(all(target_os = "macos", debug_assertions))]

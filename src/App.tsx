@@ -428,7 +428,6 @@ useEditor.subscribe((s, prev) => {
   if (s.playing !== prev.playing) document.documentElement.toggleAttribute("data-playing", s.playing);
 });
 
-// The editor takes the whole screen whenever a project opens from the home screen, as in CapCut.
 useEditor.subscribe((s, prev) => {
   if (s.view === "editor" && prev.view === "home") void api.maximizeWindow();
 });
