@@ -27,8 +27,21 @@ pub fn raw_import(project: &Project, kept: &[Asset]) -> Result<Project> {
     let mut assets: Vec<Asset> = Vec::new();
     for asset in kept.iter().chain(playing).filter(|a| a.kind == AssetKind::Video) {
         if !assets.iter().any(|a| a.id == asset.id) {
-            // The whole file, also the footage a YouTube video's part keeps hidden around it.
-            assets.push(Asset { part: None, ..project.asset(&asset.id).unwrap_or(asset).clone() });
+            let mut asset = project.asset(&asset.id).unwrap_or(asset).clone();
+            // A YouTube video's part is what was imported; footage around it the user revealed by extending a
+            // clip joins it, and the rest stays hidden.
+            if let Some(part) = asset.part.as_mut() {
+                for clip in project.tracks.iter().flat_map(|t| &t.clips) {
+                    if let ClipContent::Media { asset_id, source_in_us, speed, .. } = &clip.content
+                        && *asset_id == asset.id
+                    {
+                        part.start_us = part.start_us.min(*source_in_us).max(0);
+                        let end = *source_in_us + (clip.duration_us as f64 * *speed as f64).round() as i64;
+                        part.end_us = part.end_us.max(end).min(asset.duration_us);
+                    }
+                }
+            }
+            assets.push(asset);
         }
     }
     let mut cmds = vec![EditCmd::AddAssets { assets: assets.clone() }];
@@ -343,6 +356,34 @@ mod tests {
             assert!(matches!(&c.content, ClipContent::Media { source_in_us: 0, speed, .. } if *speed == 1.0));
         }
         assert_eq!(r.tracks.len(), 1);
+    }
+
+    /// The footage a YouTube video's part keeps hidden is no part of the recording until a clip reveals it.
+    #[test]
+    fn recap_raw_import_keeps_a_part_and_what_a_clip_revealed() {
+        let mut p = project(&["youtube"]);
+        p.assets[0].part = Some(nuzky_engine::model::Part { start_us: 3_000_000, end_us: 6_000_000 });
+        let source = |r: &Project| match &r.tracks[0].clips[0].content {
+            ClipContent::Media { source_in_us, .. } => (*source_in_us, r.tracks[0].clips[0].duration_us),
+            ClipContent::Text { .. } => unreachable!(),
+        };
+        let clip = p.tracks[0].clips[0].id.clone();
+        p.apply(EditCmd::TrimClip {
+            clip_id: clip.clone(),
+            start_us: 0,
+            duration_us: 2_000_000,
+            source_in_us: Some(3_500_000),
+        })
+        .unwrap();
+        assert_eq!(source(&raw_import(&p, &[]).unwrap()), (3_000_000, 3_000_000));
+        p.apply(EditCmd::TrimClip {
+            clip_id: clip,
+            start_us: 0,
+            duration_us: 5_000_000,
+            source_in_us: Some(1_000_000),
+        })
+        .unwrap();
+        assert_eq!(source(&raw_import(&p, &[]).unwrap()), (1_000_000, 5_000_000));
     }
 
     #[test]
