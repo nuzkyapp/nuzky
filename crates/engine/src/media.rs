@@ -60,7 +60,7 @@ pub(crate) fn open_input(path: &Path) -> Result<ff::format::context::Input> {
     ff::format::input_with_dictionary(path, options).with_context(|| format!("Cannot open {}", path.display()))
 }
 
-fn origin_us(input: &ff::format::context::Input) -> i64 {
+pub(crate) fn origin_us(input: &ff::format::context::Input) -> i64 {
     let start = unsafe { (*input.as_ptr()).start_time };
     if start == ff::ffi::AV_NOPTS_VALUE { 0 } else { start }
 }

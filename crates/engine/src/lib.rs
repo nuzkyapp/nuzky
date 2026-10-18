@@ -8,6 +8,7 @@ pub mod edit;
 pub mod effects;
 pub mod export;
 pub mod gpu;
+pub mod join;
 pub mod level;
 pub mod loudness;
 pub mod matte;
