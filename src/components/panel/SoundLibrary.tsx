@@ -441,7 +441,7 @@ function GetYtdlp({ outdated = false }: { outdated?: boolean }) {
           Stop
         </Button>
       ) : (
-        <Button variant="primary" className="h-7 shrink-0 text-[12px]" onClick={installYtdlp}>
+        <Button variant="primary" className="h-7 shrink-0 text-[12px]" onClick={() => installYtdlp(true)}>
           Download yt-dlp
         </Button>
       )}

@@ -91,6 +91,7 @@ export const api = {
   soundLink: (url: string) => invoke<Sound>("sound_link", { url }),
   /** Downloads yt-dlp from its GitHub releases; progress comes as `sound-progress` for "yt-dlp", `soundCancel("yt-dlp")` stops it. */
   installYtdlp: () => invoke<void>("install_ytdlp"),
+  ytdlpDownloaded: () => invoke<boolean>("ytdlp_downloaded"),
   /** The user read that the rights to music from YouTube links are theirs; asked only once. */
   confirmYoutubeRights: () => invoke<SoundSettings>("confirm_youtube_rights"),
   /** Plays a sound, downloading it first when needed; `sound-preview-ended` names it when it is over. */

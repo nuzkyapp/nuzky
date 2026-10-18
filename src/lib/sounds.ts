@@ -24,6 +24,7 @@ const EMPTY: Search = { query: "", sounds: [], page: 0, more: false, service: nu
 export type Link = { url: string; sound: Sound | null; loading: boolean; error: string | null };
 
 const NO_LINK: Link = { url: "", sound: null, loading: false, error: null };
+const waitsForYtdlp = (link: Link) => !!link.error?.startsWith("YTDLP_");
 
 type State = {
   tab: AudioTab;
@@ -40,6 +41,8 @@ type State = {
   rightsFor: string | null;
   /** yt-dlp is downloading. */
   installing: boolean;
+  /** Why the last yt-dlp download ended without it; `CANCELLED: …` when it was stopped. */
+  installError: string | null;
 };
 
 export const useSounds = create<State>(() => ({
@@ -52,6 +55,7 @@ export const useSounds = create<State>(() => ({
   link: NO_LINK,
   rightsFor: null,
   installing: false,
+  installError: null,
 }));
 
 let listening = false;
@@ -110,8 +114,8 @@ export async function openLink(url: string) {
   const text = url.trim();
   const { link, adding, preview } = useSounds.getState();
   if (link.sound && text === link.url) return;
-  // Another link takes the row and its Stop away, so its download stops with it.
-  if (useSounds.getState().installing) api.soundCancel("yt-dlp");
+  // Another link takes the row and its Stop away, so its download stops with it; one from Get set up has no row here.
+  if (useSounds.getState().installing && waitsForYtdlp(link)) api.soundCancel("yt-dlp");
   if (link.sound) {
     if (adding.includes(link.sound.id)) api.soundCancel(link.sound.id);
     if (preview?.id === link.sound.id) stopPreview();
@@ -144,24 +148,26 @@ export async function answerRights(agree: boolean) {
 }
 
 /**
- * Downloads yt-dlp, looks the link up again and plays or adds the song when that is what failed;
- * stopped, the link still offers the download.
+ * Downloads yt-dlp and looks a link waiting for it up again. Music's own download then plays or adds the song when
+ * that is what failed; one from Get set up drops that request, as nobody there asked for the song. Stopped, the link
+ * still offers the download.
  */
-export async function installYtdlp() {
+export async function installYtdlp(finishAsked: boolean) {
   if (useSounds.getState().installing) return;
-  useSounds.setState({ installing: true });
+  useSounds.setState({ installing: true, installError: null });
   try {
     await api.installYtdlp();
     useSounds.setState({ installing: false });
-    await openLink(useSounds.getState().link.url);
-    const next = afterYtdlp;
+    const next = finishAsked ? afterYtdlp : null;
     afterYtdlp = null;
+    const { link } = useSounds.getState();
+    if (waitsForYtdlp(link)) await openLink(link.url);
     if (!next || useSounds.getState().link.sound?.id !== next.sound.id) return;
     if (!next.add) await togglePreview(next.sound);
     else if (next.add.epoch === currentEpoch()) await addSound(next.sound, next.add.timeUs);
   } catch (e) {
     const text = errorText(e);
-    useSounds.setState((s) => ({ installing: false, link: text.startsWith("CANCELLED") ? s.link : { ...s.link, error: text } }));
+    useSounds.setState((s) => ({ installing: false, installError: text, link: !text.startsWith("CANCELLED") && waitsForYtdlp(s.link) ? { ...s.link, error: text } : s.link }));
   } finally {
     useSounds.setState((s) => ({ progress: { ...s.progress, "yt-dlp": 0 } }));
   }

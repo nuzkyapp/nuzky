@@ -154,6 +154,11 @@ fn release_file() -> Option<&'static str> {
     }
 }
 
+/// Whether Nuzky has its own yt-dlp.
+pub fn downloaded() -> bool {
+    executable(&own_copy())
+}
+
 fn own_copy() -> PathBuf {
     crate::sounds::data_dir().join("tools").join(if cfg!(windows) { "yt-dlp.exe" } else { "yt-dlp" })
 }

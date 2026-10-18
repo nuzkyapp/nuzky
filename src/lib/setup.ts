@@ -1,6 +1,8 @@
 import { create } from "zustand";
+import { api } from "./api";
+import { useSounds } from "./sounds";
 
-export const SETUP_STEPS = ["captions", "vision", "ai"] as const;
+export const SETUP_STEPS = ["captions", "vision", "music", "ai"] as const;
 export type SetupStep = (typeof SETUP_STEPS)[number];
 type StepState = "done" | "skipped";
 type Saved = { states: Partial<Record<SetupStep, StepState>>; current: SetupStep };
@@ -43,3 +45,14 @@ export const useSetup = create<Setup>((set) => ({
 useSetup.subscribe((s) => localStorage.setItem(KEY, JSON.stringify({ states: s.states, current: s.current })));
 
 export const stepsLeft = (states: Saved["states"]) => SETUP_STEPS.filter((step) => !states[step]).length;
+
+/** Music from YouTube is done once Nuzky has its own yt-dlp, from wherever it was downloaded. */
+export async function checkYtdlp() {
+  if ((await api.ytdlpDownloaded()) && useSetup.getState().states.music !== "done") useSetup.getState().finishStep("music");
+}
+// At once when it downloaded, so the step never shows Download yt-dlp again on its way to done.
+useSounds.subscribe((s, prev) => {
+  if (!prev.installing || s.installing) return;
+  if (!s.installError) useSetup.getState().finishStep("music");
+  else void checkYtdlp();
+});

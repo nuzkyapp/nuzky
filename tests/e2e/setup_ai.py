@@ -84,8 +84,8 @@ def agents(r, home):
     wait(lambda: dialog(r), 5)
     press('End')
     d = wait(lambda: (dialog(r) or {}).get('panel') == 'Connect your AI' and dialog(r), 5)
-    r.check('the rail lists only the steps that are built', rail(d) == [['Captions model'], ['Face and person models'], ['Connect your AI']], rail(d))
-    r.check('the header counts three steps', d and d['count'] == '0 of 3 done', d)
+    r.check('the rail lists only the steps that are built', rail(d) == [['Captions model'], ['Face and person models'], ['Music from YouTube'], ['Connect your AI']], rail(d))
+    r.check('the header counts four steps', d and d['count'] == '0 of 4 done', d)
 
     # Missing: neither stand-in is installed.
     c = wait(lambda: (x := cards(r)) and all('Not installed' in v['text'] for v in x.values()) and x, 10)
@@ -127,7 +127,7 @@ def agents(r, home):
     r.check("the nuzky entry went into Claude Code's own settings, beside the other server",
             saved['mcpServers']['nuzky']['args'] == ['mcp', '--current', '--allow-write'] and saved['mcpServers']['other']['command'] == 'other-server', saved)
     r.check('after a backup', any(p.name.startswith('.claude.json.nuzky-backup-') for p in home.iterdir()), sorted(p.name for p in home.iterdir()))
-    r.check('a failed check does not finish the step', rail(dialog(r))[2] == ['Connect your AI'], dialog(r))
+    r.check('a failed check does not finish the step', rail(dialog(r))[3] == ['Connect your AI'], dialog(r))
     time.sleep(0.3)
     r.shot('setup-ai-failed')
 
@@ -137,8 +137,8 @@ def agents(r, home):
     c = wait(lambda: card_says(r, 'Claude Code', 'Connected') and cards(r), 30)
     r.check('Try again: Claude Code is connected and its check passed', c and 'Claude Code sees Nuzky' in c['Claude Code']['text'], cards(r))
     r.check('it says to restart Claude Code if it is open', c and 'restart it so it sees Nuzky' in c['Claude Code']['text'], c)
-    d = wait(lambda: (x := dialog(r)) and x['steps'][2]['lines'] == ['Connect your AI', 'Done'] and x, 5)
-    r.check('the step is done and the header counts it', d and d['count'] == '1 of 3 done', dialog(r))
+    d = wait(lambda: (x := dialog(r)) and x['steps'][3]['lines'] == ['Connect your AI', 'Done'] and x, 5)
+    r.check('the step is done and the header counts it', d and d['count'] == '1 of 4 done', dialog(r))
     r.check('the focus goes to Done', wait(lambda: r.s.run(FOCUS) == 'Done', 3), r.s.run(FOCUS))
     r.check('Check again stays for Codex, still missing, before Done', d and d['buttons'] == ['Check again', 'Done'], d)
     time.sleep(0.3)
@@ -195,7 +195,7 @@ def skip_to_transcript(r):
     press('End')
     wait(lambda: card_says(r, 'Codex', 'Not installed'), 10)
     r.check('Skip', press_button(r, 'Skip'))
-    d = wait(lambda: (x := dialog(r)) and x['steps'][2]['lines'] == ['Connect your AI', 'Skipped'] and x, 5)
+    d = wait(lambda: (x := dialog(r)) and x['steps'][3]['lines'] == ['Connect your AI', 'Skipped'] and x, 5)
     text = r.s.run("return document.querySelector('#setup-panel').innerText") or ''
     r.check('skipped, the step shows how to cut without AI', 'Cut without AI' in text and 'Remove retakes and pauses' in text and 'Transcribe timeline' in text, text)
     r.check('Open a video… is the way on, and Done is secondary', d and d['buttons'] == ['Open a video…', 'Done'], d)

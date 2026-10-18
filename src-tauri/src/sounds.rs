@@ -81,6 +81,12 @@ pub async fn install_ytdlp(app: AppHandle) -> CmdResult<()> {
     result
 }
 
+/// Whether Nuzky has its own yt-dlp.
+#[tauri::command]
+pub fn ytdlp_downloaded() -> bool {
+    nuzky_mcp::youtube::downloaded()
+}
+
 /// The user read the notice that the rights to music from YouTube links are theirs to check.
 #[tauri::command]
 pub fn confirm_youtube_rights() -> CmdResult<SoundSettings> {

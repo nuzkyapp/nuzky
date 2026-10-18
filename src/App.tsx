@@ -26,7 +26,7 @@ import { Toasts } from "./components/Toasts";
 import { DockDragLayer, DockedAiPanel, FloatingAiPanel } from "./components/ai/AiDock";
 import { listenAgentEvents, panelRunEnded, useAgent } from "./lib/agent";
 import { togglePanel, useDock, useDockLayout, useWindowSize } from "./lib/dock";
-import { useSetup } from "./lib/setup";
+import { checkYtdlp, useSetup } from "./lib/setup";
 import { PANE_MIN, paneLayout, setPane, usePanes } from "./lib/layout";
 import { TopBar } from "./components/TopBar";
 import { Button, DisabledHint, Splitter } from "./components/ui";
@@ -467,6 +467,7 @@ async function startEditor() {
   useEditor.getState().setSnap(boot.snapshot, true, true);
   useEditor.setState({ saveState: "saved" });
   startUpdates(boot.version, boot.updateChecks);
+  void checkYtdlp();
   // A warning stays until dismissed, so the reason a different project opened is not missed.
   // Once per launch: StrictMode and Try again can start the editor more than once.
   if (boot.startupNotice && !startupNoticeShown) {
