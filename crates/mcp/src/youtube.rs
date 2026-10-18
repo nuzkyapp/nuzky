@@ -408,8 +408,8 @@ pub struct Video {
 }
 
 /// Looks up one video and the size of its `format` without downloading it: a few seconds, and at most half a
-/// minute.
-pub fn video(id: &str, format: &str, max_bytes: u64) -> Result<Video> {
+/// minute. `cancel` stops yt-dlp within 50 ms.
+pub fn video(id: &str, format: &str, max_bytes: u64, cancel: &AtomicBool) -> Result<Video> {
     ensure!(valid_id(id), "INVALID_LINK: {id:?} is not a YouTube video id");
     let mut child = command(format, &["--skip-download", "--dump-single-json", "--no-warnings", "--", &watch_url(id)])?
         .spawn()
@@ -428,6 +428,10 @@ pub fn video(id: &str, format: &str, max_bytes: u64) -> Result<Video> {
         if Instant::now() > deadline {
             stop(&mut child);
             bail!("OFFLINE: YouTube did not answer within half a minute. Check your internet connection.");
+        }
+        if cancel.load(Ordering::Relaxed) {
+            stop(&mut child);
+            bail!("CANCELLED: the lookup stopped");
         }
         std::thread::sleep(Duration::from_millis(50));
     };

@@ -113,13 +113,12 @@ function Dialog() {
     setInstalling(0);
     try {
       await api.installYtdlp();
-      // Closed, or another link, meanwhile: nothing more to download for this one.
-      if (run !== runs.current.n) return;
       setInstalling(null);
-      await go(url);
+      // Closed, or another link, meanwhile: nothing more to download for this one.
+      if (run === runs.current.n) await go(url);
     } catch (e) {
       setInstalling(null);
-      if (!errorText(e).startsWith("CANCELLED")) setStep({ kind: "error", url, error: errorText(e) });
+      if (run === runs.current.n && !errorText(e).startsWith("CANCELLED")) setStep({ kind: "error", url, error: errorText(e) });
     }
   };
 

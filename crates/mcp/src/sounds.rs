@@ -569,7 +569,7 @@ pub fn link(url: &str) -> Result<Sound> {
 }
 
 fn youtube_sound(id: &str) -> Result<Sound> {
-    let video = crate::youtube::video(id, crate::youtube::SOUND, MAX_FILE_BYTES)?;
+    let video = crate::youtube::video(id, crate::youtube::SOUND, MAX_FILE_BYTES, &AtomicBool::new(false))?;
     let author = [&video.artist, &video.channel, &video.uploader].into_iter().find_map(|a| a.as_deref());
     let sound = Sound {
         id: format!("youtube:{id}"),

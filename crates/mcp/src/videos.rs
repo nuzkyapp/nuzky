@@ -26,10 +26,10 @@ pub struct Video {
     pub duration_us: i64,
 }
 
-/// The video a YouTube link points at.
-pub fn link(url: &str) -> Result<Video> {
+/// The video a YouTube link points at. `cancel` stops the lookup.
+pub fn link(url: &str, cancel: &AtomicBool) -> Result<Video> {
     let id = crate::youtube::video_id(url)?;
-    let video = crate::youtube::video(&id, PICTURE, MAX_BYTES)?;
+    let video = crate::youtube::video(&id, PICTURE, MAX_BYTES, cancel)?;
     let text =
         |t: Option<&str>| t.map(|t| t.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|t| !t.is_empty());
     let channel = [&video.channel, &video.uploader, &video.artist].into_iter().find_map(|a| text(a.as_deref()));

@@ -609,8 +609,11 @@ impl Backend {
                     let (cache, worker_stop, link) = (self.host.cache_dir.clone(), stop.clone(), args.link.clone());
                     // The lookup runs here too, so a Stop while YouTube is slow to answer returns at once.
                     std::thread::Builder::new().name("youtube-video-download".into()).spawn(move || {
-                        let asset = crate::videos::link(&link)
-                            .and_then(|video| crate::videos::asset(&video, part, &cache, &worker_stop, |_| {}));
+                        let asset = crate::videos::link(&link, &worker_stop).and_then(|video| {
+                            // Stopped while looking up: nothing more to download.
+                            ensure!(!worker_stop.load(Ordering::Relaxed), "CANCELLED: the download stopped");
+                            crate::videos::asset(&video, part, &cache, &worker_stop, |_| {})
+                        });
                         tx.send(asset).ok();
                     })?;
                     let asset = loop {
