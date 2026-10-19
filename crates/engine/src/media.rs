@@ -1213,7 +1213,6 @@ mod tests {
                 slices,
                 "{x265}"
             );
-            // Reading straight through keeps a picture per thread.
             assert_eq!(active(VideoDecoder::open(&path).unwrap()), ff::ffi::FF_THREAD_FRAME, "{x265}");
             std::fs::remove_file(path).unwrap();
         }

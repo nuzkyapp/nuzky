@@ -14,7 +14,6 @@ fn check_seek(path: &Path, extra_times: &[i64]) {
     let truth = raw(path, &[]);
     let frame_len = (a.width * a.height * 4) as usize;
     assert_eq!(truth.len() / frame_len, timestamps.len());
-    // The preview's decoders, which jump around the file.
     let mut decoder = VideoDecoder::open_for_seeking(path).unwrap();
     let mut worker = VideoWorker::spawn_for_seeking(path.into());
     let mut rng = Rng(0xCAFE_1234);
