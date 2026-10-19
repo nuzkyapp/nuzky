@@ -485,7 +485,7 @@ fn youtube_links_download_with_mocked_ytdlp_and_require_rights() {
     let cache = dir.join("cache");
     let runtime = dir.join("runtime");
     let home = dir.join("home");
-    let data = dir.join("data");
+    let data = dir.join("data/nuzky");
     let offline = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let unavailable = PathBuf::from(format!("http://{}/", offline.local_addr().unwrap()));
     drop(offline);
@@ -495,7 +495,7 @@ fn youtube_links_download_with_mocked_ytdlp_and_require_rights() {
         ("NUZKY_FAKE_YTDLP_LOG", &log),
         ("NUZKY_OPENVERSE_URL", &unavailable),
         ("HOME", &home),
-        ("XDG_DATA_HOME", &data),
+        ("NUZKY_DATA_DIR", &data),
         ("XDG_CACHE_HOME", &cache),
         ("XDG_RUNTIME_DIR", &runtime),
     ];
@@ -3079,7 +3079,7 @@ fn reels_are_proposed_and_made_beside_a_long_talk_over_stdio() {
 
     for (i, made) in reels.iter().chain(blurred["reels"].as_array().unwrap()).enumerate() {
         let path = PathBuf::from(made["path"].as_str().unwrap());
-        assert_eq!(path, c.dir.join(format!("project-reel-{}.nuzky", i + 1)));
+        assert_eq!(path, c.dir.canonicalize().unwrap().join(format!("project-reel-{}.nuzky", i + 1)));
         let reel: Project = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         nuzky_session::validate(&reel).unwrap();
         assert_eq!((reel.canvas.width, reel.canvas.height), (1080, 1920));

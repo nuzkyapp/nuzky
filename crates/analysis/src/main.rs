@@ -76,10 +76,7 @@ fn main() -> Result<()> {
 }
 
 fn find_model(name: &str) -> Option<PathBuf> {
-    let data = std::env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share")));
-    data.map(|p| p.join("nuzky/models").join(name)).filter(|p| p.is_file()).or_else(|| {
+    Some(nuzky_analysis::models_dir().join(name)).filter(|p| p.is_file()).or_else(|| {
         let p = PathBuf::from("tmp-test/xdg/data/nuzky/models").join(name);
         p.is_file().then_some(p)
     })

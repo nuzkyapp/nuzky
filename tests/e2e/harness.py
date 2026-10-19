@@ -155,6 +155,8 @@ class Run:
                         # Nor does it run the person's own Claude Code or Codex; a flow that needs one puts a stand-in there.
                         NUZKY_AGENT_CLAUDE=str(self.work / 'no-agent'), NUZKY_AGENT_CODEX=str(self.work / 'no-agent'),
                         PYTHONDONTWRITEBYTECODE='1')
+        # A data folder the person chose for their own work would win over XDG_DATA_HOME.
+        self.env.pop('NUZKY_DATA_DIR', None)
         self.checks, self.shots, self.s, self.app, self.driver = [], [], None, None, None
         # Arguments for the app, such as the system language on macOS (`-AppleLanguages (cs)`).
         self.args = []

@@ -588,8 +588,11 @@ fn send(
         // the window opened last made current, which may be another Nuzky window's.
         let bridge = connect::Command::this_app().map_err(err)?;
         let args = vec!["mcp".into(), "--project".into(), path.to_string_lossy().into_owned(), "--allow-write".into()];
-        let mut env =
-            std::env::var("XDG_RUNTIME_DIR").map(|dir| vec![("XDG_RUNTIME_DIR".to_owned(), dir)]).unwrap_or_default();
+        // The agent's own `nuzky mcp` reads the creator's style itself, so it needs the same data folder.
+        let mut env: Vec<_> = ["XDG_RUNTIME_DIR", "NUZKY_DATA_DIR"]
+            .into_iter()
+            .filter_map(|var| std::env::var(var).ok().map(|value| (var.to_owned(), value)))
+            .collect();
         env.push((nuzky_mcp::bridge::CONVERSATION_VAR.to_owned(), owner));
         Start::Cli(TurnRequest {
             agent,
