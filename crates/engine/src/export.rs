@@ -472,23 +472,53 @@ fn encode(
         None => [("preset", options.preset.as_str()), ("", "")],
     };
     let mut mp4 = Mp4Writer::create(out, vcodec, w, h, fps, options.crf, &x264)?;
-    for i in 0..total_frames {
-        if cancel.load(Ordering::Relaxed) {
-            bail!("CANCELLED: export cancelled");
-        }
+    let render = |i| {
         let pixels = renderer.render(project, frame_time_us(i, fps), w, h, Wait::Exact, true)?;
-        mp4.frame(i, &pixels)?;
-        // Keep audio up to the end of this video frame.
-        let audio_until = crate::audio::us_to_samples(frame_time_us(i + 1, fps)).min(total_samples);
-        mp4.sound_until(audio_until, |pos, mix| sound.fill(project, pos, mix))?;
         progress(ExportProgress {
             phase: ExportPhase::Rendering,
             frame: i + 1,
             total_frames,
             fraction: render_start + (1.0 - render_start) * (i + 1) as f32 / total_frames.max(1) as f32,
         });
-    }
+        Ok(pixels)
+    };
+    let write = |i, pixels: Vec<u8>| {
+        mp4.frame(i, &pixels)?;
+        // Keep audio up to the end of this video frame.
+        let audio_until = crate::audio::us_to_samples(frame_time_us(i + 1, fps)).min(total_samples);
+        mp4.sound_until(audio_until, |pos, mix| sound.fill(project, pos, mix))
+    };
+    overlap(total_frames, cancel, render, write)?;
     mp4.finish()
+}
+
+/// Makes items `0..count` in order and hands each to `write` on another thread, so making the next one overlaps
+/// writing the one before. The hand-off holds no item, so at most two exist at once. Both sides stop at `cancel`,
+/// the writer before an item it has not started; the first error of either side ends both and is returned.
+fn overlap<T: Send>(
+    count: u64,
+    cancel: &AtomicBool,
+    mut make: impl FnMut(u64) -> Result<T>,
+    mut write: impl FnMut(u64, T) -> Result<()> + Send,
+) -> Result<()> {
+    let (hand, take) = std::sync::mpsc::sync_channel(0);
+    std::thread::scope(|scope| {
+        let writer = scope.spawn(move || {
+            for (i, item) in (0..).zip(take) {
+                check_cancel(cancel)?;
+                write(i, item)?;
+            }
+            Ok(())
+        });
+        let made = (0..count).try_for_each(|i| {
+            check_cancel(cancel)?;
+            // Refused only once the writer has stopped on an error, which is the one returned.
+            hand.send(make(i)?).map_err(|_| anyhow!("The export writer stopped"))
+        });
+        drop(hand);
+        let written: Result<()> = writer.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+        written.and(made)
+    })
 }
 
 /// An MP4 of H.264 video and AAC sound at 48 kHz stereo, written a frame at a time.
@@ -657,6 +687,9 @@ impl Mp4Writer {
 /// rows on each, every row as one pass over the whole frame would. It threads only a context given its thread count
 /// before `sws_init_context`, which `scaling::Context` cannot do, and only in `sws_scale_frame`.
 struct ToYuv(*mut ff::ffi::SwsContext);
+
+// One thread at a time uses the context; swscale's own threads stay inside a call.
+unsafe impl Send for ToYuv {}
 
 impl ToYuv {
     fn new(w: u32, h: u32) -> Result<Self> {
@@ -993,6 +1026,43 @@ mod tests {
             let differ = (0..got.plane_height(plane) as usize).filter(|&y| row(&got, y) != row(&expected, y)).count();
             assert_eq!(differ, 0, "{differ} rows of plane {plane} differ");
         }
+    }
+
+    #[test]
+    fn overlap_writes_in_order_and_stops_at_cancel_or_either_sides_error() {
+        let cancel = AtomicBool::new(false);
+        let mut written = Vec::new();
+        overlap(
+            5,
+            &cancel,
+            |i| Ok(i * 10),
+            |i, item| {
+                written.push((i, item));
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(written, [(0, 0), (1, 10), (2, 20), (3, 30), (4, 40)]);
+
+        // Cancelled while item 4 waits to be handed over: the writer must not write it.
+        let mut written = Vec::new();
+        let error = overlap(10, &cancel, Ok, |i, _| {
+            written.push(i);
+            if i == 3 {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                cancel.store(true, Ordering::Relaxed);
+            }
+            Ok(())
+        })
+        .unwrap_err();
+        assert!(error.to_string().starts_with("CANCELLED"), "{error:#}");
+        assert_eq!(written, [0, 1, 2, 3]);
+
+        cancel.store(false, Ordering::Relaxed);
+        let error = overlap(10, &cancel, Ok, |i, _| if i == 2 { bail!("disk full") } else { Ok(()) }).unwrap_err();
+        assert_eq!(error.to_string(), "disk full");
+        let error = overlap(10, &cancel, |i| if i == 2 { bail!("decoding failed") } else { Ok(i) }, |_, _| Ok(()));
+        assert_eq!(error.unwrap_err().to_string(), "decoding failed");
     }
 
     #[test]
