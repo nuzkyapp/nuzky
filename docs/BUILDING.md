@@ -119,6 +119,15 @@ The maintainer adds these repository secrets in GitHub under Settings → Secret
 
 `APPLE_CERTIFICATE` and `APPLE_CERTIFICATE_PASSWORD` go together, and so do `APPLE_ID`, `APPLE_TEAM_ID` and `APPLE_APP_PASSWORD`. Both groups need `APPLE_SIGNING_IDENTITY`. When a group is incomplete, the script stops and names the missing secret. Without the notarization group, the dmg is signed but not notarized, and Gatekeeper still blocks it. Locally, export the variables and run the script after `build-bundles.mjs`. Without `APPLE_CERTIFICATE`, it uses the identity from your own keychain.
 
+Sign the builds you use yourself with the Developer ID too. Nuzky keeps the Sign in with ChatGPT tokens in the login keychain, and macOS lets an app read an item without asking only when it has the signature of an app the item already allows. An ad-hoc signature is the hash of one build, so every new ad-hoc build asks for the keychain password the first time it reads the tokens. A Developer ID signature names the team, so the next Developer ID build reads them without asking. The first Developer ID build after an ad-hoc one asks once; Always Allow ends that.
+
+```sh
+node scripts/build-bundles.mjs
+APPLE_SIGNING_IDENTITY="Developer ID Application: <name> (<team ID>)" node scripts/sign-macos.mjs
+```
+
+`codesign` takes the key from the login keychain and asks once for access to it; Always Allow ends that too. Without the notarization variables the dmg stays not notarized, which does not matter for your own copy: macOS checks notarization only for downloaded files. Quit Nuzky, move the old copy in Applications to the Trash and copy the new one from the dmg. `codesign -dv /Applications/Nuzky.app` shows `TeamIdentifier=<team ID>`.
+
 `ci.yml` runs `sign-macos.mjs` in the `sign-macos` job, on a fresh machine after the build job, and passes the secrets only to its signing step; `release.yml` hands them to `ci.yml`. The job downloads the macOS artifact, runs no `npm ci`, cargo or other dependency code, and replaces the artifact with the signed dmg and its build-info. The build job runs the build code of every Rust and npm dependency. Such code could read the environment of another process of the same user, or leave behind a process, a changed `PATH` or a changed script for a later step, so the secrets never reach the build's machine. Keep them out of `build-bundles.mjs` for a second reason: the Tauri CLI reads the same names and would sign and notarize the app itself before the libraries are relocated. `sign-macos.mjs` imports the certificate into a temporary keychain, adds it to the user's keychain search list while it signs, because `codesign` on macOS 14 finds no identity outside that list, and afterwards restores the list and deletes the keychain, also after a failure. With the secrets set, every macOS build is signed and notarized, including the build on each push to `main`. A wrong certificate or an expired password then fails `main` before it can fail a release.
 
 To check a notarized dmg on a Mac:
@@ -134,7 +143,7 @@ hdiutil detach /Volumes/Nuzky
 
 `stapler` prints `The validate action worked!`, and both `spctl` commands print `accepted` and `source=Notarized Developer ID`. An ad-hoc build prints `rejected` instead. `build-info-darwin.txt` names the result on its `macOS signature:` line.
 
-`release.yml` reads that line. When it says `Developer ID, notarized and stapled`, the draft's notes leave out the macOS line about Open Anyway. A rerun writes the draft's notes again and drops edits made on GitHub, so change the text in `scripts/release-notes.md`. `node --test 'scripts/*.test.mjs'` fails when `scripts/release-notes.md` no longer has exactly one such line. The README is not generated, so the version pull request of the first notarized release also rewrites the README's macOS install line.
+`release.yml` reads that line. When it says `Developer ID, notarized and stapled`, the draft's notes leave out the macOS line about Open Anyway. A rerun writes the draft's notes again and drops edits made on GitHub, so change the text in `scripts/release-notes.md`. `node --test 'scripts/*.test.mjs'` fails when `scripts/release-notes.md` no longer has exactly one such line. The README is not generated and says the dmg is notarized, so a release whose dmg is not notarized also changes the README's macOS install line.
 
 ## Windows x64
 

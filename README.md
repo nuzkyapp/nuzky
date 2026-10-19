@@ -37,9 +37,9 @@ Nuzky itself sends nothing you edit anywhere. It goes online only to download mo
 
 ## Install
 
-Download the installer for your system from [Releases](https://github.com/nuzkyapp/nuzky/releases). Nuzky has no Apple or Microsoft signing certificate yet, so your system warns you the first time you open it.
+Download the installer for your system from [Releases](https://github.com/nuzkyapp/nuzky/releases). Apple has checked the macOS app. Nuzky has no Microsoft signing certificate yet, so Windows warns you the first time you open it.
 
-- **macOS 14 or newer on Apple Silicon**: open the `.dmg` and drag Nuzky to Applications. When macOS says it can't open Nuzky, close the message, open System Settings → Privacy & Security, click Open Anyway next to Nuzky and confirm.
+- **macOS 14 or newer on Apple Silicon**: open the `.dmg` and drag Nuzky to Applications. The first time you open it, macOS asks whether to open an app downloaded from the internet; click Open.
 - **Windows 10 or 11, x64**: run the `-setup.exe`. When SmartScreen says "Windows protected your PC", click More info, then Run anyway. The installer downloads Microsoft WebView2 if it is missing.
 - **Linux, x86_64**: on Ubuntu 24.04 or newer, `sudo apt install ./Nuzky_*.deb`. On other distributions with glibc 2.39 or newer, make the `.AppImage` executable with `chmod +x` and run it.
 
@@ -66,7 +66,7 @@ npm run tauri dev
 
 Without root on Fedora/Nobara, `bash scripts/setup-linux-deps.sh` downloads the FFmpeg and ALSA headers into `~/.cache/nuzky/deps` and writes a local `.cargo/config.toml`. The corresponding runtime libraries and WebKitGTK must already be installed. Install cmake with `pip install --user cmake` and put `~/.local/bin` on `PATH`.
 
-On Ubuntu, `bash scripts/setup-ubuntu-deps.sh` installs the packages CI uses. For macOS and Windows, install the dependencies from [BUILDING.md](docs/BUILDING.md) and run the same npm commands. Pushing a matching `v*` version tag builds installers on all three systems and prepares a draft GitHub Release; builds are unsigned previews until verified on each system.
+On Ubuntu, `bash scripts/setup-ubuntu-deps.sh` installs the packages CI uses. For macOS and Windows, install the dependencies from [BUILDING.md](docs/BUILDING.md) and run the same npm commands. Pushing a matching `v*` version tag builds installers on all three systems and prepares a draft GitHub Release; the macOS build is signed with a Developer ID and notarized, the Windows installer is unsigned, and builds are previews until verified on each system.
 
 `npm run tauri dev` opens your own projects. To work on Nuzky without touching them, run it as [CONTRIBUTING.md](CONTRIBUTING.md) describes.
 
