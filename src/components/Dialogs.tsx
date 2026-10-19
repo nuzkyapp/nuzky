@@ -11,7 +11,6 @@ import { SetupDialog } from "./setup/SetupDialog";
 import { LearnDialog } from "./style/LearnDialog";
 import { YoutubeDialog } from "./YoutubeDialog";
 
-/** The launcher and the dialogs, each open only when asked for. */
 export default function Dialogs() {
   const launcher = useEditor((s) => s.launcherOpen && s.view !== "home");
   // Learning from videos opens from Your style, the top bar or a toast, anywhere.

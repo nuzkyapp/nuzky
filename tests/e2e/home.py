@@ -109,6 +109,14 @@ def wait_library(r):
 def home(r):
     r.check('Nuzky starts on the home screen, the newest project open behind it',
             wait(lambda: view(r)['view'] == 'home', 10) and view(r)['name'] == 'Talk to camera', view(r))
+    # The editor and the dialogs come in chunks of their own, fetched once Home has painted.
+    order = r.s.run("""const paint = performance.getEntriesByType('paint').find((e) => e.name === 'first-contentful-paint');
+        const chunk = (name) => performance.getEntriesByType('resource')
+          .find((e) => e.name.includes(`/components/${name}.tsx`) || e.name.includes(`/assets/${name}-`));
+        return {paint: paint?.startTime ?? null, editor: chunk('Editor')?.startTime ?? null, dialogs: chunk('Dialogs')?.startTime ?? null,
+                resources: performance.getEntriesByType('resource').length};""")
+    r.check('the home screen paints before the code of the editor and the dialogs loads', order['paint'] is not None
+            and all(order[name] is not None and order[name] > order['paint'] for name in ('editor', 'dialogs')), order)
     r.check('the back button names the open project',
             r.s.run("return [...document.querySelectorAll('header button')].some((b) => b.textContent.includes('Talk to camera'))"))
     wait_library(r)
