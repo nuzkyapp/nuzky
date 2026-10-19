@@ -34,12 +34,13 @@ body:
     id: steps
     attributes:
       label: Steps to reproduce
+      description: If you know them. The report Nuzky saved lists your last actions.
       placeholder: |
         1. Open Nuzky and...
         2. ...
         3. ...
     validations:
-      required: true
+      required: false
   - type: textarea
     id: media
     attributes:
@@ -52,9 +53,10 @@ body:
     attributes:
       label: Diagnostics
       description: >-
-        Report a bug… in Nuzky's Send feedback menu copied them for you; paste them here, or use Copy diagnostics in the same menu.
-        They hold the version, system, graphics and the last lines of Nuzky's log, without folder names, typed text or secrets.
-        Read them before sending. If asked for more, Open logs folder in the same menu shows the full log files.
+        Report a bug… in Nuzky's Send feedback menu filled in a summary here and saved the whole report as a
+        nuzky-report-….txt file in Nuzky's logs folder. Drag that file into this form. It holds the version, system,
+        graphics, the format of the project's files, your last actions and the end of Nuzky's log, without file names,
+        folders, typed text or secrets. Read it before sending.
       render: text
     validations:
       required: false

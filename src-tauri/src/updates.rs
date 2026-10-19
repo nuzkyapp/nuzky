@@ -82,21 +82,47 @@ pub fn open_release_page(app: AppHandle) -> CmdResult<()> {
 #[derive(Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FeedbackKind {
-    Bug,
     Idea,
     Message,
 }
 
-fn feedback_url(kind: FeedbackKind, version: &str, system: &str) -> String {
-    // The forms in .github/ISSUE_TEMPLATE take these fields from the address by their ids.
-    let fields: &[(&str, &str)] = match kind {
-        FeedbackKind::Bug => &[("template", "bug_report.yml"), ("version", version), ("system", system)],
-        FeedbackKind::Idea => &[("template", "feature_request.yml"), ("version", version)],
-        FeedbackKind::Message => return X_PROFILE.into(),
-    };
-    let mut url = tauri::Url::parse("https://github.com/nuzkyapp/nuzky/issues/new").unwrap();
+const NEW_ISSUE: &str = "https://github.com/nuzkyapp/nuzky/issues/new";
+/// GitHub refuses addresses much longer than this.
+const MAX_URL: usize = 7000;
+
+fn feedback_url(kind: FeedbackKind, version: &str) -> String {
+    match kind {
+        // The forms in .github/ISSUE_TEMPLATE take these fields from the address by their ids.
+        FeedbackKind::Idea => form(&[("template", "feature_request.yml"), ("version", version)]),
+        FeedbackKind::Message => X_PROFILE.into(),
+    }
+}
+
+fn form(fields: &[(&str, &str)]) -> String {
+    let mut url = tauri::Url::parse(NEW_ISSUE).unwrap();
     url.query_pairs_mut().extend_pairs(fields);
     url.into()
+}
+
+/// The bug report form with the description and a summary of the report filled in. A long description is cut and the
+/// summary loses lines from its end until the address fits; the report the person attaches holds them whole.
+pub(crate) fn bug_url(version: &str, description: &str, summary: &[String]) -> String {
+    let whole = description.trim();
+    let mut description: String = whole.chars().take(600).collect();
+    if description.len() < whole.len() {
+        description.push('…');
+    }
+    let system = system();
+    let fields = |lines: &[String]| {
+        form(&[
+            ("template", "bug_report.yml"),
+            ("version", version),
+            ("system", &system),
+            ("what-happened", &description),
+            ("diagnostics", &lines.join("\n")),
+        ])
+    };
+    (0..=summary.len()).rev().map(|n| fields(&summary[..n])).find(|url| url.len() <= MAX_URL).unwrap_or_else(|| fields(&[]))
 }
 
 /// The system as a person reading a bug report wants it, with its version where the system says it.
@@ -144,40 +170,60 @@ pub(crate) fn open(app: &AppHandle, target: &str) -> CmdResult<()> {
 /// Opens a prefilled issue form or the X profile in the browser; the person reads and submits the issue there.
 #[tauri::command]
 pub fn open_feedback(app: AppHandle, kind: FeedbackKind) -> CmdResult<()> {
-    open(&app, &feedback_url(kind, &app.package_info().version.to_string(), &system()))
+    open(&app, &feedback_url(kind, &app.package_info().version.to_string()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn fields(url: &str) -> Vec<(String, String)> {
+        let url = tauri::Url::parse(url).unwrap();
+        assert_eq!(url.origin().ascii_serialization(), "https://github.com");
+        assert_eq!(url.path(), "/nuzkyapp/nuzky/issues/new");
+        url.query_pairs().map(|(k, v)| (k.into_owned(), v.into_owned())).collect()
+    }
+
     #[test]
-    fn feedback_links_open_the_issue_forms_with_version_and_system() {
-        let fields = |kind| {
-            let url = tauri::Url::parse(&feedback_url(kind, "0.2.0", "Linux (Fedora Linux 44) · x86_64")).unwrap();
-            assert_eq!(url.origin().ascii_serialization(), "https://github.com");
-            assert_eq!(url.path(), "/nuzkyapp/nuzky/issues/new");
-            url.query_pairs().map(|(k, v)| (k.into_owned(), v.into_owned())).collect::<Vec<_>>()
-        };
+    fn feedback_links_open_the_issue_forms_with_what_nuzky_knows() {
         let pair = |k: &str, v: &str| (k.to_owned(), v.to_owned());
         assert_eq!(
-            fields(FeedbackKind::Bug),
+            fields(&feedback_url(FeedbackKind::Idea, "0.2.0")),
+            [pair("template", "feature_request.yml"), pair("version", "0.2.0")]
+        );
+        assert_eq!(feedback_url(FeedbackKind::Message, "0.2.0"), X_PROFILE);
+        let summary = ["Nuzky 0.2.0 (abc1234)".to_owned(), "Last actions:".to_owned()];
+        assert_eq!(
+            fields(&bug_url("0.2.0 (abc1234)", "  The sound is late.\n", &summary)),
             [
                 pair("template", "bug_report.yml"),
-                pair("version", "0.2.0"),
-                pair("system", "Linux (Fedora Linux 44) · x86_64")
+                pair("version", "0.2.0 (abc1234)"),
+                pair("system", &system()),
+                pair("what-happened", "The sound is late."),
+                pair("diagnostics", "Nuzky 0.2.0 (abc1234)\nLast actions:"),
             ]
         );
-        assert_eq!(fields(FeedbackKind::Idea), [pair("template", "feature_request.yml"), pair("version", "0.2.0")]);
-        assert_eq!(feedback_url(FeedbackKind::Message, "0.2.0", "macOS 15.3 · aarch64"), X_PROFILE);
         for (form, ids) in [
-            (include_str!("../../.github/ISSUE_TEMPLATE/bug_report.yml"), ["version", "system"].as_slice()),
+            (
+                include_str!("../../.github/ISSUE_TEMPLATE/bug_report.yml"),
+                ["version", "system", "what-happened", "diagnostics"].as_slice(),
+            ),
             (include_str!("../../.github/ISSUE_TEMPLATE/feature_request.yml"), ["version"].as_slice()),
         ] {
             for id in ids {
                 assert!(form.contains(&format!("id: {id}\n")), "the form has no field {id}");
             }
         }
+    }
+
+    /// GitHub answers a too long address with an error page, so a long summary is cut to fit and keeps its start.
+    #[test]
+    fn a_long_summary_is_cut_to_fit_the_address() {
+        let summary: Vec<String> = (0..400).map(|n| format!("  2026-10-19T14:02:{n:02}Z user splitClip atUs={n}")).collect();
+        let url = bug_url("0.2.0", &"ž".repeat(3000), &summary);
+        assert!(url.len() <= MAX_URL, "{}", url.len());
+        let diagnostics = fields(&url).into_iter().find(|(k, _)| k == "diagnostics").unwrap().1;
+        assert!(diagnostics.starts_with(&summary[0]) && diagnostics.lines().count() > 20, "{diagnostics}");
     }
 
     fn check(json: &str, current: &str) -> Option<String> {

@@ -1365,6 +1365,8 @@ pub fn run() {
             updates::open_feedback,
             diagnostics::diagnostics,
             diagnostics::open_logs,
+            diagnostics::report_bug,
+            diagnostics::show_bug_report,
             diagnostics::log_ui_error,
             chatgpt::chatgpt_status,
             chatgpt::chatgpt_sign_in,
