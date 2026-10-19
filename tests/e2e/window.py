@@ -10,6 +10,9 @@ OPEN_CARD = """return [...document.querySelectorAll('[role=listbox][aria-label=P
   .filter((c) => c.querySelector('[data-meta]')?.textContent.includes('Open now')).map((c) => c.dataset.path)"""
 
 
+OPEN_DIALOGS = "return [...document.querySelectorAll('dialog[open], [aria-modal=true]')].map((d) => d.getAttribute('aria-label') || d.textContent.slice(0, 40))"
+
+
 def seed(r):
     make(r, 'talk.nuzky', 'Talk to camera', [FIXTURES / 'talk.mp4'], 0)
     make(r, 'reel.nuzky', 'Morning reel', [FIXTURES / 'portrait.mp4'], 1)
@@ -50,6 +53,21 @@ def close_window_flow(r):
     time.sleep(0.5)
     close_window()
     r.check('closing again from the editor goes back to the projects again', wait(lambda: view(r)['view'] == 'home', 10), view(r))
+
+    # The editor's dialogs go with it, so they do not cover the projects.
+    r.s.run("window.__nuzky.store.setState({view: 'editor', exportOpen: true})")
+    r.check('Export opens in the editor', wait(lambda: r.s.run(OPEN_DIALOGS), 5), r.s.run(OPEN_DIALOGS))
+    time.sleep(0.5)
+    close_window()
+    r.check('closing the window with Export open shows the projects without the dialog',
+            wait(lambda: view(r)['view'] == 'home' and not r.s.run(OPEN_DIALOGS), 10), [view(r), r.s.run(OPEN_DIALOGS)])
+
+    # A reloaded page starts on the projects, so the next close quits even though the editor was shown before.
+    r.s.run("window.__nuzky.store.setState({view: 'editor'})")
+    time.sleep(0.5)
+    r.s.run('window.__oldPage = true; location.reload()')
+    r.check('after a reload the page starts on the projects',
+            wait(lambda: r.s.run("return !window.__oldPage && window.__nuzky?.store.getState().snap ? window.__nuzky.store.getState().view : null", retries=3) == 'home', 30))
     time.sleep(0.5)
 
     close_window()

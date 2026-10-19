@@ -35,7 +35,7 @@ def export(r):
     r.check('exported frame 150 (5 s at 30 fps) matches the rendered one', changed < 0.002, f'{changed:.3%} of pixels differ')
     r.check('no unfinished file is left', not list(r.work.glob('.nuzky-part-*')))
     youtube(r, start_export)
-    # Closing the window during an export asks first, then removes the unfinished file.
+    # Closing the window during an export goes home first; closing it there asks, then removes the unfinished file.
     quit_target = r.work / 'quit.mp4'
     started = r.s.call(start_export, str(quit_target), {'resolution': 2160, 'fps': 60, 'quality': 'high'}, epoch, True)
     r.check('a long export runs into an unfinished file', started['ok'] and wait(lambda: list(r.work.glob('.nuzky-part-*')), 10))

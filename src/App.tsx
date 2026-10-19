@@ -322,8 +322,17 @@ function useBackendEvents() {
         useEditor.getState().toast({ kind: "error", text: "macOS didn't show the window for choosing a file. Quit Nuzky, open it again and try once more." }),
       ),
     );
-    // The window's close button in the editor goes back to the projects; on the home screen it quits.
-    offs.push(listen("close-to-home", showHome));
+    // A reloaded page starts on the projects, while the backend still remembers the editor.
+    void api.setEditorShown(useEditor.getState().view === "editor");
+    // The editor's own dialogs would cover the projects; an export goes on without its dialog.
+    offs.push(
+      listen("close-to-home", () => {
+        useEditor.setState({ exportOpen: false });
+        useYoutube.setState({ open: false, url: "" });
+        useCapCut.setState({ opened: null });
+        showHome();
+      }),
+    );
     offs.push(
       listen<string>("close-save-failed", (e) =>
         useEditor.getState().toast({ kind: "error", text: `Your last changes could not be saved: ${e.payload}. Free some disk space and close again, or close again to quit without them.` }),
