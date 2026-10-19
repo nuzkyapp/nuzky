@@ -156,7 +156,7 @@ export function Home() {
   const searching = query.trim().length > 0;
   const found = useMemo(() => (searching ? sorted.filter((p) => matches(p, query, collections)) : sorted), [sorted, searching, query, collections]);
   const firstRun = filter === "all" && !searching && onlyPristine(projects, current);
-  // CapCut's drafts sit above all the projects, never in a collection or a search.
+  // CapCut's drafts sit below all the projects, never in a collection or a search.
   const drafts = filter === "all" && !searching && !firstRun;
   const hasDrafts = useCapCut((s) => (s.drafts?.length ?? 0) > 0) && drafts;
   const hits = useMemo(
@@ -479,7 +479,6 @@ export function Home() {
               )
             ) : (
               <>
-                {drafts && <DraftsSection title="CapCut drafts" className="mb-7 pt-1" />}
                 {found.length > 0 && (
                   <div ref={grid} role="listbox" aria-label="Projects" aria-multiselectable onKeyDown={onGridKey} className="flex flex-col gap-7 pt-1">
                     {sections.map((section) => (
@@ -505,6 +504,7 @@ export function Home() {
                     ))}
                   </div>
                 )}
+                {drafts && <DraftsSection title="CapCut drafts" className={found.length > 0 ? "mt-7" : "pt-1"} />}
                 {searching && <SaidResults query={query} said={said} hits={hits} projects={projects} first={found.length === 0} />}
                 {found.length === 0 && !searching && filter !== "all" && (
                   <Empty icon={<Folder size={28} className="text-muted" />} title={`No projects in ${title} yet`}>

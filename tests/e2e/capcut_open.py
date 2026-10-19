@@ -258,9 +258,13 @@ def capcut_open(r):
     r.shot('ai-starter')
     r.s.run("window.__nuzky.agent.setState({draft: ''}); window.__nuzky.dock.setState({open: false})")
 
-    # Back home: the drafts sit above the projects now, and the one opened says so.
+    # Back home: the projects come first now, the drafts below them, and the one opened says so.
     r.s.run("window.__nuzky.store.setState({view: 'home'})")
-    r.check('once there are projects, the drafts sit above them', wait(lambda: r.s.run(SECTION) == 'CapCut drafts', 10), r.s.run(SECTION))
+    r.check('once there are projects, the drafts are titled CapCut drafts', wait(lambda: r.s.run(SECTION) == 'CapCut drafts', 10), r.s.run(SECTION))
+    below = r.s.run("""const grid = document.querySelector('[role=listbox][aria-label=Projects]')?.getBoundingClientRect();
+        const s = document.querySelector('section[aria-label="CapCut drafts"]').getBoundingClientRect();
+        return !!grid && grid.height > 0 && s.top >= grid.bottom""")
+    r.check('and sit below the projects', below)
     opened = wait(lambda: next((c for c in r.s.run(DRAFT_CARDS) if c['name'] == 'Talking reel' and 'In Nuzky' in c['text']), None), 10)
     r.check('the draft opened before says In Nuzky', opened, r.s.run(DRAFT_CARDS))
     clear = wait(lambda: r.s.run("""const card = [...document.querySelectorAll('[role=option][data-path]')].find((c) => c.innerText.includes('missing'));
