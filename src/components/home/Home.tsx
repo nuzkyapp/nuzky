@@ -156,7 +156,6 @@ export function Home() {
   const searching = query.trim().length > 0;
   const found = useMemo(() => (searching ? sorted.filter((p) => matches(p, query, collections)) : sorted), [sorted, searching, query, collections]);
   const firstRun = filter === "all" && !searching && onlyPristine(projects, current);
-  // CapCut's drafts sit below all the projects, never in a collection or a search.
   const drafts = filter === "all" && !searching && !firstRun;
   const hasDrafts = useCapCut((s) => (s.drafts?.length ?? 0) > 0) && drafts;
   const hits = useMemo(
