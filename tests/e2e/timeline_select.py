@@ -22,6 +22,10 @@ BOX = "return !!document.querySelector('[data-box]')"
 VIEW = """const el = document.querySelector('[data-ruler]').closest('.overflow-auto'); const r = el.getBoundingClientRect();
 return [r.left, r.top, r.left + el.clientWidth, r.top + el.clientHeight, el.scrollLeft];"""
 SCROLL_TO = "document.querySelector('[data-ruler]').closest('.overflow-auto').scrollLeft = arguments[0]"
+CUT = 'return window.__nuzky.store.getState().cut'
+HOVER_UNDO = """document.querySelector('[data-peek-button=undo]').dispatchEvent(new PointerEvent(arguments[0] ? 'pointerover' : 'pointerout',
+  {bubbles: true, pointerId: 1, relatedTarget: arguments[0] ? null : document.body}));"""
+PEEK = "return document.querySelector('[data-testid=history-peek]')?.innerText ?? null"
 CAPTION = """window.__nuzky.store.getState().edit({type: 'addText', startUs: arguments[0], text: 'Caption',
   style: {fontSize: 64, color: '#ffffff', bold: false, strokeWidth: 0, strokeColor: '#000000'}})"""
 
@@ -94,8 +98,21 @@ def timeline_select(r):
     r.key('Escape')
     r.s.run(RELEASE, *path[-1], {})
     clock.sleep(0.3)
-    r.check('Esc in the middle of a box keeps a selected transition selected',
-            r.s.run('return window.__nuzky.store.getState().cut') == second, r.s.run('return window.__nuzky.store.getState().cut'))
+    r.check('Esc in the middle of a box keeps a selected transition selected', r.s.run(CUT) == second, r.s.run(CUT))
+    # A box that replaces the selection takes a selected transition out of it too, even when it touches no clip.
+    r.s.run(PRESS, start[0], below + 10, {}, [(start[0] + 40, below + 30)])
+    r.s.run(RELEASE, start[0] + 40, below + 30, {})
+    clock.sleep(0.3)
+    r.check('a box over empty space clears a selected transition', r.s.run(CUT) is None and r.s.run(SELECTION) == [],
+            [r.s.run(CUT), r.s.run(SELECTION)])
+
+    # Undo's preview draws an earlier project, whose clips a box would select; it waits while a box is drawn.
+    r.s.run(PRESS, *start, {}, path)
+    r.s.run(HOVER_UNDO, True)
+    clock.sleep(1)
+    r.check('resting on Undo during a box shows no preview', r.s.run(PEEK) is None, r.s.run(PEEK))
+    r.s.run(HOVER_UNDO, False)
+    r.s.run(RELEASE, *path[-1], {})
 
     # Zoomed in, the second clip is out of view; holding the box at the right edge scrolls the timeline on to it.
     r.s.run('window.__nuzky.store.getState().select([]); window.__nuzky.store.getState().setZoom(200)')

@@ -316,8 +316,8 @@ export function useTimelineGestures({
           if (cr.right > x0 && cr.left < x0 + b.width && cr.bottom > y0 && cr.top < y0 + b.height) hit.push(c.dataset.clipId!);
         }
         const ids = [...base, ...hit.filter((id) => !base.includes(id))];
-        const sel = useEditor.getState().selection;
-        if (ids.length !== sel.length || ids.some((id, i) => id !== sel[i])) select(ids);
+        const { selection: sel, cut } = useEditor.getState();
+        if (cut || ids.length !== sel.length || ids.some((id, i) => id !== sel[i])) select(ids);
       };
       const end = (commit: boolean) => {
         unfollow();

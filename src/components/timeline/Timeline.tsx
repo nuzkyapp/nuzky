@@ -193,24 +193,8 @@ export function Timeline({ height }: { height: number }) {
   /** The project as last shown, where a deleted clip's neighbours are found. */
   const shown = useRef(project);
   const closeMenu = useCallback(() => setMenu(null), []);
-  // While Undo or Redo is hovered, the lanes draw the project that step would restore, with what changes marked.
-  // Only the drawing: selection, focus and edits keep working on the project as it is.
-  const [peek, setPeek] = useState<Peek | null>(null);
-  const peekShown = peek && !locked && project && peek.revision === snap0?.revision ? peek : null;
-  const described = useMemo(() => (peekShown && project ? describePeek(project, peekShown.project) : null), [peekShown, project]);
-  const drawn = peekShown && described?.draw === "then" ? peekShown.project : project;
-
-  const tracks = useMemo(() => (drawn ? displayTracks(drawn) : []), [drawn]);
-  const duration = drawn ? contentEnd(drawn) : 0;
   const fps = project?.canvas.fps ?? 30;
   const minUs = Math.ceil(US / fps);
-  // A shorter preview never narrows the lanes, so the scroll position survives it.
-  const laneWidth = Math.max(view.width - HEADER_W, (Math.max(duration, project ? contentEnd(project) : 0) / US + 30) * zoom);
-  // Clips get the window they draw filmstrip tiles in. It moves in steps, with at least 200 px of margin on
-  // each side, so scrolling re-renders the clips once per step instead of on every scroll event.
-  const windowFrom = Math.floor(view.left / VISIBLE_STEP) * VISIBLE_STEP;
-  const visible = useMemo<[number, number]>(() => [windowFrom - 200, windowFrom + view.width + VISIBLE_STEP + 200], [windowFrom, view.width]);
-
   const timeAt = useCallback(
     (clientX: number) => {
       const el = scroller.current!;
@@ -219,6 +203,24 @@ export function Timeline({ height }: { height: number }) {
     },
     [zoom],
   );
+
+  const { drag: gesture, box, startClipDrag, startScrub, startBoxSelect } = useTimelineGestures({ project, zoom, snapping, minUs, rows, scroller, lanesAt: LANES_AT, timeAt });
+  // While Undo or Redo is hovered, the lanes draw the project that step would restore, with what changes marked.
+  // Only the drawing: selection, focus and edits keep working on the project as it is. A box select passing over
+  // the button never shows it, since the box selects the clips drawn.
+  const [peek, setPeek] = useState<Peek | null>(null);
+  const peekShown = peek && !locked && !box && project && peek.revision === snap0?.revision ? peek : null;
+  const described = useMemo(() => (peekShown && project ? describePeek(project, peekShown.project) : null), [peekShown, project]);
+  const drawn = peekShown && described?.draw === "then" ? peekShown.project : project;
+
+  const tracks = useMemo(() => (drawn ? displayTracks(drawn) : []), [drawn]);
+  const duration = drawn ? contentEnd(drawn) : 0;
+  // A shorter preview never narrows the lanes, so the scroll position survives it.
+  const laneWidth = Math.max(view.width - HEADER_W, (Math.max(duration, project ? contentEnd(project) : 0) / US + 30) * zoom);
+  // Clips get the window they draw filmstrip tiles in. It moves in steps, with at least 200 px of margin on
+  // each side, so scrolling re-renders the clips once per step instead of on every scroll event.
+  const windowFrom = Math.floor(view.left / VISIBLE_STEP) * VISIBLE_STEP;
+  const visible = useMemo<[number, number]>(() => [windowFrom - 200, windowFrom + view.width + VISIBLE_STEP + 200], [windowFrom, view.width]);
 
   // Media dragged from the media panel lands here.
   useEffect(() => {
@@ -284,7 +286,6 @@ export function Timeline({ height }: { height: number }) {
     return () => el.removeEventListener("wheel", onWheel);
   }, [setZoom]);
 
-  const { drag: gesture, box, startClipDrag, startScrub, startBoxSelect } = useTimelineGestures({ project, zoom, snapping, minUs, rows, scroller, lanesAt: LANES_AT, timeAt });
   // A fade drag changes only the clip's fades; the ghost, the slot and the snap guide belong to moves and trims.
   const drag = gesture && !isFade(gesture.mode) ? gesture : null;
   const fading = gesture?.moved && isFade(gesture.mode) ? gesture : null;
@@ -589,7 +590,6 @@ export function Timeline({ height }: { height: number }) {
           {/* Tracks */}
           <div
             className="relative flex flex-1 flex-col"
-            // Empty lane space, between and below the lanes too: a click moves the playhead, a drag selects clips with a box.
             onPointerDown={(e) => (e.target as HTMLElement).hasAttribute("data-lane") && startBoxSelect(e)}
             onKeyDown={onClipKey}
             onFocus={(e) => {
