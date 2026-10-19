@@ -14,8 +14,9 @@ fn check_seek(path: &Path, extra_times: &[i64]) {
     let truth = raw(path, &[]);
     let frame_len = (a.width * a.height * 4) as usize;
     assert_eq!(truth.len() / frame_len, timestamps.len());
-    let mut decoder = VideoDecoder::open(path).unwrap();
-    let mut worker = VideoWorker::spawn(path.into());
+    // The preview's decoders, which jump around the file.
+    let mut decoder = VideoDecoder::open_for_seeking(path).unwrap();
+    let mut worker = VideoWorker::spawn_for_seeking(path.into());
     let mut rng = Rng(0xCAFE_1234);
     let mut times = vec![0, 1, *timestamps.last().unwrap()];
     times.extend(extra_times);
@@ -130,6 +131,34 @@ fn vfr_and_hevc_10_bit_seek_matches_ffmpeg() {
         }
     }
     assert!(failures.is_empty(), "Failed HEVC flags {failures:?}");
+}
+/// HEVC whose pictures decode row by row on several threads (wavefronts, as Apple's encoder and x265 write them) lands
+/// on the same frames as FFmpeg after every seek, also with B-frames.
+#[test]
+fn hevc_with_wavefronts_seeks_match_ffmpeg() {
+    if !available() {
+        return;
+    }
+    let encoders =
+        String::from_utf8_lossy(&run(Command::new("ffmpeg").args(["-hide_banner", "-encoders"])).stdout).into_owned();
+    let d = dir("seek-hevc-wavefronts");
+    let source = ["-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30:duration=2"];
+    let mut checked = 0;
+    if encoders.contains("libx265") {
+        let path = d.join("x265.mp4");
+        ff(&[&source[..], &["-c:v", "libx265", "-x265-params", "keyint=30:bframes=3:log-level=error"]].concat(), &path);
+        check_seek(&path, &[]);
+        checked += 1;
+    }
+    if encoders.contains("hevc_videotoolbox") {
+        let path = d.join("apple.mov");
+        ff(&[&source[..], &["-c:v", "hevc_videotoolbox", "-b:v", "4M", "-g", "30", "-tag:v", "hvc1"]].concat(), &path);
+        check_seek(&path, &[]);
+        checked += 1;
+    }
+    if checked == 0 {
+        eprintln!("SKIP: ffmpeg without an HEVC encoder");
+    }
 }
 #[test]
 fn rotation_display_matrices_match_ffmpeg_autorotate() {

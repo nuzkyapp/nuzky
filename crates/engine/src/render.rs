@@ -510,8 +510,11 @@ impl Renderer {
     fn worker(&mut self, clip_id: &str, path: &str, switch: bool) -> &mut VideoWorker {
         let key = (clip_id.to_owned(), path.to_owned());
         let proxy = self.proxies.as_deref().and_then(|dir| crate::proxy::ready(dir, Path::new(path)));
+        // Only the preview reads proxies, and it jumps around; export reads straight through.
+        let preview = self.proxies.is_some();
         let spawn = |proxy: Option<PathBuf>| match proxy {
             Some(proxy) => VideoWorker::spawn_proxy(proxy),
+            None if preview => VideoWorker::spawn_for_seeking(PathBuf::from(path)),
             None => VideoWorker::spawn(PathBuf::from(path)),
         };
         if !self.workers.contains_key(&key) {

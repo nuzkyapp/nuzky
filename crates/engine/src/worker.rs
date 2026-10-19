@@ -84,21 +84,26 @@ pub struct VideoWorker {
 
 impl VideoWorker {
     pub fn spawn(path: PathBuf) -> Self {
-        Self::start(path, None)
+        Self::start(path, None, false)
+    }
+
+    /// For the preview, which jumps around the file (`VideoDecoder::open_for_seeking`).
+    pub fn spawn_for_seeking(path: PathBuf) -> Self {
+        Self::start(path, None, true)
     }
 
     /// Decodes a preview proxy (`crate::proxy`), which gives the frames of its original at the same times.
     pub fn spawn_proxy(proxy: PathBuf) -> Self {
-        Self::start(proxy.clone(), Some(proxy))
+        Self::start(proxy.clone(), Some(proxy), false)
     }
 
-    fn start(path: PathBuf, proxy: Option<PathBuf>) -> Self {
+    fn start(path: PathBuf, proxy: Option<PathBuf>, seeking: bool) -> Self {
         let shared = Arc::new(Shared { state: Mutex::new(State::default()), cv: Condvar::new() });
         let s = shared.clone();
         let is_proxy = proxy.is_some();
         let thread = std::thread::Builder::new()
             .name("video-decode".into())
-            .spawn(move || run(s, path, is_proxy))
+            .spawn(move || run(s, path, is_proxy, seeking))
             .expect("spawn decoder thread");
         Self { shared, thread: Some(thread), last_used: Instant::now(), exact: false, proxy }
     }
@@ -161,8 +166,12 @@ impl Drop for VideoWorker {
     }
 }
 
-fn run(shared: Arc<Shared>, path: PathBuf, proxy: bool) {
-    let opened = if proxy { VideoDecoder::open_proxy(&path) } else { VideoDecoder::open(&path) };
+fn run(shared: Arc<Shared>, path: PathBuf, proxy: bool, seeking: bool) {
+    let opened = match (proxy, seeking) {
+        (true, _) => VideoDecoder::open_proxy(&path),
+        (false, true) => VideoDecoder::open_for_seeking(&path),
+        (false, false) => VideoDecoder::open(&path),
+    };
     let mut decoder = match opened {
         Ok(d) => d,
         Err(e) => {

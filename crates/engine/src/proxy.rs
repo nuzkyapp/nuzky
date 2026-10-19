@@ -39,7 +39,7 @@ pub fn ready(cache_dir: &Path, source: &Path) -> Option<PathBuf> {
 pub fn open_decoder(cache_dir: &Path, source: &Path) -> Result<VideoDecoder> {
     match ready(cache_dir, source) {
         Some(proxy) => VideoDecoder::open_proxy(&proxy),
-        None => VideoDecoder::open(source),
+        None => VideoDecoder::open_for_seeking(source),
     }
 }
 

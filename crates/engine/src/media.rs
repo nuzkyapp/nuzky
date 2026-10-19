@@ -525,8 +525,40 @@ pub struct VideoDecoder {
 
 unsafe impl Send for VideoDecoder {}
 
+/// Frame threading decodes one picture per thread, so the first picture after a seek, usually a large keyframe,
+/// decodes on one thread. For `seeking`, HEVC whose rows decode in parallel (`hevc::parallel_rows`; Apple's encoder
+/// writes it so) decodes each picture on several threads instead: the first frame shows sooner and seeks land
+/// sooner. Reading straight through, as export and proxies do, stays with frame threading: slice threading was faster
+/// there on Apple's HEVC but slower on x265's, and fell further behind when other work took the cores.
+fn threading(parameters: &ff::codec::Parameters, seeking: bool) -> ff::codec::threading::Config {
+    use ff::codec::threading::{Config, Type};
+    // SAFETY: the stream owns its parameters and extradata while `parameters` lives.
+    let extradata = unsafe {
+        let par = &*parameters.as_ptr();
+        match usize::try_from(par.extradata_size) {
+            Ok(len) if len > 0 && !par.extradata.is_null() => std::slice::from_raw_parts(par.extradata, len),
+            _ => &[],
+        }
+    };
+    if seeking && parameters.id() == ff::codec::Id::HEVC && crate::hevc::parallel_rows(extradata) {
+        // Rows wait for the row above them, so 4 threads stalled when other work took the cores; 8 stayed ahead.
+        Config { kind: Type::Slice, count: 8 }
+    } else {
+        Config { kind: Type::Frame, count: 4 }
+    }
+}
+
 impl VideoDecoder {
     pub fn open(path: &Path) -> Result<Self> {
+        Self::open_with(path, false)
+    }
+
+    /// For jumping around a file, as the preview and thumbnails do (`threading`).
+    pub fn open_for_seeking(path: &Path) -> Result<Self> {
+        Self::open_with(path, true)
+    }
+
+    fn open_with(path: &Path, seeking: bool) -> Result<Self> {
         let input = open_input(path)?;
         let is_image = is_image_format(&input);
         let grid = tile_grid(&input);
@@ -541,7 +573,7 @@ impl VideoDecoder {
         let rate = stream.avg_frame_rate();
         let fps = if rate.numerator() > 0 && rate.denominator() > 0 { f64::from(rate) } else { 30.0 };
         let mut ctx = ff::codec::context::Context::from_parameters(stream.parameters())?;
-        ctx.set_threading(ff::codec::threading::Config { kind: ff::codec::threading::Type::Frame, count: 4 });
+        ctx.set_threading(threading(&stream.parameters(), seeking));
         let decoder = ctx.decoder().video()?;
         let origin_us = origin_us(&input);
         Ok(Self {
@@ -1157,6 +1189,33 @@ mod tests {
                 pair = decoder.frame_covering(target, [None, None]).unwrap();
                 assert_eq!(pair[0].as_ref().map(|f| f.0), expected, "seek {name} at {target}");
             }
+        }
+    }
+
+    #[test]
+    fn seeking_decodes_each_picture_of_hevc_with_wavefronts_on_all_threads() {
+        // x265 writes wavefronts (WPP) unless told not to.
+        for (x265, slices) in [("log-level=error", true), ("wpp=0:log-level=error", false)] {
+            let path = std::env::temp_dir().join(format!("nuzky-wpp-{}.mp4", uuid::Uuid::new_v4()));
+            let encoded = std::process::Command::new("ffmpeg")
+                .args(["-v", "error", "-f", "lavfi", "-i", "testsrc2=s=320x240:r=25:d=0.2", "-c:v", "libx265"])
+                .args(["-x265-params", x265])
+                .arg(&path)
+                .status()
+                .is_ok_and(|s| s.success());
+            if !encoded {
+                eprintln!("ffmpeg CLI with libx265 not available, skipping");
+                return;
+            }
+            let active = |decoder: VideoDecoder| unsafe { (*decoder.decoder.as_ptr()).active_thread_type };
+            assert_eq!(
+                active(VideoDecoder::open_for_seeking(&path).unwrap()) == ff::ffi::FF_THREAD_SLICE,
+                slices,
+                "{x265}"
+            );
+            // Reading straight through keeps a picture per thread.
+            assert_eq!(active(VideoDecoder::open(&path).unwrap()), ff::ffi::FF_THREAD_FRAME, "{x265}");
+            std::fs::remove_file(path).unwrap();
         }
     }
 
