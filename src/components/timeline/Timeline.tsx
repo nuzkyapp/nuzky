@@ -221,6 +221,8 @@ export function Timeline({ height }: { height: number }) {
   const [focusId, setFocusId] = useState<string | null>(null);
   /** The focused clip, so focus can move on when it is deleted; null once focus left the clips. */
   const focusPlace = useRef<string | null>(null);
+  /** A clip Alt+↑/↓ moved a layer, scrolled into view when it shows on its new track. */
+  const restacked = useRef<string | null>(null);
   /** The project as last shown, where a deleted clip's neighbours are found. */
   const shown = useRef(project);
   const closeMenu = useCallback(() => setMenu(null), []);
@@ -333,7 +335,11 @@ export function Timeline({ height }: { height: number }) {
     if (!project || !before || !id) return;
     if (findClip(project, id)) {
       // A clip moved to another track is drawn anew there and keeps the focus.
-      if (!document.activeElement || document.activeElement === document.body) focusClipIn(scroller.current, id);
+      if (!document.activeElement || document.activeElement === document.body) {
+        if (restacked.current === id) focusClipIn(scroller.current, id);
+        else scroller.current?.querySelector<HTMLElement>(`[data-clip-id="${id}"]`)?.focus({ preventScroll: true });
+      }
+      restacked.current = null;
       return;
     }
     focusPlace.current = null;
@@ -428,7 +434,10 @@ export function Timeline({ height }: { height: number }) {
       e.preventDefault();
       e.stopPropagation();
       if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-        if (!e.shiftKey) restack(clip.id, e.key === "ArrowUp");
+        if (!e.shiftKey) {
+          restacked.current = clip.id;
+          restack(clip.id, e.key === "ArrowUp");
+        }
       } else nudge(clip.id, e.key === "ArrowLeft" ? -1 : 1, e.shiftKey);
     } else if (arrow && !e.shiftKey) {
       e.preventDefault();
