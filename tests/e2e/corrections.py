@@ -270,6 +270,7 @@ def corrections(r):
     r.check('the app starts again with the project',
             wait(lambda: r.s.run('return !!window.__nuzky?.store.getState().snap', retries=3), 60)
             and wait(lambda: caption_with(r, right), 10), caption_texts(r))
+    r.s.run("window.__nuzky.store.setState({view: 'editor'})")
     tab(r, 'transcript')
     r.check('after reopening, the transcript still reads the correction',
             wait(lambda: fixed().get('text') == right and fixed().get('title') == f'Recognised as “{word}”', 30), fixed())
@@ -292,8 +293,14 @@ def agent(r, first, rest):
         stale = bridge.rpc('tools/call', {'name': 'correct_words', 'arguments': {
             'run_id': run, 'transcript_key': 'stale', 'corrections': [{'i': i, 'text': right}]}})
         r.check('a stale transcript key is refused', 'SPEECH_CHANGED' in json.dumps(stale), stale)
+        # Off by one: the word before reads something else, so nothing may change.
+        shifted = bridge.rpc('tools/call', {'name': 'correct_words', 'arguments': {
+            'run_id': run, 'transcript_key': transcript['transcript_key'],
+            'corrections': [{'i': i - 1 if i > 0 else i + 1, 'text': right, 'expected': word}]}})
+        r.check('a shifted word index is refused', 'WORD_MISMATCH' in json.dumps(shifted), shifted)
+        r.check('and changes nothing', bridge.call('get_transcript', {})['transcript_key'] == transcript['transcript_key'])
         fixed = bridge.call('correct_words', {'run_id': run, 'request_id': 'fix', 'transcript_key': transcript['transcript_key'],
-                                              'corrections': [{'i': i, 'text': right}]})
+                                              'corrections': [{'i': i, 'text': right, 'expected': word}]})
         r.check(f'correct_words changes "{word}" to "{right}" and its caption',
                 fixed['words'] == [{'i': i, 'before': word, 'after': right}] and len(fixed['captions_changed']) == 1, fixed)
         built = bridge.call('build_captions', {'run_id': run})

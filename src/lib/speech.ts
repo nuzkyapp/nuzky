@@ -184,7 +184,7 @@ export const removeRetakes = (key: string, pauseUs: number, what: (removedUs: nu
 export async function correctWord(key: string, i: number, text: string, shown: string): Promise<boolean> {
   if (aiLocked()) return false;
   const out: { done?: WordsCorrected } = {};
-  await enqueue(async (epoch) => (out.done = await api.correctWords(key, [{ i, text }], epoch)).snapshot);
+  await enqueue(async (epoch) => (out.done = await api.correctWords(key, [{ i, text, expected: shown }], epoch)).snapshot);
   if (!out.done) return false;
   const n = out.done.captions;
   const captions = n > 0 ? `, also in ${n === 1 ? "its caption" : `${n} captions`}` : "";

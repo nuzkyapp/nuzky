@@ -1233,7 +1233,7 @@ impl Backend {
         let project = self.media_project(&state.project);
         let derived = transcript::derive(&project, &self.host.transcripts)?;
         transcript::check_word_key(&state.project, &derived, &args.transcript_key)?;
-        let fixes: Vec<_> = args.corrections.iter().map(|c| (c.i, c.text.clone())).collect();
+        let fixes: Vec<_> = args.corrections.iter().map(|c| (c.i, c.text.clone(), c.expected.clone())).collect();
         let plan = transcript::plan_correction(&state.project, &derived, &fixes)?;
         let mut preview = project;
         for edit in plan.edits.clone() {

@@ -195,8 +195,8 @@ export const api = {
     invoke<TranscriptCut>("remove_pauses", { key, pauseUs: Math.round(pauseUs), only, hesitations, expectedEpoch: epoch }),
   /** What the retake analysis suggests deleting, every hesitation and every pause longer than `pauseUs`, as one undo step. */
   removeRetakes: (key: string, pauseUs: number, epoch: Epoch) => invoke<TranscriptCut>("remove_retakes", { key, pauseUs: Math.round(pauseUs), expectedEpoch: epoch }),
-  /** Words by view index and the text they should read, with the captions that show them, as one undo step. */
-  correctWords: (key: string, corrections: { i: number; text: string }[], epoch: Epoch) =>
+  /** Words by view index, the text they should read and the text the view shows, with the captions that show them, as one undo step. */
+  correctWords: (key: string, corrections: { i: number; text: string; expected: string }[], epoch: Epoch) =>
     invoke<WordsCorrected>("correct_words", { key, corrections, expectedEpoch: epoch }),
   listFonts: () => invoke<FontFamilies>("list_fonts"),
   /** Sentences of the timeline said with emphasis, for a punch-in. */

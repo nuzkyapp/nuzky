@@ -821,12 +821,25 @@ pub fn check_correction(text: &str) -> Result<String> {
 
 /// Corrects the words at these `derived` indices to the given text. A word heard twice, such as
 /// in a duplicated clip, is one recognised word: correcting it corrects every place it is heard.
-pub fn plan_correction(project: &Project, derived: &Derived, fixes: &[(usize, String)]) -> Result<Correction> {
+/// Fixes are `(index, new text, the text the word shows now)`; a word that shows something else
+/// refuses the whole batch, so a shifted index cannot correct the wrong word.
+pub fn plan_correction(
+    project: &Project,
+    derived: &Derived,
+    fixes: &[(usize, String, Option<String>)],
+) -> Result<Correction> {
     ensure!(!fixes.is_empty(), "INVALID_ARGUMENTS: give at least one correction");
     let mut corrections: Vec<(usize, WordCorrection)> = Vec::new();
-    for (i, text) in fixes {
+    for (i, text, expected) in fixes {
         let word =
             derived.words.get(*i).with_context(|| format!("INVALID_WORD_INDEX: no word {i} in the transcript"))?;
+        if let Some(expected) = expected {
+            let (reads, expected) = (word.text.trim(), expected.trim());
+            ensure!(
+                reads == expected,
+                "WORD_MISMATCH: word {i} reads {reads:?}, expected {expected:?}; read get_transcript again"
+            );
+        }
         let text = check_correction(text)?;
         let original = derived.original(word).unwrap_or(&word.text).to_owned();
         let correction =
@@ -1608,7 +1621,7 @@ pub(crate) mod tests {
         fixes: &[(usize, &str)],
     ) -> Result<Correction> {
         let derived = Derived::new(project, sources.clone(), vec![]);
-        let fixes: Vec<_> = fixes.iter().map(|(i, text)| (*i, text.to_string())).collect();
+        let fixes: Vec<_> = fixes.iter().map(|(i, text)| (*i, text.to_string(), None)).collect();
         let plan = plan_correction(project, &derived, &fixes)?;
         for edit in plan.edits.clone() {
             project.apply(edit)?;

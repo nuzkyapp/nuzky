@@ -1398,14 +1398,13 @@ fn caption_style_packages_over_stdio() {
     c.finish();
 }
 
-// Only on Linux does XDG_DATA_HOME choose where Nuzky keeps transcripts.
-#[cfg(target_os = "linux")]
-#[test]
-fn correct_words_fixes_the_transcript_and_captions_over_stdio() {
+/// A 4 s take whose words are stored as recognised, 0.8 s apart, and placed on the timeline by a
+/// run. Words come from the store, so the file is never decoded and any bytes do. The client
+/// must have a data directory of its own (`style: Some(..)`).
+#[cfg(unix)]
+fn place_transcribed_take(c: &mut Client, said: &[&str], run_id: &Value) -> nuzky_engine::model::Asset {
     use nuzky_engine::{model::Asset, model::AssetKind, speech::Word};
     use nuzky_session::transcripts::{Record, TranscriptStore, VERSION};
-    let mut c = Client::start(true, None, Some(None));
-    // Words come from the store, so the file is never decoded and any bytes do.
     let path = c.dir.join("take.mov");
     std::fs::write(&path, b"take").unwrap();
     let asset = Asset {
@@ -1423,7 +1422,6 @@ fn correct_words_fixes_the_transcript_and_captions_over_stdio() {
         credit: None,
         part: None,
     };
-    let said = ["Mikrofon", "vejte", "co", "nejblíž."];
     let words = said
         .iter()
         .enumerate()
@@ -1446,25 +1444,30 @@ fn correct_words_fixes_the_transcript_and_captions_over_stdio() {
         alignment: None,
     };
     store.put(&asset, &record).unwrap();
+    let edits = json!([{"type":"addAssets","assets":[asset]},{"type":"addClip","assetId":"take"}]);
+    c.call("apply_edits", json!({"run_id":run_id,"request_id":"place","edits":edits}));
+    asset
+}
 
+#[cfg(unix)]
+fn caption_texts(c: &mut Client) -> Vec<String> {
+    let state = c.call("get_state", json!({}));
+    let track = state["tracks"].as_array().unwrap().iter().find(|t| t["name"] == "Captions").unwrap().clone();
+    track["clips"].as_array().unwrap().iter().map(|c| c["content"]["text"].as_str().unwrap().to_owned()).collect()
+}
+
+// Only on Linux does XDG_DATA_HOME choose where Nuzky keeps transcripts.
+#[cfg(target_os = "linux")]
+#[test]
+fn correct_words_fixes_the_transcript_and_captions_over_stdio() {
+    let mut c = Client::start(true, None, Some(None));
     let tools = c.rpc("tools/list", json!({}));
     let tool = tools["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "correct_words").unwrap();
     assert_eq!(tool["inputSchema"]["required"], json!(["run_id", "transcript_key", "corrections"]));
     let run = c.call("begin_run", json!({"label":"fix a word"}));
-    let edits = json!([{"type":"addAssets","assets":[asset]},{"type":"addClip","assetId":"take"}]);
-    c.call("apply_edits", json!({"run_id":run["run_id"],"request_id":"place","edits":edits}));
-    let captions = |c: &mut Client| {
-        let state = c.call("get_state", json!({}));
-        let track = state["tracks"].as_array().unwrap().iter().find(|t| t["name"] == "Captions").unwrap().clone();
-        track["clips"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|c| c["content"]["text"].as_str().unwrap().to_owned())
-            .collect::<Vec<_>>()
-    };
+    place_transcribed_take(&mut c, &["Mikrofon", "vejte", "co", "nejblíž."], &run["run_id"]);
     c.call("build_captions", json!({"run_id":run["run_id"]}));
-    assert!(captions(&mut c).iter().any(|t| t.contains("vejte")));
+    assert!(caption_texts(&mut c).iter().any(|t| t.contains("vejte")));
     let transcript = c.call("get_transcript", json!({}));
     assert_eq!(transcript["words"][1]["text"], "vejte");
     let args = json!({"run_id":run["run_id"],"request_id":"dejte","transcript_key":transcript["transcript_key"],
@@ -1473,7 +1476,7 @@ fn correct_words_fixes_the_transcript_and_captions_over_stdio() {
     assert_eq!(fixed["words"], json!([{"i":1,"before":"vejte","after":"dejte"}]));
     assert_eq!(fixed["captions_changed"].as_array().unwrap().len(), 1);
     assert_eq!(c.call("correct_words", args), fixed, "a retry with the same request_id corrects once");
-    let shown = captions(&mut c);
+    let shown = caption_texts(&mut c);
     assert!(shown.iter().any(|t| t.contains("dejte")) && !shown.iter().any(|t| t.contains("vejte")), "{shown:?}");
     let now = c.call("get_transcript", json!({}));
     assert_eq!(now["words"][1]["text"], "dejte");
@@ -1482,7 +1485,7 @@ fn correct_words_fixes_the_transcript_and_captions_over_stdio() {
     assert!(c.error("correct_words", stale).contains("SPEECH_CHANGED"));
     // Building the captions again reads the corrected word.
     c.call("build_captions", json!({"run_id":run["run_id"]}));
-    assert_eq!(captions(&mut c), shown);
+    assert_eq!(caption_texts(&mut c), shown);
     c.call("end_run", json!({"run_id":run["run_id"],"action":"keep"}));
     c.finish();
     let disk: Value = serde_json::from_slice(&std::fs::read(c.dir.join("project.nuzky")).unwrap()).unwrap();
@@ -1490,6 +1493,73 @@ fn correct_words_fixes_the_transcript_and_captions_over_stdio() {
         disk["wordCorrections"],
         json!([{"assetId":"take","sourceStartUs":1_000_000,"original":"vejte","text":"dejte"}])
     );
+}
+
+/// An agent off by one word once overwrote "něco" instead of "natchne" with a current
+/// transcript_key. `expected` names the word the agent means, so a shifted index changes nothing.
+#[cfg(unix)]
+#[test]
+fn correct_words_refuses_a_word_that_reads_otherwise_than_expected_over_stdio() {
+    let mut c = Client::start(true, None, Some(None));
+    let run = c.call("begin_run", json!({"label":"fix a word"}));
+    let run_id = run["run_id"].clone();
+    place_transcribed_take(&mut c, &["Mikrofon", "něco", "natchne", "nejblíž."], &run_id);
+    c.call("build_captions", json!({"run_id":run_id}));
+    let transcript = c.call("get_transcript", json!({}));
+    let key = transcript["transcript_key"].clone();
+    let before = (c.call("get_state", json!({}))["revision"].clone(), caption_texts(&mut c));
+    let unchanged = |c: &mut Client| {
+        assert_eq!((c.call("get_state", json!({}))["revision"].clone(), caption_texts(c)), before);
+        assert_eq!(c.call("get_transcript", json!({})), transcript);
+    };
+    let refused = |c: &mut Client, args: Value| {
+        let error: Value = serde_json::from_str(&c.error("correct_words", args)).unwrap();
+        error["error"].as_str().unwrap().to_owned()
+    };
+
+    let shifted =
+        json!({"run_id":run_id,"transcript_key":key,"corrections":[{"i":1,"text":"nadchne","expected":"natchne"}]});
+    assert_eq!(
+        refused(&mut c, shifted),
+        r#"WORD_MISMATCH: word 1 reads "něco", expected "natchne"; read get_transcript again"#
+    );
+    unchanged(&mut c);
+    let mixed = json!({"run_id":run_id,"transcript_key":key,"corrections":[
+        {"i":0,"text":"Mikrofón","expected":"Mikrofon"},{"i":3,"text":"nejbližší.","expected":"natchne"}]});
+    assert!(refused(&mut c, mixed).starts_with("WORD_MISMATCH: word 3"));
+    unchanged(&mut c);
+
+    // Compared after trimming; a retry finishes the call although the word reads otherwise now.
+    let right = json!({"run_id":run_id,"request_id":"nadchne","transcript_key":key,
+        "corrections":[{"i":2,"text":"nadchne","expected":" natchne "}]});
+    let fixed = c.call("correct_words", right.clone());
+    assert_eq!(fixed["words"], json!([{"i":2,"before":"natchne","after":"nadchne"}]));
+    assert_eq!(c.call("correct_words", right), fixed);
+    assert!(caption_texts(&mut c).iter().any(|t| t.contains("nadchne")));
+
+    // A corrected word reads its correction, not what recognition wrote.
+    let key = fixed["transcript_key"].clone();
+    let original =
+        json!({"run_id":run_id,"transcript_key":key,"corrections":[{"i":2,"text":"nadchne!","expected":"natchne"}]});
+    assert!(refused(&mut c, original).starts_with(r#"WORD_MISMATCH: word 2 reads "nadchne""#));
+    let again =
+        json!({"run_id":run_id,"transcript_key":key,"corrections":[{"i":2,"text":"nadchne!","expected":"nadchne"}]});
+    let fixed = c.call("correct_words", again);
+    assert_eq!(fixed["words"], json!([{"i":2,"before":"nadchne","after":"nadchne!"}]));
+
+    // Without expected, as before.
+    let unchecked =
+        json!({"run_id":run_id,"transcript_key":fixed["transcript_key"],"corrections":[{"i":1,"text":"něco,"}]});
+    assert_eq!(c.call("correct_words", unchecked)["words"], json!([{"i":1,"before":"něco","after":"něco,"}]));
+    let words: Vec<_> = c.call("get_transcript", json!({}))["words"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w["text"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(words, ["Mikrofon", "něco,", "nadchne!", "nejblíž."]);
+    c.call("end_run", json!({"run_id":run_id,"action":"keep"}));
+    c.finish();
 }
 
 /// A 12 s talk of three sentences of four 0.4 s tone "words", the middle sentence 12 dB louder,

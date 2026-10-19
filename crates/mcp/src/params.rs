@@ -313,6 +313,9 @@ pub struct WordFix {
     pub i: usize,
     /// What the word should read, punctuation included: one line, at most 100 characters.
     pub text: String,
+    /// The word's text as get_transcript shows it now. If it reads otherwise, the whole call is
+    /// refused with WORD_MISMATCH and nothing changes.
+    pub expected: Option<String>,
 }
 #[derive(Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

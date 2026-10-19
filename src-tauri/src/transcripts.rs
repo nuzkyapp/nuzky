@@ -160,7 +160,7 @@ fn cut(host: &Host, key: &str, target: Target) -> Result<(Vec<String>, i64, i64)
 
 /// Corrects words as one user edit, with the captions that show them. Returns how many
 /// caption clips changed.
-fn correct(host: &Host, key: &str, fixes: &[(usize, String)]) -> Result<usize> {
+fn correct(host: &Host, key: &str, fixes: &[(usize, String, Option<String>)]) -> Result<usize> {
     let state = host.session.state()?;
     let derived = transcript::derive(&state.project, &host.transcripts)?;
     transcript::check_word_key(&state.project, &derived, key)?;
@@ -182,7 +182,7 @@ fn explain(error: anyhow::Error) -> String {
         Some("INVALID_CORRECTION") => {
             format!("A word must be one line of 1 to {MAX_CORRECTION_CHARS} characters.")
         }
-        Some("SPEECH_CHANGED" | "INVALID_HESITATION") => {
+        Some("SPEECH_CHANGED" | "INVALID_HESITATION" | "WORD_MISMATCH") => {
             "The transcript changed in the meantime. Check the words and try again.".into()
         }
         Some("TRANSCRIPT_MISSING") => "Transcribe the remaining clips first.".into(),
@@ -240,6 +240,8 @@ pub async fn remove_retakes(
 pub struct WordFix {
     i: usize,
     text: String,
+    /// The word as the view showed it, so a view that went stale cannot correct another word.
+    expected: String,
 }
 
 #[cfg_attr(test, derive(ts_rs::TS))]
@@ -261,7 +263,7 @@ pub async fn correct_words(
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         let current = crate::lock_session(&state.session, expected_epoch.as_deref())?;
-        let fixes: Vec<_> = corrections.into_iter().map(|f| (f.i, f.text)).collect();
+        let fixes: Vec<_> = corrections.into_iter().map(|f| (f.i, f.text, Some(f.expected))).collect();
         let captions = correct(&current.host, &key, &fixes).map_err(explain)?;
         Ok(WordsCorrected { snapshot: current.snapshot(Vec::new())?, captions })
     })
@@ -516,17 +518,23 @@ pub(crate) mod tests {
             }
         };
         let first = view(&host, 300_000).unwrap();
-        assert_eq!(correct(&host, &first.key, &[(3, "tři".into())]).unwrap(), 1);
+        assert_eq!(correct(&host, &first.key, &[(3, "tři".into(), Some("w3".into()))]).unwrap(), 1);
         let fixed = view(&host, 300_000).unwrap();
         assert_eq!((fixed.words[3].text.as_str(), fixed.words[3].original.as_deref()), ("tři", Some("w3")));
         assert!(fixed.words.iter().filter(|w| w.i != 3).all(|w| w.original.is_none()));
         assert_eq!(caption(&host), "w2 tři");
         assert!(
-            explain(correct(&host, &first.key, &[(2, "dva".into())]).unwrap_err())
+            explain(correct(&host, &first.key, &[(2, "dva".into(), None)]).unwrap_err())
+                .starts_with("The transcript changed")
+        );
+        assert!(
+            explain(correct(&host, &fixed.key, &[(2, "dva".into(), Some("w3".into()))]).unwrap_err())
                 .starts_with("The transcript changed")
         );
         let long = "x".repeat(MAX_CORRECTION_CHARS + 1);
-        assert!(explain(correct(&host, &fixed.key, &[(2, long)]).unwrap_err()).starts_with("A word must be one line"));
+        assert!(
+            explain(correct(&host, &fixed.key, &[(2, long, None)]).unwrap_err()).starts_with("A word must be one line")
+        );
         host.session.undo().unwrap();
         assert_eq!(view(&host, 300_000).unwrap().words[3].text, "w3");
         assert_eq!(caption(&host), "w2 w3");

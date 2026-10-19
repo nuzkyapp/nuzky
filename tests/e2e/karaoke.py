@@ -333,7 +333,7 @@ def caption_styles(r):
     if r.check('the transcript has the first key word', word, keyed):
         fixed = word['text'].strip().upper()
         done = r.s.call('window.__nuzky.api.correctWords(arguments[0], arguments[1], arguments[2])', view['key'],
-                        [{'i': word['i'], 'text': fixed}], r.state()['epoch'])
+                        [{'i': word['i'], 'text': fixed, 'expected': word['text']}], r.state()['epoch'])
         r.check('the correction is saved', done['ok'], done)
         time.sleep(1.5)
         saved = json.loads(r.saved_project().read_text())

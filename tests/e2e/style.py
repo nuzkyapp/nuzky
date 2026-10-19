@@ -338,7 +338,7 @@ def style_auto(r):
     # As typed in the transcript: the recognised punctuation stays.
     said = [w['text'].strip() for w in shown['words']]
     trail = lambda word: word[len(word.rstrip('.,')):]
-    fixes = [{'i': (i := texts.index(word)), 'text': right + trail(said[i])}
+    fixes = [{'i': (i := texts.index(word)), 'text': right + trail(said[i]), 'expected': said[i]}
              for word, right in (('phone', 'iPhone'), ('videos', 'reels'), ('captions', 'subtitles'))]
     corrected = r.s.call(f"window.__nuzky.api.correctWords(arguments[0], arguments[1], {epoch})", shown['key'], fixes)
     r.check('the user cuts a side remark and corrects three words', corrected['ok'], corrected)
