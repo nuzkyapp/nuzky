@@ -4,7 +4,7 @@
 //! docs/AI-ARCHITECTURE.md, "AI panel".
 
 use crate::event::{AgentEvent, ErrorCode, ToolStatus};
-use crate::turn::{Inbox, SYSTEM, Turn};
+use crate::turn::{Inbox, Message, SYSTEM, Turn};
 use anyhow::Result;
 use serde_json::{Value, json};
 use std::collections::HashSet;
@@ -58,7 +58,7 @@ pub struct ChatGptRequest {
     pub guide: String,
     /// Nuzky's tools as MCP's `tools/list` lists them.
     pub tools: Value,
-    pub prompt: String,
+    pub prompt: Message,
     /// The conversation as the Responses API takes it, as `input`. Nuzky keeps it: nothing is stored
     /// on OpenAI's side. The turn adds what it keeps once it ends.
     pub history: Arc<Mutex<Vec<Value>>>,
@@ -89,8 +89,13 @@ impl Turn {
 fn run(req: &ChatGptRequest, stop: &Arc<AtomicBool>, inbox: &Waiting, emit: &mut dyn FnMut(AgentEvent)) -> AgentEvent {
     let before = req.history.lock().unwrap().clone();
     let mut items = before.clone();
-    items.push(user(&req.prompt));
-    let (mut end, answered) = converse(req, &mut items, stop, inbox, emit);
+    let (mut end, answered) = match user(&req.prompt) {
+        Ok(first) => {
+            items.push(first);
+            converse(req, &mut items, stop, inbox, emit)
+        }
+        Err(error) => (failure(ErrorCode::AgentFailed, &format!("{error:#}")), false),
+    };
     // A run ChatGPT left open that could not be kept leaves the editor locked, so the panel says so.
     if let Err(error) = req.run.end()
         && !matches!(end, AgentEvent::Error { .. })
@@ -115,10 +120,14 @@ fn run(req: &ChatGptRequest, stop: &Arc<AtomicBool>, inbox: &Waiting, emit: &mut
 }
 
 /// Messages the user sent while ChatGPT works; None once the turn takes no more.
-type Waiting = Arc<Mutex<Option<Vec<String>>>>;
+type Waiting = Arc<Mutex<Option<Vec<Message>>>>;
 
-fn user(text: &str) -> Value {
-    json!({"type": "message", "role": "user", "content": [{"type": "input_text", "text": text}]})
+fn user(message: &Message) -> Result<Value> {
+    let mut content = vec![json!({"type": "input_text", "text": message.text})];
+    for data in message.base64_images()? {
+        content.push(json!({"type": "input_image", "image_url": format!("data:image/jpeg;base64,{data}")}));
+    }
+    Ok(json!({"type": "message", "role": "user", "content": content}))
 }
 
 /// Asks ChatGPT and runs the tools it calls until it answers without calling one. Also says whether
@@ -182,7 +191,12 @@ fn converse(
             items.push(json!({"type": "function_call_output", "call_id": call["call_id"], "output": output}));
         }
         let waiting = inbox.lock().unwrap().as_mut().map(std::mem::take).unwrap_or_default();
-        items.extend(waiting.iter().map(|text| user(text)));
+        for message in &waiting {
+            match user(message) {
+                Ok(message) => items.push(message),
+                Err(error) => return (failure(ErrorCode::AgentFailed, &format!("{error:#}")), answered),
+            }
+        }
     }
     let message = format!(
         "ChatGPT stopped after {MAX_ROUNDS} rounds of tools in one message, so a model going in circles can't use up your plan. Send \"go on\" to let it continue."

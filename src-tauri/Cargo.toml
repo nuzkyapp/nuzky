@@ -42,6 +42,7 @@ png = "0.18"
 base64 = "0.23"
 dirs = "6"
 uuid = { version = "1", features = ["v4"] }
+percent-encoding = "2.3.2"
 whisper-rs = "0.16.0"
 ureq = "3.4.2"
 sha2 = "0.11.0"

@@ -24,6 +24,7 @@ import {
   Plug,
   MessagesSquare,
   MessageSquareText,
+  Plus,
   RefreshCw,
   ScanFace,
   Scissors,
@@ -33,8 +34,11 @@ import {
   X,
 } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { open as openFiles } from "@tauri-apps/plugin-dialog";
 import {
   agentName,
+  attach,
+  detach,
   choose,
   chooseAgent,
   jobText,
@@ -52,6 +56,7 @@ import {
   useAgent,
   type AgentErrorCode,
   type AiAbout,
+  type Attachment,
   type ChatItem,
   type CliAgentId,
   type RunChange,
@@ -68,6 +73,7 @@ import { whenLabel } from "../../lib/library";
 import { Button, IconButton, LockReason, ProgressBar, Segmented } from "../ui";
 import { MODEL_QUESTION, answerModelQuestion } from "../ModelQuestionDialog";
 import { Markdown } from "./Markdown";
+import { IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from "../panel/assets";
 import { ChatGptLogo } from "../ChatGptLogo";
 import { ContinueButton, USAGE_PAGE } from "../ChatGptDialog";
 import { continueWithChatGpt, openChatGpt, planReady, useChatGpt } from "../../lib/chatgpt";
@@ -463,7 +469,7 @@ function RunCard({ item, index, past }: { item: Extract<ChatItem, { kind: "run" 
 }
 
 /** `last`: the conversation ends with it, so its way on takes focus when it has only one. */
-function ErrorNotice({ code, message, retryText, last = false }: { code: AgentErrorCode; message: string; retryText?: string; last?: boolean }) {
+function ErrorNotice({ code, message, retryText, retryAttachments, last = false }: { code: AgentErrorCode; message: string; retryText?: string; retryAttachments?: Attachment[]; last?: boolean }) {
   const actions = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (last && code === "SESSION_GONE") actions.current?.querySelector("button")?.focus();
@@ -474,7 +480,7 @@ function ErrorNotice({ code, message, retryText, last = false }: { code: AgentEr
   const name = agentName(agent, agents);
   const other = agents?.find((a) => a.id !== agent && a.path)?.id ?? (agent !== "chatgpt" && chatgptReady ? "chatgpt" : undefined);
   const retry = (
-    <Button className="h-7 px-2.5 text-[12px]" onClick={() => void (retryText ? send(retryText) : send())}>
+    <Button className="h-7 px-2.5 text-[12px]" onClick={() => void (retryText !== undefined ? send(retryText, undefined, retryAttachments ?? []) : send())}>
       Try again
     </Button>
   );
@@ -492,7 +498,7 @@ function ErrorNotice({ code, message, retryText, last = false }: { code: AgentEr
   const cmd = agent === "chatgpt" ? null : term(COMMAND[agent]);
   const signIn = agent === "codex" ? <>run {term("codex login")} and choose Sign in with ChatGPT</> : <>run {cmd} and sign in</>;
   // A message that failed after the agent began answering stays in the conversation, with Try again, not in the field.
-  const kept = retryText ? message : <>{message} Your message is still here.</>;
+  const kept = retryText !== undefined ? message : <>{message} Your message is still here.</>;
   const [icon, title, body, buttons]: [ReactNode, string, ReactNode, ReactNode] =
     code === "SESSION_GONE"
       ? [
@@ -662,7 +668,29 @@ function Empty() {
   );
 }
 
-function UserMessage({ text, context }: { text: string; context: string | null }) {
+/** What went with a message, as small pictures; a video is marked as one. */
+function Attached({ attachments }: { attachments: Attachment[] }) {
+  return (
+    <div className="flex flex-wrap justify-end gap-1.5">
+      {attachments.map((a) => (
+        <div key={a.path} title={a.name} aria-label={`${a.kind === "video" ? "Video" : "Picture"} ${a.name}`} role="img" className="relative h-16 overflow-hidden rounded-[10px] bg-raised">
+          {a.preview ? (
+            <img src={a.preview} alt="" className="h-full max-w-[120px] object-cover" />
+          ) : (
+            <span className="flex h-full w-16 items-center justify-center text-muted">{a.kind === "video" ? <Film size={16} /> : <ImageIcon size={16} />}</span>
+          )}
+          {a.kind === "video" && a.preview && (
+            <span className="absolute bottom-1 left-1 flex h-4 w-4 items-center justify-center rounded bg-black/60 text-white">
+              <Film size={10} />
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function UserMessage({ text, context, attachments }: { text: string; context: string | null; attachments?: Attachment[] }) {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
@@ -676,16 +704,19 @@ function UserMessage({ text, context }: { text: string; context: string | null }
     );
   return (
     <div className="group flex max-w-[88%] flex-col items-end gap-1 self-end">
-      <div className="flex max-w-full items-end gap-1">
-        <IconButton
-          label={copied ? "Copied" : "Copy message"}
-          onClick={() => void copy()}
-          className={`h-6 w-6 shrink-0 focus-visible:opacity-100 group-hover:opacity-100 ${copied ? "opacity-100" : "opacity-0"}`}
-        >
-          {copied ? <Check size={13} className="text-ok" /> : <Copy size={13} />}
-        </IconButton>
-        <div className="min-w-0 whitespace-pre-wrap break-words rounded-[14px] rounded-br-[4px] bg-raised px-3 py-2 leading-[19px] text-fg">{text}</div>
-      </div>
+      {attachments?.length ? <Attached attachments={attachments} /> : null}
+      {text && (
+        <div className="flex max-w-full items-end gap-1">
+          <IconButton
+            label={copied ? "Copied" : "Copy message"}
+            onClick={() => void copy()}
+            className={`h-6 w-6 shrink-0 focus-visible:opacity-100 group-hover:opacity-100 ${copied ? "opacity-100" : "opacity-0"}`}
+          >
+            {copied ? <Check size={13} className="text-ok" /> : <Copy size={13} />}
+          </IconButton>
+          <div className="min-w-0 whitespace-pre-wrap break-words rounded-[14px] rounded-br-[4px] bg-raised px-3 py-2 leading-[19px] text-fg">{text}</div>
+        </div>
+      )}
       {context && <div className="tabular text-[11px] text-muted">{context}</div>}
     </div>
   );
@@ -694,7 +725,7 @@ function UserMessage({ text, context }: { text: string; context: string | null }
 function Item({ item, index, collapsed, past, last }: { item: ChatItem; index: number; collapsed: boolean; past: boolean; last: boolean }) {
   switch (item.kind) {
     case "user":
-      return <UserMessage text={item.text} context={item.context} />;
+      return <UserMessage text={item.text} context={item.context} attachments={item.attachments} />;
     case "agent":
       return (
         <div className="break-words leading-[20px] text-fg/90">
@@ -716,7 +747,7 @@ function Item({ item, index, collapsed, past, last }: { item: ChatItem; index: n
         </div>
       );
     case "error":
-      return <ErrorNotice code={item.code} message={item.message} retryText={item.retry} last={last} />;
+      return <ErrorNotice code={item.code} message={item.message} retryText={item.retry} retryAttachments={item.retryAttachments} last={last} />;
   }
 }
 
@@ -846,7 +877,7 @@ function Conversation() {
 
 function Chip({ icon, children, onRemove, label }: { icon: ReactNode; children: ReactNode; onRemove: () => void; label: string }) {
   return (
-    <span className="flex h-[22px] items-center gap-1.5 whitespace-nowrap rounded-md bg-white/[.08] pl-1.5 text-[12px] text-fg/90 [&>svg]:text-muted">
+    <span className="flex h-[22px] min-w-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-white/[.08] pl-1.5 text-[12px] text-fg/90 [&>svg]:text-muted">
       {icon}
       {children}
       <button
@@ -877,9 +908,19 @@ function Elapsed() {
   return <>{`${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`}</>;
 }
 
+/** Over this, pasting would hold the whole file in memory twice; + reads it from its place instead. */
+const MAX_PASTE_BYTES = 512 * 1024 * 1024;
+
+async function pickAttachments() {
+  const picked = await openFiles({ multiple: true, filters: [{ name: "Pictures and videos", extensions: [...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS] }] });
+  if (picked) await attach(Array.isArray(picked) ? picked : [picked]);
+}
+
 function Composer() {
   const about = useContext(About);
   const draft = useAgent((s) => s.draft);
+  const attachments = useAgent((s) => s.attachments);
+  const attaching = useAgent((s) => s.attaching);
   const status = useAgent((s) => s.status);
   const frame = useAgent((s) => s.frame);
   const thumbnail = useAgent((s) => s.thumbnail && about === "project");
@@ -939,8 +980,9 @@ function Composer() {
   useEffect(() => setWhy(null), [status]);
   // Fresh from the store: Enter can come before React has drawn the latest text.
   const submit = () => {
-    if (!useAgent.getState().draft.trim() && !useAgent.getState().thumbnail) return;
-    const reason = useAgent.getState().status === "idle" ? sendBlocked() : steerBlocked();
+    const now = useAgent.getState();
+    if (!now.draft.trim() && !now.thumbnail && !now.attachments.length) return;
+    const reason = now.attaching ? "Wait until the attachment is added" : now.status === "idle" ? sendBlocked() : steerBlocked();
     if (reason) setWhy(reason);
     else if (useAgent.getState().status === "idle") void send(undefined, about);
     else void steer();
@@ -954,8 +996,8 @@ function Composer() {
     <button
       type="button"
       aria-label={working ? "Send now" : "Send"}
-      title={blocked ?? (draft.trim() || (thumbnail && !working) ? sendTitle : "Type a message first")}
-      aria-disabled={!!blocked || (!draft.trim() && !thumbnail) || undefined}
+      title={blocked ?? (draft.trim() || attachments.length || (thumbnail && !working) ? sendTitle : "Type a message first")}
+      aria-disabled={!!blocked || (!draft.trim() && !thumbnail && !attachments.length) || undefined}
       onClick={submit}
       className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent-strong text-white transition-colors duration-[120ms] hover:bg-[#0064c8] aria-disabled:cursor-not-allowed aria-disabled:bg-white/[.08] aria-disabled:text-white/40"
     >
@@ -982,6 +1024,28 @@ function Composer() {
               <Scissors size={12} className="text-muted" />
               Your style
             </span>
+          </div>
+        )}
+        {(attachments.length > 0 || attaching > 0) && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {attachments.map((a) => (
+              <Chip
+                key={a.path}
+                icon={a.preview ? <img src={a.preview} alt="" className="h-4 w-4 shrink-0 rounded-[3px] object-cover" /> : a.kind === "video" ? <Film size={12} /> : <ImageIcon size={12} />}
+                label={a.name}
+                onRemove={() => detach(a.path)}
+              >
+                <span className="max-w-[160px] truncate" title={a.name}>
+                  {a.name}
+                </span>
+              </Chip>
+            ))}
+            {attaching > 0 && (
+              <span className="flex h-[22px] items-center gap-1.5 rounded-md bg-white/[.08] px-2 text-[12px] text-muted" role="status">
+                <Loader2 size={12} className="animate-spin" />
+                Adding…
+              </span>
+            )}
           </div>
         )}
         {about === "project" && ((selected > 0 && !dropSelection) || !dropPlayhead || frame || thumbnail) && (
@@ -1059,6 +1123,15 @@ function Composer() {
           aria-label={`Message to ${name}`}
           placeholder={working ? `Tell ${name} more while it works…` : blocked === "Start a new chat to send this" ? `${name} can't continue this chat` : reopened ? `Continue with ${name}` : agent === "chatgpt" && !plan ? "Sign in to ChatGPT to start" : thumbnail ? "Add a note, e.g. the hook (optional)" : about === "style" ? "What should change in how you edit?" : hasItems ? "Ask for changes…" : `Ask ${name} to edit…`}
           onChange={(e) => useAgent.setState({ draft: e.target.value })}
+          onPaste={(e) => {
+            // A screenshot, or a file copied in Finder; text pastes as usual.
+            const files = [...e.clipboardData.files].filter((f) => !f.type || /^(image|video)\//.test(f.type));
+            if (!files.length) return;
+            e.preventDefault();
+            const big = files.find((f) => f.size > MAX_PASTE_BYTES);
+            if (big) useEditor.getState().toast({ kind: "error", text: `${big.name} is too big to paste. Attach it with + instead.` });
+            void attach(files.filter((f) => f.size <= MAX_PASTE_BYTES));
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
@@ -1068,6 +1141,9 @@ function Composer() {
           className="block max-h-40 w-full resize-none bg-transparent text-[13px] leading-[19px] text-fg outline-none placeholder:text-muted"
         />
         <div className="mt-1 flex items-center gap-2">
+          <IconButton label="Attach pictures or videos" onClick={() => void pickAttachments()} className="h-7 w-7">
+            <Plus size={16} />
+          </IconButton>
           {about === "project" && (
           <IconButton
             label={frame ? "Don't show the agent the frame at the playhead" : "Show the agent the frame at the playhead"}
@@ -1104,7 +1180,7 @@ function Composer() {
               <Button className="h-7 px-2.5 text-[12px]" disabled={status === "stopping"} title="Stop the agent. What it did so far stays, and Undo takes it back." onClick={() => void stop()}>
                 <CircleStop size={13} /> Stop
               </Button>
-              {draft.trim() && sendButton}
+              {(draft.trim() || attachments.length > 0) && sendButton}
             </>
           ) : (
             sendButton

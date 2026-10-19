@@ -3627,6 +3627,7 @@ name = "nuzky-agent"
 version = "0.1.0-alpha"
 dependencies = [
  "anyhow",
+ "base64 0.23.1",
  "libc",
  "log",
  "serde",
@@ -3678,6 +3679,7 @@ dependencies = [
  "objc2-app-kit",
  "objc2-foundation",
  "objc2-web-kit",
+ "percent-encoding",
  "png 0.18.1",
  "rtrb",
  "semver",

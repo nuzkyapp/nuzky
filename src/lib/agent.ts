@@ -71,9 +71,18 @@ export interface Choice {
   detail: string | null;
 }
 
+/** A picture or video the user attached to a message; the panel's own copy when it was pasted. */
+export interface Attachment {
+  path: string;
+  kind: "image" | "video";
+  name: string;
+  /** A small PNG data URL. */
+  preview: string | null;
+}
+
 export type ChatItem =
   /** `at`: when it was sent, in ms. */
-  | { kind: "user"; text: string; context: string | null; at?: number }
+  | { kind: "user"; text: string; context: string | null; at?: number; attachments?: Attachment[] }
   /** `ended`: a tool call the panel does not show came after it, so the agent's next words are a new message. */
   | { kind: "agent"; text: string; ended?: boolean }
   | { kind: "steps"; steps: Step[] }
@@ -90,8 +99,8 @@ export type ChatItem =
       undone?: boolean;
     }
   | { kind: "stopped" }
-  /** `retry`: the message that failed after the agent had begun answering, for Try again. */
-  | { kind: "error"; code: AgentErrorCode; message: string; retry?: string };
+  /** `retry`: the message that failed after the agent had begun answering, for Try again, with what was attached to it. */
+  | { kind: "error"; code: AgentErrorCode; message: string; retry?: string; retryAttachments?: Attachment[] };
 
 /** A chat this project keeps, as the list of past chats shows it. */
 export interface ChatSummary {
@@ -110,6 +119,7 @@ export interface PromptContext {
   style: boolean;
   /** Make a thumbnail: the agent gets the MCP prompt `thumbnail`, with the text as the user's wishes. */
   thumbnail: boolean;
+  attachments: Attachment[];
 }
 
 /** What the panel is about: the open project, or the creator's style on the Your style page. */
@@ -133,6 +143,10 @@ interface AgentState {
   /** When the current answer started, in ms; it survives moving the panel. */
   startedAt: number | null;
   draft: string;
+  /** Attached to the draft. */
+  attachments: Attachment[];
+  /** Attachments still being read, which the message waits for. */
+  attaching: number;
   /** What the last message was about, so a choice or Try again stays on it. */
   about: AiAbout;
   /** Context chips the user removed from the next message. */
@@ -171,6 +185,8 @@ export const useAgent = create<AgentState>(() => ({
   startedAt: null,
   about: "project",
   draft: "",
+  attachments: [],
+  attaching: 0,
   dropSelection: false,
   dropPlayhead: false,
   frame: false,
@@ -356,7 +372,7 @@ async function saveChat(chat: string, items: ChatItem[]) {
     .map((it) => (it.kind === "run" ? { ...it, snap: null } : it));
   const first = kept.find((i) => i.kind === "user");
   if (first?.kind !== "user") return;
-  const title = first.text.replace(/\s+/g, " ").trim().slice(0, 120);
+  const title = (first.text || (first.attachments ?? []).map((a) => a.name).join(", ")).replace(/\s+/g, " ").trim().slice(0, 120);
   try {
     await agentApi.save(chat, title, kept);
   } catch (e) {
@@ -390,11 +406,33 @@ async function watchJobs() {
 }
 
 /** What the next message would carry, as the chips show it. */
-function promptContext(about: AiAbout): PromptContext {
-  if (about === "style") return { selection: null, playheadUs: null, frame: false, style: true, thumbnail: false };
+function promptContext(about: AiAbout, attachments: Attachment[]): PromptContext {
+  if (about === "style") return { selection: null, playheadUs: null, frame: false, style: true, thumbnail: false, attachments };
   const { selection, timeUs } = useEditor.getState();
   const { dropSelection, dropPlayhead, frame, thumbnail } = useAgent.getState();
-  return { selection: dropSelection || selection.length === 0 ? null : [...selection], playheadUs: dropPlayhead ? null : Math.round(timeUs), frame, style: false, thumbnail };
+  return { selection: dropSelection || selection.length === 0 ? null : [...selection], playheadUs: dropPlayhead ? null : Math.round(timeUs), frame, style: false, thumbnail, attachments };
+}
+
+/** Attaches pictures and videos to the draft: files the user chose, or what they pasted. */
+export async function attach(files: (string | File)[]) {
+  useAgent.setState((s) => ({ attaching: s.attaching + files.length }));
+  for (const file of files) {
+    try {
+      const attached =
+        typeof file === "string"
+          ? await invoke<Attachment>("agent_attach_file", { path: file })
+          : await invoke<Attachment>("agent_attach_pasted", new Uint8Array(await file.arrayBuffer()), { headers: { "x-name": encodeURIComponent(file.name) } });
+      useAgent.setState((s) => ({ attachments: [...s.attachments, attached] }));
+    } catch (e) {
+      useEditor.getState().toast({ kind: "error", text: plainError(errorText(e)) });
+    } finally {
+      useAgent.setState((s) => ({ attaching: s.attaching - 1 }));
+    }
+  }
+}
+
+export function detach(path: string) {
+  useAgent.setState((s) => ({ attachments: s.attachments.filter((a) => a.path !== path) }));
 }
 
 function describeContext(c: PromptContext): string | null {
@@ -456,16 +494,23 @@ export function makeCoverWithAi() {
   else start();
 }
 
-export async function send(text = useAgent.getState().draft.trim(), about: AiAbout = useAgent.getState().about) {
+/** `attachments`: what goes with it; by default the draft's, when it sends the draft. */
+export async function send(text = useAgent.getState().draft.trim(), about: AiAbout = useAgent.getState().about, attachments?: Attachment[]) {
   const s = useAgent.getState();
-  if ((!text && !(s.thumbnail && about === "project")) || sendBlocked()) return;
-  const context = promptContext(about);
   const fromDraft = text === s.draft.trim();
+  const attached = attachments ?? (fromDraft ? s.attachments : []);
+  if ((!text && !attached.length && !(s.thumbnail && about === "project")) || sendBlocked()) return;
+  const context = promptContext(about, attached);
+  const thumbnailOnly = !text && context.thumbnail;
   useAgent.setState({
     // Earlier problems are over once a new message goes; their Try again would send this one.
-    items: [...s.items.filter((i) => i.kind !== "error"), { kind: "user", text: text || "Make a thumbnail", context: text ? describeContext(context) : describeContext({ ...context, thumbnail: false }), at: Date.now() }],
+    items: [
+      ...s.items.filter((i) => i.kind !== "error"),
+      { kind: "user", text: thumbnailOnly ? "Make a thumbnail" : text, context: describeContext(thumbnailOnly ? { ...context, thumbnail: false } : context), at: Date.now(), ...(attached.length ? { attachments: attached } : {}) },
+    ],
     about,
     draft: fromDraft ? "" : s.draft,
+    attachments: attachments === undefined && fromDraft ? [] : s.attachments,
     dropSelection: false,
     dropPlayhead: false,
     frame: false,
@@ -490,12 +535,15 @@ let steering: Promise<unknown> | null = null;
 /** Sends a message to the agent while it works: it takes it at its next step, or as the next message when it cannot in this turn. */
 export async function steer(text = useAgent.getState().draft.trim()) {
   const s = useAgent.getState();
-  if (!text || s.status !== "working" || !s.turn || steerBlocked()) return;
-  const context = promptContext(s.about);
-  const shown = { kind: "user" as const, text, context: describeContext(context), at: Date.now() };
+  const fromDraft = text === s.draft.trim();
+  const attached = fromDraft ? s.attachments : [];
+  if ((!text && !attached.length) || s.status !== "working" || !s.turn || steerBlocked()) return;
+  const context = promptContext(s.about, attached);
+  const shown = { kind: "user" as const, text, context: describeContext(context), at: Date.now(), ...(attached.length ? { attachments: attached } : {}) };
   useAgent.setState({
     items: [...s.items, shown],
-    draft: text === s.draft.trim() ? "" : s.draft,
+    draft: fromDraft ? "" : s.draft,
+    attachments: fromDraft ? [] : s.attachments,
     dropSelection: false,
     dropPlayhead: false,
     frame: false,
@@ -507,7 +555,7 @@ export async function steer(text = useAgent.getState().draft.trim()) {
     steered = await call;
   } catch (e) {
     // It did not reach the agent, so it is not part of the conversation.
-    useAgent.setState((now) => ({ items: now.items.filter((it) => it !== shown), draft: now.draft ? `${text}\n${now.draft}` : text }));
+    useAgent.setState((now) => ({ items: now.items.filter((it) => it !== shown), draft: now.draft ? `${text}\n${now.draft}` : text, attachments: [...attached, ...now.attachments] }));
     useEditor.getState().toast({ kind: "error", text: plainError(errorText(e)) });
     return;
   } finally {
@@ -570,20 +618,27 @@ function fail(code: AgentErrorCode, message: string) {
   const s = useAgent.getState();
   let items = s.items;
   let draft = s.draft;
+  let attachments = s.attachments;
   let retry: string | undefined;
+  let retryAttachments: Attachment[] | undefined;
   const last = items[items.length - 1];
   // A message waiting for the next turn goes back to the field; it is the last one shown when nothing came after it.
-  if (s.next && last?.kind !== "user") draft = draft ? `${s.next.text}\n${draft}` : s.next.text;
+  if (s.next && last?.kind !== "user") {
+    draft = draft ? `${s.next.text}\n${draft}` : s.next.text;
+    attachments = [...s.next.context.attachments, ...attachments];
+  }
   if (last?.kind === "user") {
     // With the messages sent while it worked, which it did not answer either.
     const unanswered = items.slice(items.findLastIndex((it) => it.kind !== "user") + 1);
     items = items.slice(0, -unanswered.length);
-    draft = [...unanswered.map((it) => (it.kind === "user" ? it.text : "")), ...(draft ? [draft] : [])].join("\n");
+    draft = [...unanswered.map((it) => (it.kind === "user" ? it.text : "")), ...(draft ? [draft] : [])].filter(Boolean).join("\n");
+    attachments = [...unanswered.flatMap((it) => (it.kind === "user" ? (it.attachments ?? []) : [])), ...attachments];
   } else {
     const asked = [...items].reverse().find((i) => i.kind === "user");
     retry = asked?.kind === "user" ? asked.text : undefined;
+    retryAttachments = asked?.kind === "user" ? asked.attachments : undefined;
   }
-  useAgent.setState({ items: [...items, { kind: "error", code, message, retry }], draft, status: "idle", next: null });
+  useAgent.setState({ items: [...items, { kind: "error", code, message, retry, retryAttachments }], draft, attachments, status: "idle", next: null });
   // The sign-in ended or lost the plan meanwhile: the panel stops saying it uses the plan.
   if (s.agent === "chatgpt" && (code === "NOT_SIGNED_IN" || code === "PLAN_UNAVAILABLE")) void checkChatGpt(false);
 }
@@ -636,7 +691,8 @@ function onEvent(e: AgentEvent) {
     const runs = turn.filter((it) => it.kind === "run").map((it) => (stopped ? { ...it, stopped: true } : it));
     const ordered = [...marked.slice(0, turnStart), ...turn.filter((it) => it.kind !== "run"), ...runs];
     const draft = s.next && !next ? (s.draft ? `${s.next.text}\n${s.draft}` : s.next.text) : s.draft;
-    useAgent.setState({ items: stopped && !runs.length ? [...ordered, { kind: "stopped" }] : ordered, status: "idle", next: null, draft });
+    const attachments = s.next && !next ? [...s.next.context.attachments, ...s.attachments] : s.attachments;
+    useAgent.setState({ items: stopped && !runs.length ? [...ordered, { kind: "stopped" }] : ordered, status: "idle", next: null, draft, attachments });
     if (next) void start(next.text, next.context);
     else void watchJobs();
   }

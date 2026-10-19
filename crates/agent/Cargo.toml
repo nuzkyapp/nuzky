@@ -7,6 +7,7 @@ description = "Runs the user's own Claude Code or Codex, or ChatGPT on the user'
 
 [dependencies]
 anyhow.workspace = true
+base64 = "0.23.1"
 log.workspace = true
 serde.workspace = true
 serde_json.workspace = true

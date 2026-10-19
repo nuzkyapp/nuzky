@@ -26,14 +26,16 @@ stream-json user messages from stdin while it works; Codex reads one prompt up t
   "image"    (Codex) generates an orange PNG into a Codex home of its own (generated_images/<thread>/) as Codex's image_gen does, imports it with
              import_media and shows it as a picture in picture from 0, as Nuzky's instructions ask
   "signin"   is not signed in;  "limit" has hit its usage limit
+  a message with pictures or a video attached says how many it got, with the size of each picture
   anything else is echoed back.
-Each start is logged to $NUZKY_FAKE_AGENT_LOG/runs.jsonl (argv, pid, session); sessions live there too.
+Each start is logged to $NUZKY_FAKE_AGENT_LOG/runs.jsonl (argv, pid, session, the pictures' sizes), and each message
+Claude got while working to steered.jsonl; sessions live there too.
 With $NUZKY_FAKE_AGENT_LOG/vanish, `--version` takes this executable's execute bit away, so the turn cannot start.
 `auth status` (Claude) and `login status` (Codex) answer as the real ones, signed out with FAKE_AGENT_SIGNED_OUT=1.
 `mcp get nuzky` reads the agent's own settings: Codex prints the entry as JSON, Claude really starts the server and
 reports whether it answered; with FAKE_AGENT_MCP=broken it starts it in an empty runtime folder, so it finds no app.
 """
-import json, os, signal, subprocess, sys, threading, queue, tempfile, time, tomllib, uuid
+import base64, json, os, signal, struct, subprocess, sys, threading, queue, tempfile, time, tomllib, uuid
 from pathlib import Path
 
 CODEX = Path(sys.argv[0]).name == 'fake_codex'
@@ -154,22 +156,50 @@ else:
         missing.append('--settings disableAllHooks')
     session = opt('--session-id') or opt('--resume')
     resume = '--resume' in args
+
+
+def jpeg_size(data):
+    """Width and height from the frame header of a JPEG, which is all Nuzky may send as a picture."""
+    if data[:2] != b'\xff\xd8':
+        raise ValueError('not a JPEG')
+    i = 2
+    while data[i] == 0xFF:
+        if data[i + 1] in (0xC0, 0xC1, 0xC2):
+            height, width = struct.unpack('>HH', data[i + 5:i + 9])
+            return [width, height]
+        i += 2 + struct.unpack('>H', data[i + 2:i + 4])[0]
+    raise ValueError('no frame header')
+
+
+def unpack(content):
+    """Claude's user message: its text, and the size of each picture beside it."""
+    text = '\n'.join(b['text'] for b in content if b['type'] == 'text')
+    images = [b['source'] for b in content if b['type'] == 'image']
+    if any((source['type'], source['media_type']) != ('base64', 'image/jpeg') for source in images):
+        raise ValueError(f'a picture Claude would refuse: {images}')
+    return text, [jpeg_size(base64.b64decode(source['data'])) for source in images]
+
+
 messages = None
 if CODEX:
     prompt = sys.stdin.read()
+    pictures = [jpeg_size(Path(a.removeprefix('--image=')).read_bytes()) for a in args if a.startswith('--image=')]
 else:
-    prompt = json.loads(sys.stdin.readline())['message']['content']
+    prompt, pictures = unpack(json.loads(sys.stdin.readline())['message']['content'])
     messages = queue.Queue()
 
     def read_messages():
         for line in sys.stdin:
-            messages.put(json.loads(line)['message']['content'])
+            text, steered = unpack(json.loads(line)['message']['content'])
+            with open(LOG / 'steered.jsonl', 'a') as f:
+                f.write(json.dumps({'pid': os.getpid(), 'prompt': text, 'pictures': steered}, ensure_ascii=False) + '\n')
+            messages.put(text)
         messages.put(None)
 
     threading.Thread(target=read_messages, daemon=True).start()
 with open(LOG / 'runs.jsonl', 'a') as f:
     f.write(json.dumps({'pid': os.getpid(), 'argv': args, 'cwd': os.getcwd(), 'missing': missing, 'prompt': prompt,
-                        'resume': resume, 'session': session}, ensure_ascii=False) + '\n')
+                        'pictures': pictures, 'resume': resume, 'session': session}, ensure_ascii=False) + '\n')
 if missing:
     print(f'fake agent: Nuzky left out {missing}', file=sys.stderr)
     sys.exit(2)
@@ -323,7 +353,11 @@ if 'limit' in message and not thumbnail:
     emit({'type': 'result', 'subtype': 'success', 'is_error': True, 'result': "You've hit your limit · resets 9pm"})
     sys.exit(1)
 
-if '[Nuzky] The user writes from the Your style page' in prompt:
+VIDEO = '[Nuzky] The user attached the video'
+if pictures or VIDEO in prompt:
+    sizes = ', '.join(f'{w}×{h}' for w, h in pictures)
+    say(f'I see {len(pictures)} pictures ({sizes}) and {prompt.count(VIDEO)} videos.')
+elif '[Nuzky] The user writes from the Your style page' in prompt:
     style = call('get_style', {})
     said = prompt.split('\n\n[Nuzky]')[0].strip()
     if said.lower().startswith('keep:'):

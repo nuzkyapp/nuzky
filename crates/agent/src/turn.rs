@@ -28,6 +28,34 @@ it takes from remaining_s. After that, write only when something changes. Never 
 When the user has to decide something, call suggest_options as the last thing in your turn. The [Nuzky] lines at the end \
 of a message say what the user had selected when they sent it.";
 
+/// What the user sends: their words, and the pictures they attached as JPEG files Nuzky prepared.
+#[derive(Clone, Debug, Default)]
+pub struct Message {
+    pub text: String,
+    pub images: Vec<PathBuf>,
+}
+
+impl From<&str> for Message {
+    fn from(text: &str) -> Self {
+        Message { text: text.to_owned(), images: Vec::new() }
+    }
+}
+
+impl Message {
+    /// Each image as base64, for the agents that take pictures inline.
+    pub(crate) fn base64_images(&self) -> Result<Vec<String>> {
+        use base64::Engine as _;
+        self.images
+            .iter()
+            .map(|path| {
+                let bytes =
+                    std::fs::read(path).with_context(|| format!("Reading the attached picture {}", path.display()))?;
+                Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+            })
+            .collect()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct TurnRequest {
     pub agent: AgentId,
@@ -38,7 +66,7 @@ pub struct TurnRequest {
     pub resume: bool,
     pub model: Option<String>,
     pub effort: Option<String>,
-    pub prompt: String,
+    pub prompt: Message,
     /// An empty folder of Nuzky's own, so no project instructions or settings load from it.
     pub cwd: PathBuf,
     pub mcp: McpServer,
@@ -85,7 +113,7 @@ pub(crate) enum Inbox {
     /// Claude Code reads them on its input and takes each at its next step.
     Claude(Arc<Mutex<Option<ChildStdin>>>),
     /// ChatGPT's turn adds them to the conversation before it asks again.
-    ChatGpt(Arc<Mutex<Option<Vec<String>>>>),
+    ChatGpt(Arc<Mutex<Option<Vec<Message>>>>),
     /// Codex reads one message per turn; true once it has kept this turn's, so a stop for the next loses nothing.
     Codex(Arc<AtomicBool>),
 }
@@ -126,6 +154,8 @@ impl Turn {
             bail!("The AI panel is not available on Windows yet. Connect your agent in a terminal instead.");
         }
         std::fs::create_dir_all(&req.cwd).context("Creating the AI panel's folder")?;
+        // Codex reads its pictures from files itself.
+        let first = if req.agent == AgentId::Claude { claude::message(&req.prompt)? } else { req.prompt.text.clone() };
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -153,12 +183,12 @@ impl Turn {
         let mut stdin = child.stdin.take().context("Agent input")?;
         let inbox = if req.agent == AgentId::Claude {
             // Its input stays open for what the user sends while it works.
-            let _ = stdin.write_all(claude::message(&req.prompt).as_bytes());
+            let _ = stdin.write_all(first.as_bytes());
             Arc::new(Mutex::new(Some(stdin)))
         } else {
             std::thread::spawn(move || {
                 // Closing input tells Codex that the message is complete.
-                let _ = stdin.write_all(req.prompt.as_bytes());
+                let _ = stdin.write_all(first.as_bytes());
             });
             Arc::new(Mutex::new(None))
         };
@@ -249,19 +279,15 @@ impl Turn {
 
     /// Gives the working agent another message, which it takes at its next step. False when it cannot
     /// take one: Codex reads only one message per turn, and a turn that is ending or stopping takes none.
-    pub fn steer(&self, prompt: &str) -> bool {
+    pub fn steer(&self, prompt: &Message) -> bool {
         if !self.running() || self.stopping.load(Ordering::Acquire) {
             return false;
         }
         match &self.inbox {
-            Inbox::Claude(stdin) => stdin
-                .lock()
-                .unwrap()
-                .as_mut()
-                .is_some_and(|stdin| stdin.write_all(claude::message(prompt).as_bytes()).is_ok()),
-            Inbox::ChatGpt(queue) => {
-                queue.lock().unwrap().as_mut().map(|queue| queue.push(prompt.to_owned())).is_some()
-            }
+            Inbox::Claude(stdin) => stdin.lock().unwrap().as_mut().is_some_and(|stdin| {
+                claude::message(prompt).is_ok_and(|line| stdin.write_all(line.as_bytes()).is_ok())
+            }),
+            Inbox::ChatGpt(queue) => queue.lock().unwrap().as_mut().map(|queue| queue.push(prompt.clone())).is_some(),
             Inbox::Codex(_) => false,
         }
     }
@@ -331,7 +357,7 @@ mod tests {
                             resume,
                             model: model.clone(),
                             effort: effort.clone(),
-                            prompt: String::new(),
+                            prompt: Message::default(),
                             cwd: PathBuf::new(),
                             mcp: McpServer { command: "nuzky".into(), args: vec![], env: vec![] },
                         };

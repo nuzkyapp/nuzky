@@ -1,4 +1,5 @@
 mod agent_panel;
+mod attachments;
 mod audio_out;
 mod caption_styles;
 mod chatgpt;
@@ -1346,6 +1347,8 @@ pub fn run() {
             agent_panel::agent_stop,
             agent_panel::agent_steer,
             agent_panel::agent_jobs,
+            attachments::agent_attach_file,
+            attachments::agent_attach_pasted,
             transcripts::correct_words,
             reels::reel_bounds,
             reels::start_make_reels,

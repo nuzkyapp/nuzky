@@ -220,8 +220,8 @@ fn steering_during_tool_follows_its_output_and_stays_in_history() {
     let (release, blocked) = mpsc::channel();
     let f = Fixture::start(&server, tool_reply(), None, Some(blocked), vec![]);
     f.calls.recv_timeout(Duration::from_secs(3)).unwrap();
-    let accepted = f.turn.steer("Keep the ending");
-    let also_accepted = f.turn.steer("Keep the sound too");
+    let accepted = f.turn.steer(&"Keep the ending".into());
+    let also_accepted = f.turn.steer(&"Keep the sound too".into());
     release.send(()).unwrap();
     let events = f.finish();
     assert!(accepted && also_accepted);
@@ -251,7 +251,7 @@ fn steering_during_final_stream_asks_again_and_stays_in_history() {
     *server.stream_wait.lock().unwrap() = Some(blocked);
     let f = Fixture::start(&server, tool_reply(), None, None, vec![]);
     assert_eq!(f.events.recv_timeout(Duration::from_secs(3)).unwrap(), AgentEvent::Text { text: "Cut ".into() });
-    let accepted = f.turn.steer("Keep the ending");
+    let accepted = f.turn.steer(&"Keep the ending".into());
     release.send(()).unwrap();
     let events = f.finish();
     assert!(accepted);
@@ -281,7 +281,7 @@ fn steering_inbox_closes_before_done_or_error() {
                 break;
             }
         }
-        assert!(!f.turn.steer("Too late"));
+        assert!(!f.turn.steer(&"Too late".into()));
         let crate::turn::Inbox::ChatGpt(inbox) = &f.turn.inbox else { panic!("missing ChatGPT inbox") };
         assert!(inbox.lock().unwrap().is_none());
         f.finish();
@@ -450,7 +450,7 @@ fn stop_during_tool_ends_promptly_and_answers_pending_call() {
     assert_eq!(f.events.recv_timeout(Duration::from_secs(1)).unwrap(), AgentEvent::Done { stopped: true });
     assert!(f.run.ended.load(Ordering::Acquire));
     assert!(!f.turn.running());
-    assert!(!f.turn.steer("Too late"));
+    assert!(!f.turn.steer(&"Too late".into()));
     let crate::turn::Inbox::ChatGpt(inbox) = &f.turn.inbox else { panic!("missing ChatGPT inbox") };
     assert!(inbox.lock().unwrap().is_none());
     let history = f.history.lock().unwrap();

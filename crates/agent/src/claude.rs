@@ -1,7 +1,7 @@
 //! Claude Code as `claude -p` with stream-json output: the command and a parser of its lines.
 
 use crate::event::{AgentEvent, ErrorCode, ToolStatus};
-use crate::turn::{SYSTEM, Step, TurnRequest};
+use crate::turn::{Message, SYSTEM, Step, TurnRequest};
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
 use std::process::Command;
@@ -42,8 +42,12 @@ pub(crate) fn command(req: &TurnRequest) -> Command {
 }
 
 /// A message for Claude's stream-json input, one line.
-pub(crate) fn message(text: &str) -> String {
-    format!("{}\n", json!({"type": "user", "message": {"role": "user", "content": text}}))
+pub(crate) fn message(message: &Message) -> anyhow::Result<String> {
+    let mut content = vec![json!({"type": "text", "text": message.text})];
+    for data in message.base64_images()? {
+        content.push(json!({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": data}}));
+    }
+    Ok(format!("{}\n", json!({"type": "user", "message": {"role": "user", "content": content}})))
 }
 
 #[derive(Default)]

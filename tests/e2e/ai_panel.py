@@ -154,7 +154,7 @@ class ChatGptPanelServer:
 
     def answer(self, items):
         last = max(i for i, item in enumerate(items) if item.get('role') == 'user')
-        message = ' '.join(part['text'] for part in items[last]['content']).lower()
+        message = ' '.join(part.get('text', '') for part in items[last]['content']).lower()
         if 'limit' in message:
             return [{'type': 'response.output_text.delta', 'delta': 'Checking your plan now.'},
                     {'type': 'response.failed', 'response': {'error': {

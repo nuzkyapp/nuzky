@@ -2,8 +2,9 @@
 //! as its only tools, or ChatGPT on the user's plan with Nuzky's tools run in the app, and streams
 //! what it does to the UI as `agent` events.
 
+use crate::attachments::{Attachment, AttachmentKind, model_image};
 use crate::{AppState, CmdResult, chatgpt, connect, err, library, store};
-use nuzky_agent::{AgentEvent, AgentId, AgentInfo, ChatGptRequest, McpServer, Tools, Turn, TurnRequest};
+use nuzky_agent::{AgentEvent, AgentId, AgentInfo, ChatGptRequest, McpServer, Message, Tools, Turn, TurnRequest};
 use nuzky_chatgpt::Model as AgentModel;
 use nuzky_mcp::{Access, Backend, Client};
 use nuzky_session::host::Host;
@@ -88,11 +89,10 @@ pub(crate) fn chats_dir(project: &Path) -> PathBuf {
     store::data_dir().join("chats").join(format!("{hash:016x}"))
 }
 
-/// Frames stay in the live conversation, but never in its saved copy.
+/// Pictures stay in the live conversation, but never in its saved copy.
 fn strip_images(value: &mut Value) {
     if value.get("type").and_then(Value::as_str) == Some("input_image") {
-        *value =
-            serde_json::json!({"type": "input_text", "text": "[A frame Nuzky showed you earlier; it is not kept.]"});
+        *value = serde_json::json!({"type": "input_text", "text": "[A picture you saw earlier; it is not kept.]"});
     } else {
         match value {
             Value::Array(values) => values.iter_mut().for_each(strip_images),
@@ -194,6 +194,8 @@ pub struct PromptContext {
     /// Make a thumbnail in the AI panel: the agent gets the MCP prompt `thumbnail` instead of the label.
     #[serde(default)]
     thumbnail: bool,
+    #[serde(default)]
+    attachments: Vec<Attachment>,
 }
 
 fn timecode(us: i64) -> String {
@@ -252,7 +254,34 @@ fn prompt(text: &str, context: &PromptContext, project: &nuzky_engine::Project) 
             });
         }
     }
+    for attached in &context.attachments {
+        lines.push(match attached.kind {
+            AttachmentKind::Image => {
+                format!("[Nuzky] The user attached the picture {}; you see it with this message.", attached.path)
+            }
+            AttachmentKind::Video => format!(
+                "[Nuzky] The user attached the video {}. To see or use it, add it to the project with import_media.",
+                attached.path
+            ),
+        });
+    }
     if lines.is_empty() { text.to_owned() } else { format!("{text}\n\n{}", lines.join("\n")) }
+}
+
+/// The message as the agent gets it, with the pictures attached to it.
+fn message(text: &str, context: &PromptContext, project: &nuzky_engine::Project) -> CmdResult<Message> {
+    let images = context
+        .attachments
+        .iter()
+        .filter(|a| a.kind == AttachmentKind::Image)
+        .map(|a| {
+            model_image(Path::new(&a.path)).map_err(|error| {
+                log::warn!("Attaching {}: {error:#}", a.path);
+                format!("Nuzky couldn't read the picture {}. Attach it again.", a.name)
+            })
+        })
+        .collect::<CmdResult<_>>()?;
+    Ok(Message { text: prompt(text, context, project), images })
 }
 
 /// An empty folder of Nuzky's own outside the home folder, so no CLAUDE.md, AGENTS.md or
@@ -547,7 +576,7 @@ fn send(
             effort,
             guide: nuzky_mcp::guide(),
             tools: nuzky_mcp::tool_list().map_err(err)?,
-            prompt: prompt(text, context, &project),
+            prompt: message(text, context, &project)?,
             history,
             token: Arc::new(|renew| chatgpt::chatgpt().access_token(renew)),
             run: Arc::new(InApp(Backend::shared(host, &path, client).map_err(err)?)),
@@ -569,7 +598,7 @@ fn send(
             resume: resumable,
             model,
             effort,
-            prompt: prompt(text, context, &project),
+            prompt: message(text, context, &project)?,
             cwd: work_dir(),
             mcp: McpServer { command: bridge.program.into(), args, env },
         })
@@ -628,7 +657,7 @@ pub async fn agent_steer(
 fn steer(app: &AppHandle, turn: &str, text: &str, context: &PromptContext) -> CmdResult<&'static str> {
     let (panel, state) = (app.state::<AgentPanel>(), app.state::<AppState>());
     let project = state.session.lock().unwrap().host.session.state().map_err(err)?.project;
-    let prompt = prompt(text, context, &project);
+    let prompt = message(text, context, &project)?;
     let this = |(id, started): &&(String, Turn)| id == turn && started.running();
     let resumable = match panel.active.lock().unwrap().as_ref().filter(this) {
         None => return Ok("next"),
@@ -751,7 +780,7 @@ mod tests {
         assert_eq!(
             saved[0]["output"][1],
             serde_json::json!({"type": "input_text",
-            "text": "[A frame Nuzky showed you earlier; it is not kept.]"})
+            "text": "[A picture you saw earlier; it is not kept.]"})
         );
         assert_eq!(history[0]["output"][1]["type"], "input_image");
         let defaults: SavedChat = serde_json::from_str("{}").unwrap();
@@ -771,6 +800,7 @@ mod tests {
             frame: true,
             style: false,
             thumbnail: false,
+            attachments: Vec::new(),
         };
         let text = prompt("Zkrať to", &context, &project);
         assert!(text.starts_with("Zkrať to\n\n[Nuzky] Playhead: 00:07.20 (7200000 µs)."), "{text}");
@@ -781,17 +811,38 @@ mod tests {
             frame: true,
             style: false,
             thumbnail: false,
+            attachments: Vec::new(),
         };
         assert_eq!(prompt("Ahoj", &none, &project), "Ahoj");
-        let style = PromptContext { selection: None, playhead_us: None, frame: false, style: true, thumbnail: false };
+        let attachment = |path: &str, kind| Attachment { path: path.into(), kind, name: String::new(), preview: None };
+        let attached = PromptContext {
+            attachments: vec![
+                attachment("/a/shot.png", AttachmentKind::Image),
+                attachment("/a/clip.mov", AttachmentKind::Video),
+            ],
+            ..none
+        };
+        let text = prompt("", &attached, &project);
+        assert!(
+            text.contains("picture /a/shot.png; you see it")
+                && text.contains("video /a/clip.mov. To see or use it, add it to the project with import_media"),
+            "{text}"
+        );
+        let style = PromptContext {
+            selection: None,
+            playhead_us: None,
+            frame: false,
+            style: true,
+            thumbnail: false,
+            attachments: Vec::new(),
+        };
         let text = prompt("Nestříhej mi rozloučení", &style, &project);
         assert!(
             text.starts_with("Nestříhej mi rozloučení\n\n[Nuzky] The user writes from the Your style page")
                 && text.contains("change_style"),
             "{text}"
         );
-        let thumbnail =
-            PromptContext { selection: None, playhead_us: Some(0), frame: false, style: false, thumbnail: true };
+        let thumbnail = PromptContext { thumbnail: true, playhead_us: Some(0), style: false, ..style };
         let text = prompt("", &thumbnail, &project);
         assert!(text.starts_with("Make a 9:16 cover") && text.contains("export_thumbnail"), "{text}");
         assert!(

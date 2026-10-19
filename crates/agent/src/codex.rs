@@ -67,6 +67,12 @@ pub(crate) fn command(req: &TurnRequest) -> Command {
     if let Some(effort) = &req.effort {
         c.args(["-c", &format!("model_reasoning_effort={}", string(effort))]);
     }
+    for image in &req.prompt.images {
+        // One flag each: `--image a b` would take what follows as pictures too.
+        let mut flag = std::ffi::OsString::from("--image=");
+        flag.push(image);
+        c.arg(flag);
+    }
     if req.resume {
         c.arg(&req.session);
     }
@@ -185,7 +191,7 @@ impl Parser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::turn::McpServer;
+    use crate::turn::{McpServer, Message};
     use serde_json::json;
     use std::path::PathBuf;
 
@@ -297,7 +303,7 @@ mod tests {
             resume: true,
             model: None,
             effort: None,
-            prompt: String::new(),
+            prompt: Message { text: String::new(), images: vec!["/tmp/a b.jpg".into()] },
             cwd: PathBuf::new(),
             mcp: McpServer {
                 command: "/opt/Nuzky \"app\"".into(),
@@ -307,7 +313,7 @@ mod tests {
         };
         let args: Vec<String> = command(&req).get_args().map(|a| a.to_string_lossy().into_owned()).collect();
         assert_eq!(args[..3], ["exec", "resume", "--json"]);
-        assert_eq!(args[args.len() - 2..], ["01a12779-e1a0-7391-8130-1242bc8fb459", "-"]);
+        assert_eq!(args[args.len() - 3..], ["--image=/tmp/a b.jpg", "01a12779-e1a0-7391-8130-1242bc8fb459", "-"]);
         assert!(args.contains(&"--ignore-user-config".into()) && args.contains(&"features.shell_tool=false".into()));
         assert!(!args.iter().any(|a| a.starts_with("sandbox_mode=")));
         // Each setting is TOML that reads back as what Nuzky meant, as Codex parses it.

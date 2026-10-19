@@ -16,6 +16,18 @@ pub fn thumbnail(cache_dir: &Path, asset: &Asset) -> Result<Option<String>> {
 
 /// A PNG of the asset's picture `height` pixels high, from a tenth of the way in for a video.
 pub fn picture(cache_dir: &Path, asset: &Asset, height: f32) -> Result<Option<String>> {
+    let Some((rgba, w, h)) = frame(cache_dir, asset, height, u32::MAX)? else { return Ok(None) };
+    let mut png_bytes = Vec::new();
+    {
+        let mut enc = png::Encoder::new(&mut png_bytes, w, h);
+        enc.set_color(png::ColorType::Rgba);
+        enc.write_header()?.write_image_data(&rgba)?;
+    }
+    Ok(Some(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(png_bytes))))
+}
+
+/// The asset's picture as RGBA, `height` pixels high but no side over `max_side`, turned the way it is shown.
+pub fn frame(cache_dir: &Path, asset: &Asset, height: f32, max_side: u32) -> Result<Option<(Vec<u8>, u32, u32)>> {
     if asset.kind == AssetKind::Audio || asset.width == 0 {
         return Ok(None);
     }
@@ -34,17 +46,9 @@ pub fn picture(cache_dir: &Path, asset: &Asset, height: f32) -> Result<Option<St
     }
     let Some((t, f)) = picked else { return Ok(None) };
     let display = (asset.width as f32 * height / asset.height as f32, height);
-    let (w, h) = decode_size(decoder.source_size(), asset.rotation, display, u32::MAX);
+    let (w, h) = decode_size(decoder.source_size(), asset.rotation, display, max_side);
     let frame = decoder.convert(&f, t, w, h)?;
-    let (rgba, w, h) = orient(&frame.data, frame.width, frame.height, asset);
-
-    let mut png_bytes = Vec::new();
-    {
-        let mut enc = png::Encoder::new(&mut png_bytes, w, h);
-        enc.set_color(png::ColorType::Rgba);
-        enc.write_header()?.write_image_data(&rgba)?;
-    }
-    Ok(Some(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(png_bytes))))
+    Ok(Some(orient(&frame.data, frame.width, frame.height, asset)))
 }
 
 pub fn filmstrip(cache_dir: &Path, asset: &Asset) -> Result<Option<crate::Filmstrip>> {
