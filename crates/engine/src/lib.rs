@@ -27,3 +27,12 @@ pub mod worker;
 
 pub use model::Project;
 pub use render::{Pending, Renderer, Wait};
+
+/// Nuzky's own data folder: projects, models, transcripts, styles and sounds. `NUZKY_DATA_DIR` moves it,
+/// also on Windows, where no environment variable moves the system's application data.
+pub fn data_dir() -> Option<std::path::PathBuf> {
+    match std::env::var_os("NUZKY_DATA_DIR") {
+        Some(dir) if !dir.is_empty() => Some(dir.into()),
+        _ => dirs::data_dir().map(|dir| dir.join("nuzky")),
+    }
+}

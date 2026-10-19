@@ -57,8 +57,8 @@ pub struct TranscriptStore {
 
 impl TranscriptStore {
     pub fn open() -> Result<Self> {
-        let data = dirs::data_dir().context("STORE_UNAVAILABLE: no data directory")?;
-        Self::at(data.join("nuzky/transcripts"))
+        let data = nuzky_engine::data_dir().context("STORE_UNAVAILABLE: no data directory")?;
+        Self::at(data.join("transcripts"))
     }
 
     pub fn at(directory: PathBuf) -> Result<Self> {

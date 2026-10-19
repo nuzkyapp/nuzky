@@ -220,7 +220,7 @@ pub struct Settings {
 }
 
 pub(crate) fn data_dir() -> PathBuf {
-    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("nuzky")
+    nuzky_engine::data_dir().unwrap_or_else(|| std::env::temp_dir().join("nuzky"))
 }
 
 fn settings_path() -> PathBuf {

@@ -19,7 +19,7 @@ pub fn sidecar(path: &Path, suffix: &str) -> PathBuf {
 }
 
 pub fn data_dir() -> PathBuf {
-    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("nuzky")
+    nuzky_engine::data_dir().unwrap_or_else(|| std::env::temp_dir().join("nuzky"))
 }
 
 pub fn projects_dir() -> PathBuf {

@@ -71,19 +71,12 @@ impl Client {
             command.arg("--allow-write");
         }
         if let Some(style) = style {
-            let data = dir.join("data");
-            std::fs::create_dir_all(data.join("nuzky")).unwrap();
+            let data = dir.join("data/nuzky");
+            std::fs::create_dir_all(&data).unwrap();
             if let Some(text) = style {
-                std::fs::write(data.join("nuzky/EDIT.md"), text).unwrap();
+                std::fs::write(data.join("EDIT.md"), text).unwrap();
             }
-            // macOS ignores XDG_DATA_HOME and reads ~/Library/Application Support, so there it is the same folder.
-            #[cfg(target_os = "macos")]
-            {
-                std::fs::create_dir_all(dir.join("home/Library")).unwrap();
-                std::os::unix::fs::symlink(&data, dir.join("home/Library/Application Support")).unwrap();
-                command.env("HOME", dir.join("home"));
-            }
-            command.env("XDG_DATA_HOME", data);
+            command.env("NUZKY_DATA_DIR", data);
         }
         let mut child = command
             .stdin(Stdio::piped())

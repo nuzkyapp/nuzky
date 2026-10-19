@@ -15,7 +15,6 @@ nuzky-interchange.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-dirs = "6"
 dunce = "1.0.5"
 # raw-api names whisper.cpp's types, which the progress callback takes.
 whisper-rs = { version = "0.16.0", features = ["raw-api"] }

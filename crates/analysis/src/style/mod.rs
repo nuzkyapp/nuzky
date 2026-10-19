@@ -22,7 +22,7 @@ const MIN_PAUSE_US: i64 = 80_000;
 
 /// Where the creator's style lives. MCP serves it as nuzky://style when it exists.
 pub fn style_path() -> PathBuf {
-    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("nuzky").join("EDIT.md")
+    nuzky_engine::data_dir().unwrap_or_else(|| std::env::temp_dir().join("nuzky")).join("EDIT.md")
 }
 
 /// Lowercase letters and digits only, so "Opus," and "opus" are the same word.

@@ -6,9 +6,9 @@ use anyhow::{Context, Result, ensure};
 use nuzky_engine::edit::{CaptionPreset, caption_preset, caption_presets};
 
 fn path() -> Result<PathBuf> {
-    Ok(dirs::data_dir()
+    Ok(nuzky_engine::data_dir()
         .context("STORE_UNAVAILABLE: no data directory for caption styles")?
-        .join("nuzky/caption-styles.json"))
+        .join("caption-styles.json"))
 }
 
 fn normalized(name: &str) -> String {

@@ -34,7 +34,7 @@ pub struct Range {
 }
 
 pub fn models_dir() -> std::path::PathBuf {
-    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("nuzky").join("models")
+    nuzky_engine::data_dir().unwrap_or_else(|| std::env::temp_dir().join("nuzky")).join("models")
 }
 
 /// Silero voice detector shared by desktop, MCP and the analysis CLI.

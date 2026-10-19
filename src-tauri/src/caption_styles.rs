@@ -37,8 +37,7 @@ mod tests {
             let mut child = std::process::Command::new(std::env::current_exe().unwrap())
                 .args(["--exact", "caption_styles::tests::caption_styles_round_trip", "--nocapture"])
                 .env("NUZKY_CAPTION_STYLES_TEST", "1")
-                .env("XDG_DATA_HOME", &dir)
-                .env("HOME", &dir)
+                .env("NUZKY_DATA_DIR", &dir)
                 .spawn()
                 .unwrap();
             drop(spawning);
@@ -89,7 +88,7 @@ mod tests {
         boundary.anim_out.as_mut().unwrap().duration_us = 10_000_000;
         assert_eq!(save_caption_style(boundary.clone()).unwrap(), vec![boundary.clone()]);
         assert!(delete_caption_style(boundary.name).unwrap().is_empty());
-        let path = dirs::data_dir().unwrap().join("nuzky/caption-styles.json");
+        let path = nuzky_engine::data_dir().unwrap().join("caption-styles.json");
         std::fs::write(&path, b"broken").unwrap();
         assert!(caption_styles().unwrap_err().starts_with("STORE_UNREADABLE"));
         assert!(save_caption_style(style.clone()).unwrap_err().starts_with("STORE_UNREADABLE"));
