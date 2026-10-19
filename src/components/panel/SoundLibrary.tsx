@@ -514,9 +514,11 @@ function Music() {
   const linked = useSounds((s) => s.link.sound?.id);
   const downloaded = useSounds((s) => s.downloaded);
   const inProject = useInProject();
+  // A song the user or an agent adds from a link joins the list with the asset.
+  const assets = useEditor((s) => s.snap?.project.assets.length);
   useEffect(() => {
     loadDownloaded().catch((e) => useEditor.getState().toast({ kind: "error", text: `The songs from YouTube could not be read: ${errorText(e)}` }));
-  }, []);
+  }, [assets]);
   const words = query.trim().toLowerCase();
   const shown = downloaded.filter((s) => s.id !== linked && (!words || [s.title, s.author].some((t) => t.toLowerCase().includes(words))));
   return (

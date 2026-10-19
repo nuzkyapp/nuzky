@@ -226,7 +226,6 @@ export async function addSound(sound: Sound, timeUs = useEditor.getState().timeU
   useSounds.setState((s) => ({ adding: [...s.adding, sound.id] }));
   try {
     setSnap(await api.soundAdd(sound.id, timeUs, epoch));
-    if (sound.provider === "YouTube" && !useSounds.getState().downloaded.some((s) => s.id === sound.id)) loadDownloaded().catch(() => {});
   } catch (e) {
     const text = errorText(e);
     if (!text.includes("CANCELLED") && !offerOwnYtdlp(sound, text, { timeUs, epoch })) toast({ kind: "error", text: `Could not add ${sound.title}: ${text}` });

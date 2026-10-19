@@ -274,6 +274,25 @@ input.dispatchEvent(new Event('input', {bubbles: true}));""", FIELD, f'https://y
     r.check('+ adds the same library file to the second project without running yt-dlp',
             asset and Path(asset['path']).resolve() == file.resolve() and asset.get('credit') is None
             and len(invocations(r)) == calls, (asset, invocations(r)[calls:]))
+
+    # A song an agent adds joins the open list, as one the user adds does.
+    file.with_suffix('.json').unlink()
+    second = r.state()['epoch']
+    r.s.call('window.__nuzky.newProjectFromMedia(arguments[0])', [str(SOURCE)])
+    wait(lambda: r.state()['epoch'] != second and r.s.run('return window.__nuzky.store.getState().view') == 'editor', 30)
+    music(r)
+    section = 'section[aria-label="From YouTube"]'
+    r.check('without its saved details the song is not listed',
+            wait(lambda: not r.s.run('return !!document.querySelector(arguments[0])', section), 5))
+    bridge = Bridge(r, Path(r.s.run('return window.__nuzky.store.getState().snap.path')))
+    try:
+        run = bridge.call('begin_run', {'label': 'Music'})
+        bridge.call('add_sound', {'run_id': run['run_id'], 'id': f'youtube:{SONG}', 'at_us': 0})
+        bridge.call('end_run', {'run_id': run['run_id'], 'action': 'keep'})
+    finally:
+        bridge.close()
+    r.check('a song an agent adds shows under From YouTube while Music is open, in the project',
+            wait(lambda: r.s.run('return !!document.querySelector(arguments[0] + " " + arguments[1] + \' [title="In this project"]\')', section, ROW), 10))
     r.check('no error toasts', not r.errors(), r.errors())
 
 
