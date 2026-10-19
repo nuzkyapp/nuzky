@@ -570,6 +570,25 @@ impl VideoDecoder {
         Ok(decoder)
     }
 
+    /// Decodes on the GPU's video decoder (VideoToolbox), which gives the software decoder's frames for a fraction
+    /// of its CPU time. Errs where FFmpeg has no hardware decoder, and `next_frame` errs on a frame the hardware
+    /// does not decode, instead of skipping it or decoding it in software.
+    pub(crate) fn open_hardware(path: &Path) -> Result<Self> {
+        let mut decoder = Self::open(path)?;
+        let stream = decoder.input.stream(decoder.stream_index).context("The video stream is gone")?;
+        let mut ctx = ff::codec::context::Context::from_parameters(stream.parameters())?;
+        // The codec context owns the reference and lets it go when it is freed.
+        unsafe { (*ctx.as_mut_ptr()).hw_device_ctx = hardware_device()? };
+        // FFmpeg hands the hardware one frame at a time, so more threads would only hold more frames.
+        ctx.set_threading(ff::codec::threading::Config { kind: ff::codec::threading::Type::Frame, count: 1 });
+        decoder.decoder = ctx.decoder().video()?;
+        Ok(decoder)
+    }
+
+    fn is_hardware(&self) -> bool {
+        unsafe { !(*self.decoder.as_ptr()).hw_device_ctx.is_null() }
+    }
+
     pub fn is_image(&self) -> bool {
         self.is_image
     }
@@ -635,6 +654,20 @@ impl VideoDecoder {
         self.eof = false;
     }
 
+    /// The time of the keyframe a seek to `t_us` lands on, read from the file without decoding: None when the
+    /// file does not seek to keyframes. The next decoded frames start anywhere until the next `seek`.
+    pub(crate) fn keyframe_at(&mut self, t_us: i64) -> Option<i64> {
+        self.seek_from(t_us);
+        let index = self.stream_index;
+        let (_, packet) = self.input.packets().find(|(stream, _)| stream.index() == index)?;
+        let pts = packet.pts().filter(|_| packet.is_key())?;
+        Some(self.micros(pts))
+    }
+
+    fn micros(&self, pts: i64) -> i64 {
+        (pts as f64 * f64::from(self.time_base) * 1e6).round() as i64 - self.origin_us
+    }
+
     /// Decodes the next frame in display order. `None` at end of stream.
     pub fn next_frame(&mut self) -> Result<Option<(i64, frame::Video)>> {
         if std::mem::take(&mut self.image_rewound)
@@ -658,13 +691,15 @@ impl VideoDecoder {
         loop {
             match self.decoder.receive_frame(&mut f) {
                 Ok(()) => {
+                    if self.is_hardware() {
+                        f = from_hardware(&f, (self.decoder.width(), self.decoder.height()))?;
+                    }
                     if self.is_image
                         && let Some((rotation, _)) = frame_orientation(&f)
                     {
                         self.rotation = rotation;
                     }
-                    let pts = f.timestamp().or(f.pts()).unwrap_or(0);
-                    let t = (pts as f64 * f64::from(self.time_base) * 1e6).round() as i64 - self.origin_us;
+                    let t = self.micros(f.timestamp().or(f.pts()).unwrap_or(0));
                     if self.is_image {
                         self.image = Some((t, f.clone()));
                     }
@@ -684,8 +719,10 @@ impl VideoDecoder {
             loop {
                 match self.input.packets().next() {
                     Some((stream, packet)) if stream.index() == self.stream_index => {
-                        if let Err(e) = self.decoder.send_packet(&packet) {
-                            log::warn!("Skipping corrupt packet: {e}");
+                        match self.decoder.send_packet(&packet) {
+                            Err(e) if self.is_hardware() => bail!("The hardware decoder failed: {e}"),
+                            Err(e) => log::warn!("Skipping corrupt packet: {e}"),
+                            Ok(()) => {}
                         }
                         break;
                     }
@@ -727,6 +764,40 @@ impl VideoDecoder {
 
 /// First step back when a seek lands after the frame it was asked for; doubled on every retry.
 const SEEK_BACK_OFF_US: i64 = 1_000_000;
+
+/// VideoToolbox, the video decoder of Apple's GPUs, when FFmpeg was built with it.
+fn hardware_device() -> Result<*mut ff::ffi::AVBufferRef> {
+    #[cfg(target_os = "macos")]
+    {
+        let mut device = std::ptr::null_mut();
+        let kind = ff::ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_VIDEOTOOLBOX;
+        if unsafe { ff::ffi::av_hwdevice_ctx_create(&mut device, kind, std::ptr::null(), std::ptr::null_mut(), 0) } >= 0
+        {
+            return Ok(device);
+        }
+    }
+    bail!("FFmpeg has no hardware video decoder here")
+}
+
+/// The picture of a frame the hardware decoded, read in place from the GPU's memory, which Apple's chips share
+/// with the CPU. FFmpeg decodes in software what VideoToolbox refuses; that and a frame of another size than the
+/// stream's are errors, so a caller can decode the whole file in software instead.
+fn from_hardware(f: &frame::Video, size: (u32, u32)) -> Result<frame::Video> {
+    if f.format() != Pixel::VIDEOTOOLBOX {
+        bail!("The hardware decoder does not decode this video");
+    }
+    let mut mapped = frame::Video::empty();
+    unsafe {
+        let flags = ff::ffi::AV_HWFRAME_MAP_READ as i32;
+        if ff::ffi::av_hwframe_map(mapped.as_mut_ptr(), f.as_ptr(), flags) < 0 {
+            bail!("Cannot read the picture of the hardware decoder");
+        }
+    }
+    if (mapped.width(), mapped.height()) != size {
+        bail!("The hardware decoder gave a picture of {}×{}", mapped.width(), mapped.height());
+    }
+    Ok(mapped)
+}
 
 /// Size to decode at so a layer shown at `display` pixels (after rotation) stays sharp
 /// without converting more pixels than needed, and no side exceeds `max_side`.
