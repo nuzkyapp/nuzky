@@ -1095,8 +1095,6 @@ fn an_agent_reads_the_style_and_keeps_what_the_creator_agreed_to() {
     reader.finish();
 }
 
-// Only on Linux does XDG_DATA_HOME choose where Nuzky looks for EDIT.md.
-#[cfg(target_os = "linux")]
 #[test]
 fn a_creator_style_reaches_the_agent_and_without_one_nothing_changes() {
     let guide = include_str!("../../../skills/nuzky-edit/SKILL.md");
@@ -1320,7 +1318,6 @@ fn headless_transcribe_without_models_points_to_transcript_tab_over_stdio() {
 }
 
 /// A 4 s take whose transcript, "Save 450 every month.", is in the data directory of `c`.
-#[cfg(unix)]
 fn transcribed_take(c: &Client) -> nuzky_engine::model::Asset {
     use nuzky_session::transcripts::{Record, TranscriptStore, VERSION};
 
@@ -1374,7 +1371,6 @@ fn transcribed_take(c: &Client) -> nuzky_engine::model::Asset {
     asset
 }
 
-#[cfg(target_os = "linux")]
 #[test]
 fn caption_style_packages_over_stdio() {
     use nuzky_engine::edit::caption_preset;
@@ -1484,8 +1480,6 @@ fn fonts_this_computer_lacks_are_named_over_stdio() {
 }
 
 /// Captions and reels in a font this computer lacks name it, a retried make_reels too.
-// Windows keeps transcripts in its Roaming AppData, which XDG_DATA_HOME does not move.
-#[cfg(unix)]
 #[test]
 fn captions_and_reels_name_fonts_this_computer_lacks_over_stdio() {
     let mut c = Client::start(true, None, Some(None));
@@ -1520,11 +1514,9 @@ fn captions_and_reels_name_fonts_this_computer_lacks_over_stdio() {
     c.finish();
 }
 
-// Windows keeps transcripts in its Roaming AppData, which XDG_DATA_HOME does not move.
 /// A 4 s take whose words are stored as recognised, 0.8 s apart, and placed on the timeline by a
 /// run. Words come from the store, so the file is never decoded and any bytes do. The client
 /// must have a data directory of its own (`style: Some(..)`).
-#[cfg(unix)]
 fn place_transcribed_take(c: &mut Client, said: &[&str], run_id: &Value) {
     use nuzky_engine::{model::Asset, model::AssetKind, speech::Word};
     use nuzky_session::transcripts::{Record, TranscriptStore, VERSION};
@@ -1572,7 +1564,6 @@ fn place_transcribed_take(c: &mut Client, said: &[&str], run_id: &Value) {
 }
 
 /// Each caption clip's id, text, and whether its timed words still spell it, so karaoke highlights it.
-#[cfg(unix)]
 fn caption_clips(c: &mut Client) -> Vec<(String, String, bool)> {
     let state = c.call("get_state", json!({}));
     let track = state["tracks"].as_array().unwrap().iter().find(|t| t["name"] == "Captions").unwrap().clone();
@@ -1589,12 +1580,10 @@ fn caption_clips(c: &mut Client) -> Vec<(String, String, bool)> {
         .collect()
 }
 
-#[cfg(unix)]
 fn caption_texts(c: &mut Client) -> Vec<String> {
     caption_clips(c).into_iter().map(|(_, text, _)| text).collect()
 }
 
-#[cfg(unix)]
 #[test]
 fn correct_words_fixes_the_transcript_and_captions_over_stdio() {
     let mut c = Client::start(true, None, Some(None));
@@ -1634,7 +1623,6 @@ fn correct_words_fixes_the_transcript_and_captions_over_stdio() {
 
 /// An agent off by one word once overwrote "něco" instead of "natchne" with a current
 /// transcript_key. `expected` names the word the agent means, so a shifted index changes nothing.
-#[cfg(unix)]
 #[test]
 fn correct_words_refuses_a_word_that_reads_otherwise_than_expected_over_stdio() {
     let mut c = Client::start(true, None, Some(None));
@@ -1697,7 +1685,6 @@ fn correct_words_refuses_a_word_that_reads_otherwise_than_expected_over_stdio() 
     c.finish();
 }
 
-#[cfg(unix)]
 #[test]
 fn a_correction_with_more_words_than_a_caption_splits_and_its_parts_follow_corrections_over_stdio() {
     let mut c = Client::start(true, None, Some(None));
@@ -1735,14 +1722,12 @@ fn a_correction_with_more_words_than_a_caption_splits_and_its_parts_follow_corre
     );
 }
 
-#[cfg(unix)]
 fn correct_second_word(c: &mut Client, run: &Value, text: &str) -> Value {
     let key = c.call("get_transcript", json!({}))["transcript_key"].clone();
     c.call("correct_words", json!({"run_id":run["run_id"],"transcript_key":key,"corrections":[{"i":1,"text":text}]}))
 }
 
 /// "Tak Vzal bys ji? nebo ne." with "Vzal bys ji?" one recognised word, its parts over two captions.
-#[cfg(unix)]
 fn split_word_over_two_captions(c: &mut Client) -> (Value, Vec<String>) {
     let run = c.call("begin_run", json!({"label":"fix a word"}));
     place_transcribed_take(c, &["Tak", "vzalbysi", "nebo", "ne."], &run["run_id"]);
@@ -1752,7 +1737,6 @@ fn split_word_over_two_captions(c: &mut Client) -> (Value, Vec<String>) {
     (run, caption_clips(c).into_iter().map(|(id, ..)| id).collect())
 }
 
-#[cfg(unix)]
 #[test]
 fn a_part_left_by_a_shorter_correction_still_takes_the_next_one_over_stdio() {
     let mut c = Client::start(true, None, Some(None));
@@ -1770,7 +1754,6 @@ fn a_part_left_by_a_shorter_correction_still_takes_the_next_one_over_stdio() {
     c.finish();
 }
 
-#[cfg(unix)]
 #[test]
 fn a_deleted_part_leaves_the_others_as_they_are_over_stdio() {
     let mut c = Client::start(true, None, Some(None));
@@ -1787,7 +1770,6 @@ fn a_deleted_part_leaves_the_others_as_they_are_over_stdio() {
     c.finish();
 }
 
-#[cfg(unix)]
 #[test]
 fn a_part_typed_over_by_hand_is_never_overwritten_over_stdio() {
     let mut c = Client::start(true, None, Some(None));
@@ -1805,8 +1787,7 @@ fn a_part_typed_over_by_hand_is_never_overwritten_over_stdio() {
 }
 
 /// A 12 s talk of three sentences of four 0.4 s tone "words", the middle sentence 12 dB louder,
-/// with its words stored as if recognised. Only on Linux does XDG_DATA_HOME choose the store.
-#[cfg(target_os = "linux")]
+/// with its words stored as if recognised.
 #[test]
 fn emphasis_suggests_and_apply_zooms_punches_in_as_one_undo_over_stdio() {
     use nuzky_session::transcripts::{Record, TranscriptStore, VERSION};
@@ -2869,7 +2850,6 @@ fn decode_gray(bytes: &[u8]) -> Vec<u8> {
     gray
 }
 
-#[cfg(target_os = "linux")]
 fn long_talk(c: &mut Client) -> Vec<Value> {
     use nuzky_session::transcripts::{Record, TranscriptStore, VERSION};
     let video = c.dir.join("long-talk.mp4");
@@ -2938,7 +2918,6 @@ fn long_talk(c: &mut Client) -> Vec<Value> {
     words
 }
 
-#[cfg(target_os = "linux")]
 #[test]
 fn transcript_sentences_and_pages_preserve_long_talk_over_stdio() {
     let mut c = Client::start(true, None, Some(None));
@@ -3026,7 +3005,6 @@ fn transcript_sentences_and_pages_preserve_long_talk_over_stdio() {
 
 /// A long talk becomes reels: proposals out of bounds are refused, three picked ones become projects beside it
 /// with only their words on a 9:16 canvas, the talk and its video stay as they were, and undo takes it all back.
-#[cfg(target_os = "linux")]
 #[test]
 fn reels_are_proposed_and_made_beside_a_long_talk_over_stdio() {
     let mut c = Client::start(true, None, Some(None));
