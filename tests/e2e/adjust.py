@@ -6,7 +6,7 @@ from e2e.harness import CLI, ROOT, flow, preview_crop, preview_rect, press, wait
 PATCHES = {'black': (0, 0, 0), 'white': (255, 255, 255), 'grey': (128, 128, 128), 'skin': (242, 184, 148)}
 WIDTH, HEIGHT = 360, 640
 PHOTO = ROOT / 'site/public/media/ugc.jpg'
-PUNCH = {'contrast': 0.45, 'saturation': 0.25, 'vignette': 0.25}
+PUNCH = {'contrast': 0.5, 'saturation': 0.1, 'vignette': 0.25}
 ADJUST = "return window.__nuzky.store.getState().snap.project.tracks.flatMap((t) => t.clips).find((c) => c.id === arguments[0]).content.adjust"
 TAB = ("const t = [...document.querySelectorAll(arguments[0] + ' [role=tab]')].find((t) => t.textContent.trim() === arguments[1]);"
        'if (!t) return false; t.click(); return true')
@@ -110,7 +110,6 @@ def adjust(r):
     r.check('the preview shows the same colours as the renderer the export uses', off <= 8, f'{off} levels apart')
     r.shot('adjust-inspector')
 
-    # The filter tiles preview a filter on the clip's thumbnail, so a real photo shows what they look like.
     r.import_media(PHOTO)
     r.add_clip(PHOTO.name)
     photo_clip = r.track()[1]

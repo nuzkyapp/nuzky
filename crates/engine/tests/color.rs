@@ -51,9 +51,9 @@ fn smooth_grey(frame: &[u8]) {
     assert!(frame.as_chunks::<4>().0.iter().all(|p| p[3] == 255));
 }
 
-fn each_control(amount: f32) -> [(&'static str, Adjust); 9] {
+fn each_control(amount: f32) -> Vec<(&'static str, Adjust)> {
     let d = Adjust::default();
-    [
+    let mut controls = vec![
         ("exposure", Adjust { exposure: amount, ..d }),
         ("brightness", Adjust { brightness: amount, ..d }),
         ("contrast", Adjust { contrast: amount, ..d }),
@@ -62,8 +62,12 @@ fn each_control(amount: f32) -> [(&'static str, Adjust); 9] {
         ("saturation", Adjust { saturation: amount, ..d }),
         ("temperature", Adjust { temperature: amount, ..d }),
         ("tint", Adjust { tint: amount, ..d }),
-        ("fade", Adjust { fade: amount.abs(), ..d }),
-    ]
+    ];
+    // Fade only goes up from 0.
+    if amount > 0.0 {
+        controls.push(("fade", Adjust { fade: amount, ..d }));
+    }
+    controls
 }
 
 // Golden RGBA captured with the unmodified a18d535 CLI: frame ramp.json 0 ramp-head.png 256.
@@ -118,6 +122,16 @@ fn highlights_target_brights_and_preserve_midgrey() {
         assert_eq!(grey(&frame, 32), grey(&base, 32));
         smooth_grey(&frame);
     }
+}
+
+/// Highlights pulled down once only shortened the distance to white, so a bright sky of 244 came down to 238 at -50.
+#[test]
+fn highlights_pulled_down_darken_a_bright_sky() {
+    let mut renderer = Renderer::new().unwrap();
+    let base = ramp(&mut renderer, Adjust::default());
+    let frame = ramp(&mut renderer, Adjust { highlights: -0.5, ..Adjust::default() });
+    let darker = grey(&base, 244) - grey(&frame, 244);
+    assert!(darker >= 20, "highlights -50 drew 244 grey only {darker} levels darker");
 }
 
 #[test]
@@ -177,23 +191,58 @@ fn warm_hue([r, g, b]: [i32; 3]) -> f32 {
     60.0 * (g - b) as f32 / (r - b) as f32
 }
 
+/// An 8 x 8 picture of one colour, drawn with `adjust`.
+fn swatch(renderer: &mut Renderer, colour: [u8; 3], adjust: Adjust) -> [i32; 3] {
+    let [r, g, b] = colour;
+    let path = format!("{}/swatch-{r}-{g}-{b}.ppm", env!("CARGO_TARGET_TMPDIR"));
+    let mut ppm = b"P6\n8 8\n255\n".to_vec();
+    ppm.extend(colour.repeat(64));
+    std::fs::write(&path, ppm).unwrap();
+    let frame = render(renderer, &path, (8, 8), adjust);
+    [frame[0], frame[1], frame[2]].map(i32::from)
+}
+
 /// Contrast and saturation once pushed each channel of bright skin apart and clipped red alone, which turned it
 /// yellow: contrast +50 moved its hue by 8 degrees.
 #[test]
 fn contrast_and_saturation_keep_the_hue_of_bright_skin() {
     const SKIN: [u8; 3] = [242, 184, 148];
-    let path = format!("{}/bright-skin.ppm", env!("CARGO_TARGET_TMPDIR"));
-    let mut ppm = b"P6\n8 8\n255\n".to_vec();
-    ppm.extend(SKIN.repeat(64));
-    std::fs::write(&path, ppm).unwrap();
     let mut renderer = Renderer::new().unwrap();
-    let pixel = |frame: &[u8]| [frame[0], frame[1], frame[2]].map(i32::from);
     let skin = SKIN.map(i32::from);
     for adjust in [Adjust { contrast: 0.5, ..Adjust::default() }, Adjust { saturation: 0.5, ..Adjust::default() }] {
-        let shown = pixel(&render(&mut renderer, &path, (8, 8), adjust));
+        let shown = swatch(&mut renderer, SKIN, adjust);
         assert!((0..3).any(|c| (shown[c] - skin[c]).abs() >= 5), "{adjust:?} left the skin as it was: {shown:?}");
         let moved = (warm_hue(shown) - warm_hue(skin)).abs();
         assert!(moved <= 1.0, "{adjust:?}: {shown:?} moved the hue by {moved:.1} degrees");
+    }
+}
+
+/// Hue in degrees in OKLab, where equal angles look like equal turns of colour.
+fn oklab_hue(rgb: [i32; 3]) -> f64 {
+    let [r, g, b] = rgb.map(|c| {
+        let c = f64::from(c) / 255.0;
+        if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+    });
+    let l = (0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b).cbrt();
+    let m = (0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b).cbrt();
+    let s = (0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b).cbrt();
+    let green_red = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s;
+    let blue_yellow = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s;
+    blue_yellow.atan2(green_red).to_degrees()
+}
+
+/// Temperature once kept the picture's brightness by moving green against red and blue, so warming turned skin
+/// towards red and cooling towards olive: at +/-50 this skin's hue moved by -7 and +9 degrees.
+#[test]
+fn temperature_keeps_the_hue_of_skin() {
+    const SKIN: [u8; 3] = [153, 112, 79];
+    let mut renderer = Renderer::new().unwrap();
+    let skin = SKIN.map(i32::from);
+    for amount in [-0.5, 0.5] {
+        let shown = swatch(&mut renderer, SKIN, Adjust { temperature: amount, ..Adjust::default() });
+        assert!((shown[0] - skin[0]).abs() >= 10, "temperature {amount} left the skin as it was: {shown:?}");
+        let moved = oklab_hue(shown) - oklab_hue(skin);
+        assert!(moved.abs() <= 6.0, "temperature {amount}: {shown:?} moved the hue by {moved:.1} degrees");
     }
 }
 

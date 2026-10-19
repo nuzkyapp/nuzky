@@ -236,34 +236,47 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
             // apart from fade, and each is the identity at 0. `fit` keeps colour in 0..1 where clipping each
             // channel would shift its hue.
             const STOPS = 2.0;
-            const TEMPERATURE = vec3<f32>(1.15, 0.0, -1.15);
+            // Pulled down, contrast and brightness bend by fewer stops: at 2 they stretched the tones next to
+            // clipped white into a hard-edged patch with contour rings.
+            const CONTRAST_DOWN_STOPS = 1.0;
+            const BRIGHTNESS_DOWN_STOPS = 1.25;
+            const TEMPERATURE = vec3<f32>(1.15, 0.15, -1.15);
             const TINT = vec3<f32>(0.9, -0.9, 0.9);
             const TONE_STOPS = 1.25;
+            const HIGHLIGHTS_DIM = 0.2;
             const FADE_BLACK = 0.25;
             const FADE_WHITE = 0.05;
             // White balance and exposure are gains on linear light, the 2.4 power of the colour here. The white
-            // balance gains keep luma, so warming does not brighten; at 1.15 and 0.9 they move 18 % grey as far
-            // as the additive shift they replaced.
+            // balance gains keep luma, so warming does not brighten. Keeping luma alone takes green down when
+            // warming and up when cooling, which turned skin red or olive; green following red a little keeps the
+            // hue of skin. At 1.15 and 0.9 they move red against blue on 18 % grey as far as the additive shift
+            // they replaced.
             let wb = exp2(layer.adjust.w * TEMPERATURE + layer.grading.y * TINT);
             rgb = fit(rgb * pow(wb / dot(wb, BT709_LUMA) * exp2(layer.grading.x * STOPS), vec3<f32>(1.0 / 2.4)));
-            // Contrast is an S-curve around mid grey, slope 4^c there and 4^-c at black and white, so nothing
-            // clips. It moves only the brightest and darkest channel and puts the middle one at the same place
-            // between them, which keeps the hue; saturation follows contrast as on film.
+            // Contrast is an S-curve around mid grey, slope 4^c there and 4^-c at black and white (2^c and 2^-c
+            // pulled down), so nothing clips. It moves only the brightest and darkest channel and puts the middle
+            // one at the same place between them, which keeps the hue; saturation follows contrast as on film.
             let hi = max(max(rgb.r, rgb.g), rgb.b);
             let lo = min(min(rgb.r, rgb.g), rgb.b);
             let d = 2.0 * vec3<f32>(hi, lo, 0.0) - 1.0;
-            let s = 0.5 + 0.5 * sign(d) * bend(abs(d), exp2(layer.adjust.y * STOPS));
+            let c = layer.adjust.y;
+            let s = 0.5 + 0.5 * sign(d) * bend(abs(d), exp2(c * select(STOPS, CONTRAST_DOWN_STOPS, c < 0.0)));
             rgb = s.y + (rgb - lo) * (s.x - s.y) / max(hi - lo, 1e-6);
-            // Shadows expose tones below mid grey by up to 1.25 stops, highlights the distance to white above it,
-            // and brightness bends luma; mid grey, black and white stay. They work on luma and scale the colour
-            // with it, so a lighter shadow keeps its colour instead of turning grey.
+            // Shadows expose tones below mid grey by up to 1.25 stops and highlights the distance to white above
+            // it, both keeping black and mid grey. Highlights pulled down also dim the tones above 70 % by up to a
+            // fifth, white included, so a bright sky gets its tone back. Brightness bends luma between black and
+            // white, which stay, and moves mid grey. All of them work on luma and scale the colour with it, so a
+            // lighter shadow keeps its colour instead of turning grey.
             let y = dot(rgb, BT709_LUMA);
+            let h = layer.grading.z;
             let toned = select(
                 y * exp2(TONE_STOPS * layer.grading.w * (1.0 - smoothstep(0.0, 0.5, y))),
-                1.0 - (1.0 - y) * exp2(-TONE_STOPS * layer.grading.z * smoothstep(0.5, 1.0, y)),
+                (1.0 - (1.0 - y) * exp2(-TONE_STOPS * h * smoothstep(0.5, 1.0, y)))
+                    * (1.0 + HIGHLIGHTS_DIM * min(h, 0.0) * smoothstep(0.7, 1.0, y)),
                 y > 0.5
             );
-            rgb *= bend(vec3<f32>(toned), exp2(layer.adjust.x * STOPS)).x / max(y, 1e-6);
+            let b = layer.adjust.x;
+            rgb *= bend(vec3<f32>(toned), exp2(b * select(STOPS, BRIGHTNESS_DOWN_STOPS, b < 0.0))).x / max(y, 1e-6);
             let luma = dot(rgb, BT709_LUMA);
             rgb = fit(mix(vec3<f32>(luma), rgb, 1.0 + layer.adjust.z));
             // Fade maps black to 0.25 and white to 0.95 at full strength, without changing hue.

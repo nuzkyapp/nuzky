@@ -128,7 +128,7 @@ export const FILTERS: { id: string; label: string; adjust: Adjust }[] = [
   { id: "mono", label: "Mono", adjust: { ...NO_ADJUST, contrast: 0.2, saturation: -1 } },
   { id: "fade", label: "Fade", adjust: { ...NO_ADJUST, fade: 0.6, contrast: -0.1, saturation: -0.2 } },
   { id: "moody", label: "Moody", adjust: { ...NO_ADJUST, shadows: -0.5, brightness: -0.05, contrast: 0.3, saturation: -0.2, temperature: -0.1, vignette: 0.45 } },
-  { id: "punch", label: "Punch", adjust: { ...NO_ADJUST, contrast: 0.45, saturation: 0.25, vignette: 0.25 } },
+  { id: "punch", label: "Punch", adjust: { ...NO_ADJUST, contrast: 0.5, saturation: 0.1, vignette: 0.25 } },
 ];
 
 export function sameAdjust(a: Adjust, b: Adjust) {
@@ -137,13 +137,14 @@ export function sameAdjust(a: Adjust, b: Adjust) {
 
 /** Rough CSS approximation of an Adjust, for preset tiles only. The engine does the real grading. */
 export function adjustCss(a: Adjust): { filter: string; tint: string | null; vignette: number } {
-  const wb = [1.15 * a.temperature + 0.9 * a.tint, -0.9 * a.tint, -1.15 * a.temperature + 0.9 * a.tint].map((v) => 2 ** v);
+  const wb = [1.15 * a.temperature + 0.9 * a.tint, 0.15 * a.temperature - 0.9 * a.tint, -1.15 * a.temperature + 0.9 * a.tint].map((v) => 2 ** v);
   const y = 0.2126 * wb[0] + 0.7152 * wb[1] + 0.0722 * wb[2];
   const gain = wb.map((v) => (v / y) ** (1 / 2.4));
   const top = Math.max(...gain);
-  const light = (2 ** (0.83 * a.exposure + 0.9 * a.brightness) * (1 - a.fade * 0.3)) / (1 - a.fade * 0.5) + a.highlights * 0.1 + a.shadows * 0.1;
-  const contrast = (1 + 0.55 * a.contrast + a.highlights * 0.1 - a.shadows * 0.1) * (1 - a.fade * 0.5);
-  const filter = `brightness(${Math.max(0, light * top)}) contrast(${Math.max(0, contrast)}) saturate(${1 + a.saturation})`;
+  const light = 2 ** (0.83 * a.exposure + 0.9 * a.brightness) * (1 + a.fade * 0.2) + a.highlights * 0.1 + a.shadows * 0.1;
+  const contrast = ((1 + 0.55 * a.contrast + a.highlights * 0.1 - a.shadows * 0.1) * (1 - a.fade * 0.3)) / (1 + a.fade * 0.2);
+  // Contrast before brightness: brightness above 1 would clip a bright sky before fade's contrast could bring it back.
+  const filter = `contrast(${Math.max(0, contrast)}) brightness(${Math.max(0, light * top)}) saturate(${1 + a.saturation})`;
   const tint = a.temperature === 0 && a.tint === 0 ? null : `rgb(${gain.map((v) => Math.round((255 * v) / top)).join(",")})`;
   return { filter, tint, vignette: a.vignette };
 }

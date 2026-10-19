@@ -31,7 +31,7 @@ const TRASH_DELAY: Duration = Duration::from_secs(30);
 /// Longest side of a poster in pixels: sharp on a 2× screen at the size of a card.
 const POSTER_SIDE: u32 = 360;
 /// A new value makes every cached poster render again.
-const POSTER_VERSION: u8 = 2;
+const POSTER_VERSION: u8 = 3;
 const MAX_HITS_PER_PROJECT: usize = 3;
 const MAX_HITS: usize = 30;
 const CONTEXT_BEFORE: usize = 5;
