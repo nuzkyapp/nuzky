@@ -371,6 +371,8 @@ const FADE_US: i64 = 400_000;
 const SNIP_GAP_US: i64 = 150_000;
 /// A snip starts this much before its piece snaps shut, so the blades meet as it closes.
 const SNIP_LEAD_US: i64 = 60_000;
+/// The music under the racing recording, so the snips stand out.
+const BED_DB: f64 = -9.0;
 /// The finished cut's own sound fades out this long before its sample ends, leaving its music.
 const HANDOVER_US: i64 = 300_000;
 /// A sound on an audio track at least this long is music, even when it does not duck under speech.
@@ -653,25 +655,18 @@ impl<'a> Painter<'a> {
         draws.push(rect(x - 4.0, baseline - 0.33 * size - 2.0, text.ink() + 8.0, 4.0, RED, 2.0));
     }
 
-    /// The numbers the recap counts, as far as `at` of the recording, as pieces of a row.
-    fn stats(&self, at: i64, size: f32, numbers: &str, labels: &str) -> Vec<(String, TextStyle)> {
+    /// What the cuts removed, as pieces of a row: the counts with a transcript, else the number of cuts.
+    fn stats(&self, size: f32, numbers: &str, labels: &str) -> Vec<(String, TextStyle)> {
         let RecapTotals { words, retakes, pauses, .. } = self.totals;
-        let passed = |cut: &&RecapCut| cut.start_us <= at;
-        let counts = [
-            (words, self.recap.cuts.iter().filter(passed).map(|c| c.words).sum(), "word", "words"),
-            (retakes, self.recap.cuts.iter().filter(passed).map(|c| c.retakes).sum(), "retake", "retakes"),
-            (pauses, self.recap.cuts.iter().filter(passed).filter(|c| c.words == 0).count(), "pause", "pauses"),
-        ];
+        let counts = [(words, "word", "words"), (retakes, "retake", "retakes"), (pauses, "pause", "pauses")];
         let mut pieces = Vec::new();
-        for (total, now, one, many) in counts {
-            if total.unwrap_or(0) == 0 {
-                continue;
-            }
+        for (n, one, many) in counts {
+            let Some(n @ 1..) = n else { continue };
             if !pieces.is_empty() {
                 pieces.push(("·".to_owned(), style(size, labels, false, 0.0)));
             }
-            pieces.push((now.to_string(), style(size, numbers, true, 0.0)));
-            pieces.push((if now == 1 { one } else { many }.to_owned(), style(size, labels, false, 0.0)));
+            pieces.push((n.to_string(), style(size, numbers, true, 0.0)));
+            pieces.push((if n == 1 { one } else { many }.to_owned(), style(size, labels, false, 0.0)));
         }
         if pieces.is_empty() {
             let cuts = self.recap.cuts.len();
@@ -749,16 +744,18 @@ impl<'a> Painter<'a> {
 
     /// The recording racing: each cut steps the picture back and strikes its words, and once played its piece of
     /// the bar snaps shut, taking its length off the number at the bar's end.
-    fn racing(&mut self, draws: &mut Vec<Draw>, t: i64, mut into: i64) -> Result<()> {
+    fn racing(&mut self, draws: &mut Vec<Draw>, t: i64, into: i64) -> Result<()> {
         let before = self.recap.before.duration_us();
-        let (_, speed, piece) = self.race.at(into);
-        if piece.is_none() && speed > SAMPLED_SPEED {
-            into -= into % 100_000;
-        }
-        let (at, _, piece) = self.race.at(into);
+        let (at, speed, piece) = self.race.at(into);
         let at = at.min(before - 1);
+        // Fast kept footage shows ten pictures a second, never one from the cut it has just left.
+        let mut shot = at;
+        if piece.is_none() && speed > SAMPLED_SPEED {
+            let kept_from = self.race.shown.iter().zip(&self.race.pieces).rev().find(|(s, _)| s.end <= into);
+            shot = self.race.at(into - into % 100_000).0.max(kept_from.map_or(0, |(_, p)| p.end_us)).min(at);
+        }
         let back = self.race.recede(into);
-        draws.push(self.picture(false, at, back, 1.0, 0.0)?);
+        draws.push(self.picture(false, shot, back, 1.0, 0.0)?);
         draws.push(scrim(860.0, 1480.0, 1.0));
         // The caption leaves while a pause plays, so the chip alone says what goes, and with the speed as the race ends.
         let ending = 1.0 - progress(into - (self.race.length - TEXT_OUT_US), TEXT_OUT_US);
@@ -778,7 +775,6 @@ impl<'a> Painter<'a> {
         let length = self.text(&duration_text(before - gone as i64), &style(112.0, FG, true, 0.0));
         let right = end.max(LEFT + speed.ink() + 40.0 + length.ink());
         draws.push(length.at(right - length.ink(), BAR_Y - LABEL_ABOVE));
-        // The chip of the piece playing or snapping shut hangs under it, saying what goes.
         let chip = self.race.shown.iter().rposition(|s| s.start <= into && into < s.end + SNAP_US);
         if let Some(i) = chip {
             let piece = self.race.pieces[i].clone();
@@ -807,8 +803,8 @@ impl<'a> Painter<'a> {
         let snapped = self.race.snapped(self.race.length + u);
         let ones = vec![1.0; snapped.len()];
         let end = self.bar(&mut over, y, h, &snapped, Some(before), 1.0, &ones);
-        // Once the bar has arrived, the length grows from riding on its end to the left edge.
         let length = self.text(&duration_text(self.totals.after_us), &style(250.0, FG, true, 0.0));
+        // Once the bar has arrived, the length grows from its end to the left edge.
         let grow = ease_out(progress(u - 500_000, 360_000));
         let pop = 1.0 + 0.03 * (std::f32::consts::PI * progress(u - LAND_HIT_US, 240_000)).sin();
         let small = 112.0 / 250.0;
@@ -817,7 +813,7 @@ impl<'a> Painter<'a> {
         let under = ease_out(progress(u - 500_000, 300_000));
         let mut lines = Vec::new();
         self.struck(&mut lines, &duration_text(self.totals.before_us), 64.0, RIGHT, y + h + 86.0);
-        let mut stats = self.stats(i64::MAX, 52.0, FG, LABEL);
+        let mut stats = self.stats(52.0, FG, LABEL);
         if self.recap.transcribed {
             stats.insert(0, ("Cut".to_owned(), style(52.0, LABEL, false, 0.0)));
         }
@@ -883,7 +879,7 @@ impl<'a> Painter<'a> {
 
     /// The recording's time `into` the finished cut shows.
     fn recorded(&self, into: i64) -> i64 {
-        self.race.pieces.iter().fold(into, |at, p| if p.start_us <= at { at + p.removed_us } else { at })
+        self.recap.cuts.iter().fold(into, |at, c| if c.start_us <= at { at + c.end_us - c.start_us } else { at })
     }
 
     /// The whole recording as a bar at `y`, `h` high: its cuts red until they snap shut, then a seam, and white as
@@ -1139,19 +1135,28 @@ impl Sound {
 fn soundtrack(after: &Project, start: i64, end: i64, fade: i64) -> (Project, Project) {
     const FADE_IN_US: i64 = 100_000;
     const FADE_OUT_US: i64 = 300_000;
-    /// The music under the racing recording, -9 dB.
-    const BED: f32 = 0.35;
+    let bed_gain = db_to_gain(BED_DB);
     let length = after.duration_us();
     let assets: std::collections::HashMap<&str, &Asset> = after.assets.iter().map(|a| (a.id.as_str(), a)).collect();
+    let is_music = |track: &Track, clip: &Clip| {
+        matches!(&clip.content, ClipContent::Media { duck_db, .. }
+            if track.kind == TrackKind::Audio && (*duck_db > 0.0 || clip.duration_us >= MUSIC_US))
+    };
+    // The music starts with the recap even when the finished cut brings it in later.
+    let lead = after.tracks.iter().flat_map(|t| t.clips.iter().filter(|c| is_music(t, c))).map(|c| c.start_us).min();
+    let lead = lead.unwrap_or(0);
     let mut project = after.clone();
     let mut music = after.clone();
     for (track, music) in project.tracks.iter_mut().zip(&mut music.tracks) {
-        let audio = track.kind == TrackKind::Audio;
         music.clips.clear();
         for mut clip in std::mem::take(&mut track.clips) {
+            let is_music = is_music(track, &clip);
+            // Music that plays to the end of the finished cut plays on past it while its file lasts.
+            let to_the_end = clip.start_us + clip.duration_us >= length;
+            if is_music {
+                clip.start_us -= lead;
+            }
             let mut bed = clip.clone();
-            let is_music = matches!(&clip.content, ClipContent::Media { duck_db, .. }
-                if audio && (*duck_db > 0.0 || clip.duration_us >= MUSIC_US));
             let ClipContent::Media { asset_id, source_in_us, volume, speed, fade_in_us, fade_out_us, .. } =
                 &mut clip.content
             else {
@@ -1167,8 +1172,7 @@ fn soundtrack(after: &Project, start: i64, end: i64, fade: i64) -> (Project, Pro
                 track.clips.push(clip);
                 continue;
             }
-            // Music that plays to the end of the finished cut plays on past it while its file lasts.
-            if clip.start_us + clip.duration_us >= length {
+            if to_the_end {
                 let left = assets.get(asset_id.as_str()).map_or(0, |a| a.duration_us - *source_in_us);
                 let longest = (left.max(0) as f64 / *speed as f64) as i64;
                 clip.duration_us = clip.duration_us.max(longest.min(end - clip.start_us));
@@ -1181,7 +1185,7 @@ fn soundtrack(after: &Project, start: i64, end: i64, fade: i64) -> (Project, Pro
                 *fade_out_us = (*fade_out_us).max(fade.max(FADE_OUT_US)).min(clip.duration_us);
             }
             if clip.start_us + clip.duration_us <= start {
-                *volume *= BED;
+                *volume *= bed_gain;
             } else if clip.start_us < start {
                 let into = start - clip.start_us;
                 *source_in_us += (into as f64 * *speed as f64) as i64;
@@ -1191,7 +1195,7 @@ fn soundtrack(after: &Project, start: i64, end: i64, fade: i64) -> (Project, Pro
                 clip.duration_us -= into;
                 bed.duration_us = into;
                 if let ClipContent::Media { volume, fade_out_us, .. } = &mut bed.content {
-                    *volume *= BED;
+                    *volume *= bed_gain;
                     *fade_out_us = 0;
                 }
                 music.clips.push(bed.clone());

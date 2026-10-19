@@ -16,7 +16,7 @@ use crate::{
     jobs::{Reporter, check_destination, crashed, register, unregister},
 };
 
-/// Snips of real scissors the recap plays as cuts snap shut, in turn, so a run of cuts never repeats one.
+/// Snips of real scissors the recap plays as cuts snap shut, in turn, so no snip follows itself.
 const SNIPS: [&str; 3] = ["nuzky:scissors-snip", "nuzky:scissors-snip-2", "nuzky:scissors-snip-3"];
 
 #[cfg_attr(test, derive(ts_rs::TS))]

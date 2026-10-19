@@ -21,7 +21,7 @@ fn sound(id: &str) -> Asset {
 }
 
 /// A 20 s vertical talking-head take with a 440 Hz tone, cut at 2–4 s and 10–12.5 s, with the built-in snips.
-/// With `music`, an 880 Hz tone on an audio track ducks under it, as music does.
+/// With `music`, an 880 Hz tone from 5 s on an audio track ducks under it, as music does.
 fn recap(dir: &Path, music: bool) -> Recap {
     let take = dir.join("take.mp4");
     if !take.exists() {
@@ -63,7 +63,7 @@ fn recap(dir: &Path, music: bool) -> Recap {
             ff(&["-f", "lavfi", "-i", "sine=f=880:r=48000:d=40", "-c:a", "aac"], &song);
         }
         before.assets.push(probe(&song, "song".into()).unwrap());
-        let mut song = clip("song-clip", "song", 0, 20 * S);
+        let mut song = clip("song-clip", "song", 5 * S, 15 * S);
         if let ClipContent::Media { duck_db, .. } = &mut song.content {
             *duck_db = 12.0;
         }
@@ -236,7 +236,8 @@ fn recap_snaps_each_cut_shut_on_the_bar_and_ends_on_the_finished_cut_as_the_rend
 }
 
 #[test]
-fn the_finished_cuts_music_plays_from_the_start_of_the_recap_and_its_speech_only_with_its_picture() {
+fn the_finished_cuts_music_plays_from_the_start_of_the_recap_even_when_it_comes_in_later_and_its_speech_only_with_its_picture()
+ {
     if !available() {
         return;
     }
@@ -248,7 +249,8 @@ fn the_finished_cuts_music_plays_from_the_start_of_the_recap_and_its_speech_only
     let [hook, fast, landing, sample, _] = sections(&recap, true);
     let secs = |us: i64| us as f64 / 1e6;
     let (music, speech) = ("bandpass=f=880:width_type=q:w=8", "bandpass=f=440:width_type=q:w=8");
-    let race = (secs(hook) + 0.5, secs(hook + fast) - 0.2);
+    // Before 5 s, where the music comes in on the finished cut's timeline.
+    let race = (secs(hook) + 0.3, (secs(hook) + 3.0).min(secs(hook + fast) - 0.2));
     let finished = (secs(hook + fast + landing) + 1.0, secs(hook + fast + landing + sample) - 1.0);
     let (race_music, race_speech) = (rms(&out, race.0, race.1, music), rms(&out, race.0, race.1, speech));
     let (cut_music, cut_speech) = (rms(&out, finished.0, finished.1, music), rms(&out, finished.0, finished.1, speech));
