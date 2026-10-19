@@ -2,10 +2,11 @@
 //!
 //! A creator restarts sentences ("Dneska vám ukážu, jak natočit." "Dneska vám ukážu, jak natočit
 //! video za deset minut.") and fills them ("Jakoby, potom řešíte světlo.", "Kamera stojí, ehm,
-//! pevně."). An attempt can also be the last clause of a longer sentence, said again as a sentence of
-//! its own. This groups the attempts at one sentence, recommends keeping the last complete one and
-//! proposes deleting the others and the fillers. It only reads words: the same words always give
-//! the same result, with fixed thresholds and no ordering taken from maps or sets.
+//! pevně."). This groups the attempts at one sentence, recommends keeping the last complete one and
+//! proposes deleting the others and the fillers. A sentence that says again the last clause of the
+//! one before it is only for review: words alone cannot tell a retake of that clause from a repetition
+//! the speaker meant. It only reads words: the same words always give the same result, with fixed
+//! thresholds and no ordering taken from maps or sets.
 
 use std::collections::HashMap;
 
@@ -139,8 +140,9 @@ pub struct Filler {
     pub text: String,
 }
 
-/// Two consecutive sentences that would be one restarted sentence, but differ in a negation or a
-/// number. They are not a group and nothing of them is in `suggested_delete`.
+/// Two consecutive sentences that would be one restarted sentence, but differ in a negation, a
+/// number or a content word, or a sentence and the last clause of the one before it that it says
+/// again. They are not a group and nothing of them is in `suggested_delete`.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Review {
     pub sentences: Vec<Attempt>,
@@ -182,7 +184,6 @@ impl Sentence {
 /// Czech and English, and in files missing from it.
 pub fn retakes(words: &[TimelineWord], languages: &HashMap<String, String>) -> Retakes {
     let mut sentences = sentences(words, languages);
-    // Sentences as said; repeated last clauses of them are added after these.
     let said = sentences.len();
     let mut group_of: Vec<Option<usize>> = vec![None; said];
     let mut groups: Vec<Vec<usize>> = Vec::new();
@@ -219,19 +220,16 @@ pub fn retakes(words: &[TimelineWord], languages: &HashMap<String, String>) -> R
             }
             break;
         }
-        if let Some(p) = s.checked_sub(1).filter(|_| !paired)
+        let reported = |p: usize| group_of[p].is_some() || pairs.iter().any(|(a, b, _)| *a == p || *b == p);
+        if let Some(p) = s.checked_sub(1).filter(|&p| !paired && !reported(p))
             && let Some((tail, relation)) = repeated_tail(&sentences[p], &sentences[s], words)
         {
+            let reason = match relation {
+                Relation::Differs(reason) => format!("repeats the end of the previous sentence, but {reason}"),
+                _ => "repeats the end of the previous sentence".to_owned(),
+            };
             sentences.push(tail);
-            let t = sentences.len() - 1;
-            match relation {
-                Relation::Same => {
-                    groups.push(vec![t, s]);
-                    group_of[s] = Some(groups.len() - 1);
-                }
-                Relation::Differs(reason) => pairs.push((t, s, reason)),
-                Relation::Unrelated => {}
-            }
+            pairs.push((sentences.len() - 1, s, reason));
         }
     }
     let mut groups: Vec<RetakeGroup> = groups
@@ -384,7 +382,7 @@ fn restarts_within(sentence: &Sentence, words: &[TimelineWord]) -> (Vec<RetakeGr
 /// The last clause of `earlier`, after a comma, a semicolon or a colon, that `later` says again: "Máš
 /// stálou práci, a když se tě někdo zeptá na práci, řekneš: Jo, dobrý." "A když se tě někdo zeptá na
 /// práci, řekneš: Jo, dobrý." The longest such clause, compared as a sentence of its own; at least
-/// TAIL_WORDS of its words must be the same, so "a taky kameru" opening another sentence is no retake.
+/// TAIL_WORDS of its words must be the same, so "a taky kameru" opening another sentence is not reported.
 fn repeated_tail(earlier: &Sentence, later: &Sentence, words: &[TimelineWord]) -> Option<(Sentence, Relation)> {
     (1..earlier.words.len())
         .filter(|&k| words[earlier.words[k - 1].0].text.trim_end().ends_with([',', ';', ':']))
@@ -1051,33 +1049,65 @@ mod tests {
         assert_eq!(unfinished, ["Ale když...", "ale nejdřív..."], "{found:#?}");
     }
 
-    /// A sentence that says again what the previous one ended with, after a comma inside it.
+    fn reviewed(found: &Retakes) -> Vec<(&str, Vec<[usize; 2]>)> {
+        found.review.iter().map(|r| (r.reason.as_str(), r.sentences.iter().map(|a| [a.from, a.to]).collect())).collect()
+    }
+
+    /// Words alone cannot tell a retake of a clause from a repetition the speaker meant, so the
+    /// earlier clause, after the comma, and the sentence are for review and nothing of them goes.
     #[test]
-    fn a_repeated_tail_of_the_previous_sentence_is_a_retake_of_that_tail() {
+    fn a_sentence_that_repeats_the_end_of_the_previous_one_is_for_review() {
         let said = "Máš stálou práci, a když se tě někdo zeptá na práci, řekneš: Jo, dobrý.";
         let found = one(&[(said, 900_000), ("A když se tě někdo zeptá na práci, řekneš: Jo, dobrý.", 900_000)]);
-        assert_eq!(found.groups.len(), 1, "{found:#?}");
-        assert_eq!(
-            texts(&found.groups[0]),
-            [
-                ("a když se tě někdo zeptá na práci, řekneš: Jo, dobrý.", true),
-                ("A když se tě někdo zeptá na práci, řekneš: Jo, dobrý.", true)
-            ]
-        );
-        // "Máš stálou práci," was said once and stays.
-        assert_eq!((found.groups[0].keep, &found.groups[0].delete), (1, &vec![[3, 13]]));
-        assert!(found.review.is_empty(), "{found:#?}");
-        assert_eq!(found.suggested_delete, [[3, 13]]);
-        // The same tail with a negation is for review, and nothing of it goes.
+        assert!(found.groups.is_empty() && found.suggested_delete.is_empty(), "{found:#?}");
+        assert_eq!(reviewed(&found), [("repeats the end of the previous sentence", vec![[3, 13], [14, 24]])]);
         let found = one(&[(said, 900_000), ("A když se tě někdo zeptá na práci, neřekneš: Jo, dobrý.", 900_000)]);
         assert!(found.groups.is_empty() && found.suggested_delete.is_empty(), "{found:#?}");
-        let reviewed: Vec<_> =
-            found.review.iter().map(|r| (r.reason.as_str(), r.sentences.iter().map(|a| a.from).collect())).collect();
         assert_eq!(
-            reviewed,
-            [("a negation differs: the earlier says \"řekneš\", the later \"neřekneš\"", vec![3, 14])],
-            "{found:#?}"
+            reviewed(&found),
+            [(
+                "repeats the end of the previous sentence, but a negation differs: the earlier says \"řekneš\", the later \"neřekneš\"",
+                vec![[3, 13], [14, 24]]
+            )]
         );
+    }
+
+    /// A repeated clause adds a review pair and deletes nothing that was not deleted without it.
+    #[test]
+    fn a_repeated_end_of_a_sentence_deletes_nothing_more() {
+        // The clause trails off and is unfinished on its own; the sentence after it stays.
+        let found = one(&[
+            ("Teď ukážu nastavení, kamera musí stát pevně na stativu…", 900_000),
+            ("Kamera musí stát pevně.", 900_000),
+        ]);
+        assert_eq!(found.suggested_delete, [[3, 8]], "{found:#?}");
+        assert_eq!(reviewed(&found), [("repeats the end of the previous sentence", vec![[3, 8], [9, 12]])]);
+        // The second sentence is already an attempt of the first: one attempt removed, no second report.
+        let found = one(&[
+            ("Teď ukážu nastavení, kamera musí stát pevně na stativu.", 900_000),
+            ("Teď ukážu nastavení, kamera musí stát pevně.", 900_000),
+            ("Kamera musí stát pevně.", 900_000),
+        ]);
+        assert_eq!(found.groups.iter().map(|g| g.delete.clone()).collect::<Vec<_>>(), [vec![[9, 15]]]);
+        assert_eq!(found.suggested_delete, [[9, 15]], "{found:#?}");
+        assert!(found.review.is_empty(), "{found:#?}");
+        // A sentence already in a review pair is not reported again for its last clause.
+        let found = one(&[
+            ("Teď ukážu nastavení, kamera musí stát pevně na stativu.", 900_000),
+            ("Teď ukážu nastavení, kamera nemusí stát pevně na stativu.", 900_000),
+            ("Kamera nemusí stát pevně na stativu.", 900_000),
+        ]);
+        assert!(found.suggested_delete.is_empty(), "{found:#?}");
+        assert_eq!(reviewed(&found).iter().map(|r| r.1.clone()).collect::<Vec<_>>(), [vec![[0, 8], [9, 17]]]);
+        // The second sentence qualifies the claim the first one rejects: both stay whole.
+        let qualified = ("Kamera musí stát pevně na stativu jen při dlouhé expozici.", 900_000);
+        let found = one(&[("Nevěř tomu, že kamera musí stát pevně na stativu.", 900_000), qualified]);
+        assert!(found.groups.is_empty() && found.suggested_delete.is_empty(), "{found:#?}");
+        assert_eq!(found.review.len(), 1, "{found:#?}");
+        let found =
+            one(&[("Spousta lidí na internetu tvrdí, že kamera musí stát pevně na stativu.", 900_000), qualified]);
+        assert!(found.groups.is_empty() && found.suggested_delete.is_empty(), "{found:#?}");
+        assert_eq!(reviewed(&found), [("repeats the end of the previous sentence", vec![[5, 11], [12, 21]])]);
     }
 
     #[test]
