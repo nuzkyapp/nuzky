@@ -414,13 +414,77 @@ fn transfer(f: &frame::Video) -> Transfer {
     }
 }
 
-struct Scaler {
-    key: (Pixel, u32, u32, u32, u32),
-    ctx: scaling::Context,
+/// A swscale conversion that runs on several threads, each converting a band of rows the way one pass over the
+/// whole frame would. swscale threads only a context given its thread count before `sws_init_context`, which
+/// `scaling::Context` cannot do, and only in `sws_scale_frame`.
+pub(crate) struct Scaler(*mut ff::ffi::SwsContext);
+
+// Only the thread that owns the decoder or the writer touches the context.
+unsafe impl Send for Scaler {}
+
+impl Scaler {
+    /// `colorspace` is the YUV matrix (`SWS_CS_*`) and full range of the source and of the destination; swscale
+    /// would otherwise assume BT.601.
+    pub(crate) fn new(
+        (src, src_w, src_h): (Pixel, u32, u32),
+        (dst, dst_w, dst_h): (Pixel, u32, u32),
+        flags: scaling::Flags,
+        colorspace: [(i32, bool); 2],
+    ) -> Result<Self> {
+        use ff::ffi::*;
+        let scaler = Self(unsafe { sws_alloc_context() });
+        if scaler.0.is_null() {
+            bail!("Cannot allocate the colour converter");
+        }
+        let options = [
+            (c"srcw", src_w as i64),
+            (c"srch", src_h as i64),
+            (c"src_format", AVPixelFormat::from(src) as i64),
+            (c"dstw", dst_w as i64),
+            (c"dsth", dst_h as i64),
+            (c"dst_format", AVPixelFormat::from(dst) as i64),
+            (c"sws_flags", flags.bits() as i64),
+            (c"threads", scaler_threads()),
+        ];
+        for (name, value) in options {
+            if unsafe { av_opt_set_int(scaler.0.cast(), name.as_ptr(), value, 0) } < 0 {
+                bail!("The colour converter has no option {name:?}");
+            }
+        }
+        if unsafe { sws_init_context(scaler.0, std::ptr::null_mut(), std::ptr::null_mut()) } < 0 {
+            bail!("Cannot convert {src_w}x{src_h} {src:?} to {dst_w}x{dst_h} {dst:?}");
+        }
+        let [(src_cs, src_full), (dst_cs, dst_full)] = colorspace;
+        unsafe { set_sws_colorspace_raw(scaler.0, src_cs, src_full, dst_cs, dst_full) };
+        Ok(scaler)
+    }
+
+    pub(crate) fn run(&mut self, src: &frame::Video, dst: &mut frame::Video) -> Result<(), ff::Error> {
+        match unsafe { ff::ffi::sws_scale_frame(self.0, dst.as_mut_ptr(), src.as_ptr()) } {
+            error if error < 0 => Err(ff::Error::from(error)),
+            _ => Ok(()),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn threads(&self) -> i64 {
+        let mut threads = 0;
+        assert!(unsafe { ff::ffi::av_opt_get_int(self.0.cast(), c"threads".as_ptr(), 0, &mut threads) } >= 0);
+        threads
+    }
 }
 
-// SwsContext is only touched by the thread that owns the decoder.
-unsafe impl Send for Scaler {}
+/// One thread per core, at most eight. On a 12-core Apple M-series eight converted faster than twelve, whose bands on
+/// the efficiency cores finished last, and every video layer of a project has a converter of its own.
+fn scaler_threads() -> i64 {
+    std::thread::available_parallelism().map_or(1, |n| n.get().min(8)) as i64
+}
+
+impl Drop for Scaler {
+    fn drop(&mut self) {
+        unsafe { ff::ffi::sws_freeContext(self.0) }
+    }
+}
 
 /// The YUV matrix a frame is shown with: its own, or by its height when the file does not name one.
 pub(crate) fn matrix(f: &frame::Video) -> color::Space {
@@ -449,7 +513,7 @@ pub(crate) fn set_sws_colorspace(ctx: &mut scaling::Context, src_cs: i32, src_fu
 }
 
 /// `set_sws_colorspace` for a context made without ffmpeg-next; `ptr` must be initialized and not yet freed.
-pub(crate) unsafe fn set_sws_colorspace_raw(
+unsafe fn set_sws_colorspace_raw(
     ptr: *mut ff::ffi::SwsContext,
     src_cs: i32,
     src_full: bool,
@@ -487,18 +551,19 @@ fn is_rgb(format: Pixel) -> bool {
     !desc.is_null() && unsafe { (*desc).flags } & (AV_PIX_FMT_FLAG_RGB | AV_PIX_FMT_FLAG_PAL) as u64 != 0
 }
 
-fn to_rgba(scaler: &mut Option<Scaler>, f: &frame::Video, t_us: i64, w: u32, h: u32) -> Result<RgbaFrame> {
+type ScalerKey = (Pixel, u32, u32, u32, u32);
+
+fn to_rgba(scaler: &mut Option<(ScalerKey, Scaler)>, f: &frame::Video, t_us: i64, w: u32, h: u32) -> Result<RgbaFrame> {
     let key = (f.format(), f.width(), f.height(), w, h);
-    if scaler.as_ref().map(|s| s.key) != Some(key) {
-        let mut ctx =
-            scaling::Context::get(f.format(), f.width(), f.height(), Pixel::RGBA, w, h, scaling::Flags::BILINEAR)?;
+    if scaler.as_ref().map(|s| s.0) != Some(key) {
         // swscale scales an RGB source in YUV and must convert it back with the matrix it went in with.
         let space = if is_rgb(f.format()) { ff::ffi::SWS_CS_DEFAULT } else { sws_colorspace(matrix(f)) };
-        set_sws_colorspace(&mut ctx, space, is_full_range(f), ff::ffi::SWS_CS_DEFAULT, true);
-        *scaler = Some(Scaler { key, ctx });
+        let colorspace = [(space, is_full_range(f)), (ff::ffi::SWS_CS_DEFAULT, true)];
+        let src = (f.format(), f.width(), f.height());
+        *scaler = Some((key, Scaler::new(src, (Pixel::RGBA, w, h), scaling::Flags::BILINEAR, colorspace)?));
     }
     let mut out = frame::Video::new(Pixel::RGBA, w, h);
-    scaler.as_mut().unwrap().ctx.run(f, &mut out)?;
+    scaler.as_mut().unwrap().1.run(f, &mut out)?;
     let stride = out.stride(0);
     let row = w as usize * 4;
     let src = out.data(0);
@@ -528,7 +593,7 @@ pub struct VideoDecoder {
     grid: Option<TileGrid>,
     /// First frame after a seek, decoded to check where the seek landed.
     pending: Option<DecodedFrame>,
-    scaler: Option<Scaler>,
+    scaler: Option<(ScalerKey, Scaler)>,
     pub rotation: u32,
     pub frame_duration_us: i64,
 }
@@ -1145,6 +1210,91 @@ mod tests {
         assert_eq!(next.unwrap().0, 400_000);
         drop(decoder);
         std::fs::remove_file(path).unwrap();
+    }
+
+    /// A frame filled with noise within each sample's bit depth, so a band edge that filtered or rounded
+    /// differently would show.
+    fn noise(format: Pixel, (w, h): (u32, u32), space: color::Space, range: color::Range) -> frame::Video {
+        let mut f = frame::Video::new(format, w, h);
+        f.set_color_space(space);
+        f.set_color_range(range);
+        let component = unsafe { (*ff::ffi::av_pix_fmt_desc_get(format.into())).comp[0] };
+        let mut seed = 1u32;
+        let mut fill = |bytes: &mut [u8]| {
+            let mut next = || {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                seed
+            };
+            if component.step >= 2 && component.depth < 16 {
+                let mask = ((1u16 << component.depth) - 1) << component.shift;
+                for sample in bytes.as_chunks_mut::<2>().0 {
+                    *sample = (next() as u16 & mask).to_le_bytes();
+                }
+            } else {
+                bytes.iter_mut().for_each(|byte| *byte = next() as u8);
+            }
+        };
+        for plane in 0..f.planes() {
+            fill(f.data_mut(plane));
+        }
+        if format == Pixel::PAL8 {
+            fill(unsafe { std::slice::from_raw_parts_mut((*f.as_mut_ptr()).data[1], 256 * 4) });
+        }
+        f
+    }
+
+    #[test]
+    fn rgba_on_several_threads_is_the_one_pass_conversion() {
+        use color::{Range, Space};
+        use ff::ffi::{SWS_CS_BT2020, SWS_CS_DEFAULT, SWS_CS_ITU601, SWS_CS_ITU709};
+        init();
+        let full_hd = (1920, 1080);
+        // The source, its colour description, the size converted to, and the matrix and range it must be read with.
+        let cases = [
+            (Pixel::YUV420P, (3840, 2160), Space::Unspecified, Range::MPEG, full_hd, (SWS_CS_ITU709, false)),
+            (Pixel::YUV420P, full_hd, Space::BT709, Range::MPEG, full_hd, (SWS_CS_ITU709, false)),
+            (Pixel::YUV420P, (1080, 1920), Space::BT470BG, Range::MPEG, (608, 1080), (SWS_CS_ITU601, false)),
+            (Pixel::YUV420P, (640, 360), Space::Unspecified, Range::Unspecified, (640, 360), (SWS_CS_ITU601, false)),
+            (Pixel::YUV420P, full_hd, Space::BT709, Range::MPEG, (64, 36), (SWS_CS_ITU709, false)),
+            (Pixel::YUV420P, (1888, 1062), Space::SMPTE170M, Range::JPEG, (1888, 1062), (SWS_CS_ITU601, true)),
+            (Pixel::YUVJ420P, (1001, 667), Space::Unspecified, Range::Unspecified, (1001, 667), (SWS_CS_ITU601, true)),
+            (Pixel::YUV420P10LE, (3840, 2160), Space::BT2020NCL, Range::MPEG, full_hd, (SWS_CS_BT2020, false)),
+            (Pixel::YUV420P10LE, full_hd, Space::BT2020NCL, Range::MPEG, full_hd, (SWS_CS_BT2020, false)),
+            (Pixel::YUV422P, full_hd, Space::BT709, Range::JPEG, full_hd, (SWS_CS_ITU709, true)),
+            (Pixel::YUV422P10LE, (3840, 2160), Space::BT709, Range::MPEG, (1024, 576), (SWS_CS_ITU709, false)),
+            (Pixel::YUV444P, (1280, 720), Space::SMPTE170M, Range::JPEG, (1280, 720), (SWS_CS_ITU601, true)),
+            (Pixel::YUV444P10LE, full_hd, Space::BT2020NCL, Range::JPEG, (960, 540), (SWS_CS_BT2020, true)),
+            (Pixel::NV12, full_hd, Space::BT709, Range::MPEG, (1024, 576), (SWS_CS_ITU709, false)),
+            (Pixel::P010LE, (3840, 2160), Space::BT2020NCL, Range::MPEG, (3840, 2160), (SWS_CS_BT2020, false)),
+            (Pixel::YUVA420P, full_hd, Space::Unspecified, Range::MPEG, full_hd, (SWS_CS_ITU709, false)),
+            (Pixel::GRAY8, (800, 600), Space::Unspecified, Range::JPEG, (800, 600), (SWS_CS_ITU601, true)),
+            (Pixel::RGB24, (1000, 750), Space::Unspecified, Range::Unspecified, (1000, 750), (SWS_CS_DEFAULT, false)),
+            (Pixel::RGBA, (2000, 1500), Space::Unspecified, Range::JPEG, (1000, 750), (SWS_CS_DEFAULT, true)),
+            (Pixel::BGRA, full_hd, Space::Unspecified, Range::Unspecified, full_hd, (SWS_CS_DEFAULT, false)),
+            (Pixel::RGB48BE, (640, 480), Space::Unspecified, Range::Unspecified, (640, 480), (SWS_CS_DEFAULT, false)),
+            (Pixel::PAL8, (500, 300), Space::Unspecified, Range::Unspecified, (250, 150), (SWS_CS_DEFAULT, false)),
+        ];
+        for (format, size, space, range, (w, h), (cs, full)) in cases {
+            let case = format!("{format:?} {}x{} {space:?} {range:?} to {w}x{h}", size.0, size.1);
+            let f = noise(format, size, space, range);
+            let mut one_pass =
+                scaling::Context::get(format, size.0, size.1, Pixel::RGBA, w, h, scaling::Flags::BILINEAR).unwrap();
+            set_sws_colorspace(&mut one_pass, cs, full, SWS_CS_DEFAULT, true);
+            let mut expected = frame::Video::new(Pixel::RGBA, w, h);
+            one_pass.run(&f, &mut expected).unwrap();
+
+            let mut scaler = None;
+            let got = to_rgba(&mut scaler, &f, 0, w, h).unwrap();
+            let threads = scaler.unwrap().1.threads();
+            assert!(threads > 1, "{case} converts on {threads} thread");
+            let row = w as usize * 4;
+            let differ = (0..h as usize)
+                .filter(|&y| got.data[y * row..][..row] != expected.data(0)[y * expected.stride(0)..][..row])
+                .count();
+            assert_eq!(differ, 0, "{differ} rows of {case} differ");
+        }
     }
 
     #[test]

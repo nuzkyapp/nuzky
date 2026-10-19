@@ -11,7 +11,7 @@ use ffmpeg_next as ff;
 
 use crate::audio::{Chain, Mixer, chains, has_audio};
 use crate::loudness::{Limiter, Meter, db_to_gain};
-use crate::media::{init, set_sws_colorspace_raw};
+use crate::media::{Scaler, init};
 use crate::model::{CHANNELS, Clip, ClipContent, Project, SAMPLE_RATE, TrackKind};
 use crate::render::{Pending, Renderer, Wait};
 
@@ -534,7 +534,7 @@ pub(crate) struct Mp4Writer {
     fps: u32,
     w: u32,
     h: u32,
-    to_yuv: ToYuv,
+    to_yuv: Scaler,
     rgba: frame::Video,
     yuv: frame::Video,
     aframe_size: usize,
@@ -618,7 +618,7 @@ impl Mp4Writer {
             fps,
             w,
             h,
-            to_yuv: ToYuv::new(w, h)?,
+            to_yuv: to_yuv(w, h)?,
             rgba: frame::Video::new(Pixel::RGBA, w, h),
             yuv: frame::Video::new(Pixel::YUV420P, w, h),
             aframe_size,
@@ -635,7 +635,7 @@ impl Mp4Writer {
         for y in 0..self.h as usize {
             dst[y * stride..y * stride + row].copy_from_slice(&pixels[y * row..(y + 1) * row]);
         }
-        self.to_yuv.run(&self.rgba, &mut self.yuv)?;
+        self.to_yuv.run(&self.rgba, &mut self.yuv).context("Converting the frame to YUV failed")?;
         self.yuv.set_pts(Some(index as i64));
         self.venc.send_frame(&self.yuv)?;
         self.drain_video()
@@ -686,57 +686,10 @@ impl Mp4Writer {
     }
 }
 
-/// Straight RGBA to the encoder's BT.709 limited-range YUV 4:2:0, on several threads. swscale converts a band of
-/// rows on each, every row as one pass over the whole frame would. It threads only a context given its thread count
-/// before `sws_init_context`, which `scaling::Context` cannot do, and only in `sws_scale_frame`.
-struct ToYuv(*mut ff::ffi::SwsContext);
-
-// One thread at a time uses the context; swscale's own threads stay inside a call.
-unsafe impl Send for ToYuv {}
-
-impl ToYuv {
-    fn new(w: u32, h: u32) -> Result<Self> {
-        use ff::ffi::*;
-        let ctx = Self(unsafe { sws_alloc_context() });
-        if ctx.0.is_null() {
-            bail!("Cannot allocate the colour converter");
-        }
-        let options = [
-            (c"srcw", w as i64),
-            (c"srch", h as i64),
-            (c"src_format", AVPixelFormat::from(Pixel::RGBA) as i64),
-            (c"dstw", w as i64),
-            (c"dsth", h as i64),
-            (c"dst_format", AVPixelFormat::from(Pixel::YUV420P) as i64),
-            (c"sws_flags", scaling::Flags::BICUBIC.bits() as i64),
-            // FFmpeg picks the count from the cores.
-            (c"threads", 0),
-        ];
-        for (name, value) in options {
-            if unsafe { av_opt_set_int(ctx.0.cast(), name.as_ptr(), value, 0) } < 0 {
-                bail!("The colour converter has no option {name:?}");
-            }
-        }
-        if unsafe { sws_init_context(ctx.0, std::ptr::null_mut(), std::ptr::null_mut()) } < 0 {
-            bail!("Cannot set up the colour converter for {w}x{h}");
-        }
-        unsafe { set_sws_colorspace_raw(ctx.0, SWS_CS_DEFAULT, true, SWS_CS_ITU709, false) };
-        Ok(ctx)
-    }
-
-    fn run(&mut self, rgba: &frame::Video, yuv: &mut frame::Video) -> Result<()> {
-        let result = unsafe { ff::ffi::sws_scale_frame(self.0, yuv.as_mut_ptr(), rgba.as_ptr()) };
-        if result < 0 {
-            return Err(ff::Error::from(result)).context("Converting the frame to YUV failed");
-        }
-        Ok(())
-    }
-}
-
-impl Drop for ToYuv {
-    fn drop(&mut self) {
-        unsafe { ff::ffi::sws_freeContext(self.0) }
-    }
+/// Straight RGBA to the encoder's BT.709 limited-range YUV 4:2:0.
+fn to_yuv(w: u32, h: u32) -> Result<Scaler> {
+    let colorspace = [(ff::ffi::SWS_CS_DEFAULT, true), (ff::ffi::SWS_CS_ITU709, false)];
+    Scaler::new((Pixel::RGBA, w, h), (Pixel::YUV420P, w, h), scaling::Flags::BICUBIC, colorspace)
 }
 
 /// Ceiling in dBTP the limiter holds the levelled mix under. The AAC encoder adds peaks of its
@@ -1015,12 +968,10 @@ mod tests {
         let mut expected = frame::Video::new(Pixel::YUV420P, w, h);
         one_pass.run(&rgba, &mut expected).unwrap();
 
-        let mut to_yuv = ToYuv::new(w, h).unwrap();
-        let mut threads = 0;
-        assert!(unsafe { ff::ffi::av_opt_get_int(to_yuv.0.cast(), c"threads".as_ptr(), 0, &mut threads) } >= 0);
+        let mut to_yuv = to_yuv(w, h).unwrap();
         // A machine with one core converts on one thread; the pixels must match either way.
         let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
-        assert!(threads > 1 || cores == 1, "the conversion runs on {threads} thread");
+        assert!(to_yuv.threads() > 1 || cores == 1, "the conversion runs on {} thread", to_yuv.threads());
         let mut got = frame::Video::new(Pixel::YUV420P, w, h);
         to_yuv.run(&rgba, &mut got).unwrap();
         for plane in 0..3 {
