@@ -18,8 +18,8 @@ jobs:
       matrix:
         os: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && fromJSON('["macos-14"]') || fromJSON('["ubuntu-24.04", "macos-14", "windows-2022"]') }}
     runs-on: ${{ matrix.os }}
-    # Windows compiles slowest and, until its first green run saves a cache, from scratch: clippy, the tests and
-    # the installers took over 60 minutes there.
+    # Windows compiles slowest, and a release tag builds without a cache (it cannot read another ref's): clippy, the
+    # tests and the installers took over 60 minutes there.
     timeout-minutes: ${{ matrix.os == 'windows-2022' && 90 || 60 }}
     env:
       CARGO_TERM_COLOR: always
