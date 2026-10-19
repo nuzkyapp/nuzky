@@ -52,7 +52,6 @@ def edit(r):
     clips = r.track()
     r.check('clips sit back to back on the main track', clips[1]['startUs'] == clips[0]['startUs'] + clips[0]['durationUs'], clips)
     r.check('both clips get thumbnails', wait(lambda: len(r.state()['thumbs']) == 2), r.state()['thumbs'])
-    # A touchpad sends many small Ctrl + wheel deltas per pinch; each once zoomed a whole step, 1.15^20 times at once.
     r.s.run('window.__nuzky.store.getState().setZoom(60)')
     pinched = r.s.run(WHEEL, clips[0]['id'], -3, 20)
     r.check('a touchpad pinch zooms the timeline in proportion to the gesture', 75 < pinched < 90, pinched)

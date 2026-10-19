@@ -272,8 +272,7 @@ export function Timeline({ height }: { height: number }) {
       const z = useEditor.getState().zoom;
       const px = e.clientX - el.getBoundingClientRect().left - HEADER_W;
       zoomAnchor.current = { t: (el.scrollLeft + px) / z, px };
-      // A touchpad sends many small deltas per gesture, a mouse wheel one large delta per notch: zoom
-      // in proportion to the delta, at most one 15 % step per event.
+      // A touchpad sends many small deltas per gesture, a mouse wheel one large delta per notch.
       const dy = e.deltaMode === WheelEvent.DOM_DELTA_PIXEL ? e.deltaY : e.deltaY * 40;
       setZoom(z * Math.min(1.15, Math.max(1 / 1.15, Math.exp(-dy * 0.005))));
       // Already at the limit: nothing moves, and the next zoom anchors on the playhead again.
