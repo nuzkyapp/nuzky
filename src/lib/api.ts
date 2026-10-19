@@ -57,7 +57,6 @@ export const api = {
   chatgptSignIn: (anotherAccount: boolean) => invoke<ChatGptStatus>("chatgpt_sign_in", { anotherAccount }),
   chatgptCancelSignIn: () => invoke<void>("chatgpt_cancel_sign_in"),
   chatgptSignOut: () => invoke<ChatGptStatus>("chatgpt_sign_out"),
-  /** The signed-in account's models, as ChatGPT orders them. */
   newProject: (width: number, height: number) => invoke<Snapshot>("new_project", { width, height }),
   maximizeWindow: () => invoke<void>("maximize_window"),
   openProject: (path: string) => invoke<Snapshot>("open_project", { path }),

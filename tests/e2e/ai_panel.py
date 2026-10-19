@@ -75,7 +75,8 @@ MENU = '[role=menu][aria-label=Model]'
 
 
 def open_models(r):
-    r.s.run("document.querySelector('aside[aria-label=AI] button[title=\"Choose the model and effort\"]').click()")
+    """Focuses the button first, as a real click does, so a focus moving away would close the menu here too."""
+    r.s.run("const b = document.querySelector('aside[aria-label=AI] button[title=\"Choose the model and effort\"]'); b.focus(); b.click()")
 
 
 def flag(argv, name):

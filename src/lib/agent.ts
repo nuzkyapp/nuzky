@@ -692,14 +692,12 @@ useAgent.subscribe((s, prev) => {
 function followModels() {
   const { agent, agents } = useAgent.getState();
   const { lists, errors, chatgptFor } = useModels.getState();
-  if (agent !== "chatgpt") {
-    if (!lists[agent] && !errors[agent] && agents?.find((a) => a.id === agent)?.path) void loadAgentModels(agent);
-    return;
-  }
   const { status } = useChatGpt.getState();
+  // Forgotten on sign-out whichever agent is in use, so signing in again loads them anew.
   if (status?.state !== "signedIn" || !status.plan) {
     if (chatgptFor !== null) forgetChatGptModels();
-  } else if (chatgptFor !== (status.email ?? "")) void loadAgentModels("chatgpt", status.email ?? "");
+  } else if (agent === "chatgpt" && chatgptFor !== (status.email ?? "")) void loadAgentModels("chatgpt", status.email ?? "");
+  if (agent !== "chatgpt" && !lists[agent] && !errors[agent] && agents?.find((a) => a.id === agent)?.path) void loadAgentModels(agent);
 }
 useChatGpt.subscribe((s, prev) => s.status !== prev.status && followModels());
 useAgent.subscribe((s, prev) => (s.agent !== prev.agent || s.agents !== prev.agents) && followModels());

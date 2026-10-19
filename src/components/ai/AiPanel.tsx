@@ -136,7 +136,6 @@ function Menu({
     <div
       className={shrink ? "relative min-w-0" : "relative"}
       ref={ref}
-      // Tab out of the open menu closes it, so it does not stay over the conversation.
       onBlur={(e) => e.relatedTarget && !e.currentTarget.contains(e.relatedTarget) && setOpen(false)}
     >
       {trigger({ open, toggle: () => setOpen(!open), ref: triggerRef })}
@@ -975,8 +974,8 @@ function Composer() {
           </div>
         </div>
       )}
-      {/* A click in the model menu stays there, so its keys keep working. */}
-      <div onClick={(e) => !(e.target as Element).closest("[role=menu]") && field.current?.focus()} className="rounded-xl border border-white/[.08] bg-white/[.055] px-2.5 pb-1.5 pt-2 transition-colors duration-[120ms] has-[textarea:focus]:border-accent">
+      {/* A click on the model menu or its button keeps the focus there, which the menu needs to stay open. */}
+      <div onClick={(e) => !(e.target as Element).closest("[role=menu],[aria-haspopup=menu]") && field.current?.focus()} className="rounded-xl border border-white/[.08] bg-white/[.055] px-2.5 pb-1.5 pt-2 transition-colors duration-[120ms] has-[textarea:focus]:border-accent">
         {about === "style" && (
           <div className="mb-2 flex flex-wrap gap-1.5">
             <span className="flex h-[22px] items-center gap-1.5 rounded-md bg-white/[.08] px-2 text-[12px] text-fg" title="Messages here are about your style, for all your videos">
