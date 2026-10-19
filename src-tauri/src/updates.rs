@@ -122,7 +122,11 @@ pub(crate) fn bug_url(version: &str, description: &str, summary: &[String]) -> S
             ("diagnostics", &lines.join("\n")),
         ])
     };
-    (0..=summary.len()).rev().map(|n| fields(&summary[..n])).find(|url| url.len() <= MAX_URL).unwrap_or_else(|| fields(&[]))
+    (0..=summary.len())
+        .rev()
+        .map(|n| fields(&summary[..n]))
+        .find(|url| url.len() <= MAX_URL)
+        .unwrap_or_else(|| fields(&[]))
 }
 
 /// The system as a person reading a bug report wants it, with its version where the system says it.
@@ -219,7 +223,8 @@ mod tests {
     /// GitHub answers a too long address with an error page, so a long summary is cut to fit and keeps its start.
     #[test]
     fn a_long_summary_is_cut_to_fit_the_address() {
-        let summary: Vec<String> = (0..400).map(|n| format!("  2026-10-19T14:02:{n:02}Z user splitClip atUs={n}")).collect();
+        let summary: Vec<String> =
+            (0..400).map(|n| format!("  2026-10-19T14:02:{n:02}Z user splitClip atUs={n}")).collect();
         let url = bug_url("0.2.0", &"ž".repeat(3000), &summary);
         assert!(url.len() <= MAX_URL, "{}", url.len());
         let diagnostics = fields(&url).into_iter().find(|(k, _)| k == "diagnostics").unwrap().1;

@@ -278,6 +278,9 @@ impl OpenSession {
                 }
                 match event {
                     SessionEvent::Job { id, kind, status, progress, error } => {
+                        if status != "running" {
+                            log::info!(target: "action", "ai job {kind} {status}");
+                        }
                         let label = match kind {
                             "transcription" => "Transcribing",
                             "export" => "Exporting",
@@ -705,6 +708,7 @@ async fn probe_media(paths: Vec<String>) -> CmdResult<(Vec<nuzky_engine::model::
 
 #[tauri::command]
 async fn import_media(app: AppHandle, paths: Vec<String>, expected_epoch: Option<String>) -> CmdResult<ImportResult> {
+    log::info!(target: "action", "import {} files", paths.len());
     let (assets, failed) = probe_media(paths).await?;
     let state = app.state::<AppState>();
     let added: Vec<String> = assets.iter().map(|a| a.id.clone()).collect();
@@ -774,11 +778,13 @@ async fn match_gain(app: AppHandle, clip_id: String) -> CmdResult<Option<f64>> {
 
 #[tauri::command]
 fn play(state: State<'_, AppState>) {
+    log::info!(target: "action", "play");
     state.engine.send(Msg::Play);
 }
 
 #[tauri::command]
 fn pause(state: State<'_, AppState>) {
+    log::info!(target: "action", "pause");
     state.engine.send(Msg::Pause);
 }
 
@@ -923,6 +929,7 @@ fn new_project(
     width: u32,
     height: u32,
 ) -> CmdResult<Snapshot> {
+    log::info!(target: "action", "new project");
     // The panel's agent works on the open project only.
     panel.stop();
     let mut project = Project::new("Untitled project");
@@ -937,6 +944,7 @@ fn new_project(
 /// picture: the matching common format, or the picture's own shape.
 #[tauri::command]
 async fn new_project_from_media(app: AppHandle, paths: Vec<String>) -> CmdResult<ImportResult> {
+    log::info!(target: "action", "new project from {} files", paths.len());
     let (assets, failed) = probe_media(paths).await?;
     if assets.is_empty() {
         let reasons: Vec<String> = failed.iter().map(|f| f.error.clone()).collect();
@@ -999,6 +1007,7 @@ fn open_project(
     panel: State<'_, agent_panel::AgentPanel>,
     path: String,
 ) -> CmdResult<Snapshot> {
+    log::info!(target: "action", "open project");
     let path = std::fs::canonicalize(path).map_err(err)?;
     if state.session.lock().unwrap().path != path {
         // The panel's agent works on the open project only; never stopped while holding the session.

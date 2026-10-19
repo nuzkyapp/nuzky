@@ -292,8 +292,10 @@ struct Report {
 /// and the AI did, and the end of the log. The log, and with it the actions, was cleaned when written.
 fn report(about: &[String], project: &[String], dir: &Path) -> Report {
     let log = log_lines(dir);
-    let actions: Vec<String> =
-        log.iter().filter_map(|line| line.split_once(" INFO action: ").map(|(at, what)| format!("{at} {what}"))).collect();
+    let actions: Vec<String> = log
+        .iter()
+        .filter_map(|line| line.split_once(" INFO action: ").map(|(at, what)| format!("{at} {what}")))
+        .collect();
     let errors: Vec<&String> = log.iter().filter(|line| line.contains(" ERROR ")).collect();
     let warnings = log.iter().filter(|line| line.contains(" WARN ")).count();
     let listed = |title: &str, lines: &[String], empty: &str| {
@@ -314,7 +316,9 @@ fn report(about: &[String], project: &[String], dir: &Path) -> Report {
     summary.push("Last actions:".into());
     summary.extend(newest(&actions, SUMMARY_ACTIONS).iter().map(|a| format!("  {a}")));
     summary.push(format!("Log: {} errors, {warnings} warnings", errors.len()));
-    summary.extend(newest(&errors, SUMMARY_ERRORS).iter().map(|e| format!("  {}", e.chars().take(200).collect::<String>())));
+    summary.extend(
+        newest(&errors, SUMMARY_ERRORS).iter().map(|e| format!("  {}", e.chars().take(200).collect::<String>())),
+    );
     Report { full, summary }
 }
 
@@ -383,9 +387,10 @@ fn save_report(dir: &Path, text: &str) -> std::io::Result<PathBuf> {
     for path in &old[..old.len().saturating_sub(REPORTS_KEPT - 1)] {
         std::fs::remove_file(path).ok();
     }
+    // A second report in the same second sorts after the first, so the oldest are the first by name.
     let stamp = jiff::Timestamp::now().strftime("%Y-%m-%d-%H%M%S").to_string();
     for n in 1.. {
-        let name = if n == 1 { format!("{REPORT}{stamp}.txt") } else { format!("{REPORT}{stamp}-{n}.txt") };
+        let name = if n == 1 { format!("{REPORT}{stamp}.txt") } else { format!("{REPORT}{stamp}_{n:02}.txt") };
         match OpenOptions::new().write(true).create_new(true).open(dir.join(&name)) {
             Ok(mut file) => {
                 file.write_all(text.as_bytes())?;
@@ -655,7 +660,9 @@ mod tests {
     #[test]
     fn a_project_is_described_by_its_shape_and_its_files_formats() {
         let mut project = Project::new("Jana's wedding");
-        project.apply(EditCmd::AddAssets { assets: vec![asset("a", AssetKind::Video), asset("b", AssetKind::Audio)] }).unwrap();
+        project
+            .apply(EditCmd::AddAssets { assets: vec![asset("a", AssetKind::Video), asset("b", AssetKind::Audio)] })
+            .unwrap();
         for _ in 0..2 {
             project.apply(EditCmd::AddClip { asset_id: "a".into(), start_us: None, track_id: None }).unwrap();
         }
@@ -684,17 +691,34 @@ mod tests {
         };
         std::fs::write(dir.join(OLDER_LOG), (0..1000).map(|n| line(n) + "\n").collect::<String>()).unwrap();
         std::fs::write(dir.join(LOG), (1000..1100).map(|n| line(n) + "\n").collect::<String>()).unwrap();
-        let report = report(&["Nuzky 0.1.0-alpha (abc1234)".into()], &["Project: shape".into(), "File 1: hevc".into()], &dir);
+        let report =
+            report(&["Nuzky 0.1.0-alpha (abc1234)".into()], &["Project: shape".into(), "File 1: hevc".into()], &dir);
 
         let full = &report.full;
-        assert!(full.starts_with("Nuzky 0.1.0-alpha (abc1234)\nProject: shape\nFile 1: hevc\n\nLast 22 actions:\n"), "{full}");
-        assert!(full.contains("\n  2026-10-19T14:00:40Z user splitClip atUs=1000\n  2026-10-19T14:00:30Z user splitClip atUs=1050\n"), "{full}");
-        assert!(full.contains("\nLast 300 lines of the log:\n  2026-10-19T14:00:20Z INFO action: user splitClip atUs=800\n"), "{full}");
+        assert!(
+            full.starts_with("Nuzky 0.1.0-alpha (abc1234)\nProject: shape\nFile 1: hevc\n\nLast 22 actions:\n"),
+            "{full}"
+        );
+        assert!(
+            full.contains(
+                "\n  2026-10-19T14:00:40Z user splitClip atUs=1000\n  2026-10-19T14:00:30Z user splitClip atUs=1050\n"
+            ),
+            "{full}"
+        );
+        assert!(
+            full.contains(
+                "\nLast 300 lines of the log:\n  2026-10-19T14:00:20Z INFO action: user splitClip atUs=800\n"
+            ),
+            "{full}"
+        );
         assert!(full.ends_with("\n  other 1099\n") && !full.contains("other 799\n"), "{full}");
 
         let summary = report.summary.join("\n");
         assert!(summary.starts_with("Nuzky 0.1.0-alpha (abc1234)\nProject: shape\nFile 1: hevc\nLast actions:\n  2026-10-19T14:00:50Z user splitClip atUs=350\n"), "{summary}");
-        assert!(summary.contains("atUs=1050\nLog: 22 errors, 22 warnings\n  2026-10-19T14:00:00Z ERROR ui: failure 951\n"), "{summary}");
+        assert!(
+            summary.contains("atUs=1050\nLog: 22 errors, 22 warnings\n  2026-10-19T14:00:00Z ERROR ui: failure 951\n"),
+            "{summary}"
+        );
         assert!(summary.ends_with("ERROR ui: failure 1051"), "{summary}");
         std::fs::remove_dir_all(dir).ok();
     }
@@ -705,9 +729,16 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(LOG), "kept\n").unwrap();
-        let saved: Vec<PathBuf> = (0..7).map(|n| save_report(&dir, &format!("report {n}")).unwrap()).collect();
-        let left: Vec<String> = saved.iter().filter(|p| p.exists()).map(|p| std::fs::read_to_string(p).unwrap()).collect();
-        assert_eq!(left, ["report 2", "report 3", "report 4", "report 5", "report 6"]);
+        for day in 1..=6 {
+            std::fs::write(dir.join(format!("{REPORT}2026-01-0{day}-120000.txt")), format!("day {day}")).unwrap();
+        }
+        let first = save_report(&dir, "first").unwrap();
+        let second = save_report(&dir, "second").unwrap();
+        assert_ne!(first, second, "a second report in the same second gets a name of its own");
+        let mut left: Vec<PathBuf> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.path()).collect();
+        left.sort();
+        let left: Vec<String> = left.iter().map(|p| std::fs::read_to_string(p).unwrap()).collect();
+        assert_eq!(left, ["day 4", "day 5", "day 6", "first", "second", "kept\n"]);
         assert_eq!(std::fs::read_to_string(dir.join(LOG)).unwrap(), "kept\n");
         std::fs::remove_dir_all(dir).ok();
     }

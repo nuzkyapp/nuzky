@@ -53,6 +53,7 @@ pub(crate) struct Reporter {
 
 impl Reporter {
     pub(crate) fn new(app: &AppHandle, id: &str, kind: &'static str, label: String) -> Self {
+        log::info!(target: "action", "job {kind} started");
         let event = JobEvent {
             id: id.into(),
             kind,
@@ -91,6 +92,7 @@ impl Reporter {
                 self.event.message = Some(format!("{e:#}"));
             }
         }
+        log::info!(target: "action", "job {} {}", self.event.kind, self.event.status);
         self.app.emit("job", &self.event).ok();
     }
 }

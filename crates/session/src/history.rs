@@ -174,6 +174,54 @@ fn line(version: &Version, with_project: bool) -> String {
     line
 }
 
+/// What a batch of edits did, for the log: each command's type with its number and yes-or-no fields, never text.
+pub(crate) fn action(cmds: &[EditCmd]) -> String {
+    let mut commands: Vec<String> = cmds
+        .iter()
+        .take(5)
+        .map(|cmd| {
+            let value = serde_json::to_value(cmd).unwrap_or_default();
+            let mut line = value["type"].as_str().unwrap_or("edit").to_owned();
+            let fields = value.as_object().into_iter().flatten().filter(|(_, v)| v.is_number() || v.is_boolean());
+            for (key, value) in fields.take(6) {
+                line.push_str(&format!(" {key}={value}"));
+            }
+            line
+        })
+        .collect();
+    if cmds.len() > 5 {
+        commands.push(format!("+{} more", cmds.len() - 5));
+    }
+    commands.join(", ")
+}
+
+#[cfg(test)]
+#[test]
+fn action_summary_omits_private_text_and_limits_fields_and_commands() {
+    let command = |value| serde_json::from_value::<EditCmd>(value).unwrap();
+    let split = command(serde_json::json!({"type":"splitClip", "clipId":"private", "atUs":12400000}));
+    let track = command(serde_json::json!({"type":"updateTrack", "trackId":"private", "muted":true}));
+    let text = command(serde_json::json!({"type":"renameProject", "name":"private title"}));
+    let assets = command(serde_json::json!({"type":"addAssets", "assets":[]}));
+    assert_eq!(
+        action(&[split, track, text, assets]),
+        "splitClip atUs=12400000, updateTrack muted=true, renameProject, addAssets"
+    );
+    let many = command(serde_json::json!({
+        "type":"updateClip", "clipId":"private", "text":"secret caption", "background":{"type":"none"},
+        "volume":0.5, "speed":2.0, "keepPitch":true, "fadeInUs":100,
+        "fadeOutUs":200, "cleanVoice":false, "dereverb":0.5, "normalize":true
+    }));
+    let line = action(&vec![many; 7]);
+    assert_eq!(line.matches("updateClip").count(), 5);
+    assert!(line.ends_with(", +2 more"));
+    for cmd in line.split(", ").take(5) {
+        assert_eq!(cmd.matches('=').count(), 6);
+    }
+    assert!(!line.contains("private") && !line.contains("secret"));
+    assert_eq!(action(&[]), "");
+}
+
 /// What a batch of the user's edits did, named by its first command.
 pub(crate) fn label(cmds: &[EditCmd]) -> &'static str {
     let Some(cmd) = cmds.first() else { return "Edit" };

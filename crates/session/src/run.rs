@@ -71,6 +71,7 @@ impl ProjectSession {
         let info = RunInfo { run_id: run_id.clone(), label };
         let before = inner.editor.project.clone();
         inner.run = Some(Run { info: info.clone(), touched: Instant::now(), ending: None, before });
+        log::info!(target: "action", "ai run started");
         inner.emit(SessionEvent::Run(Some(info)));
         Ok(RunResult { run_id, stamp: inner.stamp() })
     }
@@ -134,6 +135,7 @@ impl ProjectSession {
         inner.stopped_runs.insert(run_id.clone());
         revoked(&run_id);
         inner.finish(action)?;
+        log::info!(target: "action", "user stopped the ai run");
         Ok(RunResult { run_id, stamp: inner.stamp() })
     }
 
@@ -206,6 +208,7 @@ impl Inner {
             run_id: run.info.run_id,
             changes: crate::summary::summarize(&run.before, &self.editor.project),
         });
+        log::info!(target: "action", "ai run {}", if matches!(action, EndAction::Keep) { "kept" } else { "discarded" });
         self.emit(SessionEvent::Run(None));
         Ok(())
     }

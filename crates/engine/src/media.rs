@@ -335,6 +335,99 @@ fn image_orientation(
     if decoder.receive_frame(&mut f).is_ok() { frame_orientation(&f).unwrap_or((0, false)) } else { (0, false) }
 }
 
+/// Header and stream information safe to include in a bug report, without decoding frames.
+pub fn describe(path: &Path) -> Result<String> {
+    let input = open_input(path)?;
+    let image = is_image_format(&input);
+    let mut parts = vec![input.format().name().split(',').next().unwrap_or_default().to_owned()];
+    if let Some(stream) = video_stream(&input) {
+        let context = ff::codec::context::Context::from_parameters(stream.parameters())?;
+        let codec = unsafe { &*context.as_ptr() };
+        if !image {
+            let mut name = stream.parameters().id().name().to_owned();
+            let profile = unsafe { ff::ffi::avcodec_profile_name(codec.codec_id, codec.profile) };
+            if !profile.is_null() {
+                name.push(' ');
+                name.push_str(&unsafe { std::ffi::CStr::from_ptr(profile) }.to_string_lossy());
+            }
+            parts.push(name);
+        }
+        let grid = tile_grid(&input);
+        let (width, height) =
+            grid.as_ref().map_or((codec.width, codec.height), |g| (g.picture[2] as i32, g.picture[3] as i32));
+        if width > 0 && height > 0 {
+            parts.push(format!("{width}×{height}"));
+        }
+        if !image {
+            if let Some(pixel) = Pixel::from(codec.pix_fmt).descriptor() {
+                parts.push(pixel.name().to_owned());
+            }
+            let avg = stream.avg_frame_rate();
+            let rate = stream.rate();
+            if avg.numerator() > 0 && avg.denominator() > 0 {
+                let avg = f64::from(avg);
+                let vfr = rate.numerator() > 0 && rate.denominator() > 0 && (f64::from(rate) / avg - 1.0).abs() > 0.005;
+                parts.push(format!("{avg:.2} fps{}", if vfr { " VFR" } else { "" }));
+            }
+        }
+        let (rotation, mirror) = grid.as_ref().map_or_else(|| display_orientation(&stream), |g| g.orientation);
+        if rotation != 0 {
+            parts.push(format!("rotated {rotation}°"));
+        }
+        if mirror {
+            parts.push("mirrored".into());
+        }
+        if !image {
+            match color::TransferCharacteristic::from(codec.color_trc) {
+                color::TransferCharacteristic::SMPTE2084 => parts.push("PQ HDR".into()),
+                color::TransferCharacteristic::ARIB_STD_B67 => parts.push("HLG HDR".into()),
+                _ => {}
+            }
+        }
+    }
+    if !image {
+        if let Some(stream) = input.streams().best(ff::media::Type::Audio) {
+            let params = stream.parameters();
+            let codec = unsafe { &*params.as_ptr() };
+            let mut audio = vec![params.id().name().to_owned()];
+            if codec.sample_rate > 0 {
+                audio.push(format!("{} kHz", f64::from(codec.sample_rate) / 1000.0));
+            }
+            if codec.ch_layout.nb_channels > 0 {
+                audio.push(format!("{} ch", codec.ch_layout.nb_channels));
+            }
+            parts.push(audio.join(" "));
+        }
+        if input.duration() > 0 {
+            parts.push(format!("{:.1} s", input.duration() as f64 / 1e6));
+        }
+        const KEYS: &[&str] = &[
+            "com.apple.quicktime.make",
+            "com.apple.quicktime.model",
+            "com.apple.quicktime.software",
+            "make",
+            "model",
+            "com.android.manufacturer",
+            "com.android.model",
+            "com.android.version",
+            "encoder",
+        ];
+        let streams: Vec<_> = input.streams().collect();
+        for metadata in std::iter::once(input.metadata()).chain(streams.iter().map(|s| s.metadata())) {
+            for key in KEYS {
+                if let Some(value) = metadata.get(key) {
+                    let value: String = value.chars().filter(|c| !c.is_control()).collect();
+                    let value: String = value.trim().chars().take(40).collect();
+                    if !value.is_empty() && !parts.contains(&value) {
+                        parts.push(value);
+                    }
+                }
+            }
+        }
+    }
+    Ok(parts.join(" · "))
+}
+
 pub fn probe(path: &Path, id: String) -> Result<Asset> {
     let mut input = open_input(path)?;
     let is_image = is_image_format(&input);

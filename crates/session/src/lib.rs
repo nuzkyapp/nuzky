@@ -257,6 +257,12 @@ impl Inner {
     }
 
     fn changed(&self, origin: Origin) {
+        match &origin {
+            Origin::Undo => log::info!(target: "action", "undo"),
+            Origin::Redo => log::info!(target: "action", "redo"),
+            Origin::Restore => log::info!(target: "action", "restore version"),
+            _ => {}
+        }
         self.emit(SessionEvent::Changed { revision: self.editor.revision, origin });
     }
 
@@ -319,6 +325,7 @@ impl Inner {
             Origin::Run { run_id, label } => Tip::new(label.clone(), Some(run_id.clone())),
             _ => Tip::user(history::label(&cmds)),
         };
+        let action = (!continues).then(|| history::action(&cmds));
         let before = self.editor.project.clone();
         let mut outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.editor.apply_batch_checked(cmds, coalesce, validate)
@@ -330,6 +337,8 @@ impl Inner {
         if self.editor.project != before {
             if !continues {
                 self.editor.name_step(&tip.label);
+                let who = if matches!(origin, Origin::Run { .. }) { "ai" } else { "user" };
+                log::info!(target: "action", "{who} {}", action.as_deref().unwrap_or_default());
             }
             self.changed(origin);
             match &mut self.history.tip {
