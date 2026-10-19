@@ -571,12 +571,19 @@ impl VideoDecoder {
     }
 
     /// Decodes on the GPU's video decoder (VideoToolbox), which gives the software decoder's frames for a fraction
-    /// of its CPU time. Errs where FFmpeg has no hardware decoder, and `next_frame` errs on a frame the hardware
-    /// does not decode, instead of skipping it or decoding it in software.
+    /// of its CPU time. Errs where FFmpeg has no hardware decoder for the video, and `next_frame` errs on a frame the
+    /// hardware does not decode, instead of skipping it or decoding it in software.
     pub(crate) fn open_hardware(path: &Path) -> Result<Self> {
+        // Elsewhere there is no VideoToolbox: fail before opening the file, which the software decoder opens again.
+        if !cfg!(target_os = "macos") {
+            bail!("FFmpeg has no hardware video decoder here");
+        }
         let mut decoder = Self::open(path)?;
         let stream = decoder.input.stream(decoder.stream_index).context("The video stream is gone")?;
         let mut ctx = ff::codec::context::Context::from_parameters(stream.parameters())?;
+        if !on_videotoolbox(ctx.id()) {
+            bail!("FFmpeg does not decode {:?} on the GPU", ctx.id());
+        }
         // The codec context owns the reference and lets it go when it is freed.
         unsafe { (*ctx.as_mut_ptr()).hw_device_ctx = hardware_device()? };
         // FFmpeg hands the hardware one frame at a time, so more threads would only hold more frames.
@@ -777,6 +784,15 @@ fn hardware_device() -> Result<*mut ff::ffi::AVBufferRef> {
         }
     }
     bail!("FFmpeg has no hardware video decoder here")
+}
+
+/// Whether FFmpeg decodes `codec` with VideoToolbox. It does not decode Motion JPEG there, for one.
+fn on_videotoolbox(codec: ff::codec::Id) -> bool {
+    let Some(decoder) = ff::decoder::find(codec) else { return false };
+    (0..).map_while(|i| unsafe { ff::ffi::avcodec_get_hw_config(decoder.as_ptr(), i).as_ref() }).any(|config| {
+        config.device_type == ff::ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_VIDEOTOOLBOX
+            && config.methods & ff::ffi::AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX as i32 != 0
+    })
 }
 
 /// The picture of a frame the hardware decoded, read in place from the GPU's memory, which Apple's chips share
