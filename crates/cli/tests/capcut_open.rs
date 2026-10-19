@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 
 fn dir(name: &str) -> PathBuf {
     let root = dunce::canonicalize(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap();
-    let dir = root.join("tmp-test/capcut-open").join(format!("{name}-{}", std::process::id()));
+    let dir = root.join("tmp-test").join("capcut-open").join(format!("{name}-{}", std::process::id()));
     std::fs::create_dir_all(dir.join("runtime")).unwrap();
     std::fs::create_dir_all(dir.join("home")).unwrap();
     #[cfg(unix)]
