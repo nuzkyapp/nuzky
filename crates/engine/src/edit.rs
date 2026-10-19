@@ -128,11 +128,16 @@ pub enum EditCmd {
         text: String,
         style: TextStyle,
     },
-    /// `track_id: None` moves the clip to a new track of the right kind.
+    /// `track_id: None` moves the clip to a new track of the right kind. With `new_track` it always goes on a new
+    /// track right above or below `track_id` as the timeline shows it, or its own track without one; on screen a
+    /// higher video or text track covers a lower one, and nothing goes below the main track.
+    #[cfg_attr(feature = "ts", ts(optional_fields = nullable))]
     MoveClip {
         clip_id: String,
         track_id: Option<String>,
         start_us: i64,
+        #[serde(default)]
+        new_track: Option<TrackSide>,
     },
     /// On the main track the other tracks, except audio kept in place, gain or lose the same time at the moved edge.
     TrimClip {
@@ -464,6 +469,15 @@ impl TransformPatch {
             }
         }
     }
+}
+
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum TrackSide {
+    Above,
+    Below,
 }
 
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -1109,16 +1123,42 @@ impl Project {
     ) -> Result<()> {
         let min = min_duration(self);
         match cmd {
-            EditCmd::MoveClip { clip_id, track_id, start_us } => {
+            EditCmd::MoveClip { clip_id, track_id, start_us, new_track } => {
                 let (ti, ci) = self.find_clip(&clip_id).ok_or_else(|| anyhow!("Unknown clip"))?;
                 // Clips always sit on a track of their kind; detached sound is a video asset on an audio track.
                 let kind = self.tracks[ti].kind;
                 let keep = self.tracks[ti].keep_in_place;
+                let beside = match new_track {
+                    None => None,
+                    Some(side) => {
+                        let at = match &track_id {
+                            Some(id) => self.track_index(id).ok_or_else(|| anyhow!("Unknown track"))?,
+                            None => ti,
+                        };
+                        let audio = kind == TrackKind::Audio;
+                        ensure!(
+                            (self.tracks[at].kind == TrackKind::Audio) == audio,
+                            "A new track for this clip goes beside {} track",
+                            if audio { "an audio" } else { "a video or text" }
+                        );
+                        // Audio tracks are listed top down; video and text tracks stack, the main track lowest.
+                        Some(match (side, audio) {
+                            (TrackSide::Above, false) | (TrackSide::Below, true) => at + 1,
+                            _ => {
+                                ensure!(at != 0, "Nothing goes below the main track");
+                                at
+                            }
+                        })
+                    }
+                };
                 let mut clip = self.tracks[ti].clips.remove(ci);
                 let start = start_us.max(0);
                 clip.start_us = start;
                 let end = start + clip.duration_us;
-                let target = track_id.and_then(|id| self.track_index(&id)).filter(|&i| self.tracks[i].kind == kind);
+                let target = match beside {
+                    Some(at) => Some(self.insert_track(at, kind, keep)),
+                    None => track_id.and_then(|id| self.track_index(&id)).filter(|&i| self.tracks[i].kind == kind),
+                };
                 let target = match target {
                     Some(0) => {
                         *moved = Some((clip.id.clone(), start));
@@ -2608,7 +2648,13 @@ mod tests {
         p.apply(EditCmd::AddClip { asset_id: "a".into(), start_us: None, track_id: None }).unwrap();
         p.apply(EditCmd::AddClip { asset_id: "b".into(), start_us: None, track_id: None }).unwrap();
         let b = p.tracks[0].clips[1].id.clone();
-        p.apply(EditCmd::MoveClip { clip_id: b.clone(), track_id: Some(MAIN_TRACK.into()), start_us: 0 }).unwrap();
+        p.apply(EditCmd::MoveClip {
+            clip_id: b.clone(),
+            track_id: Some(MAIN_TRACK.into()),
+            start_us: 0,
+            new_track: None,
+        })
+        .unwrap();
         assert_eq!(p.tracks[0].clips[0].id, b);
         assert_eq!(main_layout(&p), vec![(0, 3000), (3000, 5000)]);
     }
@@ -2723,12 +2769,56 @@ mod tests {
         p.apply(EditCmd::AddClip { asset_id: "a".into(), start_us: None, track_id: None }).unwrap();
         p.apply(EditCmd::AddClip { asset_id: "b".into(), start_us: None, track_id: None }).unwrap();
         let b = p.tracks[0].clips[1].id.clone();
-        p.apply(EditCmd::MoveClip { clip_id: b.clone(), track_id: None, start_us: 1_000_000 }).unwrap();
+        p.apply(EditCmd::MoveClip { clip_id: b.clone(), track_id: None, start_us: 1_000_000, new_track: None })
+            .unwrap();
         assert_eq!(p.tracks.len(), 2);
         assert_eq!(p.tracks[1].clips[0].start_us, 1_000_000);
-        p.apply(EditCmd::MoveClip { clip_id: b, track_id: Some(MAIN_TRACK.into()), start_us: 9_000_000 }).unwrap();
+        p.apply(EditCmd::MoveClip {
+            clip_id: b,
+            track_id: Some(MAIN_TRACK.into()),
+            start_us: 9_000_000,
+            new_track: None,
+        })
+        .unwrap();
         assert_eq!(p.tracks.len(), 1);
         assert_eq!(main_layout(&p), vec![(0, 5000), (5000, 3000)]);
+    }
+
+    #[test]
+    fn a_clip_moves_onto_a_new_track_below_or_above_another() {
+        let mut p = project();
+        let add = |p: &mut Project| {
+            p.apply(EditCmd::AddClip { asset_id: "b".into(), start_us: None, track_id: None }).unwrap().select[0]
+                .clone()
+        };
+        add(&mut p);
+        let (low, high) = (add(&mut p), add(&mut p));
+        p.apply(EditCmd::MoveClip { clip_id: low.clone(), track_id: None, start_us: 0, new_track: None }).unwrap();
+        let low_track = p.tracks[1].id.clone();
+        // Dropped onto the overlay where it is taken, it goes on a new track above.
+        p.apply(EditCmd::MoveClip {
+            clip_id: high.clone(),
+            track_id: Some(low_track.clone()),
+            start_us: 0,
+            new_track: None,
+        })
+        .unwrap();
+        let layers = |p: &Project| p.tracks.iter().map(|t| t.clips.first().map(|c| c.id.clone())).collect::<Vec<_>>();
+        assert_eq!(layers(&p)[1..], [Some(low.clone()), Some(high.clone())]);
+        let move_to = |clip: &str, track: Option<String>, side| EditCmd::MoveClip {
+            clip_id: clip.into(),
+            track_id: track,
+            start_us: 0,
+            new_track: Some(side),
+        };
+
+        // Under the overlay below it, though it is free there.
+        p.apply(move_to(&high, Some(low_track.clone()), TrackSide::Below)).unwrap();
+        assert_eq!(layers(&p)[1..], [Some(high.clone()), Some(low.clone())]);
+        // And back above it.
+        p.apply(move_to(&high, Some(low_track.clone()), TrackSide::Above)).unwrap();
+        assert_eq!(layers(&p)[1..], [Some(low.clone()), Some(high.clone())]);
+        assert!(p.apply(move_to(&high, Some(MAIN_TRACK.into()), TrackSide::Below)).is_err());
     }
 
     #[test]
@@ -3083,7 +3173,8 @@ mod tests {
         assert!(p.apply(EditCmd::DetachAudio { clip_id: a }).is_err());
         // The detached sound is audio: it cannot be detached again and moves along audio tracks.
         assert!(p.apply(EditCmd::DetachAudio { clip_id: sound.clone() }).is_err());
-        p.apply(EditCmd::MoveClip { clip_id: sound.clone(), track_id: None, start_us: 1_000_000 }).unwrap();
+        p.apply(EditCmd::MoveClip { clip_id: sound.clone(), track_id: None, start_us: 1_000_000, new_track: None })
+            .unwrap();
         let track = p.tracks.iter().find(|t| t.clips.iter().any(|c| c.id == sound)).unwrap();
         assert_eq!(track.kind, TrackKind::Audio);
     }

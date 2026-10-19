@@ -105,6 +105,7 @@ fn seeded_sequences(with_speed: bool) {
                         clip_id: c.id.clone(),
                         track_id: if rng.next().is_multiple_of(2) { Some("main".into()) } else { None },
                         start_us: (rng.next() % 10_000_000) as i64,
+                        new_track: None,
                     },
                     1 => EditCmd::TrimClip {
                         clip_id: c.id.clone(),
@@ -151,7 +152,7 @@ fn slowing_overlay_must_not_overlap_next_clip() {
     let mut e = editor();
     e.apply(EditCmd::AddClip { asset_id: "a".into(), start_us: None, track_id: None }, None).unwrap();
     let id = e.project.tracks[0].clips[0].id.clone();
-    e.apply(EditCmd::MoveClip { clip_id: id.clone(), track_id: None, start_us: 0 }, None).unwrap();
+    e.apply(EditCmd::MoveClip { clip_id: id.clone(), track_id: None, start_us: 0, new_track: None }, None).unwrap();
     let track = e.project.tracks[1].id.clone();
     e.apply(EditCmd::AddClip { asset_id: "b".into(), start_us: Some(5_000_000), track_id: Some(track) }, None).unwrap();
     let _ = e.apply(update_speed(&id, 0.5), None);

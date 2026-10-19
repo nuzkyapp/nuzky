@@ -529,8 +529,9 @@ export type EditCmd = {
 } | {
   "type": "moveClip",
   clipId: string,
-  trackId: string | null,
+  trackId?: string | null,
   startUs: number,
+  newTrack?: TrackSide | null,
 } | {
   "type": "trimClip",
   clipId: string,
@@ -1711,6 +1712,8 @@ export type Track = {
 };
 
 export type TrackKind = "video" | "audio" | "text";
+
+export type TrackSide = "above" | "below";
 
 export type TranscriptCut = {
   snapshot: Snapshot,

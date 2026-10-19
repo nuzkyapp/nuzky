@@ -6,6 +6,8 @@ import type { Clip, Project, Track } from "../../lib/types";
 import { EDGE, clipAsset } from "./ClipView";
 
 const SNAP_PX = 8;
+// How near the line between two tracks the pointer drops a clip on a new track there.
+const GAP_PX = 6;
 // Cmd on a Mac, where Ctrl-click is a right click.
 const MAC = navigator.userAgent.includes("Mac");
 
@@ -22,8 +24,8 @@ export interface Drag {
   moved: boolean;
   toggle: boolean;
   dxUs: number;
-  /** undefined: same track, null: a new track, string: another track. */
-  target: string | null | undefined;
+  /** undefined: same track, null: a new track, string: another track, `below`: a new track right below that one. */
+  target: string | null | { below: string } | undefined;
   snapUs: number | null;
   candidates: number[];
   maxDurUs: number | null;
@@ -59,6 +61,21 @@ export function dragFade(d: Drag): number {
 
 /** The box a drag over empty lane space draws, in the timeline scroller's content pixels. */
 export type Box = { left: number; top: number; width: number; height: number };
+
+/**
+ * The video or text track whose lower edge the pointer is at, so a clip dropped there goes on a new track
+ * right below it, over the track under the edge. Not beside a track the clip has to itself, where it would
+ * stay on the same layer.
+ */
+function trackAboveGap(project: Project, rects: (readonly [string, DOMRect])[], y: number, d: Drag): string | undefined {
+  const visual = rects.filter(([id]) => project.tracks.find((t) => t.id === id)?.kind !== "audio").sort((a, b) => a[1].top - b[1].top);
+  const alone = project.tracks.find((t) => t.id === d.trackId)?.clips.length === 1;
+  for (let i = 0; i + 1 < visual.length; i++) {
+    const [[upper, u], [lower, l]] = [visual[i], visual[i + 1]];
+    if (y < u.bottom - GAP_PX || y > l.top + GAP_PX) continue;
+    return alone && (upper === d.trackId || lower === d.trackId) ? undefined : upper;
+  }
+}
 
 function snap(value: number, candidates: number[], thr: number): number | null {
   let best: number | null = null;
@@ -130,11 +147,14 @@ export function useTimelineGestures({
           }
         }
       }
-      let target: string | null | undefined = undefined;
+      let target: Drag["target"] = undefined;
       if (d.mode === "move") {
         const rects = [...rows.current.entries()].map(([id, el]) => [id, el.getBoundingClientRect()] as const);
         const hit = rects.find(([, r]) => e.clientY >= r.top && e.clientY <= r.bottom);
-        if (hit) {
+        const above = kind !== "audio" ? trackAboveGap(project, rects, e.clientY, d) : undefined;
+        if (above) {
+          target = { below: above };
+        } else if (hit) {
           const t = project.tracks.find((tr) => tr.id === hit[0]);
           if (t && t.kind === kind && t.id !== d.trackId) target = t.id;
         } else if (rects.length > 0) {
@@ -163,10 +183,15 @@ export function useTimelineGestures({
       return;
     }
     const r = dragResult(d, live.current.minUs);
+    const { target } = d;
     if (d.mode === "move") {
-      const trackId = d.target === undefined ? d.trackId : d.target;
-      if (trackId === d.trackId && r.startUs === d.clip.startUs) return;
-      edit({ type: "moveClip", clipId: d.clip.id, trackId, startUs: r.startUs });
+      if (target && typeof target === "object") {
+        edit({ type: "moveClip", clipId: d.clip.id, trackId: target.below, startUs: r.startUs, newTrack: "below" });
+      } else {
+        const trackId = target === undefined ? d.trackId : target;
+        if (trackId === d.trackId && r.startUs === d.clip.startUs) return;
+        edit({ type: "moveClip", clipId: d.clip.id, trackId, startUs: r.startUs });
+      }
     } else {
       const sourceInUs = d.mode === "trimL" && d.sourceInUs !== null ? Math.max(0, d.sourceInUs + Math.round((r.startUs - d.clip.startUs) * d.speed)) : null;
       edit({ type: "trimClip", clipId: d.clip.id, startUs: r.startUs, durationUs: r.durationUs, sourceInUs });

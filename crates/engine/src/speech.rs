@@ -197,7 +197,7 @@ mod tests {
         let sound = p.apply(EditCmd::DetachAudio { clip_id: video }).unwrap().select[0].clone();
         assert_eq!(placed(&p, &words).len(), 10);
         let before = speech_layout_key(&p);
-        p.apply(EditCmd::MoveClip { clip_id: sound.clone(), track_id: None, start_us: S }).unwrap();
+        p.apply(EditCmd::MoveClip { clip_id: sound.clone(), track_id: None, start_us: S, new_track: None }).unwrap();
         assert_eq!(placed(&p, &words)[0], ("w0".into(), 1_200_000));
         assert_ne!(speech_layout_key(&p), before);
         assert!(map_words(&p, &words).iter().all(|w| w.clip_id == sound));

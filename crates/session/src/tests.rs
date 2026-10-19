@@ -428,7 +428,7 @@ fn selection_does_not_retain_clips_removed_later_in_the_batch() {
             &r,
             "remove",
             vec![
-                EditCmd::MoveClip { clip_id: id.clone(), track_id: Some("main".into()), start_us: 0 },
+                EditCmd::MoveClip { clip_id: id.clone(), track_id: Some("main".into()), start_us: 0, new_track: None },
                 EditCmd::DeleteClips { clip_ids: vec![id] },
             ],
             Expect::default(),
