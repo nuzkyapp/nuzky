@@ -102,11 +102,13 @@ fn remove_others(path: &Path) {
 fn transcode(source: &Path, out: &Path, progress: &mut impl FnMut(f32) -> Result<()>) -> Result<()> {
     let stopped = Cell::new(false);
     let mut report = |p| progress(p).inspect_err(|_| stopped.set(true));
-    if let Ok((decoders, starts)) = on_gpu(source) {
-        match encode(decoders, &starts, out, &mut report) {
+    match on_gpu(source, &mut report) {
+        Ok((decoders, starts)) => match encode(decoders, &starts, out, &mut report) {
             Err(e) if !stopped.get() => log::warn!("Decoding {} in software: {e:#}", source.display()),
             done => return done,
-        }
+        },
+        Err(e) if stopped.get() => return Err(e),
+        Err(_) => {}
     }
     encode(vec![VideoDecoder::open(source)?], &[i64::MIN], out, &mut report)
 }
@@ -119,9 +121,9 @@ const PARTS_AT_ONCE: usize = 2;
 const PART_US: i64 = 2_000_000;
 
 /// GPU decoders for the parts of the video, and where the parts start.
-fn on_gpu(source: &Path) -> Result<(Vec<VideoDecoder>, Vec<i64>)> {
+fn on_gpu(source: &Path, progress: &mut impl FnMut(f32) -> Result<()>) -> Result<(Vec<VideoDecoder>, Vec<i64>)> {
     let first = VideoDecoder::open_hardware(source)?;
-    let starts = part_starts(source)?;
+    let starts = part_starts(source, progress)?;
     let mut decoders = vec![first];
     for _ in 1..PARTS_AT_ONCE.min(starts.len()) {
         decoders.push(VideoDecoder::open_hardware(source)?);
@@ -130,12 +132,13 @@ fn on_gpu(source: &Path) -> Result<(Vec<VideoDecoder>, Vec<i64>)> {
 }
 
 /// The times the parts of a video start at: the first at its start, the others at a keyframe, so decoding a
-/// part decodes no frame of the one before.
-fn part_starts(source: &Path) -> Result<Vec<i64>> {
+/// part decodes no frame of the one before. A long video takes a while to look through, so Stop is heard here too.
+fn part_starts(source: &Path, progress: &mut impl FnMut(f32) -> Result<()>) -> Result<Vec<i64>> {
     let mut file = VideoDecoder::open(source)?;
     let duration = file.duration_us();
     let mut starts = vec![i64::MIN];
     for target in (1..).map(|i| i * PART_US).take_while(|t| *t < duration) {
+        progress(0.0)?;
         if let Some(t) = file.keyframe_at(target)
             && t > (*starts.last().unwrap()).max(0)
         {
