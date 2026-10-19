@@ -134,7 +134,6 @@ function Step() {
   const again = job && askedNow ? job.status : null;
   const busy = running ? "Wait for the download to finish" : null;
   const name = languageName(language);
-  // Each part as what is left of it, so the parts add up to the size on Download.
   const picked = models.find((m) => m.id === model);
   const parts = (
     [
