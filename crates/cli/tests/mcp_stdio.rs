@@ -843,6 +843,119 @@ fn an_agent_pastes_a_hook_later_and_its_look_onto_another_title_over_stdio() {
     c.finish();
 }
 
+/// The Reel agent's restyle: captions built where it wants them, one rewritten by hand, then made bigger and moved
+/// with one command that keeps every caption, its id and its text; undoing that run brings the look back.
+#[test]
+fn restyle_track_changes_every_caption_in_place_over_stdio() {
+    use nuzky_session::transcripts::{Record, TranscriptStore, VERSION};
+
+    let mut c = Client::start(true, None, Some(None));
+    let video = c.dir.join("talk.mp4");
+    assert!(
+        Command::new("ffmpeg")
+            .args(["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=s=16x16:r=30:d=4"])
+            .args(["-f", "lavfi", "-i", "sine=frequency=440:duration=4", "-c:v", "libx264", "-preset", "ultrafast"])
+            .args(["-c:a", "aac"])
+            .arg(&video)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let asset = nuzky_engine::media::probe(&video, "take".into()).unwrap();
+    let store = TranscriptStore::at(c.dir.join("data/nuzky/transcripts")).unwrap();
+    let words = ["Save", "450", "every", "month."]
+        .iter()
+        .enumerate()
+        .map(|(i, text)| nuzky_engine::speech::Word {
+            start_us: 200_000 + i as i64 * 800_000,
+            end_us: 700_000 + i as i64 * 800_000,
+            text: (*text).into(),
+            probability: 0.9,
+        })
+        .collect();
+    let record = Record {
+        version: VERSION,
+        fingerprint: store.fingerprint(&asset).unwrap(),
+        duration_us: asset.duration_us,
+        model: "fixture".into(),
+        language: "en".into(),
+        words,
+        segments: vec![],
+        alignment: None,
+    };
+    store.put(&asset, &record).unwrap();
+    let captions = |c: &mut Client| {
+        let state = c.call("get_state", json!({}));
+        state["tracks"].as_array().unwrap().iter().find(|t| t["name"] == "Captions").unwrap().clone()
+    };
+
+    let run = c.call("begin_run", json!({"label": "captions"}));
+    let place = json!([{"type": "addAssets", "assets": [asset]}, {"type": "addClip", "assetId": "take"}]);
+    c.call("apply_edits", json!({"run_id": run["run_id"], "request_id": "place", "edits": place}));
+    c.call("build_captions", json!({"run_id": run["run_id"], "transform": {"y": 0.25, "scale": 1.25}}));
+    let built = captions(&mut c);
+    assert!(built["clips"].as_array().unwrap().len() > 1, "{built}");
+    for clip in built["clips"].as_array().unwrap() {
+        let transform = &clip["content"]["transform"];
+        assert_eq!((&transform["x"], &transform["y"], &transform["scale"]), (&json!(0.0), &json!(0.25), &json!(1.25)));
+    }
+    let first = built["clips"][0]["id"].clone();
+    let last = built["clips"].as_array().unwrap().last().unwrap()["id"].clone();
+    let rise = json!([{"tUs": 0, "transform": {"x": 0.0, "y": 0.25, "scale": 1.0, "rotation": 0.0, "opacity": 1.0}},
+        {"tUs": 300_000, "transform": {"x": 0.0, "y": 0.2, "scale": 1.0, "rotation": 0.0, "opacity": 1.0}}]);
+    let by_hand = json!([{"type": "updateClip", "clipId": first, "text": "Keep 450"},
+        {"type": "setKeyframes", "clipId": last, "keyframes": rise}]);
+    c.call("apply_edits", json!({"run_id": run["run_id"], "request_id": "by-hand", "edits": by_hand}));
+    c.call("end_run", json!({"run_id": run["run_id"], "action": "keep"}));
+    let before = captions(&mut c);
+
+    let run = c.call("begin_run", json!({"label": "bigger and higher"}));
+    let restyle = |request: &str, track: &Value, style: Value, transform: Value| {
+        json!({"run_id": run["run_id"], "request_id": request,
+            "edits": [{"type": "restyleTrack", "trackId": track, "style": style, "transform": transform}]})
+    };
+    let main = json!("main");
+    let wrong = c.error("apply_edits", restyle("main", &main, json!({"fontSize": 140.0}), Value::Null));
+    assert!(wrong.contains("text track"), "{wrong}");
+    let tiny = c.error("apply_edits", restyle("tiny", &before["id"], json!({"fontSize": -1.0}), Value::Null));
+    assert!(tiny.contains("text style"), "{tiny}");
+    let typo = c.error("apply_edits", restyle("typo", &before["id"], json!({"fontsize": 140.0}), Value::Null));
+    assert!(typo.contains("fontsize"), "{typo}");
+    let style = json!({"fontSize": 140.0, "background": "#000000aa"});
+    let applied = c.call("apply_edits", restyle("restyle", &before["id"], style, json!({"y": -0.25})));
+    assert_eq!((&applied["created"], &applied["removed"]), (&json!([]), &json!([])), "{applied}");
+    assert_eq!(applied["skipped"], json!([last]), "the keyed caption keeps its place");
+    let after = captions(&mut c);
+    assert_eq!(after["id"], before["id"]);
+    let (old, new) = (before["clips"].as_array().unwrap(), after["clips"].as_array().unwrap());
+    assert_eq!(old.len(), new.len());
+    for (old, new) in old.iter().zip(new) {
+        let (was, now) = (&old["content"], &new["content"]);
+        assert_eq!(
+            (&new["id"], &new["startUs"], &new["durationUs"]),
+            (&old["id"], &old["startUs"], &old["durationUs"])
+        );
+        assert_eq!((&now["text"], &now["words"], &new["keyframes"]), (&was["text"], &was["words"], &old["keyframes"]));
+        assert_eq!((&now["style"]["fontSize"], &now["style"]["background"]), (&json!(140.0), &json!("#000000aa")));
+        assert_eq!(now["style"]["color"], was["style"]["color"]);
+        let y = if new["id"] == last { 0.25 } else { -0.25 };
+        assert_eq!((&now["transform"]["y"], &now["transform"]["scale"]), (&json!(y), &json!(1.25)));
+    }
+    assert_eq!(new[0]["content"]["text"], "Keep 450");
+    c.call("apply_edits", restyle("no-box", &before["id"], json!({"background": null}), Value::Null));
+    let boxed = captions(&mut c)["clips"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| !c["content"]["style"]["background"].is_null())
+        .count();
+    assert_eq!(boxed, 0, "null clears the box");
+    c.call("end_run", json!({"run_id": run["run_id"], "action": "keep"}));
+    c.call("undo_run", json!({"run_id": run["run_id"]}));
+    assert_eq!(captions(&mut c), before);
+    c.finish();
+}
+
 /// Headless, without the app: runs are versions that outlive the agent, a read-only agent lists them,
 /// and undo_to brings one back as one step, which undo_to the version before takes back.
 #[test]

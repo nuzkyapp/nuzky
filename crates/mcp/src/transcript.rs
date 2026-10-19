@@ -1071,8 +1071,10 @@ pub fn caption_edit(
     ensure!(tracks.len() <= 1, "AMBIGUOUS_CAPTIONS: multiple caption tracks; use explicit replaceCaptions");
     let CaptionPreset { style, anim_in, anim_out, .. } = look;
     let edit = match tracks.first() {
-        Some(track) => EditCmd::ReplaceCaptions { track_id: track.id.clone(), segments, style, anim_in, anim_out },
-        None => EditCmd::AddCaptions { segments, style, anim_in, anim_out },
+        Some(track) => {
+            EditCmd::ReplaceCaptions { track_id: track.id.clone(), segments, style, anim_in, anim_out, transform: None }
+        }
+        None => EditCmd::AddCaptions { segments, style, anim_in, anim_out, transform: None },
     };
     Ok((edit, count))
 }
@@ -1300,6 +1302,7 @@ pub(crate) mod tests {
                 style: crate::params::reel_style(),
                 anim_in: None,
                 anim_out: None,
+                transform: None,
             })
             .unwrap();
         let caption = project.tracks.iter().find(|t| t.is_captions()).unwrap().clips[0].id.clone();
@@ -1637,7 +1640,13 @@ pub(crate) mod tests {
             })
             .collect();
         project
-            .apply(EditCmd::AddCaptions { segments, style: crate::params::reel_style(), anim_in: None, anim_out: None })
+            .apply(EditCmd::AddCaptions {
+                segments,
+                style: crate::params::reel_style(),
+                anim_in: None,
+                anim_out: None,
+                transform: None,
+            })
             .unwrap();
     }
 

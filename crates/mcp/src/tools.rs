@@ -1264,7 +1264,10 @@ impl Backend {
         let energy =
             nuzky_analysis::prepared_word_energy(&project, &derived.words, &derived.sources, &self.host.cache_dir)?;
         let keys = nuzky_analysis::key_words(&derived.words, &energy);
-        let (edit, _) = transcript::caption_edit(&derived.words, &keys, &state.project, look, grouping)?;
+        let (mut edit, _) = transcript::caption_edit(&derived.words, &keys, &state.project, look, grouping)?;
+        if let EditCmd::AddCaptions { transform, .. } | EditCmd::ReplaceCaptions { transform, .. } = &mut edit {
+            *transform = args.transform;
+        }
         let result = self.host.session.apply_edits(
             &args.run_id,
             &new_id(),
@@ -2045,6 +2048,7 @@ mod tests {
                 style,
                 anim_in: None,
                 anim_out: None,
+                transform: None,
             })
             .unwrap();
         assert_eq!(caption_stats(&project), json!({"count":1,"max_chars":16,"max_words":2}));

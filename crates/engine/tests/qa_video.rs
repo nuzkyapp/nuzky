@@ -907,7 +907,8 @@ fn captions_in_a_small_preview_match_the_export_scaled_down_by_ffmpeg() {
         keywords: None,
     };
     let segment = CaptionSegment { start_us: 0, end_us: 1_000_000, text: "Poslední dva".into(), words: Vec::new() };
-    p.apply(EditCmd::AddCaptions { segments: vec![segment], style, anim_in: None, anim_out: None }).unwrap();
+    p.apply(EditCmd::AddCaptions { segments: vec![segment], style, anim_in: None, anim_out: None, transform: None })
+        .unwrap();
     let mut renderer = Renderer::new().unwrap();
     let export = d.join("export.rgba");
     std::fs::write(&export, renderer.render(&p, 500_000, 1080, 1920, Wait::Exact, false).unwrap()).unwrap();

@@ -205,6 +205,7 @@ pub(crate) fn label(cmds: &[EditCmd]) -> &'static str {
         EditCmd::PasteAttributes { .. } => "Paste attributes",
         EditCmd::DetachAudio { .. } => "Detach audio",
         EditCmd::UpdateTrack { .. } => "Change track",
+        EditCmd::RestyleTrack { .. } => "Restyle text",
         EditCmd::SetCanvas { .. } => "Change format",
         EditCmd::AddCaptions { .. } => "Add captions",
         EditCmd::ReplaceCaptions { .. } => "Replace captions",

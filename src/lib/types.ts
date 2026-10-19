@@ -631,6 +631,11 @@ export type EditCmd = {
   hidden?: boolean | null,
   keepInPlace?: boolean | null,
 } | {
+  "type": "restyleTrack",
+  trackId: string,
+  style?: TextStylePatch | null,
+  transform?: TransformPatch | null,
+} | {
   "type": "setCanvas",
   width: number,
   height: number,
@@ -642,6 +647,7 @@ export type EditCmd = {
   style: TextStyle,
   animIn?: Animation | null,
   animOut?: Animation | null,
+  transform?: TransformPatch | null,
 } | {
   "type": "replaceCaptions",
   trackId: string,
@@ -649,6 +655,7 @@ export type EditCmd = {
   style: TextStyle,
   animIn?: Animation | null,
   animOut?: Animation | null,
+  transform?: TransformPatch | null,
 } | {
   "type": "rippleDeleteRanges",
   ranges: Array<TimeRange>,
@@ -1509,6 +1516,22 @@ export type TextStyle = {
 };
 
 /**
+ * The `TextStyle` fields to change; null clears a field that may be empty.
+ */
+export type TextStylePatch = {
+  fontFamily?: string | null,
+  fontSize?: number,
+  color?: string,
+  bold?: boolean,
+  strokeWidth?: number,
+  strokeColor?: string,
+  background?: string | null,
+  maxWidth?: number | null,
+  highlight?: string | null,
+  keywords?: Keywords | null,
+};
+
+/**
  * A still made from one frame of the video: a background, the person cut out of the frame, an
  * outline around them and text, some of it behind them. Sizes are in thumbnail pixels.
  */
@@ -1727,6 +1750,17 @@ export type Transform = {
    * Edges cut off the layer. Part of the transform, so keyframes can animate it.
    */
   crop?: Crop | null,
+};
+
+/**
+ * The `Transform` fields to change.
+ */
+export type TransformPatch = {
+  x?: number,
+  y?: number,
+  scale?: number,
+  rotation?: number,
+  opacity?: number,
 };
 
 /**

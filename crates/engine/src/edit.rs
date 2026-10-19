@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::{
     Adjust, Animation, Asset, AssetKind, Background, CAPTIONS_TRACK, Canvas, CaptionWord, Clip, ClipContent, Ease,
-    Keyframe, Project, ReelCandidate, Shape, TextStyle, Thumbnail, ThumbnailFormat, Track, TrackKind, Transform,
-    Transition, WordCorrection,
+    Keyframe, Keywords, Project, ReelCandidate, Shape, TextStyle, Thumbnail, ThumbnailFormat, Track, TrackKind,
+    Transform, Transition, WordCorrection,
 };
 
 pub const MAIN_TRACK: &str = "main";
@@ -231,6 +231,16 @@ pub enum EditCmd {
         hidden: Option<bool>,
         keep_in_place: Option<bool>,
     },
+    /// Changes every clip of a text track in place, such as all captions: the given style and transform fields
+    /// replace each clip's own, and its id, text, words, timing, animations and every field left out stay. Clips
+    /// with keyframes keep their transform, as their keyframes decide where they are, and are listed in the
+    /// outcome's `skipped`; their style still changes.
+    #[cfg_attr(feature = "ts", ts(optional_fields = nullable))]
+    RestyleTrack {
+        track_id: String,
+        style: Option<TextStylePatch>,
+        transform: Option<TransformPatch>,
+    },
     #[cfg_attr(feature = "ts", ts(optional_fields = nullable))]
     SetCanvas {
         width: u32,
@@ -238,7 +248,8 @@ pub enum EditCmd {
         background: Option<String>,
         background_blur: Option<f32>,
     },
-    /// Adds a new captions track; existing tracks are left alone. Every caption gets the animations.
+    /// Adds a new captions track; existing tracks are left alone. Every caption gets the animations, and the
+    /// transform fields given over its place a little below the middle.
     #[cfg_attr(feature = "ts", ts(optional_fields = nullable))]
     AddCaptions {
         segments: Vec<CaptionSegment>,
@@ -247,6 +258,8 @@ pub enum EditCmd {
         anim_in: Option<Animation>,
         #[serde(default)]
         anim_out: Option<Animation>,
+        #[serde(default)]
+        transform: Option<TransformPatch>,
     },
     /// Replaces the clips of an existing captions track.
     #[cfg_attr(feature = "ts", ts(optional_fields = nullable))]
@@ -258,6 +271,8 @@ pub enum EditCmd {
         anim_in: Option<Animation>,
         #[serde(default)]
         anim_out: Option<Animation>,
+        #[serde(default)]
+        transform: Option<TransformPatch>,
     },
     /// Cuts the timeline ranges out of every track except `keep_track_ids` (by default the
     /// tracks kept in place) and closes the gaps, so video, overlays, audio and captions stay in sync.
@@ -327,6 +342,114 @@ pub struct CopiedClip {
     pub track_kind: TrackKind,
     #[serde(default)]
     pub keep_in_place: bool,
+}
+
+/// The `TextStyle` fields to change; null clears a field that may be empty.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts", ts(optional_fields))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TextStylePatch {
+    #[serde(default, with = "present", skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Option<String>>"))]
+    #[cfg_attr(feature = "schema", schemars(with = "Option<Option<String>>"))]
+    pub font_family: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_size: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bold: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke_width: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke_color: Option<String>,
+    #[serde(default, with = "present", skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Option<String>>"))]
+    #[cfg_attr(feature = "schema", schemars(with = "Option<Option<String>>"))]
+    pub background: Option<Option<String>>,
+    #[serde(default, with = "present", skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Option<f32>>"))]
+    #[cfg_attr(feature = "schema", schemars(with = "Option<Option<f32>>"))]
+    pub max_width: Option<Option<f32>>,
+    #[serde(default, with = "present", skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Option<String>>"))]
+    #[cfg_attr(feature = "schema", schemars(with = "Option<Option<String>>"))]
+    pub highlight: Option<Option<String>>,
+    #[serde(default, with = "present", skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Option<Keywords>>"))]
+    #[cfg_attr(feature = "schema", schemars(with = "Option<Option<Keywords>>"))]
+    pub keywords: Option<Option<Keywords>>,
+}
+
+/// The `Transform` fields to change.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts", ts(optional_fields))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TransformPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opacity: Option<f32>,
+}
+
+/// Tells a field given as null (`Some(None)`) from one left out (`None`).
+mod present {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer, T: Serialize>(value: &Option<Option<T>>, s: S) -> Result<S::Ok, S::Error> {
+        value.serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<Option<T>>, D::Error> {
+        Option::deserialize(d).map(Some)
+    }
+}
+
+impl TextStylePatch {
+    fn apply(&self, style: &mut TextStyle) {
+        fn set<T: Clone>(field: &mut T, value: &Option<T>) {
+            if let Some(value) = value {
+                *field = value.clone();
+            }
+        }
+        set(&mut style.font_family, &self.font_family);
+        set(&mut style.font_size, &self.font_size);
+        set(&mut style.color, &self.color);
+        set(&mut style.bold, &self.bold);
+        set(&mut style.stroke_width, &self.stroke_width);
+        set(&mut style.stroke_color, &self.stroke_color);
+        set(&mut style.background, &self.background);
+        set(&mut style.max_width, &self.max_width);
+        set(&mut style.highlight, &self.highlight);
+        set(&mut style.keywords, &self.keywords);
+    }
+}
+
+impl TransformPatch {
+    fn apply(&self, transform: &mut Transform) {
+        let fields = [
+            (&mut transform.x, self.x),
+            (&mut transform.y, self.y),
+            (&mut transform.scale, self.scale),
+            (&mut transform.rotation, self.rotation),
+            (&mut transform.opacity, self.opacity),
+        ];
+        for (field, value) in fields {
+            if let Some(value) = value {
+                *field = value;
+            }
+        }
+    }
 }
 
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -775,6 +898,9 @@ impl Project {
             }
             EditCmd::PasteClips { clips, at_us } => self.paste_clips(clips, at_us, &mut out)?,
             EditCmd::PasteAttributes { source, clip_ids } => self.paste_attributes(source, clip_ids, &mut out)?,
+            EditCmd::RestyleTrack { track_id, style, transform } => {
+                self.restyle_track(&track_id, style, transform, &mut out)?
+            }
             EditCmd::CorrectWords { corrections } => self.correct_words(corrections)?,
             EditCmd::ZoomRanges { ranges } => self.zoom_ranges(ranges, &mut out)?,
             EditCmd::ApplyMotion { clip_id, range, kind, strength } => {
@@ -1339,8 +1465,8 @@ impl Project {
     fn apply_captions(&mut self, cmd: EditCmd, out: &mut EditOutcome) -> Result<()> {
         let min = min_duration(self);
         match cmd {
-            EditCmd::AddCaptions { segments, style, anim_in, anim_out } => {
-                let clips = caption_clips(segments, &style, [anim_in, anim_out], &self.canvas, min)?;
+            EditCmd::AddCaptions { segments, style, anim_in, anim_out, transform } => {
+                let clips = caption_clips(segments, &style, [anim_in, anim_out], transform, &self.canvas, min)?;
                 out.select = clips.iter().map(|c| c.id.clone()).take(1).collect();
                 self.tracks.push(Track {
                     id: new_id(),
@@ -1352,9 +1478,9 @@ impl Project {
                     clips,
                 });
             }
-            EditCmd::ReplaceCaptions { track_id, segments, style, anim_in, anim_out } => {
+            EditCmd::ReplaceCaptions { track_id, segments, style, anim_in, anim_out, transform } => {
                 let ti = self.caption_track(&track_id)?;
-                let clips = caption_clips(segments, &style, [anim_in, anim_out], &self.canvas, min)?;
+                let clips = caption_clips(segments, &style, [anim_in, anim_out], transform, &self.canvas, min)?;
                 out.select = clips.iter().map(|c| c.id.clone()).take(1).collect();
                 self.tracks[ti].clips = clips;
             }
@@ -1765,6 +1891,31 @@ impl Project {
         ensure!(pasted > 0, "None of these clips is of the copied clip's kind");
         Ok(())
     }
+
+    fn restyle_track(
+        &mut self,
+        track_id: &str,
+        style: Option<TextStylePatch>,
+        transform: Option<TransformPatch>,
+        out: &mut EditOutcome,
+    ) -> Result<()> {
+        ensure!(style.is_some() || transform.is_some(), "restyleTrack needs a style or a transform to change");
+        let ti = self.track_index(track_id).ok_or_else(|| anyhow!("Unknown track"))?;
+        ensure!(self.tracks[ti].kind == TrackKind::Text, "Only a text track can be restyled");
+        for clip in &mut self.tracks[ti].clips {
+            let keyed = !clip.keyframes.is_empty();
+            let ClipContent::Text { style: s, transform: t, .. } = &mut clip.content else { continue };
+            if let Some(patch) = &style {
+                patch.apply(s);
+            }
+            match transform {
+                Some(_) if keyed => out.skipped.push(clip.id.clone()),
+                Some(patch) => patch.apply(t),
+                None => {}
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Where `key` takes a clip framed as `to` when it takes one framed as `base` there: zoomed as much about the same
@@ -1813,9 +1964,15 @@ fn caption_clips(
     mut segments: Vec<CaptionSegment>,
     style: &TextStyle,
     [anim_in, anim_out]: [Option<Animation>; 2],
+    place: Option<TransformPatch>,
     canvas: &Canvas,
     min: i64,
 ) -> Result<Vec<Clip>> {
+    // Where CapCut puts auto captions on a reel: a bit below the middle.
+    let mut transform = Transform { y: CAPTION_Y, ..Transform::default() };
+    if let Some(place) = place {
+        place.apply(&mut transform);
+    }
     let mut style = style.clone();
     if style.max_width.is_none() {
         style.max_width = canvas.safe_area().map(|area| area.centered_width(canvas.width as f32));
@@ -1852,8 +2009,6 @@ fn caption_clips(
     Ok(merged
         .into_iter()
         .map(|s| {
-            // Where CapCut puts auto captions on a reel: a bit below the middle.
-            let transform = Transform { y: CAPTION_Y, ..Transform::default() };
             let words = s
                 .words
                 .into_iter()
@@ -2410,7 +2565,7 @@ mod tests {
         let seg =
             |start_us, end_us, text: &str| CaptionSegment { start_us, end_us, text: text.into(), words: Vec::new() };
         let segments = vec![seg(1_000_000, 2_000_000, "over a"), seg(6_000_000, 7_000_000, "over b")];
-        p.apply(EditCmd::AddCaptions { segments, style, anim_in: None, anim_out: None }).unwrap();
+        p.apply(EditCmd::AddCaptions { segments, style, anim_in: None, anim_out: None, transform: None }).unwrap();
         let first = p.tracks[0].clips[0].id.clone();
         let cut = copied(&p, &first);
         p.apply(EditCmd::DeleteClips { clip_ids: vec![first] }).unwrap();
@@ -2650,6 +2805,7 @@ mod tests {
             style: style.clone(),
             anim_in: None,
             anim_out: None,
+            transform: None,
         })
         .unwrap();
         let title =
@@ -3192,6 +3348,7 @@ mod tests {
             style: style.clone(),
             anim_in: None,
             anim_out: None,
+            transform: None,
         })
         .unwrap();
         let track = p.tracks.iter().find(|t| t.name == "Captions").unwrap().id.clone();
@@ -3201,6 +3358,7 @@ mod tests {
             style: style.clone(),
             anim_in: None,
             anim_out: None,
+            transform: None,
         })
         .unwrap();
         let caption_tracks: Vec<_> = p.tracks.iter().filter(|t| t.name == "Captions").collect();
@@ -3212,6 +3370,7 @@ mod tests {
             style: style.clone(),
             anim_in: None,
             anim_out: None,
+            transform: None,
         })
         .unwrap();
         assert_eq!(p.tracks.iter().filter(|t| t.name == "Captions").count(), 2);
@@ -3225,6 +3384,7 @@ mod tests {
             style: style.clone(),
             anim_in: None,
             anim_out: None,
+            transform: None,
         };
         assert!(p.apply(replace).is_err());
         let captions = p.tracks.iter().find(|t| t.is_captions()).unwrap().id.clone();
@@ -3234,6 +3394,7 @@ mod tests {
             style,
             anim_in: None,
             anim_out: None,
+            transform: None,
         })
         .unwrap();
         let title = &p.tracks.iter().find(|t| t.id == titles).unwrap().clips[0].content;
@@ -3250,6 +3411,7 @@ mod tests {
             vec![seg(0, 1_000_000, "first"), seg(1_000_000, 2_000_000, "second")],
             &style,
             [pop, None],
+            None,
             &Project::new("c").canvas,
             33_334,
         )
@@ -3260,7 +3422,7 @@ mod tests {
             "type": "addCaptions", "segments": [], "style": style
         }))
         .unwrap();
-        assert!(matches!(old, EditCmd::AddCaptions { anim_in: None, anim_out: None, .. }));
+        assert!(matches!(old, EditCmd::AddCaptions { anim_in: None, anim_out: None, transform: None, .. }));
     }
 
     #[test]
@@ -3282,6 +3444,7 @@ mod tests {
             vec![seg(0, 1_000_000, "first"), seg(0, 2_000_000, "second"), seg(1_500_000, 3_000_000, "third")],
             &style,
             [None, None],
+            None,
             &Project::new("c").canvas,
             33_334,
         )
@@ -3368,7 +3531,8 @@ mod tests {
             keywords: None,
         };
         let seg = CaptionSegment { start_us: 1_000_000, end_us: 3_000_000, text: "jsem se".into(), words: Vec::new() };
-        p.apply(EditCmd::AddCaptions { segments: vec![seg], style, anim_in: None, anim_out: None }).unwrap();
+        p.apply(EditCmd::AddCaptions { segments: vec![seg], style, anim_in: None, anim_out: None, transform: None })
+            .unwrap();
         let clip_id = p.tracks.iter().find(|t| t.is_captions()).unwrap().clips[0].id.clone();
         // A keyframe at 2.5 s on the timeline, inside the part that stays.
         let keyframes = vec![Keyframe { t_us: 1_500_000, transform: Transform::default(), ease: Ease::Linear }];
@@ -3416,6 +3580,7 @@ mod tests {
                 style,
                 anim_in: None,
                 anim_out: None,
+                transform: None,
             })
             .unwrap();
             let mut overlay = p.tracks[0].clone();
@@ -3480,8 +3645,15 @@ mod tests {
                 word("jak", 3200, 3800),
             ],
         };
-        let out =
-            p.apply(EditCmd::AddCaptions { segments: vec![segment], style, anim_in: None, anim_out: None }).unwrap();
+        let out = p
+            .apply(EditCmd::AddCaptions {
+                segments: vec![segment],
+                style,
+                anim_in: None,
+                anim_out: None,
+                transform: None,
+            })
+            .unwrap();
         (p, out.select[0].clone())
     }
 
@@ -3638,7 +3810,13 @@ mod tests {
         let mut p = project();
         let wrong = segment(0, "Ahoj světe", vec![word("Ahoj", 0), word("svete", 250_000)]);
         let error = p
-            .apply(EditCmd::AddCaptions { segments: vec![wrong], style: style.clone(), anim_in: None, anim_out: None })
+            .apply(EditCmd::AddCaptions {
+                segments: vec![wrong],
+                style: style.clone(),
+                anim_in: None,
+                anim_out: None,
+                transform: None,
+            })
             .unwrap_err();
         assert!(error.to_string().contains("Caption words must be the caption text"), "{error}");
         // Segments starting within a frame merge; the words of both stay, at their times.
@@ -3648,7 +3826,8 @@ mod tests {
             segment(1_000_000, "bez", vec![word("bez", 1_000_000)]),
             segment(1_010_000, "slov", Vec::new()),
         ];
-        p.apply(EditCmd::AddCaptions { segments: merged, style, anim_in: None, anim_out: None }).unwrap();
+        p.apply(EditCmd::AddCaptions { segments: merged, style, anim_in: None, anim_out: None, transform: None })
+            .unwrap();
         let captions = &p.tracks.iter().find(|t| t.is_captions()).unwrap().clips;
         let ClipContent::Text { text, words, .. } = &captions[0].content else { panic!() };
         assert_eq!(

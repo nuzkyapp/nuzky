@@ -503,7 +503,7 @@ pub(crate) mod tests {
         let style = nuzky_engine::edit::caption_presets()[0].style.clone();
         host.session
             .edit(
-                vec![EditCmd::AddCaptions { segments, style, anim_in: None, anim_out: None }],
+                vec![EditCmd::AddCaptions { segments, style, anim_in: None, anim_out: None, transform: None }],
                 None,
                 Expect::default(),
             )

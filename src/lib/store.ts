@@ -1017,11 +1017,11 @@ export function applyCaptionLook(look: CaptionLook) {
 }
 
 /** Changes part of every caption's style (the font, the key words), keeping the rest of each, as one undo step. */
-export function restyleCaptions(patch: Partial<TextStyle>) {
-  return useEditor.getState().edit(
-    (project) =>
-      project.tracks.find(isCaptionTrack)?.clips.flatMap((c): EditCmd[] => (c.content.type === "text" ? [{ type: "updateClip", clipId: c.id, style: { ...c.content.style, ...patch } }] : [])) ?? null,
-  );
+export function restyleCaptions(style: Partial<TextStyle>) {
+  return useEditor.getState().edit((project) => {
+    const track = project.tracks.find(isCaptionTrack);
+    return track ? { type: "restyleTrack", trackId: track.id, style } : null;
+  });
 }
 
 /**

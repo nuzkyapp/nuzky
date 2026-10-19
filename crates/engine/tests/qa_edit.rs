@@ -212,6 +212,7 @@ fn equal_start_captions_do_not_overlap() {
             style,
             anim_in: None,
             anim_out: None,
+            transform: None,
         },
         None,
     );

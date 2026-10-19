@@ -1078,7 +1078,15 @@ mod tests {
         // The longest reel caption, 15 characters, is wider than the safe area at 95 px and wraps.
         let segment =
             CaptionSegment { start_us: 0, end_us: 1_000_000, text: "Největší rozdíl".into(), words: Vec::new() };
-        project.apply(EditCmd::AddCaptions { segments: vec![segment], style, anim_in: None, anim_out: None }).unwrap();
+        project
+            .apply(EditCmd::AddCaptions {
+                segments: vec![segment],
+                style,
+                anim_in: None,
+                anim_out: None,
+                transform: None,
+            })
+            .unwrap();
         let ClipContent::Text { style, .. } = &project.tracks[1].clips[0].content else { panic!() };
         assert_eq!(style.max_width, Some(720.0));
         let quad = layer_bounds(&project, 500_000, &mut TextRenderer::new())[0].1;
@@ -1213,7 +1221,15 @@ mod tests {
             text: "Kůň úpěl ódy".into(),
             words: vec![word("Kůň", 100_000, 300_000), word("úpěl", 400_000, 700_000), word("ódy", 700_000, 1_000_000)],
         };
-        project.apply(EditCmd::AddCaptions { segments: vec![segment], style, anim_in: None, anim_out: None }).unwrap();
+        project
+            .apply(EditCmd::AddCaptions {
+                segments: vec![segment],
+                style,
+                anim_in: None,
+                anim_out: None,
+                transform: None,
+            })
+            .unwrap();
         project
     }
 

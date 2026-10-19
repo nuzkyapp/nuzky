@@ -1,5 +1,5 @@
 use nuzky_engine::{
-    edit::{CaptionPreset, EditCmd, MotionKind, TimeRange},
+    edit::{CaptionPreset, EditCmd, MotionKind, TimeRange, TransformPatch},
     export::{Delivery, Quality},
     model::{TextStyle, ThumbnailFormat, Transform},
 };
@@ -392,6 +392,9 @@ pub struct Captions {
     pub style_preset: Option<String>,
     pub max_words: Option<usize>,
     pub max_chars: Option<usize>,
+    /// Where the captions go, only the fields to change, e.g. {"y": 0.3}: x and y offset the centre from the
+    /// canvas centre as a fraction of its width and height. Captions start at x 0, y 0.15, scale 1.
+    pub transform: Option<TransformPatch>,
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
