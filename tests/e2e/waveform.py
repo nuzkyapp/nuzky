@@ -1,7 +1,7 @@
 """A one-hour recording on the timeline: the waveform of the part on screen shows while the sound of the file is
 still being prepared, and every bar on screen matches the sound FFmpeg decodes from the whole file, at the start
-and half an hour in. Clips of the same file draw from the same loaded blocks. The time to the first waveform and
-the app's memory go to tmp-test/repro/waveform/measure.json."""
+and half an hour in, and at the clip's volume once it is turned down or up. Clips of the same file draw from the
+same loaded blocks. The time to the first waveform and the app's memory go to tmp-test/repro/waveform/measure.json."""
 import json, subprocess, threading, time
 from pathlib import Path
 
@@ -47,7 +47,8 @@ return {bars, lane: to - from, dpr: window.devicePixelRatio || 1};"""
 CLIP = """const st = window.__nuzky.store.getState();
 for (const t of st.snap.project.tracks) for (const c of t.clips)
   if (c.content.type === 'media' && c.content.assetId === arguments[0])
-    return {id: c.id, startUs: c.startUs, durationUs: c.durationUs, sourceInUs: c.content.sourceInUs, speed: c.content.speed};
+    return {id: c.id, startUs: c.startUs, durationUs: c.durationUs, sourceInUs: c.content.sourceInUs, speed: c.content.speed,
+            volume: c.content.volume};
 return null;"""
 
 
@@ -86,7 +87,8 @@ def compare(seen, clip, peaks_from, peaks):
             raise RuntimeError(f'the reference does not cover peaks {lo}..{hi}')
         window = peaks[lo - peaks_from:hi - peaks_from].astype(float)
         peak = window[0] + (window[1] - window[0]) * (x - lo) if b - a < 1 else window.max()
-        level = max(0.0, 1 + 20 * np.log10(peak / 255) / RANGE_DB) if peak > 0 else 0.0
+        gain = clip['volume']
+        level = min(1.0, max(0.0, 1 + 20 * np.log10(peak * gain / 255) / RANGE_DB)) if peak > 0 and gain > 0 else 0.0
         expected = max(int(np.floor(seen['dpr'] + 0.5)), int(np.floor(level * column['height'] + 0.5)))
         worst = max(worst, abs(column['bar'] - expected))
         wrong += column['bar'] != expected
@@ -246,6 +248,19 @@ def waveform(r):
     r.shot('3b-start-zoomed-in')
     if r.check('zoomed in, the waveform at the start draws', close):
         check_against_reference(r, 'the start zoomed in, bars blending between peaks', close, clip, 0)
+        # The volume moves every bar by as many dB as it changes the sound: 18 % lowers them, 200 % raises the loud
+        # ones to the top edge.
+        shown = close
+        for volume, name in ((0.18, '18'), (2.0, '200')):
+            r.s.call('window.__nuzky.store.getState().edit({type: "updateClip", clipId: arguments[0], volume: arguments[1]})',
+                     clip['id'], volume)
+            changed = wait(lambda: (seen := visible_bars(r, clip['id'])) and seen['bars'] != shown['bars'] and seen, 10, 0.05)
+            r.shot(f'3c-volume-{name}')
+            if r.check(f'at {name} % volume the bars on screen change height', changed):
+                check_against_reference(r, f'the start at {name} % volume', changed, r.s.run(CLIP, asset), 0)
+                shown = changed
+        r.s.call('window.__nuzky.store.getState().edit({type: "updateClip", clipId: arguments[0], volume: 1})', clip['id'])
+        wait(lambda: r.s.run(CLIP, asset)['volume'] == 1, 5)
     r.s.run("window.__nuzky.store.getState().setZoom(4)")
     wait(lambda: r.s.run('return window.__nuzky.store.getState().zoom') == 4, 5)
 

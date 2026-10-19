@@ -42,7 +42,8 @@ function barPeak(blocks: Record<number, WaveBlock> | undefined, a: number, b: nu
 }
 
 /**
- * Peak bars rising from the bottom edge, for the source range a clip plays; `speed` stretches it like the renderer.
+ * Peak bars rising from the bottom edge, for the source range a clip plays; `speed` stretches it like the renderer and
+ * `gain`, the clip's volume, raises or lowers the bars by as many dB as it changes the sound, up to full scale.
  * Only `visible` (px of the clip) is drawn, at the screen's pixel density, from the blocks of peaks under it and one
  * block around; bars whose peaks are not loaded yet stay empty. Without `visible` it fits its container.
  */
@@ -51,6 +52,7 @@ export function Waveform({
   sourceInUs,
   durationUs,
   speed,
+  gain = 1,
   width,
   visible,
   color,
@@ -60,6 +62,7 @@ export function Waveform({
   sourceInUs: number;
   durationUs: number;
   speed: number;
+  gain?: number;
   width: number;
   visible?: [number, number];
   color: string;
@@ -107,12 +110,12 @@ export function Waveform({
     for (let x = Math.ceil(from / PITCH) * PITCH; x < to; x += PITCH) {
       const peak = barPeak(blocks, first + (x / across) * span, first + (Math.min(x + PITCH, across) / across) * span);
       if (peak === undefined) continue;
-      const level = peak > 0 ? Math.max(0, 1 + (20 * Math.log10(peak / 255)) / RANGE_DB) : 0;
+      const level = peak > 0 && gain > 0 ? Math.min(1, Math.max(0, 1 + (20 * Math.log10((peak * gain) / 255)) / RANGE_DB)) : 0;
       const bar = Math.max(Math.round(dpr), Math.round(level * h));
       const left = Math.round((x - from) * dpr);
       ctx.fillRect(left, h - bar, Math.round((x + BAR - from) * dpr) - left, bar);
     }
-  }, [blocks, from, to, first, span, across, color, dpr]);
+  }, [blocks, from, to, first, span, gain, across, color, dpr]);
   if (!shown) return null;
   return <canvas ref={ref} className={`pointer-events-none ${fits ? "w-full" : ""} ${className}`} style={visible && { left: from, width: to - from }} />;
 }

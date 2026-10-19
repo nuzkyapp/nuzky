@@ -154,7 +154,7 @@ export const ClipView = memo(function ClipView({
     >
       {strip && c.type === "media" && <FilmstripTiles strip={strip} sourceInUs={c.sourceInUs} speed={speed} zoom={zoom} width={width} height={innerH} visible={local} />}
       {sound && asset && c.type === "media" && (
-        <Waveform assetId={asset.id} sourceInUs={c.sourceInUs} durationUs={durationUs} speed={speed} width={width} visible={local} color="#5fd497" className="absolute top-[5px] h-[calc(100%-8px)]" />
+        <Waveform assetId={asset.id} sourceInUs={c.sourceInUs} durationUs={durationUs} speed={speed} gain={c.volume} width={width} visible={local} color="#5fd497" className="absolute top-[5px] h-[calc(100%-8px)]" />
       )}
       {(fadeIn > 0 || fadeOut > 0) && (
         // The fades as ramps over the waveform: the shaded corner above the line is how much quieter the sound plays there.
@@ -175,7 +175,7 @@ export const ClipView = memo(function ClipView({
       )}
       {soundStrip && (
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-3.5 bg-black/55">
-          <Waveform assetId={asset.id} sourceInUs={c.sourceInUs} durationUs={durationUs} speed={speed} width={width} visible={local} color="#7ee2a8" />
+          <Waveform assetId={asset.id} sourceInUs={c.sourceInUs} durationUs={durationUs} speed={speed} gain={c.volume} width={width} visible={local} color="#7ee2a8" />
         </div>
       )}
 
