@@ -119,6 +119,7 @@ fn recap(dir: &Path, music: bool) -> Recap {
         transcribed: true,
         snips: ["scissors-snip", "scissors-snip-2", "scissors-snip-3"].map(sound).to_vec(),
         whoosh: None,
+        land: None,
     }
 }
 
@@ -202,7 +203,7 @@ fn recap_snaps_each_cut_shut_on_the_bar_and_ends_on_the_finished_cut_as_the_rend
     assert_eq!(reds(&kept, (900, 1090)) + reds(&kept, (1312, 1380)), 0, "nothing kept is struck or labelled");
 
     // Once both pieces have snapped shut, the bar ends where 15.5 s of 20 s ends.
-    let landed = frame(&out, at(hook + fast + landing - 100_000));
+    let landed = frame(&out, at(hook + fast + landing - 500_000));
     let end = bar_x(15_500_000);
     let lit = |x: usize| pixel(&landed, x, 1028).iter().all(|&c| c > 170);
     assert!(
@@ -349,6 +350,7 @@ fn a_transition_into_a_clip_past_the_finished_cuts_sample_still_plays_its_sound(
         transcribed: false,
         snips: Vec::new(),
         whoosh: None,
+        land: None,
     };
     let out = d.join("recap.mp4");
     let options = RecapOptions { end_card: false, replace_existing: true };

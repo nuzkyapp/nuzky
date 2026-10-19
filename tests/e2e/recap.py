@@ -6,11 +6,11 @@ from e2e.home import resize
 from e2e.reel import poll
 
 DIALOG = "return document.querySelector('[role=dialog]')?.innerText ?? ''"
-# The recording plays in the recap after 1.2 s of opening, then the new length lands for 1.4 s; with the end card the
+# The recording plays in the recap after 1.2 s of opening, then the new length lands for 2 s; with the end card the
 # recap ends on 2 s of it. While a cut plays, the picture steps back to 90 % and leaves the graphite around it: the
 # test pattern of talk.mp4 fills its right edge when kept and the edge goes dark in a cut.
 OPENING_S = 1.2
-LANDING_S = 1.4
+LANDING_S = 2.0
 END_CARD_S = 2.0
 EDGE = (1069, 400, 1080, 1500)
 
@@ -64,6 +64,12 @@ def red_share(image, box):
     """Share of the box that is the red cuts are marked with."""
     pixels = list(image.crop(box).getdata())
     return sum(1 for (red, green, blue) in pixels if red > 200 and green < 110 and blue < 110) / max(1, len(pixels))
+
+
+def chip_share(image, box):
+    """Share of the box in the red of a cut's chip, #ff453a, which the test pattern's pure red is not."""
+    pixels = list(image.crop(box).getdata())
+    return sum(1 for (red, green, blue) in pixels if red > 225 and 45 < green < 95 and 35 < blue < 85) / max(1, len(pixels))
 
 
 def dark_share(image, box):
@@ -125,8 +131,8 @@ def recap(r):
         r.check('the cut steps the picture back to the graphite and the kept passage fills the frame',
                 dark_share(cut, EDGE) > 0.9 and dark_share(kept, EDGE) < 0.05, [stepped, dark_share(kept, EDGE)])
         r.check("the cut's red chip hangs under the bar and the kept passage has none",
-                red_share(cut, (60, 1312, 900, 1380)) > 0.02 and red_share(kept, (60, 1312, 900, 1380)) == 0,
-                [red_share(cut, (60, 1312, 900, 1380)), red_share(kept, (60, 1312, 900, 1380))])
+                chip_share(cut, (60, 1312, 900, 1380)) > 0.02 and chip_share(kept, (60, 1312, 900, 1380)) == 0,
+                [chip_share(cut, (60, 1312, 900, 1380)), chip_share(kept, (60, 1312, 900, 1380))])
         r.check('the cut words are struck through in the caption', red_share(cut, (60, 900, 900, 1090)) > 0.002,
                 red_share(cut, (60, 900, 900, 1090)))
         frame(r, video, 1.0, 'recap-opening')

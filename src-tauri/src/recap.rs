@@ -130,6 +130,7 @@ pub async fn start_recap(
             let sound = |id: &str| nuzky_mcp::sounds::asset(id, &cache, || cancel.load(Ordering::Relaxed), |_| {});
             recap.snips = SNIPS.iter().map(|id| sound(id)).collect::<Result<_, _>>()?;
             recap.whoosh = Some(sound("nuzky:swish-short")?);
+            recap.land = Some(sound("nuzky:soft-hit")?);
             nuzky_vision::matte::prepare(&recap.after, &cache, &nuzky_analysis::models_dir(), &cancel, &mut |p| {
                 rep.progress(p, Some("Finding the person"));
             })?;

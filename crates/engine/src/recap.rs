@@ -38,10 +38,11 @@ pub struct Recap {
     pub words: Vec<RecapWord>,
     /// Every file a cut touches has a transcript, so words, retakes and pauses are known.
     pub transcribed: bool,
-    /// Built-in sounds the recap plays: a snip of scissors as each cut passes, taking turns, and a whoosh
-    /// between its parts.
+    /// Built-in sounds the recap plays: a snip of scissors as each cut snaps shut, taking turns, a whoosh between
+    /// its parts and a soft hit as the new length lands.
     pub snips: Vec<Asset>,
     pub whoosh: Option<Asset>,
+    pub land: Option<Asset>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -100,8 +101,8 @@ pub struct RecapOptions {
 const HOOK_US: i64 = 1_200_000;
 /// The recording plays at least this fast and takes at most this long.
 const FAST_MIN_US: i64 = 3_000_000;
-const FAST_MAX_US: i64 = 17_000_000;
-const LANDING_US: i64 = 1_400_000;
+const FAST_MAX_US: i64 = 16_000_000;
+const LANDING_US: i64 = 2_000_000;
 const SAMPLE_MAX_US: i64 = 8_000_000;
 const END_CARD_US: i64 = 2_000_000;
 /// A cut stays on screen this long when there is room, so it is seen while the recording races past it.
@@ -178,7 +179,9 @@ impl Race {
             t += screen;
             at = piece.end_us;
         }
-        let length = t + scale(before - at, kept_screen_us, kept_us);
+        // The last piece snaps shut and the picture springs back before the race ends.
+        let length =
+            (t + scale(before - at, kept_screen_us, kept_us)).max(shown.last().map_or(0, |s| s.end + RETURN_US));
         Self { pieces, shown, kept_us, kept_screen_us, length }
     }
 
@@ -205,13 +208,18 @@ impl Race {
         self.shown.iter().map(|shown| ease_in_out(progress(t - shown.end, SNAP_US))).collect()
     }
 
-    /// How far the picture has stepped back at `t`: in while a piece plays, back out after it.
+    /// How far the picture has stepped back at `t`: in while a piece plays, back out after it, or staying back
+    /// when the next piece comes soon, so many cuts close together do not flicker.
     fn recede(&self, t: i64) -> f32 {
         self.shown
             .iter()
-            .map(|shown| {
+            .enumerate()
+            .map(|(i, shown)| {
+                let next = self.shown.get(i + 1);
                 if shown.contains(&t) {
                     ease_out(progress(t - shown.start, RECEDE_US))
+                } else if let Some(next) = next.filter(|n| n.start - shown.end < STAY_BACK_US && t < n.end) {
+                    if t >= shown.end && t < next.end { 1.0 } else { 0.0 }
                 } else if t >= shown.end {
                     1.0 - ease_out(progress(t - shown.end, RETURN_US))
                 } else {
@@ -291,7 +299,7 @@ pub fn render(
         bail!("OUTPUT_EXISTS: {} already exists; choose a new file name", credits_out.display());
     }
     prepare_sound(&recap.after, cache_dir, cancel)?;
-    for asset in recap.snips.iter().chain(&recap.whoosh) {
+    for asset in recap.snips.iter().chain(&recap.whoosh).chain(&recap.land) {
         ensure_pcm(cache_dir, asset, |_| check_cancel(cancel))?;
     }
     crate::matte::check(cache_dir, &recap.after)?;
@@ -317,7 +325,9 @@ const BAR_W: f32 = RIGHT - LEFT;
 /// The bar while the recording races, and the caption's last line above it.
 const BAR_Y: f32 = 1240.0;
 const BAR_H: f32 = 40.0;
-const CAPTION_BOTTOM: f32 = 1075.0;
+const CAPTION_BOTTOM: f32 = 1060.0;
+/// The speed and the length sit on this baseline above the bar's top, clear of its playhead.
+const LABEL_ABOVE: f32 = 42.0;
 const CAPTION_SIZE: f32 = 62.0;
 
 /// Behind everything, and the dark seam where a cut snapped shut.
@@ -348,6 +358,12 @@ const SAMPLED_SPEED: f64 = 8.0;
 const RECEDE_US: i64 = 220_000;
 const RETURN_US: i64 = 320_000;
 const SNAP_US: i64 = 280_000;
+/// The new length has grown to its size this far into the landing, where its hit sounds.
+const LAND_HIT_US: i64 = 860_000;
+/// The picture stays back between pieces closer together than this, so it never comes back for less than 200 ms.
+const STAY_BACK_US: i64 = RETURN_US + 200_000;
+/// What is written over the picture fades this fast where it goes.
+const TEXT_OUT_US: i64 = 200_000;
 /// The finished cut shows its bar this long, then the bar fades.
 const AFTER_BAR_US: i64 = 3_000_000;
 const FADE_US: i64 = 400_000;
@@ -543,13 +559,13 @@ fn faded(mut draw: Draw, opacity: f32) -> Draw {
     draw
 }
 
-/// A band of soft shadow across the whole width from `top` to `bottom`, darkest in its middle, so what is written
-/// over the picture reads on bright footage.
+/// A band of soft shadow across the whole width from `top` to `bottom`, from nothing at its edges to 70 % in its
+/// middle, so what is written over the picture reads on bright footage.
 fn scrim(top: f32, bottom: f32, opacity: f32) -> Draw {
     const STEPS: usize = 32;
     let data = (0..STEPS)
         .flat_map(|i| {
-            let alpha = (std::f32::consts::PI * (i as f32 + 0.5) / STEPS as f32).sin().powf(0.7) * 0.62 * opacity;
+            let alpha = (std::f32::consts::PI * i as f32 / (STEPS - 1) as f32).sin().powi(2) * 0.7 * opacity;
             [0, 0, 0, (alpha * 255.0).round() as u8]
         })
         .collect();
@@ -634,7 +650,7 @@ impl<'a> Painter<'a> {
         let text = self.text(text, &style(size, MUTED, true, 0.0));
         let x = right - text.ink();
         draws.push(text.at(x, baseline));
-        draws.push(rect(x - 4.0, baseline - 0.33 * size - 3.0, text.ink() + 8.0, 6.0, RED, 3.0));
+        draws.push(rect(x - 4.0, baseline - 0.33 * size - 2.0, text.ink() + 8.0, 4.0, RED, 2.0));
     }
 
     /// The numbers the recap counts, as far as `at` of the recording, as pieces of a row.
@@ -716,19 +732,18 @@ impl<'a> Painter<'a> {
     /// The recording's first picture under the whole bar, drawn left to right, its cuts popping in red.
     fn opening(&mut self, draws: &mut Vec<Draw>, t: i64) -> Result<()> {
         draws.push(self.picture(false, 0, 0.0, 1.0, -0.3)?);
-        draws.push(scrim(900.0, 1460.0, 1.0));
-        let drawn = ease_out(progress(t, 450_000));
+        draws.push(scrim(860.0, 1480.0, 1.0));
+        // A third of the bar is there from the first frame, which a platform may show as the video's picture.
+        let drawn = lerp(0.35, 1.0, ease_out(progress(t, 450_000)));
         let n = self.race.pieces.len() as i64;
         let stagger = (300_000 / n.max(1)).min(60_000);
         let shown: Vec<f32> = (0..n).map(|i| progress(t - 450_000 - i * stagger, 120_000)).collect();
         let snapped = vec![0.0; self.race.pieces.len()];
         self.bar(draws, BAR_Y, BAR_H, &snapped, None, drawn, &shown);
-        let mut labels = Vec::new();
         let cuts = self.text(&count(self.recap.cuts.len(), "cut", "cuts"), &style(46.0, LABEL, false, 0.0));
-        labels.push(cuts.at(LEFT, BAR_Y - 36.0));
+        draws.push(cuts.at(LEFT, BAR_Y - LABEL_ABOVE));
         let length = self.text(&duration_text(self.totals.before_us), &style(112.0, FG, true, 0.0));
-        labels.push(length.at(RIGHT - length.ink(), BAR_Y - 26.0));
-        draws.extend(labels.into_iter().map(|d| faded(d, drawn)));
+        draws.push(length.at(RIGHT - length.ink(), BAR_Y - LABEL_ABOVE));
         Ok(())
     }
 
@@ -740,21 +755,29 @@ impl<'a> Painter<'a> {
         if piece.is_none() && speed > SAMPLED_SPEED {
             into -= into % 100_000;
         }
-        let (at, speed, _) = self.race.at(into);
+        let (at, _, piece) = self.race.at(into);
         let at = at.min(before - 1);
         let back = self.race.recede(into);
         draws.push(self.picture(false, at, back, 1.0, 0.0)?);
-        draws.push(scrim(900.0, 1460.0, 1.0));
-        self.caption(draws, at, t);
+        draws.push(scrim(860.0, 1480.0, 1.0));
+        // The caption leaves while a pause plays, so the chip alone says what goes, and with the speed as the race ends.
+        let ending = 1.0 - progress(into - (self.race.length - TEXT_OUT_US), TEXT_OUT_US);
+        let pause = piece.is_some_and(|i| self.recap.transcribed && self.race.pieces[i].words == 0);
+        let mut caption = Vec::new();
+        self.caption(&mut caption, at, t);
+        let shown = ending * if pause { 1.0 - back } else { 1.0 };
+        draws.extend(caption.into_iter().map(|d| faded(d, shown)));
         let snapped = self.race.snapped(into);
         let ones = vec![1.0; snapped.len()];
         let end = self.bar(draws, BAR_Y, BAR_H, &snapped, Some(at), 1.0, &ones);
-        let speed = self.text(&speed_text(speed), &style(46.0, LABEL, false, 0.0));
-        draws.push(speed.at(LEFT, BAR_Y - 36.0));
+        // The speed of the kept footage: the cuts' own speeds would flicker past too fast to read.
+        let kept = self.race.kept_us as f64 / self.race.kept_screen_us as f64;
+        let speed = self.text(&speed_text(kept), &style(46.0, LABEL, false, 0.0));
+        draws.push(faded(speed.at(LEFT, BAR_Y - LABEL_ABOVE), ending * (1.0 - back)));
         let gone: f64 = self.race.pieces.iter().zip(&snapped).map(|(p, s)| p.removed_us as f64 * *s as f64).sum();
         let length = self.text(&duration_text(before - gone as i64), &style(112.0, FG, true, 0.0));
         let right = end.max(LEFT + speed.ink() + 40.0 + length.ink());
-        draws.push(length.at(right - length.ink(), BAR_Y - 26.0));
+        draws.push(length.at(right - length.ink(), BAR_Y - LABEL_ABOVE));
         // The chip of the piece playing or snapping shut hangs under it, saying what goes.
         let chip = self.race.shown.iter().rposition(|s| s.start <= into && into < s.end + SNAP_US);
         if let Some(i) = chip {
@@ -770,43 +793,52 @@ impl<'a> Painter<'a> {
         Ok(())
     }
 
-    /// The new length lands: the bar rises with the outline of the length it had, the number grows above it and
-    /// the old length and what went show under it.
+    /// The new length lands: the bar rises with the outline of the length it had, the number rides on it and then
+    /// grows above it, and the old length and what went show under it, until it all fades into the finished cut.
     fn landing(&mut self, draws: &mut Vec<Draw>, u: i64) -> Result<()> {
         let before = self.recap.before.duration_us();
-        draws.push(self.picture(false, before - 1, 0.0, 1.0, -1.4 * ease_out(progress(u, 300_000)))?);
+        let dark = ease_out(progress(u, 300_000)) * (1.0 - ease_in_out(progress(u - (LANDING_US - 300_000), 300_000)));
+        draws.push(self.picture(false, before - 1, 0.0, 1.0, -1.4 * dark)?);
+        let leaving = 1.0 - progress(u - (LANDING_US - TEXT_OUT_US), TEXT_OUT_US);
         let rise = ease_in_out(progress(u, 500_000));
         let (y, h) = (lerp(BAR_Y, 1000.0, rise), lerp(BAR_H, 56.0, rise));
-        draws.push(scrim(900.0, 1460.0, 1.0 - rise));
+        let mut over =
+            vec![scrim(860.0, 1480.0, 1.0 - rise), faded(outline(LEFT, y, BAR_W, h, 3.0, "#ffffff52"), rise)];
         let snapped = self.race.snapped(self.race.length + u);
         let ones = vec![1.0; snapped.len()];
-        draws.push(faded(outline(LEFT, y, BAR_W, h, 3.0, "#ffffff52"), rise));
-        let end = self.bar(draws, y, h, &snapped, Some(before), 1.0, &ones);
+        let end = self.bar(&mut over, y, h, &snapped, Some(before), 1.0, &ones);
+        // Once the bar has arrived, the length grows from riding on its end to the left edge.
         let length = self.text(&duration_text(self.totals.after_us), &style(250.0, FG, true, 0.0));
-        let grow = ease_in_out(progress(u - 100_000, 500_000));
-        let pop = 1.0 + 0.03 * (std::f32::consts::PI * progress(u - 600_000, 240_000)).sin();
-        let scale = lerp(112.0 / 250.0, 1.0, grow) * pop;
-        let x = lerp((end - length.ink() * 112.0 / 250.0).max(LEFT), LEFT, grow);
-        draws.push(length.scaled(x, lerp(BAR_Y - 26.0, y - 64.0, grow), scale));
-        let under = ease_out(progress(u - 300_000, 300_000));
+        let grow = ease_out(progress(u - 500_000, 360_000));
+        let pop = 1.0 + 0.03 * (std::f32::consts::PI * progress(u - LAND_HIT_US, 240_000)).sin();
+        let small = 112.0 / 250.0;
+        let x = lerp((end - length.ink() * small).max(LEFT), LEFT, grow);
+        over.push(length.scaled(x, y - LABEL_ABOVE, lerp(small, 1.0, grow) * pop));
+        let under = ease_out(progress(u - 500_000, 300_000));
         let mut lines = Vec::new();
-        self.struck(&mut lines, &duration_text(self.totals.before_us), 46.0, RIGHT, y + h + 70.0);
-        let stats = self.stats(i64::MAX, 52.0, FG, LABEL);
+        self.struck(&mut lines, &duration_text(self.totals.before_us), 64.0, RIGHT, y + h + 86.0);
+        let mut stats = self.stats(i64::MAX, 52.0, FG, LABEL);
+        if self.recap.transcribed {
+            stats.insert(0, ("Cut".to_owned(), style(52.0, LABEL, false, 0.0)));
+        }
         let size = 52.0 * (BAR_W / self.row_width(&stats, 16.0)).min(1.0);
-        let stats = self.stats(i64::MAX, size, FG, LABEL);
-        self.row(&mut lines, LEFT, y + h + 150.0, &stats, 16.0);
-        draws.extend(lines.into_iter().map(|d| faded(d, under)));
+        for (_, style) in &mut stats {
+            style.font_size = size;
+        }
+        self.row(&mut lines, LEFT, y + h + 176.0, &stats, 16.0);
+        over.extend(lines.into_iter().map(|d| faded(d, under)));
+        draws.extend(over.into_iter().map(|d| faded(d, leaving)));
         Ok(())
     }
 
     /// The finished cut, with a thin bar of its length playing along under it for a few seconds.
     fn finished(&mut self, draws: &mut Vec<Draw>, into: i64) -> Result<()> {
         draws.push(self.picture(true, into, 0.0, 1.0, 0.0)?);
-        let opacity = 1.0 - progress(into - AFTER_BAR_US, FADE_US);
+        let opacity = progress(into, TEXT_OUT_US) * (1.0 - progress(into - AFTER_BAR_US, FADE_US));
         if opacity <= 0.0 {
             return Ok(());
         }
-        let mut bar = vec![scrim(1200.0, 1480.0, 1.0)];
+        let mut bar = vec![scrim(1100.0, 1500.0, 0.57)];
         let ones = vec![1.0; self.race.pieces.len()];
         let end = self.bar(&mut bar, 1352.0, 14.0, &ones, Some(self.recorded(into)), 1.0, &ones);
         let length = self.text(&duration_text(self.totals.after_us), &style(60.0, FG, true, 0.0));
@@ -827,11 +859,11 @@ impl<'a> Painter<'a> {
         let ones = vec![1.0; self.race.pieces.len()];
         card.push(outline(LEFT, 930.0, BAR_W, 32.0, 3.0, "#ffffff47"));
         self.bar(&mut card, 930.0, 32.0, &ones, Some(self.recap.before.duration_us()), 1.0, &ones);
-        let after = self.text(&duration_text(self.totals.after_us), &style(46.0, FG, true, 0.0));
-        card.push(after.at(LEFT, 1040.0));
-        self.struck(&mut card, &duration_text(self.totals.before_us), 46.0, RIGHT, 1040.0);
-        let site = self.text("nuzky.app", &style(56.0, LABEL, false, 0.0));
-        card.push(site.at(LEFT, 1160.0));
+        let after = self.text(&duration_text(self.totals.after_us), &style(112.0, FG, true, 0.0));
+        card.push(after.at(LEFT, 1090.0));
+        self.struck(&mut card, &duration_text(self.totals.before_us), 64.0, RIGHT, 1090.0);
+        let site = self.text("nuzky.app", &style(46.0, LABEL, false, 0.0));
+        card.push(site.at(LEFT, 1180.0));
         draws.extend(card.into_iter().map(|d| faded(d, shown)));
         Ok(())
     }
@@ -880,7 +912,7 @@ impl<'a> Painter<'a> {
         }
         for ((piece, &s), &come) in self.race.pieces.iter().zip(snapped).zip(shown) {
             let x = self.x_at(piece.start_us, snapped);
-            let w = ((BAR_W * piece.len() as f32 / before).max(PIECE_MIN_PX) * (1.0 - s)).min(reach - x);
+            let w = ((BAR_W * piece.removed_us as f32 / before).max(PIECE_MIN_PX) * (1.0 - s)).min(reach - x);
             if come > 0.0 && w > 0.5 {
                 let round = if x <= LEFT + h / 2.0 || x + w >= end - h / 2.0 { h / 2.0 } else { 3.0 };
                 draws.push(faded(rect(x, y, w, h, RED, round), come));
@@ -1039,6 +1071,10 @@ impl Sound {
             cues.assets.push(whoosh.clone());
             cues.tracks.push(track("whooshes", clips));
         }
+        if let Some(land) = &recap.land {
+            cues.assets.push(land.clone());
+            cues.tracks.push(track("landing", vec![clip(land, hook + fast + LAND_HIT_US, 0.5)]));
+        }
         let stop = start + sample;
         let (soundtrack, music) = soundtrack(&recap.after, start, stop + end_card, end_card);
         let mut sound = Self {
@@ -1194,6 +1230,7 @@ mod tests {
             transcribed: false,
             snips: Vec::new(),
             whoosh: None,
+            land: None,
         }
     }
 
