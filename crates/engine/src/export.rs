@@ -11,7 +11,7 @@ use ffmpeg_next as ff;
 
 use crate::audio::{Chain, Mixer, chains, has_audio};
 use crate::loudness::{Limiter, Meter, db_to_gain};
-use crate::media::{init, set_sws_colorspace};
+use crate::media::{init, set_sws_colorspace_raw};
 use crate::model::{CHANNELS, Clip, ClipContent, Project, SAMPLE_RATE, TrackKind};
 use crate::render::{Pending, Renderer, Wait};
 
@@ -501,7 +501,7 @@ pub(crate) struct Mp4Writer {
     fps: u32,
     w: u32,
     h: u32,
-    scaler: scaling::Context,
+    to_yuv: ToYuv,
     rgba: frame::Video,
     yuv: frame::Video,
     aframe_size: usize,
@@ -576,8 +576,6 @@ impl Mp4Writer {
         header_opts.set("movflags", "+faststart");
         octx.write_header_with(header_opts)?;
 
-        let mut scaler = scaling::Context::get(Pixel::RGBA, w, h, Pixel::YUV420P, w, h, scaling::Flags::BICUBIC)?;
-        set_sws_colorspace(&mut scaler, ff::ffi::SWS_CS_DEFAULT, true, ff::ffi::SWS_CS_ITU709, false);
         Ok(Self {
             octx,
             venc,
@@ -587,7 +585,7 @@ impl Mp4Writer {
             fps,
             w,
             h,
-            scaler,
+            to_yuv: ToYuv::new(w, h)?,
             rgba: frame::Video::new(Pixel::RGBA, w, h),
             yuv: frame::Video::new(Pixel::YUV420P, w, h),
             aframe_size,
@@ -604,7 +602,7 @@ impl Mp4Writer {
         for y in 0..self.h as usize {
             dst[y * stride..y * stride + row].copy_from_slice(&pixels[y * row..(y + 1) * row]);
         }
-        self.scaler.run(&self.rgba, &mut self.yuv)?;
+        self.to_yuv.run(&self.rgba, &mut self.yuv)?;
         self.yuv.set_pts(Some(index as i64));
         self.venc.send_frame(&self.yuv)?;
         self.drain_video()
@@ -652,6 +650,56 @@ impl Mp4Writer {
             packet.write_interleaved(&mut self.octx)?;
         }
         Ok(())
+    }
+}
+
+/// Straight RGBA to the encoder's BT.709 limited-range YUV 4:2:0, on several threads. swscale converts a band of
+/// rows on each, every row as one pass over the whole frame would. It threads only a context given its thread count
+/// before `sws_init_context`, which `scaling::Context` cannot do, and only in `sws_scale_frame`.
+struct ToYuv(*mut ff::ffi::SwsContext);
+
+impl ToYuv {
+    fn new(w: u32, h: u32) -> Result<Self> {
+        use ff::ffi::*;
+        let ctx = Self(unsafe { sws_alloc_context() });
+        if ctx.0.is_null() {
+            bail!("Cannot allocate the colour converter");
+        }
+        let options = [
+            (c"srcw", w as i64),
+            (c"srch", h as i64),
+            (c"src_format", AVPixelFormat::from(Pixel::RGBA) as i64),
+            (c"dstw", w as i64),
+            (c"dsth", h as i64),
+            (c"dst_format", AVPixelFormat::from(Pixel::YUV420P) as i64),
+            (c"sws_flags", scaling::Flags::BICUBIC.bits() as i64),
+            // One per core.
+            (c"threads", 0),
+        ];
+        for (name, value) in options {
+            if unsafe { av_opt_set_int(ctx.0.cast(), name.as_ptr(), value, 0) } < 0 {
+                bail!("The colour converter has no option {name:?}");
+            }
+        }
+        if unsafe { sws_init_context(ctx.0, std::ptr::null_mut(), std::ptr::null_mut()) } < 0 {
+            bail!("Cannot set up the colour converter for {w}x{h}");
+        }
+        unsafe { set_sws_colorspace_raw(ctx.0, SWS_CS_DEFAULT, true, SWS_CS_ITU709, false) };
+        Ok(ctx)
+    }
+
+    fn run(&mut self, rgba: &frame::Video, yuv: &mut frame::Video) -> Result<()> {
+        let result = unsafe { ff::ffi::sws_scale_frame(self.0, yuv.as_mut_ptr(), rgba.as_ptr()) };
+        if result < 0 {
+            return Err(ff::Error::from(result)).context("Converting the frame to YUV failed");
+        }
+        Ok(())
+    }
+}
+
+impl Drop for ToYuv {
+    fn drop(&mut self) {
+        unsafe { ff::ffi::sws_freeContext(self.0) }
     }
 }
 
@@ -907,6 +955,42 @@ mod tests {
             std::fs::remove_file(&out).unwrap();
         }
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn yuv_on_several_threads_is_the_one_pass_conversion() {
+        init();
+        let (w, h) = (1920, 1080);
+        let mut rgba = frame::Video::new(Pixel::RGBA, w, h);
+        let stride = rgba.stride(0);
+        // Noise, so a band edge that filtered or rounded chroma differently would show.
+        let mut seed = 1u32;
+        for row in rgba.data_mut(0).chunks_mut(stride) {
+            for byte in &mut row[..w as usize * 4] {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                *byte = seed as u8;
+            }
+        }
+        let mut one_pass =
+            scaling::Context::get(Pixel::RGBA, w, h, Pixel::YUV420P, w, h, scaling::Flags::BICUBIC).unwrap();
+        crate::media::set_sws_colorspace(&mut one_pass, ff::ffi::SWS_CS_DEFAULT, true, ff::ffi::SWS_CS_ITU709, false);
+        let mut expected = frame::Video::new(Pixel::YUV420P, w, h);
+        one_pass.run(&rgba, &mut expected).unwrap();
+
+        let mut to_yuv = ToYuv::new(w, h).unwrap();
+        let mut threads = 0;
+        assert!(unsafe { ff::ffi::av_opt_get_int(to_yuv.0.cast(), c"threads".as_ptr(), 0, &mut threads) } >= 0);
+        assert!(threads > 1, "the conversion runs on {threads} thread");
+        let mut got = frame::Video::new(Pixel::YUV420P, w, h);
+        to_yuv.run(&rgba, &mut got).unwrap();
+        for plane in 0..3 {
+            let width = got.plane_width(plane) as usize;
+            let row = |f: &frame::Video, y: usize| f.data(plane)[y * f.stride(plane)..][..width].to_vec();
+            let differ = (0..got.plane_height(plane) as usize).filter(|&y| row(&got, y) != row(&expected, y)).count();
+            assert_eq!(differ, 0, "{differ} rows of plane {plane} differ");
+        }
     }
 
     #[test]

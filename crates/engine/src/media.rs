@@ -445,9 +445,19 @@ pub(crate) fn sws_colorspace(space: color::Space) -> i32 {
 
 /// Sets the YUV matrix and range explicitly; swscale would otherwise assume BT.601.
 pub(crate) fn set_sws_colorspace(ctx: &mut scaling::Context, src_cs: i32, src_full: bool, dst_cs: i32, dst_full: bool) {
+    unsafe { set_sws_colorspace_raw(ctx.as_mut_ptr(), src_cs, src_full, dst_cs, dst_full) }
+}
+
+/// `set_sws_colorspace` for a context made without ffmpeg-next; `ptr` must be initialized and not yet freed.
+pub(crate) unsafe fn set_sws_colorspace_raw(
+    ptr: *mut ff::ffi::SwsContext,
+    src_cs: i32,
+    src_full: bool,
+    dst_cs: i32,
+    dst_full: bool,
+) {
     use ff::ffi::*;
     unsafe {
-        let ptr = ctx.as_mut_ptr();
         let (mut inv, mut table) = (std::ptr::null_mut(), std::ptr::null_mut());
         let (mut sr, mut dr, mut b, mut c, mut s) = (0, 0, 0, 0, 0);
         if sws_getColorspaceDetails(ptr, &mut inv, &mut sr, &mut table, &mut dr, &mut b, &mut c, &mut s) < 0 {
