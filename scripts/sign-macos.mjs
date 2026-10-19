@@ -34,6 +34,7 @@ const work = mkdtempSync(path.join(target, 'sign-macos-'));
 const app = path.join(work, 'Nuzky.app');
 const keychainDir = signing.certificate && mkdtempSync(path.join(os.tmpdir(), 'nuzky-signing-'));
 const keychain = keychainDir && path.join(keychainDir, 'signing.keychain-db');
+let searchList;
 try {
   const mount = path.join(work, 'dmg');
   run('hdiutil', ['attach', '-nobrowse', '-readonly', '-mountpoint', mount, dmg]);
@@ -53,6 +54,10 @@ try {
     rmSync(p12);
     // Lets codesign use the key without asking, which nobody could answer on a runner.
     secret('security', ['set-key-partition-list', '-S', 'apple-tool:,apple:,codesign:', '-s', '-k', password, keychain]);
+    // codesign on macOS 14 finds no identity in a keychain outside the search list, even with --keychain.
+    searchList = execFileSync('security', ['list-keychains', '-d', 'user'], { encoding: 'utf8' })
+      .split('\n').map((line) => line.trim().replace(/^"|"$/g, '')).filter(Boolean);
+    run('security', ['list-keychains', '-d', 'user', '-s', keychain, ...searchList]);
   }
   const sign = ['--force', '--timestamp', '--sign', signing.identity, ...(keychain ? ['--keychain', keychain] : [])];
   const frameworks = path.join(app, 'Contents/Frameworks');
@@ -64,6 +69,7 @@ try {
   createDmg(app, dmg, target);
   run('codesign', [...sign, dmg]);
 } finally {
+  if (searchList) spawnSync('security', ['list-keychains', '-d', 'user', '-s', ...searchList], { stdio: 'inherit' });
   if (keychain) spawnSync('security', ['delete-keychain', keychain], { stdio: 'inherit' });
   if (keychainDir) rmSync(keychainDir, { recursive: true, force: true });
   rmSync(work, { recursive: true, force: true });
