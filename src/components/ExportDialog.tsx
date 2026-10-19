@@ -5,7 +5,7 @@ import { videoDir, join } from "@tauri-apps/api/path";
 import { AlertCircle, AlertTriangle, AudioLines, CheckCircle2, ChevronDown, X } from "lucide-react";
 import { api, errorText, plainError } from "../lib/api";
 import { formatLabel } from "../lib/presets";
-import { useCover } from "../lib/cover";
+import { closeExport, useCover } from "../lib/cover";
 import { currentEpoch, projectDuration, useEditor } from "../lib/store";
 import { CoverExport } from "./cover/CoverExport";
 import { LogsButton } from "./Feedback";
@@ -174,16 +174,13 @@ export function ExportDialog() {
     };
   }, [open, what]);
 
-  const close = () => {
+  const close = closeExport;
+  useEffect(() => {
+    if (open) return;
     setError(null);
     setExists(null);
     setCreditsExist(null);
-    // A finished job is shown once; a running one keeps reporting in the top bar.
-    if (job && job.status !== "running") useEditor.setState({ exportJobId: null });
-    const cover = useCover.getState().exportJob;
-    if (cover && useEditor.getState().jobs[cover]?.status !== "running") useCover.setState({ exportJob: null });
-    useEditor.setState({ exportOpen: false });
-  };
+  }, [open]);
 
   const ready = open && options !== null;
   useEffect(() => {

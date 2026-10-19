@@ -13,6 +13,11 @@ OPEN_CARD = """return [...document.querySelectorAll('[role=listbox][aria-label=P
 OPEN_DIALOGS = "return [...document.querySelectorAll('dialog[open], [aria-modal=true]')].map((d) => d.getAttribute('aria-label') || d.textContent.slice(0, 40))"
 
 
+BUTTONS = "[...document.querySelectorAll('[aria-modal=true] button')].map((b) => b.textContent.trim())"
+DONE_SHOWN = f"return {BUTTONS}.includes('Done')"
+EXPORT_SHOWN = f"return {BUTTONS}.some((t) => t.startsWith('Export'))"
+
+
 def seed(r):
     make(r, 'talk.nuzky', 'Talk to camera', [FIXTURES / 'talk.mp4'], 0)
     make(r, 'reel.nuzky', 'Morning reel', [FIXTURES / 'portrait.mp4'], 1)
@@ -54,13 +59,23 @@ def close_window_flow(r):
     close_window()
     r.check('closing again from the editor goes back to the projects again', wait(lambda: view(r)['view'] == 'home', 10), view(r))
 
-    # The editor's dialogs go with it, so they do not cover the projects.
-    r.s.run("window.__nuzky.store.setState({view: 'editor', exportOpen: true})")
-    r.check('Export opens in the editor', wait(lambda: r.s.run(OPEN_DIALOGS), 5), r.s.run(OPEN_DIALOGS))
-    time.sleep(0.5)
+    # The editor's dialogs go with it, so they do not cover the projects. A finished export, as the dialog
+    # starts it, shows Done once; closing the window counts as closing the dialog.
+    r.s.run("window.__nuzky.store.setState({view: 'editor'})")
+    started = r.s.call("window.__nuzky.api.startExport(arguments[0], {resolution: 720, fps: 30, quality: 'small'}, "
+                       "window.__nuzky.store.getState().snap.sessionEpoch, false)"
+                       ".then((job) => (window.__nuzky.store.setState({exportJobId: job, exportOpen: true}), job))",
+                       str(r.work / 'closed.mp4'))
+    r.check('an export from the dialog finishes and the dialog says Done',
+            started['ok'] and wait(lambda: r.s.run(DONE_SHOWN), 120), started)
     close_window()
     r.check('closing the window with Export open shows the projects without the dialog',
             wait(lambda: view(r)['view'] == 'home' and not r.s.run(OPEN_DIALOGS), 10), [view(r), r.s.run(OPEN_DIALOGS)])
+    r.s.run("[...document.querySelectorAll('button')].find((b) => b.title === 'Back to the editor (Esc)').click()")
+    r.s.run("window.__nuzky.store.setState({exportOpen: true})")
+    r.check('Export opened again starts a new export instead of showing the finished one',
+            wait(lambda: r.s.run(OPEN_DIALOGS), 5) and wait(lambda: r.s.run(EXPORT_SHOWN), 5) and not r.s.run(DONE_SHOWN), r.s.run(OPEN_DIALOGS))
+    r.s.run("window.__nuzky.store.setState({exportOpen: false})")
 
     # A reloaded page starts on the projects, so the next close quits even though the editor was shown before.
     r.s.run("window.__nuzky.store.setState({view: 'editor'})")

@@ -28,7 +28,7 @@ import { checkForUpdates, startUpdates, useUpdates } from "./lib/updates";
 import { useSounds } from "./lib/sounds";
 import { useStickers } from "./lib/stickers";
 import { addProjects, findDrafts, listenStyle, loadStyle, useStyle } from "./lib/style";
-import { closeCover, deleteText, exportCover, loadModels as loadVisionModels, onCoverJob, useCover } from "./lib/cover";
+import { closeCover, closeExport, deleteText, exportCover, loadModels as loadVisionModels, onCoverJob, useCover } from "./lib/cover";
 import { candidateOf, closeReels, onReelsJob, openReelsToFind, playEnding, toggleReelPlay, useReels } from "./lib/reels";
 import { appWindow, toggleFullPreview, toggleMuted, usePreview } from "./lib/preview";
 
@@ -327,7 +327,7 @@ function useBackendEvents() {
     // The editor's own dialogs would cover the projects; an export goes on without its dialog.
     offs.push(
       listen("close-to-home", () => {
-        useEditor.setState({ exportOpen: false });
+        closeExport();
         useYoutube.setState({ open: false, url: "" });
         useCapCut.setState({ opened: null });
         showHome();

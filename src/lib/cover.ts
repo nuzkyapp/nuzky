@@ -475,3 +475,13 @@ export function candidateReason(c: CoverCandidate, format: ThumbnailFormat) {
   const text = words.join(", ");
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
+
+/** Closes the Export dialog, whose Cover side exports the cover too. */
+export function closeExport() {
+  const { jobs, exportJobId } = useEditor.getState();
+  // A finished job is shown once; a running one keeps reporting in the top bar.
+  if (exportJobId && jobs[exportJobId]?.status !== "running") useEditor.setState({ exportJobId: null });
+  const cover = useCover.getState().exportJob;
+  if (cover && jobs[cover]?.status !== "running") useCover.setState({ exportJob: null });
+  useEditor.setState({ exportOpen: false });
+}
