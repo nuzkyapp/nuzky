@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+const ITEM = /^\s*([-*•]|\d+[.)])\s+/;
+
 /**
  * The little Markdown agents write: paragraphs, lists, code blocks, headings, bold, italics and
  * inline code. Everything is drawn as React text, so nothing the agent writes becomes HTML.
@@ -21,13 +23,27 @@ export function Markdown({ text }: { text: string }) {
           {code.join("\n")}
         </pre>,
       );
-    } else if (/^\s*([-*•]|\d+[.)])\s+/.test(line)) {
+    } else if (ITEM.test(line)) {
       const ordered = /^\s*\d/.test(line);
       const items: string[] = [];
-      for (; i < lines.length && /^\s*([-*•]|\d+[.)])\s+/.test(lines[i]); i++) items.push(lines[i].replace(/^\s*([-*•]|\d+[.)])\s+/, ""));
+      while (i < lines.length) {
+        if (ITEM.test(lines[i])) items.push(lines[i++].replace(ITEM, ""));
+        else if (/^\s+\S/.test(lines[i])) items[items.length - 1] += " " + lines[i++].trim();
+        else {
+          // Agents write loose lists, with a blank line between items.
+          let next = i;
+          while (next < lines.length && lines[next].trim() === "") next++;
+          if (next === i || next === lines.length || !ITEM.test(lines[next]) || /^\s*\d/.test(lines[next]) !== ordered) break;
+          i = next;
+        }
+      }
       const List = ordered ? "ol" : "ul";
       blocks.push(
-        <List key={blocks.length} className={`flex flex-col gap-1 pl-5 ${ordered ? "list-decimal" : "list-disc"} marker:text-muted`}>
+        <List
+          key={blocks.length}
+          start={ordered ? parseInt(line, 10) : undefined}
+          className={`flex flex-col gap-1 pl-5 ${ordered ? "list-decimal" : "list-disc"} marker:text-muted`}
+        >
           {items.map((t, k) => (
             <li key={k}>{inline(t)}</li>
           ))}
@@ -35,7 +51,7 @@ export function Markdown({ text }: { text: string }) {
       );
     } else {
       const para: string[] = [];
-      for (; i < lines.length && lines[i].trim() !== "" && !lines[i].startsWith("```") && !/^\s*([-*•]|\d+[.)])\s+/.test(lines[i]); i++) para.push(lines[i]);
+      for (; i < lines.length && lines[i].trim() !== "" && !lines[i].startsWith("```") && !ITEM.test(lines[i]); i++) para.push(lines[i]);
       const heading = /^#{1,6}\s+/.test(para[0]);
       const body = para.map((p) => p.replace(/^#{1,6}\s+/, "")).join("\n");
       blocks.push(

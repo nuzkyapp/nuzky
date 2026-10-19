@@ -84,6 +84,10 @@ def flag(argv, name):
 
 
 MESSAGES = "return window.__nuzky.agent.getState().items.filter((i) => i.kind === 'agent').map((i) => i.text)"
+# The blocks of the answer that starts "Here is what went wrong:", each list as the number or bullet shown before each item.
+LISTS = """const p = [...document.querySelectorAll('aside[aria-label=AI] p')].find((p) => p.textContent === 'Here is what went wrong:');
+return p && [...p.parentElement.children].map((e) => e.tagName === 'P' ? e.textContent
+  : [...e.children].map((li, k) => [e.tagName === 'OL' ? e.start + k : '•', li.textContent]));"""
 
 
 def idle(r):
@@ -931,6 +935,21 @@ def ai_panel(r):
     state = r.s.run(buttons)
     r.check('it is marked chosen and the other is off', state[1][1] == 'true' and state[0][2] == 'true', state)
     idle(r)
+
+    # Agents write loose lists, a blank line between items; each item once came out as its own list numbered 1.
+    send(r, 'Sum up the problems as a numbered list')
+    blocks = wait(lambda: idle(r) and r.s.run(LISTS), 15)
+    r.check('a loose numbered list in an answer is one list numbered 1, 2, 3 with its wrapped line inside the item, '
+            'a list after a paragraph goes on from its own first number, and loose bullets are one list too', blocks == [
+                'Here is what went wrong:',
+                [[1, 'Captions have no shadow. TextStyle has no shadow, so white text disappears on a bright sky.'],
+                 [2, 'Caption position cannot be set in bulk. Each caption moves alone.'],
+                 [3, 'Font size meant rebuilding captions. The size lived in the preset.']],
+                'What I would do next:',
+                [[4, 'Add a shadow.'], [5, 'Move captions together.']],
+                [['•', 'Keep the preset'], ['•', 'Keep the font']],
+                'That is all.'], blocks)
+    r.shot('numbered-list')
 
     # A message while it works steers the same agent process, inside the same run.
     send(r, 'steer me please')

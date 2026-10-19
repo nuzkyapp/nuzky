@@ -9,6 +9,7 @@ stream-json user messages from stdin while it works; Codex reads one prompt up t
              adds two captions and answers
   "retakes"  transcribes, retries a declined model three times, or cuts the first two words in one run
   "options"  offers two takes with suggest_options
+  "numbered list"  answers with loose Markdown lists: numbered from 1, numbered on from 4, and bullets
   "work as reels"  (Find reels) proposes four reels of at least 15 s from the transcript
   "slow"     opens a run, splits the clip and keeps working until stopped
   "steer me" splits at 2 s, waits for another message and splits at 4 s if it says "split", in the same run;
@@ -538,6 +539,13 @@ elif 'options' in message:
     say('Mám dvě verze úvodu.')
     call('suggest_options', {'question': 'Kterou verzi úvodu nechat?', 'options': [
         {'label': 'The first take', 'detail': 'Shorter, a slip in the middle'}, {'label': 'The last take', 'detail': 'Clean, 2 s longer'}]})
+elif 'numbered list' in message:
+    # Loose lists as Claude and Codex write them: a blank line between items, bold first words, a wrapped line.
+    say('Here is what went wrong:\n\n'
+        '1. **Captions have no shadow.** `TextStyle` has no shadow,\n   so white text disappears on a bright sky.\n\n'
+        '2. **Caption position cannot be set in bulk.** Each caption moves alone.\n\n'
+        '3. **Font size meant rebuilding captions.** The size lived in the preset.\n\n'
+        'What I would do next:\n\n4. Add a shadow.\n\n5. Move captions together.\n\n- Keep the preset\n\n- Keep the font\n\nThat is all.')
 elif 'steer me' in message and not CODEX:
     clip = call('get_state', {})['tracks'][0]['clips'][0]
     run = call('begin_run', {'label': 'Steerable edit'})['run_id']
