@@ -21,6 +21,8 @@ stream-json user messages from stdin while it works; Codex reads one prompt up t
   the `thumbnail` prompt (Make a thumbnail): sets both covers in one run with the hook from "Hook: …" in the wishes,
              looks at the cover with inspect_thumbnail, waiting for its mask, and exports nothing
   "think first"  (Codex) says nothing for 2 s, then is echoed back
+  "image"    (Codex) generates an orange PNG into $CODEX_HOME/generated_images as Codex's image_gen does, imports it with
+             import_media and shows it as a picture in picture from 0, as Nuzky's instructions ask
   "signin"   is not signed in;  "limit" has hit its usage limit
   anything else is echoed back.
 Each start is logged to $NUZKY_FAKE_AGENT_LOG/runs.jsonl (argv, pid, session); sessions live there too.
@@ -134,8 +136,8 @@ REQUIRED = {'-p': None, '--input-format': 'stream-json', '--output-format': 'str
             '--disable-slash-commands': None}
 if CODEX:
     settings = dict(a.split('=', 1) for i, a in enumerate(args) if i and args[i - 1] == '-c')
-    required = {'sandbox_mode': '"read-only"', 'approval_policy': '"never"', 'features.shell_tool': 'false',
-                'features.code_mode.direct_only_tool_namespaces': '["mcp__nuzky"]',
+    required = {'default_permissions': '"nuzky"', 'permissions.nuzky.filesystem': '{":minimal"="read"}', 'approval_policy': '"never"', 'features.shell_tool': 'false',
+                'features.code_mode.direct_only_tool_namespaces': '["mcp__nuzky"]', 'features.image_generation': 'true',
                 'mcp_servers.nuzky.default_tools_approval_mode': '"approve"'}
     missing = [f for f in ('--json', '--ignore-user-config') if f not in args]
     missing += [f'-c {k}={v}' for k, v in required.items() if settings.get(k) != v]
@@ -435,6 +437,30 @@ elif 'cover frames' in message:
             raise RuntimeError(error)
     else:
         say('Bez modelů vyberu snímek sám.')
+elif CODEX and 'image' in message:
+    if 'import_media' not in tomllib.loads('v = ' + settings['developer_instructions'])['v']:
+        say('Obrázek umím vytvořit, ale nevím, jak ho dostat do projektu.')
+        finish()
+    import struct, zlib
+
+    def chunk(kind, data):
+        return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data))
+    size = 256
+    rows = b''.join(b'\0' + b'\xff\x80\x00' * size for _ in range(size))
+    png = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', size, size, 8, 2, 0, 0, 0)) \
+        + chunk(b'IDAT', zlib.compress(rows)) + chunk(b'IEND', b'')
+    home = Path(os.environ.get('CODEX_HOME') or Path(os.environ['HOME']) / '.codex')
+    image = home / 'generated_images' / session / f'ig_{os.getpid()}.png'
+    image.parent.mkdir(parents=True, exist_ok=True)
+    image.write_bytes(png)
+    (LOG / 'generated.txt').write_text(str(image))
+    say('Obrázek je hotový, vkládám ho do videa.')
+    run = call('begin_run', {'label': 'Add a generated image'})['run_id']
+    asset = call('import_media', {'run_id': run, 'paths': [str(image)]})['asset_ids'][0]
+    call('apply_edits', {'run_id': run, 'request_id': 'image', 'edits': [
+        {'type': 'addPictureInPicture', 'assetId': asset, 'startUs': 0, 'durationUs': 3_000_000}]})
+    call('end_run', {'run_id': run, 'action': 'keep'})
+    say('Hotovo, obrázek je v prvních 3 s.')
 elif 'cut' in message:
     state = call('get_state', {})
     call('activity', {})

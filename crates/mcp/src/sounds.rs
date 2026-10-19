@@ -710,13 +710,13 @@ fn file_name(sound: &Sound) -> String {
 }
 
 /// Writes through a temporary file beside `path`, so a file there is always whole.
-fn publish(path: &Path, write: impl FnOnce(&mut std::fs::File) -> Result<()>) -> Result<()> {
-    std::fs::create_dir_all(path.parent().context("Sound needs a directory")?)?;
+pub(crate) fn publish(path: &Path, write: impl FnOnce(&mut std::fs::File) -> Result<()>) -> Result<()> {
+    std::fs::create_dir_all(path.parent().context("A file needs a directory")?)?;
     let tmp = path.with_file_name(format!(".nuzky-part-{}", new_id()));
     let result = std::fs::File::create(&tmp)
-        .context("Saving the sound")
-        .and_then(|mut file| write(&mut file).and_then(|()| file.sync_all().context("Saving the sound")))
-        .and_then(|()| std::fs::rename(&tmp, path).context("Saving the sound"));
+        .context("Saving the file")
+        .and_then(|mut file| write(&mut file).and_then(|()| file.sync_all().context("Saving the file")))
+        .and_then(|()| std::fs::rename(&tmp, path).context("Saving the file"));
     if result.is_err() {
         std::fs::remove_file(&tmp).ok();
     }

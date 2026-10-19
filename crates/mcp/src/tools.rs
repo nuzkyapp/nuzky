@@ -500,7 +500,7 @@ impl Backend {
                     .map(|p| {
                         let path = self.resolve(p);
                         ensure!(path.is_file(), "MEDIA_MISSING: {}", path.display());
-                        probe(&std::fs::canonicalize(&path).context("Resolving media path")?, new_id())
+                        probe(&kept(std::fs::canonicalize(&path).context("Resolving media path")?)?, new_id())
                     })
                     .collect::<Result<Vec<_>>>()?;
                 entry.insert(PreparedImport {
@@ -1587,6 +1587,24 @@ fn loudness_window(duration_us: i64, window_us: Option<i64>) -> Result<i64> {
         "INVALID_ARGUMENTS: loudness window_us must be {min}..={MAX_LOUDNESS_WINDOW_US} for this asset"
     );
     Ok(window)
+}
+
+/// An image Codex generated, copied into Nuzky's own folder, since a project should not depend on Codex's home;
+/// any other file as it is.
+fn kept(path: PathBuf) -> Result<PathBuf> {
+    let codex = std::env::var_os("CODEX_HOME").filter(|v| !v.is_empty()).map(PathBuf::from);
+    let generated =
+        codex.or_else(|| dirs::home_dir().map(|home| home.join(".codex"))).map(|c| c.join("generated_images"));
+    let Some(name) =
+        generated.and_then(|g| g.canonicalize().ok()).and_then(|g| path.strip_prefix(g).ok().map(Path::to_owned))
+    else {
+        return Ok(path);
+    };
+    let copy = crate::sounds::data_dir().join("generated-images").join(name);
+    if !copy.is_file() {
+        crate::sounds::publish(&copy, |file| Ok(std::io::copy(&mut std::fs::File::open(&path)?, file).map(drop)?))?;
+    }
+    copy.canonicalize().context("Resolving media path")
 }
 
 /// Agents add media as existing local files, as import_media does; projects may keep missing ones.

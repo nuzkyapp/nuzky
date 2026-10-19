@@ -5,10 +5,13 @@ use crate::turn::{SYSTEM, Step, TurnRequest};
 use serde_json::Value;
 use std::process::Command;
 
-/// Everything that would give Codex a tool besides Nuzky's. `-c` rather than `--disable`,
-/// since Codex refuses to start on a feature name it no longer knows but only warns about a setting.
+/// Everything that would give Codex a tool besides Nuzky's and its image generation. `-c` rather than
+/// `--disable`, since Codex refuses to start on a feature name it no longer knows but only warns about a setting.
 const OFF: &[&str] = &[
-    "sandbox_mode=\"read-only\"",
+    // Reads only what Codex itself needs and writes nothing, so image generation cannot take a user's
+    // file as a reference and send it to OpenAI; a read-only sandbox would still read every file.
+    "default_permissions=\"nuzky\"",
+    "permissions.nuzky.filesystem={\":minimal\"=\"read\"}",
     "approval_policy=\"never\"",
     "web_search=\"disabled\"",
     "agents.enabled=false",
@@ -18,7 +21,9 @@ const OFF: &[&str] = &[
     "features.plugins=false",
     "features.hooks=false",
     "features.multi_agent=false",
-    "features.image_generation=false",
+    // Offered only with a paid ChatGPT login. It saves the image under Codex's home without the sandbox
+    // and reports nothing in --json, so the panel shows only the import that follows.
+    "features.image_generation=true",
     "features.view_image=false",
     "features.tool_suggest=false",
     "features.sleep_tool=false",
@@ -29,6 +34,10 @@ const OFF: &[&str] = &[
     // offered directly, every Nuzky call shows in the panel.
     "features.code_mode.direct_only_tool_namespaces=[\"mcp__nuzky\"]",
 ];
+
+/// What only Codex can do besides Nuzky's tools.
+const IMAGES: &str = "When the user asks for a picture that is not in the project, such as a background, a sticker or a \
+cover, you may make it with image_gen.imagegen. Then import the PNG at the path it gives with import_media and place it.";
 
 /// A TOML string, which a JSON string also is.
 fn string(s: &str) -> String {
@@ -49,7 +58,7 @@ pub(crate) fn command(req: &TurnRequest) -> Command {
     settings.extend(req.mcp.env.iter().map(|(k, v)| format!("mcp_servers.nuzky.env.{k}={}", string(v))));
     settings.push("mcp_servers.nuzky.required=true".into());
     settings.push("mcp_servers.nuzky.default_tools_approval_mode=\"approve\"".into());
-    settings.push(format!("developer_instructions={}", string(SYSTEM)));
+    settings.push(format!("developer_instructions={}", string(&format!("{SYSTEM} {IMAGES}"))));
     for setting in &settings {
         c.args(["-c", setting]);
     }
@@ -301,6 +310,7 @@ mod tests {
         assert_eq!(args[..3], ["exec", "resume", "--json"]);
         assert_eq!(args[args.len() - 2..], ["01a12779-e1a0-7391-8130-1242bc8fb459", "-"]);
         assert!(args.contains(&"--ignore-user-config".into()) && args.contains(&"features.shell_tool=false".into()));
+        assert!(!args.iter().any(|a| a.starts_with("sandbox_mode=")));
         // Each setting is TOML that reads back as what Nuzky meant, as Codex parses it.
         let setting = |key: &str| {
             let value = args.iter().find_map(|a| a.strip_prefix(&format!("{key}="))).unwrap();
@@ -309,6 +319,9 @@ mod tests {
         assert_eq!(setting("mcp_servers.nuzky.command"), json!("/opt/Nuzky \"app\""));
         assert_eq!(setting("mcp_servers.nuzky.args"), json!(["mcp", "--project", "/home/u/a b.nuzky"]));
         assert_eq!(setting("mcp_servers.nuzky.env.XDG_RUNTIME_DIR"), json!("/run/user/1000"));
-        assert_eq!(setting("developer_instructions"), json!(SYSTEM));
+        assert_eq!(setting("developer_instructions"), json!(format!("{SYSTEM} {IMAGES}")));
+        assert_eq!(setting("features.image_generation"), json!(true));
+        assert_eq!(setting("default_permissions"), json!("nuzky"));
+        assert_eq!(setting("permissions.nuzky.filesystem"), json!({":minimal": "read"}));
     }
 }

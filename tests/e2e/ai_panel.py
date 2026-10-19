@@ -2,7 +2,7 @@ import json, os, shutil, subprocess, threading, time, uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from e2e.harness import CLI, FIXTURES, MACOS, Session, clipboard, close_window, flow, press, wait, webdriver
+from e2e.harness import CLI, FIXTURES, MACOS, Session, clipboard, close_window, flow, preview_crop, preview_rect, press, wait, webdriver
 from e2e.history import alive as window_alive
 
 FAKE = Path(__file__).resolve().parent / 'fake_agent'
@@ -478,6 +478,50 @@ def ai_panel_codex(r):
     send(r, 'limit please')
     r.check('the Codex usage hint includes its reset time', wait(lambda: 'Codex usage limit reached.' in panel(r)['text']
             and '9:00 PM' in panel(r)['text'], 10), panel(r)['text'])
+    r.check('no error toast along the way', not r.errors(), r.errors())
+
+
+def setup_codex_image(r):
+    setup_codex(r)
+    r.env['CODEX_HOME'] = str(r.work / 'codex')
+
+
+def orange_share(r, name):
+    """The share of the preview that is the generated image's orange, which the test video has none of."""
+    r.shot(name)
+    crop = preview_crop(r.work / f'{name}.png', preview_rect(r)).convert('RGB')
+    pixels = list(crop.getdata())
+    return sum(1 for (red, green, blue) in pixels if red > 220 and 100 < green < 160 and blue < 40) / len(pixels)
+
+
+@flow('ai_panel_codex_image', "Codex in the AI panel generates an image and puts it into the video; the project keeps "
+      "Nuzky's own copy, so it stays when Codex's folder is emptied", before=setup_codex_image)
+def ai_panel_codex_image(r):
+    r.s.run('document.body.focus()')
+    r.key('j', ctrlKey=True)
+    wait(lambda: panel(r), 5)
+    r.check('the panel uses Codex', wait(lambda: r.s.run("return window.__nuzky.agent.getState().agent === 'codex'"), 10))
+    r.seek(500_000)
+    before = orange_share(r, 'codex-image-before')
+    send(r, 'Generate an orange image and put it in the video')
+    wait(lambda: agent(r)['status'] == 'idle' and 'run' in agent(r)['kinds'], 30)
+    text = panel(r)['text']
+    r.check('Codex says the image is in the video', 'Hotovo, obrázek je v prvních 3 s.' in text, text)
+    generated = Path((r.work / 'fake/generated.txt').read_text())
+    saved = json.loads(r.saved_project().read_text())
+    images = [a for a in saved['assets'] if a['kind'] == 'image']
+    kept = (r.work / 'data/nuzky/generated-images').resolve()
+    r.check("the project's image is Nuzky's copy, not the file in Codex's folder",
+            len(images) == 1 and Path(images[0]['path']).parent.parent == kept
+            and Path(images[0]['path']).read_bytes() == generated.read_bytes(), images)
+    clips = [c for t in saved['tracks'] if t['id'] != 'main' for c in t['clips'] if images and c['content'].get('assetId') == images[0]['id']]
+    r.check('the image shows from 0 for 3 s on an overlay track',
+            [(c['startUs'], c['durationUs']) for c in clips] == [(0, 3_000_000)], clips)
+    shutil.rmtree(r.work / 'codex/generated_images')
+    r.check("the copy stays when Codex's folder is emptied", images and Path(images[0]['path']).is_file())
+    share = wait(lambda: orange_share(r, 'codex-image') > 0.05 and orange_share(r, 'codex-image'), 10)
+    r.check('the preview shows the orange image where it showed none before', before < 0.005 and share,
+            {'before': before, 'share': share})
     r.check('no error toast along the way', not r.errors(), r.errors())
 
 
