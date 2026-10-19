@@ -119,6 +119,9 @@ fn transcode(source: &Path, out: &Path, progress: &mut impl FnMut(f32) -> Result
 const PARTS_AT_ONCE: usize = 2;
 /// Parts start at keyframes about this far apart, so the decoders finish at about the same time.
 const PART_US: i64 = 2_000_000;
+/// A decoder starts a part at most this many parts after the one being written, so however slow one part is, no
+/// more than this many later parts wait for it in memory.
+const PARTS_AHEAD: usize = 4;
 
 /// GPU decoders for the parts of the video, and where the parts start.
 fn on_gpu(source: &Path, progress: &mut impl FnMut(f32) -> Result<()>) -> Result<(Vec<VideoDecoder>, Vec<i64>)> {
@@ -131,8 +134,9 @@ fn on_gpu(source: &Path, progress: &mut impl FnMut(f32) -> Result<()>) -> Result
     Ok((decoders, starts))
 }
 
-/// The times the parts of a video start at: the first at its start, the others at a keyframe, so decoding a
-/// part decodes no frame of the one before. A long video takes a while to look through, so Stop is heard here too.
+/// The times the parts of a video start at: the first at its start, the others at a keyframe, where decoding
+/// needs nothing of the part before. A seek there can still decode a few frames of the part before, which
+/// `decode_parts` drops. A long video takes a while to look through, so Stop is heard here too.
 fn part_starts(source: &Path, progress: &mut impl FnMut(f32) -> Result<()>) -> Result<Vec<i64>> {
     let mut file = VideoDecoder::open(source)?;
     let duration = file.duration_us();
@@ -160,7 +164,6 @@ struct Batch {
 /// What a decoder thread hands its encoder thread.
 enum Decoded {
     Frame(usize, i64, frame::Video),
-    /// All frames of the part came.
     End(usize),
 }
 
@@ -177,15 +180,17 @@ fn encode(
     let duration = decoders[0].duration_us().max(1);
     let frame_us = decoders[0].frame_duration_us;
     let mut octx = ff::format::output_as(out, "mp4").with_context(|| format!("Cannot create {}", out.display()))?;
-    let (next, done, stop) = (AtomicUsize::new(0), AtomicI64::new(0), AtomicBool::new(false));
-    let (batches, encoded) = mpsc::channel::<Result<Batch>>();
+    let (next, written) = (AtomicUsize::new(0), AtomicUsize::new(0));
+    let (done, stop) = (AtomicI64::new(0), AtomicBool::new(false));
+    // When writing falls behind, the encoders wait after a few frames instead of their frames piling up here.
+    let (batches, encoded) = mpsc::sync_channel::<Result<Batch>>(8);
     std::thread::scope(|scope| {
         for mut decoder in decoders {
             // Decoding waits for the decoder, scaling and encoding for the CPU: on threads of their own they overlap.
             let (frames, decoded) = mpsc::sync_channel(2);
-            let (next, done, stop) = (&next, &done, &stop);
+            let (next, written, done, stop) = (&next, &written, &done, &stop);
             scope.spawn(move || {
-                if let Err(e) = decode_parts(&mut decoder, starts, duration, next, done, stop, &frames) {
+                if let Err(e) = decode_parts(&mut decoder, starts, duration, next, written, done, stop, &frames) {
                     frames.send(Err(e)).ok();
                 }
             });
@@ -197,7 +202,9 @@ fn encode(
             });
         }
         drop(batches);
-        let result = write_parts(&encoded, &mut octx, codec, starts.len(), frame_us, duration, &done, progress);
+        // Writing drops `encoded` when it ends, so an encoder waiting to hand over a frame stops too.
+        let result =
+            write_parts(encoded, &mut octx, codec, starts.len(), frame_us, duration, &done, &written, progress);
         if result.is_err() {
             stop.store(true, Ordering::Relaxed);
         }
@@ -207,11 +214,13 @@ fn encode(
 
 /// Decodes the next part no other decoder took, until none is left: its frames from its start up to the next
 /// part's, the first part's from the start of the file.
+#[allow(clippy::too_many_arguments)]
 fn decode_parts(
     decoder: &mut VideoDecoder,
     starts: &[i64],
     duration: i64,
     next: &AtomicUsize,
+    written: &AtomicUsize,
     done: &AtomicI64,
     stop: &AtomicBool,
     frames: &mpsc::SyncSender<Result<Decoded>>,
@@ -219,6 +228,12 @@ fn decode_parts(
     loop {
         let part = next.fetch_add(1, Ordering::Relaxed);
         let Some(&start) = starts.get(part) else { return Ok(()) };
+        while part > written.load(Ordering::Relaxed) + PARTS_AHEAD {
+            if stop.load(Ordering::Relaxed) {
+                bail!("Stopped");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
         let end = starts.get(part + 1).copied().unwrap_or(i64::MAX);
         if start != i64::MIN {
             decoder.seek(start)?;
@@ -255,7 +270,7 @@ fn encode_parts(
     decoded: mpsc::Receiver<Result<Decoded>>,
     codec: ff::Codec,
     frame_us: i64,
-    batches: &mpsc::Sender<Result<Batch>>,
+    batches: &mpsc::SyncSender<Result<Batch>>,
 ) -> Result<()> {
     let send = |batch| batches.send(Ok(batch)).map_err(|_| anyhow::anyhow!("Stopped"));
     let mut encoder = None;
@@ -292,13 +307,14 @@ fn encode_parts(
 /// Writes the parts' frames in order as they come, and reports progress while it waits.
 #[allow(clippy::too_many_arguments)]
 fn write_parts(
-    rx: &mpsc::Receiver<Result<Batch>>,
+    rx: mpsc::Receiver<Result<Batch>>,
     octx: &mut ff::format::context::Output,
     codec: ff::Codec,
     parts: usize,
     frame_us: i64,
     duration: i64,
     done: &AtomicI64,
+    written: &AtomicUsize,
     progress: &mut impl FnMut(f32) -> Result<()>,
 ) -> Result<()> {
     let (mut part, mut waiting) = (0, std::collections::BTreeMap::<usize, Vec<Batch>>::new());
@@ -334,12 +350,11 @@ fn write_parts(
                 }
                 finished |= batch.last;
             }
-            if finished {
-                part += 1;
-            } else {
-                // More of this part is coming.
+            if !finished {
                 break;
             }
+            part += 1;
+            written.store(part, Ordering::Relaxed);
         }
         progress(done.load(Ordering::Relaxed) as f32 / duration as f32)?;
     }
