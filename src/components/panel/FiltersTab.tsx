@@ -13,7 +13,7 @@ function FilterPreview({ adjust, thumb }: { adjust: Adjust; thumb: string | null
   return (
     <span className="absolute inset-0" style={{ filter: css.filter }}>
       <span className="absolute inset-0" style={thumb ? { backgroundImage: `url(${thumb})`, backgroundSize: "cover", backgroundPosition: "center" } : { background: SCENE }} />
-      {css.tint && <span className="absolute inset-0 mix-blend-soft-light" style={{ background: css.tint }} />}
+      {css.tint && <span className="absolute inset-0 mix-blend-multiply" style={{ background: css.tint }} />}
       {css.vignette > 0 && <span className="absolute inset-0" style={{ background: `radial-gradient(ellipse at center, transparent 45%, rgba(0,0,0,${css.vignette}) 100%)` }} />}
     </span>
   );
