@@ -1003,7 +1003,6 @@ fn readonly_resources_prompts_and_clear_errors() {
             && guide.contains(r#""duckDb":12"#)
             && guide.contains(r#""keepPitch":false"#)
     );
-    // An agent copying a look from CapCut once had to guess which way y runs and what the units are.
     assert!(guide.contains("positive y DOWN") && guide.contains("−(draft y) / 2 is `y`"));
     let schema = c.rpc("resources/read", json!({"uri":"nuzky://schema"}));
     let schema = schema["result"]["contents"][0]["text"].as_str().unwrap();
