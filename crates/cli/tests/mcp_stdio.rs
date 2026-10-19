@@ -3079,7 +3079,7 @@ fn reels_are_proposed_and_made_beside_a_long_talk_over_stdio() {
 
     for (i, made) in reels.iter().chain(blurred["reels"].as_array().unwrap()).enumerate() {
         let path = PathBuf::from(made["path"].as_str().unwrap());
-        assert_eq!(path, c.dir.canonicalize().unwrap().join(format!("project-reel-{}.nuzky", i + 1)));
+        assert_eq!(path, dunce::canonicalize(&c.dir).unwrap().join(format!("project-reel-{}.nuzky", i + 1)));
         let reel: Project = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         nuzky_session::validate(&reel).unwrap();
         assert_eq!((reel.canvas.width, reel.canvas.height), (1080, 1920));
