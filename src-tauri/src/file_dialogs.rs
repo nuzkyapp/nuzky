@@ -61,8 +61,7 @@ fn check(app: &AppHandle, sheet: u64) {
     });
 }
 
-/// Cancels the window's file dialog when the window is on the screen and the dialog is not. A window on
-/// another Space or in the Dock hides its dialog too, and that one is left alone.
+/// A window on another Space or in the Dock hides its dialog too; that one is left alone.
 fn close_hidden(window: &NSWindow) -> bool {
     let Some(panel) = window.attachedSheet().and_then(|sheet| sheet.downcast::<NSSavePanel>().ok()) else {
         return false;
@@ -86,7 +85,7 @@ unsafe extern "C" {
 /// `kCGWindowListOptionIncludingWindow`: only the window asked about.
 const INCLUDING_WINDOW: u32 = 1 << 3;
 
-/// Whether the window server shows the window, which it never did for the hidden sheets.
+/// Asks the window server, since AppKit kept the hidden sheets attached as if shown.
 pub(crate) fn on_screen(number: isize) -> bool {
     // SAFETY: a Copy function, so the array is ours to release.
     let Some(windows) = (unsafe { Retained::from_raw(CGWindowListCopyWindowInfo(INCLUDING_WINDOW, number as u32)) })
