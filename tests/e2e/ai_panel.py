@@ -602,9 +602,13 @@ def ai_panel_codex_cover(r):
             wait(lambda: r.s.run(COVER_STATE)['image'] is None and r.s.run(COVER_ORANGE) is not None and r.s.run(COVER_ORANGE) < 0.01, 10)
             and r.s.run(COVER_STATE)['timeUs'] > 0 and r.s.run(COVER_STATE)['texts'] == ['GROKBOT'], r.s.run(COVER_STATE))
     r.shot('codex-cover-frame')
+    # The message field keeps the keys while it has focus.
+    r.s.run('document.activeElement.blur()')
     r.key('Home')
     r.check('Home then takes the cover to the first frame', wait(lambda: r.s.run(COVER_STATE)['timeUs'] == 0, 5),
             r.s.run(COVER_STATE))
+    r.s.run('window.__nuzky.store.getState().undo()')
+    wait(lambda: r.s.run(COVER_STATE)['timeUs'] == 2_000_000, 5)
     r.s.run('window.__nuzky.store.getState().undo()')
     r.check('Undo brings the generated image back',
             wait(lambda: r.s.run(COVER_STATE)['image'] == cover['image'] and (r.s.run(COVER_ORANGE) or 0) > 0.5, 10),
