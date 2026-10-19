@@ -1,10 +1,10 @@
 """Get set up: one dialog with the setup steps side by side and whether each is done or skipped, only the steps that
 are built. The first start's Get set up and the home sidebar's row open it, the keyboard moves through the steps,
 Skip moves on, and closing, also quitting Nuzky, loses neither the steps' states nor the step shown."""
-import time
+import subprocess, time
 
 from e2e.corrections import Hands
-from e2e.harness import FIXTURES, Session, flow, press, wait
+from e2e.harness import FIXTURES, MACOS, Session, flow, press, start_driver, stop, wait
 from e2e.home import FIRST_RUN_TEXT, OPEN_VIDEO, make, resize
 
 TITLES = ['Captions model', 'Face and person models', 'Music from YouTube', 'Connect your AI']
@@ -68,7 +68,13 @@ def row(r):
 
 
 def relaunch(r):
+    """Starts the app again, with r.env as it is now."""
     r.s.close()
+    if not MACOS:
+        # The old app has to be gone before WebKitWebDriver stops and a new one starts.
+        wait(lambda: not subprocess.run(['pgrep', '-P', str(r.driver.pid)], capture_output=True).stdout, 10)
+        stop(r.driver)
+        start_driver(r)
     r.s = Session()
     if not wait(lambda: r.s.run('return !!window.__nuzky?.store.getState().snap', retries=3), 60):
         raise RuntimeError('the app did not start again')

@@ -155,7 +155,7 @@ class Run:
                         # Nor does it run the person's own Claude Code or Codex; a flow that needs one puts a stand-in there.
                         NUZKY_AGENT_CLAUDE=str(self.work / 'no-agent'), NUZKY_AGENT_CODEX=str(self.work / 'no-agent'),
                         PYTHONDONTWRITEBYTECODE='1')
-        self.checks, self.shots, self.s, self.app = [], [], None, None
+        self.checks, self.shots, self.s, self.app, self.driver = [], [], None, None, None
         # Arguments for the app, such as the system language on macOS (`-AppleLanguages (cs)`).
         self.args = []
         if MACOS:
@@ -249,6 +249,15 @@ def port_busy(port):
         return False
 
 
+def start_driver(r):
+    """WebKitWebDriver, which on Linux starts the app with its own environment, so r.env as it is now."""
+    # Tauri 2 lets WebDriver drive its webview only with this set, as tauri-driver does.
+    r.driver = start([WEBKIT_DRIVER, '--port=4444', '--host=127.0.0.1'], r.work / 'driver.log',
+                     dict(r.env, TAURI_WEBVIEW_AUTOMATION='true'))
+    if not started(r.driver, 4444, 20):
+        raise RuntimeError('WebKitWebDriver did not start, see driver.log')
+
+
 def run_flow(name):
     description, before, body = FLOWS[name]
     print(f'\n==> {name}: {description}', flush=True)
@@ -256,7 +265,7 @@ def run_flow(name):
     runtime = tempfile.mkdtemp(prefix='nuzky-repro-', dir='/tmp' if MACOS else None)
     global RUN
     r = RUN = Run(name, runtime)
-    error = driver = None
+    error = None
     try:
         if before:
             before(r)
@@ -264,11 +273,7 @@ def run_flow(name):
             # A WebDriver that is not ours would launch the app outside this run's directories.
             if not wait(lambda: not port_busy(4444), 10):
                 raise RuntimeError('port 4444 is in use by another session')
-            # Tauri 2 lets WebDriver drive its webview only with this set, as tauri-driver does.
-            driver = start([WEBKIT_DRIVER, '--port=4444', '--host=127.0.0.1'], r.work / 'driver.log',
-                           dict(r.env, TAURI_WEBVIEW_AUTOMATION='true'))
-            if not started(driver, 4444, 20):
-                raise RuntimeError('WebKitWebDriver did not start, see driver.log')
+            start_driver(r)
         r.s = Session()
         if not wait(lambda: r.s.run('return !!window.__nuzky?.store.getState().snap', retries=3), 60):
             raise RuntimeError('the app did not load a project')
@@ -282,8 +287,8 @@ def run_flow(name):
     finally:
         if r.s:
             r.s.close()
-        if driver:
-            stop(driver)
+        if r.driver:
+            stop(r.driver)
         if r.app:
             stop(r.app)
         shutil.rmtree(runtime, ignore_errors=True)
