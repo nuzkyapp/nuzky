@@ -8,7 +8,7 @@ clipboard is the page's own, never the system's."""
 import os, re, signal, subprocess, time, urllib.parse
 from pathlib import Path
 
-from e2e.harness import MACOS, Session, close_window, flow, wait
+from e2e.harness import MACOS, Session, close_window, leave_editor, flow, wait
 
 # The page's clipboard keeps what is copied, so the flow neither reads nor overwrites the person's own.
 CLIPBOARD = """window.__copied = [];
@@ -195,6 +195,7 @@ def diagnostics(r):
             'the newest errors from ' in query.get('diagnostics', '') and '.mp4' not in query.get('diagnostics', ''), query.get('diagnostics'))
     r.s.run(CLICK, REPORT_DIALOG, 'Done')
 
+    leave_editor(r)
     close_window()
     # Stopping the session would end the app with SIGTERM, which also clears the marker; it has to quit by itself.
     r.check('the window closes and Nuzky quits', wait(lambda: (r.app.poll() is not None) if MACOS else app_pid(r) is None, 15))

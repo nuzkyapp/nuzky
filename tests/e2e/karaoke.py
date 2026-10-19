@@ -226,7 +226,7 @@ def styles_setup(r):
       'the preview and the export, survive regenerating and a word correction, and My styles outlive a restart',
       before=styles_setup)
 def caption_styles(r):
-    from e2e.harness import Session, close_window
+    from e2e.harness import Session, close_window, leave_editor
     from e2e.home import resize
     r.import_media(r.work / 'loud-take.mp4')
     r.add_clip('loud-take.mp4')
@@ -349,6 +349,7 @@ def caption_styles(r):
     # Another look, then a restart: My styles is still there and brings the look back.
     r.s.run(tile_js('Reel') + '.click()')
     r.check('Reel replaces the style on every caption', wait(lambda: all(c['keywords'] is None and c['animIn'] is None for c in r.s.run(STYLED)), 5))
+    leave_editor(r)
     close_window()
     r.check('the window closes', wait(lambda: not _alive(r), 15))
     r.s.close()

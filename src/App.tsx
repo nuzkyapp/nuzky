@@ -23,7 +23,7 @@ import { paneLayout, usePanes } from "./lib/layout";
 import { Button, DisabledHint } from "./components/ui";
 import { Home } from "./components/home/Home";
 import { openDraft, useCapCut, openDraftFolder } from "./lib/capcut";
-import { newProjectFromMedia, openProject, refreshLibrary, trashProjects, useLibrary } from "./lib/library";
+import { newProjectFromMedia, openProject, refreshLibrary, showHome, trashProjects, useLibrary } from "./lib/library";
 import { checkForUpdates, startUpdates, useUpdates } from "./lib/updates";
 import { useSounds } from "./lib/sounds";
 import { useStickers } from "./lib/stickers";
@@ -322,6 +322,8 @@ function useBackendEvents() {
         useEditor.getState().toast({ kind: "error", text: "macOS didn't show the window for choosing a file. Quit Nuzky, open it again and try once more." }),
       ),
     );
+    // The window's close button in the editor goes back to the projects; on the home screen it quits.
+    offs.push(listen("close-to-home", showHome));
     offs.push(
       listen<string>("close-save-failed", (e) =>
         useEditor.getState().toast({ kind: "error", text: `Your last changes could not be saved: ${e.payload}. Free some disk space and close again, or close again to quit without them.` }),
@@ -430,7 +432,9 @@ useEditor.subscribe((s, prev) => {
 });
 
 useEditor.subscribe((s, prev) => {
-  if (s.view === "editor" && prev.view === "home") void api.maximizeWindow();
+  if (s.view === prev.view) return;
+  void api.setEditorShown(s.view === "editor");
+  if (s.view === "editor") void api.maximizeWindow();
 });
 
 // Test hook for WebDriver runs; native file dialogs cannot be automated.

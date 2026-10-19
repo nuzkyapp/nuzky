@@ -2,7 +2,7 @@ import json
 import subprocess
 import time
 
-from e2e.harness import CLI, FIXTURES, MACOS, changed_share, close_window_and_confirm, ffprobe, flow, wait, webdriver
+from e2e.harness import CLI, FIXTURES, MACOS, changed_share, close_window, close_window_and_confirm, ffprobe, flow, wait, webdriver
 
 
 @flow('export', 'Export refuses to overwrite, replaces only when asked, matches the rendered frame, offers the presets that fit '
@@ -39,7 +39,12 @@ def export(r):
     quit_target = r.work / 'quit.mp4'
     started = r.s.call(start_export, str(quit_target), {'resolution': 2160, 'fps': 60, 'quality': 'high'}, epoch, True)
     r.check('a long export runs into an unfinished file', started['ok'] and wait(lambda: list(r.work.glob('.nuzky-part-*')), 10))
-    r.check('closing the window asks before quitting', close_window_and_confirm(r))
+    close_window()
+    r.check('closing the window in the editor shows the projects and leaves the export running',
+            wait(lambda: r.s.run('return window.__nuzky.store.getState().view') == 'home', 10)
+            and r.s.run("return Object.values(window.__nuzky.store.getState().jobs).some((j) => j.kind === 'export' && j.status === 'running')"),
+            r.s.run('return window.__nuzky.store.getState().jobs'))
+    r.check('closing it on the home screen asks before quitting', close_window_and_confirm(r))
     gone = wait(lambda: not list(r.work.glob('.nuzky-part-*')) and not quit_target.exists(), 15)
     r.check('quitting removes the unfinished export', gone, [p.name for p in r.work.glob('.nuzky-part-*')])
 

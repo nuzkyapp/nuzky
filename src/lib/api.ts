@@ -59,6 +59,8 @@ export const api = {
   chatgptSignOut: () => invoke<ChatGptStatus>("chatgpt_sign_out"),
   newProject: (width: number, height: number) => invoke<Snapshot>("new_project", { width, height }),
   maximizeWindow: () => invoke<void>("maximize_window"),
+  /** While the editor is shown, closing the window goes back to the projects (`close-to-home`). */
+  setEditorShown: (shown: boolean) => invoke<void>("set_editor_shown", { shown }),
   openProject: (path: string) => invoke<Snapshot>("open_project", { path }),
   /** A new project with the media on its timeline, in the format of the first picture. */
   newProjectFromMedia: (paths: string[]) =>

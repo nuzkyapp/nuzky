@@ -3,7 +3,7 @@ changes with it; generating the captions again, reopening the app and undo all k
 together. Then an agent does the same over MCP."""
 import difflib, json, time
 
-from e2e.harness import (FIXTURES, MACOS, MODELS, Bridge, Session, close_window, flow, link_models, pointer, press,
+from e2e.harness import (FIXTURES, MACOS, MODELS, Bridge, Session, close_window, leave_editor, flow, link_models, pointer, press,
                          preview_crop, preview_rect, preview_redraw, wait)
 from e2e.reel import phrases, words as plain
 
@@ -264,6 +264,7 @@ def corrections(r):
     r.check('and saves it', wait(lambda: saved(r)[1] == caption_texts(r), 10), saved(r)[1])
 
     # Reopening the app: the same project, with the word and its caption as they were.
+    leave_editor(r)
     close_window()
     r.check('the window closes', wait(lambda: not alive(r), 15))
     r.s.close()

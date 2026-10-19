@@ -3,7 +3,7 @@ first run left it, Undo takes that back, and after a restart every version is st
 import json, time
 
 from e2e.agent import agent_project
-from e2e.harness import Bridge, Session, close_window, flow, wait
+from e2e.harness import Bridge, Session, close_window, leave_editor, flow, wait
 from e2e.home import resize
 
 BUTTON = "document.querySelector('header button[aria-label^=\"Versions\"]')"
@@ -90,6 +90,7 @@ def history(r):
     r.check('Ctrl+Z takes the restore back', wait(lambda: r.track() == edited, 10), r.track())
     r.check('and that is saved too', wait(lambda: saved() == 3, 10), saved())
 
+    leave_editor(r)
     close_window()
     r.check('the window closes', wait(lambda: not alive(r), 15))
     r.s.close()

@@ -63,6 +63,8 @@ pub struct AppState {
     close_failed: AtomicBool,
     /// The user agreed to cancel running work when closing the window.
     quit_confirmed: AtomicBool,
+    /// The editor is shown, so closing the window goes back to the projects instead of quitting.
+    editor_shown: AtomicBool,
     thumbs: Mutex<HashMap<String, String>>,
     filmstrips: Mutex<HashMap<String, Filmstrip>>,
     preview_locks: Mutex<HashMap<String, PreviewLock>>,
@@ -515,6 +517,11 @@ fn maximize_window(window: tauri::Window) -> CmdResult<()> {
         window.maximize().map_err(err)?;
     }
     Ok(())
+}
+
+#[tauri::command]
+fn set_editor_shown(shown: bool, state: State<AppState>) {
+    state.editor_shown.store(shown, Ordering::Release);
 }
 
 #[tauri::command]
@@ -1212,6 +1219,7 @@ pub fn run() {
                 proxy_skipped: Mutex::new(Default::default()),
                 close_failed: AtomicBool::new(false),
                 quit_confirmed: AtomicBool::new(false),
+                editor_shown: AtomicBool::new(false),
                 thumbs: Mutex::new(HashMap::new()),
                 filmstrips: Mutex::new(HashMap::new()),
                 preview_locks: Mutex::new(HashMap::new()),
@@ -1298,6 +1306,7 @@ pub fn run() {
             set_preview_muted,
             list_projects,
             list_fonts,
+            set_editor_shown,
             new_project,
             new_project_from_media,
             open_capcut_draft,
@@ -1388,6 +1397,12 @@ pub fn run() {
         .run(|app, event| match event {
             tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::CloseRequested { api, .. }, .. } => {
                 let state = app.state::<AppState>();
+                // Cleared here, so a second close quits even if the page never went home.
+                if state.editor_shown.swap(false, Ordering::AcqRel) {
+                    api.prevent_close();
+                    app.emit("close-to-home", ()).ok();
+                    return;
+                }
                 if !state.quit_confirmed.load(Ordering::Acquire)
                     && let Some(question) = state.running_work()
                 {

@@ -2,7 +2,7 @@ import json, os, shutil, subprocess, threading, time, uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from e2e.harness import CLI, FIXTURES, MACOS, Session, clipboard, close_window, flow, preview_crop, preview_rect, press, wait, webdriver
+from e2e.harness import CLI, FIXTURES, MACOS, Session, clipboard, close_window, leave_editor, flow, preview_crop, preview_rect, press, wait, webdriver
 from e2e.history import alive as window_alive
 
 FAKE = Path(__file__).resolve().parent / 'fake_agent'
@@ -766,6 +766,7 @@ def ai_panel_chats(r):
           wait(lambda: len(files()) == 2 and any(json.loads(p.read_text()).get('items') == kept for p in files()), 10),
           [str(p.relative_to(r.work)) for p in files()])
 
+    leave_editor(r)
     close_window()
     check('the window closes', wait(lambda: not window_alive(r), 15))
     r.s.close()

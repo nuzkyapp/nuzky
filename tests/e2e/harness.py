@@ -451,6 +451,15 @@ def close_window(d=None):
     return d
 
 
+def leave_editor(r):
+    """In the editor the close button goes back to the projects; a flow that quits closes the window once more."""
+    view = lambda: r.s.run('return window.__nuzky.store.getState().view', retries=3)
+    if view() == 'editor':
+        close_window()
+        if not wait(lambda: view() == 'home', 10):
+            raise RuntimeError('closing the window in the editor did not show the projects')
+
+
 def close_window_and_confirm(r):
     """Closes the app window like the title-bar button and confirms the native quit question with Enter."""
     if MACOS:

@@ -4,7 +4,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
-from e2e.harness import Session, close_window, flow, wait
+from e2e.harness import Session, close_window, leave_editor, flow, wait
 
 CLIENT = 'oaiapp_nuzky_e2e'
 EMAIL = 'editor@example.test'
@@ -231,6 +231,7 @@ def chatgpt(r):
         check_private(r, 'no issued token appears in the DOM, localStorage, registration or app log after sign-in')
 
         first = stored(r)
+        leave_editor(r)
         close_window()
         r.s.close()
         if (r.work / 'app.log').exists():
