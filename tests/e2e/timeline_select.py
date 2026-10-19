@@ -111,4 +111,17 @@ def timeline_select(r):
             (r.s.run(SELECTION), r.s.run(VIEW)))
     r.shot('box-scrolled')
     r.s.run(RELEASE, *edge, {})
+
+    # While playing the playhead keeps itself in view, but not during a box, which would then jerk back and forth.
+    r.s.run(SCROLL_TO, 0)
+    r.seek(0)
+    r.s.run('window.__nuzky.store.getState().togglePlay()')
+    r.check('playback runs', wait(lambda: r.s.run('return window.__nuzky.store.getState().playing'), 5))
+    r.s.run(PRESS, a[0] + 100, a[3] + 30, {}, [(a[0] + 300, a[1] + 10)])
+    wait(lambda: r.s.run(BOX), 5)
+    r.seek(16_000_000)
+    clock.sleep(0.6)
+    r.check('during a box the playing playhead does not scroll the timeline to itself', r.s.run(VIEW)[4] == 0, r.s.run(VIEW))
+    r.s.run(RELEASE, a[0] + 300, a[1] + 10, {})
+    r.s.run('window.__nuzky.store.getState().togglePlay()')
     r.check('nothing in the app failed', not r.errors(), r.errors())

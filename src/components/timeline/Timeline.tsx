@@ -142,17 +142,20 @@ function tickStep(zoom: number): number {
 
 const VISIBLE_STEP = 400;
 
-/** The playhead line, the one part of the timeline that follows playback frame by frame; it keeps itself in view while playing. */
-function Playhead({ zoom, scroller }: { zoom: number; scroller: RefObject<HTMLDivElement | null> }) {
+/**
+ * The playhead line, the one part of the timeline that follows playback frame by frame; it keeps itself in view while playing,
+ * except while `follow` is off: a box select scrolls the timeline itself.
+ */
+function Playhead({ zoom, scroller, follow }: { zoom: number; scroller: RefObject<HTMLDivElement | null>; follow: boolean }) {
   const timeUs = useEditor((s) => s.timeUs);
   const playing = useEditor((s) => s.playing);
   useEffect(() => {
     const el = scroller.current;
-    if (!el || !playing) return;
+    if (!el || !playing || !follow) return;
     const x = (timeUs / US) * zoom;
     const lane = el.clientWidth - HEADER_W;
     if (x > el.scrollLeft + lane - 24 || x < el.scrollLeft) el.scrollLeft = Math.max(0, x - 48);
-  }, [timeUs, playing, zoom, scroller]);
+  }, [timeUs, playing, zoom, scroller, follow]);
   // Above the ruler, below the track headers. The dark edges keep it visible on bright footage; no blur, it moves every frame.
   // It moves by transform on its own layer, so playback never repaints the clips under it.
   return (
@@ -718,7 +721,7 @@ export function Timeline({ height }: { height: number }) {
           {/* Drop position for media dragged from the panel */}
           {dropTime !== null && <div className="pointer-events-none absolute bottom-0 top-0 z-30 w-0.5 bg-accent" style={{ left: HEADER_W + (dropTime / US) * zoom }} />}
 
-          <Playhead zoom={zoom} scroller={scroller} />
+          <Playhead zoom={zoom} scroller={scroller} follow={!box} />
 
           {drag?.moved && ghostTiming && (
             // Pinned to the edge being dragged: the start for a move or left trim, the end for a right trim.
