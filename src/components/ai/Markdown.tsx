@@ -26,10 +26,17 @@ export function Markdown({ text }: { text: string }) {
     } else if (ITEM.test(line)) {
       const ordered = /^\s*\d/.test(line);
       const items: string[] = [];
+      let indent = 0;
       while (i < lines.length) {
-        if (ITEM.test(lines[i])) items.push(lines[i++].replace(ITEM, ""));
-        else if (/^\s+\S/.test(lines[i])) items[items.length - 1] += " " + lines[i++].trim();
-        else {
+        const marker = ITEM.exec(lines[i]);
+        if (marker) {
+          indent = marker[0].length;
+          items.push(lines[i++].slice(indent));
+        } else if (/^\s+\S/.test(lines[i])) {
+          // A wrapped line joins the item's text; a line indented past it is code and keeps its line and indent.
+          const deeper = lines[i].search(/\S/) > indent;
+          items[items.length - 1] += deeper ? "\n" + lines[i++].slice(indent) : " " + lines[i++].trim();
+        } else {
           // Agents write loose lists, with a blank line between items.
           let next = i;
           while (next < lines.length && lines[next].trim() === "") next++;
@@ -45,7 +52,9 @@ export function Markdown({ text }: { text: string }) {
           className={`flex flex-col gap-1 pl-5 ${ordered ? "list-decimal" : "list-disc"} marker:text-muted`}
         >
           {items.map((t, k) => (
-            <li key={k}>{inline(t)}</li>
+            <li key={k} className="whitespace-pre-wrap">
+              {inline(t)}
+            </li>
           ))}
         </List>,
       );

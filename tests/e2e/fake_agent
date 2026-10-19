@@ -540,12 +540,12 @@ elif 'options' in message:
     call('suggest_options', {'question': 'Kterou verzi úvodu nechat?', 'options': [
         {'label': 'The first take', 'detail': 'Shorter, a slip in the middle'}, {'label': 'The last take', 'detail': 'Clean, 2 s longer'}]})
 elif 'numbered list' in message:
-    # Loose lists as Claude and Codex write them: a blank line between items, bold first words, a wrapped line.
+    # Loose lists as Claude and Codex write them: a blank line between items, bold first words, a wrapped line, a command under an item.
     say('Here is what went wrong:\n\n'
         '1. **Captions have no shadow.** `TextStyle` has no shadow,\n   so white text disappears on a bright sky.\n\n'
         '2. **Caption position cannot be set in bulk.** Each caption moves alone.\n\n'
         '3. **Font size meant rebuilding captions.** The size lived in the preset.\n\n'
-        'What I would do next:\n\n4. Add a shadow.\n\n5. Move captions together.\n\n- Keep the preset\n\n- Keep the font\n\nThat is all.')
+        'What I would do next:\n\n4. Add a shadow.\n\n5. Move captions together.\n\n- Keep the preset\n\n- Keep the font, then run\n      npm run dev\n\nThat is all.')
 elif 'steer me' in message and not CODEX:
     clip = call('get_state', {})['tracks'][0]['clips'][0]
     run = call('begin_run', {'label': 'Steerable edit'})['run_id']

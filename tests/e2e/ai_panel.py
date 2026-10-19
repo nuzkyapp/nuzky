@@ -939,7 +939,7 @@ def ai_panel(r):
     # Agents write loose lists, a blank line between items; each item once came out as its own list numbered 1.
     send(r, 'Sum up the problems as a numbered list')
     blocks = wait(lambda: idle(r) and r.s.run(LISTS), 15)
-    r.check('a loose numbered list in an answer is one list numbered 1, 2, 3 with its wrapped line inside the item, '
+    r.check('a loose numbered list in an answer is one list numbered 1, 2, 3 with its wrapped line inside the item, a command indented under an item keeps its line and indent, '
             'a list after a paragraph goes on from its own first number, and loose bullets are one list too', blocks == [
                 'Here is what went wrong:',
                 [[1, 'Captions have no shadow. TextStyle has no shadow, so white text disappears on a bright sky.'],
@@ -947,7 +947,7 @@ def ai_panel(r):
                  [3, 'Font size meant rebuilding captions. The size lived in the preset.']],
                 'What I would do next:',
                 [[4, 'Add a shadow.'], [5, 'Move captions together.']],
-                [['•', 'Keep the preset'], ['•', 'Keep the font']],
+                [['•', 'Keep the preset'], ['•', 'Keep the font, then run\n    npm run dev']],
                 'That is all.'], blocks)
     r.shot('numbered-list')
 
