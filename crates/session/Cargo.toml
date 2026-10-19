@@ -12,3 +12,4 @@ serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
 sha2 = "0.11.0"
 dirs = "6"
+dunce = "1.0.5"

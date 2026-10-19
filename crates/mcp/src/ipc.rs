@@ -55,7 +55,7 @@ fn endpoint_directory() -> PathBuf {
 }
 
 pub fn socket_path(project: &Path) -> Result<PathBuf> {
-    let canonical = fs::canonicalize(project).context("PROJECT_MISSING: resolving IPC path")?;
+    let canonical = dunce::canonicalize(project).context("PROJECT_MISSING: resolving IPC path")?;
     let mut hash = FNV_OFFSET;
     hash_bytes(&mut hash, canonical.as_os_str().as_bytes());
     Ok(endpoint_directory().join(format!("{hash:016x}.sock")))
@@ -169,7 +169,7 @@ impl Listener {
         // Dropping the owner on any error below removes both endpoint files.
         let mut owner = Self {
             path,
-            project: fs::canonicalize(&project).context("PROJECT_MISSING: resolving IPC path")?,
+            project: dunce::canonicalize(&project).context("PROJECT_MISSING: resolving IPC path")?,
             stop: Arc::default(),
             connections: Arc::default(),
             worker: None,

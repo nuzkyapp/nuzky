@@ -87,7 +87,7 @@ fn find_model(name: &str) -> Option<PathBuf> {
 
 fn cache_id(path: &std::path::Path) -> Result<String> {
     use std::hash::{Hash, Hasher};
-    let path = std::fs::canonicalize(path).context("Resolving media path")?;
+    let path = dunce::canonicalize(path).context("Resolving media path")?;
     let metadata = path.metadata().context("Reading media metadata")?;
     let mut hash = std::collections::hash_map::DefaultHasher::new();
     path.hash(&mut hash);

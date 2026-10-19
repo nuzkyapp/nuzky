@@ -236,7 +236,7 @@ fn picture(pick: Pick, dir: &Path) -> Result<PathBuf> {
         std::fs::remove_file(&tmp).ok();
         result.with_context(|| format!("Could not save the sticker's picture in {}", dir.display()))?;
     }
-    path.canonicalize().context("Resolving sticker PNG")
+    dunce::canonicalize(path).context("Resolving sticker PNG")
 }
 
 #[derive(Clone)]

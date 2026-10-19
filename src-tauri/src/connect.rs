@@ -421,7 +421,7 @@ pub fn connect(agent: Agent, path: &Path, command: &Command, stamp: u64) -> Resu
 fn resolved(path: &Path) -> Result<PathBuf> {
     match std::fs::symlink_metadata(path) {
         Ok(meta) if meta.file_type().is_symlink() => {
-            std::fs::canonicalize(path).with_context(|| format!("Following the link {}", path.display()))
+            dunce::canonicalize(path).with_context(|| format!("Following the link {}", path.display()))
         }
         _ => Ok(path.to_path_buf()),
     }

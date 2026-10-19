@@ -7,7 +7,7 @@ use std::process::{Command, Output};
 use serde_json::{Value, json};
 
 fn dir(name: &str) -> PathBuf {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let root = dunce::canonicalize(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap();
     let dir = root.join("tmp-test/capcut-open").join(format!("{name}-{}", std::process::id()));
     std::fs::create_dir_all(dir.join("runtime")).unwrap();
     std::fs::create_dir_all(dir.join("home")).unwrap();
@@ -173,6 +173,7 @@ fn a_capcut_draft_opens_as_a_project_that_plays_as_cut() {
             text
         })
         .collect();
+    let gone = dir.join("nonexistent/gone.mov");
     let mut title = segment("text3", 0, 3_000_000, 0, 1.0);
     title["clip"]["transform"]["y"] = json!(0.8);
     let content = json!({"fps": 30, "canvas_config": {"width": 540, "height": 960, "ratio": "original"},
@@ -180,7 +181,7 @@ fn a_capcut_draft_opens_as_a_project_that_plays_as_cut() {
         "materials": {
             "videos": [
                 {"id": "talk", "type": "video", "path": talk, "material_name": "talk.mp4", "width": 540, "height": 960},
-                {"id": "gone", "type": "video", "path": "/nonexistent/gone.mov", "material_name": "gone.mov", "width": 540, "height": 960},
+                {"id": "gone", "type": "video", "path": gone, "material_name": "gone.mov", "width": 540, "height": 960},
                 {"id": "photo", "type": "photo", "path": photo, "material_name": "photo.png", "width": 540, "height": 960}],
             "audios": [{"id": "song", "type": "music", "path": song, "name": "song.mp3"}],
             "texts": texts, "effects": [{"id": "brightness", "type": "brightness", "value": 0.3}],
@@ -215,7 +216,7 @@ fn a_capcut_draft_opens_as_a_project_that_plays_as_cut() {
         (Some(540), Some(960), Some(30))
     );
     assert_eq!(project["imported"]["editor"], "CapCut");
-    assert_eq!(project["imported"]["path"], draft.canonicalize().unwrap().to_str().unwrap());
+    assert_eq!(project["imported"]["path"], dunce::canonicalize(&draft).unwrap().to_str().unwrap());
     assert_eq!(project["imported"]["leftOut"], json!(left));
     let tracks = project["tracks"].as_array().unwrap();
     assert_eq!(tracks.len(), 6);
@@ -244,7 +245,7 @@ fn a_capcut_draft_opens_as_a_project_that_plays_as_cut() {
     assert_eq!(clips[3]["transitionIn"], json!({"kind": "dissolve", "durationUs": 400_000}));
     let assets = project["assets"].as_array().unwrap();
     let asset = |clip: &Value| assets.iter().find(|a| a["id"] == clip["content"]["assetId"]).unwrap();
-    assert_eq!(asset(&clips[1])["path"], "/nonexistent/gone.mov");
+    assert_eq!(asset(&clips[1])["path"], gone.to_str().unwrap());
     assert_eq!(tracks[1]["kind"], "video");
     assert_eq!(tracks[1]["clips"].as_array().unwrap().len(), 1);
     let image = &tracks[1]["clips"][0];

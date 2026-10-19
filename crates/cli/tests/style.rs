@@ -189,7 +189,7 @@ fn project(fixture: &Fixture, name: &str, pieces: Option<&[(f64, f64)]>) -> Path
 #[test]
 #[ignore = "Recognises speech: needs ffmpeg, espeak-ng and the models in tmp-test/xdg/data/nuzky/models (scripts/fixtures.sh)"]
 fn learns_the_creators_style_and_scores_cuts_against_it() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let root = dunce::canonicalize(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap();
     let dir = root.join("tmp-test/style-tests").join(std::process::id().to_string());
     std::fs::create_dir_all(&dir).unwrap();
     let fixture = fixture(&dir);
@@ -332,7 +332,7 @@ fn timeline(fixture: &Fixture) -> (PathBuf, Vec<Piece>) {
 #[test]
 #[ignore = "Recognises speech: needs ffmpeg, espeak-ng and the models in tmp-test/xdg/data/nuzky/models (scripts/fixtures.sh)"]
 fn learns_from_a_timeline_cut_in_another_editor() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let root = dunce::canonicalize(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap();
     let dir = root.join("tmp-test/style-tests").join(format!("otio-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let fixture = fixture(&dir);
@@ -468,7 +468,7 @@ fn capcut(fixture: &Fixture) -> (PathBuf, Vec<Piece>) {
 #[test]
 #[ignore = "Recognises speech: needs ffmpeg, espeak-ng and the models in tmp-test/xdg/data/nuzky/models (scripts/fixtures.sh)"]
 fn learns_from_a_capcut_draft() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let root = dunce::canonicalize(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap();
     let dir = root.join("tmp-test/style-tests").join(format!("capcut-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let fixture = fixture(&dir);
@@ -547,7 +547,7 @@ fn learns_from_a_capcut_draft() {
 
 #[test]
 fn an_encrypted_capcut_draft_teaches_nothing() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let root = dunce::canonicalize(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap();
     let dir = root.join("tmp-test/style-tests").join(format!("capcut-encrypted-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
@@ -573,7 +573,7 @@ fn an_encrypted_capcut_draft_teaches_nothing() {
 
 #[test]
 fn a_timeline_of_nothing_on_this_computer_teaches_nothing() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let root = dunce::canonicalize(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap();
     let dir = root.join("tmp-test/style-tests").join(format!("otio-none-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let clip = |url: &str| {
@@ -612,17 +612,20 @@ fn a_timeline_of_nothing_on_this_computer_teaches_nothing() {
         "{said}"
     );
     assert!(said.contains("Not learning from talk.mov") && said.contains("Nothing to learn from"), "{said}");
-    // A pipe named as a recording is never opened: reading it would wait for ever.
-    let pipe = dir.join("pipe.mov");
-    assert!(Command::new("mkfifo").arg(&pipe).status().unwrap().success());
-    let piped = file.to_string().replace("https://example.com/talk.mov", pipe.to_str().unwrap());
-    std::fs::write(&otio, piped).unwrap();
-    let out = learn(&otio);
-    assert!(
-        String::from_utf8_lossy(&out.stderr).contains("Not learning from pipe.mov in"),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    // A pipe named as a recording is never opened: reading it would wait for ever. Windows has no such pipes.
+    #[cfg(unix)]
+    {
+        let pipe = dir.join("pipe.mov");
+        assert!(Command::new("mkfifo").arg(&pipe).status().unwrap().success());
+        let piped = file.to_string().replace("https://example.com/talk.mov", pipe.to_str().unwrap());
+        std::fs::write(&otio, piped).unwrap();
+        let out = learn(&otio);
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("Not learning from pipe.mov in"),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
     let out = learn(&premiere);
     assert!(
         String::from_utf8_lossy(&out.stderr).contains("is not a timeline Nuzky reads"),
@@ -635,7 +638,7 @@ fn a_timeline_of_nothing_on_this_computer_teaches_nothing() {
 
 #[test]
 fn a_sound_file_is_refused_before_any_recognition() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let root = dunce::canonicalize(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap();
     let dir = root.join("tmp-test/style-tests").join(format!("audio-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let sound = dir.join("memo.m4a");

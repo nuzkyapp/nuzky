@@ -12,7 +12,7 @@ use nuzky_analysis::{
 use nuzky_engine::media::probe;
 
 fn directory(name: &str) -> Result<PathBuf> {
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").canonicalize()?;
+    let src = dunce::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("src"))?;
     let root = src.ancestors().nth(3).context("Missing workspace root")?;
     let dir = root.join("tmp-test/analysis").join(format!("tests-{}", std::process::id())).join(name);
     std::fs::create_dir_all(&dir)?;

@@ -337,8 +337,8 @@ fn ratio(w: u32, h: u32) -> String {
 }
 
 pub fn check_source_path(project: &Project, path: &Path) -> Result<()> {
-    if let Ok(target) = std::fs::canonicalize(path)
-        && project.assets.iter().any(|a| std::fs::canonicalize(&a.path).ok().as_ref() == Some(&target))
+    if let Ok(target) = dunce::canonicalize(path)
+        && project.assets.iter().any(|a| dunce::canonicalize(&a.path).ok().as_ref() == Some(&target))
     {
         bail!("{} is used in this project. Choose another file name.", path.display());
     }

@@ -159,7 +159,7 @@ impl Drop for Client {
 
 #[test]
 fn an_opened_capcut_draft_keeps_its_import_report_over_read_only_stdio() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let root = dunce::canonicalize(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap();
     let dir = root.join("tmp-test").join(format!("capcut-open-mcp-{}", std::process::id()));
     let draft = dir.join("draft");
     std::fs::create_dir_all(&draft).unwrap();
@@ -213,7 +213,7 @@ fn an_opened_capcut_draft_keeps_its_import_report_over_read_only_stdio() {
     let mut c = Client::spawn_at(dir, &project, false, Some(None));
     let state = c.call("get_state", json!({}));
     assert_eq!(state["imported"]["editor"], "CapCut");
-    assert_eq!(state["imported"]["path"], draft.canonicalize().unwrap().to_str().unwrap());
+    assert_eq!(state["imported"]["path"], dunce::canonicalize(&draft).unwrap().to_str().unwrap());
     assert!(
         state["imported"]["leftOut"].as_array().unwrap().iter().any(|line| line.as_str().unwrap().contains("gone.mov")),
         "{state}"
@@ -257,7 +257,10 @@ fn built_in_sounds_are_listed_and_added_with_their_credit() {
     assert_eq!(assets[0]["credit"]["license"], "cc0");
     let file = PathBuf::from(assets[0]["path"].as_str().unwrap());
     // The temporary folder is a link on macOS (/var to /private/var); the sound is in its real path.
-    assert!(file.starts_with(c.dir.canonicalize().unwrap().join("data/nuzky/sounds")) && file.is_file(), "{file:?}");
+    assert!(
+        file.starts_with(dunce::canonicalize(&c.dir).unwrap().join("data/nuzky/sounds")) && file.is_file(),
+        "{file:?}"
+    );
     let clips: Vec<_> =
         disk["tracks"].as_array().unwrap().iter().flat_map(|t| t["clips"].as_array().unwrap()).collect();
     assert_eq!(clips.iter().map(|c| c["startUs"].as_i64().unwrap()).collect::<Vec<_>>(), [1_500_000, 4_000_000]);
@@ -289,7 +292,7 @@ fn stickers_are_added_by_emoji_and_name_as_one_asset() {
     let first = disk(&c);
     let asset = &first["assets"][0];
     let file = PathBuf::from(asset["path"].as_str().unwrap());
-    assert!(file.starts_with(c.dir.canonicalize().unwrap().join("data/nuzky/stickers")), "{file:?}");
+    assert!(file.starts_with(dunce::canonicalize(&c.dir).unwrap().join("data/nuzky/stickers")), "{file:?}");
     assert_eq!(asset["kind"], "image");
     assert_eq!(asset["width"], 1024);
     assert_eq!(asset["height"], 1024);
@@ -360,7 +363,7 @@ fn stickers_are_added_by_emoji_and_name_as_one_asset() {
 #[test]
 fn youtube_video_parts_download_with_mocked_ytdlp_and_require_rights() {
     use std::os::unix::fs::PermissionsExt;
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let root = dunce::canonicalize(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap();
     let dir = root.join("tmp-test").join(format!("youtube-video-mcp-{}", new_id()));
     std::fs::create_dir_all(&dir).unwrap();
     let project = dir.join("project.nuzky");
@@ -472,7 +475,7 @@ else:
 #[cfg(unix)]
 #[test]
 fn youtube_links_download_with_mocked_ytdlp_and_require_rights() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let root = dunce::canonicalize(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap();
     let dir = root.join("tmp-test").join(format!("youtube-mcp-{}", new_id()));
     std::fs::create_dir_all(&dir).unwrap();
     let project = dir.join("project.nuzky");
@@ -549,7 +552,7 @@ fn youtube_links_download_with_mocked_ytdlp_and_require_rights() {
     let disk: Value = serde_json::from_slice(&std::fs::read(&project).unwrap()).unwrap();
     assert_eq!(disk["assets"].as_array().unwrap().len(), 1);
     assert!(disk["assets"][0]["credit"].is_null());
-    let file = c.dir.canonicalize().unwrap().join("data/nuzky/sounds/youtube-yt_Song0001.m4a");
+    let file = dunce::canonicalize(&c.dir).unwrap().join("data/nuzky/sounds/youtube-yt_Song0001.m4a");
     assert_eq!(PathBuf::from(disk["assets"][0]["path"].as_str().unwrap()), file);
     assert_eq!(std::fs::read(&file).unwrap(), std::fs::read(&audio).unwrap());
     let track = disk["tracks"].as_array().unwrap().iter().find(|t| t["id"] == added["track_id"]).unwrap();
@@ -2040,7 +2043,7 @@ fn transcribe_edit_and_caption_real_media_over_stdio() {
 #[test]
 #[ignore = "Requires tmp-test/reel-1..3.mp4 from scripts/fixtures.sh and large-v3-turbo-q5_0 + Silero in tmp-test/xdg/data/nuzky/models"]
 fn retakes_of_three_czech_takes_over_stdio() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let root = dunce::canonicalize(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap();
     let model = root.join("tmp-test/xdg/data/nuzky/models/ggml-large-v3-turbo-q5_0.bin");
     let takes: Vec<PathBuf> = (1..=3).map(|n| root.join(format!("tmp-test/reel-{n}.mp4"))).collect();
     // Its own data directory, so no transcript stored by an earlier run is found, with the
@@ -2452,7 +2455,7 @@ fn reframe_names_missing_models_without_changing_the_project_over_stdio() {
 #[ignore = "Requires tmp-test/wide-head.mp4 and the face model from scripts/fixtures.sh; run with XDG_DATA_HOME=$PWD/tmp-test/xdg/data"]
 fn reframe_follows_a_wide_head_and_undoes_with_the_run_over_stdio() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let media = root.join("tmp-test/wide-head.mp4").canonicalize().unwrap();
+    let media = dunce::canonicalize(root.join("tmp-test/wide-head.mp4")).unwrap();
     let mut c = Client::new(true);
     let import = c.call("begin_run", json!({"label":"import"}))["run_id"].clone();
     let asset = c.call("import_media", json!({"run_id":import,"paths":[media]}))["asset_ids"][0].clone();
@@ -2538,7 +2541,7 @@ fn cover_tools_name_missing_models_and_never_download_them() {
 #[ignore = "Requires tmp-test/face-thumb.mp4 and the vision models from scripts/fixtures.sh; run with XDG_DATA_HOME=tmp-test/xdg/data"]
 fn cover_frames_and_subject_mask_of_a_face_over_stdio() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let media = root.join("tmp-test/face-thumb.mp4").canonicalize().unwrap();
+    let media = dunce::canonicalize(root.join("tmp-test/face-thumb.mp4")).unwrap();
     let mut c = Client::new(true);
     let run = c.call("begin_run", json!({"label":"import"}));
     let ids = c.call("import_media", json!({"run_id":run["run_id"],"paths":[media]}))["asset_ids"].clone();
@@ -2803,7 +2806,7 @@ fn a_project_from_before_thumbnails_saves_unchanged_over_stdio() {
 #[ignore = "Requires tmp-test/face-thumb.mp4 and the vision models from scripts/fixtures.sh; run with XDG_DATA_HOME=tmp-test/xdg/data"]
 fn text_behind_a_face_over_stdio_and_the_cli() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let media = root.join("tmp-test/face-thumb.mp4").canonicalize().unwrap();
+    let media = dunce::canonicalize(root.join("tmp-test/face-thumb.mp4")).unwrap();
     let mut c = Client::new(true);
     let run = c.call("begin_run", json!({"label":"cover"}))["run_id"].clone();
     let ids = c.call("import_media", json!({"run_id":run,"paths":[media]}))["asset_ids"].clone();

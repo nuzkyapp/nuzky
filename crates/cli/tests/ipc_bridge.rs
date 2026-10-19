@@ -295,7 +295,7 @@ fn real_bridge_shares_app_and_preserves_access_runs_images_and_disconnect() {
 fn current_attaches_while_agent_access_is_on_and_never_headless() {
     let mut app = App::new();
     let current = app.dir.join("nuzky/current");
-    assert_eq!(std::fs::read_to_string(&current).unwrap(), std::fs::canonicalize(&app.path).unwrap().to_string_lossy());
+    assert_eq!(std::fs::read_to_string(&current).unwrap(), dunce::canonicalize(&app.path).unwrap().to_string_lossy());
     assert_eq!(std::fs::metadata(&current).unwrap().permissions().mode() & 0o777, 0o600);
     app.access.store(false, Ordering::Release);
     let mut bridge = Bridge::with(&app, &["--current", "--allow-write"]);

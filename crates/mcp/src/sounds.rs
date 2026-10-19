@@ -862,7 +862,7 @@ pub fn existing<'a>(assets: &'a [Asset], id: &str) -> Option<&'a Asset> {
         source == "youtube"
             && a.kind == AssetKind::Audio
             && path.file_stem().is_some_and(|s| *s == *youtube)
-            && path.parent().map(Path::to_path_buf) == library_dir().canonicalize().ok()
+            && path.parent().map(Path::to_path_buf) == dunce::canonicalize(library_dir()).ok()
     };
     assets.iter().find(|a| {
         (a.credit.as_ref().is_some_and(|c| c.source == source && c.id == id) || linked(a))

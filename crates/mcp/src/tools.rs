@@ -90,7 +90,7 @@ impl Backend {
     }
 
     pub fn shared(host: Arc<Host>, project: &Path, client: Client) -> Result<Self> {
-        let project_path = std::fs::canonicalize(project).context("PROJECT_MISSING: resolving project")?;
+        let project_path = dunce::canonicalize(project).context("PROJECT_MISSING: resolving project")?;
         let project_dir = project_path.parent().context("INVALID_PROJECT: no directory")?.to_path_buf();
         std::fs::create_dir_all(&host.cache_dir).context("CACHE_UNAVAILABLE: creating media cache")?;
         Ok(Self {
@@ -514,7 +514,7 @@ impl Backend {
                     .map(|p| {
                         let path = self.resolve(p);
                         ensure!(path.is_file(), "MEDIA_MISSING: {}", path.display());
-                        probe(&kept(std::fs::canonicalize(&path).context("Resolving media path")?)?, new_id())
+                        probe(&kept(dunce::canonicalize(&path).context("Resolving media path")?)?, new_id())
                     })
                     .collect::<Result<Vec<_>>>()?;
                 entry.insert(PreparedImport {
@@ -1408,7 +1408,7 @@ impl Backend {
         );
         let out = self.resolve(&args.path);
         ensure!(!out.exists(), "OUTPUT_EXISTS: choose a new export path");
-        let parent = std::fs::canonicalize(out.parent().context("Output has no parent")?)
+        let parent = dunce::canonicalize(out.parent().context("Output has no parent")?)
             .context("Export directory must exist")?;
         let out = parent.join(out.file_name().context("Output needs a filename")?);
         ensure!(
@@ -1551,7 +1551,7 @@ impl Backend {
         let out = self.resolve(&args.path);
         let kind = ImageKind::of(&out).context("INVALID_ARGUMENTS: the path must end in .png, .jpg or .jpeg")?;
         ensure!(!out.exists(), "OUTPUT_EXISTS: choose a new export path");
-        let parent = std::fs::canonicalize(out.parent().context("Output has no parent")?)
+        let parent = dunce::canonicalize(out.parent().context("Output has no parent")?)
             .context("Export directory must exist")?;
         let out = parent.join(out.file_name().context("Output needs a filename")?);
         let project = self.media_project(&state.project);
@@ -1695,7 +1695,7 @@ fn kept(path: PathBuf) -> Result<PathBuf> {
     if !copy.is_file() {
         crate::sounds::publish(&copy, |out| Ok(std::io::Write::write_all(out, &bytes)?))?;
     }
-    copy.canonicalize().context("Resolving media path")
+    dunce::canonicalize(&copy).context("Resolving media path")
 }
 
 /// Agents add media as existing local files, as import_media does; projects may keep missing ones.

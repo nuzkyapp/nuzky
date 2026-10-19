@@ -108,7 +108,7 @@ pub fn run(args: &[String], cache: &Path) -> Result<()> {
 fn same_file(a: &Path, b: &Path) -> bool {
     let canonical = |p: &Path| {
         let parent = p.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
-        std::fs::canonicalize(parent).ok().map(|dir| dir.join(p.file_name().unwrap_or_default()))
+        dunce::canonicalize(parent).ok().map(|dir| dir.join(p.file_name().unwrap_or_default()))
     };
     a == b || canonical(a).is_some_and(|a| canonical(b).is_some_and(|b| a == b))
 }

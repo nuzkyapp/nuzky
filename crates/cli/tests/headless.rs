@@ -135,7 +135,7 @@ impl Drop for Client {
 #[test]
 #[ignore = "Requires ffprobe, tmp-test/talk.mp4 and small, Silero and English word timing models from scripts/fixtures.sh"]
 fn headless_rough_cut_exports_reels_and_saves_captions() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let root = dunce::canonicalize(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap();
     let media = root.join("tmp-test/talk.mp4");
     let mut c = Client::start(&root);
     let empty = c.call("get_state", json!({}));

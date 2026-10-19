@@ -123,7 +123,7 @@ mod tests {
         let proposed = EditCmd::SetReelCandidates { candidates: candidates.clone() };
         host.session.edit(vec![proposed], None, Expect::default()).unwrap();
         let ids = vec![candidates[0].id.clone()];
-        let reel = std::fs::canonicalize(&dir).unwrap().join("project-reel-1.nuzky");
+        let reel = dunce::canonicalize(&dir).unwrap().join("project-reel-1.nuzky");
 
         let make = || {
             super::make(&host, &host.session.state().unwrap(), &ids, Framing::Crop, &mut |_| Ok(()), |edits, expect| {

@@ -1,0 +1,4 @@
+disallowed-methods = [
+    { path = "std::fs::canonicalize", reason = "Use dunce::canonicalize to keep Windows paths compatible across projects, tools and UI." },
+    { path = "std::path::Path::canonicalize", reason = "Use dunce::canonicalize to keep Windows paths compatible across projects, tools and UI." },
+]

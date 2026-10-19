@@ -30,7 +30,7 @@ pub fn require() -> Result<()> {
 }
 
 fn load() -> Result<PathBuf, String> {
-    let exe = std::env::current_exe().and_then(|exe| exe.canonicalize()).map_err(|e| format!("finding Nuzky: {e}"))?;
+    let exe = std::env::current_exe().and_then(dunce::canonicalize).map_err(|e| format!("finding Nuzky: {e}"))?;
     let override_path = std::env::var_os("NUZKY_ONNXRUNTIME").map(PathBuf::from);
     let candidates = candidates(&exe, override_path, cfg!(debug_assertions).then(dev_library).flatten());
     let Some(path) = candidates.iter().find(|path| path.is_file()) else {

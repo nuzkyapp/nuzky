@@ -14,7 +14,7 @@ use nuzky_vision::{Candidate, segment_subject, thumbnail_frames};
 
 fn fixture(name: &str) -> PathBuf {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tmp-test").join(name);
-    path.canonicalize().unwrap_or_else(|_| panic!("{} is missing: run scripts/fixtures.sh", path.display()))
+    dunce::canonicalize(&path).unwrap_or_else(|_| panic!("{} is missing: run scripts/fixtures.sh", path.display()))
 }
 
 fn models() -> PathBuf {

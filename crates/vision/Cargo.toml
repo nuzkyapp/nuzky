@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 nuzky-engine.workspace = true
 anyhow.workspace = true
+dunce = "1.0.5"
 serde.workspace = true
 sha2 = "0.11.0"
 png = "0.18.1"

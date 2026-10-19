@@ -1944,7 +1944,7 @@ pub(crate) mod tests {
     #[test]
     #[ignore = "needs tmp-test/speech.wav and the small + Silero models from scripts/fixtures.sh"]
     fn without_a_word_timing_model_recognition_gives_the_words_it_gave_before() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+        let root = dunce::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap();
         let models = root.join("tmp-test/xdg/data/nuzky/models");
         let dir = root.join("tmp-test/mcp-tests").join(format!("no-aligner-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();

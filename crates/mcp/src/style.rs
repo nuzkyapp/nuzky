@@ -966,7 +966,7 @@ pub fn video(
 /// The same file gets the same id, so its sound is extracted once into the shared cache.
 fn stable_id(path: &Path) -> Result<String> {
     use std::hash::{Hash, Hasher};
-    let path = fs::canonicalize(path).with_context(|| format!("Cannot find {}", path.display()))?;
+    let path = dunce::canonicalize(path).with_context(|| format!("Cannot find {}", path.display()))?;
     let metadata = path.metadata()?;
     let mut hash = std::collections::hash_map::DefaultHasher::new();
     (&path, metadata.len(), metadata.modified()?).hash(&mut hash);
@@ -1114,7 +1114,7 @@ pub fn project_evidence(project: &Project, path: &Path, transcripts: &Transcript
             Some(Correction { time_us: word.start_us, heard: c.original.clone(), text: c.text.clone() })
         })
         .collect();
-    let key = format!("project:{}", fs::canonicalize(path).unwrap_or_else(|_| path.to_owned()).display());
+    let key = format!("project:{}", dunce::canonicalize(path).unwrap_or_else(|_| path.to_owned()).display());
     Ok(Some(Evidence {
         seq: 0,
         key,
@@ -1271,7 +1271,7 @@ pub struct PlannedRecording {
 fn read_timeline(path: &Path) -> Result<(nuzky_interchange::Read, String)> {
     let mut read = nuzky_interchange::read(path)?.played();
     for clip in read.timeline.tracks.iter_mut().flat_map(|t| &mut t.clips) {
-        if let Some(canonical) = clip.path.as_ref().and_then(|p| fs::canonicalize(p).ok()) {
+        if let Some(canonical) = clip.path.as_ref().and_then(|p| dunce::canonicalize(p).ok()) {
             clip.path = Some(canonical);
         }
     }
@@ -1368,7 +1368,7 @@ pub fn timeline_lessons(
         })
         .collect();
     let mut taught = learning::lessons(timeline, &name, &recordings).into_iter();
-    let key = format!("timeline:{}", fs::canonicalize(path).unwrap_or_else(|_| path.to_owned()).display());
+    let key = format!("timeline:{}", dunce::canonicalize(path).unwrap_or_else(|_| path.to_owned()).display());
     let mut out = Vec::new();
     for (m, v) in media.iter().zip(videos) {
         let video = match v {

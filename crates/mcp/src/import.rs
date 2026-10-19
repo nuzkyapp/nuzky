@@ -149,7 +149,7 @@ impl Assets {
 }
 
 fn key(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// Reads each local file the timeline plays. A file that is not on this computer, or that Nuzky

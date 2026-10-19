@@ -182,7 +182,7 @@ static HOSTS: Mutex<Vec<(PathBuf, std::sync::Weak<Host>)>> = Mutex::new(Vec::new
 impl OpenSession {
     fn open(path: PathBuf) -> anyhow::Result<(Self, Receiver<SessionEvent>)> {
         // The home screen and the editor compare projects by this path.
-        let path = std::fs::canonicalize(&path).unwrap_or(path);
+        let path = dunce::canonicalize(&path).unwrap_or(path);
         {
             let canonical = path.clone();
             let mut hosts = HOSTS.lock().unwrap();
@@ -974,7 +974,7 @@ async fn new_project_from_media(app: AppHandle, paths: Vec<String>) -> CmdResult
 /// snapshot's project says what did not come over.
 #[tauri::command]
 async fn open_capcut_draft(app: AppHandle, path: String) -> CmdResult<Snapshot> {
-    let draft = std::fs::canonicalize(&path).map_err(|_| format!("The draft {path} is not there any more."))?;
+    let draft = dunce::canonicalize(&path).map_err(|_| format!("The draft {path} is not there any more."))?;
     let families = list_fonts(app.state());
     let fonts: Vec<String> = families.bundled.into_iter().chain(families.system).collect();
     let project = tauri::async_runtime::spawn_blocking(move || nuzky_mcp::import::capcut_draft(&draft, &fonts))
@@ -1008,7 +1008,7 @@ fn open_project(
     path: String,
 ) -> CmdResult<Snapshot> {
     log::info!(target: "action", "open project");
-    let path = std::fs::canonicalize(path).map_err(err)?;
+    let path = dunce::canonicalize(path).map_err(err)?;
     if state.session.lock().unwrap().path != path {
         // The panel's agent works on the open project only; never stopped while holding the session.
         panel.stop();
@@ -1134,7 +1134,7 @@ fn initial_project() -> anyhow::Result<(OpenSession, Receiver<SessionEvent>, Opt
 fn open_recent(recent: Vec<ProjectSummary>) -> (Option<(OpenSession, Receiver<SessionEvent>)>, Option<String>) {
     let mut skipped: Option<(String, anyhow::Error)> = None;
     for project in recent {
-        match std::fs::canonicalize(&project.path).map_err(anyhow::Error::from).and_then(OpenSession::open) {
+        match dunce::canonicalize(&project.path).map_err(anyhow::Error::from).and_then(OpenSession::open) {
             Ok(opened) => {
                 return (Some(opened), skipped.map(|(name, error)| skipped_notice(&name, Some(&project.name), &error)));
             }

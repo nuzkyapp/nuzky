@@ -20,7 +20,7 @@ const SOFT_TOLERANCE_US: i64 = 60_000;
 #[test]
 #[ignore = "needs tmp-test/krysar-cs.wav and the large-v3-turbo-q5_0, Silero and Czech word timing models from scripts/fixtures.sh"]
 fn connected_czech_speech_is_timed_to_its_word_boundaries() -> Result<()> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize()?;
+    let root = dunce::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))?;
     let models = root.join("tmp-test/xdg/data/nuzky/models");
     let asset = probe(&root.join("tmp-test/krysar-cs.wav"), "krysar".into())?;
     let cache = cache_dir(&root)?;
@@ -59,7 +59,7 @@ fn connected_czech_speech_is_timed_to_its_word_boundaries() -> Result<()> {
 #[test]
 #[ignore = "needs tmp-test/krysar-cs.wav and the Czech word timing model from scripts/fixtures.sh"]
 fn a_stop_ends_word_timing_within_seconds() -> Result<()> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize()?;
+    let root = dunce::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))?;
     let models = root.join("tmp-test/xdg/data/nuzky/models");
     let aligner = Aligner::load(&models.join(align_model("cs").context("no Czech model")?.file))?;
     let asset = probe(&root.join("tmp-test/krysar-cs.wav"), "krysar".into())?;

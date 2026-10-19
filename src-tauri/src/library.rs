@@ -166,7 +166,7 @@ pub struct Library {
 
 /// The path a project is known by: canonical where it exists, so every list and the editor agree.
 pub fn key(path: &Path) -> String {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()).to_string_lossy().into_owned()
+    dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()).to_string_lossy().into_owned()
 }
 
 fn index_path() -> PathBuf {
@@ -246,7 +246,7 @@ impl Library {
     /// Every project file in the projects folder and every project opened from elsewhere, newest first.
     fn paths(&self, index: &Index) -> Vec<PathBuf> {
         let dir = store::projects_dir();
-        let dir = std::fs::canonicalize(&dir).unwrap_or(dir);
+        let dir = dunce::canonicalize(&dir).unwrap_or(dir);
         let mut seen = HashSet::new();
         let pending: HashSet<String> = self.pending_trash.lock().unwrap().keys().cloned().collect();
         std::fs::read_dir(&dir)

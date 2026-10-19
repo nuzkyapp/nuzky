@@ -78,10 +78,10 @@ pub fn vacant(path: &Path) -> bool {
 /// The returned file owns the OS lock; keep it alive through any pending writes.
 pub fn lock_project(path: &Path, exclusive: bool) -> Result<File> {
     let path = if path.exists() {
-        fs::canonicalize(path).context("Resolving project path")?
+        dunce::canonicalize(path).context("Resolving project path")?
     } else {
         let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
-        fs::canonicalize(parent)
+        dunce::canonicalize(parent)
             .context("Resolving project directory")?
             .join(path.file_name().context("Project needs a filename")?)
     };

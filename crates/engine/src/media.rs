@@ -440,7 +440,7 @@ pub fn probe(path: &Path, id: String) -> Result<Asset> {
     let mut asset = Asset {
         id,
         name: path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
-        path: std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()).to_string_lossy().into_owned(),
+        path: dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()).to_string_lossy().into_owned(),
         kind: if is_image {
             AssetKind::Image
         } else if video.is_some() {

@@ -469,7 +469,7 @@ mod tests {
     #[ignore = "Requires scripts/fixtures.sh media and models; run with XDG_DATA_HOME=$PWD/tmp-test/xdg/data"]
     fn a_wide_talking_head_reframed_to_vertical_keeps_the_face_in_the_frame() {
         let file = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tmp-test/wide-head.mp4");
-        let file = file.canonicalize().expect("tmp-test/wide-head.mp4 is missing: run scripts/fixtures.sh");
+        let file = dunce::canonicalize(&file).expect("tmp-test/wide-head.mp4 is missing: run scripts/fixtures.sh");
         let data = std::env::var_os("XDG_DATA_HOME").expect("set XDG_DATA_HOME=$PWD/tmp-test/xdg/data");
         let models = std::path::PathBuf::from(data).join("nuzky/models");
         let mut project = Project::new("reframe");

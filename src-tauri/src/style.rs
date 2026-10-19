@@ -60,7 +60,7 @@ pub async fn style_capcut_drafts(folder: Option<String>) -> CmdResult<Vec<CapCut
             .into_iter()
             .map(|d| CapCutDraft {
                 // As a project opened from it names it.
-                path: std::fs::canonicalize(&d.path).unwrap_or(d.path).display().to_string(),
+                path: dunce::canonicalize(&d.path).unwrap_or(d.path).display().to_string(),
                 name: d.name,
                 modified_ms: d.modified_ms,
                 duration_us: d.duration_us,

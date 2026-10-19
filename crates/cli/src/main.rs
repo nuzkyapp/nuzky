@@ -108,14 +108,14 @@ fn resolved_path(path: &Path) -> Result<PathBuf> {
     const MAX_SYMLINKS: usize = 40;
     let mut path = path.to_path_buf();
     for _ in 0..MAX_SYMLINKS {
-        if let Ok(target) = std::fs::canonicalize(&path) {
+        if let Ok(target) = dunce::canonicalize(&path) {
             return Ok(target);
         }
         let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
         match std::fs::read_link(&path) {
             Ok(target) => path = if target.is_absolute() { target } else { parent.join(target) },
             Err(_) => {
-                return Ok(std::fs::canonicalize(parent)?.join(path.file_name().context("Output needs a filename")?));
+                return Ok(dunce::canonicalize(parent)?.join(path.file_name().context("Output needs a filename")?));
             }
         }
     }
@@ -125,12 +125,12 @@ fn resolved_path(path: &Path) -> Result<PathBuf> {
 /// Resolve the parent while preserving the final directory entry, which export replaces.
 fn absolute_entry(path: &Path) -> Result<PathBuf> {
     let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
-    Ok(std::fs::canonicalize(parent)?.join(path.file_name().context("Output needs a filename")?))
+    Ok(dunce::canonicalize(parent)?.join(path.file_name().context("Output needs a filename")?))
 }
 
 fn check_render_output(project: &Path, out: &Path) -> Result<()> {
     let targets = [resolved_path(out)?, absolute_entry(out)?];
-    let canonical = std::fs::canonicalize(project)?;
+    let canonical = dunce::canonicalize(project)?;
     for base in [absolute_entry(project)?, canonical] {
         let mut prefix = base.file_name().context("Project needs a filename")?.to_os_string();
         prefix.push(".");
@@ -251,7 +251,7 @@ fn main() -> Result<()> {
             if out.symlink_metadata().is_ok() {
                 bail!("Project already exists: {}", out.display());
             }
-            let draft = std::fs::canonicalize(draft).with_context(|| format!("Cannot find {draft}"))?;
+            let draft = dunce::canonicalize(draft).with_context(|| format!("Cannot find {draft}"))?;
             let fonts = nuzky_engine::text::TextRenderer::new().font_families();
             let project = nuzky_mcp::import::capcut_draft(&draft, &fonts)?;
             nuzky_session::publish_new(out, &project)?;

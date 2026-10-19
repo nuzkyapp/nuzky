@@ -102,7 +102,7 @@ impl ProjectSession {
         events: Option<Sender<SessionEvent>>,
     ) -> Result<Self> {
         ensure!(!timeout.is_zero(), "Idle timeout must be positive");
-        let path = fs::canonicalize(path.as_ref()).context("Resolving project path")?;
+        let path = dunce::canonicalize(path.as_ref()).context("Resolving project path")?;
         let lock = if mode == Mode::Write { Some(lock_project(&path, true)?) } else { None };
         let project = load(&path)?;
         let checkpoint = storage::sidecar(&path, ".checkpoint.json");

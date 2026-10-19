@@ -7,7 +7,7 @@ impl Fixture {
         let dir = std::env::temp_dir().join(format!("nuzky-session-{}", new_id()));
         fs::create_dir_all(&dir).unwrap();
         // The session resolves symlinks in the project path; macOS's temp dir sits under the /var symlink.
-        let path = fs::canonicalize(dir).unwrap().join("project.nuzky");
+        let path = dunce::canonicalize(dir).unwrap().join("project.nuzky");
         storage::save(&path, &Project::new("Original")).unwrap();
         Self(path)
     }
