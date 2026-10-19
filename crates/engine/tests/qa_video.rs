@@ -151,11 +151,25 @@ fn hevc_with_wavefronts_seeks_match_ffmpeg() {
     }
     if encoders.contains("hevc_videotoolbox") {
         let path = d.join("apple.mov");
-        // GitHub's macOS runners have no hardware HEVC encoder; Apple's software one stands in there.
+        // GitHub's macOS runners have no hardware HEVC encoder, and Apple's software one that stands in there takes
+        // only its own pixel format, because the runner cannot convert pixels either (-12905).
         ff(
             &[
                 &source[..],
-                &["-c:v", "hevc_videotoolbox", "-allow_sw", "1", "-b:v", "4M", "-g", "30", "-tag:v", "hvc1"],
+                &[
+                    "-c:v",
+                    "hevc_videotoolbox",
+                    "-allow_sw",
+                    "1",
+                    "-pix_fmt",
+                    "nv12",
+                    "-b:v",
+                    "4M",
+                    "-g",
+                    "30",
+                    "-tag:v",
+                    "hvc1",
+                ],
             ]
             .concat(),
             &path,
