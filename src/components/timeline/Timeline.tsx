@@ -37,6 +37,7 @@ const HEADER_W = 140;
 const RULER_H = 28;
 /** Space between lanes. It belongs to the rows, so the track header column runs unbroken. */
 const ROW_GAP = 4;
+const LANES_AT = { left: HEADER_W, top: RULER_H };
 const END_TIP = "The video ends here. Sound after this point is not exported.";
 
 function rowHeight(track: Track) {
@@ -280,7 +281,7 @@ export function Timeline({ height }: { height: number }) {
     return () => el.removeEventListener("wheel", onWheel);
   }, [setZoom]);
 
-  const { drag: gesture, box, startClipDrag, startScrub, startBoxSelect } = useTimelineGestures({ project, zoom, snapping, minUs, rows, scroller, timeAt });
+  const { drag: gesture, box, startClipDrag, startScrub, startBoxSelect } = useTimelineGestures({ project, zoom, snapping, minUs, rows, scroller, lanesAt: LANES_AT, timeAt });
   // A fade drag changes only the clip's fades; the ghost, the slot and the snap guide belong to moves and trims.
   const drag = gesture && !isFade(gesture.mode) ? gesture : null;
   const fading = gesture?.moved && isFade(gesture.mode) ? gesture : null;

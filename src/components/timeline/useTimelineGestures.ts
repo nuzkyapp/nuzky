@@ -78,6 +78,7 @@ export function useTimelineGestures({
   minUs,
   rows,
   scroller,
+  lanesAt,
   timeAt,
 }: {
   project: Project | undefined;
@@ -86,6 +87,8 @@ export function useTimelineGestures({
   minUs: number;
   rows: RefObject<Map<string, HTMLDivElement>>;
   scroller: RefObject<HTMLDivElement | null>;
+  /** Where the lanes start in the scroller, past the track headers and the ruler. */
+  lanesAt: { left: number; top: number };
   timeAt: (clientX: number) => number;
 }) {
   const [drag, setDrag] = useState<Drag | null>(null);
@@ -290,16 +293,22 @@ export function useTimelineGestures({
       const start = at(e.clientX, e.clientY);
       let b: Box | null = null;
       let frame = 0;
-      let latest: globalThis.PointerEvent | null = null;
-      const apply = () => {
+      let pointer = { x: e.clientX, y: e.clientY };
+      const apply = (autoScroll: boolean) => {
         frame = 0;
-        const ev = latest;
-        latest = null;
-        if (!ev || (!b && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) <= 3)) return;
-        const p = at(ev.clientX, ev.clientY);
+        if (!b && Math.hypot(pointer.x - e.clientX, pointer.y - e.clientY) <= 3) return;
+        const r = el.getBoundingClientRect();
+        if (autoScroll) {
+          // Within 24 px of an edge of the lanes the timeline scrolls on, faster nearer the edge, so the box reaches clips out of view.
+          const speed = (d: number) => (d < 24 ? Math.ceil((24 - Math.max(0, d)) / 2) : 0);
+          const [left, top] = [el.scrollLeft, el.scrollTop];
+          el.scrollLeft += speed(r.left + el.clientWidth - pointer.x) - speed(pointer.x - r.left - lanesAt.left);
+          el.scrollTop += speed(r.top + el.clientHeight - pointer.y) - speed(pointer.y - r.top - lanesAt.top);
+          if (el.scrollLeft !== left || el.scrollTop !== top) frame = requestAnimationFrame(() => apply(true));
+        }
+        const p = at(pointer.x, pointer.y);
         b = { left: Math.min(start.x, p.x), top: Math.min(start.y, p.y), width: Math.abs(p.x - start.x), height: Math.abs(p.y - start.y) };
         setBox(b);
-        const r = el.getBoundingClientRect();
         const [x0, y0] = [b.left + r.left - el.scrollLeft, b.top + r.top - el.scrollTop];
         const hit: string[] = [];
         for (const c of el.querySelectorAll<HTMLElement>("[data-clip-id]")) {
@@ -313,9 +322,10 @@ export function useTimelineGestures({
       const end = (commit: boolean) => {
         unfollow();
         window.removeEventListener("keydown", onKey, true);
+        el.removeEventListener("scroll", follow);
         cancelAnimationFrame(frame);
         stopDrag.current = null;
-        if (commit) apply();
+        if (commit) apply(false);
         setBox(null);
         if (!commit) select(before);
         else if (!b) {
@@ -329,21 +339,24 @@ export function useTimelineGestures({
           end(false);
         }
       };
+      const follow = () => (frame ||= requestAnimationFrame(() => apply(true)));
       const unfollow = followPointer({
         move: (ev) => {
-          latest = ev;
-          frame ||= requestAnimationFrame(apply);
+          pointer = { x: ev.clientX, y: ev.clientY };
+          follow();
         },
         up: (ev) => {
-          latest = ev;
+          pointer = { x: ev.clientX, y: ev.clientY };
           end(true);
         },
         cancel: () => end(false),
       });
       window.addEventListener("keydown", onKey, true);
+      // Scrolling with the wheel mid-drag stretches the box too.
+      el.addEventListener("scroll", follow);
       stopDrag.current = () => end(false);
     },
-    [scroller, playheadAt],
+    [scroller, lanesAt, playheadAt],
   );
 
   return { drag, box, startClipDrag, startScrub, startBoxSelect };

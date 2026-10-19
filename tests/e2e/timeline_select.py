@@ -18,6 +18,10 @@ for (const [px, py] of path) window.dispatchEvent(at('pointermove', px, py));"""
 RELEASE = """const [x, y, keys] = arguments;
 window.dispatchEvent(new PointerEvent('pointerup', Object.assign({bubbles: true, button: 0, pointerId: 1, clientX: x, clientY: y}, keys)));"""
 BOX = "return !!document.querySelector('[data-box]')"
+# The timeline scroller's client box and scroll position, and a way to scroll it.
+VIEW = """const el = document.querySelector('[data-ruler]').closest('.overflow-auto'); const r = el.getBoundingClientRect();
+return [r.left, r.top, r.left + el.clientWidth, r.top + el.clientHeight, el.scrollLeft];"""
+SCROLL_TO = "document.querySelector('[data-ruler]').closest('.overflow-auto').scrollLeft = arguments[0]"
 CAPTION = """window.__nuzky.store.getState().edit({type: 'addText', startUs: arguments[0], text: 'Caption',
   style: {fontSize: 64, color: '#ffffff', bold: false, strokeWidth: 0, strokeColor: '#000000'}})"""
 
@@ -83,4 +87,19 @@ def timeline_select(r):
     clock.sleep(0.3)
     r.check('Esc in the middle of a box puts the selection back',
             not r.s.run(BOX) and sorted(r.s.run(SELECTION)) == sorted([first, second]), r.s.run(SELECTION))
+
+    # Zoomed in, the second clip is out of view; holding the box at the right edge scrolls the timeline on to it.
+    r.s.run('window.__nuzky.store.getState().select([]); window.__nuzky.store.getState().setZoom(200)')
+    clock.sleep(0.5)
+    r.s.run(SCROLL_TO, 0)
+    view = r.s.run(VIEW)
+    a = rect(first)
+    r.check('zoomed in, the second clip starts past the right edge', rect(second)[0] > view[2], (rect(second), view))
+    edge = (view[2] - 4, a[1] + 10)
+    r.s.run(PRESS, a[0] + 100, a[3] + 30, {}, [(a[0] + 120, a[3] + 30), edge])
+    reached = wait(lambda: second in r.s.run(SELECTION), 15)
+    r.check('holding the box at the right edge scrolls the timeline until it reaches the second clip', reached,
+            (r.s.run(SELECTION), r.s.run(VIEW)))
+    r.shot('box-scrolled')
+    r.s.run(RELEASE, *edge, {})
     r.check('nothing in the app failed', not r.errors(), r.errors())
