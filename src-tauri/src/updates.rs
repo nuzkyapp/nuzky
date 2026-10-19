@@ -107,8 +107,16 @@ fn form(fields: &[(&str, &str)]) -> String {
 /// The bug report form with the description and a summary of the report filled in. A long description is cut and the
 /// summary loses lines from its end until the address fits; the report the person attaches holds them whole.
 pub(crate) fn bug_url(version: &str, description: &str, summary: &[String]) -> String {
+    // Counted in bytes: each one takes up to three characters of the address.
     let whole = description.trim();
-    let mut description: String = whole.chars().take(600).collect();
+    let mut bytes = 0;
+    let mut description: String = whole
+        .chars()
+        .take_while(|c| {
+            bytes += c.len_utf8();
+            bytes <= 1200
+        })
+        .collect();
     if description.len() < whole.len() {
         description.push('…');
     }
@@ -226,6 +234,7 @@ mod tests {
         let summary: Vec<String> =
             (0..400).map(|n| format!("  2026-10-19T14:02:{n:02}Z user splitClip atUs={n}")).collect();
         let url = bug_url("0.2.0", &"ž".repeat(3000), &summary);
+        assert!(bug_url("0.2.0", &"🎬".repeat(600), &[]).len() <= MAX_URL);
         assert!(url.len() <= MAX_URL, "{}", url.len());
         let diagnostics = fields(&url).into_iter().find(|(k, _)| k == "diagnostics").unwrap().1;
         assert!(diagnostics.starts_with(&summary[0]) && diagnostics.lines().count() > 20, "{diagnostics}");

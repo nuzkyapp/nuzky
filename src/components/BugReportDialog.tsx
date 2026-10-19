@@ -99,7 +99,7 @@ function Dialog() {
             <Button pill onClick={close}>
               Done
             </Button>
-            <Button pill variant="primary" autoFocus onClick={showBugReport}>
+            <Button pill variant="primary" autoFocus onClick={() => showBugReport()}>
               Show in folder
             </Button>
           </div>
@@ -137,7 +137,7 @@ function Dialog() {
                 <pre data-report tabIndex={0} aria-label="Report" className="mt-1 max-h-[min(240px,calc(100vh-420px))] overflow-auto font-mono text-[11px] leading-[17px] whitespace-pre-wrap text-fg/80">
                   {report ?? "Reading the report…"}
                 </pre>
-                <p className="mt-2 text-[12px] text-muted">It has no file names, folders, captions or other text from your projects. Nothing is sent until you submit the issue on GitHub.</p>
+                <p className="mt-2 text-[12px] text-muted">It has no folders, captions or other text from your projects; the log names files it had trouble with. Nothing is sent until you submit the issue on GitHub.</p>
               </div>
             )}
           </div>

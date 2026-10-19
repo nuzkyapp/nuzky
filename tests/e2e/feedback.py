@@ -3,7 +3,7 @@ shows what the report includes, then opens the repository's bug form in the brow
 the system, the description and a summary of the report filled in, and saves the whole report in the logs folder to
 drag into the issue. Share an idea opens the idea form with the version, and Message me on X opens the author's profile.
 Copy diagnostics and Open logs folder have their own flow (diagnostics). Nothing is sent; the flow records the pages
-the app would open instead of a browser and keeps what is copied in the page."""
+the app would open instead of a browser."""
 import platform, re, sys, time, urllib.parse
 from pathlib import Path
 
@@ -31,9 +31,6 @@ REPORT = "return document.querySelector('[data-report]')?.textContent ?? ''"
 FITS = "const r = document.querySelector(arguments[0]).getBoundingClientRect(); return r.top >= 0 && r.bottom <= window.innerHeight;"
 DESCRIPTION = 'After I split the clip, the sound plays half a second late.\nIt happens on every phone video.'
 ITEMS = ['Report a bug…', 'Share an idea…', 'Copy diagnostics', 'Open logs folder', 'Message me on X…']
-# The page's clipboard keeps what is copied, so the flow neither reads nor overwrites the person's own.
-CLIPBOARD = """window.__copied = [];
-Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {writeText: async (t) => { window.__copied.push(t); }}});"""
 
 
 def record_opened(r):
@@ -77,7 +74,6 @@ def issue(url):
 @flow('feedback', 'Send feedback opens a prefilled GitHub issue for a bug or an idea, or the X profile, with nothing sent',
       before=record_opened, home=True)
 def feedback(r):
-    r.s.run(CLIPBOARD)
     version = r.s.run('return window.__nuzky.updates.getState().version')
     this_system = f'{system()} · {platform.machine().replace("arm64", "aarch64")}'
     form = 'https://github.com/nuzkyapp/nuzky/issues/new'
@@ -125,7 +121,8 @@ def feedback(r):
     saved = r.work / 'data/nuzky/logs' / (name or 'missing')
     r.check('and saves the whole report, starting with the description, in the logs folder',
             name and re.fullmatch(r'nuzky-report-[\d-]+\.txt', name) and saved.exists()
-            and saved.read_text().startswith(f'What happened:\n{DESCRIPTION}\n\nNuzky {version} ('), name)
+            and saved.read_text().startswith(f'What happened:\n{DESCRIPTION}\n\nNuzky {version} (')
+            and re.search(r'^Last \d+ lines of the log:\n', saved.read_text(), re.M), name)
     time.sleep(0.2)
     r.shot('report-saved')
     r.s.run(CLICK, DIALOG, 'Show in folder')

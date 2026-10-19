@@ -23,8 +23,8 @@ export async function reportBugNow(say: Say) {
   }
 }
 
-export function showBugReport() {
-  api.showBugReport().catch((e) => toast("error", `Couldn't show the report: ${errorText(e)}`));
+export function showBugReport(say = toast) {
+  api.showBugReport().catch((e) => say("error", `Couldn't show the report: ${errorText(e)}`));
 }
 
 /** Puts the whole bug report on the clipboard. */

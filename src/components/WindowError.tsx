@@ -39,7 +39,7 @@ export class WindowErrorBoundary extends Component<{ children: ReactNode }, { fa
               <CheckCircle2 size={16} className="mt-px shrink-0 text-ok" />
               <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
                 <p>{this.state.said[1]}</p>
-                <button type="button" onClick={showBugReport} className="-mx-1.5 rounded-md px-1.5 py-0.5 text-[12px] font-semibold text-accent transition-colors duration-[120ms] ease-out hover:bg-white/[.08]">
+                <button type="button" onClick={() => showBugReport((...said) => this.setState({ said }))} className="-mx-1.5 rounded-md px-1.5 py-0.5 text-[12px] font-semibold text-accent transition-colors duration-[120ms] ease-out hover:bg-white/[.08]">
                   Show in folder
                 </button>
               </div>

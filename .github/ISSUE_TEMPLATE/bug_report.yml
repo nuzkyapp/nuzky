@@ -55,8 +55,8 @@ body:
       description: >-
         Report a bug… in Nuzky's Send feedback menu filled in a summary here and saved the whole report as a
         nuzky-report-….txt file in Nuzky's logs folder. Drag that file into this form. It holds the version, system,
-        graphics, the format of the project's files, your last actions and the end of Nuzky's log, without file names,
-        folders, typed text or secrets. Read it before sending.
+        graphics, the format of the project's files, your last actions and the end of Nuzky's log, without folders,
+        typed text or secrets; the log names files it had trouble with. Read it before sending.
       render: text
     validations:
       required: false

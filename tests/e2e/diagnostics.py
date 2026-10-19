@@ -191,6 +191,8 @@ def diagnostics(r):
     r.check('Continue on GitHub opens the bug form with this version and system',
             f'{url.scheme}://{url.netloc}{url.path}' == 'https://github.com/nuzkyapp/nuzky/issues/new'
             and query.get('template') == 'bug_report.yml' and query.get('version', '').startswith(f'{version} (') and query.get('system'), (url, query))
+    r.check('its summary says where the errors came from without naming the exported or imported file',
+            'the newest errors from ' in query.get('diagnostics', '') and '.mp4' not in query.get('diagnostics', ''), query.get('diagnostics'))
     r.s.run(CLICK, REPORT_DIALOG, 'Done')
 
     close_window()
