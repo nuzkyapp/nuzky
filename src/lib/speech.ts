@@ -97,8 +97,9 @@ export function speechBlocker(project: Project): string | null {
 const sameView = (a: TranscriptView, b: TranscriptView) =>
   a.key === b.key && JSON.stringify([a.pauses, a.hesitations, a.untranscribed]) === JSON.stringify([b.pauses, b.hesitations, b.untranscribed]);
 
-// The Transcript tab and the inspector's project status show at once; one request serves both.
-let fetched: { at: string; view: Promise<TranscriptView> } | null = null;
+// The Transcript tab and the inspector's project status ask at once; one request serves both. Only a request still
+// running is shared: a transcript can be written without an event (learning a style), so a later mount asks again.
+let fetching: { at: string; view: Promise<TranscriptView> } | null = null;
 
 /**
  * The timeline's speech as it is now, fetched again after every edit, recognition or change of the
@@ -113,15 +114,17 @@ export function useTranscriptView(): { view: TranscriptView | null; error: strin
   useEffect(() => {
     let live = true;
     const at = `${epoch} ${revision} ${pauseUs} ${stored}`;
-    if (fetched?.at !== at) fetched = { at, view: api.transcriptView(pauseUs) };
-    const request = fetched;
-    request.view.then(
+    if (fetching?.at !== at) {
+      const request = { at, view: api.transcriptView(pauseUs) };
+      fetching = request;
+      const done = () => {
+        if (fetching === request) fetching = null;
+      };
+      request.view.then(done, done);
+    }
+    fetching.view.then(
       (view) => live && setState((s) => ({ epoch, view: s.epoch === epoch && s.view && sameView(s.view, view) ? s.view : view, error: null })),
-      (e) => {
-        // A failure is asked again next time instead of being shared.
-        if (fetched === request) fetched = null;
-        if (live) setState({ epoch, view: null, error: plainError(errorText(e)) });
-      },
+      (e) => live && setState({ epoch, view: null, error: plainError(errorText(e)) }),
     );
     return () => {
       live = false;

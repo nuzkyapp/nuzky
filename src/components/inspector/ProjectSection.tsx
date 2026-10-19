@@ -26,7 +26,9 @@ function focusWhenShown(selector: string) {
   const until = performance.now() + 3000;
   const look = () => {
     const now = document.activeElement;
-    if (mine !== waiting || (now !== from && now !== document.body)) return;
+    // Losing the focus counts only when the step's own button went (the cover editor replaces the inspector): a click
+    // on empty space also leaves the focus on the body.
+    if (mine !== waiting || (now !== from && !(now === document.body && !from?.isConnected))) return;
     const target = document.querySelector<HTMLElement>(selector);
     if (target) target.focus();
     else if (performance.now() < until) requestAnimationFrame(look);
@@ -73,7 +75,7 @@ function SpeechStep({ project, view, error }: { project: Project; view: Transcri
   if (view.untranscribed.length > 0)
     return (
       <Step icon={Scissors} title="Speech" detail={view.words.length ? "Partly transcribed" : "Not transcribed"}>
-        <Button variant="primary" className={STEP_BUTTON} title="Open Transcript to recognise what is said" onClick={() => reach("transcript", "[data-transcribe]")}>
+        <Button variant="primary" className={STEP_BUTTON} aria-label="Transcribe the timeline" title="Open Transcript to recognise what is said" onClick={() => reach("transcript", "[data-transcribe]")}>
           Transcribe
         </Button>
       </Step>
@@ -88,7 +90,7 @@ function SpeechStep({ project, view, error }: { project: Project; view: Transcri
   if (!left.length) return <Step icon={Scissors} done title="Speech" detail="Nothing left to cut" />;
   return (
     <Step icon={Scissors} title="Speech" detail={left.join(", ")}>
-      <Button variant="primary" className={STEP_BUTTON} title="Open Transcript to remove retakes and pauses" onClick={() => reach("transcript", "[data-remove-retakes]")}>
+      <Button variant="primary" className={STEP_BUTTON} aria-label="Clean up speech" title="Open Transcript to remove retakes and pauses" onClick={() => reach("transcript", "[data-remove-retakes]")}>
         Clean up
       </Button>
     </Step>
@@ -113,12 +115,13 @@ function soundsOf(project: Project) {
     });
 }
 
-/** What the video still needs, each step with the place that does it. */
 function ProjectStatus({ project }: { project: Project }) {
   const captions = useMemo(() => captionsOf(project), [project]);
   const sounds = useMemo(() => soundsOf(project), [project]);
   const covers = COVER_FORMATS.filter((f) => thumbnailOf(project, f.id));
   const { view, error } = useTranscriptView();
+  // Suggest zooms waits for every heard clip, as cuts in Transcript do.
+  const transcribed = !!view?.words.length && !view.untranscribed.length;
   const empty = projectDuration(project) <= 0;
   const openAudio = (tab: "project" | "music", selector?: string) => {
     useSounds.setState({ tab });
@@ -138,11 +141,11 @@ function ProjectStatus({ project }: { project: Project }) {
             {captions.count ? "Edit" : "Add"}
           </Button>
         </Step>
-        <Step icon={ZoomIn} title="Zooms" detail={view?.words.length ? undefined : "Needs a transcript"}>
+        <Step icon={ZoomIn} title="Zooms" detail={transcribed ? undefined : "Needs a transcript"}>
           <Button
             className={STEP_BUTTON}
             aria-label="Suggest zooms"
-            disabled={!view?.words.length}
+            disabled={!transcribed}
             disabledReason="Transcribe the timeline first"
             title="Open Transcript to zoom in on the sentences said with emphasis"
             onClick={() => reach("transcript", "[data-suggest-zooms]")}
@@ -234,7 +237,6 @@ function ProjectSettings() {
   );
 }
 
-/** The inspector with nothing selected: what the video still needs, then the project's format and background. */
 export function ProjectSection() {
   const project = useEditor((s) => s.snap!.project);
   const { fps } = project.canvas;
