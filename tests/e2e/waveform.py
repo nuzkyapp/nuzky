@@ -248,8 +248,6 @@ def waveform(r):
     r.shot('3b-start-zoomed-in')
     if r.check('zoomed in, the waveform at the start draws', close):
         check_against_reference(r, 'the start zoomed in, bars blending between peaks', close, clip, 0)
-        # The volume moves every bar by as many dB as it changes the sound: 18 % lowers them, 200 % raises the loud
-        # ones to the top edge.
         shown = close
         for volume, name in ((0.18, '18'), (2.0, '200')):
             r.s.call('window.__nuzky.store.getState().edit({type: "updateClip", clipId: arguments[0], volume: arguments[1]})',
