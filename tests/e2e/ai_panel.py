@@ -883,11 +883,22 @@ def ai_panel(r):
         got = clipboard()
         shown = r.s.run("return !!document.querySelector('aside[aria-label=AI] button[aria-label=Copied]')")
         r.shot('message-copied')
+        reply = r.s.run(MESSAGES)[-1]
+        reply_found = r.s.run("""const b = [...document.querySelectorAll('aside[aria-label=AI] button[aria-label="Copy reply"]')].at(-1);
+            b?.focus(); return !!b;""")
+        press('Return')
+        reply_copied = wait(lambda: clipboard() == reply, 5)
+        reply_got = clipboard()
+        reply_shown = r.s.run("return document.activeElement?.getAttribute('aria-label') === 'Copied'")
+        r.shot('reply-copied')
     finally:
         if theirs is not None:
             subprocess.run(['pbcopy'], input=theirs, text=True, check=True)
     r.check('Copy beside my message puts exactly what I sent on the clipboard and says it is copied',
             found and copied and shown, {'button': found, 'clipboard': got, 'copied shown': shown})
+    r.check("Copy under the agent's reply puts exactly its text on the clipboard and says it is copied",
+            reply_found and reply.startswith('Hotovo.') and reply_copied and reply_shown,
+            {'button': reply_found, 'reply': reply, 'clipboard': reply_got, 'copied shown': reply_shown})
     click(r, 'Added 2 captions')
     r.check('a line of the card selects the clips it is about', wait(lambda: len(r.s.run('return window.__nuzky.store.getState().selection')) == 2, 5))
     click(r, 'Undo')

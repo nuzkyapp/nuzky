@@ -690,7 +690,8 @@ function Attached({ attachments }: { attachments: Attachment[] }) {
   );
 }
 
-function UserMessage({ text, context, attachments }: { text: string; context: string | null; attachments?: Attachment[] }) {
+/** Shown while the pointer is over its `group` or it has keyboard focus. */
+function CopyButton({ text, label, className = "" }: { text: string; label: string; className?: string }) {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
@@ -703,17 +704,23 @@ function UserMessage({ text, context, attachments }: { text: string; context: st
       (e: Error) => useEditor.getState().toast({ kind: "error", text: e.message }),
     );
   return (
+    <IconButton
+      label={copied ? "Copied" : label}
+      onClick={() => void copy()}
+      className={`h-6 w-6 shrink-0 focus-visible:opacity-100 group-hover:opacity-100 ${copied ? "opacity-100" : "opacity-0"} ${className}`}
+    >
+      {copied ? <Check size={13} className="text-ok" /> : <Copy size={13} />}
+    </IconButton>
+  );
+}
+
+function UserMessage({ text, context, attachments }: { text: string; context: string | null; attachments?: Attachment[] }) {
+  return (
     <div className="group flex max-w-[88%] flex-col items-end gap-1 self-end">
       {attachments?.length ? <Attached attachments={attachments} /> : null}
       {text && (
         <div className="flex max-w-full items-end gap-1">
-          <IconButton
-            label={copied ? "Copied" : "Copy message"}
-            onClick={() => void copy()}
-            className={`h-6 w-6 shrink-0 focus-visible:opacity-100 group-hover:opacity-100 ${copied ? "opacity-100" : "opacity-0"}`}
-          >
-            {copied ? <Check size={13} className="text-ok" /> : <Copy size={13} />}
-          </IconButton>
+          <CopyButton text={text} label="Copy message" />
           <div className="min-w-0 whitespace-pre-wrap break-words rounded-[14px] rounded-br-[4px] bg-raised px-3 py-2 leading-[19px] text-fg">{text}</div>
         </div>
       )}
@@ -728,8 +735,11 @@ function Item({ item, index, collapsed, past, last }: { item: ChatItem; index: n
       return <UserMessage text={item.text} context={item.context} attachments={item.attachments} />;
     case "agent":
       return (
-        <div className="break-words leading-[20px] text-fg/90">
-          <Markdown text={item.text} />
+        <div className="group flex flex-col items-start gap-0.5">
+          <div className="max-w-full break-words leading-[20px] text-fg/90">
+            <Markdown text={item.text} />
+          </div>
+          <CopyButton text={item.text} label="Copy reply" className="-ml-1" />
         </div>
       );
     case "steps":
