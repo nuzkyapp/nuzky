@@ -1482,7 +1482,7 @@ export type TextStyle = {
    */
   fontFamily?: string | null,
   /**
-   * Pixels at canvas resolution.
+   * Pixels at canvas resolution, before the transform's scale.
    */
   fontSize: number,
   /**
@@ -1491,7 +1491,7 @@ export type TextStyle = {
   color: string,
   bold: boolean,
   /**
-   * Outline width in canvas pixels, 0 disables it.
+   * Outline width in canvas pixels before the transform's scale, 0 disables it.
    */
   strokeWidth: number,
   strokeColor: string,
@@ -1500,8 +1500,8 @@ export type TextStyle = {
    */
   background: string | null,
   /**
-   * Lines wrap at this width in canvas pixels; `None` wraps at 90% of the canvas width. Generated captions on
-   * vertical videos keep to the Reels and TikTok safe area.
+   * Lines wrap at this width in canvas pixels before the transform's scale; `None` wraps at 90% of the
+   * canvas width. Generated captions on vertical videos keep to the Reels and TikTok safe area.
    */
   maxWidth?: number | null,
   /**
@@ -1731,20 +1731,25 @@ export type TranscriptWord = {
 export type Transform = {
   /**
    * Offset of the layer centre from the canvas centre, as a fraction of canvas width.
+   * Positive moves right; 0.5 puts the centre on the right edge.
    */
   x: number,
   /**
    * Offset of the layer centre from the canvas centre, as a fraction of canvas height.
+   * Positive moves down; 0.5 puts the centre on the bottom edge.
    */
   y: number,
   /**
-   * 1.0 fits media inside the canvas; text is drawn at its font size.
+   * 1.0 fits media inside the canvas and draws text at its style's sizes, which scale with it.
    */
   scale: number,
   /**
    * Degrees, clockwise.
    */
   rotation: number,
+  /**
+   * 0 is invisible, 1 opaque.
+   */
   opacity: number,
   /**
    * Edges cut off the layer. Part of the transform, so keyframes can animate it.

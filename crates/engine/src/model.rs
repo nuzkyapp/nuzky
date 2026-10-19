@@ -708,13 +708,16 @@ pub fn key_words(text: &str, words: &[CaptionWord], pick: KeywordPick) -> Vec<st
 #[serde(rename_all = "camelCase")]
 pub struct Transform {
     /// Offset of the layer centre from the canvas centre, as a fraction of canvas width.
+    /// Positive moves right; 0.5 puts the centre on the right edge.
     pub x: f32,
     /// Offset of the layer centre from the canvas centre, as a fraction of canvas height.
+    /// Positive moves down; 0.5 puts the centre on the bottom edge.
     pub y: f32,
-    /// 1.0 fits media inside the canvas; text is drawn at its font size.
+    /// 1.0 fits media inside the canvas and draws text at its style's sizes, which scale with it.
     pub scale: f32,
     /// Degrees, clockwise.
     pub rotation: f32,
+    /// 0 is invisible, 1 opaque.
     pub opacity: f32,
     /// Edges cut off the layer. Part of the transform, so keyframes can animate it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -808,13 +811,13 @@ pub struct TextStyle {
     #[serde(default)]
     #[cfg_attr(feature = "ts", ts(optional = nullable))]
     pub font_family: Option<String>,
-    /// Pixels at canvas resolution.
+    /// Pixels at canvas resolution, before the transform's scale.
     pub font_size: f32,
     /// `#rrggbb`
     pub color: String,
     #[serde(default)]
     pub bold: bool,
-    /// Outline width in canvas pixels, 0 disables it.
+    /// Outline width in canvas pixels before the transform's scale, 0 disables it.
     #[serde(default)]
     pub stroke_width: f32,
     #[serde(default = "black")]
@@ -822,8 +825,8 @@ pub struct TextStyle {
     /// `#rrggbbaa` box behind the text.
     #[serde(default)]
     pub background: Option<String>,
-    /// Lines wrap at this width in canvas pixels; `None` wraps at 90% of the canvas width. Generated captions on
-    /// vertical videos keep to the Reels and TikTok safe area.
+    /// Lines wrap at this width in canvas pixels before the transform's scale; `None` wraps at 90% of the
+    /// canvas width. Generated captions on vertical videos keep to the Reels and TikTok safe area.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_width: Option<f32>,
     /// `#rrggbb` fill of the word being spoken (karaoke captions); `None` draws every word in `color`.
