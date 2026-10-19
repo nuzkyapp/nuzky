@@ -140,12 +140,13 @@ function nudge(clipId: string, dir: -1 | 1, second: boolean) {
  * Alt+↑/↓ moves a video or text clip a layer up or down: onto a new track right past the next video or
  * text track above or below its own. Main-track clips stay, and nothing goes below the main track.
  */
-function restack(clipId: string, up: boolean) {
+function restack(clipId: string, up: boolean, moving: () => void) {
   editClip(clipId, (c, track, project): EditCmd | null => {
     if (track.kind === "audio" || track.id === MAIN_TRACK) return null;
     const visual = project.tracks.filter((t) => t.kind !== "audio");
     const past = visual[visual.findIndex((t) => t.id === track.id) + (up ? 1 : -1)];
     if (!past || (!up && past.id === MAIN_TRACK)) return null;
+    moving();
     return { type: "moveClip", clipId: c.id, trackId: past.id, startUs: c.startUs, newTrack: up ? "above" : "below" };
   });
 }
@@ -434,10 +435,7 @@ export function Timeline({ height }: { height: number }) {
       e.preventDefault();
       e.stopPropagation();
       if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-        if (!e.shiftKey) {
-          restacked.current = clip.id;
-          restack(clip.id, e.key === "ArrowUp");
-        }
+        if (!e.shiftKey) restack(clip.id, e.key === "ArrowUp", () => (restacked.current = clip.id));
       } else nudge(clip.id, e.key === "ArrowLeft" ? -1 : 1, e.shiftKey);
     } else if (arrow && !e.shiftKey) {
       e.preventDefault();
