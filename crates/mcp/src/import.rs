@@ -338,7 +338,7 @@ fn text(clip: &TextClip, project: &Project, fonts: &[String], left: &mut Left) -
     };
     if let Some(font) = &style.font_family
         && !fonts.is_empty()
-        && !fonts.iter().any(|f| f.eq_ignore_ascii_case(font))
+        && !fonts.contains(font)
     {
         left.add(format!("Font not on this computer: {font}"));
     }

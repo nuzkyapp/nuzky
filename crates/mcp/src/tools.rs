@@ -212,6 +212,7 @@ impl Backend {
             "apply_edits" => {
                 let a: Apply = parse(arguments)?;
                 check_new_assets(&a.edits)?;
+                let warnings = crate::fonts::warnings(a.edits.iter().flat_map(crate::fonts::edit_families));
                 let mut result = serde_json::to_value(self.host.session.apply_edits(
                     &a.run_id,
                     &a.request_id,
@@ -223,7 +224,7 @@ impl Backend {
                 {
                     result["clips_omitted"] = json!(clips.as_array().map_or(0, Vec::len));
                 }
-                Ok(result)
+                Ok(with_warnings(result, warnings))
             }
             "end_run" => {
                 let a: End = parse(arguments)?;
@@ -488,6 +489,7 @@ impl Backend {
         object.insert("imported".into(), json!(project.imported));
         object.insert("duration_us".into(), json!(state.project.duration_us()));
         object.insert("caption_stats".into(), caption_stats(&state.project));
+        object.insert("missing_fonts".into(), json!(crate::fonts::missing(crate::fonts::families(&state.project))));
         object.insert("filtered".into(), json!(args.range.is_some() || args.clip_ids.is_some()));
         Ok(value)
     }
@@ -1268,15 +1270,17 @@ impl Backend {
         if let EditCmd::AddCaptions { transform, .. } | EditCmd::ReplaceCaptions { transform, .. } = &mut edit {
             *transform = args.transform;
         }
+        let warnings = crate::fonts::warnings(crate::fonts::edit_families(&edit));
         let result = self.host.session.apply_edits(
             &args.run_id,
             &new_id(),
             vec![edit],
             Expect { revision: Some(state.stamp.revision), speech_layout_key: None },
         )?;
-        Ok(
+        Ok(with_warnings(
             json!({"revision": result.stamp.revision, "session_epoch": result.stamp.session_epoch, "caption_count": result.outcome.created.len(), "created": result.outcome.created, "removed": result.outcome.removed}),
-        )
+            warnings,
+        ))
     }
 
     /// Punch-ins on word ranges as one edit of the run. Splitting clips moves the speech layout and
@@ -1373,7 +1377,10 @@ impl Backend {
             arguments,
             edits,
             expect: Expect { revision: Some(state.stamp.revision), speech_layout_key: None },
-            response: json!({ "reels": made }),
+            response: with_warnings(
+                json!({ "reels": made }),
+                crate::fonts::warnings(made.iter().flat_map(|reel| reel.fonts.iter().map(String::as_str))),
+            ),
         });
         let applied = self.apply_transcript_edit(&args.run_id, &request_id, prepared);
         if applied.is_err() && reels::forget(&made, &self.host.session.state()?.project) {
@@ -1768,6 +1775,14 @@ fn owns_run(state: &SessionState, id: &str) -> Result<()> {
     ensure!(!state.read_only, "READ_ONLY: restart with --allow-write");
     ensure!(state.open_run.as_ref().is_some_and(|r| r.run_id == id), "INVALID_RUN: begin a run first");
     Ok(())
+}
+
+/// A tool's answer with `warnings` when there are any.
+fn with_warnings(mut value: Value, warnings: Vec<String>) -> Value {
+    if !warnings.is_empty() {
+        value["warnings"] = json!(warnings);
+    }
+    value
 }
 
 fn parse<T: DeserializeOwned>(value: Value) -> Result<T> {

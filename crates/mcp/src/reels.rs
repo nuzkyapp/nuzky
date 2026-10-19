@@ -1,7 +1,7 @@
 //! Reels from a long video: an agent proposes moments of the transcript, the user picks some, and each
 //! picked one becomes a project of its own beside the source, playing the same media files.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail, ensure};
@@ -58,6 +58,9 @@ pub struct MadeReel {
     pub id: String,
     pub path: PathBuf,
     pub duration_us: i64,
+    /// Font families of the reel's text.
+    #[serde(skip)]
+    pub fonts: BTreeSet<String>,
 }
 
 /// A full stop, question or exclamation mark, an ellipsis or a pause of 600 ms ends a sentence; a comma does
@@ -257,7 +260,12 @@ pub fn make(
             forget(&made, project);
             return Err(error);
         }
-        made.push(MadeReel { id: candidate.id.clone(), path, duration_us: reel.duration_us() });
+        made.push(MadeReel {
+            id: candidate.id.clone(),
+            path,
+            duration_us: reel.duration_us(),
+            fonts: crate::fonts::families(reel).map(str::to_owned).collect(),
+        });
     }
     let edits = planned
         .iter()

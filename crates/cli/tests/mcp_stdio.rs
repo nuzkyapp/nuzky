@@ -1310,13 +1310,11 @@ fn headless_transcribe_without_models_points_to_transcript_tab_over_stdio() {
     c.finish();
 }
 
-#[cfg(target_os = "linux")]
-#[test]
-fn caption_style_packages_over_stdio() {
-    use nuzky_engine::edit::caption_preset;
+/// A 4 s take whose transcript, "Save 450 every month.", is in the data directory of `c`.
+#[cfg(unix)]
+fn transcribed_take(c: &Client) -> nuzky_engine::model::Asset {
     use nuzky_session::transcripts::{Record, TranscriptStore, VERSION};
 
-    let mut c = Client::start(true, None, Some(None));
     let video = c.dir.join("talk.mp4");
     assert!(
         Command::new("ffmpeg")
@@ -1364,6 +1362,16 @@ fn caption_style_packages_over_stdio() {
             },
         )
         .unwrap();
+    asset
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn caption_style_packages_over_stdio() {
+    use nuzky_engine::edit::caption_preset;
+
+    let mut c = Client::start(true, None, Some(None));
+    let asset = transcribed_take(&c);
     let mut own = caption_preset("neon_blue").unwrap().clone();
     own.name = "My neon".into();
     own.anim_out = own.anim_in;
@@ -1397,6 +1405,109 @@ fn caption_style_packages_over_stdio() {
     let unknown = c.error("build_captions", json!({"run_id": run["run_id"], "style_preset": "missing_package"}));
     assert!(unknown.contains("My neon") && unknown.contains("hormozi") && unknown.contains("typewriter"), "{unknown}");
     c.call("end_run", json!({"run_id": run["run_id"], "action": "keep"}));
+    c.finish();
+}
+
+const MISSING_FONT: &str = "Nuzky Test Font That Is Not Installed";
+
+fn missing_font_warning() -> Value {
+    json!([format!(
+        "Font \"{MISSING_FONT}\" is not installed on this computer; its text is drawn in Inter. Install it or pick an installed font."
+    )])
+}
+
+fn font_style(family: &str) -> Value {
+    json!({"fontFamily": family, "fontSize": 80.0, "color": "#ffffff"})
+}
+
+/// A font this computer lacks is named once by the edits that give it to text, also when they are retried, and
+/// get_state lists it; a bundled font and moving text in a missing one are not named.
+#[test]
+fn fonts_this_computer_lacks_are_named_over_stdio() {
+    let mut c = Client::start(true, None, None);
+    let run = c.call("begin_run", json!({"label": "fonts"}))["run_id"].clone();
+    let bundled = c.call(
+        "apply_edits",
+        json!({"run_id": run, "request_id": "inter", "edits": [
+            {"type": "addText", "startUs": 0, "text": "Hook", "style": font_style("Inter")}]}),
+    );
+    assert!(bundled.get("warnings").is_none(), "{bundled}");
+    assert_eq!(c.call("get_state", json!({}))["missing_fonts"], json!([]));
+
+    let titles = json!({"run_id": run, "request_id": "titles", "edits": [
+        {"type": "addText", "startUs": 1_000_000, "text": "One", "style": font_style(MISSING_FONT)},
+        {"type": "addText", "startUs": 2_000_000, "text": "Two", "style": font_style(MISSING_FONT)}]});
+    let added = c.call("apply_edits", titles.clone());
+    assert_eq!(added["warnings"], missing_font_warning());
+    // A retry, as after a failed save or a lost answer, answers the same, warning included.
+    assert_eq!(c.call("apply_edits", titles), added);
+    let state = c.call("get_state", json!({}));
+    assert_eq!(state["missing_fonts"], json!([MISSING_FONT]));
+    let text = |state: &Value, text: &str| {
+        state["tracks"].as_array().unwrap().iter().find_map(|track| {
+            let clip = track["clips"].as_array().unwrap().iter().find(|clip| clip["content"]["text"] == text)?;
+            Some(json!({"clip": clip, "trackId": track["id"], "trackKind": track["kind"],
+                "keepInPlace": track["keepInPlace"]}))
+        })
+    };
+    let (hook, one) = (text(&state, "Hook").unwrap(), text(&state, "One").unwrap());
+
+    let moved = c.call(
+        "apply_edits",
+        json!({"run_id": run, "request_id": "move", "edits": [
+            {"type": "moveClip", "clipId": one["clip"]["id"], "startUs": 3_000_000}]}),
+    );
+    assert!(moved.get("warnings").is_none(), "{moved}");
+    let pasted = c.call(
+        "apply_edits",
+        json!({"run_id": run, "request_id": "paste", "edits": [
+            {"type": "pasteAttributes", "source": one, "clipIds": [hook["clip"]["id"]]}]}),
+    );
+    assert_eq!(pasted["warnings"], missing_font_warning());
+    let restyled = c.call(
+        "apply_edits",
+        json!({"run_id": run, "request_id": "restyle", "edits": [
+            {"type": "restyleTrack", "trackId": hook["trackId"], "style": {"fontFamily": MISSING_FONT}}]}),
+    );
+    assert_eq!(restyled["warnings"], missing_font_warning());
+    c.call("end_run", json!({"run_id": run, "action": "keep"}));
+    c.finish();
+}
+
+/// Captions and reels in a font this computer lacks name it, a retried make_reels too.
+// Windows keeps transcripts in its Roaming AppData, which XDG_DATA_HOME does not move.
+#[cfg(unix)]
+#[test]
+fn captions_and_reels_name_fonts_this_computer_lacks_over_stdio() {
+    let mut c = Client::start(true, None, Some(None));
+    let asset = transcribed_take(&c);
+    let run = c.call("begin_run", json!({"label": "fonts"}))["run_id"].clone();
+    c.call(
+        "apply_edits",
+        json!({"run_id": run, "request_id": "take", "edits": [
+            {"type": "addAssets", "assets": [asset]}, {"type": "addClip", "assetId": "take"}]}),
+    );
+    let inter = c.call("build_captions", json!({"run_id": run, "style": font_style("Inter")}));
+    assert!(inter.get("warnings").is_none(), "{inter}");
+    let captions = c.call("build_captions", json!({"run_id": run, "style": font_style(MISSING_FONT)}));
+    assert!(captions["caption_count"].as_u64().unwrap() > 1);
+    assert_eq!(captions["warnings"], missing_font_warning());
+
+    let key = c.call("get_transcript", json!({"detail": "sentences"}))["transcript_key"].clone();
+    let proposed = c.call(
+        "propose_reels",
+        json!({"run_id": run, "transcript_key": key, "candidates": [
+            {"from": 0, "to": 3, "title": "Save", "why": "The whole take.", "score": 0.5}]}),
+    );
+    let args = json!({"run_id": run, "request_id": "make", "ids": [proposed["candidates"][0]["id"]]});
+    let made = c.call("make_reels", args.clone());
+    assert_eq!(made["warnings"], missing_font_warning());
+    assert_eq!(c.call("make_reels", args), made);
+    let reel: Project =
+        serde_json::from_slice(&std::fs::read(made["reels"][0]["path"].as_str().unwrap()).unwrap()).unwrap();
+    assert!(reel.tracks.iter().flat_map(|track| &track.clips).any(|clip| matches!(&clip.content,
+        nuzky_engine::model::ClipContent::Text { style, .. } if style.font_family.as_deref() == Some(MISSING_FONT))));
+    c.call("end_run", json!({"run_id": run, "action": "keep"}));
     c.finish();
 }
 

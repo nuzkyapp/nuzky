@@ -78,8 +78,9 @@ static BUNDLED_FONTS: std::sync::LazyLock<Vec<&'static [u8]>> = std::sync::LazyL
         .collect()
 });
 
-/// Text without a chosen font uses this bundled family, so a project looks the same on every machine.
-const DEFAULT_FAMILY: &str = "Inter";
+/// Text without a chosen font, or with one this computer lacks, uses this bundled family, so a project
+/// looks the same on every machine.
+pub const DEFAULT_FAMILY: &str = "Inter";
 
 pub struct TextRenderer {
     fonts: FontSystem,
@@ -135,9 +136,15 @@ impl TextRenderer {
         BUNDLED_FONT_FAMILIES.iter().copied().chain(system).map(str::to_owned).collect()
     }
 
+    /// Whether text in `family` is drawn in it: bundled and installed families match by exact name.
+    /// Text in any other family is drawn in `DEFAULT_FAMILY`.
+    pub fn has_family(&self, family: &str) -> bool {
+        self.families.contains(family)
+    }
+
     fn family<'a>(&self, name: Option<&'a str>) -> Family<'a> {
         match name {
-            Some(name) if self.families.contains(name) => Family::Name(name),
+            Some(name) if self.has_family(name) => Family::Name(name),
             _ => Family::SansSerif,
         }
     }
