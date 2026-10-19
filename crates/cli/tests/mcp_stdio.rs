@@ -1402,7 +1402,7 @@ fn caption_style_packages_over_stdio() {
 /// run. Words come from the store, so the file is never decoded and any bytes do. The client
 /// must have a data directory of its own (`style: Some(..)`).
 #[cfg(unix)]
-fn place_transcribed_take(c: &mut Client, said: &[&str], run_id: &Value) -> nuzky_engine::model::Asset {
+fn place_transcribed_take(c: &mut Client, said: &[&str], run_id: &Value) {
     use nuzky_engine::{model::Asset, model::AssetKind, speech::Word};
     use nuzky_session::transcripts::{Record, TranscriptStore, VERSION};
     let path = c.dir.join("take.mov");
@@ -1446,7 +1446,6 @@ fn place_transcribed_take(c: &mut Client, said: &[&str], run_id: &Value) -> nuzk
     store.put(&asset, &record).unwrap();
     let edits = json!([{"type":"addAssets","assets":[asset]},{"type":"addClip","assetId":"take"}]);
     c.call("apply_edits", json!({"run_id":run_id,"request_id":"place","edits":edits}));
-    asset
 }
 
 #[cfg(unix)]
@@ -1537,7 +1536,6 @@ fn correct_words_refuses_a_word_that_reads_otherwise_than_expected_over_stdio() 
     assert_eq!(c.call("correct_words", right), fixed);
     assert!(caption_texts(&mut c).iter().any(|t| t.contains("nadchne")));
 
-    // A corrected word reads its correction, not what recognition wrote.
     let key = fixed["transcript_key"].clone();
     let original =
         json!({"run_id":run_id,"transcript_key":key,"corrections":[{"i":2,"text":"nadchne!","expected":"natchne"}]});
@@ -1547,7 +1545,6 @@ fn correct_words_refuses_a_word_that_reads_otherwise_than_expected_over_stdio() 
     let fixed = c.call("correct_words", again);
     assert_eq!(fixed["words"], json!([{"i":2,"before":"nadchne","after":"nadchne!"}]));
 
-    // Without expected, as before.
     let unchecked =
         json!({"run_id":run_id,"transcript_key":fixed["transcript_key"],"corrections":[{"i":1,"text":"něco,"}]});
     assert_eq!(c.call("correct_words", unchecked)["words"], json!([{"i":1,"before":"něco","after":"něco,"}]));
