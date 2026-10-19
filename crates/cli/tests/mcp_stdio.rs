@@ -1511,6 +1511,7 @@ fn captions_and_reels_name_fonts_this_computer_lacks_over_stdio() {
     c.finish();
 }
 
+// Windows keeps transcripts in its Roaming AppData, which XDG_DATA_HOME does not move.
 /// A 4 s take whose words are stored as recognised, 0.8 s apart, and placed on the timeline by a
 /// run. Words come from the store, so the file is never decoded and any bytes do. The client
 /// must have a data directory of its own (`style: Some(..)`).
@@ -1561,15 +1562,30 @@ fn place_transcribed_take(c: &mut Client, said: &[&str], run_id: &Value) {
     c.call("apply_edits", json!({"run_id":run_id,"request_id":"place","edits":edits}));
 }
 
+/// Each caption clip's id, text, and whether its timed words still spell it, so karaoke highlights it.
 #[cfg(unix)]
-fn caption_texts(c: &mut Client) -> Vec<String> {
+fn caption_clips(c: &mut Client) -> Vec<(String, String, bool)> {
     let state = c.call("get_state", json!({}));
     let track = state["tracks"].as_array().unwrap().iter().find(|t| t["name"] == "Captions").unwrap().clone();
-    track["clips"].as_array().unwrap().iter().map(|c| c["content"]["text"].as_str().unwrap().to_owned()).collect()
+    track["clips"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|clip| {
+            let text = clip["content"]["text"].as_str().unwrap().to_owned();
+            let words = clip["content"]["words"].as_array().cloned().unwrap_or_default();
+            let timed = words.iter().map(|w| w["text"].as_str().unwrap()).collect::<Vec<_>>().join(" ") == text;
+            (clip["id"].as_str().unwrap().to_owned(), text, timed)
+        })
+        .collect()
 }
 
-// Only on Linux does XDG_DATA_HOME choose where Nuzky keeps transcripts.
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
+fn caption_texts(c: &mut Client) -> Vec<String> {
+    caption_clips(c).into_iter().map(|(_, text, _)| text).collect()
+}
+
+#[cfg(unix)]
 #[test]
 fn correct_words_fixes_the_transcript_and_captions_over_stdio() {
     let mut c = Client::start(true, None, Some(None));
@@ -1669,6 +1685,113 @@ fn correct_words_refuses_a_word_that_reads_otherwise_than_expected_over_stdio() 
         .collect();
     assert_eq!(words, ["Mikrofon", "něco,", "nadchne!", "nejblíž."]);
     c.call("end_run", json!({"run_id":run_id,"action":"keep"}));
+    c.finish();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_correction_with_more_words_than_a_caption_splits_and_its_parts_follow_corrections_over_stdio() {
+    let mut c = Client::start(true, None, Some(None));
+    let run = c.call("begin_run", json!({"label":"fix a word"}));
+    place_transcribed_take(&mut c, &["Tak", "vzalbysi", "nebo", "ne."], &run["run_id"]);
+    let correct = |c: &mut Client, text: &str| {
+        let key = c.call("get_transcript", json!({}))["transcript_key"].clone();
+        let args = json!({"run_id":run["run_id"],"transcript_key":key,"corrections":[{"i":1,"text":text}]});
+        c.call("correct_words", args)["captions_changed"].as_array().unwrap().len()
+    };
+    correct(&mut c, "Vzal bys ji?");
+    c.call("build_captions", json!({"run_id":run["run_id"],"max_words":2}));
+    let captions = caption_clips(&mut c);
+    assert!(captions.iter().all(|(_, t, _)| t.split_whitespace().count() <= 2), "{captions:?}");
+    assert_eq!(caption_texts(&mut c).join(" "), "Tak Vzal bys ji? nebo ne.");
+    assert!(captions.iter().all(|(.., timed)| *timed), "every part keeps its karaoke time: {captions:?}");
+    let transcript = c.call("get_transcript", json!({}));
+    assert_eq!(transcript["words"].as_array().unwrap().len(), 4, "the transcript keeps one word");
+    assert_eq!(transcript["words"][1]["text"], "Vzal bys ji?");
+
+    assert_eq!(correct(&mut c, "Vzala bys jí?"), 2);
+    assert_eq!(caption_texts(&mut c), ["Tak", "Vzala bys", "jí?", "nebo", "ne."]);
+    let captions = caption_clips(&mut c);
+    assert!(captions.iter().all(|(.., timed)| *timed), "{captions:?}");
+    correct(&mut c, "Vzal by sis ji?");
+    assert_eq!(caption_texts(&mut c), ["Tak", "Vzal by", "sis ji?", "nebo", "ne."]);
+    correct(&mut c, "Vzalbysji");
+    assert_eq!(caption_texts(&mut c), ["Tak", "Vzalbysji", "nebo", "ne."]);
+    c.call("end_run", json!({"run_id":run["run_id"],"action":"keep"}));
+    c.finish();
+    let disk: Value = serde_json::from_slice(&std::fs::read(c.dir.join("project.nuzky")).unwrap()).unwrap();
+    assert_eq!(
+        disk["wordCorrections"],
+        json!([{"assetId":"take","sourceStartUs":1_000_000,"original":"vzalbysi","text":"Vzalbysji"}])
+    );
+}
+
+#[cfg(unix)]
+fn correct_second_word(c: &mut Client, run: &Value, text: &str) -> Value {
+    let key = c.call("get_transcript", json!({}))["transcript_key"].clone();
+    c.call("correct_words", json!({"run_id":run["run_id"],"transcript_key":key,"corrections":[{"i":1,"text":text}]}))
+}
+
+/// "Tak Vzal bys ji? nebo ne." with "Vzal bys ji?" one recognised word, its parts over two captions.
+#[cfg(unix)]
+fn split_word_over_two_captions(c: &mut Client) -> (Value, Vec<String>) {
+    let run = c.call("begin_run", json!({"label":"fix a word"}));
+    place_transcribed_take(c, &["Tak", "vzalbysi", "nebo", "ne."], &run["run_id"]);
+    correct_second_word(c, &run, "Vzal bys ji?");
+    c.call("build_captions", json!({"run_id":run["run_id"],"max_words":2}));
+    assert_eq!(caption_texts(c), ["Tak", "Vzal bys", "ji?", "nebo", "ne."]);
+    (run, caption_clips(c).into_iter().map(|(id, ..)| id).collect())
+}
+
+#[cfg(unix)]
+#[test]
+fn a_part_left_by_a_shorter_correction_still_takes_the_next_one_over_stdio() {
+    let mut c = Client::start(true, None, Some(None));
+    let run = c.call("begin_run", json!({"label":"fix a word"}));
+    place_transcribed_take(&mut c, &["Tak", "vzalbysi", "nebo", "ne."], &run["run_id"]);
+    correct_second_word(&mut c, &run, "Vzal bys ji?");
+    c.call("build_captions", json!({"run_id":run["run_id"],"max_words":1}));
+    correct_second_word(&mut c, &run, "Vzalbysji");
+    // The part kept is the first, which ends before the middle of the word.
+    assert_eq!(caption_texts(&mut c), ["Tak", "Vzalbysji", "nebo", "ne."]);
+    let fixed = correct_second_word(&mut c, &run, "Vzala");
+    assert_eq!(fixed["captions_changed"].as_array().unwrap().len(), 1, "{fixed}");
+    assert_eq!(caption_texts(&mut c), ["Tak", "Vzala", "nebo", "ne."]);
+    c.call("end_run", json!({"run_id":run["run_id"],"action":"keep"}));
+    c.finish();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_deleted_part_leaves_the_others_as_they_are_over_stdio() {
+    let mut c = Client::start(true, None, Some(None));
+    let (run, built) = split_word_over_two_captions(&mut c);
+    let edits = json!([{"type":"deleteClips","clipIds":[built[2]]}]);
+    c.call("apply_edits", json!({"run_id":run["run_id"],"request_id":"delete","edits":edits}));
+    let fixed = correct_second_word(&mut c, &run, "Vzala bys jí?");
+    assert_eq!(fixed["captions_changed"], json!([]));
+    assert_eq!(fixed["captions_kept"], json!([built[1]]));
+    assert!(fixed["note"].as_str().unwrap().contains("build_captions"), "{fixed}");
+    assert_eq!(caption_texts(&mut c), ["Tak", "Vzal bys", "nebo", "ne."]);
+    assert_eq!(c.call("get_transcript", json!({}))["words"][1]["text"], "Vzala bys jí?");
+    c.call("end_run", json!({"run_id":run["run_id"],"action":"keep"}));
+    c.finish();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_part_typed_over_by_hand_is_never_overwritten_over_stdio() {
+    let mut c = Client::start(true, None, Some(None));
+    let (run, built) = split_word_over_two_captions(&mut c);
+    let edits = json!([{"type":"updateClip","clipId":built[2],"text":"JI!!!"}]);
+    c.call("apply_edits", json!({"run_id":run["run_id"],"request_id":"shout","edits":edits}));
+    let fixed = correct_second_word(&mut c, &run, "Vzala bys jí?");
+    assert_eq!(fixed["captions_changed"], json!([]));
+    let mut kept = vec![built[1].clone(), built[2].clone()];
+    kept.sort();
+    assert_eq!(fixed["captions_kept"], json!(kept));
+    assert_eq!(caption_texts(&mut c), ["Tak", "Vzal bys", "JI!!!", "nebo", "ne."]);
+    c.call("end_run", json!({"run_id":run["run_id"],"action":"keep"}));
     c.finish();
 }
 

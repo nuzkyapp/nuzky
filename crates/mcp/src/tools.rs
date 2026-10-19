@@ -1245,11 +1245,18 @@ impl Backend {
         let after = transcript::derive(&preview, &self.host.transcripts)?;
         let words: Vec<_> =
             plan.words.iter().map(|(i, from, to)| json!({"i": i, "before": from, "after": to})).collect();
+        let mut response = json!({"words": words, "captions_changed": plan.captions,
+            "transcript_key": transcript::word_key(&preview, &after.words)});
+        if !plan.captions_kept.is_empty() {
+            response["captions_kept"] = json!(plan.captions_kept);
+            response["note"] = json!(
+                "captions_kept show a part of a corrected word whose other part was deleted, moved or edited by hand, so they were left as they are; build_captions makes them again from the corrected words"
+            );
+        }
         let prepared = PreparedTranscriptEdit {
             arguments,
             expect: Expect { revision: Some(state.stamp.revision), speech_layout_key: None },
-            response: json!({"words": words, "captions_changed": plan.captions,
-                "transcript_key": transcript::word_key(&preview, &after.words)}),
+            response,
             edits: plan.edits,
         };
         let prepared = requests.entry(key).or_insert(prepared);

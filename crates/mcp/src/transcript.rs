@@ -807,6 +807,9 @@ pub struct Correction {
     pub words: Vec<(usize, String, String)>,
     /// Caption clips whose text changes.
     pub captions: Vec<String>,
+    /// Caption clips showing a part of a corrected word that were left as they are, because another
+    /// part of it was deleted, moved off its time or edited by hand.
+    pub captions_kept: Vec<String>,
 }
 
 /// One line of text, as a recognised word is.
@@ -868,12 +871,16 @@ pub fn plan_correction(
         }
     }
     let changes: Vec<(usize, &str)> = words.iter().map(|(i, _, text)| (*i, text.as_str())).collect();
-    let captions = caption_corrections(project, derived, &changes);
+    let (captions, captions_kept) = caption_corrections(project, derived, &changes);
     let mut edits = Vec::new();
     if !corrections.is_empty() {
         edits.push(EditCmd::CorrectWords { corrections: corrections.into_iter().map(|(_, c)| c).collect() });
     }
     let changed = captions.iter().map(|(id, _)| id.clone()).collect();
+    let (emptied, captions): (Vec<_>, Vec<_>) = captions.into_iter().partition(|(_, text)| text.is_empty());
+    if !emptied.is_empty() {
+        edits.push(EditCmd::DeleteClips { clip_ids: emptied.into_iter().map(|(id, _)| id).collect() });
+    }
     edits.extend(captions.into_iter().map(|(clip_id, text)| EditCmd::UpdateClip {
         clip_id,
         transform: None,
@@ -893,7 +900,7 @@ pub fn plan_correction(
         duck_db: None,
         background: None,
     }));
-    Ok(Correction { edits, words, captions: changed })
+    Ok(Correction { edits, words, captions: changed, captions_kept })
 }
 
 /// Text compared without case, the punctuation around it and how wide its spaces are.
@@ -908,11 +915,19 @@ type Replacements<'a> = (&'a str, &'a str, Vec<(usize, usize, String)>);
 /// time holds the middle of the word and whose text has the word, compared without case and the
 /// punctuation around it, gets that word replaced. Its style and timing stay. `changes` are
 /// `(index in derived.words, new text)`; a word twice in one caption is told apart by the words
-/// heard before it there.
-pub fn caption_corrections(project: &Project, derived: &Derived, changes: &[(usize, &str)]) -> Vec<(String, String)> {
+/// heard before it there. A word shown in parts over several captions changes in each of them; an
+/// empty text means the clip has nothing left to show. Also returns the captions left as they are
+/// because a part of a word there no longer reads as Nuzky made it.
+pub fn caption_corrections(
+    project: &Project,
+    derived: &Derived,
+    changes: &[(usize, &str)],
+) -> (Vec<(String, String)>, Vec<String>) {
     let middle = |w: &TimelineWord| w.start_us + (w.end_us - w.start_us) / 2;
+    let captions = || project.tracks.iter().filter(|t| t.is_captions()).flat_map(|t| &t.clips);
     // Per clip: its text and the replacements by byte range, both from the text before any change.
     let mut planned: Vec<Replacements> = Vec::new();
+    let mut kept: Vec<String> = Vec::new();
     for &(index, text) in changes {
         let Some(word) = derived.words.get(index) else { continue };
         let wanted = comparable(&word.text);
@@ -922,7 +937,8 @@ pub fn caption_corrections(project: &Project, derived: &Derived, changes: &[(usi
         // A corrected word may hold a space, so it may span several words of a caption.
         let length = word.text.split_whitespace().count();
         let at = middle(word);
-        for clip in project.tracks.iter().filter(|t| t.is_captions()).flat_map(|t| &t.clips) {
+        let mut found = false;
+        for clip in captions() {
             let ClipContent::Text { text: shown, words: timed, .. } = &clip.content else { continue };
             if !clip.contains(at) {
                 continue;
@@ -942,19 +958,16 @@ pub fn caption_corrections(project: &Project, derived: &Derived, changes: &[(usi
             let spoken = nuzky_engine::model::spoken_word(shown, timed, at - clip.start_us)
                 .and_then(|range| matching.iter().find(|&&(start, _)| start == range.start));
             let Some(&(start, end)) = spoken.or(matching.get(before)).or(matching.last()) else { continue };
-            let entry = match planned.iter().position(|(id, ..)| *id == clip.id) {
-                Some(found) => &mut planned[found],
-                None => {
-                    planned.push((&clip.id, shown, Vec::new()));
-                    planned.last_mut().unwrap()
-                }
-            };
-            if entry.2.iter().all(|&(a, b, _)| end <= a || start >= b) {
-                entry.2.push((start, end, replaced(&shown[start..end], &word.text, text)));
-            }
+            found = true;
+            plan(&mut planned, clip, start, end, replaced(&shown[start..end], &word.text, text));
+        }
+        if !found {
+            kept.extend(split_correction(&mut planned, captions().collect(), word, text));
         }
     }
-    planned
+    kept.sort();
+    kept.dedup();
+    let changed = planned
         .into_iter()
         .filter_map(|(id, shown, mut replacements)| {
             replacements.sort_by_key(|r| r.0);
@@ -968,7 +981,82 @@ pub fn caption_corrections(project: &Project, derived: &Derived, changes: &[(usi
             out.push_str(&shown[last..]);
             (out != shown).then(|| (id.to_owned(), out))
         })
-        .collect()
+        .collect();
+    (changed, kept)
+}
+
+fn plan<'a>(planned: &mut Vec<Replacements<'a>>, clip: &'a Clip, start: usize, end: usize, new: String) {
+    let ClipContent::Text { text: shown, .. } = &clip.content else { return };
+    let entry = match planned.iter().position(|(id, ..)| *id == clip.id) {
+        Some(found) => &mut planned[found],
+        None => {
+            planned.push((&clip.id, shown, Vec::new()));
+            planned.last_mut().unwrap()
+        }
+    };
+    if entry.2.iter().all(|&(a, b, _)| end <= a || start >= b) {
+        entry.2.push((start, end, new));
+    }
+}
+
+/// A word with more words than fit a caption was shown in parts over consecutive captions
+/// (`nuzky_analysis::group_words`), and a shorter correction may have left fewer parts than its
+/// time. Its parts are found in the captions its time overlaps, exactly as Nuzky wrote them, and
+/// each gets its share of the new text: as many words as it had, the last part the rest. A part
+/// left without a word goes, and so does a caption left empty. When a part was deleted, moved off
+/// the word's time or edited by hand, no part changes, since the new text could overwrite what the
+/// user wrote; the captions that still show some of the word are returned instead.
+fn split_correction<'a>(
+    planned: &mut Vec<Replacements<'a>>,
+    mut clips: Vec<&'a Clip>,
+    word: &TimelineWord,
+    text: &str,
+) -> Vec<String> {
+    clips.retain(|c| c.start_us < word.end_us && c.end_us() > word.start_us);
+    clips.sort_by_key(|c| c.start_us);
+    let mut shown: Vec<(&Clip, usize, &str)> = Vec::new();
+    for clip in clips {
+        let ClipContent::Text { text, .. } = &clip.content else { continue };
+        shown.extend(tokens(text).into_iter().map(|(at, token)| (clip, at, token)));
+    }
+    let said: Vec<&str> = word.text.split_whitespace().collect();
+    let Some(run) = shown.windows(said.len()).find(|run| run.iter().map(|w| w.2).eq(said.iter().copied())) else {
+        let wanted: Vec<String> = said.iter().map(|w| comparable(w)).collect();
+        let mut left: Vec<String> =
+            shown.iter().filter(|w| wanted.contains(&comparable(w.2))).map(|w| w.0.id.clone()).collect();
+        left.dedup();
+        return left;
+    };
+    // As (caption, start, end, how many words).
+    let mut parts: Vec<(&Clip, usize, usize, usize)> = Vec::new();
+    for &(clip, at, token) in run {
+        let (start, end) = (at, at + token.len());
+        match parts.last_mut() {
+            Some(part) if part.0.id == clip.id => (part.2, part.3) = (end, part.3 + 1),
+            _ => parts.push((clip, start, end, 1)),
+        }
+    }
+    let new: Vec<&str> = text.split_whitespace().collect();
+    let mut left = &new[..];
+    let count = parts.len();
+    for (i, (clip, mut start, mut end, size)) in parts.into_iter().enumerate() {
+        // Every later part keeps a word while there are enough.
+        let take = if i + 1 == count { left.len() } else { size.min(left.len().saturating_sub(count - 1 - i)).max(1) };
+        let (mine, rest) = left.split_at(take.min(left.len()));
+        left = rest;
+        let ClipContent::Text { text: shown, .. } = &clip.content else { continue };
+        if mine.is_empty() {
+            // Take a space beside the part with it, so the words left are still one space apart.
+            let after = shown[end..].len() - shown[end..].trim_start().len();
+            if end + after < shown.len() {
+                end += after;
+            } else {
+                start = shown[..start].trim_end().len();
+            }
+        }
+        plan(planned, clip, start, end, mine.join(" "));
+    }
+    Vec::new()
 }
 
 /// Words of a caption text with their byte offsets.
@@ -1066,10 +1154,12 @@ pub fn caption_edit(
     }
     for clip in project.tracks.iter().flat_map(|t| &t.clips).filter(|c| c.duration_us >= min_caption_us) {
         let Some(clip_words) = by_clip.get(clip.id.as_str()) else { continue };
-        let mut grouped = group_words(clip_words, grouping);
+        let mut grouped = group_words(clip_words, grouping, min_caption_us);
         for segment in &mut grouped {
             for word in &mut segment.words {
-                word.key = keyed.contains(&(clip.id.as_str(), word.start_us));
+                // A part of a word split over captions starts inside that word.
+                let said = clip_words.partition_point(|w| w.start_us <= word.start_us).saturating_sub(1);
+                word.key = keyed.contains(&(clip.id.as_str(), clip_words[said].start_us));
             }
             segment.end_us = segment.end_us.min(clip.end_us());
             // The engine enforces a one-frame minimum; borrow time before a short tail word.
@@ -1329,7 +1419,7 @@ pub(crate) mod tests {
             .unwrap();
         let derived = Derived::new(&project, sources, vec![]);
         let last = derived.words.iter().position(|w| w.text == "to.").unwrap();
-        let changed = caption_corrections(&project, &derived, &[(last, "tu.")]);
+        let (changed, _) = caption_corrections(&project, &derived, &[(last, "tu.")]);
         assert_eq!(changed.iter().map(|(_, text)| text.as_str()).collect::<Vec<_>>(), ["To je tu."]);
     }
 
