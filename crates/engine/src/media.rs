@@ -444,7 +444,7 @@ impl Scaler {
             (c"dsth", dst_h as i64),
             (c"dst_format", AVPixelFormat::from(dst) as i64),
             (c"sws_flags", flags.bits() as i64),
-            (c"threads", scaler_threads()),
+            (c"threads", scaler_threads(dst_w, dst_h)),
         ];
         for (name, value) in options {
             if unsafe { av_opt_set_int(scaler.0.cast(), name.as_ptr(), value, 0) } < 0 {
@@ -474,9 +474,14 @@ impl Scaler {
     }
 }
 
-/// One thread per core, at most eight. On a 12-core Apple M-series eight converted faster than twelve, whose bands on
-/// the efficiency cores finished last, and every video layer of a project has a converter of its own.
-fn scaler_threads() -> i64 {
+/// One thread per core, at most eight, for frames of Full HD and larger, as export converts them. On a 12-core Apple
+/// M-series eight converted faster than twelve, whose bands on the efficiency cores finished last, and every video
+/// layer of a project has a converter of its own. The preview's frames, at most 1280 px, stay on one thread: on eight
+/// they took the cores the preview renders on, and a frame took twice as long to render while playing.
+fn scaler_threads(dst_w: u32, dst_h: u32) -> i64 {
+    if u64::from(dst_w) * u64::from(dst_h) < 1920 * 1080 {
+        return 1;
+    }
     std::thread::available_parallelism().map_or(1, |n| n.get().min(8)) as i64
 }
 
@@ -1288,7 +1293,7 @@ mod tests {
             let mut scaler = None;
             let got = to_rgba(&mut scaler, &f, 0, w, h).unwrap();
             let threads = scaler.unwrap().1.threads();
-            assert!(threads > 1, "{case} converts on {threads} thread");
+            assert_eq!(threads > 1, w * h >= 1920 * 1080, "{case} converts on {threads} threads");
             let row = w as usize * 4;
             let differ = (0..h as usize)
                 .filter(|&y| got.data[y * row..][..row] != expected.data(0)[y * expected.stride(0)..][..row])
