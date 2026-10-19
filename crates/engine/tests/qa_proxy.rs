@@ -147,6 +147,8 @@ fn proxy_keeps_the_frame_times_colours_and_orientation_and_export_never_reads_it
     // Swap in a proxy that is plainly another picture: the preview shows it, export still shows the file.
     let magenta = d.join("magenta.mp4");
     ff(&["-f", "lavfi", "-i", "color=magenta:s=192x108:r=30:d=3", "-c:v", "libx264", "-threads", "2"], &magenta);
+    drop(decoder);
+    drop(preview);
     std::fs::rename(&magenta, &made).unwrap();
     let mut fresh = Renderer::new().unwrap();
     fresh.use_proxies(cache.clone());
@@ -200,7 +202,10 @@ fn proxy_decodes_little_ahead_of_writing() {
     std::fs::remove_dir_all(&cache).ok();
     let written = || {
         let files = std::fs::read_dir(cache.join("proxy")).into_iter().flatten().flatten();
-        files.filter(|f| f.file_name().to_string_lossy().ends_with(".part")).map(|f| f.metadata().unwrap().len()).sum()
+        files
+            .filter(|f| f.file_name().to_string_lossy().ends_with(".part"))
+            .map(|f| std::fs::metadata(f.path()).unwrap().len())
+            .sum()
     };
     let (mut stalled, mut after_stall, mut reports) = (false, None, Vec::<(f32, u64)>::new());
     let made = proxy::ensure_proxy(&cache, &clip, |p| {
@@ -220,5 +225,9 @@ fn proxy_decodes_little_ahead_of_writing() {
     // Every second of testsrc2 takes about as many bytes, so the bytes written tell the time written.
     let size = std::fs::metadata(&made).unwrap().len() as f32;
     let ahead = reports.iter().map(|(p, bytes)| p - *bytes as f32 / size).fold(0.0, f32::max);
-    assert!(ahead < 0.33, "decoding ran {:.0} % of the video ahead of writing", ahead * 100.0);
+    assert!(
+        ahead < 0.33,
+        "decoding ran {:.0} % of the video ahead of writing; size: {size}, reports: {reports:?}",
+        ahead * 100.0
+    );
 }

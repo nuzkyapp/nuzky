@@ -175,7 +175,7 @@ mod tests {
             (include_str!("../../.github/ISSUE_TEMPLATE/feature_request.yml"), ["version"].as_slice()),
         ] {
             for id in ids {
-                assert!(form.contains(&format!("id: {id}\n")), "the form has no field {id}");
+                assert!(form.lines().any(|line| line.trim() == format!("id: {id}")), "the form has no field {id}");
             }
         }
     }

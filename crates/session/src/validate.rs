@@ -867,7 +867,7 @@ mod tests {
         // A made one may overlap, since cuts may have moved its words.
         with(|c| {
             c[0].status = nuzky_engine::model::ReelStatus::Made;
-            c[0].project_path = Some("/videos/talk-reel-1.nuzky".into());
+            c[0].project_path = Some(std::env::temp_dir().join("talk-reel-1.nuzky").to_string_lossy().into());
             c[0].from = 30;
         })
         .unwrap();
@@ -880,7 +880,9 @@ mod tests {
             ("two lines", |c| c[0].why = "One\nTwo".into()),
             ("score", |c| c[0].score = f32::NAN),
             ("no time", |c| c[0].end_us = c[0].start_us),
-            ("path before made", |c| c[0].project_path = Some("/videos/x.nuzky".into())),
+            ("path before made", |c| {
+                c[0].project_path = Some(std::env::temp_dir().join("x.nuzky").to_string_lossy().into())
+            }),
             ("made without path", |c| c[0].status = nuzky_engine::model::ReelStatus::Made),
             ("relative path", |c| {
                 c[0].status = nuzky_engine::model::ReelStatus::Made;

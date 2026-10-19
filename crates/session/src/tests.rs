@@ -1189,7 +1189,7 @@ fn recap_kept_main_assets_includes_takes_that_left() {
     let f = Fixture::new();
     let s = f.open();
     let asset: Asset = serde_json::from_value(serde_json::json!({
-        "id": "take", "name": "take", "path": "/take.mp4", "kind": "video",
+        "id": "take", "name": "take", "path": std::env::temp_dir().join("take.mp4"), "kind": "video",
         "durationUs": 1_000_000, "width": 1080, "height": 1920, "fps": 30,
         "hasAudio": true, "rotation": 0, "mirror": false
     }))
