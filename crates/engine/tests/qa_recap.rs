@@ -287,3 +287,74 @@ fn recap_keeps_an_existing_file_and_stops_when_cancelled() {
         !std::fs::read_dir(&d).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().starts_with(".nuzky-part-"))
     );
 }
+
+#[test]
+fn a_transition_into_a_clip_past_the_finished_cuts_sample_still_plays_its_sound() {
+    if !available() {
+        return;
+    }
+    let d = dir("recap-transition");
+    let face = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../site/public/media/ugc.jpg");
+    let take = |name: &str, tone: u32| {
+        let path = d.join(name);
+        if !path.exists() {
+            let sine = format!("sine=f={tone}:r=48000:d=10");
+            let video = face.to_str().unwrap();
+            ff(
+                &[
+                    "-loop",
+                    "1",
+                    "-framerate",
+                    "30",
+                    "-i",
+                    video,
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    &sine,
+                    "-vf",
+                    "scale=1080:1920",
+                    "-t",
+                    "10",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "ultrafast",
+                    "-c:a",
+                    "aac",
+                ],
+                &path,
+            );
+        }
+        probe(&path, name.into()).unwrap()
+    };
+    // The second take, from 2 s into its file, comes in over a 2 s dissolve centred on 8.2 s, so its sound starts at
+    // 7.2 s, inside the recap's 8 s sample of the finished cut, though the clip itself starts after it.
+    let mut after = Project::new("Transition");
+    after.assets.extend([take("first.mp4", 440), take("second.mp4", 1320)]);
+    after.tracks[0].clips.push(clip("first-clip", "first.mp4", 0, 8_200_000));
+    let mut second = clip("second-clip", "second.mp4", 8_200_000, 5 * S);
+    if let ClipContent::Media { source_in_us, .. } = &mut second.content {
+        *source_in_us = 2 * S;
+    }
+    second.transition_in = Some(Transition { kind: TransitionKind::Dissolve, duration_us: 2 * S });
+    after.tracks[0].clips.push(second);
+    let recap = Recap {
+        before: after.clone(),
+        after,
+        cuts: Vec::new(),
+        words: Vec::new(),
+        transcribed: false,
+        snips: Vec::new(),
+        whoosh: None,
+    };
+    let out = d.join("recap.mp4");
+    let options = RecapOptions { end_card: false, replace_existing: true };
+    render(&recap, &d.join("cache"), &out, &options, &AtomicBool::new(false), |_| {}).unwrap();
+    let [hook, fast, landing, ..] = sections(&recap, false);
+    let start = (hook + fast + landing) as f64 / 1e6;
+    let incoming = rms(&out, start + 7.5, start + 7.7, "bandpass=f=1320:width_type=q:w=8");
+    assert!(incoming > 0.01, "the incoming take is heard across the dissolve: {incoming:.4}");
+}

@@ -355,6 +355,8 @@ const FADE_US: i64 = 400_000;
 const SNIP_GAP_US: i64 = 150_000;
 /// A snip starts this much before its piece snaps shut, so the blades meet as it closes.
 const SNIP_LEAD_US: i64 = 60_000;
+/// The finished cut's own sound fades out this long before its sample ends, leaving its music.
+const HANDOVER_US: i64 = 300_000;
 /// A sound on an audio track at least this long is music, even when it does not duck under speech.
 const MUSIC_US: i64 = 10_000_000;
 
@@ -966,14 +968,20 @@ impl<'a> Painter<'a> {
 struct Sound {
     cues: Project,
     soundtrack: Project,
+    /// The soundtrack's music alone, which takes over from it as the finished cut ends.
+    music: Project,
+    /// Recap frames over which the soundtrack gives way to its music.
+    handover: Range<i64>,
     cue_mixer: Mixer,
     mixer: Mixer,
+    music_mixer: Mixer,
     /// Holds the peaks where the snips land on the music, as export does.
     limiter: Limiter,
     /// Recap frame the mixers read next, `Limiter::latency()` ahead of what comes out.
     read: i64,
     mix: Vec<f32>,
     buffer: Vec<f32>,
+    music_buffer: Vec<f32>,
 }
 
 impl Sound {
@@ -1031,15 +1039,21 @@ impl Sound {
             cues.assets.push(whoosh.clone());
             cues.tracks.push(track("whooshes", clips));
         }
+        let stop = start + sample;
+        let (soundtrack, music) = soundtrack(&recap.after, start, stop + end_card, end_card);
         let mut sound = Self {
             cues,
-            soundtrack: soundtrack(&recap.after, start, start + sample, end_card),
+            soundtrack,
+            music,
+            handover: us_to_samples(stop - HANDOVER_US)..us_to_samples(stop),
             cue_mixer: Mixer::new(cache_dir.to_path_buf()),
             mixer: Mixer::new(cache_dir.to_path_buf()),
+            music_mixer: Mixer::new(cache_dir.to_path_buf()),
             limiter: Limiter::new(db_to_gain(LIMITER_CEILING_DB)),
             read: 0,
             mix: Vec::new(),
             buffer: Vec::new(),
+            music_buffer: Vec::new(),
         };
         let early = sound.read_ahead(Limiter::latency()).count();
         debug_assert_eq!(early, 0, "the limiter lets nothing out before its look-ahead is read");
@@ -1048,18 +1062,28 @@ impl Sound {
 
     /// Mixes the next `frames` of the recap into the limiter, returning what it lets out.
     fn read_ahead(&mut self, frames: usize) -> impl Iterator<Item = [f32; CHANNELS]> + '_ {
-        self.mix.resize(frames * CHANNELS, 0.0);
-        self.buffer.resize(frames * CHANNELS, 0.0);
-        self.cue_mixer.mix(&self.cues, self.read, &mut self.mix);
-        self.mixer.mix(&self.soundtrack, self.read, &mut self.buffer);
-        self.read += frames as i64;
+        let (from, to) = (self.read, self.read + frames as i64);
+        self.read = to;
+        for buffer in [&mut self.mix, &mut self.buffer, &mut self.music_buffer] {
+            buffer.clear();
+            buffer.resize(frames * CHANNELS, 0.0);
+        }
+        self.cue_mixer.mix(&self.cues, from, &mut self.mix);
+        let Range { start: begin, end } = self.handover.clone();
+        if from < end {
+            self.mixer.mix(&self.soundtrack, from, &mut self.buffer);
+        }
+        if to > begin {
+            self.music_mixer.mix(&self.music, from, &mut self.music_buffer);
+        }
         let limiter = &mut self.limiter;
-        self.mix
-            .as_chunks::<CHANNELS>()
-            .0
-            .iter()
-            .zip(self.buffer.as_chunks::<CHANNELS>().0)
-            .filter_map(move |(cue, sound)| limiter.push(std::array::from_fn(|c| cue[c] + sound[c])))
+        let frames = self.mix.as_chunks::<CHANNELS>().0.iter().zip(self.buffer.as_chunks::<CHANNELS>().0);
+        frames.zip(self.music_buffer.as_chunks::<CHANNELS>().0).enumerate().filter_map(
+            move |(i, ((cue, all), music))| {
+                let gain = ((from + i as i64 - begin) as f32 / (end - begin).max(1) as f32).clamp(0.0, 1.0);
+                limiter.push(std::array::from_fn(|c| cue[c] + all[c] * (1.0 - gain) + music[c] * gain))
+            },
+        )
     }
 
     /// `pos` must continue where the previous call ended.
@@ -1072,39 +1096,39 @@ impl Sound {
     }
 }
 
-/// The finished cut's sound on the recap's timeline: its music from the start of the recap, quieter while the
-/// recording races so the snips stand out, and everything else from `start` to `stop`, so the picture keeps its
-/// sound and the music still ducks under the speech. The music fades out over `end_card` past `stop`.
-fn soundtrack(after: &Project, start: i64, stop: i64, end_card: i64) -> Project {
+/// The finished cut's sound on the recap's timeline, and its music alone: the music from the start of the recap to
+/// `end`, quieter while the recording races so the snips stand out, and everything else from `start`, as the
+/// picture plays it, so it keeps its transitions and the music still ducks under the speech. The music fades out
+/// over `fade`, the end card.
+fn soundtrack(after: &Project, start: i64, end: i64, fade: i64) -> (Project, Project) {
     const FADE_IN_US: i64 = 100_000;
     const FADE_OUT_US: i64 = 300_000;
     /// The music under the racing recording, -9 dB.
     const BED: f32 = 0.35;
-    let end = stop + end_card;
     let length = after.duration_us();
     let assets: std::collections::HashMap<&str, &Asset> = after.assets.iter().map(|a| (a.id.as_str(), a)).collect();
     let mut project = after.clone();
-    for track in &mut project.tracks {
+    let mut music = after.clone();
+    for (track, music) in project.tracks.iter_mut().zip(&mut music.tracks) {
         let audio = track.kind == TrackKind::Audio;
+        music.clips.clear();
         for mut clip in std::mem::take(&mut track.clips) {
             let mut bed = clip.clone();
-            let ClipContent::Media { asset_id, source_in_us, volume, speed, duck_db, fade_in_us, fade_out_us, .. } =
+            let is_music = matches!(&clip.content, ClipContent::Media { duck_db, .. }
+                if audio && (*duck_db > 0.0 || clip.duration_us >= MUSIC_US));
+            let ClipContent::Media { asset_id, source_in_us, volume, speed, fade_in_us, fade_out_us, .. } =
                 &mut clip.content
             else {
+                clip.start_us += start;
+                track.clips.push(clip);
                 continue;
             };
-            if !(audio && (*duck_db > 0.0 || clip.duration_us >= MUSIC_US)) {
+            if !is_music {
                 if clip.start_us == 0 {
                     *fade_in_us = (*fade_in_us).max(FADE_IN_US);
                 }
                 clip.start_us += start;
-                if clip.start_us < stop {
-                    if clip.start_us + clip.duration_us >= stop {
-                        clip.duration_us = stop - clip.start_us;
-                        *fade_out_us = (*fade_out_us).max(FADE_OUT_US).min(clip.duration_us);
-                    }
-                    track.clips.push(clip);
-                }
+                track.clips.push(clip);
                 continue;
             }
             // Music that plays to the end of the finished cut plays on past it while its file lasts.
@@ -1118,7 +1142,7 @@ fn soundtrack(after: &Project, start: i64, stop: i64, end_card: i64) -> Project 
             }
             if clip.start_us + clip.duration_us >= end {
                 clip.duration_us = end - clip.start_us;
-                *fade_out_us = (*fade_out_us).max(end_card.max(FADE_OUT_US)).min(clip.duration_us);
+                *fade_out_us = (*fade_out_us).max(fade.max(FADE_OUT_US)).min(clip.duration_us);
             }
             if clip.start_us + clip.duration_us <= start {
                 *volume *= BED;
@@ -1134,13 +1158,16 @@ fn soundtrack(after: &Project, start: i64, stop: i64, end_card: i64) -> Project 
                     *volume *= BED;
                     *fade_out_us = 0;
                 }
+                music.clips.push(bed.clone());
                 track.clips.push(bed);
             }
+            music.clips.push(clip.clone());
             track.clips.push(clip);
         }
         track.clips.sort_by_key(|c| c.start_us);
+        music.clips.sort_by_key(|c| c.start_us);
     }
-    project
+    (project, music)
 }
 
 #[cfg(test)]
