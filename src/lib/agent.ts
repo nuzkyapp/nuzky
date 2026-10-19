@@ -425,8 +425,8 @@ export async function attach(files: (string | File)[]) {
           ? await invoke<Attachment>("agent_attach_file", { path: file })
           : await invoke<Attachment>("agent_attach_pasted", new Uint8Array(await file.arrayBuffer()), { headers: { "x-name": encodeURIComponent(file.name) } });
       const add = (list: Attachment[]) => (list.some((a) => a.path === attached.path) ? list : [...list, attached]);
-      // Another chat opened meanwhile: it goes with the draft of the chat it was added in.
-      if (useAgent.getState().chat === chat) useAgent.setState((s) => ({ attachments: add(s.attachments) }));
+      // Another saved chat opened meanwhile: it goes with the draft of the chat it was added in. A new chat's draft is not kept, so it stays in sight.
+      if (chat === null || useAgent.getState().chat === chat) useAgent.setState((s) => ({ attachments: add(s.attachments) }));
       else drafts.set(chat, { draft: drafts.get(chat)?.draft ?? "", attachments: add(drafts.get(chat)?.attachments ?? []) });
     } catch (e) {
       useEditor.getState().toast({ kind: "error", text: plainError(errorText(e)) });
