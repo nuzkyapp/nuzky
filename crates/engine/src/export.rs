@@ -484,7 +484,6 @@ fn encode(
     };
     let write = |i, pixels: Vec<u8>| {
         mp4.frame(i, &pixels)?;
-        // Keep audio up to the end of this video frame.
         let audio_until = crate::audio::us_to_samples(frame_time_us(i + 1, fps)).min(total_samples);
         mp4.sound_until(audio_until, |pos, mix| sound.fill(project, pos, mix))
     };
@@ -502,22 +501,26 @@ fn overlap<T: Send>(
     mut write: impl FnMut(u64, T) -> Result<()> + Send,
 ) -> Result<()> {
     let (hand, take) = std::sync::mpsc::sync_channel(0);
+    let writer_failed = &AtomicBool::new(false);
     std::thread::scope(|scope| {
         let writer = scope.spawn(move || {
-            for (i, item) in (0..).zip(take) {
+            let written = (0..).zip(take).try_for_each(|(i, item)| {
                 check_cancel(cancel)?;
-                write(i, item)?;
-            }
-            Ok(())
+                write(i, item)
+            });
+            writer_failed.store(written.is_err(), Ordering::SeqCst);
+            written
         });
+        let mut made_first = false;
         let made = (0..count).try_for_each(|i| {
             check_cancel(cancel)?;
+            let item = make(i).inspect_err(|_| made_first = !writer_failed.load(Ordering::SeqCst))?;
             // Refused only once the writer has stopped on an error, which is the one returned.
-            hand.send(make(i)?).map_err(|_| anyhow!("The export writer stopped"))
+            hand.send(item).map_err(|_| anyhow!("The export writer stopped"))
         });
         drop(hand);
         let written: Result<()> = writer.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic));
-        written.and(made)
+        if made_first { made.and(written) } else { written.and(made) }
     })
 }
 
@@ -1062,6 +1065,20 @@ mod tests {
         let error = overlap(10, &cancel, Ok, |i, _| if i == 2 { bail!("disk full") } else { Ok(()) }).unwrap_err();
         assert_eq!(error.to_string(), "disk full");
         let error = overlap(10, &cancel, |i| if i == 2 { bail!("decoding failed") } else { Ok(i) }, |_, _| Ok(()));
+        assert_eq!(error.unwrap_err().to_string(), "decoding failed");
+        // Making fails while the writer is busy with the frame before; the writer failing after it does not hide it.
+        let error = overlap(
+            10,
+            &cancel,
+            |i| if i == 2 { bail!("decoding failed") } else { Ok(i) },
+            |i, _| {
+                if i == 1 {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    bail!("disk full");
+                }
+                Ok(())
+            },
+        );
         assert_eq!(error.unwrap_err().to_string(), "decoding failed");
     }
 
