@@ -490,16 +490,21 @@ fn youtube_links_download_with_mocked_ytdlp_and_require_rights() {
     let runtime = dir.join("runtime");
     let home = dir.join("home");
     let data = dir.join("data");
-    let mut env: [(&str, &std::path::Path); 7] = [
+    let offline = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let unavailable = PathBuf::from(format!("http://{}/", offline.local_addr().unwrap()));
+    drop(offline);
+    let mut env: [(&str, &std::path::Path); 8] = [
         ("NUZKY_YTDLP", &fake),
         ("NUZKY_FAKE_YTDLP_AUDIO", &audio),
         ("NUZKY_FAKE_YTDLP_LOG", &log),
+        ("NUZKY_OPENVERSE_URL", &unavailable),
         ("HOME", &home),
         ("XDG_DATA_HOME", &data),
         ("XDG_CACHE_HOME", &cache),
         ("XDG_RUNTIME_DIR", &runtime),
     ];
     let mut c = Client::spawn_at_env(dir, &project, true, Some(None), &env);
+    assert_eq!(c.call("search_sounds", json!({"query": "", "kind": "music"}))["sounds"], json!([]));
     for query in ["https://music.youtube.com/watch?v=yt_Song0001&list=RDtest", "https://youtu.be/yt_Song0001?si=test"] {
         let found = c.call("search_sounds", json!({"query": query, "kind": "music"}));
         assert_eq!(found["sounds"].as_array().unwrap().len(), 1, "{found}");
@@ -572,9 +577,29 @@ fn youtube_links_download_with_mocked_ytdlp_and_require_rights() {
     drop(c);
     let missing = dir.join("not-installed");
     env[0] = ("NUZKY_YTDLP", &missing);
-    let mut c = Client::spawn_at_env(dir, &project, false, None, &env);
+    let second = dir.join("second.nuzky");
+    std::fs::write(&second, serde_json::to_vec(&Project::new("Another project")).unwrap()).unwrap();
+    let before = std::fs::read(&log).unwrap();
+    let mut c = Client::spawn_at_env(dir, &second, true, None, &env);
+    let run = c.call("begin_run", json!({"label": "Reuse downloaded music"}))["run_id"].clone();
+    c.call("add_sound", json!({"run_id": run, "id": "youtube:yt_Song0001", "at_us": 0}));
+    c.call("end_run", json!({"run_id": run, "action": "keep"}));
+    assert_eq!(c.call("get_state", json!({}))["assets"][0]["path"], file.to_str().unwrap());
+    for query in ["", "sTEAdY", "test ARTIST"] {
+        let found = c.call("search_sounds", json!({"query": query, "kind": "music"}));
+        assert_eq!(found["sounds"].as_array().unwrap().len(), 1, "{found}");
+        assert_eq!(found["sounds"][0]["id"], "youtube:yt_Song0001");
+        assert_eq!(found["sounds"][0]["title"], "Steady Song");
+        assert_eq!(found["sounds"][0]["author"], "Test Artist");
+        assert_eq!(found["sounds"][0]["durationUs"], 20_000_000);
+        if !query.is_empty() {
+            assert!(found["online_error"].as_str().unwrap().contains("OFFLINE"), "{found}");
+        }
+    }
+    assert!(c.error("search_sounds", json!({"query": "unmatched", "kind": "music"})).contains("OFFLINE"));
+    assert_eq!(std::fs::read(&log).unwrap(), before);
     assert!(
-        c.error("search_sounds", json!({"query": "https://youtu.be/yt_Song0001", "kind": "music"}))
+        c.error("search_sounds", json!({"query": "https://youtu.be/ytSlow00001", "kind": "music"}))
             .contains("YTDLP_MISSING")
     );
     c.finish();

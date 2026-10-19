@@ -1236,6 +1236,7 @@ pub fn run() {
             stickers::sticker_thumbs,
             stickers::sticker_add,
             sounds::sound_library,
+            sounds::sound_downloaded,
             sounds::sound_search,
             sounds::sound_link,
             sounds::install_ytdlp,

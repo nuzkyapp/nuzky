@@ -1,7 +1,7 @@
 import { AlertCircle, AudioLines, Check, Copy, ExternalLink, Link2, Loader2, Pause, Play, Plus, SlidersHorizontal, WifiOff, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api, errorText, plainError } from "../../lib/api";
-import { addSound, answerRights, copyCredits, installYtdlp, loadBuiltIn, openLink, searchSounds, stopPreview, togglePreview, useSounds } from "../../lib/sounds";
+import { addSound, answerRights, copyCredits, installYtdlp, loadBuiltIn, loadDownloaded, openLink, searchSounds, stopPreview, togglePreview, useSounds } from "../../lib/sounds";
 import { useEditor } from "../../lib/store";
 import { formatDuration } from "../../lib/time";
 import type { Sound, SoundKind, SoundSettings } from "../../lib/types";
@@ -219,14 +219,14 @@ function useInProject() {
   );
 }
 
-function OnlineResults({ kind }: { kind: SoundKind }) {
+function OnlineResults({ kind, titled = kind === "effect" }: { kind: SoundKind; titled?: boolean }) {
   const search = useSounds((s) => s.search[kind]);
   const inProject = useInProject();
   if (!search.query.trim()) return null;
   const offline = search.error?.startsWith("OFFLINE");
   return (
     <section aria-label="Online results" className="flex flex-col gap-0.5">
-      {kind === "effect" && <h3 className="mx-1.5 mt-2 mb-1 text-[13px] font-semibold text-fg">Online</h3>}
+      {titled && <h3 className="mx-1.5 mt-2 mb-1 text-[13px] font-semibold text-fg">Online</h3>}
       {search.sounds.map((sound) => (
         <SoundRow key={sound.id} sound={sound} inProject={inProject.has(sound.id)} />
       ))}
@@ -511,13 +511,19 @@ function RightsDialog() {
 
 function Music() {
   const query = useSounds((s) => s.search.music.query);
+  const linked = useSounds((s) => s.link.sound?.id);
+  const downloaded = useSounds((s) => s.downloaded);
+  const inProject = useInProject();
+  useEffect(() => {
+    loadDownloaded().catch((e) => useEditor.getState().toast({ kind: "error", text: `The songs from YouTube could not be read: ${errorText(e)}` }));
+  }, []);
+  const words = query.trim().toLowerCase();
+  const shown = downloaded.filter((s) => s.id !== linked && (!words || [s.title, s.author].some((t) => t.toLowerCase().includes(words))));
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2 pb-3.5">
       <LinkResult />
-      {query.trim() ? (
-        <OnlineResults kind="music" />
-      ) : (
-        <div role="group" aria-label="Music ideas" className="flex flex-wrap gap-1.5 px-1.5">
+      {!words && (
+        <div role="group" aria-label="Music ideas" className="flex flex-wrap gap-1.5 px-1.5 pb-2">
           {MUSIC_IDEAS.map((idea) => (
             <button key={idea} type="button" onClick={() => searchSounds("music", idea)} className="h-[26px] rounded-full bg-white/[.06] px-2.5 text-[12px] font-medium text-muted transition-colors duration-[120ms] ease-out hover:text-fg">
               {idea}
@@ -525,6 +531,17 @@ function Music() {
           ))}
         </div>
       )}
+      {shown.length > 0 && (
+        <section aria-label="From YouTube" className="flex flex-col gap-0.5">
+          <h3 className="mx-1.5 mb-1 flex items-baseline gap-1.5 text-[13px] font-semibold text-fg">
+            From YouTube <span className="tabular text-[12px] font-normal text-muted">{shown.length}</span>
+          </h3>
+          {shown.map((sound) => (
+            <SoundRow key={sound.id} sound={sound} inProject={inProject.has(sound.id)} />
+          ))}
+        </section>
+      )}
+      {words && <OnlineResults kind="music" titled={shown.length > 0} />}
     </div>
   );
 }

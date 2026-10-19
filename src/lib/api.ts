@@ -91,6 +91,8 @@ export const api = {
   soundSearch: (query: string, kind: SoundKind, page: number) => invoke<SoundPage>("sound_search", { query, kind, page }),
   /** The video of a YouTube or YouTube Music link as a sound, looked up through the user's yt-dlp. */
   soundLink: (url: string) => invoke<Sound>("sound_link", { url }),
+  /** Songs from YouTube links that any project added, newest first; they play and add without the network. */
+  soundDownloaded: () => invoke<Sound[]>("sound_downloaded"),
   /** Downloads yt-dlp from its GitHub releases; progress comes as `sound-progress` for "yt-dlp", `soundCancel("yt-dlp")` stops it. */
   installYtdlp: () => invoke<void>("install_ytdlp"),
   ytdlpDownloaded: () => invoke<boolean>("ytdlp_downloaded"),

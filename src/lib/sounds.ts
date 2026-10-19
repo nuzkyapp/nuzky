@@ -29,6 +29,8 @@ const waitsForYtdlp = (link: Link) => !!link.error?.startsWith("YTDLP_");
 type State = {
   tab: AudioTab;
   builtIn: Sound[];
+  /** Songs from YouTube links already in the sound library, from any project. */
+  downloaded: Sound[];
   search: Record<SoundKind, Search>;
   /** The sound playing, or still loading to play. */
   preview: { id: string; loading: boolean } | null;
@@ -48,6 +50,7 @@ type State = {
 export const useSounds = create<State>(() => ({
   tab: "project",
   builtIn: [],
+  downloaded: [],
   search: { music: EMPTY, effect: EMPTY },
   preview: null,
   progress: {},
@@ -77,6 +80,10 @@ function listenOnce() {
 export async function loadBuiltIn() {
   listenOnce();
   if (useSounds.getState().builtIn.length === 0) useSounds.setState({ builtIn: await api.soundLibrary() });
+}
+
+export async function loadDownloaded() {
+  useSounds.setState({ downloaded: await api.soundDownloaded() });
 }
 
 const searches: Record<SoundKind, number> = { music: 0, effect: 0 };
@@ -219,6 +226,7 @@ export async function addSound(sound: Sound, timeUs = useEditor.getState().timeU
   useSounds.setState((s) => ({ adding: [...s.adding, sound.id] }));
   try {
     setSnap(await api.soundAdd(sound.id, timeUs, epoch));
+    if (sound.provider === "YouTube" && !useSounds.getState().downloaded.some((s) => s.id === sound.id)) loadDownloaded().catch(() => {});
   } catch (e) {
     const text = errorText(e);
     if (!text.includes("CANCELLED") && !offerOwnYtdlp(sound, text, { timeUs, epoch })) toast({ kind: "error", text: `Could not add ${sound.title}: ${text}` });

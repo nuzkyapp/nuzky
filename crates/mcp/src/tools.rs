@@ -1621,7 +1621,8 @@ fn texts(thumbnail: &Thumbnail, hidden: &[f32]) -> Value {
     )
 }
 
-/// Built-in sound effects first, then a page from online; offline the built-in ones still come back.
+/// Built-in sound effects, or music already added from YouTube, first, then a page from online; offline those
+/// still come back.
 fn search_sounds(args: SearchSounds) -> Result<Value> {
     use crate::sounds::{Kind, built_in, search};
     if crate::youtube::is_link(&args.query) {
@@ -1635,6 +1636,12 @@ fn search_sounds(args: SearchSounds) -> Result<Value> {
     let mut sounds =
         if args.kind == Kind::Effect && page == 1 && args.license != Some(nuzky_engine::model::License::CcBy) {
             built_in(&args.query)
+        } else if args.kind == Kind::Music && page == 1 && args.license.is_none() {
+            let query = args.query.trim().to_lowercase();
+            crate::sounds::downloaded()
+                .into_iter()
+                .filter(|s| s.title.to_lowercase().contains(&query) || s.author.to_lowercase().contains(&query))
+                .collect()
         } else {
             Vec::new()
         };

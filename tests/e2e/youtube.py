@@ -246,6 +246,34 @@ input.dispatchEvent(new Event('input', {bubbles: true}));""", FIELD, f'https://y
     if r.check('the window goes to its smallest size', resize(r, 1024, 640)):
         time.sleep(0.5)
         r.shot('music-1024')
+
+    # Another project lists the song it never linked, and adds it from the library file without yt-dlp.
+    r.s.run(CLICK, 'button[aria-label="Clear link"]')
+    resize(r, 1440, 900)
+    first = r.state()['epoch']
+    calls = len(invocations(r))
+    r.s.call('window.__nuzky.newProjectFromMedia(arguments[0])', [str(SOURCE)])
+    r.check('a second project opens', wait(lambda: r.state()['epoch'] != first and r.s.run('return window.__nuzky.store.getState().view') == 'editor', 30))
+    music(r)
+    row = wait(lambda: r.s.run('return document.querySelector(\'section[aria-label="From YouTube"] \' + arguments[0])?.innerText ?? ""', ROW), 10) or ''
+    r.check('the second project lists the song under From YouTube with its title, artist and length, not yet in it',
+            all(text in row for text in ('Steady Song', 'Test Artist · YouTube', '20.0 s'))
+            and not r.s.run('return !!document.querySelector(arguments[0])', ROW + ' [title="In this project"]'), row)
+    time.sleep(0.4)
+    r.shot('from-youtube')
+    query = "window.__nuzky.sounds.setState((s) => ({search: {...s.search, music: {...s.search.music, query: arguments[0]}}}))"
+    r.s.run(query, 'steady')
+    r.check('typing its title keeps it listed', wait(lambda: r.s.run('return !!document.querySelector(arguments[0])', ROW), 5))
+    r.s.run(query, 'nothing like it')
+    r.check('another word hides it', wait(lambda: not r.s.run('return !!document.querySelector(arguments[0])', ROW), 5))
+    r.s.run(query, '')
+    wait(lambda: r.s.run('return !!document.querySelector(arguments[0])', ROW), 5)
+    r.s.run(CLICK, ROW + ' button[aria-label^=Add]')
+    wait(lambda: any(a['name'] == 'Steady Song' for a in r.state()['assets']), 15)
+    asset = next((a for a in r.s.run(PROJECT)['assets'] if a['name'] == 'Steady Song'), None)
+    r.check('+ adds the same library file to the second project without running yt-dlp',
+            asset and Path(asset['path']).resolve() == file.resolve() and asset.get('credit') is None
+            and len(invocations(r)) == calls, (asset, invocations(r)[calls:]))
     r.check('no error toasts', not r.errors(), r.errors())
 
 

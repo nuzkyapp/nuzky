@@ -51,6 +51,11 @@ pub fn sound_library() -> Vec<Sound> {
 }
 
 #[tauri::command]
+pub async fn sound_downloaded() -> CmdResult<Vec<Sound>> {
+    blocking(|| Ok(sounds::downloaded())).await
+}
+
+#[tauri::command]
 pub async fn sound_search(query: String, kind: Kind, page: u32) -> CmdResult<Page> {
     blocking(move || sounds::search(&query, kind, None, page)).await
 }

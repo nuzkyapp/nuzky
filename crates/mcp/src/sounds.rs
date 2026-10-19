@@ -563,12 +563,66 @@ fn freesound_sound(id: &str) -> Result<Sound> {
 
 const YOUTUBE: &str = "YouTube";
 
+#[derive(Serialize, Deserialize)]
+struct Downloaded {
+    title: String,
+    author: String,
+    duration_us: i64,
+    file: String,
+}
+
+fn saved_youtube(id: &str) -> Option<Sound> {
+    if !crate::youtube::valid_id(id) {
+        return None;
+    }
+    let details: Downloaded =
+        serde_json::from_slice(&std::fs::read(library_dir().join(format!("youtube-{id}.json"))).ok()?).ok()?;
+    let sound = Sound {
+        id: format!("youtube:{id}"),
+        kind: Kind::Music,
+        title: line(Some(&details.title), 300),
+        author: line(Some(&details.author), 300),
+        duration_us: details.duration_us,
+        license: None,
+        license_version: String::new(),
+        license_url: String::new(),
+        url: crate::youtube::watch_url(id),
+        provider: YOUTUBE.into(),
+        category: None,
+        file: crate::youtube::watch_url(id),
+        filetype: Path::new(&details.file).extension().and_then(|e| e.to_str()).map(str::to_owned),
+    };
+    (file_name(&sound) == details.file && library_dir().join(&details.file).is_file()).then_some(sound)
+}
+
+/// Songs added from YouTube in any project, newest first, without a network lookup.
+pub fn downloaded() -> Vec<Sound> {
+    let mut found: Vec<_> = std::fs::read_dir(library_dir())
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let name = entry.file_name();
+            let id = name.to_str()?.strip_prefix("youtube-")?.strip_suffix(".json")?;
+            Some((entry.metadata().ok()?.modified().ok()?, saved_youtube(id)?))
+        })
+        .collect();
+    found.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
+    let sounds: Vec<_> = found.into_iter().map(|(_, sound)| sound).collect();
+    remember(&sounds);
+    sounds
+}
+
 /// The video a YouTube or YouTube Music link points at, as a sound to preview and add.
 pub fn link(url: &str) -> Result<Sound> {
     youtube_sound(&crate::youtube::video_id(url)?)
 }
 
 fn youtube_sound(id: &str) -> Result<Sound> {
+    if let Some(sound) = saved_youtube(id) {
+        remember(std::slice::from_ref(&sound));
+        return Ok(sound);
+    }
     let video = crate::youtube::video(id, crate::youtube::SOUND, MAX_FILE_BYTES, &AtomicBool::new(false))?;
     let author = [&video.artist, &video.channel, &video.uploader].into_iter().find_map(|a| a.as_deref());
     let sound = Sound {
@@ -780,6 +834,15 @@ pub fn asset(id: &str, cache_dir: &Path, cancelled: impl Fn() -> bool, progress:
     let mut asset = nuzky_engine::media::probe(&path, new_id())
         .map_err(|e| anyhow!("SOUND_UNAVAILABLE: {} is not a sound file Nuzky can play ({e:#})", sound.title))?;
     ensure!(asset.kind == AssetKind::Audio, "SOUND_UNAVAILABLE: {} is not a sound file", sound.title);
+    if sound.id.starts_with("youtube:") {
+        let details = Downloaded {
+            title: sound.title.clone(),
+            author: sound.author.clone(),
+            duration_us: sound.duration_us,
+            file: file_name(&sound),
+        };
+        publish(&path.with_extension("json"), |file| Ok(serde_json::to_writer(file, &details)?))?;
+    }
     asset.name = sound.title.clone();
     asset.credit = sound.credit();
     Ok(asset)
