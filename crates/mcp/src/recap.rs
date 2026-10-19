@@ -132,7 +132,7 @@ fn build(before: Project, after: Project, derived: &Derived) -> Recap {
     }
     let transcribed = untranscribed(&before, &cuts, derived).is_empty();
     let mut recap =
-        Recap { before, after, cuts, words: Vec::new(), transcribed, snips: Vec::new(), whoosh: None, land: None };
+        Recap { before, after, cuts, words: Vec::new(), transcribed, swish: None, whoosh: None, land: None };
     if !transcribed {
         return recap;
     }

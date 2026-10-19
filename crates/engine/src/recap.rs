@@ -1,6 +1,6 @@
 //! A recap: a short vertical video of how a video was cut. The recording races over a bar of its whole
-//! length; each cut slows down on screen, strikes its words and then snaps shut on the bar to a snip of
-//! scissors, so the bar and the number at its end shrink to the new length, which lands big before a
+//! length; each cut slows down on screen, strikes its words and then snaps shut on the bar with a quick
+//! swish, so the bar and the number at its end shrink to the new length, which lands big before a
 //! sample of the finished cut closes it. Its pictures come from the renderer of preview
 //! and export, so the recording and the cut look as they do in the app.
 
@@ -38,9 +38,9 @@ pub struct Recap {
     pub words: Vec<RecapWord>,
     /// Every file a cut touches has a transcript, so words, retakes and pauses are known.
     pub transcribed: bool,
-    /// Built-in sounds the recap plays: a snip of scissors as each cut snaps shut, taking turns, a whoosh between
-    /// its parts and a soft hit as the new length lands.
-    pub snips: Vec<Asset>,
+    /// Built-in sounds the recap plays: a short swish as each cut snaps shut, a whoosh between its parts and a soft
+    /// hit as the new length lands.
+    pub swish: Option<Asset>,
     pub whoosh: Option<Asset>,
     pub land: Option<Asset>,
 }
@@ -98,15 +98,15 @@ pub struct RecapOptions {
     pub replace_existing: bool,
 }
 
-const HOOK_US: i64 = 1_200_000;
+const HOOK_US: i64 = 1_000_000;
 /// The recording plays at least this fast and takes at most this long.
-const FAST_MIN_US: i64 = 3_000_000;
-const FAST_MAX_US: i64 = 16_000_000;
-const LANDING_US: i64 = 2_000_000;
-const SAMPLE_MAX_US: i64 = 8_000_000;
-const END_CARD_US: i64 = 2_000_000;
+const FAST_MIN_US: i64 = 2_500_000;
+const FAST_MAX_US: i64 = 5_000_000;
+const LANDING_US: i64 = 1_600_000;
+const SAMPLE_MAX_US: i64 = 4_000_000;
+const END_CARD_US: i64 = 1_500_000;
 /// A cut stays on screen this long when there is room, so it is seen while the recording races past it.
-const CUT_SCREEN_US: i64 = 700_000;
+const CUT_SCREEN_US: i64 = 400_000;
 /// Cuts at most this many pixels of the bar apart go as one piece, which is drawn at least this wide.
 const MERGE_PX: f32 = 10.0;
 const PIECE_MIN_PX: f32 = 6.0;
@@ -164,7 +164,7 @@ impl Race {
                 }),
             }
         }
-        let fast = (before / 4).clamp(FAST_MIN_US, FAST_MAX_US).min(before);
+        let fast = (before / 6).clamp(FAST_MIN_US, FAST_MAX_US).min(before);
         // The pieces take at most half the race, so with many cuts the kept recording still reads.
         let budget = fast / 2 / (pieces.len() as i64).max(1);
         let screens: Vec<i64> = pieces.iter().map(|p| p.len().min(CUT_SCREEN_US).min(budget)).collect();
@@ -299,7 +299,7 @@ pub fn render(
         bail!("OUTPUT_EXISTS: {} already exists; choose a new file name", credits_out.display());
     }
     prepare_sound(&recap.after, cache_dir, cancel)?;
-    for asset in recap.snips.iter().chain(&recap.whoosh).chain(&recap.land) {
+    for asset in recap.swish.iter().chain(&recap.whoosh).chain(&recap.land) {
         ensure_pcm(cache_dir, asset, |_| check_cancel(cancel))?;
     }
     crate::matte::check(cache_dir, &recap.after)?;
@@ -365,13 +365,13 @@ const STAY_BACK_US: i64 = RETURN_US + 200_000;
 /// What is written over the picture fades this fast where it goes.
 const TEXT_OUT_US: i64 = 200_000;
 /// The finished cut shows its bar this long, then the bar fades.
-const AFTER_BAR_US: i64 = 3_000_000;
+const AFTER_BAR_US: i64 = 2_000_000;
 const FADE_US: i64 = 400_000;
-/// Snips closer than this to the one before are left out.
-const SNIP_GAP_US: i64 = 150_000;
-/// A snip starts this much before its piece snaps shut, so the blades meet as it closes.
-const SNIP_LEAD_US: i64 = 60_000;
-/// The music under the racing recording, so the snips stand out.
+/// Swishes closer than this to the one before are left out, so none plays over the last.
+const SWISH_GAP_US: i64 = 150_000;
+/// A swish starts this long after its piece starts to snap shut, so it peaks as the piece closes fastest.
+const SWISH_DELAY_US: i64 = 90_000;
+/// The music under the racing recording, so the swishes stand out.
 const BED_DB: f64 = -9.0;
 /// The finished cut's own sound fades out this long before its sample ends, leaving its music.
 const HANDOVER_US: i64 = 300_000;
@@ -990,7 +990,7 @@ impl<'a> Painter<'a> {
     }
 }
 
-/// The recap's sound: a whoosh into each part and a snip of scissors as each piece of the bar snaps shut, then the
+/// The recap's sound: a whoosh into each part and a short swish as each piece of the bar snaps shut, then the
 /// finished cut as it plays.
 /// The finished cut's music plays from the start of the recap, so the recording races to it.
 struct Sound {
@@ -1003,7 +1003,7 @@ struct Sound {
     cue_mixer: Mixer,
     mixer: Mixer,
     music_mixer: Mixer,
-    /// Holds the peaks where the snips land on the music, as export does.
+    /// Holds the peaks where the swishes land on the music, as export does.
     limiter: Limiter,
     /// Recap frame the mixers read next, `Limiter::latency()` ahead of what comes out.
     read: i64,
@@ -1047,19 +1047,16 @@ impl Sound {
             keep_in_place: true,
             clips,
         };
-        if !recap.snips.is_empty() {
+        if let Some(swish) = &recap.swish {
             let mut clips: Vec<Clip> = Vec::new();
             for shown in Race::new(recap).shown {
-                let at = hook + shown.end - SNIP_LEAD_US;
-                if clips.last().is_none_or(|last| at - last.start_us >= SNIP_GAP_US) {
-                    clips.push(clip(&recap.snips[clips.len() % recap.snips.len()], at, 0.8));
+                let at = hook + shown.end + SWISH_DELAY_US;
+                if clips.last().is_none_or(|last| at - last.start_us >= SWISH_GAP_US) {
+                    clips.push(clip(swish, at, 0.8));
                 }
             }
-            cues.assets.extend(recap.snips.iter().cloned());
-            // A snip can outlast the gap to the next one, so each takes turns on one of two tracks.
-            let (even, odd): (Vec<_>, Vec<_>) = clips.into_iter().enumerate().partition(|(i, _)| i % 2 == 0);
-            cues.tracks.push(track("snips", even.into_iter().map(|(_, c)| c).collect()));
-            cues.tracks.push(track("snips-2", odd.into_iter().map(|(_, c)| c).collect()));
+            cues.assets.push(swish.clone());
+            cues.tracks.push(track("swishes", clips));
         }
         if let Some(whoosh) = &recap.whoosh {
             let lead = whoosh.duration_us / 2;
@@ -1129,7 +1126,7 @@ impl Sound {
 }
 
 /// The finished cut's sound on the recap's timeline, and its music alone: the music from the start of the recap to
-/// `end`, quieter while the recording races so the snips stand out, and everything else from `start`, as the
+/// `end`, quieter while the recording races so the swishes stand out, and everything else from `start`, as the
 /// picture plays it, so it keeps its transitions and the music still ducks under the speech. The music fades out
 /// over `fade`, the end card.
 fn soundtrack(after: &Project, start: i64, end: i64, fade: i64) -> (Project, Project) {
@@ -1232,18 +1229,18 @@ mod tests {
             cuts: Vec::new(),
             words: Vec::new(),
             transcribed: false,
-            snips: Vec::new(),
+            swish: None,
             whoosh: None,
             land: None,
         }
     }
 
     #[test]
-    fn a_recap_fits_in_thirty_seconds_and_never_plays_slower_than_recorded() {
+    fn a_recap_fits_in_fourteen_seconds_and_never_plays_slower_than_recorded() {
         for (before, after) in [(2, 1), (10, 6), (222, 68), (1200, 300), (36_000, 20_000)] {
             let recap = recap(before, after);
             let [_, fast, _, sample, _] = sections(&recap, true);
-            assert!(duration_us(&recap, true) <= 30_000_000, "{before} s");
+            assert!(duration_us(&recap, true) <= 14_000_000, "{before} s");
             assert!(fast <= before * 1_000_000 && sample <= after * 1_000_000, "{before} s");
             assert_eq!(duration_us(&recap, true) - duration_us(&recap, false), END_CARD_US);
         }
@@ -1264,7 +1261,7 @@ mod tests {
         most.cuts = vec![cut(0.5, 14.0), cut(15.0, 29.5)];
         for recap in [&long, &short, &most] {
             let race = Race::new(recap);
-            assert!(duration_us(recap, true) <= 30_000_000);
+            assert!(duration_us(recap, true) <= 14_000_000);
             // The bar shrinks by what the cuts removed, not by the kept footage between cuts that go as one.
             let removed: i64 = recap.cuts.iter().map(|c| c.end_us - c.start_us).sum();
             assert_eq!(race.pieces.iter().map(|p| p.removed_us).sum::<i64>(), removed);

@@ -6,12 +6,12 @@ from e2e.home import resize
 from e2e.reel import poll
 
 DIALOG = "return document.querySelector('[role=dialog]')?.innerText ?? ''"
-# The recording plays in the recap after 1.2 s of opening, then the new length lands for 2 s; with the end card the
-# recap ends on 2 s of it. While a cut plays, the picture steps back to 90 % and leaves the graphite around it: the
+# The recording plays in the recap after 1 s of opening, then the new length lands for 1.6 s; with the end card the
+# recap ends on 1.5 s of it. While a cut plays, the picture steps back to 90 % and leaves the graphite around it: the
 # test pattern of talk.mp4 fills its right edge when kept and the edge goes dark in a cut.
-OPENING_S = 1.2
-LANDING_S = 2.0
-END_CARD_S = 2.0
+OPENING_S = 1.0
+LANDING_S = 1.6
+END_CARD_S = 1.5
 EDGE = (1069, 400, 1080, 1500)
 
 
@@ -80,12 +80,12 @@ def dark_share(image, box):
 
 def race_seconds(info, end_card):
     """How long the recording races in a recap, from its length and the parts around the race."""
-    sample = min(info['totals']['afterUs'], 8_000_000) / 1e6
+    sample = min(info['totals']['afterUs'], 4_000_000) / 1e6
     return info['durationUs'] / 1e6 - OPENING_S - LANDING_S - sample - (END_CARD_S if end_card else 0)
 
 
 @flow('recap', 'A recap of an AI run, of a run that only shortened a pause and of everything cut since the import: the run card '
-      'and Export give the same numbers as the summary, and the video is 9:16, at most 30 s, marks the cuts, strikes the cut words '
+      'and Export give the same numbers as the summary, and the video is 9:16, at most 14 s, marks the cuts, strikes the cut words '
       'and ends on the finished cut, with or without its nuzky.app card', before=setup)
 def recap(r):
     bridge = Bridge(r, r.saved_project())
@@ -118,8 +118,8 @@ def recap(r):
         first = info(r, run_id)
         video = make(r, 'run-recap.mp4', run_id, True)
         duration, size, codecs = probe(video)
-        r.check('the recap is a 1080 × 1920 H.264 and AAC video of at most 30 s, as long as the dialog said',
-                size == (1080, 1920) and codecs == {'h264', 'aac'} and duration <= 30 and abs(duration - first['durationUs'] / 1e6) < 0.06,
+        r.check('the recap is a 1080 × 1920 H.264 and AAC video of at most 14 s, as long as the dialog said',
+                size == (1080, 1920) and codecs == {'h264', 'aac'} and duration <= 14 and abs(duration - first['durationUs'] / 1e6) < 0.06,
                 [duration, size, codecs, first['durationUs']])
         fast = race_seconds(first, True)
         # The cut is at the start, so it plays in the first part of the race; the end of the race is kept.
@@ -135,12 +135,12 @@ def recap(r):
                 [chip_share(cut, (60, 1312, 900, 1380)), chip_share(kept, (60, 1312, 900, 1380))])
         r.check('the cut words are struck through in the caption', red_share(cut, (60, 900, 900, 1090)) > 0.002,
                 red_share(cut, (60, 900, 900, 1090)))
-        frame(r, video, 1.0, 'recap-opening')
-        # Five seconds into the finished cut, past its bar, the recap shows what the renderer draws there.
+        frame(r, video, 0.9, 'recap-opening')
+        # Three seconds into the finished cut, past its bar, the recap shows what the renderer draws there.
         sample_s = OPENING_S + fast + LANDING_S
-        shown = frame(r, video, sample_s + 5.0, 'recap-finished')
+        shown = frame(r, video, sample_s + 3.0, 'recap-finished')
         drawn = r.work / 'frame-finished.png'
-        subprocess.run([str(CLI), 'frame', str(r.saved_project()), '5', str(drawn), '1080'], env=r.env, check=True, capture_output=True)
+        subprocess.run([str(CLI), 'frame', str(r.saved_project()), '3', str(drawn), '1080'], env=r.env, check=True, capture_output=True)
         changed = changed_share(drawn, shown)
         r.check('the recap ends on the finished cut as the renderer draws it', changed < 0.01, f'{changed:.3%} of pixels differ')
         frame(r, video, duration - 0.5, 'recap-end-card')
@@ -184,7 +184,7 @@ def recap(r):
             resize(r, 1440, 900)
         video = make(r, 'pause-recap.mp4', run, False)
         duration, size, _ = probe(video)
-        r.check('without the end card the recap is 2 s shorter than with it', size == (1080, 1920) and abs(duration - (pause['durationUs'] / 1e6 - END_CARD_S)) < 0.06,
+        r.check('without the end card the recap is 1.5 s shorter than with it', size == (1080, 1920) and abs(duration - (pause['durationUs'] / 1e6 - END_CARD_S)) < 0.06,
                 [duration, pause['durationUs']])
 
         # A hand cut, then everything cut since the import.
@@ -205,8 +205,8 @@ def recap(r):
         r.shot('recap-dialog-project')
         video = make(r, 'project-recap.mp4', None, True)
         duration, size, _ = probe(video)
-        r.check('the whole-project recap is 9:16 and at most 30 s', size == (1080, 1920) and duration <= 30, [duration, size])
-        opening = frame(r, video, 1.0, 'project-opening')
+        r.check('the whole-project recap is 9:16 and at most 14 s', size == (1080, 1920) and duration <= 14, [duration, size])
+        opening = frame(r, video, 0.9, 'project-opening')
         # The bar is the whole take; its red share is the share of the take that was cut, the run's, the pause and the hand cut.
         share, gone = red_share(opening, (60, 1250, 900, 1270)), 1 - now_us / talk_us
         r.check('the opening bar is red where the take was cut, in proportion', abs(share - gone) < 0.03, [share, gone])

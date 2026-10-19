@@ -16,9 +16,6 @@ use crate::{
     jobs::{Reporter, check_destination, crashed, register, unregister},
 };
 
-/// Snips of real scissors the recap plays as cuts snap shut, in turn, so no snip follows itself.
-const SNIPS: [&str; 3] = ["nuzky:scissors-snip", "nuzky:scissors-snip-2", "nuzky:scissors-snip-3"];
-
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -128,7 +125,7 @@ pub async fn start_recap(
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             nuzky_session::jobs::check_cancel(&cancel)?;
             let sound = |id: &str| nuzky_mcp::sounds::asset(id, &cache, || cancel.load(Ordering::Relaxed), |_| {});
-            recap.snips = SNIPS.iter().map(|id| sound(id)).collect::<Result<_, _>>()?;
+            recap.swish = Some(sound("nuzky:swish-tiny")?);
             recap.whoosh = Some(sound("nuzky:swish-short")?);
             recap.land = Some(sound("nuzky:soft-hit")?);
             nuzky_vision::matte::prepare(&recap.after, &cache, &nuzky_analysis::models_dir(), &cancel, &mut |p| {

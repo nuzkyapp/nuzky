@@ -20,7 +20,7 @@ fn sound(id: &str) -> Asset {
     probe(&path, format!("nuzky:{id}")).unwrap()
 }
 
-/// A 20 s vertical talking-head take with a 440 Hz tone, cut at 2–4 s and 10–12.5 s, with the built-in snips.
+/// A 20 s vertical talking-head take with a 440 Hz tone, cut at 2–4 s and 10–12.5 s, with the built-in swish.
 /// With `music`, an 880 Hz tone from 5 s on an audio track ducks under it, as music does.
 fn recap(dir: &Path, music: bool) -> Recap {
     let take = dir.join("take.mp4");
@@ -117,7 +117,7 @@ fn recap(dir: &Path, music: bool) -> Recap {
         after: editor.project,
         words,
         transcribed: true,
-        snips: ["scissors-snip", "scissors-snip-2", "scissors-snip-3"].map(sound).to_vec(),
+        swish: Some(sound("swish-tiny")),
         whoosh: None,
         land: None,
     }
@@ -175,20 +175,20 @@ fn recap_snaps_each_cut_shut_on_the_bar_and_ends_on_the_finished_cut_as_the_rend
     let length = j["format"]["duration"].as_str().unwrap().parse::<f64>().unwrap();
     let expected = duration_us(&recap, true) as f64 / 1e6;
     assert!((length - expected).abs() < 0.05, "{length} s instead of {expected} s");
-    assert!(length <= 30.0);
+    assert!(length <= 14.0);
 
     // Once drawn, the opening bar is red where the recording was cut and not where it was kept.
     let [hook, fast, landing, ..] = sections(&recap, true);
-    let opening = frame(&out, 33);
+    let opening = frame(&out, 27);
     let bar_x = |at_us: i64| (60.0 + 840.0 * at_us as f64 / (20 * S) as f64) as usize;
     assert!(red(pixel(&opening, bar_x(11 * S), 1260)), "{:?}", pixel(&opening, bar_x(11 * S), 1260));
     assert!(!red(pixel(&opening, bar_x(7 * S), 1260)), "{:?}", pixel(&opening, bar_x(7 * S), 1260));
 
-    // Each cut stays on screen at least 0.7 s, its picture stepped back to the graphite around it, its chip red
+    // Each cut stays on screen at least 0.4 s, its picture stepped back to the graphite around it, its chip red
     // under the bar and its words struck; kept footage between them fills the frame.
     let times = cut_times(&recap);
     assert_eq!(times.len(), 2);
-    assert!(times.iter().all(|t| t.end - t.start >= 700_000), "{times:?}");
+    assert!(times.iter().all(|t| t.end - t.start >= 400_000), "{times:?}");
     let at = |us: i64| (us * 30 / S) as u32;
     let cut = frame(&out, at((times[0].start + times[0].end) / 2));
     let kept = frame(&out, at((times[0].end + times[1].start) / 2 + 300_000));
@@ -213,9 +213,9 @@ fn recap_snaps_each_cut_shut_on_the_bar_and_ends_on_the_finished_cut_as_the_rend
         pixel(&landed, end + 12, 1028)
     );
 
-    // Five seconds into the finished cut, past its bar, the recap shows the renderer's frame.
+    // Three seconds into the finished cut, past its bar, the recap shows the renderer's frame.
     let start = hook + fast + landing;
-    let n = ((start + 5 * S) * 30 / S) as u32;
+    let n = ((start + 3 * S) * 30 / S) as u32;
     let into = nuzky_engine::export::frame_time_us(n as u64, 30) - start;
     let mut renderer = Renderer::new().unwrap();
     let drawn = renderer.render(&recap.after, into, 1080, 1920, Wait::Exact, false).unwrap();
@@ -223,12 +223,12 @@ fn recap_snaps_each_cut_shut_on_the_bar_and_ends_on_the_finished_cut_as_the_rend
     let error = mae(&drawn, &shown);
     assert!(error < 4.0, "the finished cut differs from the renderer by {error:.2} per channel");
 
-    // The racing recording is silent but for a snip as each piece snaps shut; the finished cut plays its sound.
+    // The racing recording is silent but for a swish as each piece snaps shut; the finished cut plays its sound.
     let secs = |us: i64| us as f64 / 1e6;
-    let snip = |t: &std::ops::Range<i64>| rms(&out, secs(t.end) - 0.1, secs(t.end) + 0.3, "highpass=f=2000");
+    let swish = |t: &std::ops::Range<i64>| rms(&out, secs(t.end), secs(t.end) + 0.3, "highpass=f=2000");
     let quiet = rms(&out, secs(hook) + 0.1, secs(times[0].end) - 0.2, "anull");
-    let voice = rms(&out, secs(start) + 1.0, secs(start) + 4.0, "anull");
-    assert!(times.iter().all(|t| snip(t) > 0.005), "snips {:.4} {:.4}", snip(&times[0]), snip(&times[1]));
+    let voice = rms(&out, secs(start) + 0.5, secs(start) + 3.5, "anull");
+    assert!(times.iter().all(|t| swish(t) > 0.005), "swishes {:.4} {:.4}", swish(&times[0]), swish(&times[1]));
     assert!(quiet < 0.001 && voice > 0.1, "race {quiet:.4}, finished cut {voice:.4}");
     assert!(
         !std::fs::read_dir(&d).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().starts_with(".nuzky-part-"))
@@ -249,14 +249,14 @@ fn the_finished_cuts_music_plays_from_the_start_of_the_recap_even_when_it_comes_
     let [hook, fast, landing, sample, _] = sections(&recap, true);
     let secs = |us: i64| us as f64 / 1e6;
     let (music, speech) = ("bandpass=f=880:width_type=q:w=8", "bandpass=f=440:width_type=q:w=8");
-    // Before 5 s, where the music comes in on the finished cut's timeline.
-    let race = (secs(hook) + 0.3, (secs(hook) + 3.0).min(secs(hook + fast) - 0.2));
+    // Before 5 s, where the music comes in on the finished cut's timeline, and before the first swish.
+    let race = (secs(hook) + 0.3, secs(cut_times(&recap)[0].end).min(secs(hook + fast) - 0.2));
     let finished = (secs(hook + fast + landing) + 1.0, secs(hook + fast + landing + sample) - 1.0);
     let (race_music, race_speech) = (rms(&out, race.0, race.1, music), rms(&out, race.0, race.1, speech));
     let (cut_music, cut_speech) = (rms(&out, finished.0, finished.1, music), rms(&out, finished.0, finished.1, speech));
     assert!(race_music > 0.02 && race_speech < 0.005, "race: music {race_music:.4}, speech {race_speech:.4}");
     assert!(cut_speech > 0.1, "the finished cut has its speech: {cut_speech:.4}");
-    // Under the racing recording the music is lower, so the snips stand out, and under speech it ducks further.
+    // Under the racing recording the music is lower, so the swishes stand out, and under speech it ducks further.
     assert!(cut_music < race_music, "music under speech {cut_music:.4}, while racing {race_music:.4}");
     let end = rms(&out, secs(duration_us(&recap, true)) - 0.15, secs(duration_us(&recap, true)) - 0.02, music);
     assert!(end < race_music / 4.0, "the music fades out at the end: {end:.4}");
@@ -333,12 +333,12 @@ fn a_transition_into_a_clip_past_the_finished_cuts_sample_still_plays_its_sound(
         }
         probe(&path, name.into()).unwrap()
     };
-    // The second take, from 2 s into its file, comes in over a 2 s dissolve centred on 8.2 s, so its sound starts at
-    // 7.2 s, inside the recap's 8 s sample of the finished cut, though the clip itself starts after it.
+    // The second take, from 2 s into its file, comes in over a 2 s dissolve centred on 4.2 s, so its sound starts at
+    // 3.2 s, inside the recap's 4 s sample of the finished cut, though the clip itself starts after it.
     let mut after = Project::new("Transition");
     after.assets.extend([take("first.mp4", 440), take("second.mp4", 1320)]);
-    after.tracks[0].clips.push(clip("first-clip", "first.mp4", 0, 8_200_000));
-    let mut second = clip("second-clip", "second.mp4", 8_200_000, 5 * S);
+    after.tracks[0].clips.push(clip("first-clip", "first.mp4", 0, 4_200_000));
+    let mut second = clip("second-clip", "second.mp4", 4_200_000, 5 * S);
     if let ClipContent::Media { source_in_us, .. } = &mut second.content {
         *source_in_us = 2 * S;
     }
@@ -350,7 +350,7 @@ fn a_transition_into_a_clip_past_the_finished_cuts_sample_still_plays_its_sound(
         cuts: Vec::new(),
         words: Vec::new(),
         transcribed: false,
-        snips: Vec::new(),
+        swish: None,
         whoosh: None,
         land: None,
     };
@@ -359,6 +359,6 @@ fn a_transition_into_a_clip_past_the_finished_cuts_sample_still_plays_its_sound(
     render(&recap, &d.join("cache"), &out, &options, &AtomicBool::new(false), |_| {}).unwrap();
     let [hook, fast, landing, ..] = sections(&recap, false);
     let start = (hook + fast + landing) as f64 / 1e6;
-    let incoming = rms(&out, start + 7.5, start + 7.7, "bandpass=f=1320:width_type=q:w=8");
+    let incoming = rms(&out, start + 3.5, start + 3.7, "bandpass=f=1320:width_type=q:w=8");
     assert!(incoming > 0.01, "the incoming take is heard across the dissolve: {incoming:.4}");
 }
