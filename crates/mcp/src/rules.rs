@@ -87,6 +87,7 @@ pub(crate) const TOOLS: &[Rules] = &[
     rules("export_video", Never, false, false, true),
     // Only draws the thumbnail; a missing mask of its frame is made as a job into the cache.
     rules("inspect_thumbnail", Always, false, true, true),
+    rules("inspect_image", Always, false, true, false),
     rules("export_thumbnail", Never, false, false, true),
     // Only shows choices to the user; the project is not touched.
     rules("suggest_options", Always, false, true, false),
@@ -137,6 +138,7 @@ mod tests {
                 "get_waveform",
                 "segment_subject",
                 "inspect_thumbnail",
+                "inspect_image",
                 "suggest_options",
                 "list_history",
                 "get_style",
@@ -168,6 +170,7 @@ mod tests {
                 "get_waveform",
                 "segment_subject",
                 "inspect_thumbnail",
+                "inspect_image",
                 "apply_edits",
                 "apply_motion",
                 "suggest_options",

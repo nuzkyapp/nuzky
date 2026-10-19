@@ -62,6 +62,7 @@ function MakeWithAi({ variant }: { variant: "primary" | "ghost" }) {
 
 function Frames({ format, made }: { format: ThumbnailFormat; made: boolean }) {
   const candidates = useCandidates();
+  const fromImage = useEditor((s) => !!s.snap?.project.thumbnails?.find((t) => t.format === format)?.image);
   const aiBlocked = useAiBlocked();
   // The AI waits for the cover models it needs; their download shows here like a pick.
   const aiWaits = useCover((s) => !!s.afterModels);
@@ -124,7 +125,7 @@ function Frames({ format, made }: { format: ThumbnailFormat; made: boolean }) {
           )}
           {/* Prominent once there is a cover, until it has found frames; then picking again is the rarer step. */}
           <Button
-            variant={!made || candidates.length > 0 ? "secondary" : "primary"}
+            variant={!made || candidates.length > 0 || fromImage ? "secondary" : "primary"}
             className="w-full"
             disabled={!!models?.unavailable}
             disabledReason={models?.unavailable ? "Finding faces doesn't work on this computer. Click the timeline to choose a frame." : undefined}
@@ -132,7 +133,11 @@ function Frames({ format, made }: { format: ThumbnailFormat; made: boolean }) {
           >
             <ScanFace size={15} /> {candidates.length > 0 ? "Pick again" : "Pick for me"}
           </Button>
-          {candidates.length === 0 && <p className="text-[12px] text-muted">Finds frames with open eyes and a sharp face.</p>}
+          {fromImage ? (
+            <p className="text-[12px] text-muted">The cover is an image. Choosing a frame replaces it.</p>
+          ) : (
+            candidates.length === 0 && <p className="text-[12px] text-muted">Finds frames with open eyes and a sharp face.</p>
+          )}
           {models && !models.downloaded && !models.unavailable && <p className="text-[12px] text-muted">First use downloads the cover models ({models.sizeMb} MB).</p>}
         </div>
       )}

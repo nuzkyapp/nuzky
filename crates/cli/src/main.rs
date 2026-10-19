@@ -424,7 +424,9 @@ fn main() -> Result<()> {
             let project = load(project)?;
             check_source_path(&project, Path::new(out))?;
             let thumbnail = project.thumbnail(format).context("The project has no thumbnail in this format")?;
-            prepare_mattes(&project)?;
+            if thumbnail.image.is_none() {
+                prepare_mattes(&project)?;
+            }
             let mut renderer = Renderer::new()?;
             renderer.use_mattes(cache_dir(), Pending::Fail);
             let frame = renderer.thumbnail_frame(&project, thumbnail)?;

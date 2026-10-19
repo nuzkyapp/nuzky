@@ -1514,6 +1514,11 @@ export type Thumbnail = {
    */
   timeUs: number,
   /**
+   * An image of the project drawn instead of the frame, such as one an agent generated; `time_us` is
+   * then unused. `frame` places it as it places the frame.
+   */
+  image?: string | null,
+  /**
    * Where the frame sits, as for clips: scale 1 fits the whole frame inside the thumbnail, x and y move its
    * centre by fractions of the thumbnail, crop cuts its edges without moving the rest.
    */

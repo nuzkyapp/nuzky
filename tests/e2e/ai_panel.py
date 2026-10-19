@@ -526,6 +526,74 @@ def ai_panel_codex_image(r):
     r.check('no error toast along the way', not r.errors(), r.errors())
 
 
+# The share of the cover editor's canvas that is the generated image's orange.
+COVER_ORANGE = """const c = document.querySelector('[data-testid=cover-canvas]');
+if (!c || !c.width || c.width === 300) return null;
+const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0;
+for (let i = 0; i < d.length; i += 4) if (d[i] > 220 && d[i + 1] > 100 && d[i + 1] < 160 && d[i + 2] < 40) n++;
+return n / (d.length / 4);"""
+COVER_STATE = """const p = window.__nuzky.store.getState().snap.project;
+const c = (p.thumbnails ?? []).find((t) => t.format === 'cover_9x16');
+const image = c?.image ? p.assets.find((a) => a.id === c.image) : null;
+return c && {image: c.image ?? null, path: image?.path ?? null, name: image?.name ?? null, timeUs: c.timeUs,
+             texts: c.texts.map((t) => t.text)};"""
+
+
+@flow('ai_panel_codex_cover', "Codex in the AI panel makes the cover from a generated image; the cover editor shows the "
+      "image, the playhead leaves it, Use frame goes back to the video and Undo brings the image back",
+      before=setup_codex_image)
+def ai_panel_codex_cover(r):
+    r.s.run('document.body.focus()')
+    r.key('j', ctrlKey=True)
+    wait(lambda: panel(r), 5)
+    r.check('the panel uses Codex', wait(lambda: r.s.run("return window.__nuzky.agent.getState().agent === 'codex'"), 10))
+    send(r, 'Make a cover with image gen: me looking aside at the GrokBot logo')
+    wait(lambda: agent(r)['status'] == 'idle' and 'run' in agent(r)['kinds'], 30)
+    r.check('Codex says the cover is made', 'Hotovo, náhled je z vygenerovaného obrázku.' in panel(r)['text'], panel(r)['text'])
+    saved = json.loads(r.saved_project().read_text())
+    cover = next((t for t in saved.get('thumbnails', []) if t['format'] == 'cover_9x16'), None)
+    image = next((a for a in saved['assets'] if cover and a['id'] == cover.get('image')), None)
+    kept = (r.work / 'data/nuzky/generated-images').resolve()
+    r.check("the saved cover is made from Nuzky's copy of the generated image, with the hook",
+            image and image['kind'] == 'image' and Path(image['path']).parent.parent == kept
+            and [t['text'] for t in cover['texts']] == ['GROKBOT'], cover)
+
+    click(r, 'Edit the cover', None)
+    share = wait(lambda: (r.s.run(COVER_ORANGE) or 0) > 0.5 and r.s.run(COVER_ORANGE), 15)
+    bar = r.s.run("return document.querySelector('[data-testid=cover-bar]')?.innerText ?? ''")
+    r.check('the cover editor shows the generated image, and the bar Use frame instead of a time',
+            share and 'Use frame' in bar and 'Frame' not in bar.replace('Use frame', ''), {'share': share, 'bar': bar})
+    time.sleep(1)
+    r.shot('codex-cover')
+    r.seek(2_000_000)
+    time.sleep(1)
+    r.check('moving the playhead leaves the cover made from the image',
+            r.s.run(COVER_STATE)['image'] == cover['image'] and (r.s.run(COVER_ORANGE) or 0) > 0.5, r.s.run(COVER_STATE))
+    frames = r.s.run("return document.querySelector('[data-testid=cover-frames]')?.innerText ?? ''")
+    r.check('Pick for me says that choosing a frame replaces the image', 'Choosing a frame replaces it.' in frames, frames)
+    apart = """const bar = document.querySelector('[data-testid=cover-bar]');
+        const use = [...bar.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Use frame').getBoundingClientRect();
+        const formats = bar.querySelector('[aria-label="Cover format"]').getBoundingClientRect();
+        return use.width > 0 && use.right <= formats.left;"""
+    webdriver('POST', r.s.path + '/window/rect', {'width': 1024, 'height': 640})
+    time.sleep(1)
+    r.check('Use frame stays clear of the format switch in the smallest window', r.s.run(apart))
+    r.shot('codex-cover-small')
+    webdriver('POST', r.s.path + '/window/rect', {'width': 1440, 'height': 900})
+    time.sleep(1)
+    r.check('and at 1440 x 900', r.s.run(apart))
+    click(r, 'Use frame', '[data-testid=cover-bar]')
+    r.check('Use frame makes the cover from the frame at the playhead, keeping the hook',
+            wait(lambda: r.s.run(COVER_STATE)['image'] is None and r.s.run(COVER_ORANGE) is not None and r.s.run(COVER_ORANGE) < 0.01, 10)
+            and r.s.run(COVER_STATE)['timeUs'] > 0 and r.s.run(COVER_STATE)['texts'] == ['GROKBOT'], r.s.run(COVER_STATE))
+    r.shot('codex-cover-frame')
+    r.s.run('window.__nuzky.store.getState().undo()')
+    r.check('Undo brings the generated image back',
+            wait(lambda: r.s.run(COVER_STATE)['image'] == cover['image'] and (r.s.run(COVER_ORANGE) or 0) > 0.5, 10),
+            r.s.run(COVER_STATE))
+    r.check('no error toast along the way', not r.errors(), r.errors())
+
+
 @flow('ai_panel_jobs', "A job of the panel's agent outlasts the turn it ends to ask: it shows with Stop while the user "
       'decides, the next turn reads its result or cancels it, and Stop or a new chat stops it', before=setup_jobs)
 def ai_panel_jobs(r):

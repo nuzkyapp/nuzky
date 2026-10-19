@@ -427,7 +427,7 @@ fn stays_in_place(track: &Track) -> bool {
     track.keep_in_place && track.kind == TrackKind::Audio
 }
 
-fn media(asset: &Asset, transform: Transform, shape: Option<Shape>) -> ClipContent {
+pub(crate) fn media(asset: &Asset, transform: Transform, shape: Option<Shape>) -> ClipContent {
     ClipContent::Media {
         asset_id: asset.id.clone(),
         source_in_us: source_span(asset).0,
@@ -843,6 +843,12 @@ impl Project {
                         {
                             *background = Background::None;
                         }
+                    }
+                }
+                // A cover made from the image goes back to its frame.
+                for t in &mut self.thumbnails {
+                    if t.image.as_deref() == Some(asset_id.as_str()) {
+                        t.image = None;
                     }
                 }
             }
@@ -2174,6 +2180,7 @@ mod tests {
             thumbnail: Thumbnail {
                 format,
                 time_us,
+                image: None,
                 frame: Transform::default(),
                 background: Default::default(),
                 texts: Vec::new(),

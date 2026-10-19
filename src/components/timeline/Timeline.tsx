@@ -22,7 +22,7 @@ import {
 } from "../../lib/store";
 import { US, formatDuration, formatTime } from "../../lib/time";
 import type { Clip, EditCmd, Project, Track } from "../../lib/types";
-import { candidateReason, useCandidates, useCover } from "../../lib/cover";
+import { candidateReason, thumbnailOf, useCandidates, useCover } from "../../lib/cover";
 import { describePeek } from "../../lib/peek";
 import { setDropResolver } from "../panel/assets";
 import { IconButton, RangeInput } from "../ui";
@@ -179,6 +179,7 @@ export function Timeline({ height }: { height: number }) {
   const locked = useAiLocked();
   // In the cover editor the timeline chooses the cover's frame: clicks and drags move the playhead, which is the frame.
   const cover = useCover((s) => s.open);
+  const coverFromImage = useEditor((s) => !!(cover && thumbnailOf(s.snap?.project, cover)?.image));
   const candidates = useCandidates();
   const { select, setZoom } = useEditor.getState();
   const scroller = useRef<HTMLDivElement>(null);
@@ -461,7 +462,9 @@ export function Timeline({ height }: { height: number }) {
     <section className="pane flex shrink-0 flex-col overflow-hidden" style={{ height }} aria-label="Timeline">
       <div className="flex h-11 shrink-0 items-center gap-1.5 px-2.5">
         {cover ? (
-          <p className="truncate pl-1.5 text-[12px] text-muted">Click or drag on the timeline to choose the cover's frame.</p>
+          <p className="truncate pl-1.5 text-[12px] text-muted">
+            {coverFromImage ? "Moving the playhead keeps the image; Use frame takes this frame." : "Click or drag on the timeline to choose the cover's frame."}
+          </p>
         ) : (
           <div className="bar flex items-center rounded-full">
             <HistoryButton redo={false} locked={locked} lines={peekShown && !peekShown.redo ? peekLines : null} onPeek={setPeek} />

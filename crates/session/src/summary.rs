@@ -503,8 +503,9 @@ pub fn summarize(before: &Project, after: &Project) -> Vec<RunChange> {
         // Cuts before its frame move the frame's time with the picture; showing the same moment, it is the same cover.
         let moved_with_cut = |old: &Thumbnail, new: &Thumbnail| {
             Thumbnail { time_us: new.time_us, ..old.clone() } == *new
-                && shown_source(before, old.time_us)
-                    .is_some_and(|shown| Some(shown) == shown_source(after, new.time_us))
+                && (new.image.is_some()
+                    || shown_source(before, old.time_us)
+                        .is_some_and(|shown| Some(shown) == shown_source(after, new.time_us)))
         };
         let verb = match (before.thumbnail(format), after.thumbnail(format)) {
             (None, Some(_)) => "Made",

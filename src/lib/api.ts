@@ -171,7 +171,8 @@ export const api = {
   startReframe: (width: number, height: number, clipIds: string[] | null, epoch: Epoch) =>
     invoke<string>("start_reframe", { width, height, clipIds, expectedEpoch: epoch }),
   /** Masks the person in the frame at `timeUs`, downloading the mask model on first use. */
-  startCoverMask: (timeUs: number, epoch: Epoch) => invoke<string>("start_cover_mask", { timeUs: Math.round(timeUs), expectedEpoch: epoch }),
+  startCoverMask: (timeUs: number, image: string | null, epoch: Epoch) =>
+    invoke<string>("start_cover_mask", { timeUs: Math.round(timeUs), image, expectedEpoch: epoch }),
   /** Without `replaceExisting` an existing file is kept and the export fails with DESTINATION_EXISTS. */
   startCoverExport: (format: ThumbnailFormat, path: string, replaceExisting: boolean, epoch: Epoch) =>
     invoke<string>("start_cover_export", { format, path, replaceExisting, expectedEpoch: epoch }),

@@ -21,6 +21,8 @@ stream-json user messages from stdin while it works; Codex reads one prompt up t
   the `thumbnail` prompt (Make a thumbnail): sets both covers in one run with the hook from "Hook: …" in the wishes,
              looks at the cover with inspect_thumbnail, waiting for its mask, and exports nothing
   "think first"  (Codex) says nothing for 2 s, then is echoed back
+  "image gen" (Codex) makes the 9:16 cover from a generated orange PNG: looks at a frame, imports the PNG and sets the
+             cover's image with the hook GROKBOT in front, as the guide's cover from a generated picture says
   "image"    (Codex) generates an orange PNG into a Codex home of its own (generated_images/<thread>/) as Codex's image_gen does, imports it with
              import_media and shows it as a picture in picture from 0, as Nuzky's instructions ask
   "signin"   is not signed in;  "limit" has hit its usage limit
@@ -445,15 +447,32 @@ elif CODEX and 'image' in message:
 
     def chunk(kind, data):
         return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data))
-    size = 256
-    rows = b''.join(b'\0' + b'\xff\x80\x00' * size for _ in range(size))
-    png = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', size, size, 8, 2, 0, 0, 0)) \
+    cover = 'image gen' in message
+    width, height = (540, 960) if cover else (256, 256)
+    rows = b''.join(b'\0' + b'\xff\x80\x00' * width for _ in range(height))
+    png = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0)) \
         + chunk(b'IDAT', zlib.compress(rows)) + chunk(b'IEND', b'')
+    if cover:
+        # Looks at the person first, as the guide asks; the stand-in picture does not use the frame.
+        call('inspect_frames', {'times_us': [500_000], 'width': 640})
     # Under a Codex home of its own, which the app does not know, as a Codex started with another CODEX_HOME.
     image = LOG / 'codex-home' / 'generated_images' / session / f'ig_{os.getpid()}.png'
     image.parent.mkdir(parents=True, exist_ok=True)
     image.write_bytes(png)
     (LOG / 'generated.txt').write_text(str(image))
+    if cover:
+        say('Obrázek je hotový, dělám z něj náhled.')
+        run = call('begin_run', {'label': 'Make a cover from a generated image'})['run_id']
+        asset = call('import_media', {'run_id': run, 'paths': [str(image)]})['asset_ids'][0]
+        hook = {'text': 'GROKBOT', 'style': {'fontSize': 150, 'color': '#ffffff', 'strokeWidth': 0},
+                'transform': {'x': 0, 'y': -0.3, 'scale': 1, 'rotation': 0, 'opacity': 1}}
+        call('apply_edits', {'run_id': run, 'request_id': 'cover', 'edits': [{'type': 'setThumbnail', 'thumbnail': {
+            'format': 'cover_9x16', 'timeUs': 0, 'image': asset, 'texts': [hook],
+            'frame': {'x': 0, 'y': 0, 'scale': 1, 'rotation': 0, 'opacity': 1}}}]})
+        call('inspect_thumbnail', {'format': 'cover_9x16', 'safe_zones': True})
+        call('end_run', {'run_id': run, 'action': 'keep'})
+        say('Hotovo, náhled je z vygenerovaného obrázku.')
+        finish()
     say('Obrázek je hotový, vkládám ho do videa.')
     run = call('begin_run', {'label': 'Add a generated image'})['run_id']
     asset = call('import_media', {'run_id': run, 'paths': [str(image)]})['asset_ids'][0]

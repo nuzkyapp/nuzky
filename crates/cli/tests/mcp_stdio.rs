@@ -672,7 +672,7 @@ fn initialize_list_state_edit_end_undo_over_stdio() {
     let mut c = Client::new(true);
     let list = c.rpc("tools/list", json!({}));
     let tools = list["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 35);
+    assert_eq!(tools.len(), 36);
     let search = tools.iter().find(|t| t["name"] == "search_sounds").unwrap();
     assert_eq!(search["annotations"]["openWorldHint"], true);
     assert_eq!(search["annotations"]["readOnlyHint"], true);
@@ -2234,6 +2234,61 @@ fn thumbnails_are_set_drawn_exported_and_undone_over_stdio() {
     c.call("undo_run", json!({"run_id":run}));
     let state = c.call("get_state", json!({}));
     assert_eq!((state["thumbnails"].clone(), state["tracks"][0]["clips"].clone()), (json!([]), json!([])));
+    c.finish();
+}
+
+/// A cover made from an image of the project, such as one an agent generated, shows the image instead of the
+/// frame in the look, the export and inspect_image, and goes back to the frame when the image leaves the project.
+#[test]
+fn a_cover_is_made_from_an_image_over_stdio() {
+    let mut c = Client::new(true);
+    let ppm = |name: &str, (w, h): (usize, usize), rgb: [u8; 3]| {
+        let path = c.dir.join(name);
+        let mut bytes = format!("P6\n{w} {h}\n255\n").into_bytes();
+        bytes.extend(rgb.repeat(w * h));
+        std::fs::write(&path, bytes).unwrap();
+        path
+    };
+    let (grey, red) = (ppm("grey.ppm", (64, 64), [128; 3]), ppm("red.ppm", (30, 60), [255, 0, 0]));
+    let run = c.call("begin_run", json!({"label":"generated cover"}))["run_id"].clone();
+    let ids = c.call("import_media", json!({"run_id":run,"paths":[grey, red]}))["asset_ids"].clone();
+    let (grey, red) = (ids[0].clone(), ids[1].clone());
+    c.call("apply_edits", json!({"run_id":run,"request_id":"place","edits":[{"type":"addClip","assetId":grey}]}));
+    let cover = |image: &Value| {
+        json!([{"type":"setThumbnail","thumbnail":{"format":"cover_9x16","timeUs":0,"image":image,
+            "frame":{"x":0,"y":0,"scale":1.125,"rotation":0,"opacity":1}}}])
+    };
+    let bad = c.error("apply_edits", json!({"run_id":run,"request_id":"bad","edits":cover(&json!("nope"))}));
+    assert!(bad.contains("INVALID_PROJECT") && bad.contains("image"), "{bad}");
+    c.call("apply_edits", json!({"run_id":run,"request_id":"cover","edits":cover(&red)}));
+
+    let reddish = |p: [u8; 3]| p[0] > 230 && p[1] < 30 && p[2] < 30;
+    let (info, frame, rgba) = inspect_thumbnail(&mut c, json!({"format":"cover_9x16","width":270}));
+    assert_eq!(info["image"], red, "{info}");
+    for (x, y) in [(135, 240), (5, 5), (265, 475)] {
+        assert!(reddish(pixel(&rgba, frame.width, x, y)), "the image fills the cover at {x},{y}");
+    }
+    let job = c.call("export_thumbnail", json!({"format":"cover_9x16","path":"cover.png"}));
+    assert_eq!(wait_job(&mut c, &job, Duration::from_secs(30), |_| false)["status"], "done");
+    let (exported, rgba) = decode_png(&std::fs::read(c.dir.join("cover.png")).unwrap());
+    assert!(reddish(pixel(&rgba, exported.width, 540, 960)), "the export draws the image too");
+
+    use base64::Engine as _;
+    let shown = c.rpc("tools/call", json!({"name":"inspect_image","arguments":{"asset_id":red}}));
+    let content = &shown["result"]["content"];
+    let info: Value = serde_json::from_str(content[0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!((&info["width"], &info["height"]), (&json!(30), &json!(60)), "{info}");
+    let (image, rgba) =
+        decode_png(&base64::prelude::BASE64_STANDARD.decode(content[1]["data"].as_str().unwrap()).unwrap());
+    assert!(reddish(pixel(&rgba, image.width, 15, 30)));
+    let not_image = c.error("inspect_image", json!({"asset_id":"nope"}));
+    assert!(not_image.contains("UNKNOWN_ASSET"), "{not_image}");
+
+    c.call("apply_edits", json!({"run_id":run,"request_id":"remove","edits":[{"type":"removeAsset","assetId":red}]}));
+    let (info, frame, rgba) = inspect_thumbnail(&mut c, json!({"format":"cover_9x16","width":270}));
+    assert!(info["image"].is_null(), "{info}");
+    assert_eq!(pixel(&rgba, frame.width, 135, 240), [128, 128, 128], "the cover is the frame again");
+    c.call("end_run", json!({"run_id":run,"action":"keep"}));
     c.finish();
 }
 

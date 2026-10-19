@@ -172,6 +172,9 @@ impl Backend {
         if name == "inspect_thumbnail" {
             return self.inspect_thumbnail(parse(arguments)?, &state);
         }
+        if name == "inspect_image" {
+            return self.inspect_image(parse(arguments)?, &state);
+        }
         if name == "get_waveform" {
             return self.waveform(parse(arguments)?, &state);
         }
@@ -896,13 +899,25 @@ impl Backend {
     /// Masks the subject of one timeline frame as a job and keeps the mask in the cache.
     fn segment_subject(&self, args: SegmentSubject, state: &SessionState) -> Result<Value> {
         let project = self.media_project(&state.project);
-        let (start, end) = activity::timeline_range(&project, None)?;
-        ensure!((start..end).contains(&args.time_us), "INVALID_RANGE: time_us must be inside 0..{end}");
-        media::check_media(&project)?;
+        let (t, image) = match (args.time_us, args.format) {
+            (Some(t), None) => (t, None),
+            (None, Some(format)) => {
+                let cover = thumbnail(&project, format)?;
+                (cover.time_us, cover.image.clone())
+            }
+            _ => anyhow::bail!("INVALID_ARGUMENTS: pass time_us or format, not both"),
+        };
+        match image.as_deref().and_then(|id| project.asset(id)) {
+            Some(image) => ensure!(Path::new(&image.path).is_file(), "MEDIA_MISSING: {}", image.path),
+            None => {
+                let (start, end) = activity::timeline_range(&project, None)?;
+                ensure!((start..end).contains(&t), "INVALID_RANGE: time_us must be inside 0..{end}");
+                media::check_media(&project)?;
+            }
+        }
         let models = nuzky_analysis::models_dir();
         vision_models::check(nuzky_vision::models::MASK, &self.vision_refused)?;
         let cache = self.host.cache_dir.clone();
-        let t = args.time_us;
         let refused = self.vision_refused.clone();
         self.host.start_job(
             &self.client.id,
@@ -911,8 +926,7 @@ impl Backend {
             state.stamp.clone(),
             move |cancel, progress| {
                 vision_models::ensure(nuzky_vision::models::MASK, &refused, &cancel, &progress)?;
-                vision_models::prepare_mattes(&project, &cache, &refused, &cancel, &progress)?;
-                let mask = nuzky_vision::segment_subject(&project, t, &models, &cache, &cancel, &mut |phase| {
+                let mut phases = |phase| {
                     progress.set(
                         match phase {
                             nuzky_vision::mask::Phase::Rendering => "rendering",
@@ -922,8 +936,20 @@ impl Backend {
                         },
                         None,
                     )
-                })?;
-                Ok(json!({"time_us": t, "mask_path": mask.path, "width": mask.width, "height": mask.height,
+                };
+                let mask = match &image {
+                    Some(id) => {
+                        phases(nuzky_vision::mask::Phase::Rendering);
+                        let still = Renderer::new().context("Starting frame renderer")?.still(&project, id)?;
+                        let rgba = std::sync::Arc::unwrap_or_clone(still.data);
+                        nuzky_vision::segment_picture(rgba, (still.width, still.height), &models, &cache, &cancel, &mut phases)?
+                    }
+                    None => {
+                        vision_models::prepare_mattes(&project, &cache, &refused, &cancel, &progress)?;
+                        nuzky_vision::segment_subject(&project, t, &models, &cache, &cancel, &mut phases)?
+                    }
+                };
+                Ok(json!({"time_us": t, "image": image, "mask_path": mask.path, "width": mask.width, "height": mask.height,
                     "subject_box": mask.subject_box, "subject_share": mask.subject_share, "person": mask.person,
                     "cached": mask.cached}))
             },
@@ -1425,8 +1451,10 @@ impl Backend {
         let full = args.format.size().0;
         let width = args.width.unwrap_or(full / 2);
         ensure!((96..=full).contains(&width), "INVALID_ARGUMENTS: width must be 96..={full}");
-        media::check_media(&project)?;
-        self.require_mattes(&project, state)?;
+        cover_media(&project, thumbnail)?;
+        if thumbnail.image.is_none() {
+            self.require_mattes(&project, state)?;
+        }
         let mut renderer = Renderer::new().context("Starting frame renderer")?;
         renderer.use_mattes(self.host.cache_dir.clone(), Pending::Fail);
         let frame = renderer.thumbnail_frame(&project, thumbnail)?;
@@ -1439,7 +1467,8 @@ impl Backend {
                     Some(alpha) => Some(alpha),
                     None => {
                         drop(renderer);
-                        let job = self.segment_subject(SegmentSubject { time_us: thumbnail.time_us }, state)?;
+                        let job =
+                            self.segment_subject(SegmentSubject { time_us: None, format: Some(args.format) }, state)?;
                         anyhow::bail!(
                             "MASK_NOT_READY: making the person's mask as job {}; wait with job action wait until done, then inspect_thumbnail again",
                             job["job_id"].as_str().unwrap_or_default()
@@ -1454,8 +1483,36 @@ impl Backend {
         }
         let png = nuzky_engine::thumbnail::encode(&rendered, ImageKind::Png)?;
         let info = json!({"revision": state.stamp.revision, "session_epoch": state.stamp.session_epoch,
-            "format": args.format, "time_us": thumbnail.time_us, "width": rendered.width, "height": rendered.height,
+            "format": args.format, "time_us": thumbnail.time_us, "image": thumbnail.image, "width": rendered.width, "height": rendered.height,
             "texts": texts(thumbnail, &rendered.hidden)});
+        Ok(CallToolResult::success(vec![
+            ContentBlock::text(info.to_string()),
+            ContentBlock::image(BASE64_STANDARD.encode(png), "image/png"),
+        ]))
+    }
+
+    /// A project image as Nuzky draws it, such as a logo, so an agent can look at it or hand it to an image generator.
+    fn inspect_image(&self, args: InspectImage, state: &SessionState) -> Result<CallToolResult> {
+        let size = args.size.unwrap_or(768);
+        ensure!((96..=1536).contains(&size), "INVALID_ARGUMENTS: size must be 96..=1536");
+        let project = self.media_project(&state.project);
+        let asset = project
+            .asset(&args.asset_id)
+            .filter(|a| a.kind == nuzky_engine::model::AssetKind::Image)
+            .with_context(|| format!("UNKNOWN_ASSET: {} is not an image of this project", args.asset_id))?;
+        ensure!(Path::new(&asset.path).is_file(), "MEDIA_MISSING: {}", asset.path);
+        let still = Renderer::new().context("Starting frame renderer")?.still_within(&project, &asset.id, size)?;
+        let (width, height) = (still.width, still.height);
+        let rendered = nuzky_engine::thumbnail::RenderedThumbnail {
+            width,
+            height,
+            rgba: std::sync::Arc::unwrap_or_clone(still.data),
+            hidden: Vec::new(),
+            bounds: Vec::new(),
+            frame_bounds: [[[0.0; 2]; 4]; 2],
+        };
+        let png = nuzky_engine::thumbnail::encode(&rendered, ImageKind::Png)?;
+        let info = json!({"asset_id": asset.id, "name": asset.name, "width": width, "height": height});
         Ok(CallToolResult::success(vec![
             ContentBlock::text(info.to_string()),
             ContentBlock::image(BASE64_STANDARD.encode(png), "image/png"),
@@ -1474,7 +1531,7 @@ impl Backend {
         let project = self.media_project(&state.project);
         nuzky_engine::export::check_source_path(&project, &out)?;
         let thumbnail = thumbnail(&project, args.format)?.clone();
-        media::check_media(&project)?;
+        cover_media(&project, &thumbnail)?;
         let models = nuzky_analysis::models_dir();
         if thumbnail.needs_mask() {
             vision_models::check(nuzky_vision::models::MASK, &self.vision_refused)?;
@@ -1490,7 +1547,9 @@ impl Backend {
                 if thumbnail.needs_mask() {
                     vision_models::ensure(nuzky_vision::models::MASK, &refused, &cancel, &progress)?;
                 }
-                vision_models::prepare_mattes(&project, &cache, &refused, &cancel, &progress)?;
+                if thumbnail.image.is_none() {
+                    vision_models::prepare_mattes(&project, &cache, &refused, &cancel, &progress)?;
+                }
                 progress.set("rendering", None);
                 let mut renderer = Renderer::new().context("Starting frame renderer")?;
                 renderer.use_mattes(cache.clone(), Pending::Fail);
@@ -1622,6 +1681,15 @@ fn check_new_assets(edits: &[EditCmd]) -> Result<()> {
                 ensure!(Path::new(&asset.path).is_file(), "MEDIA_MISSING: {}", asset.path);
             }
         }
+    }
+    Ok(())
+}
+
+/// The files a cover's picture is drawn from are there: its image, or the timeline's media.
+fn cover_media(project: &Project, thumbnail: &Thumbnail) -> Result<()> {
+    match thumbnail.image.as_deref().and_then(|id| project.asset(id)) {
+        Some(image) => ensure!(Path::new(&image.path).is_file(), "MEDIA_MISSING: {}", image.path),
+        None => media::check_media(project)?,
     }
     Ok(())
 }

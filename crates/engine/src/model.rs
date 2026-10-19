@@ -135,6 +135,10 @@ pub struct Thumbnail {
     pub format: ThumbnailFormat,
     /// The frame, as the video shows it at this timeline time without its text tracks.
     pub time_us: i64,
+    /// An image of the project drawn instead of the frame, such as one an agent generated; `time_us` is
+    /// then unused. `frame` places it as it places the frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
     /// Where the frame sits, as for clips: scale 1 fits the whole frame inside the thumbnail, x and y move its
     /// centre by fractions of the thumbnail, crop cuts its edges without moving the rest.
     #[serde(default)]

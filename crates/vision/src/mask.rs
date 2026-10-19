@@ -66,7 +66,31 @@ pub fn segment_subject(
     renderer.use_mattes(cache_dir.to_path_buf(), nuzky_engine::Pending::Fail);
     let frame = timeline::render(&mut renderer, &picture, t_us, size)?;
     drop(renderer);
+    segment(frame, models_dir, cache_dir, cancel, progress)
+}
+
+/// Masks the subject of a picture rendered already (straight RGBA), such as a cover's image.
+pub fn segment_picture(
+    rgba: Vec<u8>,
+    (width, height): (u32, u32),
+    models_dir: &Path,
+    cache_dir: &Path,
+    cancel: &AtomicBool,
+    progress: &mut dyn FnMut(Phase),
+) -> Result<Mask> {
+    models::require(models::MASK, models_dir)?;
+    segment(Frame { width, height, rgba }, models_dir, cache_dir, cancel, progress)
+}
+
+fn segment(
+    frame: Frame,
+    models_dir: &Path,
+    cache_dir: &Path,
+    cancel: &AtomicBool,
+    progress: &mut dyn FnMut(Phase),
+) -> Result<Mask> {
     check_cancel(cancel)?;
+    let size = (frame.width, frame.height);
     let person = !Yunet::load(models_dir)?.detect(&frame.fit(640), cancel)?.is_empty();
     let path = mask_path(&frame.rgba, size, cache_dir);
     let (alpha, cached) = alpha_of(frame, &path, models_dir, cancel, progress)?;

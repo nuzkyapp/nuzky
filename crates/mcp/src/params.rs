@@ -249,7 +249,9 @@ pub struct Analyze {
 #[serde(deny_unknown_fields)]
 pub struct SegmentSubject {
     /// Timeline time of the frame, integer microseconds.
-    pub time_us: i64,
+    pub time_us: Option<i64>,
+    /// Instead of time_us: the picture of this cover, its image or its frame.
+    pub format: Option<ThumbnailFormat>,
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -411,6 +413,13 @@ pub struct Export {
     pub quality: Option<Quality>,
 }
 
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InspectImage {
+    pub asset_id: String,
+    /// Pixels on the long side, 96 to 1536; 768 by default.
+    pub size: Option<u32>,
+}
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct InspectThumbnail {

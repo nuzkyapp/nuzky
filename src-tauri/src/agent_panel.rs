@@ -239,11 +239,17 @@ fn prompt(text: &str, context: &PromptContext, project: &nuzky_engine::Project) 
                 nuzky_engine::model::ThumbnailFormat::Cover9x16 => "cover_9x16",
                 nuzky_engine::model::ThumbnailFormat::Youtube16x9 => "youtube_16x9",
             };
-            lines.push(format!(
-                "[Nuzky] The project's {name} already uses the frame at {} ({} µs): keep that frame unless the user's wishes say otherwise.",
-                timecode(cover.time_us),
-                cover.time_us
-            ));
+            lines.push(match cover.image.as_deref().and_then(|id| project.asset(id)) {
+                Some(image) => format!(
+                    "[Nuzky] The project's {name} is made from the image {} ({}): keep that image unless the user's wishes say otherwise.",
+                    image.name, image.id
+                ),
+                None => format!(
+                    "[Nuzky] The project's {name} already uses the frame at {} ({} µs): keep that frame unless the user's wishes say otherwise.",
+                    timecode(cover.time_us),
+                    cover.time_us
+                ),
+            });
         }
     }
     if lines.is_empty() { text.to_owned() } else { format!("{text}\n\n{}", lines.join("\n")) }

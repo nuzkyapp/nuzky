@@ -168,6 +168,8 @@ useEditor.subscribe((s, prev) => {
   }
   const cover = thumbnailOf(s.snap.project, format);
   const before = thumbnailOf(prev.snap?.project, format);
+  // A cover made from an image has no frame: the playhead moves freely and Use frame takes the one it shows.
+  if (cover?.image) return;
   if (cover && cover.timeUs !== before?.timeUs && choosing === 0) {
     if (Math.abs(cover.timeUs - s.timeUs) > 1) showFrame(format);
     return;
@@ -249,13 +251,14 @@ export function draftCover(format: ThumbnailFormat, project: Project, timeUs: nu
   };
 }
 
-/** Sets the cover's frame, making the cover when there is none, as one undo step. */
+/** Sets the cover's frame, also instead of the image it was made from, making the cover when there is none, as one undo step. */
 export function chooseFrame(format: ThumbnailFormat, timeUs: number, coalesce?: string) {
   return editCover(
     format,
     (current, project) => {
       const t = frameAt(project, timeUs);
-      return current ? (current.timeUs === t ? null : { ...current, timeUs: t }) : draftCover(format, project, t);
+      if (!current) return draftCover(format, project, t);
+      return current.timeUs === t && !current.image ? null : { ...current, image: null, timeUs: t };
     },
     coalesce,
   );
@@ -345,13 +348,20 @@ export async function pick(format: ThumbnailFormat) {
   }
 }
 
-/** Starts finding the person in the frame of the cover, once per frame, when the cover cuts them out. */
+/** The image the open cover is made from instead of a frame. */
+export const coverImage = (project: Project | undefined) => {
+  const format = useCover.getState().open;
+  return (format && thumbnailOf(project, format)?.image) || null;
+};
+
+/** Starts finding the person in the frame or image of the cover, once per picture, when the cover cuts them out. */
 export async function mask(timeUs: number) {
   const { maskJob } = useCover.getState();
   if (maskJob && useEditor.getState().jobs[maskJob]?.status === "running") return;
   useCover.setState({ failed: null });
   try {
-    useCover.setState({ maskJob: await api.startCoverMask(timeUs, currentEpoch()) });
+    const image = coverImage(useEditor.getState().snap?.project);
+    useCover.setState({ maskJob: await api.startCoverMask(timeUs, image, currentEpoch()) });
   } catch (e) {
     useCover.setState({ failed: plainError(errorText(e)) });
   }

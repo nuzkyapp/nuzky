@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertCircle, AlertTriangle, Loader2, MonitorPlay, Smartphone } from "lucide-react";
 import { api, errorText, plainError } from "../../lib/api";
-import { COVER_FORMATS, frameAt, coverFormat, downloadModels, draftCover, editCover, editText, mask, selectText, setSafeZones, switchFormat, thumbnailOf, useCover } from "../../lib/cover";
-import { projectDuration, useEditor } from "../../lib/store";
+import { COVER_FORMATS, frameAt, chooseFrame, coverFormat, coverImage, downloadModels, draftCover, editCover, editText, mask, selectText, setSafeZones, switchFormat, thumbnailOf, useCover } from "../../lib/cover";
+import { AI_EDITING, projectDuration, useAiLocked, useEditor } from "../../lib/store";
 import { formatTime } from "../../lib/time";
 import type { CoverView, LayerBounds, Snapshot, Thumbnail, ThumbnailFormat, Transform } from "../../lib/types";
 import { LayerBox, type LayerSource } from "../preview/LayerOverlay";
@@ -237,19 +237,21 @@ function StatusChip({ view }: { view: CoverView | null }) {
   const damaged = useCover((s) => s.damaged);
   const locked = useEditor((s) => !!s.aiRun);
   const missing = !!view?.maskMissing;
-  const tried = useRef(new Set<number>());
+  const image = useEditor((s) => coverImage(s.snap?.project));
+  const tried = useRef(new Set<string>());
 
-  // The person is cut out a moment after the frame stops changing, when the models are there.
+  // The person is cut out a moment after the picture stops changing, when the models are there.
   useEffect(() => {
     if (!view || !missing || !models?.downloaded || job || locked) return;
     const t = view.timeUs;
-    if (tried.current.has(t)) return;
+    const key = image ?? String(t);
+    if (tried.current.has(key)) return;
     const timer = window.setTimeout(() => {
-      tried.current.add(t);
+      tried.current.add(key);
       void mask(t);
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [view, missing, models, job, locked]);
+  }, [view, missing, models, job, locked, image]);
 
   const chip = "absolute left-2 top-2 z-10 flex h-7 max-w-[calc(100%-16px)] items-center gap-1.5 rounded-lg bg-black/70 pl-2 text-[12px] text-fg";
   if (job)
@@ -303,16 +305,37 @@ function StatusChip({ view }: { view: CoverView | null }) {
   );
 }
 
-/** In place of the transport: the frame's time, the format and the safe zones. */
+/** In place of the transport: the frame's time, or the image the cover is made from, the format and the safe zones. */
 export function CoverBar({ format }: { format: ThumbnailFormat }) {
   const time = useEditor((s) => thumbnailOf(s.snap?.project, format)?.timeUs ?? s.timeUs);
+  const image = useEditor((s) => {
+    const id = thumbnailOf(s.snap?.project, format)?.image;
+    return id ? (s.snap?.project.assets.find((a) => a.id === id)?.name ?? null) : null;
+  });
+  const locked = useAiLocked();
   const safeZones = useCover((s) => s.safeZones);
   return (
     <div className="bar grid h-11 w-full max-w-[620px] grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-full pl-[18px] pr-1.5" data-testid="cover-bar">
-      <span className="tabular truncate text-[13px]">
-        <span className="text-muted @max-[460px]:hidden">Frame </span>
-        <span className="font-medium text-fg">{formatTime(time)}</span>
-      </span>
+      {image ? (
+        <span className="flex min-w-0 items-center gap-1.5 text-[13px]">
+          <span className="font-medium text-fg @max-[460px]:hidden">Image</span>
+          <Button
+            pill
+            className="h-6 shrink-0 px-2.5 text-[12px]"
+            title={`Replace ${image} with the frame at the playhead`}
+            disabled={locked}
+            disabledReason={AI_EDITING}
+            onClick={() => void chooseFrame(format, useEditor.getState().timeUs)}
+          >
+            Use frame
+          </Button>
+        </span>
+      ) : (
+        <span className="tabular truncate text-[13px]">
+          <span className="text-muted @max-[460px]:hidden">Frame </span>
+          <span className="font-medium text-fg">{formatTime(time)}</span>
+        </span>
+      )}
       <div className="w-[200px] @max-[460px]:w-[112px]">
         <Segmented
           label="Cover format"

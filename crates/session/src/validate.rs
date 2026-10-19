@@ -226,6 +226,12 @@ fn thumbnails(project: &Project) -> Result<()> {
     let mut formats = HashSet::new();
     for thumbnail in &project.thumbnails {
         ensure!(formats.insert(thumbnail.format), "INVALID_PROJECT: two thumbnails of one format");
+        if let Some(id) = &thumbnail.image {
+            ensure!(
+                project.asset(id).is_some_and(|a| a.kind == AssetKind::Image),
+                "INVALID_PROJECT: a thumbnail's image must be an image of the project"
+            );
+        }
         self::thumbnail(thumbnail)?;
     }
     Ok(())
