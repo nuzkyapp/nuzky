@@ -3,6 +3,7 @@
 //! to it, but the window server never put the sheet on the screen, so nothing seemed to happen. The sheet is
 //! closed again, as Cancel would, and the window tells the user to reopen Nuzky; a newly started one showed them.
 use std::ptr::NonNull;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context as _, Result};
@@ -17,6 +18,8 @@ use tauri::{AppHandle, Emitter, Manager};
 
 /// A sheet slides in within half a second; this leaves room for a busy computer.
 const GRACE: Duration = Duration::from_secs(3);
+/// Counts the sheets begun, so a check looks only at the sheet it was started for.
+static SHEETS: AtomicU64 = AtomicU64::new(0);
 
 pub fn watch(app: &tauri::App) -> Result<()> {
     let window = app.get_webview_window("main").context("the main window is missing")?;
@@ -24,7 +27,8 @@ pub fn watch(app: &tauri::App) -> Result<()> {
     let app = app.handle().clone();
     let began = RcBlock::new(move |_: NonNull<NSNotification>| {
         let app = app.clone();
-        std::thread::spawn(move || check(&app));
+        let sheet = SHEETS.fetch_add(1, Ordering::Relaxed) + 1;
+        std::thread::spawn(move || check(&app, sheet));
     });
     // SAFETY: the window lives as long as the app, and the main queue runs the block on the main thread.
     let observer = unsafe {
@@ -39,11 +43,14 @@ pub fn watch(app: &tauri::App) -> Result<()> {
     Ok(())
 }
 
-fn check(app: &AppHandle) {
+fn check(app: &AppHandle, sheet: u64) {
     std::thread::sleep(GRACE);
     let handle = app.clone();
     let window = app.get_webview_window("main");
     let _ = app.run_on_main_thread(move || {
+        if SHEETS.load(Ordering::Relaxed) != sheet {
+            return;
+        }
         let Some(ns_window) = window.and_then(|w| w.ns_window().ok()) else { return };
         // SAFETY: on the main thread, with the window still open.
         let ns_window = unsafe { &*ns_window.cast::<NSWindow>() };
