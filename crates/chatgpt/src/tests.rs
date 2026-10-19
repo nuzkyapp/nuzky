@@ -614,9 +614,13 @@ fn chatgpt_models_filter_order_and_bearer_retry() {
         let f = Flow::new();
         f.sign_in().unwrap();
         f.server.state.lock().unwrap().models = json!({"models": [
-            {"slug": "second", "display_name": "Second", "visibility": "list", "extra": true},
+            {"slug": "second", "display_name": "Second", "visibility": "list", "extra": true,
+             "supported_reasoning_levels": [{"effort": "low", "description": "Fast"}, {"effort": "high"}, {"effort": "ultra"}],
+             "default_reasoning_level": "high"},
             {"slug": "hidden", "display_name": "Hidden", "visibility": "hidden"},
-            {"slug": "first", "display_name": "First", "visibility": "list"}
+            {"slug": "first", "display_name": "First", "visibility": "list"},
+            {"slug": "ultra", "display_name": "Ultra", "visibility": "list",
+             "supported_reasoning_levels": [{"effort": "low"}, {"effort": "ultra"}], "default_reasoning_level": "ultra"}
         ]});
         f.server.state.lock().unwrap().model_statuses = statuses.clone();
         assert_eq!(f.app().api(), format!("{}/v1", f.server.issuer));
@@ -626,8 +630,19 @@ fn chatgpt_models_filter_order_and_bearer_retry() {
             200 => assert_eq!(
                 result.unwrap(),
                 vec![
-                    Model { slug: "second".into(), display_name: "Second".into() },
-                    Model { slug: "first".into(), display_name: "First".into() }
+                    Model {
+                        slug: "second".into(),
+                        display_name: "Second".into(),
+                        efforts: vec!["low".into(), "high".into()],
+                        default_effort: Some("high".into())
+                    },
+                    Model { slug: "first".into(), display_name: "First".into(), efforts: vec![], default_effort: None },
+                    Model {
+                        slug: "ultra".into(),
+                        display_name: "Ultra".into(),
+                        efforts: vec!["low".into()],
+                        default_effort: None
+                    }
                 ]
             ),
             401 => assert_eq!(

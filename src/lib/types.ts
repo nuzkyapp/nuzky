@@ -62,6 +62,16 @@ export type AgentConnection = {
 export type AgentKind = "claudeCode" | "codex";
 
 /**
+ * A model and the reasoning efforts the AI panel can offer for it.
+ */
+export type AgentModel = {
+  slug: string,
+  displayName: string,
+  efforts: Array<string>,
+  defaultEffort: string | null,
+};
+
+/**
  * An agent Nuzky cannot connect itself, which gets the server and a first message to paste.
  */
 export type AgentSetup = "claude" | "cursor" | "other";
@@ -239,14 +249,6 @@ export type CaptionWord = {
    * `style.keywords` with `KeywordPick::Emphasis` colours it.
    */
   key?: boolean,
-};
-
-/**
- * The panel shows `display_name` and sends `slug` as the model.
- */
-export type ChatGptModel = {
-  slug: string,
-  displayName: string,
 };
 
 export type ChatGptNotice = "ended" | "notRevoked";

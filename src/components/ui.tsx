@@ -678,6 +678,7 @@ export function Segmented<T extends string | number>({
   label,
   disabled = false,
   disabledReason,
+  compact = false,
 }: {
   options: { id: T; label: ReactNode; title?: string }[];
   value: T | null;
@@ -685,6 +686,8 @@ export function Segmented<T extends string | number>({
   label: string;
   disabled?: boolean;
   disabledReason?: string;
+  /** Narrower padding, so five segments share a menu's width evenly. */
+  compact?: boolean;
 }) {
   const reasonId = useId();
   const lock = useLockReason();
@@ -699,7 +702,7 @@ export function Segmented<T extends string | number>({
           aria-pressed={o.id === value}
           title={disabled ? reason : o.title}
           {...disabledProps(disabled, () => onChange(o.id), reason ? reasonId : undefined)}
-          className={`tabular h-7 flex-1 rounded-[7px] px-2 text-[12px] font-medium whitespace-nowrap transition-colors duration-[120ms] ease-out disabled:cursor-not-allowed disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:opacity-40 ${
+          className={`tabular h-7 flex-1 rounded-[7px] ${compact ? "px-1" : "px-2"} text-[12px] font-medium whitespace-nowrap transition-colors duration-[120ms] ease-out disabled:cursor-not-allowed disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:opacity-40 ${
             o.id === value ? "seg-on text-fg" : `text-muted ${disabled ? "" : "enabled:hover:text-fg"}`
           }`}
         >

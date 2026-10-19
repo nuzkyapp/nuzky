@@ -3,6 +3,7 @@ import { AlertCircle, AlertTriangle, Check, Film, GalleryVerticalEnd, Loader2, P
 import { api } from "../../lib/api";
 import { anyAgent, loadAgents, useAgent } from "../../lib/agent";
 import { openChatGpt, useChatGpt } from "../../lib/chatgpt";
+import { useModels } from "../../lib/models";
 import { useDock } from "../../lib/dock";
 import { useLibrary } from "../../lib/library";
 import { useTranscriptView } from "../../lib/speech";
@@ -187,7 +188,7 @@ function NoReels() {
   const agents = useAgent((s) => s.agents);
   // Read again whenever the ChatGPT sign-in or its models change.
   useChatGpt((s) => s.status);
-  useChatGpt((s) => s.models);
+  useModels((s) => s.lists.chatgpt);
   const failed = useAgent((s) => s.items[s.items.length - 1]?.kind === "error");
   const blocked = useAgent(() => findBlocked());
   useEffect(() => {

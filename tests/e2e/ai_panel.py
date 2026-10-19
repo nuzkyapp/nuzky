@@ -67,6 +67,21 @@ def alive(pid):
         return False
 
 
+MODEL = "return document.querySelector('aside[aria-label=AI] button[title=\"Choose the model and effort\"]')?.textContent.trim()"
+MODELS = "return [...document.querySelectorAll('[role=menu][aria-label=Model] [role^=menuitem]')].map((b) => b.textContent.trim())"
+EFFORT = """return [...document.querySelectorAll('[role=menu][aria-label=Model] [role=group][aria-label=Effort] button')]
+  .map((b) => [b.textContent.trim(), b.getAttribute('aria-pressed')])"""
+MENU = '[role=menu][aria-label=Model]'
+
+
+def open_models(r):
+    r.s.run("document.querySelector('aside[aria-label=AI] button[title=\"Choose the model and effort\"]').click()")
+
+
+def flag(argv, name):
+    return argv[argv.index(name) + 1] if name in argv else None
+
+
 MESSAGES = "return window.__nuzky.agent.getState().items.filter((i) => i.kind === 'agent').map((i) => i.text)"
 
 
@@ -98,6 +113,7 @@ class ChatGptPanelServer:
                     return
                 models = [{'slug': f'gpt-e2e-{name}', 'display_name': f'GPT E2E {name.title()}', 'visibility': visibility}
                           for name, visibility in [('sol', 'list'), ('luna', 'list'), ('hidden', 'hidden')]]
+                models[1].update(supported_reasoning_levels=[{'effort': 'low'}, {'effort': 'high'}], default_reasoning_level='low')
                 body = json.dumps({'models': models}).encode()
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
@@ -206,13 +222,24 @@ def ai_panel_chatgpt(r):
         listed = r.s.run("return [...document.querySelectorAll(arguments[0] + ' [role^=menuitem]')].map((b) => b.textContent.trim())", menu)
         check('the model menu lists exactly the two visible models in server order', listed == ['GPT E2E Sol', 'GPT E2E Luna'], listed)
         click(r, 'GPT E2E Luna', menu)
-        model = "return document.querySelector('aside[aria-label=AI] button[title=\"Choose the model\"]')?.textContent.trim()"
-        check('picking the second model changes the model button', wait(lambda: r.s.run(model) == 'GPT E2E Luna', 3), r.s.run(model))
+        check("picking the second model changes the button, with that model's default effort",
+              wait(lambda: r.s.run(MODEL) == 'GPT E2E Luna·Low', 3), r.s.run(MODEL))
+        click(r, 'High', menu)
+        r.key('Escape')
+        check('picking High shows on the button', wait(lambda: r.s.run(MODEL) == 'GPT E2E Luna·High', 3), r.s.run(MODEL))
         r.shot('chatgpt-model-selected')
         webdriver('POST', r.s.path + '/window/rect', {'width': 1024, 'height': 640})
         check('in the smallest window the plan line and the model still show',
               wait(lambda: panel(r)['windowWidth'] <= 1030 and 'Using ChatGPT plan' in panel(r)['text'] and 'GPT E2E Luna' in panel(r)['text'], 5),
               panel(r))
+        open_models(r)
+        fits = """const m = document.querySelector('[role=menu][aria-label=Model]')?.getBoundingClientRect();
+            const p = document.querySelector('aside[aria-label=AI]').getBoundingClientRect();
+            return !!m && m.left >= p.left && m.right <= p.right;"""
+        check('the open menu fits inside the panel there', wait(lambda: r.s.run(fits), 3), r.s.run(MODELS))
+        time.sleep(0.5)  # WebKitGTK's screenshot can trail a change made just before it.
+        r.shot('chatgpt-small-window-menu')
+        r.key('Escape')
         r.shot('chatgpt-small-window')
         webdriver('POST', r.s.path + '/window/rect', {'width': 1440, 'height': 900})
         wait(lambda: panel(r)['windowWidth'] >= 1400, 5)
@@ -282,6 +309,7 @@ def ai_panel_chatgpt(r):
         check('all requests use the selected model, bearer token, preview fields, guide and only namespaced Nuzky tools',
               len(bodies) == 6 and not server.errors and all(
                   request['authorization'] == 'Bearer e2e-access' and body.get('model') == 'gpt-e2e-luna'
+                  and body.get('reasoning') == {'effort': 'high'}
                   and body.get('store') is False and body.get('stream') is True and not unsupported.intersection(body)
                   and 'You are the AI panel inside Nuzky' in body.get('instructions', '') and heading in body['instructions']
                   and len(body.get('tools', [])) == 1 and body['tools'][0].get('type') == 'namespace'
@@ -315,6 +343,8 @@ def ai_panel_codex(r):
             [('Claude Code', False, None), ('Codex', True, '0.162.1')], agents)
     r.check('the panel uses Codex', r.s.run("return window.__nuzky.agent.getState().agent === 'codex'")
             and 'Codex' in panel(r)['text'], panel(r)['text'])
+    r.check("Codex starts on the first model it lists and that model's default effort",
+            wait(lambda: r.s.run(MODEL) == 'Test First·Medium', 10), r.s.run(MODEL))
 
     before = r.track()
     send(r, 'Cut the pause at the start and add captions')
@@ -341,9 +371,24 @@ def ai_panel_codex(r):
     r.check('Undo on the card takes back the whole run', wait(lambda: r.track() == before
             and not any(t['name'] == 'Captions' for t in r.state()['tracks']), 10), r.state()['tracks'])
 
+    r.check('the first run went with that model and effort',
+            flag(first['argv'], '-m') == 'test-first' and 'model_reasoning_effort="medium"' in first['argv'], first['argv'])
+    open_models(r)
+    r.check("the menu lists Codex's two listed models in its order, and Effort what the first takes, without Ultra",
+            wait(lambda: r.s.run(MODELS) == ['Test First', 'Test Second'], 3) and r.s.run(EFFORT) == [['Med', 'true'], ['Max', 'false']],
+            {'models': r.s.run(MODELS), 'effort': r.s.run(EFFORT)})
+    click(r, 'Test Second', MENU)
+    r.check('a model that does not take Medium shows its own default, High',
+            wait(lambda: r.s.run(EFFORT) == [['Low', 'false'], ['High', 'true']], 3), r.s.run(EFFORT))
+    time.sleep(0.5)  # WebKitGTK's screenshot can trail a change made just before it.
+    r.shot('codex-model-menu')
+    r.key('Escape')
+
     send(r, 'What options do I have?')
     r.check('the next message resumes the same Codex thread', wait(lambda: len(runs(r)) == 2, 10)
             and runs(r)[1]['resume'] and runs(r)[1]['session'] == first['session'], runs(r)[-1])
+    r.check('it goes with the newly picked model and its effort',
+            flag(runs(r)[1]['argv'], '-m') == 'test-second' and 'model_reasoning_effort="high"' in runs(r)[1]['argv'], runs(r)[1]['argv'])
     buttons = "return [...document.querySelectorAll('aside[aria-label=AI] [role=group] button')].map((b) => b.textContent)"
     r.check('the choices show as buttons', wait(lambda: r.s.run(buttons) ==
             ['The first takeShorter, a slip in the middle', 'The last takeClean, 2 s longer']
@@ -714,9 +759,33 @@ def ai_panel(r):
     undo = "return [...document.querySelectorAll('aside[aria-label=AI] button')].some((b) => b.textContent.trim() === 'Undo')"
     r.check('then the card says the run was undone and offers no Undo', wait(lambda: 'Undone: Tighten the start' in panel(r)['text'] and not r.s.run(undo), 5), panel(r)['text'])
 
+    # Model and effort: Claude Code's own setting until the user picks, then both go with the next message.
+    r.check('Claude Code starts on its own model and effort, so the first run had neither flag',
+            r.s.run(MODEL) == 'Default' and '--model' not in first['argv'] and '--effort' not in first['argv'],
+            {'button': r.s.run(MODEL), 'argv': first['argv']})
+    open_models(r)
+    r.check('the menu offers Default and the four Claude models, with no effort picked and the line saying why',
+            wait(lambda: r.s.run(MODELS) == ['DefaultClaude Code setting', 'Fable', 'Opus', 'Sonnet', 'Haiku'], 3)
+            and [e for e, _ in r.s.run(EFFORT)] == ['Low', 'Med', 'High', 'X-High', 'Max']
+            and all(pressed == 'false' for _, pressed in r.s.run(EFFORT))
+            and 'Uses your Claude Code setting.' in r.s.run(f"return document.querySelector('{MENU}').innerText"),
+            {'models': r.s.run(MODELS), 'effort': r.s.run(EFFORT)})
+    click(r, 'Opus', MENU)
+    r.check("picking Opus keeps the menu open on Opus's own default effort, Medium",
+            wait(lambda: ['Med', 'true'] in r.s.run(EFFORT), 3) and r.s.run(MODEL) == 'Opus·Medium', {'button': r.s.run(MODEL), 'effort': r.s.run(EFFORT)})
+    click(r, 'X-High', MENU)
+    wait(lambda: ['X-High', 'true'] in r.s.run(EFFORT), 3)
+    time.sleep(0.5)  # WebKitGTK's screenshot can trail a change made just before it.
+    r.shot('model-menu')
+    r.key('Escape')
+    r.check('Esc closes the menu and the button shows the choice',
+            wait(lambda: not r.s.run(MODELS) and r.s.run(MODEL) == 'Opus·Extra high', 3), r.s.run(MODEL))
+
     # Choices: the next message continues the conversation; a picked option is the next message.
     send(r, 'What options do I have?')
     r.check('the next message continues the same conversation', wait(lambda: len(runs(r)) == 2, 10) and runs(r)[1]['resume'] and runs(r)[1]['session'] == first['session'], runs(r)[-1])
+    r.check('it goes with the chosen model and effort',
+            flag(runs(r)[1]['argv'], '--model') == 'opus' and flag(runs(r)[1]['argv'], '--effort') == 'xhigh', runs(r)[1]['argv'])
     buttons = "return [...document.querySelectorAll('aside[aria-label=AI] [role=group] button')].map((b) => [b.textContent, b.getAttribute('aria-pressed'), b.getAttribute('aria-disabled')])"
     r.check('the choices show as buttons', wait(lambda: len(r.s.run(buttons)) == 2 and agent(r)['status'] == 'idle', 15), r.s.run(buttons))
     r.shot('options')

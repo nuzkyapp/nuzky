@@ -143,6 +143,16 @@ struct Fixture {
 
 impl Fixture {
     fn start(s: &Server, res: Value, err: Option<&'static str>, wait: Option<Receiver<()>>, prior: Vec<Value>) -> Self {
+        Self::start_with_effort(s, res, err, wait, prior, None)
+    }
+    fn start_with_effort(
+        s: &Server,
+        res: Value,
+        err: Option<&'static str>,
+        wait: Option<Receiver<()>>,
+        prior: Vec<Value>,
+        effort: Option<String>,
+    ) -> Self {
         let (tx, events) = mpsc::channel();
         let (calls_tx, calls) = mpsc::channel();
         let run = Arc::new(FakeTools {
@@ -158,6 +168,7 @@ impl Fixture {
         let request = ChatGptRequest {
             api: s.api.clone(),
             model: "test-model".into(),
+            effort,
             guide: "Our editing guide".into(),
             prompt: "Cut it".into(),
             tools: json!([{ "name": "cut", "description": "Cut a clip", "inputSchema": {
@@ -288,6 +299,7 @@ fn text_stream_and_request_contract() {
     assert_eq!(requests.len(), 1);
     let body = &requests[0];
     assert_eq!(body["model"], "test-model");
+    assert!(body.get("reasoning").is_none());
     assert_eq!(body["store"], false);
     assert_eq!(body["stream"], true);
     assert_eq!(body["include"], json!(["reasoning.encrypted_content"]));
@@ -303,6 +315,14 @@ fn text_stream_and_request_contract() {
     for field in unsupported.split_whitespace() {
         assert!(body.get(field).is_none(), "unsupported field {field}");
     }
+}
+
+#[test]
+fn model_effort_reaches_the_responses_request() {
+    let server = Server::new(vec![answer()]);
+    let f = Fixture::start_with_effort(&server, tool_reply(), None, None, vec![], Some("high".into()));
+    assert_eq!(f.finish(), text_events());
+    assert_eq!(server.requests.lock().unwrap()[0]["reasoning"], json!({"effort": "high"}));
 }
 
 #[test]
@@ -472,6 +492,7 @@ fn stop_while_the_token_renews_sends_nothing() {
     let request = ChatGptRequest {
         api: server.api.clone(),
         model: "test-model".into(),
+        effort: None,
         guide: String::new(),
         prompt: "Cut it".into(),
         tools: json!([]),

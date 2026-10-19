@@ -53,6 +53,12 @@ pub(crate) fn command(req: &TurnRequest) -> Command {
     for setting in &settings {
         c.args(["-c", setting]);
     }
+    if let Some(model) = &req.model {
+        c.args(["-m", model]);
+    }
+    if let Some(effort) = &req.effort {
+        c.args(["-c", &format!("model_reasoning_effort={}", string(effort))]);
+    }
     if req.resume {
         c.arg(&req.session);
     }
@@ -281,6 +287,8 @@ mod tests {
             exe: "codex".into(),
             session: "01a12779-e1a0-7391-8130-1242bc8fb459".into(),
             resume: true,
+            model: None,
+            effort: None,
             prompt: String::new(),
             cwd: PathBuf::new(),
             mcp: McpServer {

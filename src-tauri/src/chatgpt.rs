@@ -74,12 +74,6 @@ pub fn chatgpt_cancel_sign_in() {
     }
 }
 
-/// The account's models for the AI panel's picker.
-#[tauri::command]
-pub async fn chatgpt_models() -> CmdResult<Vec<nuzky_chatgpt::Model>> {
-    tauri::async_runtime::spawn_blocking(|| chatgpt().models().map_err(err)).await.map_err(err)?
-}
-
 #[tauri::command]
 pub async fn chatgpt_sign_out() -> CmdResult<Status> {
     tauri::async_runtime::spawn_blocking(|| chatgpt().sign_out().map_err(err)).await.map_err(err)?

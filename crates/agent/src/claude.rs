@@ -32,6 +32,12 @@ pub(crate) fn command(req: &TurnRequest) -> Command {
     .args(["--tools", "", "--allowedTools", "mcp__nuzky", "--permission-mode", "dontAsk"])
     .args(["--disable-slash-commands", "--append-system-prompt", SYSTEM])
     .args([if req.resume { "--resume" } else { "--session-id" }, &req.session]);
+    if let Some(model) = &req.model {
+        c.args(["--model", model]);
+    }
+    if let Some(effort) = &req.effort {
+        c.args(["--effort", effort]);
+    }
     c
 }
 

@@ -2,7 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import { errorText, plainError } from "./api";
-import { check as checkChatGpt, loadModels as loadChatGptModels, planReady, useChatGpt } from "./chatgpt";
+import { check as checkChatGpt, planReady, useChatGpt } from "./chatgpt";
+import { forgetChatGptModels, loadModels as loadAgentModels, resolved, useModels } from "./models";
 import { downloadModels, loadModels, useCover } from "./cover";
 import { useDock } from "./dock";
 import { formatTime } from "./time";
@@ -179,8 +180,8 @@ export const useAgent = create<AgentState>(() => ({
 
 const agentApi = {
   list: () => invoke<AgentInfo[]>("agent_list"),
-  send: (agent: AgentId, chat: string, turn: string, text: string, context: PromptContext, model: string | null) =>
-    invoke<void>("agent_send", { agent, chat, turn, text, context, model }),
+  send: (agent: AgentId, chat: string, turn: string, text: string, context: PromptContext, model: string | null, effort: string | null) =>
+    invoke<void>("agent_send", { agent, chat, turn, text, context, model, effort }),
   stop: (turn: string) => invoke<void>("agent_stop", { turn }),
   /** Whether the working agent took the message in this turn, it goes next, or Codex stopped for it to go next. */
   steer: (turn: string, text: string, context: PromptContext) => invoke<"taken" | "next" | "stopped">("agent_steer", { turn, text, context }),
@@ -408,10 +409,11 @@ function describeContext(c: PromptContext): string | null {
 export function sendBlocked(thumbnail = useAgent.getState().thumbnail): string | null {
   const s = useAgent.getState();
   if (s.agent === "chatgpt") {
-    const { status, models, model, modelsError } = useChatGpt.getState();
+    const { status } = useChatGpt.getState();
+    const error = useModels.getState().errors.chatgpt;
     if (status?.state !== "signedIn") return "Sign in to ChatGPT first";
     if (!status.plan) return "Allow Nuzky to use your ChatGPT plan first";
-    if (!models || !model) return modelsError ? `Your ChatGPT models didn't load. ${modelsError}` : "Loading your ChatGPT models…";
+    if (!resolved("chatgpt").model) return error ? `Your ChatGPT models didn't load. ${error}` : "Loading your ChatGPT models…";
   } else if (s.agents && !s.agents.find((a) => a.id === s.agent)?.path) return `${agentName(s.agent)} is not installed`;
   if (s.status !== "idle") return "Wait for the answer, or stop it";
   const last = s.items[s.items.length - 1];
@@ -523,7 +525,8 @@ async function start(text: string, context: PromptContext) {
   const turn = crypto.randomUUID();
   useAgent.setState({ chat, turn, jobs: [], status: "working", startedAt: Date.now() });
   try {
-    await agentApi.send(s.agent, chat, turn, text, context, s.agent === "chatgpt" ? useChatGpt.getState().model : null);
+    const { model, effort } = resolved(s.agent);
+    await agentApi.send(s.agent, chat, turn, text, context, model?.slug ?? null, effort);
     // Kept from its first message, so a crash during the answer does not lose the chat.
     if (useAgent.getState().chat === chat) void saveChat(chat, useAgent.getState().items);
   } catch (e) {
@@ -683,17 +686,23 @@ useAgent.subscribe((s, prev) => {
 });
 
 /**
- * ChatGPT's model list follows the signed-in account while ChatGPT is the panel's agent, also with the panel
- * closed, as Find reels and Make it with AI send from elsewhere. Only then: nobody else needs the list.
+ * The panel's agent has its model list loaded, also with the panel closed, as Find reels and Make it with AI
+ * send from elsewhere. ChatGPT's follows the signed-in account. Only then: nobody else needs the lists.
  */
 function followModels() {
-  const { status, modelsFor } = useChatGpt.getState();
+  const { agent, agents } = useAgent.getState();
+  const { lists, errors, chatgptFor } = useModels.getState();
+  if (agent !== "chatgpt") {
+    if (!lists[agent] && !errors[agent] && agents?.find((a) => a.id === agent)?.path) void loadAgentModels(agent);
+    return;
+  }
+  const { status } = useChatGpt.getState();
   if (status?.state !== "signedIn" || !status.plan) {
-    if (modelsFor !== null) useChatGpt.setState({ models: null, modelsFor: null, modelsError: null });
-  } else if (useAgent.getState().agent === "chatgpt" && modelsFor !== (status.email ?? "")) void loadChatGptModels();
+    if (chatgptFor !== null) forgetChatGptModels();
+  } else if (chatgptFor !== (status.email ?? "")) void loadAgentModels("chatgpt", status.email ?? "");
 }
 useChatGpt.subscribe((s, prev) => s.status !== prev.status && followModels());
-useAgent.subscribe((s, prev) => s.agent !== prev.agent && followModels());
+useAgent.subscribe((s, prev) => (s.agent !== prev.agent || s.agents !== prev.agents) && followModels());
 
 let listening = false;
 export function listenAgentEvents() {

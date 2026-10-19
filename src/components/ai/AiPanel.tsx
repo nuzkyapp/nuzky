@@ -65,12 +65,13 @@ import { downloadModels, useCover } from "../../lib/cover";
 import { openRecap, undoAction, undoStep, useEditor } from "../../lib/store";
 import { formatTime } from "../../lib/time";
 import { whenLabel } from "../../lib/library";
-import { Button, IconButton, LockReason, ProgressBar } from "../ui";
+import { Button, IconButton, LockReason, ProgressBar, Segmented } from "../ui";
 import { MODEL_QUESTION, answerModelQuestion } from "../ModelQuestionDialog";
 import { Markdown } from "./Markdown";
 import { ChatGptLogo } from "../ChatGptLogo";
 import { ContinueButton, USAGE_PAGE } from "../ChatGptDialog";
-import { chooseModel, continueWithChatGpt, loadModels, openChatGpt, planReady, useChatGpt } from "../../lib/chatgpt";
+import { continueWithChatGpt, openChatGpt, planReady, useChatGpt } from "../../lib/chatgpt";
+import { EFFORTS, chooseEffort, chooseModel, effortLabel, loadModels, resolved, useModels } from "../../lib/models";
 import { moveFloatBy, startMove } from "./AiDock";
 
 const INSTALL: Record<CliAgentId, string> = {
@@ -84,12 +85,18 @@ function Menu({
   label,
   up = false,
   width = "w-72",
+  place = "left-0",
+  shrink = false,
   trigger,
   children,
 }: {
   label: string;
   up?: boolean;
   width?: string;
+  /** Where the menu starts against its button, e.g. at the field's edge instead. */
+  place?: string;
+  /** The button may get narrower than its label, which it truncates. */
+  shrink?: boolean;
   trigger: (p: { open: boolean; toggle: () => void; ref: React.RefObject<HTMLButtonElement | null> }) => ReactNode;
   children: (close: () => void) => ReactNode;
 }) {
@@ -126,10 +133,15 @@ function Menu({
     items[(i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length]?.focus();
   };
   return (
-    <div className="relative" ref={ref}>
+    <div
+      className={shrink ? "relative min-w-0" : "relative"}
+      ref={ref}
+      // Tab out of the open menu closes it, so it does not stay over the conversation.
+      onBlur={(e) => e.relatedTarget && !e.currentTarget.contains(e.relatedTarget) && setOpen(false)}
+    >
       {trigger({ open, toggle: () => setOpen(!open), ref: triggerRef })}
       {open && (
-        <div role="menu" aria-label={label} onKeyDown={onKey} className={`overlay absolute left-0 z-50 rounded-xl p-1 ${width} ${up ? "bottom-9" : "top-9"}`}>
+        <div role="menu" aria-label={label} onKeyDown={onKey} className={`overlay absolute ${place} z-50 rounded-xl p-1 ${width} ${up ? "bottom-9" : "top-9"}`}>
           {children(close)}
         </div>
       )}
@@ -904,6 +916,7 @@ function Composer() {
   const field = useRef<HTMLTextAreaElement>(null);
   const name = agentName(agent, agents);
   const plan = useChatGpt((s) => agent === "chatgpt" && planReady(s.status));
+  const installed = agent !== "chatgpt" && !!agents?.find((a) => a.id === agent)?.path;
   const working = status !== "idle";
   const blocked = working ? steerBlocked() : sendBlocked();
 
@@ -962,7 +975,8 @@ function Composer() {
           </div>
         </div>
       )}
-      <div onClick={() => field.current?.focus()} className="rounded-xl border border-white/[.08] bg-white/[.055] px-2.5 pb-1.5 pt-2 transition-colors duration-[120ms] has-[textarea:focus]:border-accent">
+      {/* A click in the model menu stays there, so its keys keep working. */}
+      <div onClick={(e) => !(e.target as Element).closest("[role=menu]") && field.current?.focus()} className="rounded-xl border border-white/[.08] bg-white/[.055] px-2.5 pb-1.5 pt-2 transition-colors duration-[120ms] has-[textarea:focus]:border-accent">
         {about === "style" && (
           <div className="mb-2 flex flex-wrap gap-1.5">
             <span className="flex h-[22px] items-center gap-1.5 rounded-md bg-white/[.08] px-2 text-[12px] text-fg" title="Messages here are about your style, for all your videos">
@@ -1066,7 +1080,8 @@ function Composer() {
             {frame && "Frame"}
           </IconButton>
           )}
-          {plan && <ModelMenu disabled={working} />}
+          {/* Hidden while the agent answers, so its progress and the reasons have the row. */}
+          {(plan || installed) && !working && <ModelMenu />}
           <span className="flex-1" />
           {!working && why && (
             <span className="min-w-0 truncate text-[12px] text-fg/85" role="status">
@@ -1111,57 +1126,97 @@ function Composer() {
   );
 }
 
-/** The ChatGPT model the panel sends with, from the signed-in account's list. */
-function ModelMenu({ disabled }: { disabled: boolean }) {
-  const models = useChatGpt((s) => s.models);
-  const model = useChatGpt((s) => s.model);
-  const error = useChatGpt((s) => s.modelsError);
-  const label = models?.find((m) => m.slug === model)?.displayName ?? (error ? "No models" : "Loading models…");
+/** The model and effort the panel sends with: one button, and a menu with the models over the effort. */
+function ModelMenu() {
+  const about = useContext(About);
+  const agent = useAgent((s) => s.agent);
+  const models = useModels();
+  const list = models.lists[agent];
+  const error = models.errors[agent];
+  const { model, effort, efforts } = resolved(agent, models);
+  // Without a model Claude Code uses its own setting, and so does Codex when its list didn't load.
+  const name = model?.displayName ?? (agent === "claude" || (agent === "codex" && error) ? "Default" : error ? "No models" : "Loading models…");
   return (
     <Menu
       label="Model"
       up
-      // Fits beside the picture button in the narrowest panel, 300 px.
-      width="w-56"
+      // From the field's edge, so it fits the narrowest panel, 300 px.
+      width="w-64"
+      place={about === "project" ? "-left-9" : "left-0"}
+      shrink
       trigger={({ open, toggle, ref }) => (
         <button
           ref={ref}
           type="button"
           aria-haspopup="menu"
           aria-expanded={open}
-          aria-disabled={disabled || undefined}
-          title={disabled ? "Wait for the answer, or stop it" : "Choose the model"}
-          onClick={disabled ? undefined : toggle}
-          className={`flex h-7 min-w-0 items-center gap-1 rounded-md px-1.5 text-[12px] text-fg/85 hover:bg-white/[.08] aria-disabled:cursor-not-allowed aria-disabled:text-muted aria-disabled:hover:bg-transparent ${open ? "bg-white/[.08]" : ""}`}
+          aria-label={`Model: ${name}${effort ? `, effort: ${effortLabel(effort)}` : ""}`}
+          title="Choose the model and effort"
+          onClick={toggle}
+          className={`flex h-7 min-w-0 max-w-full items-center gap-1 rounded-md px-1.5 text-[12px] text-fg/85 hover:bg-white/[.08] ${open ? "bg-white/[.08]" : ""}`}
         >
-          <span className="truncate">{label}</span>
+          <span className="truncate">{name}</span>
+          {effort && (
+            <>
+              <span aria-hidden className="text-subtle">
+                ·
+              </span>
+              <span className="shrink-0">{effortLabel(effort)}</span>
+            </>
+          )}
           <ChevronDown size={13} className="shrink-0 text-muted" />
         </button>
       )}
     >
-      {(close) =>
-        error ? (
-          <>
-            <p className="px-2 py-1.5 text-[12px] leading-[17px] text-fg/85">{error}</p>
-            <MenuItem onClick={() => void loadModels()}>Try again</MenuItem>
-          </>
-        ) : models === null ? (
-          <p className="px-2 py-1.5 text-[12px] text-muted">Loading models…</p>
-        ) : (
-          models.map((m) => (
-            <MenuItem
-              key={m.slug}
-              checked={m.slug === model}
-              onClick={() => {
-                chooseModel(m.slug);
-                close();
-              }}
-            >
-              {m.displayName}
+      {() => (
+        <>
+          <p className="px-2 pb-1 pt-1.5 text-[12px] font-semibold text-muted">Model</p>
+          {agent === "claude" && (
+            <MenuItem checked={!model} onClick={() => chooseModel(agent, null)}>
+              Default
+              <span className="ml-auto text-[12px] text-muted">Claude Code setting</span>
             </MenuItem>
-          ))
-        )
-      }
+          )}
+          {error ? (
+            <>
+              <p className="flex gap-1.5 px-2 py-1.5 text-[12px] leading-[17px] text-fg/85">
+                <AlertCircle size={13} className="mt-0.5 shrink-0 text-danger" />
+                {error}
+              </p>
+              <MenuItem onClick={() => void loadModels(agent, agent === "chatgpt" ? models.chatgptFor : null)}>Try again</MenuItem>
+            </>
+          ) : !list ? (
+            <p className="flex items-center gap-1.5 px-2 py-1.5 text-[12px] text-muted">
+              <Loader2 size={13} className="shrink-0 animate-spin text-accent" />
+              Loading models…
+            </p>
+          ) : (
+            list.map((m) => (
+              <MenuItem key={m.slug} checked={m.slug === model?.slug} onClick={() => chooseModel(agent, m.slug)}>
+                <span className="truncate">{m.displayName}</span>
+              </MenuItem>
+            ))
+          )}
+          {efforts.length > 0 && (
+            <>
+              <div className="mx-1.5 my-1 h-px bg-white/[.08]" />
+              <p className="px-2 pb-1 pt-1.5 text-[12px] font-semibold text-muted">Effort</p>
+              <div className="px-1.5">
+                <Segmented
+                  compact
+                  label="Effort"
+                  value={effort}
+                  options={efforts.map((e) => ({ id: e, label: EFFORTS[e]?.short ?? effortLabel(e), title: effortLabel(e) }))}
+                  onChange={(e) => chooseEffort(agent, e)}
+                />
+              </div>
+              <p className="px-2 pb-1.5 pt-1.5 text-[12px] leading-[16px] text-muted" aria-live="polite">
+                {effort ? (EFFORTS[effort]?.hint ?? `${effortLabel(effort)} effort.`) : "Uses your Claude Code setting."}
+              </p>
+            </>
+          )}
+        </>
+      )}
     </Menu>
   );
 }

@@ -36,6 +36,8 @@ pub struct TurnRequest {
     /// its own and reports it in `AgentEvent::Session`.
     pub session: String,
     pub resume: bool,
+    pub model: Option<String>,
+    pub effort: Option<String>,
     pub prompt: String,
     /// An empty folder of Nuzky's own, so no project instructions or settings load from it.
     pub cwd: PathBuf,
@@ -315,6 +317,43 @@ fn signal(pid: u32, kill: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_effort_flags_are_optional_on_new_and_resumed_turns() {
+        for agent in [AgentId::Claude, AgentId::Codex] {
+            for resume in [false, true] {
+                for model in [None, Some("test-model".to_owned())] {
+                    for effort in [None, Some("high".to_owned())] {
+                        let req = TurnRequest {
+                            agent,
+                            exe: "unused".into(),
+                            session: "session".into(),
+                            resume,
+                            model: model.clone(),
+                            effort: effort.clone(),
+                            prompt: String::new(),
+                            cwd: PathBuf::new(),
+                            mcp: McpServer { command: "nuzky".into(), args: vec![], env: vec![] },
+                        };
+                        let command = match agent {
+                            AgentId::Claude => claude::command(&req),
+                            AgentId::Codex => codex::command(&req),
+                            AgentId::ChatGpt => unreachable!(),
+                        };
+                        let args: Vec<_> = command.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+                        let model_flag = if agent == AgentId::Claude { "--model" } else { "-m" };
+                        assert_eq!(args.windows(2).any(|a| a == [model_flag, "test-model"]), model.is_some());
+                        let effort_args = if agent == AgentId::Claude {
+                            ["--effort", "high"]
+                        } else {
+                            ["-c", "model_reasoning_effort=\"high\""]
+                        };
+                        assert_eq!(args.windows(2).any(|a| a == effort_args), effort.is_some());
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn session_gone_only_classifies_missing_resumed_conversations() {

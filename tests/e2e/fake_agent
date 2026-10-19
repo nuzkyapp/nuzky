@@ -42,6 +42,17 @@ if len(sys.argv) > 1 and sys.argv[1] == '--version':
     sys.exit(0)
 
 args = sys.argv[1:]
+if CODEX and args[:2] == ['debug', 'models']:
+    print(json.dumps({'models': [
+        {'slug': 'test-second', 'display_name': 'Test Second', 'visibility': 'list', 'priority': 2,
+         'supported_reasoning_levels': [{'effort': 'low'}, {'effort': 'high'}, {'effort': 'ultra'}],
+         'default_reasoning_level': 'high'},
+        {'slug': 'test-hidden', 'display_name': 'Test Hidden', 'visibility': 'hidden', 'priority': 0},
+        {'slug': 'test-first', 'display_name': 'Test First', 'visibility': 'list', 'priority': 1,
+         'supported_reasoning_levels': [{'effort': 'medium'}, {'effort': 'max'}],
+         'default_reasoning_level': 'medium'},
+    ]}))
+    sys.exit(0)
 signed_out = os.environ.get('FAKE_AGENT_SIGNED_OUT') == '1'
 if not CODEX and args[:2] == ['auth', 'status']:
     print(json.dumps({'loggedIn': not signed_out, 'authMethod': 'none' if signed_out else 'claude.ai'}))

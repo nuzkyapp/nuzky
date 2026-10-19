@@ -4,6 +4,7 @@
 
 use crate::{AppState, CmdResult, chatgpt, connect, err, library, store};
 use nuzky_agent::{AgentEvent, AgentId, AgentInfo, ChatGptRequest, McpServer, Tools, Turn, TurnRequest};
+use nuzky_chatgpt::Model as AgentModel;
 use nuzky_mcp::{Access, Backend, Client};
 use nuzky_session::host::Host;
 use serde::{Deserialize, Serialize};
@@ -376,10 +377,90 @@ pub async fn agent_chat_save(app: AppHandle, chat: String, title: String, items:
     .map_err(err)?
 }
 
+#[tauri::command]
+pub async fn agent_models(agent: AgentId) -> CmdResult<Vec<AgentModel>> {
+    tauri::async_runtime::spawn_blocking(move || match agent {
+        AgentId::Claude => Ok([("fable", "Fable"), ("opus", "Opus"), ("sonnet", "Sonnet"), ("haiku", "Haiku")]
+            .into_iter()
+            .map(|(slug, name)| AgentModel {
+                slug: slug.into(),
+                display_name: name.into(),
+                efforts: nuzky_chatgpt::EFFORTS.map(str::to_owned).into(),
+                default_effort: Some(if slug == "sonnet" { "high" } else { "medium" }.into()),
+            })
+            .collect()),
+        AgentId::Codex => {
+            let failed = "MODELS_FAILED: Couldn't list Codex's models. Try again.";
+            let path = nuzky_agent::find(agent).path.ok_or(failed)?;
+            let output = nuzky_agent::run(&path, &["debug", "models"], &[], None, std::time::Duration::from_secs(15))
+                .map_err(|_| failed)?
+                .ok_or(failed)?;
+            if !output.status.success() {
+                return Err(failed.into());
+            }
+            codex_models(&output.stdout).map_err(|_| failed.into())
+        }
+        AgentId::ChatGpt => chatgpt::chatgpt().models().map_err(err),
+    })
+    .await
+    .map_err(err)?
+}
+
+fn codex_models(bytes: &[u8]) -> serde_json::Result<Vec<AgentModel>> {
+    #[derive(Deserialize)]
+    struct Level {
+        effort: String,
+    }
+    #[derive(Deserialize)]
+    struct Entry {
+        slug: String,
+        display_name: String,
+        visibility: String,
+        priority: i64,
+        #[serde(default)]
+        supported_reasoning_levels: Vec<Level>,
+        default_reasoning_level: Option<String>,
+    }
+    #[derive(Deserialize)]
+    struct Catalog {
+        models: Vec<Entry>,
+    }
+    let mut models = serde_json::from_slice::<Catalog>(bytes)?.models;
+    models.retain(|m| m.visibility == "list");
+    models.sort_by_key(|m| m.priority);
+    Ok(models
+        .into_iter()
+        .map(|m| {
+            let efforts: Vec<String> = m
+                .supported_reasoning_levels
+                .into_iter()
+                .map(|level| level.effort)
+                .filter(|effort| nuzky_chatgpt::EFFORTS.contains(&effort.as_str()))
+                .collect();
+            let default_effort = m.default_reasoning_level.filter(|effort| efforts.contains(effort));
+            AgentModel { slug: m.slug, display_name: m.display_name, efforts, default_effort }
+        })
+        .collect())
+}
+
+fn validate_model_effort(model: Option<&str>, effort: Option<&str>) -> CmdResult<()> {
+    if let Some(model) = model
+        && (model.is_empty()
+            || model.len() > 100
+            || !model.as_bytes()[0].is_ascii_alphanumeric()
+            || !model.bytes().all(|c| c.is_ascii_alphanumeric() || b"._:/[]-".contains(&c)))
+    {
+        return Err("Choose a valid model name, starting with a letter or digit.".into());
+    }
+    if effort.is_some_and(|effort| !nuzky_chatgpt::EFFORTS.contains(&effort)) {
+        return Err("Choose low, medium, high, xhigh or max reasoning effort.".into());
+    }
+    Ok(())
+}
+
 /// Sends a message in the chat the UI named, under the id it gave the message; the answer arrives
 /// as `agent` events for the chat. The UI names both before sending, so even an agent that fails
 /// at once reaches it, and Stop works while the message is still starting.
-/// `model`: the ChatGPT model's slug, for ChatGPT.
 #[tauri::command]
 #[allow(clippy::too_many_arguments, reason = "one argument per field the panel sends")]
 pub async fn agent_send(
@@ -390,12 +471,14 @@ pub async fn agent_send(
     text: String,
     context: PromptContext,
     model: Option<String>,
+    effort: Option<String>,
 ) -> CmdResult<()> {
-    tauri::async_runtime::spawn_blocking(move || send(&app, agent, chat, turn, &text, &context, model))
+    tauri::async_runtime::spawn_blocking(move || send(&app, agent, chat, turn, &text, &context, model, effort))
         .await
         .map_err(err)?
 }
 
+#[allow(clippy::too_many_arguments, reason = "one argument per field the panel sends")]
 fn send(
     app: &AppHandle,
     agent: AgentId,
@@ -404,7 +487,9 @@ fn send(
     text: &str,
     context: &PromptContext,
     model: Option<String>,
+    effort: Option<String>,
 ) -> CmdResult<()> {
+    validate_model_effort(model.as_deref(), effort.as_deref())?;
     validate_chat_id(&chat)?;
     let panel = app.state::<AgentPanel>();
     // Another project opening, or Stop, while this starts must stop it once it runs.
@@ -440,7 +525,7 @@ fn send(
             model: None,
             project: path.clone(),
         });
-        if chat.model != model {
+        if agent == AgentId::ChatGpt && chat.model != model {
             // ChatGPT's reasoning goes back only to the model that wrote it.
             chat.history.lock().unwrap().retain(|item| item["type"] != "reasoning");
             chat.model = model.clone();
@@ -453,6 +538,7 @@ fn send(
         Start::ChatGpt(ChatGptRequest {
             api: chatgpt::chatgpt().api().to_owned(),
             model: model.ok_or("Choose a ChatGPT model first.")?,
+            effort,
             guide: nuzky_mcp::guide(),
             tools: nuzky_mcp::tool_list().map_err(err)?,
             prompt: prompt(text, context, &project),
@@ -475,6 +561,8 @@ fn send(
             exe,
             session,
             resume: resumable,
+            model,
+            effort,
             prompt: prompt(text, context, &project),
             cwd: work_dir(),
             mcp: McpServer { command: bridge.program.into(), args, env },
@@ -592,6 +680,50 @@ pub fn agent_jobs(panel: State<'_, AgentPanel>) -> Vec<serde_json::Value> {
 mod tests {
     use super::*;
     use nuzky_engine::Project;
+
+    #[test]
+    fn model_effort_validation_rejects_invalid_input() {
+        for model in ["opus", "openai/gpt-6.1", "a:b_[c].-", "7", &"a".repeat(100)] {
+            assert!(validate_model_effort(Some(model), None).is_ok(), "{model}");
+        }
+        for model in ["", "-m", "_opus", "é", "a b", "a\\b", "a\n", &"a".repeat(101)] {
+            assert!(validate_model_effort(Some(model), None).is_err(), "{model}");
+        }
+        assert!(validate_model_effort(None, None).is_ok());
+        for effort in ["low", "medium", "high", "xhigh", "max"] {
+            assert!(validate_model_effort(None, Some(effort)).is_ok());
+        }
+        for effort in ["", "ultra", "High", "high "] {
+            assert!(validate_model_effort(None, Some(effort)).is_err());
+        }
+    }
+
+    #[test]
+    fn codex_models_filter_order_and_supported_default() {
+        let models = codex_models(br#"{"models": [
+            {"slug":"later","display_name":"Later","visibility":"list","priority":2,
+             "supported_reasoning_levels":[{"effort":"low"},{"effort":"high"},{"effort":"ultra"}],"default_reasoning_level":"high"},
+            {"slug":"hidden","display_name":"Hidden","visibility":"hidden","priority":0},
+            {"slug":"first","display_name":"First","visibility":"list","priority":1,
+             "supported_reasoning_levels":[{"effort":"medium"},{"effort":"ultra"}],"default_reasoning_level":"ultra"},
+            {"slug":"missing","display_name":"Missing","visibility":"list","priority":3}
+        ]}"#).unwrap();
+        assert_eq!(models.iter().map(|m| m.slug.as_str()).collect::<Vec<_>>(), ["first", "later", "missing"]);
+        assert_eq!(models[0].efforts, ["medium"]);
+        assert_eq!(models[0].default_effort, None);
+        assert_eq!(models[1].efforts, ["low", "high"]);
+        assert_eq!(models[1].default_effort.as_deref(), Some("high"));
+        assert!(models[2].efforts.is_empty());
+        assert_eq!(models[2].default_effort, None);
+        assert_eq!(
+            serde_json::to_value(&models[1]).unwrap(),
+            serde_json::json!({
+                "slug": "later", "displayName": "Later", "efforts": ["low", "high"], "defaultEffort": "high"
+            })
+        );
+        assert!(codex_models(b"not JSON").is_err());
+        assert!(codex_models(br#"{}"#).is_err());
+    }
 
     #[test]
     fn saved_chat_ids_cannot_escape_their_directory() {

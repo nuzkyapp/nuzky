@@ -53,14 +53,20 @@ pub enum Notice {
     NotRevoked,
 }
 
-/// The panel shows `display_name` and sends `slug` as the model.
+/// The reasoning efforts the AI panel offers and agents take. A catalog's other levels are left out:
+/// `ultra` delegates to other agents, which Nuzky turns off, and an unknown one could not be sent.
+pub const EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
+
+/// A model and the reasoning efforts the AI panel can offer for it.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-#[cfg_attr(feature = "ts", ts(rename = "ChatGptModel"))]
+#[cfg_attr(feature = "ts", ts(rename = "AgentModel"))]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Model {
     pub slug: String,
     pub display_name: String,
+    pub efforts: Vec<String>,
+    pub default_effort: Option<String>,
 }
 
 pub struct ChatGpt {
@@ -159,10 +165,17 @@ impl ChatGpt {
     /// The selected account's models, in ChatGPT's display order.
     pub fn models(&self) -> Result<Vec<Model>> {
         #[derive(Deserialize)]
+        struct Level {
+            effort: String,
+        }
+        #[derive(Deserialize)]
         struct Entry {
             slug: String,
             display_name: String,
             visibility: String,
+            #[serde(default)]
+            supported_reasoning_levels: Vec<Level>,
+            default_reasoning_level: Option<String>,
         }
         #[derive(Deserialize)]
         struct Catalog {
@@ -195,7 +208,16 @@ impl ChatGpt {
                         .models
                         .into_iter()
                         .filter(|m| m.visibility == "list")
-                        .map(|m| Model { slug: m.slug, display_name: m.display_name })
+                        .map(|m| {
+                            let efforts: Vec<String> = m
+                                .supported_reasoning_levels
+                                .into_iter()
+                                .map(|level| level.effort)
+                                .filter(|effort| EFFORTS.contains(&effort.as_str()))
+                                .collect();
+                            let default_effort = m.default_reasoning_level.filter(|effort| efforts.contains(effort));
+                            Model { slug: m.slug, display_name: m.display_name, efforts, default_effort }
+                        })
                         .collect());
                 }
                 401 if !renew => renew = true,

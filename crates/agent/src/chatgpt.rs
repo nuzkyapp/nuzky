@@ -53,6 +53,7 @@ pub struct ChatGptRequest {
     pub api: String,
     /// The slug from the account's model list.
     pub model: String,
+    pub effort: Option<String>,
     /// Nuzky's editing guide with the creator's style, which an MCP client gets as the server's instructions.
     pub guide: String,
     /// Nuzky's tools as MCP's `tools/list` lists them.
@@ -134,7 +135,7 @@ fn converse(
     let tools = namespace(&req.tools);
     let mut answered = false;
     for _ in 0..MAX_ROUNDS {
-        let body = json!({
+        let mut body = json!({
             "model": req.model,
             "instructions": instructions,
             "input": items,
@@ -144,6 +145,9 @@ fn converse(
             // Nothing is stored, so the model's reasoning goes back to it with the history.
             "include": ["reasoning.encrypted_content"],
         });
+        if let Some(effort) = &req.effort {
+            body["reasoning"] = json!({"effort": effort});
+        }
         let output = match respond(&http, req, &body.to_string(), stop, emit) {
             Ok(output) => output,
             Err(end) => return (end, answered),
