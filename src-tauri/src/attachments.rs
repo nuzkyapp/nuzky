@@ -35,7 +35,7 @@ fn attach(path: &Path, name: String) -> CmdResult<Attachment> {
     let kind = match asset.kind {
         AssetKind::Image => AttachmentKind::Image,
         AssetKind::Video => AttachmentKind::Video,
-        AssetKind::Audio => return Err(format!("{name} is only sound. Attach a picture or a video.")),
+        AssetKind::Audio => return Err(format!("{name} has no picture. Attach a picture or a video.")),
     };
     let preview = thumbs::picture(&store::cache_dir(), &asset, PREVIEW_HEIGHT).unwrap_or_else(|error| {
         log::warn!("No preview of the attachment {}: {error:#}", path.display());

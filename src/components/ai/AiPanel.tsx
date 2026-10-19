@@ -675,7 +675,7 @@ function Attached({ attachments }: { attachments: Attachment[] }) {
       {attachments.map((a) => (
         <div key={a.path} title={a.name} aria-label={`${a.kind === "video" ? "Video" : "Picture"} ${a.name}`} role="img" className="relative h-16 overflow-hidden rounded-[10px] bg-raised">
           {a.preview ? (
-            <img src={a.preview} alt="" className="h-full max-w-[120px] object-cover" />
+            <img src={a.preview} alt="" className="h-full min-w-16 max-w-[120px] object-cover" />
           ) : (
             <span className="flex h-full w-16 items-center justify-center text-muted">{a.kind === "video" ? <Film size={16} /> : <ImageIcon size={16} />}</span>
           )}
@@ -908,8 +908,8 @@ function Elapsed() {
   return <>{`${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`}</>;
 }
 
-/** Over this, pasting would hold the whole file in memory twice; + reads it from its place instead. */
-const MAX_PASTE_BYTES = 512 * 1024 * 1024;
+/** Pasting holds the whole file in memory on its way; + reads a larger one from its place instead. */
+const MAX_PASTE_BYTES = 100 * 1024 * 1024;
 
 async function pickAttachments() {
   const picked = await openFiles({ multiple: true, filters: [{ name: "Pictures and videos", extensions: [...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS] }] });
@@ -1026,8 +1026,8 @@ function Composer() {
             </span>
           </div>
         )}
-        {(attachments.length > 0 || attaching > 0) && (
-          <div className="mb-2 flex flex-wrap gap-1.5">
+        {(attachments.length > 0 || attaching > 0 || (about === "project" && ((selected > 0 && !dropSelection) || !dropPlayhead || frame || thumbnail))) && (
+          <div className="mb-2 flex max-h-[76px] flex-wrap gap-1.5 overflow-y-auto">
             {attachments.map((a) => (
               <Chip
                 key={a.path}
@@ -1046,22 +1046,18 @@ function Composer() {
                 Adding…
               </span>
             )}
-          </div>
-        )}
-        {about === "project" && ((selected > 0 && !dropSelection) || !dropPlayhead || frame || thumbnail) && (
-          <div className="mb-2 flex flex-wrap gap-1.5">
-            {thumbnail && (
+            {about === "project" && thumbnail && (
               <Chip icon={<ImageIcon size={12} />} label="Make a thumbnail" onRemove={() => useAgent.setState({ thumbnail: false })}>
                 Make a thumbnail
               </Chip>
             )}
-            {selected > 0 && !dropSelection && (
+            {about === "project" && selected > 0 && !dropSelection && (
               <Chip icon={<Film size={12} />} label="the selected clips" onRemove={() => useAgent.setState({ dropSelection: true })}>
                 {selected === 1 ? "1 clip" : `${selected} clips`}
                 {range && <span className="tabular text-muted">· {range}</span>}
               </Chip>
             )}
-            {frame ? (
+            {about !== "project" ? null : frame ? (
               <Chip icon={<Camera size={12} />} label="the frame" onRemove={() => useAgent.setState({ frame: false })}>
                 <span className="tabular">Frame {playhead}</span>
               </Chip>
@@ -1125,7 +1121,10 @@ function Composer() {
           onChange={(e) => useAgent.setState({ draft: e.target.value })}
           onPaste={(e) => {
             // A screenshot, or a file copied in Finder; text pastes as usual.
-            const files = [...e.clipboardData.files].filter((f) => !f.type || /^(image|video)\//.test(f.type));
+            // WebKit names every pasted screenshot image.png; the time tells them apart.
+            const files = [...e.clipboardData.files]
+              .filter((f) => !f.type || /^(image|video)\//.test(f.type))
+              .map((f) => (f.name === "image.png" ? new File([f], `Pasted ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}.png`, { type: f.type }) : f));
             if (!files.length) return;
             e.preventDefault();
             const big = files.find((f) => f.size > MAX_PASTE_BYTES);
@@ -1141,7 +1140,7 @@ function Composer() {
           className="block max-h-40 w-full resize-none bg-transparent text-[13px] leading-[19px] text-fg outline-none placeholder:text-muted"
         />
         <div className="mt-1 flex items-center gap-2">
-          <IconButton label="Attach pictures or videos" onClick={() => void pickAttachments()} className="h-7 w-7">
+          <IconButton label="Attach pictures or videos. You can also paste them into the field." onClick={() => void pickAttachments()} className="h-7 w-7">
             <Plus size={16} />
           </IconButton>
           {about === "project" && (
@@ -1217,7 +1216,7 @@ function ModelMenu() {
       up
       // From the field's edge, so it fits the narrowest panel, 300 px.
       width="w-64"
-      place={about === "project" ? "-left-9" : "left-0"}
+      place={about === "project" ? "-left-[72px]" : "-left-9"}
       shrink
       trigger={({ open, toggle, ref }) => (
         <button

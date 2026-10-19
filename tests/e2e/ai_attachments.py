@@ -52,11 +52,11 @@ def ai_attachments(r):
 
     r.s.run(ANSWER_FILE_DIALOG, [str(photo), str(video), str(sound)])
     r.check('+ attaches the picture and the video picked, each as a chip with its own preview',
-            click(r, 'Attach pictures or videos') == 'false'
+            click(r, 'Attach pictures or videos. You can also paste them into the field.') == 'false'
             and wait(lambda: r.s.run(CHIPS)[:2] == ["Don't send portrait-photo.jpg", "Don't send talk.mp4"], 15)
             and wait(lambda: r.s.run(PREVIEWS) == 2, 5), [r.s.run(CHIPS), r.s.run(PREVIEWS)])
     r.check('a file with only sound is not attached and says why',
-            wait(lambda: any('beep.wav is only sound' in t for t in r.s.run(TOASTS)), 5), r.s.run(TOASTS))
+            wait(lambda: any('beep.wav has no picture' in t for t in r.s.run(TOASTS)), 5), r.s.run(TOASTS))
 
     pasted = paste(r, 3000, 1500, 'Screenshot.png')
     r.check('a pasted screenshot becomes a chip too, without pasting any text',
@@ -103,6 +103,23 @@ def ai_attachments(r):
     got = wait(lambda: steered.exists() and [json.loads(line) for line in steered.read_text().splitlines()], 15) or []
     r.check('a picture sent while Claude works goes with that message', [m['pictures'] for m in got] == [[[800, 600]]], got)
     idle(r)
+
+    # A draft's attachment stays with the chat it was added in, as its text does.
+    click(r, 'New chat')
+    send(r, 'Hello there')
+    idle(r)
+    paste(r, 64, 64, 'ForThisChat.png')
+    wait(lambda: "Don't send ForThisChat.png" in r.s.run(CHIPS), 15)
+    past = 'ul[aria-label="Past chats"]'
+    click(r, 'Past chats in this project')
+    wait(lambda: r.s.run(f"return !!document.querySelector('{past}')"), 5)
+    click(r, 'What is in what I attached?', past)
+    r.check('opening another chat leaves the attachment with the draft it was added to',
+            wait(lambda: 'I see 2 pictures' in panel(r)['text'], 10) and "Don't send ForThisChat.png" not in r.s.run(CHIPS), r.s.run(CHIPS))
+    click(r, 'Past chats in this project')
+    wait(lambda: r.s.run(f"return !!document.querySelector('{past}')"), 5)
+    click(r, 'Hello there', past)
+    r.check('and going back brings it back', wait(lambda: "Don't send ForThisChat.png" in r.s.run(CHIPS), 10), r.s.run(CHIPS))
 
 
 @flow('ai_attachments_codex', 'Codex gets a pasted picture as an --image file Nuzky prepared', before=setup_codex)

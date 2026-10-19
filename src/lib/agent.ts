@@ -336,7 +336,7 @@ export async function loadChats() {
 }
 
 /** What was typed in each chat of this session, so a draft stays with its own chat. */
-const drafts = new Map<string | null, string>();
+const drafts = new Map<string | null, { draft: string; attachments: Attachment[] }>();
 
 /** Opens a chat the project keeps, to read and continue it; it stops what the current one left running. */
 export async function openChat(id: string) {
@@ -348,8 +348,9 @@ export async function openChat(id: string) {
     if (useAgent.getState().status !== "idle" || useEditor.getState().snap?.sessionEpoch !== epoch) return;
     // What was still running when Nuzky closed did not finish.
     const items = (opened.items ?? []).map((it): ChatItem => (it.kind === "steps" ? { ...it, steps: it.steps.map((x) => (x.status === "running" ? { ...x, status: "interrupted" } : x)) } : it));
-    drafts.set(useAgent.getState().chat, useAgent.getState().draft);
-    useAgent.setState({ ...endChat(), agent: opened.agent, chat: opened.id, items, pastCount: items.length, draft: drafts.get(opened.id) ?? "" });
+    const { chat, draft, attachments } = useAgent.getState();
+    drafts.set(chat, { draft, attachments });
+    useAgent.setState({ ...endChat(), agent: opened.agent, chat: opened.id, items, pastCount: items.length, draft: "", attachments: [], ...drafts.get(opened.id) });
     // Saved again as the chat last used, so the project reopens it next time.
     void saveChat(opened.id, items);
   } catch (e) {
@@ -415,6 +416,7 @@ function promptContext(about: AiAbout, attachments: Attachment[]): PromptContext
 
 /** Attaches pictures and videos to the draft: files the user chose, or what they pasted. */
 export async function attach(files: (string | File)[]) {
+  const chat = useAgent.getState().chat;
   useAgent.setState((s) => ({ attaching: s.attaching + files.length }));
   for (const file of files) {
     try {
@@ -422,7 +424,10 @@ export async function attach(files: (string | File)[]) {
         typeof file === "string"
           ? await invoke<Attachment>("agent_attach_file", { path: file })
           : await invoke<Attachment>("agent_attach_pasted", new Uint8Array(await file.arrayBuffer()), { headers: { "x-name": encodeURIComponent(file.name) } });
-      useAgent.setState((s) => ({ attachments: [...s.attachments, attached] }));
+      const add = (list: Attachment[]) => (list.some((a) => a.path === attached.path) ? list : [...list, attached]);
+      // Another chat opened meanwhile: it goes with the draft of the chat it was added in.
+      if (useAgent.getState().chat === chat) useAgent.setState((s) => ({ attachments: add(s.attachments) }));
+      else drafts.set(chat, { draft: drafts.get(chat)?.draft ?? "", attachments: add(drafts.get(chat)?.attachments ?? []) });
     } catch (e) {
       useEditor.getState().toast({ kind: "error", text: plainError(errorText(e)) });
     } finally {
