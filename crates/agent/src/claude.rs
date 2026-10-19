@@ -43,10 +43,17 @@ pub(crate) fn command(req: &TurnRequest) -> Command {
 
 /// A message for Claude's stream-json input, one line.
 pub(crate) fn message(message: &Message) -> anyhow::Result<String> {
-    let mut content = vec![json!({"type": "text", "text": message.text})];
-    for data in message.base64_images()? {
-        content.push(json!({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": data}}));
-    }
+    // Without pictures, the plain text every Claude Code version takes.
+    let content = if message.images.is_empty() {
+        json!(message.text)
+    } else {
+        let mut blocks = vec![json!({"type": "text", "text": message.text})];
+        for data in message.base64_images()? {
+            blocks
+                .push(json!({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": data}}));
+        }
+        Value::Array(blocks)
+    };
     Ok(format!("{}\n", json!({"type": "user", "message": {"role": "user", "content": content}})))
 }
 

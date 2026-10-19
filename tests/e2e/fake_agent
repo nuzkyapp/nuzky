@@ -173,6 +173,8 @@ def jpeg_size(data):
 
 def unpack(content):
     """Claude's user message: its text, and the size of each picture beside it."""
+    if isinstance(content, str):
+        return content, []
     text = '\n'.join(b['text'] for b in content if b['type'] == 'text')
     images = [b['source'] for b in content if b['type'] == 'image']
     if any((source['type'], source['media_type']) != ('base64', 'image/jpeg') for source in images):
