@@ -28,6 +28,12 @@ UNDER = """const b = document.querySelector(`[data-clip-id='${arguments[0]}'] [d
 return document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)?.closest('[data-fade]')?.dataset.fade ?? null;"""
 KNOBS = "return document.querySelectorAll(`[data-clip-id='${arguments[0]}'] [data-fade]`).length"
 SELECTION = 'return window.__nuzky.store.getState().selection'
+# Sends `arguments[2]` Ctrl + wheel events of `arguments[1]` px over the clip `arguments[0]` and returns the zoom.
+WHEEL = """const b = document.querySelector(`[data-clip-id='${arguments[0]}']`).getBoundingClientRect();
+const el = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+for (let i = 0; i < arguments[2]; i++) el.dispatchEvent(new WheelEvent('wheel', {bubbles: true, cancelable: true,
+  ctrlKey: true, deltaY: arguments[1], clientX: b.left + b.width / 2, clientY: b.top + b.height / 2}));
+return window.__nuzky.store.getState().zoom;"""
 # Clicks the middle of a clip with the modifier keys in `arguments[1]`.
 CLICK_CLIP = """const b = document.querySelector(`[data-clip-id='${arguments[0]}']`).getBoundingClientRect();
 const at = (type) => new PointerEvent(type, Object.assign({bubbles: true, button: 0, pointerId: 1,
@@ -36,7 +42,7 @@ document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2).dispatchEv
 window.dispatchEvent(at('pointerup'));"""
 
 
-@flow('edit', 'Import two clips, split one with S, delete a piece with Delete, undo, find the result saved, drag a clip edge '
+@flow('edit', 'Import two clips, zoom the timeline with a touchpad and a wheel, split one with S, delete a piece with Delete, undo, find the result saved, drag a clip edge '
       'and see a title move with the clip after it, see imported music '
       'in the Audio tab, and fade a sound in by dragging the dot on its clip, heard in the export; Esc cancels such a drag')
 def edit(r):
@@ -46,6 +52,13 @@ def edit(r):
     clips = r.track()
     r.check('clips sit back to back on the main track', clips[1]['startUs'] == clips[0]['startUs'] + clips[0]['durationUs'], clips)
     r.check('both clips get thumbnails', wait(lambda: len(r.state()['thumbs']) == 2), r.state()['thumbs'])
+    # A touchpad sends many small Ctrl + wheel deltas per pinch; each once zoomed a whole step, 1.15^20 times at once.
+    r.s.run('window.__nuzky.store.getState().setZoom(60)')
+    pinched = r.s.run(WHEEL, clips[0]['id'], -3, 20)
+    r.check('a touchpad pinch zooms the timeline in proportion to the gesture', 75 < pinched < 90, pinched)
+    notch = r.s.run(WHEEL, clips[0]['id'], -100, 1)
+    r.check('one mouse wheel notch zooms by 15 %', abs(notch - pinched * 1.15) < 0.01, [pinched, notch])
+    r.s.run('window.__nuzky.store.getState().setZoom(60)')
     r.seek(2_000_000)
     r.focus_clip(clips[0]['id'])
     r.key('s')

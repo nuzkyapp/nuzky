@@ -305,7 +305,7 @@ Every edit is saved about a second later. The top bar shows Saving…, Saved, or
 | `Home` / `End` | Start / end |
 | `M` | Mute or unmute the preview |
 | `F` | Full screen preview, and back |
-| `Ctrl` + wheel, `+` / `-` | Zoom timeline; the playhead stays where it is on screen (moved to the middle if it was out of view), with the wheel the moment under the pointer does |
+| `Ctrl` + wheel, `+` / `-` | Zoom timeline; the playhead stays where it is on screen (moved to the middle if it was out of view), with the wheel the moment under the pointer does. A wheel notch zooms 15 %, a touchpad in proportion to the gesture |
 | `F2` | In the transcript, correct the selected word |
 | In Reels from a long video | `Space` plays the reel; `Home` goes to its start and `End` plays its last 3 s; on the cards `Enter` checks, `Delete` rejects, `Ctrl+A` checks all; in the reel's words `Alt+←` `Alt+→` move its start and `Shift+←` `Shift+→` its end; `Esc` goes back to editing; `S`, `Q`, `W`, `Ctrl+D`, `Ctrl+C`, `Ctrl+X`, `Ctrl+V` and `Ctrl+E` do nothing |
 | `Ctrl+I` | Import |
