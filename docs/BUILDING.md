@@ -96,7 +96,7 @@ The deployment minimum is macOS 14.
 
 ### Signing and notarization
 
-`build-bundles.mjs` signs ad-hoc and never notarizes; its `build-info-darwin.txt` says `macOS signature: ad-hoc, not notarized`. Gatekeeper blocks such a download until the user clicks Open Anyway in System Settings → Privacy & Security, as the release notes and the README say.
+`build-bundles.mjs` signs ad-hoc and never notarizes; its `build-info-darwin.txt` says `macOS signature: ad-hoc, not notarized`. Gatekeeper blocks such a download until the user clicks Open Anyway in System Settings → Privacy & Security, as the release notes then say.
 
 ```sh
 node scripts/sign-macos.mjs
@@ -143,7 +143,7 @@ hdiutil detach /Volumes/Nuzky
 
 `stapler` prints `The validate action worked!`, and both `spctl` commands print `accepted` and `source=Notarized Developer ID`. An ad-hoc build prints `rejected` instead. `build-info-darwin.txt` names the result on its `macOS signature:` line.
 
-`release.yml` reads that line. When it says `Developer ID, notarized and stapled`, the draft's notes leave out the macOS line about Open Anyway. A rerun writes the draft's notes again and drops edits made on GitHub, so change the text in `scripts/release-notes.md`. `node --test 'scripts/*.test.mjs'` fails when `scripts/release-notes.md` no longer has exactly one such line. The README is not generated and says the dmg is notarized, so a release whose dmg is not notarized also changes the README's macOS install line.
+`release.yml` reads that line. When it says `Developer ID, notarized and stapled`, the draft's notes leave out the macOS line about Open Anyway. A rerun writes the draft's notes again and drops edits made on GitHub, so change the text in `scripts/release-notes.md`. `node --test 'scripts/*.test.mjs'` fails when `scripts/release-notes.md` no longer has exactly one such line. The README is not generated and says the dmg is notarized, so a release whose dmg is not notarized also changes what the README says about macOS.
 
 ## Windows x64
 
