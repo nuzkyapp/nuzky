@@ -230,7 +230,7 @@ function TextInspector({ format, index }: { format: ThumbnailFormat; index: numb
         <Section>
           <MainStyle style={text.style} setStyle={setStyle} maxSize={format === "cover_9x16" ? 400 : 300} />
         </Section>
-        <Disclosure title="More style" summary="Bold, outline, box" open={more} onToggle={() => setMore(!more)}>
+        <Disclosure title="More style" summary="Bold, case, spacing, outline, box, shadow" open={more} onToggle={() => setMore(!more)}>
           <MoreStyle style={text.style} setStyle={setStyle} />
         </Disclosure>
         <Disclosure title="Position" summary="Scale, rotation, opacity" open={position} onToggle={() => setPosition(!position)}>

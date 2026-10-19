@@ -239,6 +239,10 @@ mod tests {
             max_width: None,
             highlight: None,
             keywords: None,
+            shadow: None,
+            letter_case: Default::default(),
+            letter_spacing: 0.0,
+            line_spacing: 0.0,
         };
         p.apply(EditCmd::AddText { start_us: 0, text: "Title".into(), style }).unwrap();
         let video = main_id(&p, 0);

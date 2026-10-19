@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::{
     Adjust, Animation, Asset, AssetKind, Background, CAPTIONS_TRACK, Canvas, CaptionWord, Clip, ClipContent, Ease,
-    Keyframe, Keywords, Project, ReelCandidate, Shape, TextStyle, Thumbnail, ThumbnailFormat, Track, TrackKind,
-    Transform, Transition, WordCorrection,
+    Keyframe, Keywords, LetterCase, Project, ReelCandidate, Shape, TextShadow, TextStyle, Thumbnail, ThumbnailFormat,
+    Track, TrackKind, Transform, Transition, WordCorrection,
 };
 
 pub const MAIN_TRACK: &str = "main";
@@ -381,6 +381,16 @@ pub struct TextStylePatch {
     #[cfg_attr(feature = "ts", ts(as = "Option<Option<Keywords>>"))]
     #[cfg_attr(feature = "schema", schemars(with = "Option<Option<Keywords>>"))]
     pub keywords: Option<Option<Keywords>>,
+    #[serde(default, with = "present", skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Option<TextShadow>>"))]
+    #[cfg_attr(feature = "schema", schemars(with = "Option<Option<TextShadow>>"))]
+    pub shadow: Option<Option<TextShadow>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub letter_case: Option<LetterCase>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub letter_spacing: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_spacing: Option<f32>,
 }
 
 /// The `Transform` fields to change.
@@ -432,6 +442,10 @@ impl TextStylePatch {
         set(&mut style.max_width, &self.max_width);
         set(&mut style.highlight, &self.highlight);
         set(&mut style.keywords, &self.keywords);
+        set(&mut style.shadow, &self.shadow);
+        set(&mut style.letter_case, &self.letter_case);
+        set(&mut style.letter_spacing, &self.letter_spacing);
+        set(&mut style.line_spacing, &self.line_spacing);
     }
 }
 
@@ -2561,6 +2575,10 @@ mod tests {
             max_width: None,
             highlight: None,
             keywords: None,
+            shadow: None,
+            letter_case: Default::default(),
+            letter_spacing: 0.0,
+            line_spacing: 0.0,
         };
         let seg =
             |start_us, end_us, text: &str| CaptionSegment { start_us, end_us, text: text.into(), words: Vec::new() };
@@ -3341,6 +3359,10 @@ mod tests {
             max_width: None,
             highlight: None,
             keywords: None,
+            shadow: None,
+            letter_case: Default::default(),
+            letter_spacing: 0.0,
+            line_spacing: 0.0,
         };
         let seg = |s, e, t: &str| CaptionSegment { start_us: s, end_us: e, text: t.into(), words: Vec::new() };
         p.apply(EditCmd::AddCaptions {
@@ -3438,6 +3460,10 @@ mod tests {
             max_width: None,
             highlight: None,
             keywords: None,
+            shadow: None,
+            letter_case: Default::default(),
+            letter_spacing: 0.0,
+            line_spacing: 0.0,
         };
         let seg = |s, e, t: &str| CaptionSegment { start_us: s, end_us: e, text: t.into(), words: Vec::new() };
         let clips = caption_clips(
@@ -3484,6 +3510,10 @@ mod tests {
             max_width: None,
             highlight: None,
             keywords: None,
+            shadow: None,
+            letter_case: Default::default(),
+            letter_spacing: 0.0,
+            line_spacing: 0.0,
         };
         p.apply(EditCmd::AddText { start_us: 2_000_000, text: "hi".into(), style }).unwrap();
         let music = p.tracks.iter().find(|t| t.kind == TrackKind::Audio).unwrap().id.clone();
@@ -3529,6 +3559,10 @@ mod tests {
             max_width: None,
             highlight: None,
             keywords: None,
+            shadow: None,
+            letter_case: Default::default(),
+            letter_spacing: 0.0,
+            line_spacing: 0.0,
         };
         let seg = CaptionSegment { start_us: 1_000_000, end_us: 3_000_000, text: "jsem se".into(), words: Vec::new() };
         p.apply(EditCmd::AddCaptions { segments: vec![seg], style, anim_in: None, anim_out: None, transform: None })
@@ -3569,6 +3603,10 @@ mod tests {
                 max_width: None,
                 highlight: None,
                 keywords: None,
+                shadow: None,
+                letter_case: Default::default(),
+                letter_spacing: 0.0,
+                line_spacing: 0.0,
             };
             p.apply(EditCmd::AddCaptions {
                 segments: vec![CaptionSegment {
@@ -3938,6 +3976,10 @@ mod tests {
             max_width: None,
             highlight: None,
             keywords: None,
+            shadow: None,
+            letter_case: Default::default(),
+            letter_spacing: 0.0,
+            line_spacing: 0.0,
         };
         p.apply(EditCmd::AddText { start_us: 500_000, text: "Title".into(), style }).unwrap();
         let first = p.tracks[0].clips[0].id.clone();

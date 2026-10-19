@@ -5,7 +5,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, ensure};
 use nuzky_engine::media::{VideoDecoder, orient};
-use nuzky_engine::model::{Asset, AssetKind};
+use nuzky_engine::model::{Asset, AssetKind, TextShadow};
 use serde::{Deserialize, Serialize};
 
 use super::{Alignment, Piece};
@@ -69,6 +69,13 @@ pub struct CaptionLook {
     pub bold: bool,
     /// Colour and width.
     pub outline: Option<(String, f32)>,
+    #[serde(default)]
+    pub shadow: Option<TextShadow>,
+    /// Shares of the size, as a text style has them.
+    #[serde(default)]
+    pub letter_spacing: f32,
+    #[serde(default)]
+    pub line_spacing: f32,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

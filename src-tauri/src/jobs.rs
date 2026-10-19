@@ -1417,6 +1417,10 @@ mod tests {
                 max_width: None,
                 highlight: None,
                 keywords: None,
+                shadow: None,
+                letter_case: Default::default(),
+                letter_spacing: 0.0,
+                line_spacing: 0.0,
             },
         }
     }

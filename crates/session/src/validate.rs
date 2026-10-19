@@ -5,10 +5,10 @@ use anyhow::{Context, Result, ensure};
 use nuzky_engine::{
     Project,
     model::{
-        Asset, AssetKind, Background, Clip, ClipContent, MAX_BORDER_WIDTH, MAX_CORRECTION_CHARS, MAX_FONT_HEIGHT_RATIO,
-        MAX_LEFT_OUT, MAX_LEFT_OUT_CHARS, MAX_REEL_HOOK_CHARS, MAX_REEL_TITLE_CHARS, MAX_REEL_WHY_CHARS,
-        MAX_TEXT_WIDTH_RATIO, PROJECT_VERSION, ReelCandidate, ReelStatus, TextStyle, Thumbnail, TrackKind, Transform,
-        max_stroke_width,
+        Asset, AssetKind, Background, Clip, ClipContent, LETTER_SPACING, LINE_SPACING, MAX_BORDER_WIDTH,
+        MAX_CORRECTION_CHARS, MAX_FONT_HEIGHT_RATIO, MAX_LEFT_OUT, MAX_LEFT_OUT_CHARS, MAX_REEL_HOOK_CHARS,
+        MAX_REEL_TITLE_CHARS, MAX_REEL_WHY_CHARS, MAX_SHADOW_PX, MAX_TEXT_WIDTH_RATIO, PROJECT_VERSION, ReelCandidate,
+        ReelStatus, TextStyle, Thumbnail, TrackKind, Transform, max_stroke_width,
     },
 };
 
@@ -213,6 +213,26 @@ pub fn text_style(style: &TextStyle, (width, height): (u32, u32)) -> Result<()> 
     }
     if let Some(keywords) = &style.keywords {
         color(&keywords.color, "key word color")?;
+    }
+    ensure!(
+        LETTER_SPACING.contains(&style.letter_spacing) && LINE_SPACING.contains(&style.line_spacing),
+        "INVALID_PROJECT: letter spacing goes from {} to {} and line spacing from {} to {} of the font size",
+        LETTER_SPACING.start(),
+        LETTER_SPACING.end(),
+        LINE_SPACING.start(),
+        LINE_SPACING.end()
+    );
+    if let Some(shadow) = &style.shadow {
+        let most = MAX_SHADOW_PX;
+        ensure!(
+            (0.0..=1.0).contains(&shadow.opacity)
+                && (0.0..=most).contains(&shadow.blur)
+                && (0.0..=most).contains(&shadow.distance)
+                && (-360.0..=360.0).contains(&shadow.angle),
+            "INVALID_PROJECT: a text shadow's opacity goes from 0 to 1, its blur and distance from 0 to {most} pixels \
+             and its angle from -360 to 360 degrees"
+        );
+        color(&shadow.color, "shadow color")?;
     }
     Ok(())
 }

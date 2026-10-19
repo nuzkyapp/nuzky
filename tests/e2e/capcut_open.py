@@ -206,7 +206,7 @@ def capcut_open(r):
     r.check('a dialog says it opened from CapCut and what came over',
             dialog and dialog['title'] == 'Opened “Talking reel” from CapCut' and '7 clips, 1 sound' in dialog['text'] and '3 captions' in dialog['text'] and '1 title' in dialog['text'], dialog)
     lines = dialog['lines'] if dialog else []
-    wanted = ['Missing media: gone.mov', 'Media Nuzky cannot open: broken.mp4', 'Transition: Woosh', 'Text shadows', 'Effects', 'Color adjustments']
+    wanted = ['Missing media: gone.mov', 'Media Nuzky cannot open: broken.mp4', 'Transition: Woosh', 'Effects', 'Color adjustments']
     r.check('and lists in one list everything that did not come over, missing media first',
             all(any(l.startswith(w) for l in lines) for w in wanted) and {l.split(':')[0] for l in lines[:2]} == {'Missing media', 'Media Nuzky cannot open'}, lines)
     time.sleep(0.4)
@@ -229,6 +229,9 @@ def capcut_open(r):
     captions = by_name.get('Captions', [{}])[0]
     r.check('captions are editable text on the Captions track, at their place', [c['content']['text'] for c in captions.get('clips', [])] == ['Hello there', 'big zoom', 'and more']
             and all(abs(c['content']['transform']['y'] - 0.25) < 1e-4 for c in captions['clips']), captions)
+    shadows = [c['content']['style'].get('shadow') for c in captions.get('clips', [])]
+    r.check('the caption with a shadow in CapCut keeps it, the others have none',
+            [bool(s) for s in shadows] == [False, True, False] and shadows[1]['color'] == '#000000', shadows)
     r.check('the title is text on a track of its own', [c['content']['text'] for t in by_name.get('Text', []) for c in t['clips']] == ['My title'], by_name.get('Text'))
     overlays = by_name.get('Overlay', [])
     r.check('the photo is an image clip over the start, and the hidden track stays hidden',

@@ -196,6 +196,10 @@ pub fn draw(
             max_width: None,
             highlight: None,
             keywords: None,
+            shadow: None,
+            letter_case: Default::default(),
+            letter_spacing: 0.0,
+            line_spacing: 0.0,
         };
         let image = fonts.render(span.text.trim(), &style, 1.0, 10_000.0).image;
         rows[row] = x0 + f64::from(image.width) + 2.0;

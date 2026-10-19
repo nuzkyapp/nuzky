@@ -204,7 +204,8 @@ fn a_capcut_draft_opens_as_a_project_that_plays_as_cut() {
     let out = run(cli(&dir).arg("new").arg(dir.join("out.nuzky")).arg("--from").arg(&draft));
     let said = String::from_utf8_lossy(&out.stderr);
     let left: Vec<_> = said.lines().filter_map(|line| line.strip_prefix("Not brought over: ")).collect();
-    for what in ["gone.mov", "Transition: Woosh", "Text shadows", "Effects", "Color adjustments"] {
+    assert!(!said.contains("Text shadows"), "{said}");
+    for what in ["gone.mov", "Transition: Woosh", "Effects", "Color adjustments"] {
         assert!(left.iter().any(|line| line.contains(what)), "missing {what}: {said}");
     }
     let project: Value = serde_json::from_slice(&std::fs::read(dir.join("out.nuzky")).unwrap()).unwrap();
@@ -267,6 +268,8 @@ fn a_capcut_draft_opens_as_a_project_that_plays_as_cut() {
         assert_eq!(style["color"], "#ffffff");
         assert_eq!(style["strokeColor"], "#000000");
         assert!((style["strokeWidth"].as_f64().unwrap() - 2.448).abs() < 1e-4);
+        // The first caption has CapCut's shadow, drawn as Nuzky draws one; the others have none.
+        assert_eq!(style["shadow"].is_object(), i == 0, "{style}");
     }
     assert_eq!(tracks[4]["kind"], "text");
     assert_ne!(tracks[4]["name"], "Captions");

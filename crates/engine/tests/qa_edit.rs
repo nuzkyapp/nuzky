@@ -202,6 +202,10 @@ fn equal_start_captions_do_not_overlap() {
         max_width: None,
         highlight: None,
         keywords: None,
+        shadow: None,
+        letter_case: Default::default(),
+        letter_spacing: 0.0,
+        line_spacing: 0.0,
     };
     let _ = e.apply(
         EditCmd::AddCaptions {

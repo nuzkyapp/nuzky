@@ -1,5 +1,5 @@
 import captionStyles from "../../assets/presets/captions.json";
-import type { Adjust, Animation, AnimationKind, CaptionPreset, Crop, KeywordPick, Shape, TextStyle, Transform, TransitionKind } from "./types";
+import type { Adjust, Animation, AnimationKind, CaptionPreset, Crop, KeywordPick, Shape, TextShadow, TextStyle, Transform, TransitionKind } from "./types";
 
 export const FORMATS = [
   { label: "9:16", hint: "Reels, TikTok, Shorts", width: 1080, height: 1920 },
@@ -58,8 +58,17 @@ export function sameStyle(a: TextStyle, b: TextStyle) {
     lower(a.background) === lower(b.background) &&
     lower(a.highlight) === lower(b.highlight) &&
     lower(a.keywords?.color) === lower(b.keywords?.color) &&
-    (a.keywords?.pick ?? null) === (b.keywords?.pick ?? null)
+    (a.keywords?.pick ?? null) === (b.keywords?.pick ?? null) &&
+    (a.letterCase ?? "none") === (b.letterCase ?? "none") &&
+    (a.letterSpacing ?? 0) === (b.letterSpacing ?? 0) &&
+    (a.lineSpacing ?? 0) === (b.lineSpacing ?? 0) &&
+    sameShadow(a.shadow, b.shadow)
   );
+}
+
+function sameShadow(a: TextShadow | null | undefined, b: TextShadow | null | undefined) {
+  if (!a || !b) return !a && !b;
+  return lower(a.color) === lower(b.color) && a.opacity === b.opacity && a.blur === b.blur && a.distance === b.distance && a.angle === b.angle;
 }
 
 // By kind only: the engine shortens an animation to a short caption.

@@ -249,7 +249,7 @@ export function draftCover(format: ThumbnailFormat, project: Project, timeUs: nu
       // Beside the person on a YouTube thumbnail, where nothing covers it; where it was on a cover.
       behind: wide ? false : t.behind,
       transform: wide ? { ...t.transform, x: WIDE_TEXT.x, y: WIDE_TEXT.y } : format === "cover_9x16" ? { ...t.transform, x: 0, y: -0.22 } : t.transform,
-      style: { ...t.style, fontSize: Math.round(t.style.fontSize * k), strokeWidth: t.style.strokeWidth * k, maxWidth: wide ? WIDE_TEXT.maxWidth : null },
+      style: { ...scaledStyle(t.style, k), maxWidth: wide ? WIDE_TEXT.maxWidth : null },
     })),
   };
 }
@@ -267,6 +267,12 @@ export function chooseFrame(format: ThumbnailFormat, timeUs: number, coalesce?: 
   );
 }
 
+/** `style` on a picture `k` times as large: everything measured in pixels grows with it. */
+function scaledStyle(style: TextStyle, k: number): TextStyle {
+  const shadow = style.shadow && { ...style.shadow, blur: style.shadow.blur * k, distance: style.shadow.distance * k };
+  return { ...style, fontSize: Math.round(style.fontSize * k), strokeWidth: style.strokeWidth * k, shadow };
+}
+
 /**
  * A text in the look of `preset`, sized for the format: on a cover in the lower middle, on a YouTube thumbnail of a
  * vertical video beside the person.
@@ -276,7 +282,7 @@ export function presetText(format: ThumbnailFormat, preset: (typeof COVER_PRESET
   const k = format === "youtube_16x9" ? 2 / 3 : 1;
   return {
     text,
-    style: { ...preset.style, fontSize: Math.round(preset.style.fontSize * k), strokeWidth: preset.style.strokeWidth * k, ...(wide ? { maxWidth: WIDE_TEXT.maxWidth } : {}) },
+    style: { ...scaledStyle(preset.style, k), ...(wide ? { maxWidth: WIDE_TEXT.maxWidth } : {}) },
     // Under the face of a talking head and inside the Reels safe area.
     transform: { ...DEFAULT_TRANSFORM, ...(wide ? { x: WIDE_TEXT.x, y: WIDE_TEXT.y } : { y: format === "youtube_16x9" ? -0.2 : 0.12 }) },
     behind: false,

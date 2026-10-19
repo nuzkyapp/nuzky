@@ -4,7 +4,7 @@ import { Check, ChevronDown, ChevronRight, Minus, Search, X } from "lucide-react
 import { followPointer } from "../lib/drag";
 import { fontCss } from "../lib/fonts";
 import { AI_EDITING, useAiLocked } from "../lib/store";
-import type { TextStyle } from "../lib/types";
+import type { TextShadow, TextStyle } from "../lib/types";
 
 type Variant = "primary" | "secondary" | "ghost" | "danger" | "bar";
 
@@ -864,6 +864,16 @@ export function Bars({ lit }: { lit: number }) {
   );
 }
 
+const CASE_CSS = { none: undefined, upper: "uppercase", lower: "lowercase", title: "capitalize" } as const;
+
+/** The engine's text shadow in CSS, at `k` swatch pixels per canvas pixel. */
+function swatchShadow(shadow: TextShadow, k: number) {
+  const angle = (shadow.angle * Math.PI) / 180;
+  const [x, y] = [Math.cos(angle) * shadow.distance * k, -Math.sin(angle) * shadow.distance * k];
+  const alpha = Math.round(Math.min(1, Math.max(0, shadow.opacity)) * 255).toString(16).padStart(2, "0");
+  return `${x.toFixed(2)}px ${y.toFixed(2)}px ${(shadow.blur * k).toFixed(2)}px ${shadow.color.slice(0, 7)}${alpha}`;
+}
+
 /** A style preview in the font the engine draws it with. */
 export function TextSwatch({ style, label, size = 15, lines = 1 }: { style: TextStyle; label: string; /** Font size in px. */ size?: number; /** A long label wraps onto two. */ lines?: 1 | 2 }) {
   // Karaoke styles show the moment a word is spoken: the last word, or the end of a one-word label, lit.
@@ -881,6 +891,9 @@ export function TextSwatch({ style, label, size = 15, lines = 1 }: { style: Text
         background: style.background ?? undefined,
         WebkitTextStroke: style.strokeWidth > 0 ? `${Math.min(2, style.strokeWidth / 4)}px ${style.strokeColor}` : undefined,
         paintOrder: "stroke fill",
+        textShadow: style.shadow ? swatchShadow(style.shadow, size / style.fontSize) : undefined,
+        textTransform: CASE_CSS[style.letterCase ?? "none"],
+        letterSpacing: style.letterSpacing ? `${style.letterSpacing}em` : undefined,
       }}
     >
       {key > 0 && <span style={{ color: style.keywords?.color }}>{label.slice(0, Math.min(key, style.highlight ? split : label.length))}</span>}

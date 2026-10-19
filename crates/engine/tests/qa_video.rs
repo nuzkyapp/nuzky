@@ -883,35 +883,22 @@ fn crop_follows_the_picture_as_shown_after_exif_rotation_and_mirroring() {
     }
 }
 
-#[test]
-fn captions_in_a_small_preview_match_the_export_scaled_down_by_ffmpeg() {
-    use nuzky_engine::edit::{CaptionSegment, EditCmd};
-    if !available() {
-        return;
-    }
-    let d = dir("preview-captions");
+/// How far a caption in a small preview is from the export scaled down by FFmpeg, as the mean pixel error
+/// over the caption's rows.
+fn caption_preview_error(name: &str, style: TextStyle, scale: f32) -> f64 {
+    use nuzky_engine::edit::{CaptionSegment, EditCmd, TransformPatch};
+    let d = dir(name);
     // Grey, so the black outline shows like it does over a video.
     let grey = d.join("grey.png");
     ff(&["-f", "lavfi", "-i", "color=0x808080:s=1080x1920", "-frames:v", "1"], &grey);
     let mut p = project(&grey, 1_000_000);
-    let style = TextStyle {
-        font_family: None,
-        font_size: 110.0,
-        color: "#ffffff".into(),
-        bold: true,
-        stroke_width: 11.0,
-        stroke_color: "#000000".into(),
-        background: None,
-        max_width: None,
-        highlight: None,
-        keywords: None,
-    };
     let segment = CaptionSegment { start_us: 0, end_us: 1_000_000, text: "Poslední dva".into(), words: Vec::new() };
-    p.apply(EditCmd::AddCaptions { segments: vec![segment], style, anim_in: None, anim_out: None, transform: None })
-        .unwrap();
+    let transform = Some(TransformPatch { scale: Some(scale), ..TransformPatch::default() });
+    p.apply(EditCmd::AddCaptions { segments: vec![segment], style, anim_in: None, anim_out: None, transform }).unwrap();
     let mut renderer = Renderer::new().unwrap();
     let export = d.join("export.rgba");
-    std::fs::write(&export, renderer.render(&p, 500_000, 1080, 1920, Wait::Exact, false).unwrap()).unwrap();
+    // As export draws its frames.
+    std::fs::write(&export, renderer.render(&p, 500_000, 1080, 1920, Wait::Exact, true).unwrap()).unwrap();
     // The preview of a vertical video beside the library, the inspector and the AI panel in a 1080p window.
     let (w, h) = (296, 526);
     let preview = renderer.render(&p, 500_000, w, h, Wait::Exact, false).unwrap();
@@ -926,6 +913,68 @@ fn captions_in_a_small_preview_match_the_export_scaled_down_by_ffmpeg() {
         .filter(|y| reference[y * row..(y + 1) * row].as_chunks::<4>().0.iter().any(|px| px[0].abs_diff(128) > 40))
         .collect();
     let band = lit[0] * row..(lit[lit.len() - 1] + 1) * row;
-    let error = mae(&preview[band.clone()], &reference[band]);
+    mae(&preview[band.clone()], &reference[band])
+}
+
+#[test]
+fn captions_in_a_small_preview_match_the_export_scaled_down_by_ffmpeg() {
+    if !available() {
+        return;
+    }
+    let style = TextStyle {
+        font_family: None,
+        font_size: 110.0,
+        color: "#ffffff".into(),
+        bold: true,
+        stroke_width: 11.0,
+        stroke_color: "#000000".into(),
+        background: None,
+        max_width: None,
+        highlight: None,
+        keywords: None,
+        shadow: None,
+        letter_case: Default::default(),
+        letter_spacing: 0.0,
+        line_spacing: 0.0,
+    };
+    let error = caption_preview_error("preview-captions", style, 1.0);
     assert!(error < 4.0, "caption pixel MAE={error}");
+}
+
+#[test]
+fn a_shadowed_caption_in_a_small_preview_matches_the_export_scaled_down_by_ffmpeg() {
+    if !available() {
+        return;
+    }
+    // The creator's CapCut look at 152 %: size 12, a black shadow at 41 %, Blur 23 %, Distance 5, -45°, in
+    // capitals and spaced, over two lines; then a hard shadow up and to the left, where a misplaced one shows.
+    let size = 12.0 * 5.1;
+    let reel = TextShadow {
+        color: "#000000".into(),
+        opacity: 0.41,
+        blur: 0.23 * size / 2.0,
+        distance: 0.05 * size,
+        angle: -45.0,
+    };
+    let hard = TextShadow { color: "#000000".into(), opacity: 1.0, blur: 2.0, distance: 12.0, angle: 135.0 };
+    for (name, shadow) in [("preview-shadowed-captions", reel), ("preview-hard-shadow", hard)] {
+        let style = TextStyle {
+            font_family: None,
+            font_size: size,
+            color: "#fff059".into(),
+            bold: false,
+            stroke_width: 0.0,
+            stroke_color: "#000000".into(),
+            background: None,
+            max_width: Some(300.0),
+            highlight: None,
+            keywords: None,
+            shadow: Some(shadow),
+            letter_case: LetterCase::Upper,
+            letter_spacing: 0.05,
+            line_spacing: 0.1,
+        };
+        let error = caption_preview_error(name, style, 1.52);
+        assert!(error < 4.0, "{name}: caption pixel MAE={error}");
+    }
 }

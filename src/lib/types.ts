@@ -824,6 +824,11 @@ export type LayerBounds = {
   frame: [[number, number], [number, number], [number, number], [number, number]],
 };
 
+/**
+ * How the letters of a text are drawn, whatever case they were typed in.
+ */
+export type LetterCase = "none" | "upper" | "lower" | "title";
+
 export type Library = {
   projects: Array<LibraryProject>,
   collections: Array<Collection>,
@@ -1476,6 +1481,33 @@ export type Suggestion = {
   text: string,
 };
 
+/**
+ * A drop shadow under text, as CapCut draws one.
+ */
+export type TextShadow = {
+  /**
+   * `#rrggbb`
+   */
+  color: string,
+  /**
+   * 0 (invisible) to 1.
+   */
+  opacity: number,
+  /**
+   * How far the shadow's edge softens, in canvas pixels; 0 is a sharp copy.
+   */
+  blur: number,
+  /**
+   * How far the shadow falls from the text, in canvas pixels.
+   */
+  distance: number,
+  /**
+   * The direction it falls in degrees, counterclockwise from the right as in CapCut: -45 falls down and
+   * to the right, 90 straight up.
+   */
+  angle: number,
+};
+
 export type TextStyle = {
   /**
    * Font family name; `None` uses the bundled default, Inter.
@@ -1513,6 +1545,23 @@ export type TextStyle = {
    * Key words of a generated caption in their own colour; the word being spoken still takes `highlight`.
    */
   keywords?: Keywords | null,
+  /**
+   * A soft copy of the letters and their outline under them; `None` draws no shadow.
+   */
+  shadow?: TextShadow | null,
+  /**
+   * Draws the text in capitals, small letters or with each word capitalised; the stored text and its
+   * words stay as typed.
+   */
+  letterCase?: LetterCase,
+  /**
+   * Extra space after every letter, as a share of the font size; negative pulls letters together.
+   */
+  letterSpacing?: number,
+  /**
+   * Extra space between lines, as a share of the font size, on top of the usual 1.2 line height.
+   */
+  lineSpacing?: number,
 };
 
 /**
@@ -1529,6 +1578,10 @@ export type TextStylePatch = {
   maxWidth?: number | null,
   highlight?: string | null,
   keywords?: Keywords | null,
+  shadow?: TextShadow | null,
+  letterCase?: LetterCase,
+  letterSpacing?: number,
+  lineSpacing?: number,
 };
 
 /**

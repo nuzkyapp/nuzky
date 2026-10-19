@@ -153,6 +153,26 @@ pub struct TextStyle {
     pub outline: Option<(String, f32)>,
     /// How wide its lines run before they wrap, when the file says.
     pub wrap: Option<f32>,
+    pub shadow: Option<TextShadow>,
+    /// Extra space after every letter, as a share of the size.
+    pub letter_spacing: f32,
+    /// Extra space between lines, as a share of the size, on top of a 1.2 line height.
+    pub line_spacing: f32,
+}
+
+/// As Nuzky draws a text shadow.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextShadow {
+    /// `#rrggbb`
+    pub color: String,
+    /// 0 to 1.
+    pub opacity: f32,
+    /// Pixels, like the size.
+    pub blur: f32,
+    /// Pixels, like the size.
+    pub distance: f32,
+    /// Degrees counterclockwise from the right: -45 falls down and to the right.
+    pub angle: f32,
 }
 
 #[derive(Clone, Debug, PartialEq)]

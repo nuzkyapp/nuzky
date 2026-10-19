@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { CAPTION_STYLES, KEYWORD_COLOR, KEYWORD_PICKS, TEXT_PRESETS, isLook, sameStyle } from "../../lib/presets";
 import { editClip, useEditor } from "../../lib/store";
-import type { Animation, CaptionPreset, Clip, EditCmd, TextStyle } from "../../lib/types";
+import type { Animation, CaptionPreset, Clip, EditCmd, LetterCase, TextShadow, TextStyle } from "../../lib/types";
 import { FontPicker } from "../FontPicker";
 import { Checkbox, ColorInput, PresetTile, Section, Segmented, Slider, TextSwatch, useLockReason } from "../ui";
 
@@ -113,7 +113,7 @@ export function TextSection({ clip, text, style, caption }: { clip: Clip; text: 
   );
 }
 
-/** Font, size, colour, outline and box of a text. `maxSize` is the largest font size the picture takes. */
+/** Font, size, colour, case, spacing, outline, box and shadow of a text. `maxSize` is the largest font size the picture takes. */
 type SetStyle = (patch: Partial<TextStyle>, key: string) => void;
 
 export function StyleSection({ style, setStyle, maxSize = 300 }: { style: TextStyle; setStyle: SetStyle; maxSize?: number }) {
@@ -138,15 +138,46 @@ export function MainStyle({ style, setStyle, maxSize = 300 }: { style: TextStyle
   );
 }
 
-/** Bold, the outline of the letters and the box behind them. */
+const CASES: { id: LetterCase; label: string; title: string }[] = [
+  { id: "none", label: "Aa", title: "As typed" },
+  { id: "upper", label: "AB", title: "All capitals" },
+  { id: "lower", label: "ab", title: "All small letters" },
+  { id: "title", label: "Ab", title: "Each word capitalised" },
+];
+
+/** A shadow as it starts when turned on: CapCut's direction and distance, softer. */
+const SHADOW: TextShadow = { color: "#000000", opacity: 0.6, blur: 7, distance: 5, angle: -45 };
+
+const percent = (v: number) => String(Math.round(v));
+
+/** Bold, case, spacing, the outline of the letters, the box behind them and their shadow. */
 export function MoreStyle({ style, setStyle }: { style: TextStyle; setStyle: SetStyle }) {
+  const shadow = style.shadow;
+  const setShadow = (patch: Partial<TextShadow>, key: string) => shadow && setStyle({ shadow: { ...shadow, ...patch } }, key);
   return (
     <>
       <Checkbox label="Bold" checked={style.bold} onChange={(v) => setStyle({ bold: v }, "bold")} />
+      <FieldRow label="Case">
+        <div className="min-w-0 flex-1">
+          <Segmented label="Case" value={style.letterCase ?? "none"} onChange={(letterCase) => setStyle({ letterCase }, "case")} options={CASES} />
+        </div>
+      </FieldRow>
+      <Slider label="Letter spacing" value={(style.letterSpacing ?? 0) * 100} min={-20} max={100} step={1} unit="%" format={percent} onChange={(v) => setStyle({ letterSpacing: v / 100 }, "letterSpacing")} />
+      <Slider label="Line spacing" value={(style.lineSpacing ?? 0) * 100} min={-50} max={200} step={1} unit="%" format={percent} onChange={(v) => setStyle({ lineSpacing: v / 100 }, "lineSpacing")} />
       <Slider label="Outline" value={style.strokeWidth} min={0} max={20} step={0.5} format={(v) => v.toFixed(1)} onChange={(v) => setStyle({ strokeWidth: v }, "stroke")} />
       {style.strokeWidth > 0 && <ColorInput label="Outline color" value={style.strokeColor} onChange={(v) => setStyle({ strokeColor: v }, "strokeColor")} />}
       <Checkbox label="Background box" checked={style.background !== null} onChange={(v) => setStyle({ background: v ? "#000000b3" : null }, "bg")} />
       {style.background !== null && <ColorInput label="Box color" value={style.background ?? "#000000b3"} onChange={(v) => setStyle({ background: v }, "bgColor")} />}
+      <Checkbox label="Shadow" checked={!!shadow} onChange={(v) => setStyle({ shadow: v ? SHADOW : null }, "shadow")} />
+      {shadow && (
+        <>
+          <ColorInput label="Shadow color" value={shadow.color} onChange={(color) => setShadow({ color }, "shadowColor")} />
+          <Slider label="Shadow opacity" value={shadow.opacity * 100} min={0} max={100} step={1} unit="%" format={percent} onChange={(v) => setShadow({ opacity: v / 100 }, "shadowOpacity")} />
+          <Slider label="Shadow blur" value={shadow.blur} min={0} max={50} step={0.5} format={(v) => v.toFixed(1)} onChange={(blur) => setShadow({ blur }, "shadowBlur")} />
+          <Slider label="Shadow distance" value={shadow.distance} min={0} max={50} step={0.5} format={(v) => v.toFixed(1)} onChange={(distance) => setShadow({ distance }, "shadowDistance")} />
+          <Slider label="Shadow angle" value={shadow.angle} min={-180} max={180} step={1} unit="°" format={percent} onChange={(angle) => setShadow({ angle }, "shadowAngle")} />
+        </>
+      )}
     </>
   );
 }

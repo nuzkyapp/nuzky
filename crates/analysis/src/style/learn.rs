@@ -966,7 +966,17 @@ fn captions(edits: &[Edit], say: &dyn Fn(&[Example]) -> String) -> Option<Rule> 
         let weight = if look.bold { " bold" } else { "" };
         let outline =
             look.outline.as_ref().map_or(String::new(), |(c, w)| format!(" with a {c} outline {w:.0} pixels wide"));
-        let said = format!("{font}{weight}, {:.0} pixels, {}{outline}", look.size, look.color);
+        let shadow = look.shadow.as_ref().map_or(String::new(), |s| {
+            format!(
+                ", a {} shadow at {:.0} % blurred {:.0} pixels, {:.0} pixels away at {:.0}°",
+                s.color,
+                s.opacity * 100.0,
+                s.blur,
+                s.distance,
+                s.angle
+            )
+        });
+        let said = format!("{font}{weight}, {:.0} pixels, {}{outline}{shadow}", look.size, look.color);
         let at = out.find("Times in the examples").unwrap_or(out.len());
         out.insert_str(at, &format!("They are drawn in {said}, on a frame 1080 pixels across its shorter side. "));
         let mut style = serde_json::json!({"fontSize": look.size, "color": look.color, "bold": look.bold});
@@ -978,6 +988,17 @@ fn captions(edits: &[Edit], say: &dyn Fn(&[Example]) -> String) -> Option<Rule> 
             style["strokeColor"] = color.clone().into();
         } else {
             style["strokeWidth"] = 0.into();
+        }
+        // Read as written: 0.41, not the 0.4099999964 a single-precision number turns into.
+        let hundredths = |v: f32| (f64::from(v) * 100.0).round() / 100.0;
+        if let Some(s) = &look.shadow {
+            style["shadow"] = serde_json::json!({"color": s.color, "opacity": hundredths(s.opacity),
+                "blur": hundredths(s.blur), "distance": hundredths(s.distance), "angle": hundredths(s.angle)});
+        }
+        for (key, value) in [("letterSpacing", look.letter_spacing), ("lineSpacing", look.line_spacing)] {
+            if value != 0.0 {
+                style[key] = hundredths(value).into();
+            }
         }
         settings.push(("build_captions style".into(), style.to_string()));
         choices.push(Choice::text("Look", said));

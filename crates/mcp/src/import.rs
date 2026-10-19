@@ -333,6 +333,16 @@ fn text(clip: &TextClip, project: &Project, fonts: &[String], left: &mut Left) -
             max_width: s.wrap,
             highlight: None,
             keywords: None,
+            shadow: s.shadow.as_ref().map(|s| nuzky_engine::model::TextShadow {
+                color: s.color.clone(),
+                opacity: s.opacity,
+                blur: s.blur,
+                distance: s.distance,
+                angle: s.angle,
+            }),
+            letter_case: Default::default(),
+            letter_spacing: s.letter_spacing,
+            line_spacing: s.line_spacing,
         },
         None => crate::params::reel().style,
     };

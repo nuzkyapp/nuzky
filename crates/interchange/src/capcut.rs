@@ -12,8 +12,8 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::{
-    ImportedTimeline, Keyframe, MediaClip, Read, TextClip, TextStyle, Track, TrackKind, Transform, Transition,
-    TransitionKind, local_path,
+    ImportedTimeline, Keyframe, MediaClip, Read, TextClip, TextShadow, TextStyle, Track, TrackKind, Transform,
+    Transition, TransitionKind, local_path,
 };
 
 /// The timeline files of a draft, Windows' first.
@@ -765,6 +765,9 @@ fn text_clip(
         .filter(|w| w.is_finite() && *w > 0.0 && *w <= 4.0)
         .zip(canvas_width)
         .map(|(share, width)| share as f32 * width);
+    let shadow = text_shadow(style("shadows").and_then(|s| s.get(0)), material, size_px);
+    // CapCut keeps both spacings as shares of the size; its usual line spacing is 0.02.
+    let spacing = |key: &str, usual: f64| number(key).filter(|v| v.is_finite()).map_or(0.0, |v| (v - usual) as f32);
     let text_style = (size_px > 0.0).then(|| TextStyle {
         font,
         size: size_px,
@@ -772,15 +775,16 @@ fn text_clip(
         bold: heavy || style("bold").and_then(Value::as_bool).unwrap_or(false),
         outline,
         wrap,
+        shadow,
+        letter_spacing: spacing("letter_spacing", 0.0).clamp(-0.5, 2.0),
+        line_spacing: spacing("line_spacing", 0.02).clamp(-0.6, 3.0),
     });
-    let shadow = material.get("has_shadow").and_then(Value::as_bool).unwrap_or(false)
-        || style("shadows").and_then(Value::as_array).is_some_and(|s| !s.is_empty());
+    let depth = material.get("shadow_thickness_projection_enable").and_then(Value::as_bool).unwrap_or(false);
     let looks = [
-        (shadow, "Text shadows"),
+        (depth, "Text shadows with depth, drawn flat"),
         (number("background_style").is_some_and(|s| s != 0.0), "Text backgrounds"),
         (number("alignment").is_some_and(|a| a != 1.0), "Text aligned left or right"),
         (number("typesetting").is_some_and(|t| t != 0.0), "Vertical text"),
-        (number("letter_spacing").is_some_and(|l| l != 0.0), "Letter spacing"),
         (number("text_alpha").is_some_and(|a| a < 1.0), "Opacity"),
         (
             content.styles.iter().filter_map(|s| s.get("fill").and_then(solid)).collect::<HashSet<_>>().len() > 1,
@@ -806,6 +810,38 @@ fn solid(paint: &Value) -> Option<String> {
     let channel =
         |i: usize| rgb.get(i)?.as_f64().filter(|v| v.is_finite()).map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
     Some(format!("#{:02x}{:02x}{:02x}", channel(0)?, channel(1)?, channel(2)?))
+}
+
+/// The shadow of a text of `size` pixels, from its first style's shadow or else the material's.
+/// CapCut's Blur percentage is `diffuse` × 6 and `shadow_smoothing` / 3; Nuzky blurs half the size
+/// at 100 %. Its Distance runs to 100, a whole size away.
+fn text_shadow(styled: Option<&Value>, material: &Value, size: f32) -> Option<TextShadow> {
+    let number = |value: Option<&Value>| value.and_then(Value::as_f64).filter(|v| v.is_finite()).map(|v| v as f32);
+    let own = |key: &str| number(material.get(key));
+    let (color, opacity, blur, distance, angle) = match styled {
+        Some(s) => (
+            solid(s),
+            number(s.get("alpha")),
+            number(s.get("diffuse")).map(|d| d * 6.0),
+            number(s.get("distance")),
+            number(s.get("angle")),
+        ),
+        None if material.get("has_shadow").and_then(Value::as_bool) == Some(true) => (
+            material.get("shadow_color").and_then(Value::as_str).and_then(hex),
+            own("shadow_alpha"),
+            own("shadow_smoothing").map(|s| s / 3.0),
+            own("shadow_distance"),
+            own("shadow_angle"),
+        ),
+        None => return None,
+    };
+    Some(TextShadow {
+        color: color.unwrap_or_else(|| "#000000".into()),
+        opacity: opacity.unwrap_or(0.9).clamp(0.0, 1.0),
+        blur: blur.unwrap_or(0.15).clamp(0.0, 1.0) * size / 2.0,
+        distance: distance.unwrap_or(5.0).clamp(0.0, 100.0) / 100.0 * size,
+        angle: angle.unwrap_or(-45.0).clamp(-360.0, 360.0),
+    })
 }
 
 /// `#rrggbb` of CapCut's `#rrggbb` or `#rrggbbaa`.
@@ -880,7 +916,7 @@ mod tests {
     fn reads_the_cut_its_zoom_and_its_captions_from_a_macos_draft() {
         let read = read(MAC, Path::new("/drafts/Reel")).unwrap();
         let t = &read.timeline;
-        assert_eq!(read.unread, ["Text shadows (3 times)"]);
+        assert!(read.unread.is_empty(), "{:?}", read.unread);
         assert_eq!((t.name.as_str(), t.fps, t.size), ("Reel", Some(30.0), Some((1080, 1920))));
         let main = &t.tracks[0];
         assert_eq!(main.kind, TrackKind::Video);
@@ -923,11 +959,42 @@ mod tests {
         assert!(outline == "#000000" && (width - 3.672).abs() < 0.01, "{width}");
         // Lines wrap at 82% of the frame's width, before the caption's own scale.
         assert!(close(style.wrap.unwrap(), 885.6), "{:?}", style.wrap);
+        // The material's shadow: black at 41 %, Blur 23 % (smoothing 0.69), Distance 5, -45°.
+        let shadow = style.shadow.clone().unwrap();
+        assert_eq!(shadow.color, "#000000");
+        assert!(close(shadow.opacity, 0.41) && close(shadow.angle, -45.0), "{shadow:?}");
+        assert!(close(shadow.blur, 0.23 * 61.2 / 2.0) && close(shadow.distance, 0.05 * 61.2), "{shadow:?}");
+        // CapCut's usual line spacing is 0.02 of the size: no extra space.
+        assert!(close(style.letter_spacing, 0.0) && close(style.line_spacing, 0.0));
 
         let song = &t.tracks[2].clips[0];
         assert_eq!(t.tracks[2].kind, TrackKind::Audio);
         assert!(song.path.as_ref().unwrap().ends_with("song.mp3") && (song.volume.unwrap() - 0.1187).abs() < 1e-3);
         assert_eq!(t.duration_us(), 91_900_000);
+    }
+
+    #[test]
+    fn a_styled_shadow_and_spacing_come_over_and_a_text_without_shadow_has_none() {
+        let mut draft = mac();
+        let texts = draft["materials"]["texts"].as_array_mut().unwrap();
+        // As CapCut writes the creator's Reel look: the style's own shadow wins over the material's.
+        let mut content: Value = serde_json::from_str(texts[0]["content"].as_str().unwrap()).unwrap();
+        content["styles"][0]["shadows"] = json!([{"alpha": 0.5, "angle": 135.0, "diffuse": 0.038333334,
+            "distance": 20.0, "content": {"render_type": "solid", "solid": {"color": [1.0, 0.0, 0.0]}}}]);
+        texts[0]["content"] = content.to_string().into();
+        texts[0]["letter_spacing"] = json!(0.1);
+        texts[0]["line_spacing"] = json!(0.12);
+        texts[1]["has_shadow"] = json!(false);
+        texts[2]["shadow_thickness_projection_enable"] = json!(true);
+        let read = read_value(&draft, Path::new("/drafts/Reel")).unwrap();
+        let styles: Vec<_> = read.timeline.tracks[1].texts.iter().map(|t| t.style.clone().unwrap()).collect();
+        let shadow = styles[0].shadow.clone().unwrap();
+        assert_eq!(shadow.color, "#ff0000");
+        assert!(close(shadow.opacity, 0.5) && close(shadow.angle, 135.0), "{shadow:?}");
+        assert!(close(shadow.blur, 0.23 * 61.2 / 2.0) && close(shadow.distance, 0.2 * 61.2), "{shadow:?}");
+        assert!(close(styles[0].letter_spacing, 0.1) && close(styles[0].line_spacing, 0.1), "{:?}", styles[0]);
+        assert_eq!(styles[1].shadow, None);
+        assert_eq!(read.unread, ["Text shadows with depth, drawn flat"]);
     }
 
     #[test]
@@ -959,7 +1026,7 @@ mod tests {
         clip["source_timerange"]["duration"] = json!(4_533_332);
         let read = read_value(&draft, Path::new("/d")).unwrap();
         assert_eq!(read.timeline.tracks[0].clips[1].speed, 2.0);
-        assert_eq!(read.unread, ["A speed ramp, read as its average speed", "Text shadows (3 times)"]);
+        assert_eq!(read.unread, ["A speed ramp, read as its average speed"]);
     }
 
     #[test]
@@ -1050,10 +1117,7 @@ mod tests {
         assert!(tracks[3].hidden && !tracks[0].hidden && tracks[3].clips.len() == 3);
         // A muted track keeps its clips' own volume, so turning its sound back on brings them back as they were.
         assert!(tracks[2].muted && tracks[2].clips[0].volume.is_some_and(|v| v > 0.0));
-        assert_eq!(
-            read.unread,
-            ["A clip played backwards", "A part whose material is missing", "Effects", "Text shadows (3 times)"]
-        );
+        assert_eq!(read.unread, ["A clip played backwards", "A part whose material is missing", "Effects"]);
 
         // Learning hears and sees only what the finished video plays.
         let played = read.played();
@@ -1063,14 +1127,7 @@ mod tests {
         assert_eq!(tracks[2].clips[0].volume, Some(0.0));
         assert_eq!(
             played.unread,
-            [
-                "A clip played backwards",
-                "A hidden track",
-                "A part whose material is missing",
-                "A photo",
-                "Effects",
-                "Text shadows (3 times)"
-            ]
+            ["A clip played backwards", "A hidden track", "A part whose material is missing", "A photo", "Effects"]
         );
     }
 
@@ -1103,7 +1160,7 @@ mod tests {
         let read = read_value(&draft, &dir).unwrap();
         let paths: Vec<_> = read.timeline.tracks[0].clips.iter().map(|c| c.path.clone().unwrap()).collect();
         assert_eq!(paths, [dir.join("Resources/combination/part.mp4"), dir.join("assets/video/broll.mp4")]);
-        assert_eq!(read.unread, [r"Media that is not a file on this computer: talk.mov", "Text shadows (3 times)"]);
+        assert_eq!(read.unread, [r"Media that is not a file on this computer: talk.mov"]);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

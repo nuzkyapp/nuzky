@@ -910,6 +910,10 @@ mod tests {
             max_width: None,
             highlight: None,
             keywords: None,
+            shadow: None,
+            letter_case: Default::default(),
+            letter_spacing: 0.0,
+            line_spacing: 0.0,
         };
         for (id, start) in [("out", 0), ("in", 1_000_000)] {
             let mut clip = Clip::new(
@@ -982,6 +986,10 @@ mod tests {
             max_width: None,
             highlight: None,
             keywords: None,
+            shadow: None,
+            letter_case: Default::default(),
+            letter_spacing: 0.0,
+            line_spacing: 0.0,
         };
         let mut text = TextRenderer::new();
         // One line hits the glyph limit at 2160p, two lines the bitmap pixel limit.
@@ -1074,6 +1082,10 @@ mod tests {
             max_width: None,
             highlight: None,
             keywords: None,
+            shadow: None,
+            letter_case: Default::default(),
+            letter_spacing: 0.0,
+            line_spacing: 0.0,
         };
         // The longest reel caption, 15 characters, is wider than the safe area at 95 px and wraps.
         let segment =
@@ -1116,6 +1128,10 @@ mod tests {
             max_width: None,
             highlight: None,
             keywords: None,
+            shadow: None,
+            letter_case: Default::default(),
+            letter_spacing: 0.0,
+            line_spacing: 0.0,
         };
         // Rasterised at 2x and drawn at 1.3x, so every glyph edge is filtered down.
         let transform = Transform { scale: 1.3, rotation: 7.0, ..Transform::default() };
@@ -1145,6 +1161,10 @@ mod tests {
             max_width: None,
             highlight: None,
             keywords: None,
+            shadow: None,
+            letter_case: Default::default(),
+            letter_spacing: 0.0,
+            line_spacing: 0.0,
         };
         let image = text.render("Ahoj světe", &style, 1.0, 972.0).image;
         let clip = Clip::new(
@@ -1208,6 +1228,10 @@ mod tests {
             max_width: None,
             highlight: highlight.map(Into::into),
             keywords: None,
+            shadow: None,
+            letter_case: Default::default(),
+            letter_spacing: 0.0,
+            line_spacing: 0.0,
         };
         let word = |text: &str, start: i64, end: i64| CaptionWord {
             text: text.into(),

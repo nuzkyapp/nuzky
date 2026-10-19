@@ -2055,6 +2055,10 @@ mod tests {
             max_width: None,
             highlight: None,
             keywords: None,
+            shadow: None,
+            letter_case: Default::default(),
+            letter_spacing: 0.0,
+            line_spacing: 0.0,
         };
         project
             .apply(EditCmd::AddText { start_us: 0, text: "A very long unrelated title".into(), style: style.clone() })

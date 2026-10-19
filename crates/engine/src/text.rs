@@ -11,7 +11,7 @@ use cosmic_text::{
 };
 
 use crate::gpu::Image;
-use crate::model::{TextStyle, max_stroke_width, parse_color};
+use crate::model::{LETTER_SPACING, LINE_SPACING, LetterCase, MAX_SHADOW_PX, TextStyle, max_stroke_width, parse_color};
 
 // Physical raster limits also bound legacy files, zoomed text, many lines and cache retention.
 const MAX_GLYPH_PX: f32 = 2048.0;
@@ -260,27 +260,45 @@ impl TextRenderer {
         let stroke = finite_clamp(style.stroke_width, 0.0, max_stroke_width(size));
         let max_width = finite_clamp(max_width / wanted, 1.0, MAX_LAYOUT_SIDE);
         let pad_box = if style.background.is_some() { size * 0.3 } else { 0.0 };
-        let pad = (stroke.ceil() + pad_box.ceil() + 2.0) as i32;
+        let letter_spacing = finite_clamp(style.letter_spacing, *LETTER_SPACING.start(), *LETTER_SPACING.end());
+        let line_spacing = finite_clamp(style.line_spacing, *LINE_SPACING.start(), *LINE_SPACING.end()) * size;
+        let shadow = style.shadow.as_ref().map(|shadow| {
+            let distance = finite_clamp(shadow.distance, 0.0, MAX_SHADOW_PX);
+            let angle = if shadow.angle.is_finite() { shadow.angle.to_radians() } else { 0.0 };
+            ((angle.cos() * distance, -angle.sin() * distance), finite_clamp(shadow.blur, 0.0, MAX_SHADOW_PX))
+        });
+        let text_pad = stroke.ceil() + pad_box.ceil() + 2.0;
+        // The image grows by the shadow's reach on every side, so the text stays at the layer's centre.
+        let room = shadow.map_or(0.0, |((dx, dy), blur)| (dx.abs().max(dy.abs()) + blur).ceil());
+        let pad = (text_pad + room) as i32;
 
-        let line_height = size * 1.2;
+        let line_height = size * 1.2 + line_spacing;
         let mut buffer = Buffer::new(&mut self.fonts, Metrics::new(size, line_height));
-        let wrap = (max_width - 2.0 * pad as f32).max(size);
+        // Text wraps where it would without a shadow.
+        let wrap = (max_width - 2.0 * text_pad).max(size);
         buffer.set_size(Some(wrap), Some((MAX_TEXT_LINES * line_height).max(MAX_LAYOUT_SIDE)));
         let family = self.family(style.font_family.as_deref());
         let weight = if style.bold && self.draws_bold(family) { Weight::BOLD } else { Weight::NORMAL };
-        let attrs = Attrs::new().family(family).weight(weight);
+        let mut attrs = Attrs::new().family(family).weight(weight);
+        if letter_spacing != 0.0 {
+            attrs = attrs.letter_spacing(letter_spacing);
+        }
         let text = if text.trim().is_empty() { " " } else { text };
-        buffer.set_text(text, &attrs, Shaping::Advanced, Some(Align::Center));
+        let (text, shown_to_typed) = cased(text, style.letter_case);
+        buffer.set_text(&text, &attrs, Shaping::Advanced, Some(Align::Center));
         buffer.shape_until_scroll(&mut self.fonts, false);
 
         let mut line_w: f32 = 0.0;
         let mut text_h: f32 = 0.0;
         for run in buffer.layout_runs() {
             line_w = line_w.max(run.line_w);
-            text_h = text_h.max(run.line_top + run.line_height);
+            text_h = text_h.max(run.line_top + size * 1.2);
         }
-        // Glyphs are centred inside `wrap`, so crop to the widest line.
+        // Glyphs are centred inside `wrap`, so crop to the widest line. Every line ends in the letter spacing
+        // after its last letter, which is not drawn. Line spacing goes only between lines: cosmic-text centres
+        // each line in its height, so the glyphs move up by half the spacing and the last line ends as without.
         let x0 = ((wrap - line_w) / 2.0).floor() as i32;
+        let line_w = (line_w - letter_spacing * size).max(0.0);
         let canvas_w = (line_w.ceil() + 2.0 * pad as f32).max(1.0);
         let canvas_h = (text_h.ceil() + 2.0 * pad as f32).max(1.0);
         // Large text gets a coarser raster rather than a smaller font or a cropped bitmap.
@@ -304,30 +322,40 @@ impl TextRenderer {
 
         let mut fill = vec![0u8; w * h];
         // Glyph positions name the byte of their line; lines start where cosmic-text split the text.
-        let line_starts: Vec<usize> = LineIter::new(text).map(|(range, _)| range.start).collect();
+        let line_starts: Vec<usize> = LineIter::new(&text).map(|(range, _)| range.start).collect();
         let mut glyphs = Vec::new();
         for run in buffer.layout_runs() {
             let line_start = line_starts.get(run.line_i).copied().unwrap_or(usize::MAX / 2);
             for glyph in run.glyphs {
-                let offset = ((pad - x0) as f32 * scale, (run.line_y + pad as f32) * scale);
+                let offset = ((pad - x0) as f32 * scale, (run.line_y - line_spacing / 2.0 + pad as f32) * scale);
                 let physical = glyph.physical(offset, scale);
-                let placed =
-                    Placed { start: line_start + glyph.start, key: physical.cache_key, x: physical.x, y: physical.y };
+                let shown = line_start + glyph.start;
+                let start = shown_to_typed.as_ref().map_or(shown, |typed| typed.get(shown).copied().unwrap_or(shown));
+                let placed = Placed { start, key: physical.cache_key, x: physical.x, y: physical.y };
                 stamp(&mut self.swash, &mut self.fonts, &placed, &mut fill, w, h);
                 glyphs.push(placed);
             }
         }
 
         let outline = if stroke > 0.0 { Some(dilate(&fill, w, h, stroke * scale)) } else { None };
-        Layout { w, h, scale, radius: size * scale * 0.25, fill, outline, glyphs }
+        let shadow = shadow.map(|((dx, dy), blur)| {
+            let mut mask = shifted(outline.as_ref().unwrap_or(&fill), w, h, (dx * scale).round(), (dy * scale).round());
+            box_blur(&mut mask, w, h, blur * scale);
+            mask
+        });
+        Layout { w, h, scale, radius: size * scale * 0.25, inset: room * scale, fill, outline, shadow, glyphs }
     }
 
     /// Colours a layout: box, outline, then the fill, with the key words' coverage in the keyword colour and
     /// the spoken word's in the highlight.
     fn paint(&mut self, layout: &Layout, style: &TextStyle, keys: Option<&[u8]>, spoken: Option<&[u8]>) -> TextImage {
         self.stats.paints += 1;
-        let Layout { w, h, scale, radius, ref fill, ref outline, .. } = *layout;
+        let Layout { w, h, scale, radius, inset, ref fill, ref outline, ref shadow, .. } = *layout;
         let fill_c = parse_color(&style.color);
+        let shadow_c = style.shadow.as_ref().map(|shadow| {
+            let [r, g, b, a] = parse_color(&shadow.color);
+            [r, g, b, a * finite_clamp(shadow.opacity, 0.0, 1.0)]
+        });
         let stroke_c = parse_color(&style.stroke_color);
         let bg_c = style.background.as_deref().map(parse_color);
         let highlight_c = style.highlight.as_deref().map(parse_color).unwrap_or(fill_c);
@@ -350,7 +378,11 @@ impl TextRenderer {
                     acc[3] = a + acc[3] * (1.0 - a);
                 };
                 if let Some(bg) = bg_c {
-                    over(bg, rounded_rect_coverage(x as f32 + 0.5, y as f32 + 0.5, w as f32, h as f32, radius));
+                    let (x, y) = (x as f32 + 0.5 - inset, y as f32 + 0.5 - inset);
+                    over(bg, rounded_rect_coverage(x, y, w as f32 - 2.0 * inset, h as f32 - 2.0 * inset, radius));
+                }
+                if let (Some(s), Some(c)) = (shadow, shadow_c) {
+                    over(c, s[i] as f32 / 255.0);
                 }
                 if let Some(o) = outline {
                     over(stroke_c, o[i] as f32 / 255.0);
@@ -385,16 +417,98 @@ struct Layout {
     scale: f32,
     /// Corner radius of the background box in output pixels.
     radius: f32,
+    /// Room for the shadow around the background box, in output pixels.
+    inset: f32,
     /// Glyph coverage.
     fill: Vec<u8>,
     /// Glyph coverage dilated by the outline width.
     outline: Option<Vec<u8>>,
+    /// The outline's coverage, or the glyphs' without one, moved and blurred.
+    shadow: Option<Vec<u8>>,
     glyphs: Vec<Placed>,
 }
 
 impl Layout {
     fn bytes(&self) -> usize {
-        self.fill.len() * if self.outline.is_some() { 2 } else { 1 } + self.glyphs.len() * size_of::<Placed>()
+        let masks = 1 + usize::from(self.outline.is_some()) + usize::from(self.shadow.is_some());
+        self.fill.len() * masks + self.glyphs.len() * size_of::<Placed>()
+    }
+}
+
+/// `text` as `case` draws it and, when that changed it, the byte of `text` each of its bytes comes from, so
+/// karaoke and key words still find their words.
+fn cased(text: &str, case: LetterCase) -> (std::borrow::Cow<'_, str>, Option<Vec<usize>>) {
+    if case == LetterCase::None {
+        return (text.into(), None);
+    }
+    let mut shown = String::with_capacity(text.len());
+    let mut typed = Vec::with_capacity(text.len() + 1);
+    let mut word_start = true;
+    for (at, c) in text.char_indices() {
+        let before = shown.len();
+        match case {
+            LetterCase::Upper => shown.extend(c.to_uppercase()),
+            LetterCase::Lower => shown.extend(c.to_lowercase()),
+            _ if word_start && c.is_alphabetic() => shown.extend(c.to_uppercase()),
+            _ => shown.push(c),
+        }
+        word_start = c.is_whitespace() || (word_start && !c.is_alphanumeric());
+        typed.resize(typed.len() + shown.len() - before, at);
+    }
+    typed.push(text.len());
+    (shown.into(), Some(typed))
+}
+
+/// `mask` moved by whole pixels, dropping what moves past an edge.
+fn shifted(mask: &[u8], w: usize, h: usize, dx: f32, dy: f32) -> Vec<u8> {
+    let (dx, dy) = (dx as isize, dy as isize);
+    let mut out = vec![0u8; w * h];
+    let (from, to) = (dx.min(0).unsigned_abs(), dx.max(0) as usize);
+    let len = w.saturating_sub(dx.unsigned_abs());
+    for y in 0..h {
+        let sy = y as isize - dy;
+        if len == 0 || sy < 0 || sy >= h as isize {
+            continue;
+        }
+        let src = sy as usize * w + from;
+        out[y * w + to..y * w + to + len].copy_from_slice(&mask[src..src + len]);
+    }
+    out
+}
+
+/// Softens `mask` by three box blurs in each direction, close to a Gaussian, reaching `radius` pixels in
+/// all. A pass costs the same for any radius.
+fn box_blur(mask: &mut [u8], w: usize, h: usize, radius: f32) {
+    let k = (radius / 3.0).round() as usize;
+    if k == 0 {
+        return;
+    }
+    let mut line = Vec::new();
+    for _ in 0..3 {
+        for y in 0..h {
+            blur_line(mask, y * w, 1, w, k, &mut line);
+        }
+        for x in 0..w {
+            blur_line(mask, x, w, h, k, &mut line);
+        }
+    }
+}
+
+/// Averages each of `n` values `step` apart from `start` with the `k` on either side, counting those past
+/// the ends as empty.
+fn blur_line(mask: &mut [u8], start: usize, step: usize, n: usize, k: usize, line: &mut Vec<u8>) {
+    line.clear();
+    line.extend((0..n).map(|i| mask[start + i * step]));
+    let window = (2 * k + 1) as u32;
+    let mut sum: u32 = line[..k.min(n)].iter().map(|&v| u32::from(v)).sum();
+    for i in 0..n {
+        if i + k < n {
+            sum += u32::from(line[i + k]);
+        }
+        mask[start + i * step] = ((sum + window / 2) / window) as u8;
+        if i >= k {
+            sum -= u32::from(line[i - k]);
+        }
     }
 }
 
@@ -479,6 +593,7 @@ fn rounded_rect_coverage(x: f32, y: f32, w: f32, h: f32, r: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::TextShadow;
     use cosmic_text::skrifa::{FontRef, MetadataProvider};
 
     const CZECH: &str = "Příliš žluťoučký kůň ěščřžýáíéúůťďň ĚŠČŘŽÝÁÍÉÚŮŤĎŇ";
@@ -506,6 +621,10 @@ mod tests {
             max_width: None,
             highlight: None,
             keywords: None,
+            shadow: None,
+            letter_case: Default::default(),
+            letter_spacing: 0.0,
+            line_spacing: 0.0,
         }
     }
 
@@ -547,6 +666,10 @@ mod tests {
             old.font_size = value;
             old.stroke_width = value;
             old.max_width = Some(value);
+            old.letter_spacing = value;
+            old.line_spacing = value;
+            old.shadow =
+                Some(TextShadow { color: "#€".into(), opacity: value, blur: value, distance: value, angle: value });
             let bounded = old.bounded(&canvas);
             let image = renderer.render("Old title", &bounded, 1.0, bounded.max_width.unwrap()).image;
             assert!(image.width > 0 && image.height > 0);
@@ -561,6 +684,181 @@ mod tests {
         assert!(image.data.len() <= MAX_RASTER_PIXELS * 4);
         let image = renderer.render(&"line\n".repeat(1000), &style("Inter"), f32::NAN, f32::INFINITY).image;
         assert!(image.data.len() <= MAX_RASTER_PIXELS * 4);
+        old.shadow =
+            Some(TextShadow { color: "#000".into(), opacity: 1.0, blur: f32::MAX, distance: f32::MAX, angle: 1e30 });
+        old.letter_spacing = f32::MAX;
+        old.line_spacing = f32::MIN;
+        let image = renderer.render(&"line\n".repeat(1000), &old, 8.0, f32::MAX).image;
+        assert!(image.data.len() <= MAX_RASTER_PIXELS * 4);
+    }
+
+    /// The creator's CapCut caption look as the importer maps it: size 12, #fff059, a black shadow at 41 %,
+    /// Blur 23 %, Distance 5, -45°.
+    fn reel_look() -> TextStyle {
+        let size = 12.0 * 5.1;
+        TextStyle {
+            font_size: size,
+            color: "#fff059".into(),
+            stroke_width: 0.0,
+            shadow: Some(TextShadow {
+                color: "#000000".into(),
+                opacity: 0.41,
+                blur: 0.23 * size / 2.0,
+                distance: 0.05 * size,
+                angle: -45.0,
+            }),
+            ..style("Inter")
+        }
+    }
+
+    /// Where the pixels `keep` picks lie on average, weighted by their alpha, in canvas pixels from the
+    /// image's centre, and how much of them there is.
+    fn centre(text: &TextImage, keep: impl Fn(&[u8; 4]) -> bool) -> (f32, f32, f32) {
+        let w = text.image.width as usize;
+        let (mut x, mut y, mut total) = (0.0, 0.0, 0.0);
+        for (i, px) in text.image.data.as_chunks::<4>().0.iter().enumerate().filter(|(_, px)| keep(px)) {
+            let a = px[3] as f32;
+            x += (i % w) as f32 * a;
+            y += (i / w) as f32 * a;
+            total += a;
+        }
+        let at = |sum: f32, side: u32| (sum / total.max(1.0) - side as f32 / 2.0) / text.scale;
+        (at(x, text.image.width), at(y, text.image.height), total)
+    }
+
+    fn dark(px: &[u8; 4]) -> bool {
+        px[3] > 0 && u32::from(px[0]) + u32::from(px[1]) + u32::from(px[2]) < 120
+    }
+
+    fn bright(px: &[u8; 4]) -> bool {
+        px[3] > 200 && px[0] > 200 && px[1] > 200
+    }
+
+    #[test]
+    fn the_reel_shadow_falls_down_and_right_under_the_text_without_moving_it() {
+        let mut renderer = bundled_renderer();
+        let look = reel_look();
+        let plain = TextStyle { shadow: None, ..look.clone() };
+        // As a layer scaled 152 % is drawn.
+        let (with, without) =
+            (renderer.render("Ahoj světe", &look, 2.0, 2000.0), renderer.render("Ahoj světe", &plain, 2.0, 2000.0));
+        assert_eq!(centre(&without, dark).2, 0.0, "no shadow without one");
+        assert!(centre(&with, dark).2 > 0.0, "the shadow shows beside the letters");
+        // Letters filled with nothing leave the shadow alone. CapCut's -45° is down and to the right.
+        let ghost =
+            renderer.render("Ahoj světe", &TextStyle { color: "#fff05900".into(), ..look.clone() }, 2.0, 2000.0);
+        let (sx, sy, _) = centre(&ghost, |p| p[3] > 0);
+        let (tx, ty, _) = centre(&without, |p| p[3] > 0);
+        let away = 0.05 * look.font_size * std::f32::consts::FRAC_1_SQRT_2;
+        assert!((sx - tx - away).abs() < 0.6 && (sy - ty - away).abs() < 0.6, "{:?}, not {away}", (sx - tx, sy - ty));
+        // The letters stay where they were: the image grows by the shadow's reach on every side.
+        let (lx, ly, _) = centre(&with, bright);
+        let (px, py, _) = centre(&without, bright);
+        assert!((px - lx).abs() < 0.5 && (py - ly).abs() < 0.5, "{:?} vs {:?}", (px, py), (lx, ly));
+        // Not clipped: the image's edges stay clear.
+        let (w, h) = (with.image.width as usize, with.image.height as usize);
+        let px = with.image.data.as_chunks::<4>().0;
+        let edges = (0..w).flat_map(|x| [x, (h - 1) * w + x]).chain((0..h).flat_map(|y| [y * w, y * w + w - 1]));
+        assert!(edges.into_iter().all(|i| px[i][3] == 0), "the shadow reaches the edge");
+        // At 41 % black, the shadow alone is never darker than that.
+        assert!(px.iter().filter(|p| dark(p)).all(|p| p[3] <= 105), "too dark");
+    }
+
+    #[test]
+    fn a_sharp_shadow_is_the_letters_moved_by_its_distance_in_its_direction() {
+        let mut renderer = bundled_renderer();
+        let mut look = style("Inter");
+        look.stroke_width = 0.0;
+        let bounds = |text: &TextImage, keep: fn(&[u8; 4]) -> bool| {
+            let w = text.image.width as usize;
+            let (mut x0, mut y0, mut x1, mut y1) = (usize::MAX, usize::MAX, 0, 0);
+            for (i, _) in text.image.data.as_chunks::<4>().0.iter().enumerate().filter(|(_, px)| keep(px)) {
+                (x0, y0, x1, y1) = (x0.min(i % w), y0.min(i / w), x1.max(i % w), y1.max(i / w));
+            }
+            [x0, y0, x1, y1].map(|v| v as f32)
+        };
+        let red = |px: &[u8; 4]| px[3] > 200 && px[0] > 200 && px[1] < 60;
+        for (angle, (dx, dy)) in [(90.0, (0.0, -20.0)), (180.0, (-20.0, 0.0)), (-45.0, (14.0, 14.0))] {
+            look.shadow = Some(TextShadow { color: "#ff0000".into(), opacity: 1.0, blur: 0.0, distance: 20.0, angle });
+            let text = renderer.render("H", &look, 1.0, 1000.0);
+            let (letters, shadow) = (bounds(&text, bright), bounds(&text, red));
+            // Where the letters cover it, the shadow does not show: compare the far edges.
+            let far_x = if dx < 0.0 { shadow[0] - letters[0] } else { shadow[2] - letters[2] };
+            let far_y = if dy < 0.0 { shadow[1] - letters[1] } else { shadow[3] - letters[3] };
+            assert!((far_x - dx).abs() <= 1.5 && (far_y - dy).abs() <= 1.5, "{angle}°: {:?}", (far_x, far_y));
+        }
+    }
+
+    #[test]
+    fn letter_spacing_widens_the_text_and_line_spacing_moves_its_lines_apart() {
+        let mut renderer = bundled_renderer();
+        let mut look = style("Inter");
+        let size = |renderer: &mut TextRenderer, text: &str, look: &TextStyle| {
+            let image = renderer.render(text, look, 1.0, 4000.0);
+            (image.image.width as f32, image.image.height as f32)
+        };
+        let tight = size(&mut renderer, "Hello", &look);
+        look.letter_spacing = 0.2;
+        let wide = size(&mut renderer, "Hello", &look);
+        // Four gaps between five letters, none after the last.
+        assert!((wide.0 - tight.0 - 4.0 * 0.2 * 95.0).abs() <= 2.0, "{tight:?} -> {wide:?}");
+        assert_eq!(wide.1, tight.1);
+        look.letter_spacing = 0.0;
+        let lines = size(&mut renderer, "A\nA", &look);
+        let line = size(&mut renderer, "A", &look);
+        look.line_spacing = 0.5;
+        let apart = size(&mut renderer, "A\nA", &look);
+        assert!((apart.1 - lines.1 - 0.5 * 95.0).abs() <= 1.0, "{lines:?} -> {apart:?}");
+        // One line has no line to keep apart from.
+        assert_eq!(size(&mut renderer, "A", &look), line);
+    }
+
+    #[test]
+    fn letter_case_changes_what_is_drawn_and_karaoke_still_finds_its_words() {
+        let mut renderer = bundled_renderer();
+        let mut look = style("Inter");
+        let drawn = |renderer: &mut TextRenderer, text: &str, look: &TextStyle| {
+            renderer.render(text, look, 1.0, 4000.0).image.data
+        };
+        let typed = drawn(&mut renderer, "Ahoj světe, (ahoj)", &look);
+        for (case, shown) in [
+            (LetterCase::Upper, "AHOJ SVĚTE, (AHOJ)"),
+            (LetterCase::Lower, "ahoj světe, (ahoj)"),
+            (LetterCase::Title, "Ahoj Světe, (Ahoj)"),
+        ] {
+            look.letter_case = case;
+            let cased = drawn(&mut renderer, "Ahoj světe, (ahoj)", &look);
+            look.letter_case = LetterCase::None;
+            assert_eq!(cased, drawn(&mut renderer, shown, &look), "{case:?}");
+            assert_ne!(cased, typed, "{case:?}");
+        }
+        // "ﬁ" is one character of three bytes and "FI" two of one: the spoken word "it" sits at other bytes
+        // once drawn, and still lights up.
+        look.highlight = Some("#00ff00".into());
+        look.letter_case = LetterCase::Upper;
+        let lit = renderer.render_spoken("ﬁx it", &look, 1.0, 4000.0, Some(5..7), &[]).image.data;
+        look.letter_case = LetterCase::None;
+        let wanted = renderer.render_spoken("FIX IT", &look, 1.0, 4000.0, Some(4..6), &[]).image.data;
+        assert_eq!(lit, wanted);
+    }
+
+    #[test]
+    fn box_outline_and_karaoke_keep_working_over_a_shadow() {
+        let mut renderer = bundled_renderer();
+        let mut look = reel_look();
+        look.stroke_width = 6.0;
+        look.background = Some("#0000ffff".into());
+        look.highlight = Some("#00ff00".into());
+        let text = renderer.render_spoken("Ahoj světe", &look, 1.0, 4000.0, Some(0..4), &[]);
+        let (w, h) = (text.image.width as usize, text.image.height as usize);
+        let px = text.image.data.as_chunks::<4>().0;
+        let green = |p: &[u8; 4]| p[1] > 200 && p[0] < 60 && p[2] < 60;
+        let lit: Vec<usize> = (0..px.len()).filter(|&i| green(&px[i])).map(|i| i % w).collect();
+        assert!(!lit.is_empty() && lit.iter().all(|&x| x < w / 2), "only the spoken first word lights up");
+        // The box sits inside the room the shadow keeps around it, under the text's middle row.
+        let room = (0.05 * look.font_size / 2.0_f32.sqrt() + 0.23 * look.font_size / 2.0).ceil() as usize;
+        assert_eq!(px[h / 2 * w][3], 0, "the shadow's room stays clear");
+        assert_eq!(px[h / 2 * w + room + 3], [0, 0, 255, 255], "the box");
     }
 
     #[test]

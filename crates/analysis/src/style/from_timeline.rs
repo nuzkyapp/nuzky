@@ -7,6 +7,7 @@
 
 use std::path::Path;
 
+use nuzky_engine::model::TextShadow;
 use nuzky_interchange::{ImportedTimeline, MediaClip, TextClip, TrackKind, Transform};
 
 use super::picture::{EDGE_US, MIN_ZOOM, SAMPLE_US};
@@ -210,6 +211,15 @@ fn look(timeline: &ImportedTimeline, texts: &[&TextClip]) -> Option<CaptionLook>
             color: style.color.clone(),
             bold: style.bold,
             outline: style.outline.as_ref().map(|(color, width)| (color.clone(), px(*width))),
+            shadow: style.shadow.as_ref().map(|s| TextShadow {
+                color: s.color.clone(),
+                opacity: s.opacity,
+                blur: px(s.blur),
+                distance: px(s.distance),
+                angle: s.angle,
+            }),
+            letter_spacing: style.letter_spacing,
+            line_spacing: style.line_spacing,
         };
         match looks.iter_mut().find(|(l, _)| *l == look) {
             Some((_, n)) => *n += 1,
@@ -466,7 +476,17 @@ mod tests {
         second.transform = Some(at(1.6));
         let look = |size: f32, color: &str| {
             let font = Some("Montserrat".into());
-            Some(TextStyle { font, size, color: color.into(), bold: false, outline: None, wrap: None })
+            Some(TextStyle {
+                font,
+                size,
+                color: color.into(),
+                bold: false,
+                outline: None,
+                wrap: None,
+                shadow: None,
+                letter_spacing: 0.0,
+                line_spacing: 0.0,
+            })
         };
         let text = |start_us, style| TextClip {
             text: "two words".into(),
@@ -476,9 +496,18 @@ mod tests {
             style,
             caption: true,
         };
+        // The creator's CapCut look: a shadow and spacing, which the style keeps.
+        let shadow = nuzky_interchange::TextShadow {
+            color: "#000000".into(),
+            opacity: 0.41,
+            blur: 7.0,
+            distance: 3.0,
+            angle: -45.0,
+        };
+        let yellow =
+            || look(60.0, "#fff059").map(|s| TextStyle { shadow: Some(shadow.clone()), letter_spacing: 0.05, ..s });
         let mut titles = track(TrackKind::Video, Vec::new());
-        titles.texts =
-            vec![text(0, look(40.0, "#ffffff")), text(S, look(60.0, "#fff059")), text(3 * S, look(60.0, "#fff059"))];
+        titles.texts = vec![text(0, look(40.0, "#ffffff")), text(S, yellow()), text(3 * S, yellow())];
         let timeline = ImportedTimeline {
             size: Some((540, 960)),
             tracks: vec![track(TrackKind::Video, vec![first, second]), titles],
@@ -503,6 +532,9 @@ mod tests {
         // The look of most captions, its size on a frame 1080 pixels wide with the captions' own scale.
         let look = picture.look.unwrap();
         assert_eq!((look.font.as_deref(), look.size, look.color.as_str()), (Some("Montserrat"), 180.0, "#fff059"));
+        let shadow = look.shadow.unwrap();
+        assert_eq!((shadow.blur, shadow.distance, shadow.opacity, shadow.angle), (21.0, 9.0, 0.41, -45.0));
+        assert_eq!((look.letter_spacing, look.line_spacing), (0.05, 0.0));
     }
 
     #[test]

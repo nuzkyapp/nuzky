@@ -837,6 +837,62 @@ pub struct TextStyle {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional = nullable))]
     pub keywords: Option<Keywords>,
+    /// A soft copy of the letters and their outline under them; `None` draws no shadow.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional = nullable))]
+    pub shadow: Option<TextShadow>,
+    /// Draws the text in capitals, small letters or with each word capitalised; the stored text and its
+    /// words stay as typed.
+    #[serde(default, skip_serializing_if = "LetterCase::is_none")]
+    pub letter_case: LetterCase,
+    /// Extra space after every letter, as a share of the font size; negative pulls letters together.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub letter_spacing: f32,
+    /// Extra space between lines, as a share of the font size, on top of the usual 1.2 line height.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub line_spacing: f32,
+}
+
+/// A drop shadow under text, as CapCut draws one.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TextShadow {
+    /// `#rrggbb`
+    pub color: String,
+    /// 0 (invisible) to 1.
+    pub opacity: f32,
+    /// How far the shadow's edge softens, in canvas pixels; 0 is a sharp copy.
+    pub blur: f32,
+    /// How far the shadow falls from the text, in canvas pixels.
+    pub distance: f32,
+    /// The direction it falls in degrees, counterclockwise from the right as in CapCut: -45 falls down and
+    /// to the right, 90 straight up.
+    pub angle: f32,
+}
+
+/// How the letters of a text are drawn, whatever case they were typed in.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+pub enum LetterCase {
+    /// As typed.
+    #[default]
+    None,
+    /// ALL CAPITALS.
+    Upper,
+    /// all small letters.
+    Lower,
+    /// The First Letter Of Every Word In Capitals, the rest as typed.
+    Title,
+}
+
+impl LetterCase {
+    pub fn is_none(&self) -> bool {
+        *self == LetterCase::None
+    }
 }
 
 /// How a caption marks its key words. Needs the clip's `words`, like `highlight`.
@@ -878,6 +934,14 @@ pub fn max_stroke_width(font_size: f32) -> f32 {
     font_size.max(20.0)
 }
 
+/// How far a text shadow may fall and blur, in canvas pixels. It does not follow the font size, so making
+/// text smaller never makes its shadow invalid.
+pub const MAX_SHADOW_PX: f32 = 200.0;
+
+/// Letter and line spacing, as shares of the font size.
+pub const LETTER_SPACING: std::ops::RangeInclusive<f32> = -0.5..=2.0;
+pub const LINE_SPACING: std::ops::RangeInclusive<f32> = -0.6..=3.0;
+
 impl TextStyle {
     /// Older project files can bypass session validation when rendered by the CLI.
     pub fn bounded(&self, canvas: &Canvas) -> Self {
@@ -888,6 +952,14 @@ impl TextStyle {
         style.max_width = style.max_width.map(|width| {
             finite(width, canvas.width as f32 * 0.9).clamp(1.0, MAX_TEXT_WIDTH_RATIO * canvas.width.max(1) as f32)
         });
+        style.letter_spacing = finite(style.letter_spacing, 0.0).clamp(*LETTER_SPACING.start(), *LETTER_SPACING.end());
+        style.line_spacing = finite(style.line_spacing, 0.0).clamp(*LINE_SPACING.start(), *LINE_SPACING.end());
+        if let Some(shadow) = &mut style.shadow {
+            shadow.opacity = finite(shadow.opacity, 0.0).clamp(0.0, 1.0);
+            shadow.blur = finite(shadow.blur, 0.0).clamp(0.0, MAX_SHADOW_PX);
+            shadow.distance = finite(shadow.distance, 0.0).clamp(0.0, MAX_SHADOW_PX);
+            shadow.angle = finite(shadow.angle, 0.0) % 360.0;
+        }
         style
     }
 }
@@ -999,6 +1071,10 @@ mod tests {
                     max_width: None,
                     highlight: Some("#ffe14d".into()),
                     keywords: None,
+                    shadow: None,
+                    letter_case: Default::default(),
+                    letter_spacing: 0.0,
+                    line_spacing: 0.0,
                 },
                 transform: Transform::default(),
                 words: vec![
@@ -1019,6 +1095,9 @@ mod tests {
         let content: ClipContent = serde_json::from_str(old).unwrap();
         let ClipContent::Text { words, style, .. } = &content else { panic!() };
         assert!(words.is_empty() && style.highlight.is_none());
+        // Text saved before shadows, case and spacing draws without them.
+        assert!(style.shadow.is_none() && style.letter_case == LetterCase::None);
+        assert_eq!((style.letter_spacing, style.line_spacing), (0.0, 0.0));
         assert_eq!(serde_json::to_string(&content).unwrap(), old);
     }
 
