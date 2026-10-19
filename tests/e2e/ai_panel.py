@@ -532,6 +532,8 @@ if (!c || !c.width || c.width === 300) return null;
 const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0;
 for (let i = 0; i < d.length; i += 4) if (d[i] > 220 && d[i + 1] > 100 && d[i + 1] < 160 && d[i + 2] < 40) n++;
 return n / (d.length / 4);"""
+# The same for pure blue, the colour the image is saved anew in.
+COVER_BLUE = COVER_ORANGE.replace("d[i] > 220 && d[i + 1] > 100 && d[i + 1] < 160 && d[i + 2] < 40", "d[i] < 40 && d[i + 1] < 40 && d[i + 2] > 220")
 COVER_STATE = """const p = window.__nuzky.store.getState().snap.project;
 const c = (p.thumbnails ?? []).find((t) => t.format === 'cover_9x16');
 const image = c?.image ? p.assets.find((a) => a.id === c.image) : null;
@@ -569,6 +571,19 @@ def ai_panel_codex_cover(r):
     time.sleep(1)
     r.check('moving the playhead leaves the cover made from the image',
             r.s.run(COVER_STATE)['image'] == cover['image'] and (r.s.run(COVER_ORANGE) or 0) > 0.5, r.s.run(COVER_STATE))
+    # The image saved anew under the same path, as an editor would: the next drawing, after a text edit, shows it, as
+    # the export would.
+    from PIL import Image
+    retext = """window.__nuzky.store.getState().edit((p) => { const c = p.thumbnails.find((t) => t.format === 'cover_9x16');
+        return {type: 'setThumbnail', thumbnail: {...c, texts: c.texts.map((t) => ({...t, text: arguments[0]}))}}; })"""
+    Image.new('RGB', (540, 960), (0, 0, 255)).save(r.s.run(COVER_STATE)['path'], 'PNG')
+    r.s.call(retext, 'GROKBOT!')
+    r.check('an image saved anew on disk shows in the cover editor at the next drawing, as the export draws it',
+            wait(lambda: (r.s.run(COVER_BLUE) or 0) > 0.5, 10), {'blue': r.s.run(COVER_BLUE), 'orange': r.s.run(COVER_ORANGE)})
+    Image.new('RGB', (540, 960), (255, 128, 0)).save(r.s.run(COVER_STATE)['path'], 'PNG')
+    r.s.call(retext, 'GROKBOT')
+    wait(lambda: (r.s.run(COVER_ORANGE) or 0) > 0.5, 10)
+    r.seek(2_000_000)
     frames = r.s.run("return document.querySelector('[data-testid=cover-frames]')?.innerText ?? ''")
     r.check('Pick for me says that choosing a frame replaces the image', 'Choosing a frame replaces it.' in frames, frames)
     apart = """const bar = document.querySelector('[data-testid=cover-bar]');

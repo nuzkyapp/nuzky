@@ -16,6 +16,16 @@ use crate::media::{Transfer, init, set_sws_colorspace};
 use crate::model::{Adjust, AssetKind, Canvas, Clip, Crop, Project, Thumbnail, TrackKind, Transform, parse_color};
 use crate::render::{BACKGROUND_MAX_RADIUS, MAX_TEXT_SCALE, Quad, Renderer, WHOLE, Wait, quad, small_image, solid};
 
+/// The size and modification time of a file, which change when it is saved anew; empty when it cannot be read.
+pub fn file_version(path: &str) -> String {
+    std::fs::metadata(path)
+        .map(|m| {
+            let modified = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok());
+            format!("{}-{}", m.len(), modified.map_or(0, |d| d.as_nanos()))
+        })
+        .unwrap_or_default()
+}
+
 /// YouTube takes thumbnails up to 2 MB.
 pub const MAX_JPEG_BYTES: usize = 2 * 1024 * 1024;
 
@@ -93,7 +103,9 @@ impl Renderer {
         still.canvas.height = height;
         still.assets.push(asset.clone());
         let content = crate::edit::media(asset, Transform::default(), None);
-        still.tracks[0].clips.push(Clip::new(format!("still:{asset_id}"), 0, 1_000_000, content));
+        // A file saved anew under the same path gets a new decoder, so the picture is never an old one.
+        let id = format!("still:{asset_id}:{}", file_version(&asset.path));
+        still.tracks[0].clips.push(Clip::new(id, 0, 1_000_000, content));
         let rgba = self.render(&still, 0, width, height, Wait::Exact, false)?;
         Ok(Image { width, height, data: Arc::new(rgba) })
     }

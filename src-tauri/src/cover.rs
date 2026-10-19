@@ -34,8 +34,8 @@ pub struct Covers {
 struct Frame {
     picture: Project,
     time_us: i64,
-    /// The image the cover is made from instead of a frame: its id and file.
-    still: Option<(String, String)>,
+    /// The image the cover is made from instead of a frame: its id, file and the file's version.
+    still: Option<(String, String, String)>,
     image: Image,
     /// The person's mask, once it is in the cache.
     mask: Option<Vec<u8>>,
@@ -137,7 +137,10 @@ impl Covers {
         // Only what the frame is drawn from: the cover's own texts and settings do not change it.
         let mut shown = picture(project);
         shown.thumbnails.clear();
-        let still = thumbnail.image.as_ref().and_then(|id| Some((id.clone(), project.asset(id)?.path.clone())));
+        let still = thumbnail.image.as_ref().and_then(|id| {
+            let path = &project.asset(id)?.path;
+            Some((id.clone(), path.clone(), nuzky_engine::thumbnail::file_version(path)))
+        });
         let waiting: usize = match still {
             Some(_) => 0,
             None => nuzky_engine::matte::missing(cache, &shown).iter().map(|(_, chunks)| chunks.len()).sum(),
