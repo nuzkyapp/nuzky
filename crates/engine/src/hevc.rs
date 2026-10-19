@@ -1,8 +1,9 @@
 //! What an HEVC stream's picture parameter sets say about decoding one picture on several threads.
 
 /// Whether every picture parameter set in `extradata` (an `hvcC` record or Annex B NAL units) splits pictures into
-/// rows or tiles that decode in parallel: wavefront parallel processing, which Apple's encoder and x265 turn on,
-/// or tiles. False when there is no parameter set to read.
+/// rows that decode in parallel: wavefront parallel processing, which Apple's encoder and x265 turn on. FFmpeg
+/// decodes a picture of several tiles on one thread, so tiles count as no. False when there is no parameter set to
+/// read.
 pub(crate) fn parallel_rows(extradata: &[u8]) -> bool {
     let units =
         if extradata.len() > 22 && extradata[0] == 1 { hvcc_units(extradata) } else { annex_b_units(extradata) };
@@ -43,7 +44,7 @@ fn annex_b_units(data: &[u8]) -> Vec<&[u8]> {
     starts.iter().zip(ends).map(|(&start, end)| &data[start..end]).collect()
 }
 
-/// `tiles_enabled_flag || entropy_coding_sync_enabled_flag` of a PPS NAL unit (H.265, 7.3.2.3.1), or `None`
+/// `entropy_coding_sync_enabled_flag && !tiles_enabled_flag` of a PPS NAL unit (H.265, 7.3.2.3.1), or `None`
 /// when it ends before them.
 fn pps_parallel(nal: &[u8]) -> Option<bool> {
     let mut bits = Bits::new(nal.get(2..)?);
@@ -62,7 +63,7 @@ fn pps_parallel(nal: &[u8]) -> Option<bool> {
     bits.skip(4)?; // slice chroma QP offsets, weighted prediction, weighted biprediction, transquant bypass
     let tiles = bits.flag()?;
     let wavefronts = bits.flag()?;
-    Some(tiles || wavefronts)
+    Some(wavefronts && !tiles)
 }
 
 /// Reads the bits of a NAL unit's payload, without the emulation prevention bytes (0x000003 → 0x0000).
@@ -128,6 +129,9 @@ mod tests {
     /// PPS NAL units of x265 with its default WPP and with `wpp=0`.
     const X265_WPP: &str = "4401c172b46240";
     const X265_NO_WPP: &str = "4401c172b42240";
+    /// The same with `tiles_enabled_flag` set, the bit before the wavefront flag.
+    const X265_WPP_TILES: &str = "4401c172b4e240";
+    const X265_TILES: &str = "4401c172b4a240";
 
     fn bytes(hex: &str) -> Vec<u8> {
         (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap()).collect()
@@ -150,6 +154,9 @@ mod tests {
         assert!(!parallel_rows(&annex_b(X265_NO_WPP)));
         // One PPS without them is enough to keep decoding a picture per thread.
         assert!(!parallel_rows(&[annex_b(X265_WPP), annex_b(X265_NO_WPP)].concat()));
+        // Tiles, with or without wavefronts: FFmpeg would decode each picture on one thread.
+        assert!(!parallel_rows(&hvcc(&bytes(X265_WPP_TILES))));
+        assert!(!parallel_rows(&hvcc(&bytes(X265_TILES))));
     }
 
     #[test]
