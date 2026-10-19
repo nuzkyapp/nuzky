@@ -122,7 +122,7 @@ export function TranscriptTab() {
         ) : (
           <span className="flex">
             {/* With every clip transcribed but no words, transcribing again may use another language. */}
-            <Button variant="primary" className="flex-1" disabled={!!blocker || !view} disabledReason={blocker ?? undefined} onClick={() => startSpeech(null, view?.untranscribed.length === 0)}>
+            <Button variant="primary" className="flex-1" data-transcribe disabled={!!blocker || !view} disabledReason={blocker ?? undefined} onClick={() => startSpeech(null, view?.untranscribed.length === 0)}>
               <ScrollText size={15} /> Transcribe timeline
             </Button>
           </span>
@@ -150,7 +150,7 @@ export function TranscriptTab() {
             <span className="flex-1">
               {missing} clip{missing === 1 ? "" : "s"} not transcribed
             </span>
-            <Button variant="primary" className="h-7 px-2.5" disabled={busy} disabledReason="Wait for speech recognition to finish" onClick={() => startSpeech(null)}>
+            <Button variant="primary" className="h-7 px-2.5" data-transcribe disabled={busy} disabledReason="Wait for speech recognition to finish" onClick={() => startSpeech(null)}>
               Transcribe
             </Button>
           </div>
@@ -173,6 +173,7 @@ export function TranscriptTab() {
         </div>
         <Button
           variant="primary"
+          data-remove-retakes
           disabled={!retakes || !!retakesBlocker}
           disabledReason={retakesBlocker ?? `No retakes, filler words, hesitations or pauses over ${formatDuration(pauseUs)}`}
           title={`Cut earlier attempts of repeated sentences, filler words, hesitations and pauses over ${formatDuration(pauseUs)}`}

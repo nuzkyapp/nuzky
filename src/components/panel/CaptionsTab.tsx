@@ -177,7 +177,7 @@ export function CaptionsTab() {
           <SpeechJobCard job={running} />
         ) : (
           <span className="flex">
-            <Button variant="primary" className="flex-1" disabled={!!blocker} disabledReason={blocker ?? undefined} onClick={start}>
+            <Button variant="primary" className="flex-1" data-generate-captions disabled={!!blocker} disabledReason={blocker ?? undefined} onClick={start}>
               <Captions size={15} /> {hasCaptions ? "Regenerate captions" : "Generate captions"}
             </Button>
           </span>

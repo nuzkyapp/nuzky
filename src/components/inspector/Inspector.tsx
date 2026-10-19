@@ -130,12 +130,7 @@ export function Inspector({ width }: { width: number }) {
         <MultiInspector ids={selection} />
       </AiLock>
     );
-  else if (!found)
-    body = (
-      <AiLock>
-        <ProjectSection />
-      </AiLock>
-    );
+  else if (!found) body = <ProjectSection />;
   else {
     const { clip, track } = found;
     const c = clip.content;

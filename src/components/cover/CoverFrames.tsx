@@ -49,6 +49,7 @@ function MakeWithAi({ variant }: { variant: "primary" | "ghost" }) {
   return (
     <Button
       variant={variant}
+      data-make-cover-ai
       className={variant === "ghost" ? "h-7 gap-1 px-2 text-[12px] text-accent! hover:text-accent!" : "w-full"}
       disabled={!!blocked}
       disabledReason={blocked ?? undefined}
