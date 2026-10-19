@@ -350,10 +350,18 @@ pub async fn diagnostics(app: AppHandle) -> CmdResult<String> {
 
 static LAST_REPORT: Mutex<Option<PathBuf>> = Mutex::new(None);
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedReport {
+    name: String,
+    /// Why the browser did not open; the report is saved all the same.
+    open_error: Option<String>,
+}
+
 /// Saves the report in the logs folder, keeping the newest few, and opens the bug report form with the description
-/// and a summary filled in. Nothing is sent: the person attaches the file and submits the form. Returns the file name.
+/// and a summary filled in. Nothing is sent: the person attaches the file and submits the form.
 #[tauri::command]
-pub async fn report_bug(app: AppHandle, description: String) -> CmdResult<String> {
+pub async fn report_bug(app: AppHandle, description: String) -> CmdResult<SavedReport> {
     let report = build(&app).await?;
     let text = match description.trim() {
         "" => report.full,
@@ -362,8 +370,8 @@ pub async fn report_bug(app: AppHandle, description: String) -> CmdResult<String
     let path = save_report(&logs_dir(), &text).map_err(crate::err)?;
     let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
     *LAST_REPORT.lock().unwrap_or_else(PoisonError::into_inner) = Some(path);
-    updates::open(&app, &updates::bug_url(&version(&app), &description, &report.summary))?;
-    Ok(name)
+    let open_error = updates::open(&app, &updates::bug_url(&version(&app), &description, &report.summary)).err();
+    Ok(SavedReport { name, open_error })
 }
 
 /// Shows the saved report in the file manager, to drag into the issue.

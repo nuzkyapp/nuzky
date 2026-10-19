@@ -1,9 +1,9 @@
 """When something breaks, the person sees what happened with a way on and can send what Nuzky logged. An export to a
 folder it may not write to fails with Open logs folder and a way to export again, which works once the folder is
-writable; the log names the failure without the folders. Copy diagnostics gives the version, system, graphics and the end of the log.
-After the app is killed, the next start says it closed unexpectedly and Report a bug… copies the diagnostics and
-opens the bug form; after a normal quit it says nothing. A bug while drawing the window shows Reload instead of an
-empty window. Nothing leaves the computer: the flow records the pages and folders the app would open, and the
+writable; the log names the failure without the folders. Copy diagnostics gives the version, system, graphics, the format of the project's files, the last actions and the end of the log. After the app is killed, the
+next start says it closed unexpectedly and Report a bug… opens the report, which still holds what was done before the
+crash; after a normal quit it says nothing. A bug while drawing the window shows Reload instead of an empty window, and
+Report a bug… there saves the report and opens the bug form. Nothing leaves the computer: the flow records the pages and folders the app would open, and the
 clipboard is the page's own, never the system's."""
 import os, re, signal, subprocess, time, urllib.parse
 from pathlib import Path
@@ -26,6 +26,8 @@ CHOOSE = """const i = [...document.querySelectorAll('[role=menu][aria-label="Sen
   .find((i) => i.textContent === arguments[0]);
 if (!i) return false; i.click(); return true;"""
 CRASHED = 'Nuzky closed unexpectedly. Your project is as it was last saved.'
+REPORT_DIALOG = 'dialog[aria-labelledby=bug-report-title]'
+REPORT = "return document.querySelector('[data-report]')?.textContent ?? ''"
 
 
 def record_opened(r):
@@ -148,8 +150,17 @@ def diagnostics(r):
     copied = wait(lambda: r.s.run(COPIED), 5)
     text = copied[-1] if copied else ''
     version = r.s.run('return window.__nuzky.updates.getState().version')
-    r.check('Copy diagnostics copies the version, system and graphics backend',
-            text.startswith(f'Nuzky {version}\nSystem: ') and re.search(r'^Graphics: .+\((metal|vulkan|dx12|gl)\)$', text, re.M), text[:300])
+    r.check('Copy diagnostics copies the version with its commit, system and graphics backend',
+            text.startswith(f'Nuzky {version} (') and '\nSystem: ' in text and re.search(r'^Graphics: .+\((metal|vulkan|dx12|gl)\)$', text, re.M), text[:300])
+    codec = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=codec_name', '-of', 'csv=p=0', str(clip)],
+                           capture_output=True, text=True, check=True).stdout.strip()
+    r.check('the project and its file by format as FFmpeg reads it, never by name or folder',
+            re.search(r'^Project: \d+×\d+ \d+ fps · 2\.0 s · .* · 1 clips · 1 files$', text, re.M)
+            and re.search(rf'^File 1 \(video, 1 clips\): mov · {codec} .*· 640×360 · yuv420p · 30\.00 fps · aac 44\.1 kHz 1 ch · 2\.0 s', text, re.M)
+            and not re.search(r'^File .*clip\.mp4', text, re.M), text[:800])
+    r.check('the last actions: the import, the clip added and the export, with no typed text',
+            re.search(r'^Last \d+ actions:\n(  .+\n)*  \S+Z import 1 files\n(  .+\n)*  \S+Z user addClip', text, re.M)
+            and re.search(r'^  \S+Z job export failed$', text, re.M), text[text.find('actions:') - 20:][:900])
     r.check('and the end of the log with the failed export and the cleaned interface error, without folders',
             re.search(r'^Last \d+ lines of the log:$', text, re.M) and 'Exporting out.mp4 failed' in text
             and 'Cannot draw clip.mp4' in text and 'Ahoj' not in text and secret_free(r, text), text[-600:])
@@ -167,13 +178,20 @@ def diagnostics(r):
     r.shot('crash-notice')
     before = len(opened(r))
     r.s.run(CLICK, '[data-toast]', 'Report a bug…')
-    wait(lambda: len(opened(r)) > before, 5)
+    r.check('Report a bug… asks what happened', wait(lambda: r.s.run(f"return document.querySelector('{REPORT_DIALOG}')?.open"), 5))
+    r.s.run(f"[...document.querySelectorAll('{REPORT_DIALOG} button')].find((b) => b.textContent.startsWith('What the report')).click()")
+    report = wait(lambda: (lambda t: t if t.startswith('Nuzky') else None)(r.s.run(REPORT)), 10) or ''
+    r.check('its report says the last run closed unexpectedly and still holds what was done before the crash',
+            '\nThe Nuzky before this one closed unexpectedly.\n' in report and re.search(r'^  \S+Z user addClip', report, re.M)
+            and re.search(r'^  \S+Z job export done$', report, re.M), report[:1500])
+    r.s.run(CLICK, REPORT_DIALOG, 'Continue on GitHub')
+    wait(lambda: len(opened(r)) > before, 15)
     url = urllib.parse.urlsplit(opened(r)[-1] if len(opened(r)) > before else '')
     query = dict(urllib.parse.parse_qsl(url.query))
-    r.check('Report a bug… opens the bug form with this version and system',
+    r.check('Continue on GitHub opens the bug form with this version and system',
             f'{url.scheme}://{url.netloc}{url.path}' == 'https://github.com/nuzkyapp/nuzky/issues/new'
-            and query.get('template') == 'bug_report.yml' and query.get('version') == version and query.get('system'), (url, query))
-    r.check('and copies the diagnostics to paste into it', wait(lambda: (r.s.run(COPIED) or [''])[-1].startswith(f'Nuzky {version}'), 3))
+            and query.get('template') == 'bug_report.yml' and query.get('version', '').startswith(f'{version} (') and query.get('system'), (url, query))
+    r.s.run(CLICK, REPORT_DIALOG, 'Done')
 
     close_window()
     # Stopping the session would end the app with SIGTERM, which also clears the marker; it has to quit by itself.
@@ -193,8 +211,8 @@ def diagnostics(r):
     r.check('Reload has the focus', r.s.run("return document.activeElement?.textContent === 'Reload'"))
     before = len(opened(r))
     r.s.run(CLICK, '[role=alertdialog]', 'Report a bug…')
-    r.check('Report a bug… there copies the diagnostics, says so in the card and opens the bug form',
-            wait(lambda: 'Diagnostics copied. Paste them into your bug report.' in r.s.run("return document.querySelector('[role=alertdialog]').textContent"), 5)
+    r.check('Report a bug… there saves the report, says where in the card and opens the bug form',
+            wait(lambda: re.search(r'GitHub opened\. Drag nuzky-report-[\d-]+\.txt from the logs folder into the issue\.', r.s.run("return document.querySelector('[role=alertdialog]').textContent")), 15)
             and len(opened(r)) == before + 1 and 'template=bug_report.yml' in opened(r)[-1], opened(r)[before:])
     r.shot('window-error')
     r.check('the log records it', wait(lambda: 'ERROR ui: The window stopped drawing' in log_text(r), 5), log_text(r)[-400:])

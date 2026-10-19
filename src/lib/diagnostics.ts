@@ -1,3 +1,4 @@
+import { create } from "zustand";
 import { api, errorText } from "./api";
 import { copyText } from "./clipboard";
 import { useEditor } from "./store";
@@ -7,7 +8,26 @@ export type Say = (kind: "success" | "error", text: string) => void;
 
 const toast: Say = (kind, text) => useEditor.getState().toast({ kind, text });
 
-/** Puts the version, system, graphics and the end of the log on the clipboard for a bug report. */
+export const useBugReport = create<{ open: boolean }>(() => ({ open: false }));
+
+/** Opens the Report a bug dialog. */
+export const reportBug = () => useBugReport.setState({ open: true });
+
+/** Where the window cannot draw the dialog: saves the report and opens the form without a description. */
+export async function reportBugNow(say: Say) {
+  try {
+    const { name, openError } = await api.reportBug("");
+    say("success", openError ? `Saved ${name} in the logs folder. Couldn't open the browser: attach it to a new issue at github.com/nuzkyapp/nuzky.` : `GitHub opened. Drag ${name} from the logs folder into the issue.`);
+  } catch (e) {
+    say("error", `Couldn't save the report: ${errorText(e)}`);
+  }
+}
+
+export function showBugReport() {
+  api.showBugReport().catch((e) => toast("error", `Couldn't show the report: ${errorText(e)}`));
+}
+
+/** Puts the whole bug report on the clipboard. */
 export async function copyDiagnostics(say = toast) {
   try {
     await copyText(await api.diagnostics(), "The clipboard is not available. Open the logs folder and attach nuzky.log instead.");
@@ -19,10 +39,4 @@ export async function copyDiagnostics(say = toast) {
 
 export function openLogs() {
   api.openLogs().catch((e) => toast("error", `Couldn't open the logs folder: ${errorText(e)}`));
-}
-
-/** Copies the diagnostics, then opens the bug report form in the browser, where they are pasted. */
-export async function reportBug(say = toast) {
-  await copyDiagnostics(say);
-  await api.openFeedback("bug").catch((e) => say("error", `Couldn't open the browser: ${errorText(e)}`));
 }

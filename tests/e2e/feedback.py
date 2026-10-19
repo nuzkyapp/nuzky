@@ -1,9 +1,11 @@
-"""Send feedback. The foot of the home sidebar and the editor's top bar open one menu: Report a bug and Share an idea
-open the repository's issue form in the browser with this version (and for a bug the system) filled in, Report a bug
-also copies the diagnostics to paste there, and Message me on X opens the author's profile. Copy diagnostics and Open
-logs folder have their own flow (diagnostics). Nothing is sent; the flow records the pages the app would open instead of
-a browser and keeps what is copied in the page."""
-import platform, sys, time, urllib.parse
+"""Send feedback. The foot of the home sidebar and the editor's top bar open one menu. Report a bug asks what happened,
+shows what the report includes, then opens the repository's bug form in the browser with the version and its commit,
+the system, the description and a summary of the report filled in, and saves the whole report in the logs folder to
+drag into the issue. Share an idea opens the idea form with the version, and Message me on X opens the author's profile.
+Copy diagnostics and Open logs folder have their own flow (diagnostics). Nothing is sent; the flow records the pages
+the app would open instead of a browser and keeps what is copied in the page."""
+import platform, re, sys, time, urllib.parse
+from pathlib import Path
 
 from e2e.harness import MACOS, flow, wait, webdriver
 
@@ -18,6 +20,16 @@ IN_MENU = "return !!document.activeElement?.closest('[role=menu][aria-label=\"Se
 FOCUSED = "return document.activeElement === document.querySelector(arguments[0])"
 TOASTS = "return window.__nuzky.store.getState().toasts.map((t) => ({kind: t.kind, text: t.text}));"
 ROW, BUTTON = 'nav + div [data-feedback]', 'header [data-feedback]'
+DIALOG = 'dialog[aria-labelledby=bug-report-title]'
+DIALOG_TEXT = "const d = document.querySelector(arguments[0]); return d?.open ? d.textContent : null"
+TYPE = """const t = document.querySelector('#bug-report-text');
+Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(t, arguments[0]);
+t.dispatchEvent(new Event('input', {bubbles: true}));"""
+CLICK = """const b = [...document.querySelectorAll(arguments[0] + ' button')].find((b) => b.textContent.trim().startsWith(arguments[1]));
+if (!b) return false; b.click(); return true;"""
+REPORT = "return document.querySelector('[data-report]')?.textContent ?? ''"
+FITS = "const r = document.querySelector(arguments[0]).getBoundingClientRect(); return r.top >= 0 && r.bottom <= window.innerHeight;"
+DESCRIPTION = 'After I split the clip, the sound plays half a second late.\nIt happens on every phone video.'
 ITEMS = ['Report a bug…', 'Share an idea…', 'Copy diagnostics', 'Open logs folder', 'Message me on X…']
 # The page's clipboard keeps what is copied, so the flow neither reads nor overwrites the person's own.
 CLIPBOARD = """window.__copied = [];
@@ -83,11 +95,45 @@ def feedback(r):
     r.check('Esc closes the menu and focus returns to the row', wait(lambda: not r.s.run(MENU) and r.s.run(FOCUSED, ROW), 3))
     r.check('opening the menu opened nothing', opened(r) == [], opened(r))
 
-    page, query = issue(choose(r, ROW, 'Report a bug'))
-    r.check('Report a bug opens the bug report form with this version, system and architecture',
-            page == form and query == {'template': 'bug_report.yml', 'version': version, 'system': this_system}, (page, query))
-    copied = wait(lambda: r.s.run('return window.__copied'), 3)
-    r.check('and copies the diagnostics to paste into it', copied and copied[-1].startswith(f'Nuzky {version}\nSystem: {this_system}\n'), copied)
+    before = len(opened(r))
+    r.s.run(OPEN, ROW)
+    wait(lambda: r.s.run(MENU), 3)
+    r.s.run(CHOOSE, 'Report a bug')
+    r.check('Report a bug asks what happened, with the focus in the text field and nothing opened yet',
+            wait(lambda: r.s.run(DIALOG_TEXT, DIALOG), 5) and r.s.run('return document.activeElement?.id') == 'bug-report-text'
+            and len(opened(r)) == before, r.s.run(DIALOG_TEXT, DIALOG))
+    r.check('folded, it says what the report includes',
+            wait(lambda: 'What the report includesVersion, system, graphics, ' in (r.s.run(DIALOG_TEXT, DIALOG) or ''), 10)
+            and 'your last actions, the log' in r.s.run(DIALOG_TEXT, DIALOG), r.s.run(DIALOG_TEXT, DIALOG))
+    r.s.run(TYPE, DESCRIPTION)
+    time.sleep(0.4)  # The dialog has faded in.
+    r.shot('report-form')
+    r.s.run(CLICK, DIALOG, 'What the report includes')
+    report = wait(lambda: (lambda t: t if t.startswith('Nuzky') else None)(r.s.run(REPORT)), 10) or ''
+    r.check('unfolded, it shows the whole report: the version with its commit, system, graphics, memory and the log',
+            report.startswith(f'Nuzky {version} (') and f'\nSystem: {this_system}\nGraphics: ' in report
+            and re.search(r'^Memory: \d+ GB$', report, re.M) and re.search(r'^Last \d+ lines of the log:$', report, re.M), report[:400])
+    time.sleep(0.2)
+    r.shot('report-unfolded')
+    r.s.run(CLICK, DIALOG, 'Continue on GitHub')
+    name = wait(lambda: r.s.run("return document.querySelector('[data-report-name]')?.textContent"), 20)
+    page, query = issue(opened(r)[-1] if len(opened(r)) > before else None)
+    r.check('Continue on GitHub opens the bug form with the version and commit, system, description and a summary',
+            page == form and query.get('template') == 'bug_report.yml' and re.fullmatch(rf'{re.escape(version)} \(\w+(-dirty)?\)', query.get('version', ''))
+            and query.get('system') == this_system and query.get('what-happened') == DESCRIPTION
+            and query.get('diagnostics', '').startswith(f'Nuzky {version} (') and len(opened(r)) == before + 1, (page, query))
+    saved = r.work / 'data/nuzky/logs' / (name or 'missing')
+    r.check('and saves the whole report, starting with the description, in the logs folder',
+            name and re.fullmatch(r'nuzky-report-[\d-]+\.txt', name) and saved.exists()
+            and saved.read_text().startswith(f'What happened:\n{DESCRIPTION}\n\nNuzky {version} ('), name)
+    time.sleep(0.2)
+    r.shot('report-saved')
+    r.s.run(CLICK, DIALOG, 'Show in folder')
+    shown = wait(lambda: len(opened(r)) > before + 1, 5) and opened(r)[-1]
+    r.check('Show in folder shows the saved report in the file manager',
+            shown and shown.startswith('reveal ') and Path(shown[len('reveal '):]).resolve() == saved.resolve(), shown)
+    r.s.run(CLICK, DIALOG, 'Done')
+    r.check('Done closes it', wait(lambda: r.s.run(DIALOG_TEXT, DIALOG) is None, 3))
 
     page, query = issue(choose(r, ROW, 'Share an idea'))
     r.check('Share an idea opens the feature request form with this version',
@@ -96,7 +142,7 @@ def feedback(r):
     url = choose(r, ROW, 'Message me on X')
     r.check('Message me on X opens the profile on X', url == 'https://x.com/mach_builds', url)
     r.check('each choice opened exactly one page and showed no error',
-            len(opened(r)) == 3 and [t for t in r.s.run(TOASTS) if t['kind'] == 'error'] == [], (opened(r), r.s.run(TOASTS)))
+            len(opened(r)) == 4 and [t for t in r.s.run(TOASTS) if t['kind'] == 'error'] == [], (opened(r), r.s.run(TOASTS)))
 
     webdriver('POST', r.s.path + '/window/rect', {'width': 1024, 'height': 640})
     if wait(lambda: r.s.run('return window.innerWidth') == 1024, 5):
@@ -105,6 +151,17 @@ def feedback(r):
                            const nav = document.querySelector('nav[aria-label=Collections]').getBoundingClientRect();
                            return b.bottom <= window.innerHeight - 6 && b.top >= nav.bottom && b.width > 180;""", ROW))
         r.shot('home-small')
+        r.s.run(OPEN, ROW)
+        wait(lambda: r.s.run(MENU), 3)
+        r.s.run(CHOOSE, 'Report a bug')
+        wait(lambda: r.s.run(DIALOG_TEXT, DIALOG), 5)
+        r.s.run(CLICK, DIALOG, 'What the report includes')
+        wait(lambda: r.s.run(REPORT).startswith('Nuzky'), 10)
+        time.sleep(0.4)
+        r.check('unfolded in a 1024 x 640 window, the Report a bug dialog fits whole', r.s.run(FITS, DIALOG))
+        r.shot('report-small')
+        r.key('Escape')
+        wait(lambda: r.s.run(DIALOG_TEXT, DIALOG) is None, 3)
     webdriver('POST', r.s.path + '/window/rect', {'width': 1440, 'height': 900})
 
     r.s.run("window.__nuzky.store.setState({view: 'editor'})")
@@ -117,9 +174,13 @@ def feedback(r):
     r.shot('editor-menu')
     r.key('Escape')
     r.check('Esc closes it and focus returns to the button', wait(lambda: not r.s.run(MENU) and r.s.run(FOCUSED, BUTTON), 3))
-    page, query = issue(choose(r, BUTTON, 'Report a bug'))
-    r.check('Report a bug from the editor opens the same prefilled form',
-            page == form and query.get('template') == 'bug_report.yml' and query.get('system') == this_system, (page, query))
-    time.sleep(0.5)
-    r.check('focus goes back to the button after a choice', r.s.run(FOCUSED, BUTTON))
+    before = len(opened(r))
+    r.s.run(OPEN, BUTTON)
+    wait(lambda: r.s.run(MENU), 3)
+    r.s.run(CHOOSE, 'Report a bug')
+    r.check('Report a bug from the editor asks the same', wait(lambda: r.s.run(DIALOG_TEXT, DIALOG), 5))
+    r.key('Escape')
+    r.check('Esc closes it without opening anything, and focus goes back to the button',
+            wait(lambda: r.s.run(DIALOG_TEXT, DIALOG) is None and r.s.run(FOCUSED, BUTTON), 3) and len(opened(r)) == before,
+            (r.s.run(DIALOG_TEXT, DIALOG) is None, r.s.run('return document.activeElement?.outerHTML.slice(0, 160)'), opened(r)[before:]))
     r.shot('editor')

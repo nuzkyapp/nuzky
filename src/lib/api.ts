@@ -7,7 +7,7 @@ import type { AgentAccess, AgentConnection, AgentKind, AgentSetup, AgentStatus, 
  */
 type Epoch = string | undefined;
 
-export type FeedbackKind = "bug" | "idea" | "message";
+export type FeedbackKind = "idea" | "message";
 
 export const api = {
   setUiContext: (selection: string[], playheadUs: number) => invoke<void>("set_ui_context", { selection, playheadUs: Math.round(playheadUs) }),
@@ -211,10 +211,14 @@ export const api = {
   /** A newer released version, or null when this one is the latest. */
   checkForUpdate: () => invoke<string | null>("check_for_update"),
   openReleasePage: () => invoke<void>("open_release_page"),
-  /** The issue form for a bug or an idea with this version and system filled in, or the author's X profile, in the browser. */
+  /** The idea form with this version filled in, or the author's X profile, in the browser. */
   openFeedback: (kind: FeedbackKind) => invoke<void>("open_feedback", { kind }),
-  /** The version, system, graphics and the end of the log, without folders, typed text or secrets. */
+  /** The bug report: version, system, graphics, the project's files, the last actions and the end of the log, without file names, folders, typed text or secrets. */
   diagnostics: () => invoke<string>("diagnostics"),
+  /** Saves the report in the logs folder and opens the bug report form with `description` and a summary filled in; the saved file's name, and why the browser did not open. */
+  reportBug: (description: string) => invoke<{ name: string; openError: string | null }>("report_bug", { description }),
+  /** Shows the saved report in the file manager. */
+  showBugReport: () => invoke<void>("show_bug_report"),
   openLogs: () => invoke<void>("open_logs"),
   /** Writes an error of the interface into the log. */
   logUiError: (message: string) => invoke<void>("log_ui_error", { message }),

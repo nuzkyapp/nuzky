@@ -1,5 +1,6 @@
 import { useStyle } from "../lib/style";
 import { useEditor } from "../lib/store";
+import { BugReportDialog } from "./BugReportDialog";
 import { ChatGptDialog } from "./ChatGptDialog";
 import { ConnectAgentDialog } from "./ConnectAgentDialog";
 import { ExportDialog } from "./ExportDialog";
@@ -28,6 +29,7 @@ export default function Dialogs() {
       <ModelQuestionDialog kind="speech" />
       <ModelQuestionDialog kind="vision" />
       <OpenedDraftDialog />
+      <BugReportDialog />
     </>
   );
 }

@@ -460,7 +460,7 @@ async function startEditor() {
     useEditor.getState().toast({
       kind: "warning",
       text: "Nuzky closed unexpectedly. Your project is as it was last saved.",
-      action: { label: "Report a bug…", run: () => void reportBug() },
+      action: { label: "Report a bug…", run: reportBug },
     });
   }
 }

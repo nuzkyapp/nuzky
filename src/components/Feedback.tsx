@@ -12,11 +12,11 @@ function open(kind: FeedbackKind) {
 }
 
 /**
- * The reports open a GitHub issue form in the browser with this version and system filled in; Report a bug also copies
- * the diagnostics to paste there. Nothing is sent until the user submits the form.
+ * Report a bug… asks what happened, then opens the GitHub issue form with it and a summary filled in and saves the whole
+ * report to attach; Share an idea… opens its form with the version. Nothing is sent until the user submits the form.
  */
 const feedbackMenu = (): MenuEntry[] => [
-  { label: "Report a bug…", icon: <Bug size={15} />, run: () => void reportBug() },
+  { label: "Report a bug…", icon: <Bug size={15} />, run: reportBug },
   { label: "Share an idea…", icon: <Lightbulb size={15} />, run: () => open("idea") },
   "separator",
   { label: "Copy diagnostics", icon: <ClipboardCopy size={15} />, run: () => void copyDiagnostics() },
