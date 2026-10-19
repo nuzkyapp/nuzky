@@ -181,6 +181,9 @@ export function TranscriptText({
 }) {
   const [sel, setSel] = useState<Selection | null>(null);
   const [editing, setEditing] = useState<number | null>(null);
+  // The word as the field opened on it: a transcript refreshed meanwhile may read it otherwise, and
+  // the correction must then be refused, not land on the new text.
+  const opened = useRef<Token | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const bar = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
@@ -240,12 +243,13 @@ export function TranscriptText({
     }
     setSel({ anchor: i, focus: i });
     setEditing(i);
+    opened.current = tokens[i];
   };
 
   // Stable, so paragraphs without the field do not re-render with each word played.
   const finish = useRef<(text: string | null) => void>(() => {});
   finish.current = (text) => {
-    const t = editing === null ? null : tokens[editing];
+    const t = editing === null ? null : opened.current;
     setEditing(null);
     box.current?.focus();
     const typed = text?.trim();

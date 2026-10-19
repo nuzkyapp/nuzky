@@ -256,6 +256,7 @@ def corrections(r):
     r.check('the preview draws the corrected caption', redrawn, 'the preview stayed the same')
     r.check('the saved project holds the correction and the caption',
             wait(lambda: saved(r) == ([{'original': word, 'text': right}], keep), 10), saved(r))
+    stale_field(r, hands, target, word, right, keep)
 
     job = generate_captions(r)
     r.check('regenerating the captions keeps the corrected word',
@@ -278,6 +279,26 @@ def corrections(r):
 
     agent(r, right, rest)
     r.check('no error toast', not r.errors(), r.errors())
+
+
+def stale_field(r, hands, target, word, right, keep):
+    """The word changes under its open field, as when Transcribe again finishes meanwhile (an undo from the store
+    here, which changes the text and keeps the timing). Confirming must not correct the word that reads otherwise."""
+    fixed = lambda: next((w for w in shown(r) if w['t'] == target), {})
+    hands.double_click(f'[data-t="{target}"]')
+    r.check(f'the field opens on "{right}"', wait(lambda: (field(r) or {}).get('value') == right, 5), field(r))
+    r.s.run('void window.__nuzky.store.getState().undo()')
+    r.check('the word changes back under the open field',
+            wait(lambda: caption_with(r, word), 10) and (field(r) or {}).get('focused'), field(r))
+    hands.type('zzz\n')
+    refused = wait(lambda: next((t for t in r.errors() if t.startswith('The transcript changed')), None), 5)
+    r.check('confirming refuses, because the word no longer reads as the field opened on it', refused, r.errors())
+    r.check('and changes nothing', fixed().get('text') == word and not caption_with(r, 'zzz'),
+            {'word': fixed(), 'captions': caption_texts(r)})
+    r.s.run('const s = window.__nuzky.store.getState(); s.toasts.forEach((t) => s.dismissToast(t.id));')
+    r.s.run('void window.__nuzky.store.getState().redo()')
+    r.check('redo brings the correction back', wait(lambda: caption_texts(r) == keep and fixed().get('text') == right, 10),
+            {'word': fixed(), 'captions': caption_texts(r)})
 
 
 def agent(r, first, rest):
