@@ -57,7 +57,6 @@ import {
 import { FORMATS } from "../../lib/presets";
 import { openReelsToFind } from "../../lib/reels";
 import { useAgent } from "../../lib/agent";
-import { useDock } from "../../lib/dock";
 import { useSetup, stepsLeft } from "../../lib/setup";
 import { useEditor } from "../../lib/store";
 import { formatLength } from "../../lib/time";
@@ -90,20 +89,17 @@ function newProjectItems(): MenuEntry[] {
 
 const byName = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 
-/** The AI panel works on the open project, so it opens in the editor; on Your style it opens beside the style. */
-function openAi() {
-  if (useLibrary.getState().page === "style") return useStyle.setState((s) => ({ chatOpen: !s.chatOpen }));
-  showEditor();
-  useDock.setState({ open: true });
+/** The AI panel works on the open project, so the projects have no AI of their own; on Your style it opens beside the style. */
+function toggleStyleChat() {
+  useStyle.setState((s) => ({ chatOpen: !s.chatOpen }));
 }
 
 function AiButton() {
   const working = useAgent((s) => s.status !== "idle");
-  const style = useLibrary((s) => s.page === "style");
-  const open = useStyle((s) => s.chatOpen) && style;
-  const title = style ? (open ? "Close the AI (Ctrl+J)" : "Talk about your style with the AI (Ctrl+J)") : "Open the editor with AI (Ctrl+J)";
+  const open = useStyle((s) => s.chatOpen);
+  const title = open ? "Close the AI (Ctrl+J)" : "Talk about your style with the AI (Ctrl+J)";
   return (
-    <Button variant="bar" pill aria-pressed={style ? open : undefined} title={working ? `${title}. It is still working.` : title} onClick={openAi} className={open ? "bg-white/[.15]!" : ""}>
+    <Button variant="bar" pill aria-pressed={open} title={working ? `${title}. It is still working.` : title} onClick={toggleStyleChat} className={open ? "bg-white/[.15]!" : ""}>
       {working ? <Loader2 size={15} className="animate-spin text-accent" /> : <Sparkles size={15} />} AI
     </Button>
   );
@@ -359,9 +355,9 @@ export function Home() {
       } else if (mod && key === "z" && !e.shiftKey && !typing) {
         // Undo here takes back the last Trash, move or deleted collection, while its toast still offers it.
         if (undoLastToast()) e.preventDefault();
-      } else if (mod && key === "j") {
+      } else if (mod && key === "j" && style) {
         e.preventDefault();
-        openAi();
+        toggleStyleChat();
       } else if (mod && key === "o") {
         e.preventDefault();
         void openProjectFile();
@@ -404,7 +400,7 @@ export function Home() {
         <div className="flex-1" />
         <AiRunBar />
         <JobIndicator />
-        <AiButton />
+        {page === "style" && <AiButton />}
       </header>
       <div className="flex min-h-0 flex-1 gap-1.5 px-1.5 pb-1.5">
         <Sidebar drag={drag} creating={creating} setCreating={setCreating} showMenu={showMenu} />

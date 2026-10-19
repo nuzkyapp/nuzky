@@ -1073,8 +1073,15 @@ def ai_panel(r):
             {'shown': shown and {k: shown[k] for k in ('left', 'top', 'width')}, 'after': {k: panel(r)[k] for k in ('left', 'top', 'width')}})
     r.s.run("window.__nuzky.store.setState({view: 'home'})")
     r.check('on the home screen the floating panel does not show over the projects', wait(lambda: (panel(r) or {}).get('width') == 0, 3), panel(r))
-    click(r, 'AI', 'div[aria-label=Projects] header')
-    r.check("AI on the home screen goes back to the editor with the panel where it was",
+    r.check('the projects have no AI button', not r.s.run(
+        "return [...document.querySelectorAll('div[aria-label=Projects] header button')].some((b) => b.textContent.trim() === 'AI')"))
+    r.shot('home-no-ai')
+    r.key('j', ctrlKey=True)
+    time.sleep(0.5)
+    r.check('Ctrl+J on the projects stays there and opens no project',
+            r.s.run('return window.__nuzky.store.getState().view') == 'home' and (panel(r) or {}).get('width') == 0, panel(r))
+    r.key('Escape')
+    r.check("Esc goes back to the editor with the panel where it was",
             wait(lambda: r.s.run('return window.__nuzky.store.getState().view') == 'editor' and (panel(r) or {}).get('width') == p['width'] + 24, 3), panel(r))
     click(r, 'Close AI (Ctrl+J)')
     r.check('× closes it entirely', wait(lambda: panel(r) is None, 3))
