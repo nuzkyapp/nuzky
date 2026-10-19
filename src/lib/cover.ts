@@ -169,7 +169,10 @@ useEditor.subscribe((s, prev) => {
   const cover = thumbnailOf(s.snap.project, format);
   const before = thumbnailOf(prev.snap?.project, format);
   // A cover made from an image has no frame: the playhead moves freely and Use frame takes the one it shows.
-  if (cover?.image) return;
+  if (cover?.image) {
+    if (s.timeUs !== prev.timeUs) synced = null;
+    return;
+  }
   if (cover && cover.timeUs !== before?.timeUs && choosing === 0) {
     if (Math.abs(cover.timeUs - s.timeUs) > 1) showFrame(format);
     return;

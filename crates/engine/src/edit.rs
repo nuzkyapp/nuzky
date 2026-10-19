@@ -845,7 +845,6 @@ impl Project {
                         }
                     }
                 }
-                // A cover made from the image goes back to its frame.
                 for t in &mut self.thumbnails {
                     if t.image.as_deref() == Some(asset_id.as_str()) {
                         t.image = None;

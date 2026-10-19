@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertCircle, AlertTriangle, Loader2, MonitorPlay, Smartphone } from "lucide-react";
 import { api, errorText, plainError } from "../../lib/api";
-import { COVER_FORMATS, frameAt, chooseFrame, coverFormat, coverImage, downloadModels, draftCover, editCover, editText, mask, selectText, setSafeZones, switchFormat, thumbnailOf, useCover } from "../../lib/cover";
+import { COVER_FORMATS, frameAt, chooseFrame, coverFormat, downloadModels, draftCover, editCover, editText, mask, selectText, setSafeZones, switchFormat, thumbnailOf, useCover } from "../../lib/cover";
 import { AI_EDITING, projectDuration, useAiLocked, useEditor } from "../../lib/store";
 import { formatTime } from "../../lib/time";
 import type { CoverView, LayerBounds, Snapshot, Thumbnail, ThumbnailFormat, Transform } from "../../lib/types";
@@ -237,21 +237,19 @@ function StatusChip({ view }: { view: CoverView | null }) {
   const damaged = useCover((s) => s.damaged);
   const locked = useEditor((s) => !!s.aiRun);
   const missing = !!view?.maskMissing;
-  const image = useEditor((s) => coverImage(s.snap?.project));
   const tried = useRef(new Set<string>());
 
   // The person is cut out a moment after the picture stops changing, when the models are there.
   useEffect(() => {
     if (!view || !missing || !models?.downloaded || job || locked) return;
     const t = view.timeUs;
-    const key = image ?? String(t);
-    if (tried.current.has(key)) return;
+    if (tried.current.has(view.source)) return;
     const timer = window.setTimeout(() => {
-      tried.current.add(key);
+      tried.current.add(view.source);
       void mask(t);
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [view, missing, models, job, locked, image]);
+  }, [view, missing, models, job, locked]);
 
   const chip = "absolute left-2 top-2 z-10 flex h-7 max-w-[calc(100%-16px)] items-center gap-1.5 rounded-lg bg-black/70 pl-2 text-[12px] text-fg";
   if (job)

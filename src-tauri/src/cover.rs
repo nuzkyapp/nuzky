@@ -32,7 +32,8 @@ pub struct Covers {
 /// The frame of the cover shown last, kept while the picture and time stay, so moving a text does
 /// not decode the video again.
 struct Frame {
-    picture: Project,
+    /// The timeline the frame is drawn from; none for an image.
+    picture: Option<Project>,
     time_us: i64,
     /// The image the cover is made from instead of a frame: its id, file and the file's version.
     still: Option<(String, String, String)>,
@@ -62,6 +63,9 @@ pub struct CoverView {
     /// The cover cuts the person out of the frame and their mask is not made yet, so it is drawn
     /// without: text behind the person in front of them and no outline.
     pub mask_missing: bool,
+    /// What the picture is: the frame's time, or the image with its file's version, so the editor cuts the
+    /// person out once per picture.
+    pub source: String,
 }
 
 /// The cover of `format` `width` pixels wide, as the export draws it: a little-endian u32 with the
@@ -135,15 +139,18 @@ impl Covers {
         }
         let renderer = self.renderer.as_mut().unwrap();
         // Only what the frame is drawn from: the cover's own texts and settings do not change it.
-        let mut shown = picture(project);
-        shown.thumbnails.clear();
+        let shown = thumbnail.image.is_none().then(|| {
+            let mut shown = picture(project);
+            shown.thumbnails.clear();
+            shown
+        });
         let still = thumbnail.image.as_ref().and_then(|id| {
             let path = &project.asset(id)?.path;
             Some((id.clone(), path.clone(), nuzky_engine::thumbnail::file_version(path)))
         });
-        let waiting: usize = match still {
-            Some(_) => 0,
-            None => nuzky_engine::matte::missing(cache, &shown).iter().map(|(_, chunks)| chunks.len()).sum(),
+        let waiting: usize = match &shown {
+            Some(shown) => nuzky_engine::matte::missing(cache, shown).iter().map(|(_, chunks)| chunks.len()).sum(),
+            None => 0,
         };
         let fresh = !self.frame.as_ref().is_some_and(|f| match &still {
             Some(_) => f.still == still,
@@ -186,6 +193,10 @@ impl Covers {
             hidden: if mask_missing { vec![0.0; thumbnail.texts.len()] } else { rendered.hidden },
             frame: rendered.frame_bounds,
             mask_missing,
+            source: match &frame.still {
+                Some((id, _, version)) => format!("{id}:{version}"),
+                None => thumbnail.time_us.to_string(),
+            },
         };
         Ok((view, rendered.rgba))
     }
