@@ -690,7 +690,7 @@ function Attached({ attachments }: { attachments: Attachment[] }) {
   );
 }
 
-/** Shown while the pointer is over its `group` or it has keyboard focus. */
+/** Hidden unless an ancestor with the `group` class is hovered. */
 function CopyButton({ text, label, className = "" }: { text: string; label: string; className?: string }) {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
