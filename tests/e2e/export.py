@@ -148,8 +148,10 @@ def file_dialog(r):
     webdriver('POST', sheet + '/cancel')
     r.check('Cancel closes it and keeps the export dialog', wait(lambda: webdriver('GET', sheet) is None, 5) and r.s.run(DIALOG))
     # A dialog closed soon and opened again: the first one's check must leave the second alone. The first began
-    # before it showed as attached, so its check runs by `first` + 3 s; the second begins after the Cancel at
-    # `first` + 0.6 s, so its own check runs after `first` + 3.6 s. Between them, at 3.3 s, it must still be open.
+    # after `clicked` and before `first`, so its check runs between `clicked` + 3 s and `first` + 3 s; the second
+    # begins after the Cancel at `first` + 0.6 s, so its own check runs after `first` + 3.6 s. The second is hidden
+    # before the first check and must still be open after it.
+    clicked = time.monotonic()
     r.s.run(export)
     r.check('Export… opens the save dialog again', wait(lambda: webdriver('GET', sheet), 5))
     first = time.monotonic()
@@ -160,13 +162,14 @@ def file_dialog(r):
     r.check('and once more right after Cancel', wait(lambda: (webdriver('GET', sheet) or {}).get('onScreen'), 5))
     time.sleep(0.8)  # AppKit orders the sheet in again until it has slid in
     webdriver('POST', sheet + '/hide')
-    hid = time.monotonic() - first
+    hid = time.monotonic() - clicked
     time.sleep(0.3)
     hidden = webdriver('GET', sheet)
     r.check('hidden, it still darkens the window but is off the screen', hidden and not hidden['onScreen'], hidden)
-    time.sleep(max(0, first + 3.3 - time.monotonic()))
-    r.check('the check of the closed dialog leaves the new one alone',
-            hid < 2.9 and time.monotonic() - first < 3.5 and webdriver('GET', sheet), [hid, time.monotonic() - first])
+    time.sleep(max(0, first + 3.2 - time.monotonic()))
+    still = webdriver('GET', sheet)
+    seen = time.monotonic() - first
+    r.check('the check of the closed dialog leaves the new one alone', hid < 2.9 and seen < 3.6 and still, [hid, seen])
     closed = wait(lambda: webdriver('GET', sheet) is None, 6)
     told = wait(lambda: "macOS didn't show the window for choosing a file. Quit Nuzky, open it again" in r.s.run(toasts), 5)
     r.check('Nuzky closes it within seconds and a toast says to reopen Nuzky', closed and told, r.s.run(toasts))
