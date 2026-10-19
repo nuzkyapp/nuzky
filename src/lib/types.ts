@@ -1209,6 +1209,10 @@ export type SpeechModel = {
   downloaded: boolean,
 };
 
+/**
+ * What `start_speech_setup` would still download in a language, part by part, so Get set up can say what its
+ * Download size is made of: the model picked, the voice detector and the language's word timing model.
+ */
 export type SpeechSetup = {
   /**
    * Recognition runs on the GPU: Metal on macOS, Vulkan on Linux.
@@ -1218,14 +1222,16 @@ export type SpeechSetup = {
    * None when the language has no word timing model, so its word times are estimates.
    */
   wordTimingMb: number | null,
-  /**
-   * What `start_speech_setup` would still download for each model in this language.
-   */
+  wordTimingMissingMb: number,
+  voiceDetectorMissingMb: number,
   models: Array<SpeechSetupModel>,
 };
 
 export type SpeechSetupModel = {
   id: string,
+  /**
+   * What is left of the model's own file.
+   */
   missingMb: number,
 };
 

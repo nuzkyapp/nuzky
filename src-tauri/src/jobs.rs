@@ -515,23 +515,20 @@ pub struct SpeechModel {
 // File sizes and SHA-256 LFS object IDs from the publishers' Hugging Face repositories, checked 2026-10-06:
 // https://huggingface.co/api/models/ggerganov/whisper.cpp/tree/main
 // https://huggingface.co/api/models/ggml-org/whisper-vad/tree/main
-const MODELS: &[(&str, &str, u32, Integrity)] = &[
+const MODELS: &[(&str, &str, Integrity)] = &[
     (
         "base",
         "Fast",
-        142,
         Integrity { size: 147_951_465, sha256: "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe" },
     ),
     (
         "small",
         "Balanced",
-        466,
         Integrity { size: 487_601_967, sha256: "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b" },
     ),
     (
         "large-v3-turbo-q5_0",
         "Most accurate",
-        547,
         Integrity { size: 574_041_195, sha256: "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2" },
     ),
 ];
@@ -546,10 +543,10 @@ fn model_path(id: &str) -> PathBuf {
 pub fn speech_models() -> Vec<SpeechModel> {
     MODELS
         .iter()
-        .map(|(id, label, size, integrity)| SpeechModel {
+        .map(|(id, label, integrity)| SpeechModel {
             id,
             label,
-            size_mb: *size,
+            size_mb: mb(integrity.size),
             downloaded: std::fs::metadata(model_path(id))
                 .is_ok_and(|file| file.is_file() && file.len() == integrity.size),
         })
@@ -561,9 +558,12 @@ pub fn speech_models() -> Vec<SpeechModel> {
 #[serde(rename_all = "camelCase")]
 pub struct SpeechSetupModel {
     pub id: &'static str,
+    /// What is left of the model's own file.
     pub missing_mb: u32,
 }
 
+/// What `start_speech_setup` would still download in a language, part by part, so Get set up can say what its
+/// Download size is made of: the model picked, the voice detector and the language's word timing model.
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -572,25 +572,33 @@ pub struct SpeechSetup {
     pub gpu: bool,
     /// None when the language has no word timing model, so its word times are estimates.
     pub word_timing_mb: Option<u32>,
-    /// What `start_speech_setup` would still download for each model in this language.
+    pub word_timing_missing_mb: u32,
+    pub voice_detector_missing_mb: u32,
     pub models: Vec<SpeechSetupModel>,
+}
+
+/// Bytes in MB, never 0 while bytes are left, so Download stays offered for the last half MB.
+fn mb(bytes: u64) -> u32 {
+    match bytes {
+        0 => 0,
+        bytes => ((bytes as f64 / 1_048_576.0).round() as u32).max(1),
+    }
 }
 
 #[tauri::command]
 pub async fn speech_setup(language: String) -> SpeechSetup {
+    let align = nuzky_analysis::align_model(&language);
     SpeechSetup {
         gpu: nuzky_analysis::use_gpu(),
-        word_timing_mb: nuzky_analysis::align_model(&language)
-            .map(|model| (model.size as f64 / 1_048_576.0).round() as u32),
+        word_timing_mb: align.map(|model| mb(model.size)),
+        word_timing_missing_mb: align
+            .map_or(0, |model| mb(missing_model_bytes(&models_dir().join(model.file), model.size))),
+        voice_detector_missing_mb: mb(missing_model_bytes(&models_dir().join(VAD_MODEL), VAD_INTEGRITY.size)),
         models: MODELS
             .iter()
             .map(|(id, .., integrity)| SpeechSetupModel {
                 id,
-                // Never 0 while bytes are left, so Download stays offered for the last half MB.
-                missing_mb: match missing_setup_bytes(id, &language, integrity.size) {
-                    0 => 0,
-                    bytes => ((bytes as f64 / 1_048_576.0).round() as u32).max(1),
-                },
+                missing_mb: mb(missing_model_bytes(&model_path(id), integrity.size)),
             })
             .collect(),
     }
@@ -1067,7 +1075,7 @@ pub(crate) fn download_speech(
     cancel: &AtomicBool,
     mut progress: impl FnMut(f32, &'static str),
 ) -> anyhow::Result<(PathBuf, PathBuf)> {
-    let integrity = MODELS.iter().find(|(model, ..)| *model == id).context("Unknown speech model")?.3;
+    let integrity = MODELS.iter().find(|(model, ..)| *model == id).context("Unknown speech model")?.2;
     let url = huggingface(&format!("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{id}.bin"));
     let model = model_download::download(&url, &model_path(id), integrity, cancel, |value| {
         progress(value, "Downloading speech model")

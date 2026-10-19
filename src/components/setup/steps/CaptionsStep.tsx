@@ -15,6 +15,8 @@ const STOP = "Stop downloading the speech model";
 /** What the last Download asked for, so Try again and Resume download only offer to go on with that. */
 let asked: { model: string; language: string } | null = null;
 
+const LIST = new Intl.ListFormat("en", { type: "conjunction" });
+
 const languageName = (id: string) => SPEECH_LANGUAGES.find(([code]) => code === id)?.[1] ?? id;
 
 /**
@@ -128,11 +130,21 @@ function Step() {
       </p>
     ) : null;
 
-  const missing = setup.models.find((m) => m.id === model)?.missingMb ?? 0;
   const askedNow = asked?.model === model && asked.language === language;
   const again = job && askedNow ? job.status : null;
   const busy = running ? "Wait for the download to finish" : null;
   const name = languageName(language);
+  // Each part as what is left of it, so the parts add up to the size on Download.
+  const picked = models.find((m) => m.id === model);
+  const parts = (
+    [
+      [`the ${picked?.label ?? ""} model`, setup.models.find((m) => m.id === model)?.missingMb ?? 0, picked?.sizeMb ?? 0],
+      [`the ${name} word timing model`, setup.wordTimingMissingMb, setup.wordTimingMb ?? 0],
+      ["the voice detector", setup.voiceDetectorMissingMb, 0],
+    ] as const
+  ).filter(([, left]) => left > 0);
+  const missing = parts.reduce((sum, [, left]) => sum + left, 0);
+  const contents = LIST.format(parts.map(([what, left, size]) => `${left < size ? "the rest of " : ""}${what} (${left} MB)`));
   const download = () => {
     asked = { model, language };
     setError(null);
@@ -149,7 +161,7 @@ function Step() {
               ? "Word times are measured in Czech and English; pick one to download its word timing model now."
               : setup.wordTimingMb === null
                 ? `Word times in ${name} are estimates, so a cut between words can land slightly off.`
-                : `Download adds the ${setup.wordTimingMb} MB word timing model, so cuts in ${name} land between words.`
+                : `${name} has a word timing model, so cuts land between words.`
           }
         >
           <Select value={language} disabled={!!(lock ?? busy)} title={lock ?? busy ?? undefined} onChange={(e) => setSpeechLanguage(e.target.value)}>
@@ -240,6 +252,8 @@ function Step() {
         <p className="mt-3 text-[12px] text-muted" role="status">
           Stopped. Resume download goes on where it stopped.
         </p>
+      ) : missing > 0 ? (
+        <p className="tabular mt-3 text-[12px] text-muted">Download gets {contents}.</p>
       ) : null}
       {/* A stop while the last file was checked leaves nothing to fetch, only to install. */}
       {!running && (missing > 0 || !downloaded) && (

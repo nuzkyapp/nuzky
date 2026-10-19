@@ -51,7 +51,8 @@ SETUP = "window.__nuzky.api.speechSetup(arguments[0]).then((s) => JSON.stringify
 
 
 def mb(*names):
-    return round(sum((MODELS / name).stat().st_size for name in names) / 1048576)
+    """What Download offers for these files: each rounded on its own as the step lists it, at least 1 MB."""
+    return sum(max(1, round((MODELS / name).stat().st_size / 1048576)) for name in names)
 
 
 def before(r):
@@ -121,7 +122,7 @@ def run(r):
     r.check('opening puts the focus on the step in the rail, not on Download or Skip', d['focus'] == 'tab', d['focus'])
     r.check('the spoken language starts as the system language, Czech', d['language'] == 'cs', d['language'])
     sizes = [next((l for l in c['lines'] if l.endswith(' MB')), None) for c in d['cards']]
-    r.check('each model shows its size and that it is not downloaded', sizes == ['142 MB', '466 MB', '547 MB']
+    r.check('each model shows the size of its file and that it is not downloaded', sizes == ['141 MB', f'{mb(SMALL)} MB', f'{mb(TURBO)} MB']
             and all('Not downloaded' in c['lines'] for c in d['cards']), d['cards'])
     gpu = json.loads(r.s.call(SETUP, 'cs')['value'])['gpu']
     recommended = 'large-v3-turbo-q5_0' if gpu else 'small'
@@ -134,9 +135,11 @@ def run(r):
     r.check('each model says how many words it gets wrong in Czech, and the smaller ones how much quicker they are',
             f'66% of words wrong · {8 if gpu else 11}× quicker' in lines['base'] and '38% of words wrong · 4× quicker' in lines['small']
             and '11% of words wrong' in lines['large-v3-turbo-q5_0'], lines)
-    full = mb(TURBO, VAD, CS_TIMING) if recommended == 'large-v3-turbo-q5_0' else mb(SMALL, VAD, CS_TIMING)
-    r.check(f'in Czech Download gets the word timing model too: {full} MB, and says so',
-            d['buttons'] == [f'Download {full} MB', 'Skip'] and f'Download adds the {mb(CS_TIMING)} MB word timing model, so cuts in Czech land between words.' in d['text'], d)
+    file, label = (TURBO, 'Most accurate') if recommended == 'large-v3-turbo-q5_0' else (SMALL, 'Balanced')
+    full = mb(file, VAD, CS_TIMING)
+    r.check(f'in Czech Download gets the word timing model too, {full} MB, and the line above it adds up to that size',
+            d['buttons'] == [f'Download {full} MB', 'Skip'] and 'Czech has a word timing model, so cuts land between words.' in d['text']
+            and f'Download gets the {label} model ({mb(file)} MB), the Czech word timing model ({mb(CS_TIMING)} MB), and the voice detector (1 MB).' in d['text'], d)
     time.sleep(0.4)
     r.shot('captions-step')
     out = small_window(r, 'captions-step-1024')
@@ -144,9 +147,10 @@ def run(r):
 
     r.s.run(SET_LANGUAGE, 'de')
     d = wait(lambda: (d := step(r)) and d['language'] == 'de' and d['buttons'][0] != f'Download {full} MB' and d, 5)
-    without = mb(TURBO, VAD) if recommended == 'large-v3-turbo-q5_0' else mb(SMALL, VAD)
+    without = mb(file, VAD)
     r.check('in German, which has no word timing model, one sentence says word times are estimates and Download leaves it out',
-            d and 'Word times in German are estimates' in d['text'] and d['buttons'][0] == f'Download {without} MB', d)
+            d and 'Word times in German are estimates' in d['text'] and d['buttons'][0] == f'Download {without} MB'
+            and f'Download gets the {label} model ({mb(file)} MB) and the voice detector (1 MB).' in d['text'], d)
     r.shot('captions-step-german')
     r.s.run(SET_LANGUAGE, 'cs')
     r.check('Czech is picked again', wait(lambda: (step(r) or {}).get('language') == 'cs', 5))
@@ -209,6 +213,15 @@ def run(r):
     r.check('a partial file stays to resume', part.exists() and 0 < part.stat().st_size < (MODELS / SMALL).stat().st_size)
     d = wait(lambda: (d := step(r)) and d['buttons'][0] == 'Resume download' and d['focus'] == 'Resume download' and d, 5)
     r.check('the step says it stopped and offers Resume download, which takes the focus', d and 'Stopped' in (d['status'] or ''), step(r))
+    r.s.run(SET_LANGUAGE, 'de')
+    left = round((MODELS / SMALL).stat().st_size / 1048576 - part.stat().st_size / 1048576)
+    rest = f'Download gets the rest of the Balanced model ({left} MB) and the voice detector (1 MB).'
+    d = wait(lambda: (d := step(r)) and rest in d['text'] and d, 5)
+    r.check('in another language the line says only the rest of Balanced is left, and adds up to Download',
+            d and d['buttons'][0] == f'Download {left + 1} MB', step(r))
+    r.s.run(SET_LANGUAGE, 'cs')
+    r.check('back in Czech it offers Resume download again', wait(lambda: (d := step(r)) and d['buttons'][0] == 'Resume download', 5), step(r))
+    r.s.run(FOCUS_TEXT, 'Resume download', f'{BOX} footer')
 
     r.models.rate = 60 * 1024 * 1024
     press('Return')
@@ -233,7 +246,8 @@ def run(r):
 
     r.s.run(SET_LANGUAGE, 'en')
     d = wait(lambda: (d := step(r)) and d['buttons'][0] == f'Download {mb(EN_TIMING)} MB' and d, 5)
-    r.check('in English only its word timing model is left to download', d, step(r))
+    r.check('in English only its word timing model is left to download, and the line says so',
+            d and f'Download gets the English word timing model ({mb(EN_TIMING)} MB).' in d['text'], step(r))
     r.models.fail.add(EN_TIMING_PATH)
     r.models.fail_delay = 3
     r.s.run(CLICK, 'Download', f'{BOX} footer')
