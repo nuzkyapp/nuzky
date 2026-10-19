@@ -104,9 +104,9 @@ a cache directory; default is the OS temp directory's `nuzky-analysis` folder.
 CLI cache IDs depend on canonical path, file size and modification time. API callers
 keep asset IDs stable; `pcm_path` performs the same size+mtime invalidation for them.
 
-Model discovery checks `$XDG_DATA_HOME/nuzky/models` (or
-`~/.local/share/nuzky/models`) and `tmp-test/xdg/data/nuzky/models`. Explicit model
-paths take priority. Silero is also looked up alongside the chosen Whisper model.
+Model discovery checks the `models` folder of Nuzky's data folder (`$NUZKY_DATA_DIR`, else
+`$XDG_DATA_HOME/nuzky` or `~/.local/share/nuzky` on Linux and `~/Library/Application Support/nuzky`
+on macOS) and `tmp-test/xdg/data/nuzky/models`. Explicit model paths take priority. Silero is also looked up alongside the chosen Whisper model.
 
 ## Verification
 
