@@ -24,6 +24,9 @@ use serde_json::{Value, json};
 use crate::{activity, media, params::*, reels, transcript, vision_models, waveform};
 
 const PREVIEW_CHARS: usize = 400;
+/// apply_edits leaves out clips longer than this: restyling 117 captions once answered 64 thousand characters,
+/// more than the agent could read.
+const MAX_CLIPS_CHARS: usize = 8_000;
 /// How long activity waits for its job before handing it over to the client.
 const ANSWER_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
@@ -209,12 +212,18 @@ impl Backend {
             "apply_edits" => {
                 let a: Apply = parse(arguments)?;
                 check_new_assets(&a.edits)?;
-                Ok(serde_json::to_value(self.host.session.apply_edits(
+                let mut result = serde_json::to_value(self.host.session.apply_edits(
                     &a.run_id,
                     &a.request_id,
                     a.edits,
                     Expect { revision: a.expected_revision, speech_layout_key: a.expected_speech_layout_key },
-                )?)?)
+                )?)?;
+                if result["clips"].to_string().len() > MAX_CLIPS_CHARS
+                    && let Some(clips) = result.as_object_mut().and_then(|r| r.remove("clips"))
+                {
+                    result["clips_omitted"] = json!(clips.as_array().map_or(0, Vec::len));
+                }
+                Ok(result)
             }
             "end_run" => {
                 let a: End = parse(arguments)?;

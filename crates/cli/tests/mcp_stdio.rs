@@ -716,6 +716,63 @@ fn initialize_list_state_edit_end_undo_over_stdio() {
     assert_eq!(disk["name"], "Original");
 }
 
+/// An agent restyled 117 karaoke captions one updateClip each and got back 64 thousand characters it could not
+/// read. A batch that big now answers with the ids and how many clips were left out, the same on a retry, while a
+/// small batch still shows its clips in full.
+#[test]
+fn a_restyle_of_every_caption_answers_short_enough_to_read_over_stdio() {
+    let mut c = Client::new(true);
+    let run = c.call("begin_run", json!({"label":"restyle captions"}))["run_id"].clone();
+    let segments: Vec<Value> = (0..117i64)
+        .map(|i| {
+            let words: Vec<Value> = ["so", "this", "is", "it"]
+                .iter()
+                .zip(0i64..)
+                .map(|(w, j)| json!({"text":w,"startUs":i * 1_000_000 + j * 250_000,"endUs":i * 1_000_000 + (j + 1) * 250_000}))
+                .collect();
+            json!({"startUs":i * 1_000_000,"endUs":(i + 1) * 1_000_000,"text":"so this is it","words":words})
+        })
+        .collect();
+    let style = json!({"fontSize":64.0,"color":"#ffffff","bold":true});
+    c.call(
+        "apply_edits",
+        json!({"run_id":run,"request_id":"captions","edits":[{"type":"addCaptions","segments":segments,"style":style}]}),
+    );
+    let tracks = c.call("get_state", json!({}))["tracks"].clone();
+    let captions = tracks.as_array().unwrap().iter().find(|t| t["name"] == "Captions").unwrap();
+    let ids: Vec<Value> = captions["clips"].as_array().unwrap().iter().map(|clip| clip["id"].clone()).collect();
+    assert_eq!(ids.len(), 117);
+    let restyle = |request: &str, ids: &[Value], size: f64| {
+        let edits: Vec<Value> = ids
+            .iter()
+            .map(|id| json!({"type":"updateClip","clipId":id,"style":{"fontSize":size,"color":"#ffcc00","bold":true}}))
+            .collect();
+        json!({"name":"apply_edits","arguments":{"run_id":run,"request_id":request,"edits":edits}})
+    };
+    let big = c.rpc("tools/call", restyle("restyle", &ids, 72.0));
+    let text = big["result"]["content"][0]["text"].as_str().unwrap();
+    eprintln!("apply_edits of 117 updateClip answered {} characters", text.len());
+    assert!(text.len() < 4_000, "{} characters", text.len());
+    let result = &big["result"]["structuredContent"];
+    assert_eq!(result["changed"].as_array().unwrap(), &ids);
+    assert!(result.get("clips").is_none(), "{result}");
+    assert_eq!(result["clips_omitted"], 117);
+    assert_eq!(
+        c.rpc("tools/call", restyle("restyle", &ids, 72.0))["result"],
+        big["result"],
+        "a retry answers the same"
+    );
+
+    let small = c.call("apply_edits", restyle("small", &ids[..2], 80.0)["arguments"].clone());
+    let clips = small["clips"].as_array().unwrap();
+    assert_eq!(clips.len(), 2);
+    assert_eq!(clips[0]["content"]["style"]["fontSize"], 80.0);
+    assert!(clips[0]["content"]["words"].is_array(), "{}", clips[0]);
+    assert!(small.get("clips_omitted").is_none());
+    c.call("end_run", json!({"run_id":run,"action":"keep"}));
+    c.finish();
+}
+
 /// The guide's B-roll over a phrase: a screenshot in a corner window from the first word to the last,
 /// then made a round bubble with a border.
 #[test]
