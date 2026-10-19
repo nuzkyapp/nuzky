@@ -633,7 +633,7 @@ export function Timeline({ height }: { height: number }) {
                     )}
                     {track.clips.map((clip) => {
                       if (drag?.moved && drag.clip.id === clip.id) {
-                        // A main-track clip trimmed at its end is drawn by its ghost in place; otherwise its old spot stays outlined.
+                        // Where the main track's layout places the clip, its old spot goes; otherwise it stays outlined.
                         if (isMain && layout) return null;
                         return (
                           <div
