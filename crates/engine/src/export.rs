@@ -133,7 +133,9 @@ impl Default for ExportOptions {
             crf: Quality::Recommended.crf(),
             replace_existing: false,
             replace_credits: false,
-            preset: "veryfast".into(),
+            // Every platform encodes the upload again and keeps only the detail the file still has. At the
+            // same CRF, medium keeps visibly more of it than veryfast, for about twice the export time.
+            preset: "medium".into(),
             resolution: None,
             fps: None,
             delivery: None,
@@ -466,11 +468,8 @@ fn encode(
         }
         None => Sound::Mix(Box::new(Mixer::new(cache_dir.to_path_buf()))),
     };
-    // A delivery preset keeps the app's speed: veryfast writes High, which the profile pins.
-    let x264 = match delivery {
-        Some(_) => [("preset", "veryfast"), ("profile", "high")],
-        None => [("preset", options.preset.as_str()), ("", "")],
-    };
+    let profile = if delivery.is_some() { ("profile", "high") } else { ("", "") };
+    let x264 = [("preset", options.preset.as_str()), profile];
     let mut mp4 = Mp4Writer::create(out, vcodec, w, h, fps, options.crf, &x264)?;
     let render = |i| {
         let pixels = renderer.render(project, frame_time_us(i, fps), w, h, Wait::Exact, true)?;

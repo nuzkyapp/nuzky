@@ -441,6 +441,20 @@ fn check_delivery_file(out: &Path, seconds: f64, width: u32, height: u32, fps: u
         ["bt709", "bt709", "bt709", "tv"]
     );
     assert_eq!(fields(audio, &["codec_name", "sample_rate", "channels"]), ["aac", "48000", "2"]);
+    // x264 writes its settings into the stream; these are medium's, which veryfast (ref=1 subme=2 trellis=0)
+    // was not, and which keep the detail the platforms' own encode starts from.
+    let bytes = std::fs::read(out).unwrap();
+    let settings = String::from_utf8_lossy(&bytes);
+    let settings: String = settings
+        .split("options: ")
+        .nth(1)
+        .expect("x264 settings in the stream")
+        .chars()
+        .take_while(|&c| c != '\0')
+        .collect();
+    for option in ["ref=3", "subme=7", "trellis=1"] {
+        assert!(settings.split(' ').any(|s| s == option), "{option} missing from x264 settings: {settings}");
+    }
     let boxes = atoms(out);
     let position = |name: &str| boxes.iter().position(|b| b == name).unwrap();
     assert!(position("moov") < position("mdat"), "moov must come first so playback starts at once: {boxes:?}");
