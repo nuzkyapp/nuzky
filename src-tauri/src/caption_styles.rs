@@ -33,13 +33,16 @@ mod tests {
         if std::env::var_os("NUZKY_CAPTION_STYLES_TEST").is_none() {
             let dir = std::env::temp_dir().join(format!("nuzky-caption-styles-{}", new_id()));
             std::fs::create_dir_all(&dir).unwrap();
-            let status = std::process::Command::new(std::env::current_exe().unwrap())
+            let spawning = crate::CHILD_SPAWN.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap())
                 .args(["--exact", "caption_styles::tests::caption_styles_round_trip", "--nocapture"])
                 .env("NUZKY_CAPTION_STYLES_TEST", "1")
                 .env("XDG_DATA_HOME", &dir)
                 .env("HOME", &dir)
-                .status()
+                .spawn()
                 .unwrap();
+            drop(spawning);
+            let status = child.wait().unwrap();
             std::fs::remove_dir_all(dir).unwrap();
             assert!(status.success());
             return;

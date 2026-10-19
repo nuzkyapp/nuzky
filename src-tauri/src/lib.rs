@@ -1547,6 +1547,7 @@ mod ipc_lifecycle_tests {
     #[cfg(unix)]
     #[test]
     fn refused_switch_restores_ipc_after_save_failure() {
+        let _children = crate::CHILD_SPAWN.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let dir = std::env::temp_dir().join(format!("nuzky-save-failure-{}", new_id()));
         let path = dir.join("project.nuzky");
         store::create(&path, &Project::new("still open")).unwrap();
@@ -1568,6 +1569,7 @@ mod ipc_lifecycle_tests {
     #[cfg(unix)]
     #[test]
     fn squatted_agent_endpoint_still_opens_the_project() {
+        let _children = crate::CHILD_SPAWN.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         use std::os::unix::fs::DirBuilderExt;
         let dir = std::env::temp_dir().join(format!("nuzky-squatted-{}", new_id()));
         let path = dir.join("project.nuzky");
@@ -1593,6 +1595,7 @@ mod ipc_lifecycle_tests {
 
     #[test]
     fn busy_recent_project_opens_the_next_one_with_a_notice() {
+        let _children = crate::CHILD_SPAWN.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let dir = std::env::temp_dir().join(format!("nuzky-busy-{}", new_id()));
         let (older, newer) = (dir.join("older.nuzky"), dir.join("newer.nuzky"));
         store::create(&older, &Project::new("Older")).unwrap();
@@ -1628,6 +1631,7 @@ mod ipc_lifecycle_tests {
 
     #[test]
     fn quitting_asks_about_real_work_and_waits_for_cancelled_jobs_to_clean_up() {
+        let _children = crate::CHILD_SPAWN.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let kinds = |list: &[&str]| list.iter().map(|kind| kind.to_string()).collect::<Vec<_>>();
         assert_eq!(quit_question(&kinds(&["audio", "proxy"])), None);
         assert!(quit_question(&kinds(&["audio", "captions"])).unwrap().starts_with("Speech recognition"));
@@ -1676,6 +1680,7 @@ mod ipc_lifecycle_tests {
 
     #[test]
     fn pending_mutation_rejects_replaced_session_epoch() {
+        let _children = crate::CHILD_SPAWN.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let dir = std::env::temp_dir().join(format!("nuzky-epoch-{}", new_id()));
         let old_path = dir.join("old.nuzky");
         let next_path = dir.join("next.nuzky");
@@ -1710,6 +1715,7 @@ mod ipc_lifecycle_tests {
 
     #[test]
     fn switching_with_slow_job_returns_promptly_and_retains_project_lock() {
+        let _children = crate::CHILD_SPAWN.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let dir = std::env::temp_dir().join(format!("nuzky-switch-{}", new_id()));
         let old_path = dir.join("old.nuzky");
         let next_path = dir.join("next.nuzky");

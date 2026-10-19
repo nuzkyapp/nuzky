@@ -1343,7 +1343,9 @@ mod tests {
     #[test]
     fn free_space_matches_df_available() {
         let dir = std::env::current_dir().unwrap();
+        let spawning = crate::CHILD_SPAWN.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let output = std::process::Command::new("df").arg("-Pk").arg(&dir).output().unwrap();
+        drop(spawning);
         assert!(output.status.success());
         let output = String::from_utf8(output.stdout).unwrap();
         let available_kb: u64 = output.lines().last().unwrap().split_whitespace().nth(3).unwrap().parse().unwrap();

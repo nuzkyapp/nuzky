@@ -937,6 +937,7 @@ mod tests {
     /// An untitled project emptied after it had clips still has them in its versions, so it stays.
     #[test]
     fn an_emptied_project_with_earlier_versions_is_not_cleared_away() {
+        let _children = crate::CHILD_SPAWN.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let dir = std::env::temp_dir().join(format!("library-pristine-{}", new_id()));
         std::fs::create_dir_all(&dir).unwrap();
         let (fresh, emptied) = (dir.join("fresh.nuzky"), dir.join("emptied.nuzky"));
