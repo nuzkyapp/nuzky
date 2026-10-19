@@ -34,8 +34,8 @@ opt-level = 1
 # and linking slower.
 debug = "line-tables-only"
 
-# The app crate is glue between the UI and the engine: optimising it took 7 of the 10 s it cost after every edit,
-# and nothing in it is slow without optimisation.
+# The app crate is mostly glue between the UI and the engine. Optimising it took 7 of the 9 s a rebuild cost after an
+# edit there, while the debug app prepared an hour of sound and played and exported as fast without it.
 [profile.dev.package.nuzky-app]
 opt-level = 0
 
