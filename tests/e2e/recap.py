@@ -6,12 +6,11 @@ from e2e.home import resize
 from e2e.reel import poll
 
 DIALOG = "return document.querySelector('[role=dialog]')?.innerText ?? ''"
-# The recording plays in the recap after 1 s of opening, then the new length lands for 1.6 s; with the end card the
-# recap ends on 1.5 s of it. While a cut plays, the picture steps back to 90 % and leaves the graphite around it: the
-# test pattern of talk.mp4 fills its right edge when kept and the edge goes dark in a cut.
 OPENING_S = 1.0
 LANDING_S = 1.6
 END_CARD_S = 1.5
+# While a cut plays, the picture steps back to 90 % and leaves the graphite around it: the test pattern of talk.mp4
+# fills its right edge when kept and the edge goes dark in a cut.
 EDGE = (1069, 400, 1080, 1500)
 
 
