@@ -204,7 +204,8 @@ pub enum EditCmd {
     },
     /// Pastes copied clips with new ids, keeping their offsets to each other. The clips of each track go back on
     /// it when they all fit there, else on a new track right above it, as when dragging. Clips from the main track
-    /// go in back to back at its cut nearest `at_us`, and every other clip keeps its offset to the main-track clip it
+    /// go in back to back at its cut nearest `at_us`, where the other tracks except audio kept in place open the same
+    /// time, and every other clip keeps its offset to the main-track clip it
     /// starts over; without them the earliest clip starts at `at_us`. The pasted clips are selected.
     PasteClips {
         clips: Vec<CopiedClip>,
@@ -1056,8 +1057,21 @@ impl Project {
                 out.select.push(self.tracks[ti].clips[second].id.clone());
             }
             EditCmd::DeleteClips { clip_ids } => {
+                let cuts: Vec<(i64, i64)> = self
+                    .track_index(MAIN_TRACK)
+                    .map(|ti| &self.tracks[ti].clips)
+                    .into_iter()
+                    .flatten()
+                    .filter(|c| clip_ids.contains(&c.id))
+                    .map(|c| (c.start_us, c.duration_us))
+                    .collect();
                 for t in &mut self.tracks {
                     t.clips.retain(|c| !clip_ids.contains(&c.id));
+                }
+                // The main track closes the gap, so the other tracks lose that time too and captions and
+                // overlays stay over the same picture, as when trimming. Later cuts first keep earlier ones valid.
+                for (start, duration) in cuts.into_iter().rev() {
+                    self.ripple_others(start, -duration, min);
                 }
             }
             EditCmd::DuplicateClip { clip_id } => {
@@ -1587,13 +1601,15 @@ impl Project {
         let mut anchors: Vec<(i64, i64)> = Vec::new();
         if !main.is_empty() {
             let length: i64 = main.iter().map(|c| c.clip.duration_us).sum();
-            let track = &mut self.tracks[0];
+            let clips = &self.tracks[0].clips;
             // The cut nearest `at`, as when dragging: before the first clip whose middle is past it.
-            let cut = track
-                .clips
+            let cut = clips
                 .iter()
                 .find(|c| c.start_us + c.duration_us / 2 > at)
-                .map_or_else(|| track.clips.iter().map(Clip::end_us).max().unwrap_or(0), |c| c.start_us);
+                .map_or_else(|| clips.iter().map(Clip::end_us).max().unwrap_or(0), |c| c.start_us);
+            // The other tracks open the same time, so what follows stays over its picture, as when deleting.
+            self.ripple_others(cut, length, min_duration(self));
+            let track = &mut self.tracks[0];
             for c in track.clips.iter_mut().filter(|c| c.start_us >= cut) {
                 c.start_us += length;
             }
@@ -2372,9 +2388,39 @@ mod tests {
         let mut p = project();
         p.apply(EditCmd::AddClip { asset_id: "a".into(), start_us: None, track_id: None }).unwrap();
         p.apply(EditCmd::AddClip { asset_id: "b".into(), start_us: None, track_id: None }).unwrap();
+        p.apply(EditCmd::AddClip { asset_id: "m".into(), start_us: Some(0), track_id: None }).unwrap();
+        let style = TextStyle {
+            font_family: None,
+            font_size: 40.0,
+            color: "#fff".into(),
+            bold: false,
+            stroke_width: 0.0,
+            stroke_color: "#000".into(),
+            background: None,
+            max_width: None,
+            highlight: None,
+            keywords: None,
+        };
+        let seg =
+            |start_us, end_us, text: &str| CaptionSegment { start_us, end_us, text: text.into(), words: Vec::new() };
+        let segments = vec![seg(1_000_000, 2_000_000, "over a"), seg(6_000_000, 7_000_000, "over b")];
+        p.apply(EditCmd::AddCaptions { segments, style, anim_in: None, anim_out: None }).unwrap();
         let first = p.tracks[0].clips[0].id.clone();
+        let cut = copied(&p, &first);
         p.apply(EditCmd::DeleteClips { clip_ids: vec![first] }).unwrap();
         assert_eq!(main_layout(&p), vec![(0, 3000)]);
+        // The caption over the deleted clip goes and the next one moves with its picture; kept music stays.
+        let spans = |p: &Project| -> Vec<_> {
+            let captions = p.tracks.iter().find(|t| t.is_captions()).unwrap();
+            captions.clips.iter().map(|c| (c.start_us, c.end_us())).collect()
+        };
+        assert_eq!(spans(&p), vec![(1_000_000, 2_000_000)]);
+        let music = p.tracks.iter().find(|t| t.kind == TrackKind::Audio).unwrap();
+        assert_eq!((music.clips[0].start_us, music.clips[0].duration_us), (0, 20_000_000));
+        // Pasting the clip back opens its time again, so the caption returns over its picture.
+        p.apply(EditCmd::PasteClips { clips: vec![cut], at_us: 0 }).unwrap();
+        assert_eq!(main_layout(&p), vec![(0, 5000), (5000, 3000)]);
+        assert_eq!(spans(&p), vec![(6_000_000, 7_000_000)]);
     }
 
     #[test]
@@ -4027,7 +4073,7 @@ mod tests {
         let only = copied(&p, &p.tracks[2].clips[0].id.clone());
         p.apply(EditCmd::DeleteClips { clip_ids: vec![only.clip.id.clone()] }).unwrap();
         let tracks = p.tracks.len();
-        p.apply(EditCmd::PasteClips { clips: vec![only], at_us: 6_000_000 }).unwrap();
+        p.apply(EditCmd::PasteClips { clips: vec![only], at_us: 9_000_000 }).unwrap();
         assert_eq!(p.tracks.len(), tracks + 1);
         let before = p.clone();
         p.apply(EditCmd::RemoveAsset { asset_id: "b".into() }).unwrap();

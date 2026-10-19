@@ -112,6 +112,52 @@ def edit(r):
     for _ in range(2):
         r.key('z', ctrlKey=True)
     r.check('undo puts the clip and the title back', wait(lambda: r.track() == undone and title() is None, 5), r.track())
+
+    # Deleting a main-track clip takes the captions over it along and moves the later ones with their picture, also
+    # when the captions were selected with it. Deleting the video alone once left its captions, and deleting both
+    # left a gap in the captions.
+    piece, wide = undone[1], undone[2]
+    segment = lambda start, text: {'startUs': start + 200_000, 'endUs': start + 700_000, 'text': text, 'words': []}
+    r.s.call("window.__nuzky.store.getState().edit({type: 'addCaptions', segments: arguments[0],"
+             " style: {fontSize: 60, color: '#ffffff'}})", [segment(piece['startUs'], 'Piece'), segment(wide['startUs'], 'Wide')])
+    captions = lambda: [(c['text'], c['startUs']) for t in r.state()['tracks'] if t['kind'] == 'text' for c in t['clips']]
+    r.check('a caption over the piece and one over the wide clip',
+            wait(lambda: captions() == [('Piece', piece['startUs'] + 200_000), ('Wide', wide['startUs'] + 200_000)], 5), captions())
+    after = [('Wide', piece['startUs'] + 200_000)]
+    r.focus_clip(piece['id'])
+    r.key('Delete')
+    r.check('deleting only the piece removes its caption and moves the next one with the wide clip',
+            wait(lambda: captions() == after, 5), captions())
+    r.key('z', ctrlKey=True)
+    wait(lambda: len(captions()) == 2, 5)
+    caption = next(c['id'] for t in r.state()['tracks'] if t['kind'] == 'text' for c in t['clips'] if c['text'] == 'Piece')
+    r.s.run(CLICK_CLIP, piece['id'], {})
+    r.s.run(CLICK_CLIP, caption, add)
+    wait(lambda: r.s.run(SELECTION) == [piece['id'], caption], 5)
+    r.key('Delete')
+    r.check('deleting the piece with its caption leaves no gap before the next caption', wait(lambda: captions() == after, 5),
+            captions())
+    time.sleep(1)
+    r.shot('delete-with-captions')
+    # Cutting them and pasting them back at the same place puts every caption back over its picture.
+    r.key('z', ctrlKey=True)
+    wait(lambda: len(captions()) == 2, 5)
+    r.s.run(CLICK_CLIP, piece['id'], {})
+    r.s.run(CLICK_CLIP, caption, add)
+    wait(lambda: r.s.run(SELECTION) == [piece['id'], caption], 5)
+    r.key('x', ctrlKey=True)
+    wait(lambda: captions() == after, 5)
+    r.seek(piece['startUs'])
+    r.key('v', ctrlKey=True)
+    layout = lambda: [(c['startUs'], c['durationUs']) for c in r.track()]
+    r.check('Ctrl+X and Ctrl+V back at the same place leave the video and both captions where they were',
+            wait(lambda: layout() == [(c['startUs'], c['durationUs']) for c in undone] and captions() == [
+                ('Piece', piece['startUs'] + 200_000), ('Wide', wide['startUs'] + 200_000)], 5), {'video': layout(), 'captions': captions()})
+    for count in (1, 2):
+        r.key('z', ctrlKey=True)
+        wait(lambda: len(captions()) == count, 5)
+    r.key('z', ctrlKey=True)
+    r.check('undo takes the captions away again', wait(lambda: r.track() == undone and captions() == [], 5), captions())
     # Opening the Audio tab once blanked the whole window: its store selector built a new list on every read.
     r.import_media(FIXTURES / 'music.mp3')
     r.s.run("[...document.querySelectorAll('[role=tab]')].find((t) => t.textContent.trim() === 'Audio').click()")
