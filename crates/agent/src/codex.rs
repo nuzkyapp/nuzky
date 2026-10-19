@@ -35,7 +35,6 @@ const OFF: &[&str] = &[
     "features.code_mode.direct_only_tool_namespaces=[\"mcp__nuzky\"]",
 ];
 
-/// What only Codex can do besides Nuzky's tools.
 const IMAGES: &str = "When the user asks for a picture that is not in the project, such as a background, a sticker or a \
 cover, you may make it with image_gen.imagegen. Then import the PNG at the path it gives with import_media and place it.";
 

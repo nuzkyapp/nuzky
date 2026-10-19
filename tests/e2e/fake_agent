@@ -21,7 +21,7 @@ stream-json user messages from stdin while it works; Codex reads one prompt up t
   the `thumbnail` prompt (Make a thumbnail): sets both covers in one run with the hook from "Hook: …" in the wishes,
              looks at the cover with inspect_thumbnail, waiting for its mask, and exports nothing
   "think first"  (Codex) says nothing for 2 s, then is echoed back
-  "image"    (Codex) generates an orange PNG into $CODEX_HOME/generated_images as Codex's image_gen does, imports it with
+  "image"    (Codex) generates an orange PNG into a Codex home of its own (generated_images/<thread>/) as Codex's image_gen does, imports it with
              import_media and shows it as a picture in picture from 0, as Nuzky's instructions ask
   "signin"   is not signed in;  "limit" has hit its usage limit
   anything else is echoed back.
@@ -449,8 +449,8 @@ elif CODEX and 'image' in message:
     rows = b''.join(b'\0' + b'\xff\x80\x00' * size for _ in range(size))
     png = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', size, size, 8, 2, 0, 0, 0)) \
         + chunk(b'IDAT', zlib.compress(rows)) + chunk(b'IEND', b'')
-    home = Path(os.environ.get('CODEX_HOME') or Path(os.environ['HOME']) / '.codex')
-    image = home / 'generated_images' / session / f'ig_{os.getpid()}.png'
+    # Under a Codex home of its own, which the app does not know, as a Codex started with another CODEX_HOME.
+    image = LOG / 'codex-home' / 'generated_images' / session / f'ig_{os.getpid()}.png'
     image.parent.mkdir(parents=True, exist_ok=True)
     image.write_bytes(png)
     (LOG / 'generated.txt').write_text(str(image))

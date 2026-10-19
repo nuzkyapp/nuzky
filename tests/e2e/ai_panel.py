@@ -483,6 +483,7 @@ def ai_panel_codex(r):
 
 def setup_codex_image(r):
     setup_codex(r)
+    # The app knows this home; the fake saves its images under another one, as a Codex in a terminal may.
     r.env['CODEX_HOME'] = str(r.work / 'codex')
 
 
@@ -517,9 +518,9 @@ def ai_panel_codex_image(r):
     clips = [c for t in saved['tracks'] if t['id'] != 'main' for c in t['clips'] if images and c['content'].get('assetId') == images[0]['id']]
     r.check('the image shows from 0 for 3 s on an overlay track',
             [(c['startUs'], c['durationUs']) for c in clips] == [(0, 3_000_000)], clips)
-    shutil.rmtree(r.work / 'codex/generated_images')
+    shutil.rmtree(generated.parent.parent)
     r.check("the copy stays when Codex's folder is emptied", images and Path(images[0]['path']).is_file())
-    share = wait(lambda: orange_share(r, 'codex-image') > 0.05 and orange_share(r, 'codex-image'), 10)
+    share = wait(lambda: (lambda s: s > 0.05 and s)(orange_share(r, 'codex-image')), 10)
     r.check('the preview shows the orange image where it showed none before', before < 0.005 and share,
             {'before': before, 'share': share})
     r.check('no error toast along the way', not r.errors(), r.errors())

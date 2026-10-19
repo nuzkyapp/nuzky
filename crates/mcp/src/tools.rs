@@ -1590,19 +1590,25 @@ fn loudness_window(duration_us: i64, window_us: Option<i64>) -> Result<i64> {
 }
 
 /// An image Codex generated, copied into Nuzky's own folder, since a project should not depend on Codex's home;
-/// any other file as it is.
+/// any other file as it is. Codex saves them as `<its home>/generated_images/<thread>/<call>.png`, and the agent
+/// that imports one may use another home than this process knows, so the path's shape tells.
 fn kept(path: PathBuf) -> Result<PathBuf> {
-    let codex = std::env::var_os("CODEX_HOME").filter(|v| !v.is_empty()).map(PathBuf::from);
-    let generated =
-        codex.or_else(|| dirs::home_dir().map(|home| home.join(".codex"))).map(|c| c.join("generated_images"));
-    let Some(name) =
-        generated.and_then(|g| g.canonicalize().ok()).and_then(|g| path.strip_prefix(g).ok().map(Path::to_owned))
-    else {
+    let (Some(file), Some(thread)) = (path.file_name(), path.parent().and_then(Path::file_name)) else {
         return Ok(path);
     };
-    let copy = crate::sounds::data_dir().join("generated-images").join(name);
+    let generated =
+        path.parent().and_then(Path::parent).and_then(Path::file_name).is_some_and(|n| n == "generated_images");
+    if !generated || path.extension().is_none_or(|e| e != "png") {
+        return Ok(path);
+    }
+    let bytes = std::fs::read(&path).context("Reading the generated image")?;
+    let mut copy = crate::sounds::data_dir().join("generated-images").join(thread).join(file);
+    // Another image under the same names keeps the copy a project may already use.
+    if copy.is_file() && std::fs::read(&copy).ok().as_deref() != Some(bytes.as_slice()) {
+        copy.set_file_name(format!("{}-{}", new_id(), file.to_string_lossy()));
+    }
     if !copy.is_file() {
-        crate::sounds::publish(&copy, |file| Ok(std::io::copy(&mut std::fs::File::open(&path)?, file).map(drop)?))?;
+        crate::sounds::publish(&copy, |out| Ok(std::io::Write::write_all(out, &bytes)?))?;
     }
     copy.canonicalize().context("Resolving media path")
 }
