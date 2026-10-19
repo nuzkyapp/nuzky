@@ -53,23 +53,25 @@ def phone_clip(r, name, transfer, values):
     return clip
 
 
-def shown_patches(r, shot, at_us):
+def shown_patches(r, shot, at_us, names):
     r.seek(at_us)
     time.sleep(1.5)
     r.shot(shot)
     crop = preview_crop(r.work / f'{shot}.png', preview_rect(r))
-    return {name: centre(crop, i) for i, name in enumerate(PATCHES)}
+    return {name: centre(crop, i) for i, name in enumerate(names)}
 
 
 @flow('hdr', "Phone HDR, HLG and PQ, shows in the preview as Apple's SDR conversion shows HLG, the same as the renderer, "
              'with walls and highlights not blown out')
 def hdr(r):
     hlg = phone_clip(r, 'hlg-phone', 'arib-std-b67', list(PATCHES.values()))
-    pq = phone_clip(r, 'pq-phone', 'smpte2084', [hlg_to_pq(v) for v in PATCHES.values()])
+    # The PQ clip holds the patches in reverse order, so a preview still showing the HLG clip cannot pass for it.
+    reversed_names = list(reversed(PATCHES))
+    pq = phone_clip(r, 'pq-phone', 'smpte2084', [hlg_to_pq(PATCHES[name]) for name in reversed_names])
     r.import_media(hlg, pq)
     r.add_clip(hlg.name)
     r.add_clip(pq.name)
-    preview = shown_patches(r, 'hdr-preview', 1_000_000)
+    preview = shown_patches(r, 'hdr-preview', 1_000_000, list(PATCHES))
     rendered_png = r.work / 'hdr-rendered.png'
     subprocess.run([str(CLI), 'frame', str(r.saved_project()), '1', str(rendered_png), str(WIDTH)], env=r.env, check=True,
                    capture_output=True)
@@ -78,8 +80,6 @@ def hdr(r):
     off = max(abs(a - b) for i, name in enumerate(PATCHES) for a, b in zip(preview[name], centre(rendered, i)))
     r.check('the preview shows the same colours as the renderer', off <= 8, f'{off:.0f} levels apart')
     # Apple's SDR conversion (avconvert -p PresetHighestQuality, macOS 27.0.1) shows the 75 % grey at 155.
-    # libplacebo's tone curve on the light of a 1000 nit display showed it at 172, flatter; clipping at reference
-    # white showed 244.
     grey = preview['grey 75 %'][1]
     r.check("HDR reference white shows as Apple's light grey (155)", abs(grey - 155) <= 8, round(grey))
     r.check('the lit wall keeps its colour instead of turning white', max(preview['wall']) < 235,
@@ -93,7 +93,7 @@ def hdr(r):
     # The PQ clip comes after the HLG one. The preview decodes PQ with a little noise and shows the lit cheek's red
     # a few levels lower than the renderer draws it, as it did before PQ showed like HLG; the renderer's own frames
     # of the two clips are within 4 levels.
-    pq_preview = shown_patches(r, 'hdr-pq-preview', 3_000_000)
+    pq_preview = shown_patches(r, 'hdr-pq-preview', 3_000_000, reversed_names)
     off, worst = max((max(abs(a - b) for a, b in zip(pq_preview[name], preview[name])), name) for name in PATCHES)
     r.check('the same scene recorded as PQ shows as the HLG clip does', off <= 12,
             f'{off:.0f} levels apart at {worst}: PQ {[round(v) for v in pq_preview[worst]]}, '

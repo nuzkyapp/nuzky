@@ -703,8 +703,6 @@ fn hlg_and_pq_sources_are_tone_mapped_like_apples_hlg_conversion() {
         };
         let ours: Vec<_> = (0..PATCHES.len()).map(|i| patch(&frame, i)).collect();
         eprintln!("QA HDR {transfer}: Nuzky {ours:.0?}\n  Apple {APPLE:.0?}");
-        // libplacebo's tone curve on the light of a 1000 nit display showed the 50 % and 75 % greys at 114 and
-        // 172, and skin 12 to 14 levels brighter than Apple.
         for i in 0..7 {
             let off = (0..3).map(|c| (ours[i][c] - APPLE[i][c]).abs()).fold(0.0, f64::max);
             assert!(off <= 8.0, "{transfer} patch {i}: Nuzky {:?}, Apple {:?}", ours[i], APPLE[i]);
