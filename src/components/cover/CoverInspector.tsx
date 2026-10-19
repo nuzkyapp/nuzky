@@ -3,9 +3,9 @@ import { AlertTriangle, Copy, Download, Image as ImageIcon, Plus, RotateCcw, Tra
 import { COVER_PRESETS, addText, coverFormat, deleteText, downloadModels, editCover, editText, presetText, selectText, thumbnailOf, useCover } from "../../lib/cover";
 import { DEFAULT_TRANSFORM, sameStyle } from "../../lib/presets";
 import { undoAction, useEditor } from "../../lib/store";
-import type { TextStyle, Thumbnail, ThumbnailFormat } from "../../lib/types";
+import type { Thumbnail, ThumbnailFormat } from "../../lib/types";
 import { InspectorHeader } from "../inspector/Header";
-import { MainStyle, MoreStyle } from "../inspector/TextSection";
+import { MainStyle, MoreStyle, patched, type StylePatch } from "../inspector/TextSection";
 import { AiLock, Button, ColorInput, Disclosure, IconButton, PresetTile, Section, Segmented, Slider, Switch, TextSwatch, useLockReason } from "../ui";
 import { COVERED_TOO_MUCH, useShownCover } from "./CoverStage";
 
@@ -177,7 +177,7 @@ function TextInspector({ format, index }: { format: ThumbnailFormat; index: numb
   const text = useEditor((s) => thumbnailOf(s.snap?.project, format)?.texts[index]);
   const hidden = useCoverHidden()[index] ?? 0;
   if (!text) return null;
-  const setStyle = (patch: Partial<TextStyle>, key: string) => void editText(format, index, (t) => ({ ...t, style: { ...t.style, ...patch } }), `style:${key}`);
+  const setStyle = (patch: StylePatch, key: string) => void editText(format, index, (t) => ({ ...t, style: patched(t.style, patch) }), `style:${key}`);
   const setTransform = (patch: Partial<Thumbnail["frame"]>, key: string) => void editText(format, index, (t) => ({ ...t, transform: { ...t.transform, ...patch } }), `transform:${key}`);
   const remove = () => deleteText(format, index);
   const duplicate = async () => {

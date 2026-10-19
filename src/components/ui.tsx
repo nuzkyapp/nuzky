@@ -188,7 +188,7 @@ export function Field({ label, children, hint }: { label: string; children: Reac
 }
 
 /** Accepts "12,5", "50 %" and "-3" alike. */
-const parseNumber = (s: string) => Number(s.replace(",", ".").replace(/[^\d.+-]/g, "") || "x");
+export const parseNumber = (s: string) => Number(s.replace(",", ".").replace(/[^\d.+-]/g, "") || "x");
 
 /**
  * The 32 px search field of the library panels. Typing never reaches the editor's shortcuts; Esc clears
@@ -371,6 +371,7 @@ export function RangeInput({
 /** The label above, then the slider and a typeable value on one row, like CapCut's property rows. */
 export function Slider({
   label,
+  name = label,
   value,
   min,
   max,
@@ -382,8 +383,13 @@ export function Slider({
   disabled,
   mixed,
   title,
+  narrow = false,
 }: {
   label: string;
+  /** What screen readers call it, when the row it sits in names the rest ("Shadow blur" under Shadow). */
+  name?: string;
+  /** A narrower value field, for two property rows side by side. */
+  narrow?: boolean;
   value: number;
   min: number;
   max: number;
@@ -405,7 +411,7 @@ export function Slider({
       <span className={`truncate text-[12px] leading-4 ${disabled && !lock ? "text-subtle" : "text-muted"}`}>{label}</span>
       <div className="flex items-center gap-2">
         <RangeInput
-          label={label}
+          label={name}
           value={value}
           min={min}
           max={max}
@@ -416,7 +422,7 @@ export function Slider({
           className="min-w-0 flex-1"
         />
         <span className="flex shrink-0 items-center gap-0.5">
-          <NumberInput label={`${label} value`} value={value} min={min} max={max} step={step} onChange={onChange} format={format} parse={parse} disabled={disabled} mixed={mixed} />
+          <NumberInput label={`${name} value`} value={value} min={min} max={max} step={step} onChange={onChange} format={format} parse={parse} disabled={disabled} mixed={mixed} className={narrow ? "w-11" : undefined} />
           <span className="w-3 text-[11px] text-muted">{unit}</span>
         </span>
       </div>
@@ -459,7 +465,7 @@ export function Disclosure({ title, summary, open, onToggle, children }: { title
 }
 
 /** `mixed`: several clips with different colours; it shows a dash until one is picked for all of them. */
-export function ColorInput({ label, value, onChange, mixed = false }: { label: string; value: string; onChange: (v: string) => void; mixed?: boolean }) {
+export function ColorInput({ label, name = label, value, onChange, mixed = false }: { label: string; /** As Slider's. */ name?: string; value: string; onChange: (v: string) => void; mixed?: boolean }) {
   const lock = useLockReason();
   return (
     <label className="flex items-center justify-between gap-2 has-[:disabled]:opacity-40" title={lock ?? undefined}>
@@ -473,7 +479,7 @@ export function ColorInput({ label, value, onChange, mixed = false }: { label: s
         >
           <input
             type="color"
-            aria-label={label}
+            aria-label={name}
             disabled={!!lock}
             value={value.slice(0, 7)}
             onChange={(e) => onChange(e.target.value + value.slice(7))}
@@ -866,12 +872,13 @@ export function Bars({ lit }: { lit: number }) {
 
 const CASE_CSS = { none: undefined, upper: "uppercase", lower: "lowercase", title: "capitalize" } as const;
 
-/** The engine's text shadow in CSS, at `k` swatch pixels per canvas pixel. */
-function swatchShadow(shadow: TextShadow, k: number) {
+/** The engine's text shadow in CSS, on text `size` pixels high. */
+function swatchShadow(shadow: TextShadow, size: number) {
   const angle = (shadow.angle * Math.PI) / 180;
-  const [x, y] = [Math.cos(angle) * shadow.distance * k, -Math.sin(angle) * shadow.distance * k];
+  const distance = (shadow.distance / 100) * size;
+  const [x, y] = [Math.cos(angle) * distance, -Math.sin(angle) * distance];
   const alpha = Math.round(Math.min(1, Math.max(0, shadow.opacity)) * 255).toString(16).padStart(2, "0");
-  return `${x.toFixed(2)}px ${y.toFixed(2)}px ${(shadow.blur * k).toFixed(2)}px ${shadow.color.slice(0, 7)}${alpha}`;
+  return `${x.toFixed(2)}px ${y.toFixed(2)}px ${((shadow.blur / 200) * size).toFixed(2)}px ${shadow.color.slice(0, 7)}${alpha}`;
 }
 
 /** A style preview in the font the engine draws it with. */
@@ -891,7 +898,7 @@ export function TextSwatch({ style, label, size = 15, lines = 1 }: { style: Text
         background: style.background ?? undefined,
         WebkitTextStroke: style.strokeWidth > 0 ? `${Math.min(2, style.strokeWidth / 4)}px ${style.strokeColor}` : undefined,
         paintOrder: "stroke fill",
-        textShadow: style.shadow ? swatchShadow(style.shadow, size / style.fontSize) : undefined,
+        textShadow: style.shadow ? swatchShadow(style.shadow, size) : undefined,
         textTransform: CASE_CSS[style.letterCase ?? "none"],
         letterSpacing: style.letterSpacing ? `${style.letterSpacing}em` : undefined,
       }}
