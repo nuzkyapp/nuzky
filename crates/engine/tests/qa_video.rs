@@ -949,14 +949,8 @@ fn a_shadowed_caption_in_a_small_preview_matches_the_export_scaled_down_by_ffmpe
     // The creator's CapCut look at 152 %: size 12, a black shadow at 41 %, Blur 23 %, Distance 5, -45°, in
     // capitals and spaced, over two lines; then a hard shadow up and to the left, where a misplaced one shows.
     let size = 12.0 * 5.1;
-    let reel = TextShadow {
-        color: "#000000".into(),
-        opacity: 0.41,
-        blur: 0.23 * size / 2.0,
-        distance: 0.05 * size,
-        angle: -45.0,
-    };
-    let hard = TextShadow { color: "#000000".into(), opacity: 1.0, blur: 2.0, distance: 12.0, angle: 135.0 };
+    let reel = TextShadow { color: "#000000".into(), opacity: 0.41, blur: 23.0, distance: 5.0, angle: -45.0 };
+    let hard = TextShadow { color: "#000000".into(), opacity: 1.0, blur: 7.0, distance: 20.0, angle: 135.0 };
     for (name, shadow) in [("preview-shadowed-captions", reel), ("preview-hard-shadow", hard)] {
         let style = TextStyle {
             font_family: None,

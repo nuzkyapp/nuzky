@@ -1482,7 +1482,8 @@ export type Suggestion = {
 };
 
 /**
- * A drop shadow under text, as CapCut draws one.
+ * A drop shadow under text, in CapCut's numbers. Blur and distance follow the font size, so the shadow grows
+ * and shrinks with the text.
  */
 export type TextShadow = {
   /**
@@ -1494,16 +1495,16 @@ export type TextShadow = {
    */
   opacity: number,
   /**
-   * How far the shadow's edge softens, in canvas pixels; 0 is a sharp copy.
+   * CapCut's Blur, 0 to 100 %: 0 is a sharp copy, 100 softens its edge over half the font size.
    */
   blur: number,
   /**
-   * How far the shadow falls from the text, in canvas pixels.
+   * CapCut's Distance, 0 to 100: how far it falls from the text, 100 being the font size.
    */
   distance: number,
   /**
-   * The direction it falls in degrees, counterclockwise from the right as in CapCut: -45 falls down and
-   * to the right, 90 straight up.
+   * The direction it falls, -180 to 180 degrees counterclockwise from the right as in CapCut: -45 falls
+   * down and to the right, 90 straight up.
    */
   angle: number,
 };

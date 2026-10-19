@@ -765,7 +765,7 @@ fn text_clip(
         .filter(|w| w.is_finite() && *w > 0.0 && *w <= 4.0)
         .zip(canvas_width)
         .map(|(share, width)| share as f32 * width);
-    let shadow = text_shadow(style("shadows").and_then(|s| s.get(0)), material, size_px);
+    let shadow = text_shadow(style("shadows").and_then(|s| s.get(0)), material);
     // CapCut keeps both spacings as shares of the size; its usual line spacing is 0.02.
     let spacing = |key: &str, usual: f64| number(key).filter(|v| v.is_finite()).map_or(0.0, |v| (v - usual) as f32);
     let text_style = (size_px > 0.0).then(|| TextStyle {
@@ -812,24 +812,24 @@ fn solid(paint: &Value) -> Option<String> {
     Some(format!("#{:02x}{:02x}{:02x}", channel(0)?, channel(1)?, channel(2)?))
 }
 
-/// The shadow of a text of `size` pixels, from its first style's shadow or else the material's.
-/// CapCut's Blur percentage is `diffuse` × 6 and `shadow_smoothing` / 3; Nuzky blurs half the size
-/// at 100 %. Its Distance runs to 100, a whole size away.
-fn text_shadow(styled: Option<&Value>, material: &Value, size: f32) -> Option<TextShadow> {
+/// The shadow of a text in the numbers CapCut shows, from its first style's shadow or else the material's.
+/// CapCut keeps Blur as `diffuse` × 600 % and `shadow_smoothing` / 3 × 100 %. Missing values are CapCut's
+/// own: black at 90 %, Blur 15 %, Distance 5, -45°.
+fn text_shadow(styled: Option<&Value>, material: &Value) -> Option<TextShadow> {
     let number = |value: Option<&Value>| value.and_then(Value::as_f64).filter(|v| v.is_finite()).map(|v| v as f32);
     let own = |key: &str| number(material.get(key));
     let (color, opacity, blur, distance, angle) = match styled {
         Some(s) => (
             solid(s),
             number(s.get("alpha")),
-            number(s.get("diffuse")).map(|d| d * 6.0),
+            number(s.get("diffuse")).map(|d| d * 600.0),
             number(s.get("distance")),
             number(s.get("angle")),
         ),
         None if material.get("has_shadow").and_then(Value::as_bool) == Some(true) => (
             material.get("shadow_color").and_then(Value::as_str).and_then(hex),
             own("shadow_alpha"),
-            own("shadow_smoothing").map(|s| s / 3.0),
+            own("shadow_smoothing").map(|s| s / 3.0 * 100.0),
             own("shadow_distance"),
             own("shadow_angle"),
         ),
@@ -838,9 +838,10 @@ fn text_shadow(styled: Option<&Value>, material: &Value, size: f32) -> Option<Te
     Some(TextShadow {
         color: color.unwrap_or_else(|| "#000000".into()),
         opacity: opacity.unwrap_or(0.9).clamp(0.0, 1.0),
-        blur: blur.unwrap_or(0.15).clamp(0.0, 1.0) * size / 2.0,
-        distance: distance.unwrap_or(5.0).clamp(0.0, 100.0) / 100.0 * size,
-        angle: angle.unwrap_or(-45.0).clamp(-360.0, 360.0),
+        // CapCut's Blur moves in whole percents; the draft's fraction comes back as 22.98 or 23.0000004.
+        blur: blur.unwrap_or(15.0).clamp(0.0, 100.0).round(),
+        distance: distance.unwrap_or(5.0).clamp(0.0, 100.0),
+        angle: (angle.unwrap_or(-45.0) + 180.0).rem_euclid(360.0) - 180.0,
     })
 }
 
@@ -962,8 +963,8 @@ mod tests {
         // The material's shadow: black at 41 %, Blur 23 % (smoothing 0.69), Distance 5, -45°.
         let shadow = style.shadow.clone().unwrap();
         assert_eq!(shadow.color, "#000000");
-        assert!(close(shadow.opacity, 0.41) && close(shadow.angle, -45.0), "{shadow:?}");
-        assert!(close(shadow.blur, 0.23 * 61.2 / 2.0) && close(shadow.distance, 0.05 * 61.2), "{shadow:?}");
+        // As CapCut's inspector shows them, which Nuzky's shows too.
+        assert_eq!((shadow.opacity, shadow.blur, shadow.distance, shadow.angle), (0.41, 23.0, 5.0, -45.0));
         // CapCut's usual line spacing is 0.02 of the size: no extra space.
         assert!(close(style.letter_spacing, 0.0) && close(style.line_spacing, 0.0));
 
@@ -979,7 +980,7 @@ mod tests {
         let texts = draft["materials"]["texts"].as_array_mut().unwrap();
         // As CapCut writes the creator's Reel look: the style's own shadow wins over the material's.
         let mut content: Value = serde_json::from_str(texts[0]["content"].as_str().unwrap()).unwrap();
-        content["styles"][0]["shadows"] = json!([{"alpha": 0.5, "angle": 135.0, "diffuse": 0.038333334,
+        content["styles"][0]["shadows"] = json!([{"alpha": 0.5, "angle": 225.0, "diffuse": 0.038333334,
             "distance": 20.0, "content": {"render_type": "solid", "solid": {"color": [1.0, 0.0, 0.0]}}}]);
         texts[0]["content"] = content.to_string().into();
         texts[0]["letter_spacing"] = json!(0.1);
@@ -990,8 +991,9 @@ mod tests {
         let styles: Vec<_> = read.timeline.tracks[1].texts.iter().map(|t| t.style.clone().unwrap()).collect();
         let shadow = styles[0].shadow.clone().unwrap();
         assert_eq!(shadow.color, "#ff0000");
-        assert!(close(shadow.opacity, 0.5) && close(shadow.angle, 135.0), "{shadow:?}");
-        assert!(close(shadow.blur, 0.23 * 61.2 / 2.0) && close(shadow.distance, 0.2 * 61.2), "{shadow:?}");
+        // 225° is the same direction as -135°, which the inspector's angle reaches.
+        assert!(close(shadow.opacity, 0.5) && close(shadow.angle, -135.0), "{shadow:?}");
+        assert_eq!((shadow.blur, shadow.distance), (23.0, 20.0), "{shadow:?}");
         assert!(close(styles[0].letter_spacing, 0.1) && close(styles[0].line_spacing, 0.1), "{:?}", styles[0]);
         assert_eq!(styles[1].shadow, None);
         assert_eq!(read.unread, ["Text shadows with depth, drawn flat"]);

@@ -160,18 +160,18 @@ pub struct TextStyle {
     pub line_spacing: f32,
 }
 
-/// As Nuzky draws a text shadow.
+/// A text shadow in the numbers CapCut shows, as Nuzky keeps one; blur and distance follow the size.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextShadow {
     /// `#rrggbb`
     pub color: String,
     /// 0 to 1.
     pub opacity: f32,
-    /// Pixels, like the size.
+    /// Blur, 0 to 100 %.
     pub blur: f32,
-    /// Pixels, like the size.
+    /// Distance, 0 to 100.
     pub distance: f32,
-    /// Degrees counterclockwise from the right: -45 falls down and to the right.
+    /// -180 to 180 degrees counterclockwise from the right: -45 falls down and to the right.
     pub angle: f32,
 }
 

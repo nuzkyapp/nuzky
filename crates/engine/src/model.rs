@@ -853,7 +853,8 @@ pub struct TextStyle {
     pub line_spacing: f32,
 }
 
-/// A drop shadow under text, as CapCut draws one.
+/// A drop shadow under text, in CapCut's numbers. Blur and distance follow the font size, so the shadow grows
+/// and shrinks with the text.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -863,13 +864,28 @@ pub struct TextShadow {
     pub color: String,
     /// 0 (invisible) to 1.
     pub opacity: f32,
-    /// How far the shadow's edge softens, in canvas pixels; 0 is a sharp copy.
+    /// CapCut's Blur, 0 to 100 %: 0 is a sharp copy, 100 softens its edge over half the font size.
     pub blur: f32,
-    /// How far the shadow falls from the text, in canvas pixels.
+    /// CapCut's Distance, 0 to 100: how far it falls from the text, 100 being the font size.
     pub distance: f32,
-    /// The direction it falls in degrees, counterclockwise from the right as in CapCut: -45 falls down and
-    /// to the right, 90 straight up.
+    /// The direction it falls, -180 to 180 degrees counterclockwise from the right as in CapCut: -45 falls
+    /// down and to the right, 90 straight up.
     pub angle: f32,
+}
+
+impl TextShadow {
+    /// How far right and down it falls and how far its edge softens, in the pixels of text `font_size` high.
+    pub fn in_pixels(&self, font_size: f32) -> ((f32, f32), f32) {
+        let share = |value: f32| if value.is_finite() { value.clamp(0.0, MAX_SHADOW) / 100.0 } else { 0.0 };
+        let (distance, blur) = (share(self.distance) * font_size, share(self.blur) * font_size / 2.0);
+        let angle = if self.angle.is_finite() { self.angle.to_radians() } else { 0.0 };
+        ((angle.cos() * distance, -angle.sin() * distance), blur)
+    }
+}
+
+/// `degrees` as the same direction from -180 to 180.
+pub fn wrap_degrees(degrees: f32) -> f32 {
+    (degrees + 180.0).rem_euclid(360.0) - 180.0
 }
 
 /// How the letters of a text are drawn, whatever case they were typed in.
@@ -934,9 +950,8 @@ pub fn max_stroke_width(font_size: f32) -> f32 {
     font_size.max(20.0)
 }
 
-/// How far a text shadow may fall and blur, in canvas pixels. It does not follow the font size, so making
-/// text smaller never makes its shadow invalid.
-pub const MAX_SHADOW_PX: f32 = 200.0;
+/// The most of a text shadow's Blur and Distance, as in CapCut.
+pub const MAX_SHADOW: f32 = 100.0;
 
 /// Letter and line spacing, as shares of the font size.
 pub const LETTER_SPACING: std::ops::RangeInclusive<f32> = -0.5..=2.0;
@@ -956,9 +971,9 @@ impl TextStyle {
         style.line_spacing = finite(style.line_spacing, 0.0).clamp(*LINE_SPACING.start(), *LINE_SPACING.end());
         if let Some(shadow) = &mut style.shadow {
             shadow.opacity = finite(shadow.opacity, 0.0).clamp(0.0, 1.0);
-            shadow.blur = finite(shadow.blur, 0.0).clamp(0.0, MAX_SHADOW_PX);
-            shadow.distance = finite(shadow.distance, 0.0).clamp(0.0, MAX_SHADOW_PX);
-            shadow.angle = finite(shadow.angle, 0.0) % 360.0;
+            shadow.blur = finite(shadow.blur, 0.0).clamp(0.0, MAX_SHADOW);
+            shadow.distance = finite(shadow.distance, 0.0).clamp(0.0, MAX_SHADOW);
+            shadow.angle = wrap_degrees(finite(shadow.angle, 0.0));
         }
         style
     }

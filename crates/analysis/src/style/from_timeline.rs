@@ -211,11 +211,12 @@ fn look(timeline: &ImportedTimeline, texts: &[&TextClip]) -> Option<CaptionLook>
             color: style.color.clone(),
             bold: style.bold,
             outline: style.outline.as_ref().map(|(color, width)| (color.clone(), px(*width))),
+            // Blur and distance follow the size, so they stay as they are.
             shadow: style.shadow.as_ref().map(|s| TextShadow {
                 color: s.color.clone(),
                 opacity: s.opacity,
-                blur: px(s.blur),
-                distance: px(s.distance),
+                blur: s.blur,
+                distance: s.distance,
                 angle: s.angle,
             }),
             letter_spacing: style.letter_spacing,
@@ -500,8 +501,8 @@ mod tests {
         let shadow = nuzky_interchange::TextShadow {
             color: "#000000".into(),
             opacity: 0.41,
-            blur: 7.0,
-            distance: 3.0,
+            blur: 23.0,
+            distance: 5.0,
             angle: -45.0,
         };
         let yellow =
@@ -533,7 +534,7 @@ mod tests {
         let look = picture.look.unwrap();
         assert_eq!((look.font.as_deref(), look.size, look.color.as_str()), (Some("Montserrat"), 180.0, "#fff059"));
         let shadow = look.shadow.unwrap();
-        assert_eq!((shadow.blur, shadow.distance, shadow.opacity, shadow.angle), (21.0, 9.0, 0.41, -45.0));
+        assert_eq!((shadow.blur, shadow.distance, shadow.opacity, shadow.angle), (23.0, 5.0, 0.41, -45.0));
         assert_eq!((look.letter_spacing, look.line_spacing), (0.05, 0.0));
     }
 

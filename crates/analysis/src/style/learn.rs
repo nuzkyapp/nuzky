@@ -968,7 +968,7 @@ fn captions(edits: &[Edit], say: &dyn Fn(&[Example]) -> String) -> Option<Rule> 
             look.outline.as_ref().map_or(String::new(), |(c, w)| format!(" with a {c} outline {w:.0} pixels wide"));
         let shadow = look.shadow.as_ref().map_or(String::new(), |s| {
             format!(
-                ", a {} shadow at {:.0} % blurred {:.0} pixels, {:.0} pixels away at {:.0}°",
+                ", a {} shadow at {:.0} %, blur {:.0} %, distance {:.0}, at {:.0}°",
                 s.color,
                 s.opacity * 100.0,
                 s.blur,

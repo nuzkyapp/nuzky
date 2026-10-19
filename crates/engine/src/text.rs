@@ -7,11 +7,12 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use cosmic_text::{
-    Align, Attrs, Buffer, CacheKey, Color, Family, FontSystem, LineIter, Metrics, Shaping, SwashCache, Weight,
+    Align, Attrs, Buffer, CacheKey, Color, Family, FeatureTag, FontFeatures, FontSystem, LineIter, Metrics, Shaping,
+    SwashCache, Weight,
 };
 
 use crate::gpu::Image;
-use crate::model::{LETTER_SPACING, LINE_SPACING, LetterCase, MAX_SHADOW_PX, TextStyle, max_stroke_width, parse_color};
+use crate::model::{LETTER_SPACING, LINE_SPACING, LetterCase, TextStyle, max_stroke_width, parse_color};
 
 // Physical raster limits also bound legacy files, zoomed text, many lines and cache retention.
 const MAX_GLYPH_PX: f32 = 2048.0;
@@ -262,11 +263,7 @@ impl TextRenderer {
         let pad_box = if style.background.is_some() { size * 0.3 } else { 0.0 };
         let letter_spacing = finite_clamp(style.letter_spacing, *LETTER_SPACING.start(), *LETTER_SPACING.end());
         let line_spacing = finite_clamp(style.line_spacing, *LINE_SPACING.start(), *LINE_SPACING.end()) * size;
-        let shadow = style.shadow.as_ref().map(|shadow| {
-            let distance = finite_clamp(shadow.distance, 0.0, MAX_SHADOW_PX);
-            let angle = if shadow.angle.is_finite() { shadow.angle.to_radians() } else { 0.0 };
-            ((angle.cos() * distance, -angle.sin() * distance), finite_clamp(shadow.blur, 0.0, MAX_SHADOW_PX))
-        });
+        let shadow = style.shadow.as_ref().map(|shadow| shadow.in_pixels(size));
         let text_pad = stroke.ceil() + pad_box.ceil() + 2.0;
         // The image grows by the shadow's reach on every side, so the text stays at the layer's centre.
         let room = shadow.map_or(0.0, |((dx, dy), blur)| (dx.abs().max(dy.abs()) + blur).ceil());
@@ -281,7 +278,10 @@ impl TextRenderer {
         let weight = if style.bold && self.draws_bold(family) { Weight::BOLD } else { Weight::NORMAL };
         let mut attrs = Attrs::new().family(family).weight(weight);
         if letter_spacing != 0.0 {
-            attrs = attrs.letter_spacing(letter_spacing);
+            // As in CSS: spaced letters do not join into ligatures, so "ffi" spreads like the letters around it.
+            let mut features = FontFeatures::new();
+            features.disable(FeatureTag::STANDARD_LIGATURES).disable(FeatureTag::CONTEXTUAL_LIGATURES);
+            attrs = attrs.letter_spacing(letter_spacing).font_features(features);
         }
         let text = if text.trim().is_empty() { " " } else { text };
         let (text, shown_to_typed) = cased(text, style.letter_case);
@@ -289,16 +289,26 @@ impl TextRenderer {
         buffer.shape_until_scroll(&mut self.fonts, false);
 
         let mut line_w: f32 = 0.0;
+        let (mut left, mut right) = (f32::MAX, f32::MIN);
         let mut text_h: f32 = 0.0;
         for run in buffer.layout_runs() {
             line_w = line_w.max(run.line_w);
+            for glyph in run.glyphs {
+                left = left.min(glyph.x);
+                right = right.max(glyph.x + glyph.w - letter_spacing * size);
+            }
             text_h = text_h.max(run.line_top + size * 1.2);
         }
         // Glyphs are centred inside `wrap`, so crop to the widest line. Every line ends in the letter spacing
-        // after its last letter, which is not drawn. Line spacing goes only between lines: cosmic-text centres
-        // each line in its height, so the glyphs move up by half the spacing and the last line ends as without.
-        let x0 = ((wrap - line_w) / 2.0).floor() as i32;
-        let line_w = (line_w - letter_spacing * size).max(0.0);
+        // after its last letter, which is not drawn. Pulled closer than their own width, letters reach past the
+        // line, so the crop follows the letters. Line spacing goes only between lines: cosmic-text centres each
+        // line in its height, so the glyphs move up by half the spacing and the last line ends as without.
+        let (x0, line_w) = if letter_spacing < 0.0 && left <= right {
+            (left, right - left)
+        } else {
+            ((wrap - line_w) / 2.0, (line_w - letter_spacing * size).max(0.0))
+        };
+        let x0 = x0.floor() as i32;
         let canvas_w = (line_w.ceil() + 2.0 * pad as f32).max(1.0);
         let canvas_h = (text_h.ceil() + 2.0 * pad as f32).max(1.0);
         // Large text gets a coarser raster rather than a smaller font or a cropped bitmap.
@@ -703,8 +713,8 @@ mod tests {
             shadow: Some(TextShadow {
                 color: "#000000".into(),
                 opacity: 0.41,
-                blur: 0.23 * size / 2.0,
-                distance: 0.05 * size,
+                blur: 23.0,
+                distance: 5.0,
                 angle: -45.0,
             }),
             ..style("Inter")
@@ -778,14 +788,78 @@ mod tests {
             [x0, y0, x1, y1].map(|v| v as f32)
         };
         let red = |px: &[u8; 4]| px[3] > 200 && px[0] > 200 && px[1] < 60;
-        for (angle, (dx, dy)) in [(90.0, (0.0, -20.0)), (180.0, (-20.0, 0.0)), (-45.0, (14.0, 14.0))] {
-            look.shadow = Some(TextShadow { color: "#ff0000".into(), opacity: 1.0, blur: 0.0, distance: 20.0, angle });
-            let text = renderer.render("H", &look, 1.0, 1000.0);
-            let (letters, shadow) = (bounds(&text, bright), bounds(&text, red));
-            // Where the letters cover it, the shadow does not show: compare the far edges.
-            let far_x = if dx < 0.0 { shadow[0] - letters[0] } else { shadow[2] - letters[2] };
-            let far_y = if dy < 0.0 { shadow[1] - letters[1] } else { shadow[3] - letters[3] };
-            assert!((far_x - dx).abs() <= 1.5 && (far_y - dy).abs() <= 1.5, "{angle}°: {:?}", (far_x, far_y));
+        // Distance 20 is a fifth of the font size: 19 pixels at 95 and twice that when the text doubles.
+        for size in [95.0, 190.0] {
+            look.font_size = size;
+            let far = 0.2 * size;
+            let diagonal = far * std::f32::consts::FRAC_1_SQRT_2;
+            for (angle, (dx, dy)) in [(90.0, (0.0, -far)), (180.0, (-far, 0.0)), (-45.0, (diagonal, diagonal))] {
+                look.shadow =
+                    Some(TextShadow { color: "#ff0000".into(), opacity: 1.0, blur: 0.0, distance: 20.0, angle });
+                let text = renderer.render("H", &look, 1.0, 1000.0);
+                let (letters, shadow) = (bounds(&text, bright), bounds(&text, red));
+                // Where the letters cover it, the shadow does not show: compare the far edges.
+                let far_x = if dx < 0.0 { shadow[0] - letters[0] } else { shadow[2] - letters[2] };
+                let far_y = if dy < 0.0 { shadow[1] - letters[1] } else { shadow[3] - letters[3] };
+                assert!(
+                    (far_x - dx).abs() <= 1.5 && (far_y - dy).abs() <= 1.5,
+                    "{size} {angle}°: {:?}",
+                    (far_x, far_y)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_blurred_shadow_softens_over_a_share_of_the_font_size() {
+        let mut renderer = bundled_renderer();
+        let mut look = style("Inter");
+        look.stroke_width = 0.0;
+        // How far the shadow reaches beyond the letters' left edge, at no distance: its blur alone.
+        let reach = |renderer: &mut TextRenderer, look: &TextStyle| {
+            let text = renderer.render("H", look, 1.0, 4000.0);
+            let w = text.image.width as usize;
+            let px = text.image.data.as_chunks::<4>().0;
+            let first =
+                |keep: &dyn Fn(&[u8; 4]) -> bool| (0..w).find(|&x| px.iter().skip(x).step_by(w).any(keep)).unwrap();
+            (first(&bright) - first(&|p: &[u8; 4]| p[3] > 0)) as f32
+        };
+        let mut reaches = Vec::new();
+        for size in [95.0, 190.0] {
+            look.font_size = size;
+            look.shadow =
+                Some(TextShadow { color: "#000000".into(), opacity: 1.0, blur: 40.0, distance: 0.0, angle: 0.0 });
+            reaches.push(reach(&mut renderer, &look));
+        }
+        // Blur 40 % softens over a fifth of the font size: about 19 pixels at 95, 38 at 190.
+        assert!((reaches[0] - 19.0).abs() <= 3.0 && (reaches[1] - 38.0).abs() <= 4.0, "{reaches:?}");
+    }
+
+    #[test]
+    fn spaced_letters_do_not_join_into_ligatures() {
+        let mut renderer = bundled_renderer();
+        let mut look = style("Roboto");
+        let glyphs =
+            |renderer: &mut TextRenderer, look: &TextStyle| renderer.lay_out("office", look, 1.0, 4000.0).glyphs.len();
+        // Roboto joins "ffi" into one glyph, which letter spacing would leave glued.
+        assert!(glyphs(&mut renderer, &look) < 6);
+        for spacing in [0.2, -0.1] {
+            look.letter_spacing = spacing;
+            assert_eq!(glyphs(&mut renderer, &look), 6, "{spacing}");
+        }
+    }
+
+    #[test]
+    fn letters_pulled_together_stay_inside_the_image() {
+        let mut renderer = bundled_renderer();
+        let mut look = style("Inter");
+        for spacing in [-0.5, -0.3, -0.1] {
+            look.letter_spacing = spacing;
+            let text = renderer.render("Hello", &look, 1.0, 4000.0);
+            let (w, h) = (text.image.width as usize, text.image.height as usize);
+            let px = text.image.data.as_chunks::<4>().0;
+            let edges = (0..w).flat_map(|x| [x, (h - 1) * w + x]).chain((0..h).flat_map(|y| [y * w, y * w + w - 1]));
+            assert!(edges.into_iter().all(|i| px[i][3] == 0), "{spacing}: the letters reach the edge");
         }
     }
 
