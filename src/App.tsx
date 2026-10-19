@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { AlertCircle } from "lucide-react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -11,31 +11,17 @@ import { reportBug } from "./lib/diagnostics";
 import { copySelection, currentEpoch, cutSelection, deleteSelection, deleteSide, duplicateSelection, openExport, pasteAttributes, pasteClips, edgeBeside, projectDuration, runWasDiscarded, splitAtPlayhead, undoAction, useEditor } from "./lib/store";
 import { US, formatDuration, lastFrame, nearestFrame, stepFrame } from "./lib/time";
 import type { JobEvent, ProjectSummary, Snapshot, ModelQuestion, Transport } from "./lib/types";
-import { ChatGptDialog } from "./components/ChatGptDialog";
-import { ConnectAgentDialog } from "./components/ConnectAgentDialog";
-import { SetupDialog } from "./components/setup/SetupDialog";
-import { ExportDialog } from "./components/ExportDialog";
-import { AGENT_VISION_MODELS, ModelQuestionDialog } from "./components/ModelQuestionDialog";
+import { AGENT_VISION_MODELS } from "./components/ModelQuestionDialog";
 import { showsVisionDownload } from "./components/setup/steps/VisionStep";
-import { YoutubeDialog } from "./components/YoutubeDialog";
 import { useYoutube } from "./lib/youtube";
-import { Inspector } from "./components/inspector/Inspector";
-import { LeftPanel } from "./components/panel/LeftPanel";
 import { MEDIA_EXTENSIONS, dropResolver, importPaths, pickAndImport } from "./components/panel/assets";
-import { Preview } from "./components/preview/Preview";
-import { Timeline } from "./components/timeline/Timeline";
 import { Toasts } from "./components/Toasts";
-import { DockDragLayer, DockedAiPanel, FloatingAiPanel } from "./components/ai/AiDock";
 import { listenAgentEvents, panelRunEnded, useAgent } from "./lib/agent";
 import { togglePanel, useDock, useDockLayout, useWindowSize } from "./lib/dock";
 import { checkYtdlp, useSetup } from "./lib/setup";
-import { PANE_MIN, paneLayout, setPane, usePanes } from "./lib/layout";
-import { TopBar } from "./components/TopBar";
-import { Button, DisabledHint, Splitter } from "./components/ui";
+import { paneLayout, usePanes } from "./lib/layout";
+import { Button, DisabledHint } from "./components/ui";
 import { Home } from "./components/home/Home";
-import { Launcher } from "./components/home/Launcher";
-import { SwitchDialog } from "./components/home/SwitchConfirm";
-import { OpenedDraftDialog } from "./components/home/OpenedDraftDialog";
 import { openDraft, useCapCut, openDraftFolder } from "./lib/capcut";
 import { newProjectFromMedia, openProject, refreshLibrary, trashProjects, useLibrary } from "./lib/library";
 import { checkForUpdates, startUpdates, useUpdates } from "./lib/updates";
@@ -44,9 +30,7 @@ import { useStickers } from "./lib/stickers";
 import { addProjects, findDrafts, listenStyle, loadStyle, useStyle } from "./lib/style";
 import { closeCover, deleteText, exportCover, loadModels as loadVisionModels, onCoverJob, useCover } from "./lib/cover";
 import { candidateOf, closeReels, onReelsJob, openReelsToFind, playEnding, toggleReelPlay, useReels } from "./lib/reels";
-import { ReelList } from "./components/reels/ReelList";
 import { appWindow, toggleFullPreview, toggleMuted, usePreview } from "./lib/preview";
-import { LearnDialog } from "./components/style/LearnDialog";
 
 const isMedia = (path: string) => MEDIA_EXTENSIONS.includes(path.split(".").pop()?.toLowerCase() ?? "");
 
@@ -73,17 +57,6 @@ function suppressSpaceRelease() {
     window.removeEventListener("keyup", up, true);
   };
   window.addEventListener("keyup", up, true);
-}
-
-function DragChip() {
-  const drag = useEditor((s) => s.assetDrag);
-  const asset = useEditor((s) => s.snap?.project.assets.find((a) => a.id === s.assetDrag?.assetId));
-  if (!drag || !asset) return null;
-  return (
-    <div className="pointer-events-none fixed z-[120] rounded-lg bg-raised px-2.5 py-1 text-[12px] font-medium text-fg shadow-lg shadow-black/50 ring-1 ring-white/10" style={{ left: drag.x + 12, top: drag.y + 10 }}>
-      {asset.name}
-    </div>
-  );
 }
 
 function useShortcuts() {
@@ -558,16 +531,25 @@ function BootScreen() {
   );
 }
 
+// The editor behind the home screen and the dialogs load once the home screen is on screen.
+const Editor = lazy(() => import("./components/Editor"));
+const Dialogs = lazy(() => import("./components/Dialogs"));
+
+/** True from the frame after the first one drawn with a project. */
+function useDrawn(ready: boolean) {
+  const [drawn, setDrawn] = useState(false);
+  useEffect(() => {
+    if (!ready) return;
+    const frame = requestAnimationFrame(() => setTimeout(() => setDrawn(true)));
+    return () => cancelAnimationFrame(frame);
+  }, [ready]);
+  return drawn;
+}
+
 export default function App() {
   const snap = useEditor((s) => s.snap);
   const view = useEditor((s) => s.view);
-  const launcherOpen = useEditor((s) => s.launcherOpen);
-  // Learning from videos opens from Your style, the top bar or a toast, anywhere.
-  const learnOpen = useStyle((s) => s.learnOpen);
   const setupOpen = useSetup((s) => s.open);
-  // Choosing reels: the candidates in the timeline's place, the preview wide without the inspector.
-  const reels = useReels((s) => s.open);
-  const full = usePreview((s) => s.full);
   const dock = useDockLayout();
   const win = useWindowSize();
   // A column docked at either edge narrows the editor; in the inspector's place the panel is the inspector's width.
@@ -577,93 +559,28 @@ export default function App() {
   useBackendEvents();
   useUiContext();
   useEffect(listenAgentEvents, []);
+  const drawn = useDrawn(!!snap);
 
   if (!snap) return <BootScreen />;
 
   const home = view === "home";
   return (
     <>
-      {/* The editor of the open project stays behind the home screen, so going back keeps everything as it was. */}
-      <div className="flex h-full flex-col" inert={snap.recovery || home || launcherOpen} aria-hidden={home || undefined}>
-        <TopBar />
-        <div className="flex min-h-0 flex-1">
-          {dock.open && dock.mode === "left" && <DockedAiPanel side="left" width={dock.width} />}
-          <div className="flex min-w-0 flex-1 flex-col">
-            {/* The 6 px gaps between the panes are their resize handles. */}
-            <div className="flex min-h-0 flex-1 px-1.5">
-              <LeftPanel width={panes.library} />
-              <Splitter
-                what="library"
-                axis="x"
-                grow={1}
-                size={panes.library}
-                min={PANE_MIN.library}
-                max={panes.max.library}
-                onResize={(w) => setPane("library", w)}
-                onReset={() => setPane("library", null)}
-                className="relative -mx-0.5"
-              />
-              <Preview />
-              {!reels && !(dock.open && dock.mode === "inspector") && (
-                <>
-                  <Splitter
-                    what="inspector"
-                    axis="x"
-                    grow={-1}
-                    size={panes.inspector}
-                    min={PANE_MIN.inspector}
-                    max={panes.max.inspector}
-                    onResize={(w) => setPane("inspector", w)}
-                    onReset={() => setPane("inspector", null)}
-                    className="relative -mx-0.5"
-                  />
-                  <Inspector width={panes.inspector} />
-                </>
-              )}
-            </div>
-            <Splitter
-              what="timeline"
-              axis="y"
-              grow={-1}
-              size={panes.timeline}
-              min={PANE_MIN.timeline}
-              max={panes.max.timeline}
-              onResize={(h) => setPane("timeline", h)}
-              onReset={() => setPane("timeline", null)}
-              className="relative -my-0.5"
-            />
-            <div className="shrink-0 px-1.5 pb-1.5">
-              {reels ? <ReelList height={panes.timeline} /> : <Timeline height={panes.timeline} />}
-            </div>
-          </div>
-          {dock.open && dock.mode === "right" && <DockedAiPanel side="right" width={dock.width} />}
-          {dock.open && dock.mode === "inspector" && <DockedAiPanel side="right" width={panes.inspector} inspectorMax={panes.max.inspector} />}
-        </div>
-        {/* Floating above the editor, it would float above the home screen and the full screen preview too; hidden there, it keeps what was typed. */}
-        {dock.open && dock.mode === "float" && (
-          <div hidden={home || full}>
-            <FloatingAiPanel rect={dock.float} />
-          </div>
-        )}
-        <DockDragLayer />
-        <DragChip />
-      </div>
+      {drawn && (
+        <Suspense>
+          <Editor panes={panes} dock={dock} />
+        </Suspense>
+      )}
       {home && (
         <div className="fixed inset-0 z-[60]" inert={snap.recovery || setupOpen}>
           <Home />
         </div>
       )}
-      {launcherOpen && !home && <Launcher />}
-      <ExportDialog />
-      <YoutubeDialog />
-      <SetupDialog />
-      <ConnectAgentDialog />
-      <ChatGptDialog />
-      {learnOpen && <LearnDialog />}
-      <SwitchDialog />
-      <ModelQuestionDialog kind="speech" />
-      <ModelQuestionDialog kind="vision" />
-      <OpenedDraftDialog />
+      {drawn && (
+        <Suspense>
+          <Dialogs />
+        </Suspense>
+      )}
       {/* On the home screen they sit at the grid's left edge, clear of the sidebar; in the editor, clear of a panel docked left. */}
       <Toasts bottom={home ? 18 : panes.timeline + 18} left={home ? 268 : dock.open && dock.mode === "left" ? dock.width + 24 : 18} />
       <DisabledHint />
