@@ -282,7 +282,7 @@ export function useTimelineGestures({
       const el = scroller.current;
       if (e.button !== 0 || !el) return;
       stopDrag.current?.();
-      const { select, seek, selection: before } = useEditor.getState();
+      const { select, selectCut, seek, selection: before, cut } = useEditor.getState();
       const add = e.shiftKey || (MAC ? e.metaKey : e.ctrlKey);
       const base = add ? before : [];
       // In the scroller's content, so the box stays on the clips when the timeline scrolls.
@@ -327,7 +327,8 @@ export function useTimelineGestures({
         stopDrag.current = null;
         if (commit) apply(false);
         setBox(null);
-        if (!commit) select(before);
+        // A transition is selected apart from the clips, so it comes back on its own.
+        if (!commit) (cut ? selectCut(cut) : select(before));
         else if (!b) {
           if (!add) select([]);
           seek(playheadAt(e.clientX));

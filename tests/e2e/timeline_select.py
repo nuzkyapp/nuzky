@@ -88,6 +88,15 @@ def timeline_select(r):
     r.check('Esc in the middle of a box puts the selection back',
             not r.s.run(BOX) and sorted(r.s.run(SELECTION)) == sorted([first, second]), r.s.run(SELECTION))
 
+    # A selected transition comes back too: it is selected apart from the clips.
+    r.s.run('window.__nuzky.store.getState().selectCut(arguments[0])', second)
+    r.s.run(PRESS, *start, {}, path)
+    r.key('Escape')
+    r.s.run(RELEASE, *path[-1], {})
+    clock.sleep(0.3)
+    r.check('Esc in the middle of a box keeps a selected transition selected',
+            r.s.run('return window.__nuzky.store.getState().cut') == second, r.s.run('return window.__nuzky.store.getState().cut'))
+
     # Zoomed in, the second clip is out of view; holding the box at the right edge scrolls the timeline on to it.
     r.s.run('window.__nuzky.store.getState().select([]); window.__nuzky.store.getState().setZoom(200)')
     clock.sleep(0.5)
