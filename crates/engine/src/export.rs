@@ -686,7 +686,6 @@ impl Mp4Writer {
     }
 }
 
-/// Straight RGBA to the encoder's BT.709 limited-range YUV 4:2:0.
 fn to_yuv(w: u32, h: u32) -> Result<Scaler> {
     let colorspace = [(ff::ffi::SWS_CS_DEFAULT, true), (ff::ffi::SWS_CS_ITU709, false)];
     Scaler::new((Pixel::RGBA, w, h), (Pixel::YUV420P, w, h), scaling::Flags::BICUBIC, colorspace)

@@ -414,8 +414,8 @@ fn transfer(f: &frame::Video) -> Transfer {
     }
 }
 
-/// A swscale conversion that runs on several threads, each converting a band of rows the way one pass over the
-/// whole frame would. swscale threads only a context given its thread count before `sws_init_context`, which
+/// A swscale conversion that runs frames of Full HD and larger on several threads, each converting a band of rows the
+/// way one pass over the whole frame would. swscale threads only a context given its thread count before `sws_init_context`, which
 /// `scaling::Context` cannot do, and only in `sws_scale_frame`.
 pub(crate) struct Scaler(*mut ff::ffi::SwsContext);
 
@@ -444,7 +444,7 @@ impl Scaler {
             (c"dsth", dst_h as i64),
             (c"dst_format", AVPixelFormat::from(dst) as i64),
             (c"sws_flags", flags.bits() as i64),
-            (c"threads", scaler_threads(dst_w, dst_h)),
+            (c"threads", scaler_threads(src, (src_w, src_h), (dst_w, dst_h))),
         ];
         for (name, value) in options {
             if unsafe { av_opt_set_int(scaler.0.cast(), name.as_ptr(), value, 0) } < 0 {
@@ -477,9 +477,11 @@ impl Scaler {
 /// One thread per core, at most eight, for frames of Full HD and larger, as export converts them. On a 12-core Apple
 /// M-series eight converted faster than twelve, whose bands on the efficiency cores finished last, and every video
 /// layer of a project has a converter of its own. The preview's frames, at most 1280 px, stay on one thread: on eight
-/// they took the cores the preview renders on, and a frame took twice as long to render while playing.
-fn scaler_threads(dst_w: u32, dst_h: u32) -> i64 {
-    if u64::from(dst_w) * u64::from(dst_h) < 1920 * 1080 {
+/// they took the cores the preview renders on, and a frame took twice as long to render while playing. A frame kept at
+/// its size goes through swscale's special converters, already fast, and on several threads the NV12 one garbled rows
+/// (FFmpeg 8.1); of those only the encoder's from RGBA, which the tests compare, gets threads.
+fn scaler_threads(src: Pixel, src_size: (u32, u32), (dst_w, dst_h): (u32, u32)) -> i64 {
+    if u64::from(dst_w) * u64::from(dst_h) < 1920 * 1080 || src_size == (dst_w, dst_h) && src != Pixel::RGBA {
         return 1;
     }
     std::thread::available_parallelism().map_or(1, |n| n.get().min(8)) as i64
@@ -1272,6 +1274,7 @@ mod tests {
             (Pixel::YUV444P, (1280, 720), Space::SMPTE170M, Range::JPEG, (1280, 720), (SWS_CS_ITU601, true)),
             (Pixel::YUV444P10LE, full_hd, Space::BT2020NCL, Range::JPEG, (960, 540), (SWS_CS_BT2020, true)),
             (Pixel::NV12, full_hd, Space::BT709, Range::MPEG, (1024, 576), (SWS_CS_ITU709, false)),
+            (Pixel::NV12, (3840, 2160), Space::BT709, Range::MPEG, full_hd, (SWS_CS_ITU709, false)),
             (Pixel::P010LE, (3840, 2160), Space::BT2020NCL, Range::MPEG, (3840, 2160), (SWS_CS_BT2020, false)),
             (Pixel::YUVA420P, full_hd, Space::Unspecified, Range::MPEG, full_hd, (SWS_CS_ITU709, false)),
             (Pixel::GRAY8, (800, 600), Space::Unspecified, Range::JPEG, (800, 600), (SWS_CS_ITU601, true)),
@@ -1281,6 +1284,10 @@ mod tests {
             (Pixel::RGB48BE, (640, 480), Space::Unspecified, Range::Unspecified, (640, 480), (SWS_CS_DEFAULT, false)),
             (Pixel::PAL8, (500, 300), Space::Unspecified, Range::Unspecified, (250, 150), (SWS_CS_DEFAULT, false)),
         ];
+        // Each source also converted at Full HD, the size that runs on several threads.
+        let cases = cases.into_iter().flat_map(|(format, size, space, range, to, cs)| {
+            [to, full_hd].map(|to| (format, size, space, range, to, cs))
+        });
         for (format, size, space, range, (w, h), (cs, full)) in cases {
             let case = format!("{format:?} {}x{} {space:?} {range:?} to {w}x{h}", size.0, size.1);
             let f = noise(format, size, space, range);
@@ -1293,7 +1300,9 @@ mod tests {
             let mut scaler = None;
             let got = to_rgba(&mut scaler, &f, 0, w, h).unwrap();
             let threads = scaler.unwrap().1.threads();
-            assert_eq!(threads > 1, w * h >= 1920 * 1080, "{case} converts on {threads} threads");
+            let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
+            let threaded = w * h >= 1920 * 1080 && (size != (w, h) || format == Pixel::RGBA) && cores > 1;
+            assert_eq!(threads > 1, threaded, "{case} converts on {threads} threads");
             let row = w as usize * 4;
             let differ = (0..h as usize)
                 .filter(|&y| got.data[y * row..][..row] != expected.data(0)[y * expected.stride(0)..][..row])
