@@ -673,7 +673,7 @@ impl ToYuv {
             (c"dsth", h as i64),
             (c"dst_format", AVPixelFormat::from(Pixel::YUV420P) as i64),
             (c"sws_flags", scaling::Flags::BICUBIC.bits() as i64),
-            // One per core.
+            // FFmpeg picks the count from the cores.
             (c"threads", 0),
         ];
         for (name, value) in options {
@@ -982,7 +982,9 @@ mod tests {
         let mut to_yuv = ToYuv::new(w, h).unwrap();
         let mut threads = 0;
         assert!(unsafe { ff::ffi::av_opt_get_int(to_yuv.0.cast(), c"threads".as_ptr(), 0, &mut threads) } >= 0);
-        assert!(threads > 1, "the conversion runs on {threads} thread");
+        // A machine with one core converts on one thread; the pixels must match either way.
+        let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
+        assert!(threads > 1 || cores == 1, "the conversion runs on {threads} thread");
         let mut got = frame::Video::new(Pixel::YUV420P, w, h);
         to_yuv.run(&rgba, &mut got).unwrap();
         for plane in 0..3 {
