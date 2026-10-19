@@ -73,9 +73,13 @@ SOURCES = {
     'HB': ('Joseph Sardin', 'https://bigsoundbank.com/heartbeat-3-s0770.html',
            'https://bigsoundbank.com/UPLOAD/mp3/0770.mp3',
            '6004a6d4001f30d6c1185fea31900d1fe16c5e4d3478d0d4b184260fc982dd44'),
+    'SC': ('Joseph Sardin', 'https://bigsoundbank.com/scissors-s0008.html',
+           'https://bigsoundbank.com/UPLOAD/mp3/0008.mp3',
+           'd87757bca6d6a832a2c43f34fcddfda89d3ec85da5dfac33e8c4ce62060503b2'),
 }
 
-# id, title, category, source, file inside the archive, seconds kept (None keeps all of it).
+# id, title, category, source, file inside the archive, seconds kept (None keeps all of it), or the start and
+# length of one sound out of a recording of several.
 SOUNDS = [
     ('whoosh', 'Whoosh', 'Whoosh', 'W3', None, None),
     ('swoosh', 'Swoosh', 'Whoosh', 'W4', None, None),
@@ -120,6 +124,9 @@ SOUNDS = [
     ('typing', 'Typing', 'Everyday', 'TY', 'Human Typing/human_vel-002.wav', 5),
     ('typing-steady', 'Typing, steady', 'Everyday', 'TY', 'Generated Typing/generated-004_medium.wav', None),
     ('heartbeat', 'Heartbeat', 'Everyday', 'HB', None, 8),
+    ('scissors-snip', 'Scissors snip', 'Everyday', 'SC', None, (11.565, 0.4)),
+    ('scissors-snip-2', 'Scissors snip 2', 'Everyday', 'SC', None, (2.5, 0.3)),
+    ('scissors-snip-3', 'Scissors snip 3', 'Everyday', 'SC', None, (5.02, 0.3)),
 ]
 
 # After levelling, silence more than 60 dB under the peak goes from the start and the end, never from
@@ -127,6 +134,7 @@ SOUNDS = [
 EDGES = ('silenceremove=start_periods=1:start_threshold=-60dB:detection=peak:start_silence=0.005,areverse,'
          'silenceremove=start_periods=1:start_threshold=-60dB:detection=peak:start_silence=0.05,areverse')
 FADE = 1.0
+PART_FADE = 0.06
 
 
 def sha256(path):
@@ -169,12 +177,16 @@ def probe(path, entry):
 def build(sound, scratch):
     id, title, category, key, member, keep = sound
     src = source_file(key, member, scratch)
+    part = isinstance(keep, tuple)
+    pick = f'atrim={keep[0]}:{keep[0] + keep[1]},asetpts=PTS-STARTPTS,' if part else ''
     measured = subprocess.run(['ffmpeg', '-hide_banner', '-nostats', '-i', str(src), '-af',
-                               (f'atrim=0:{keep},' if keep else '') + 'volumedetect', '-f', 'null', '-'],
+                               pick + (f'atrim=0:{keep},' if keep and not part else '') + 'volumedetect', '-f', 'null', '-'],
                               capture_output=True, text=True, check=True).stderr
     peak = float(re.search(r'max_volume: (-?[\d.]+) dB', measured).group(1))
-    chain = f'volume={PEAK_DB - peak:.2f}dB,{EDGES}'
-    if keep:
+    chain = f'{pick}volume={PEAK_DB - peak:.2f}dB,{EDGES}'
+    if part:
+        chain += f',afade=t=out:st={keep[1] - PART_FADE}:d={PART_FADE}'
+    elif keep:
         chain += f',atrim=0:{keep},afade=t=out:st={keep - FADE}:d={FADE}'
     channels = min(int(probe(src, 'stream=channels')), 2)
     out = OUT / f'{id}.ogg'
@@ -183,7 +195,9 @@ def build(sound, scratch):
                     '-map_metadata', '-1', '-fflags', '+bitexact', '-flags:a', '+bitexact', str(out)], check=True)
     author, page, url, pinned = SOURCES[key]
     changes = 'Peak level -2 dBFS, silence trimmed at the start and end, encoded as Ogg Opus'
-    if keep:
+    if part:
+        changes += f'; {keep[1]} s from {keep[0]} s into the recording, fading out over the last {PART_FADE * 1000:.0f} ms'
+    elif keep:
         changes += f'; the first {keep} s, fading out over the last second'
     return {
         'id': id, 'file': out.name, 'title': title, 'category': category, 'author': author, 'source': page,

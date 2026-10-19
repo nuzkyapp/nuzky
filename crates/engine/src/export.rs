@@ -695,7 +695,7 @@ fn to_yuv(w: u32, h: u32) -> Result<Scaler> {
 /// own: decoded files measured 0.2 to 0.4 dB over the ceiling for speech, 0.8 dB for music and
 /// up to 1.6 dB for limited bursts of broadband noise such as claps (qa_export
 /// `reels_true_peak_survives_aac_on_hard_material`), so -3 keeps all of them under -1 dBTP.
-const LIMITER_CEILING_DB: f64 = -3.0;
+pub(crate) const LIMITER_CEILING_DB: f64 = -3.0;
 /// The most a quiet timeline is raised, so near silence never turns into loud noise.
 const MAX_GAIN_DB: f64 = 24.0;
 /// Close enough to the target to stop measuring; AAC moves the level by about as much.

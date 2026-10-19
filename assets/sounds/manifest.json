@@ -686,5 +686,53 @@
     "changes": "Peak level -2 dBFS, silence trimmed at the start and end, encoded as Ogg Opus; the first 8 s, fading out over the last second",
     "durationUs": 8006500,
     "sha256": "24a56b0f24beaad65aeb386395616c1074bc59dc165c40920f2d2fb1c2332164"
+  },
+  {
+    "id": "scissors-snip",
+    "file": "scissors-snip.ogg",
+    "title": "Scissors snip",
+    "category": "Everyday",
+    "author": "Joseph Sardin",
+    "source": "https://bigsoundbank.com/scissors-s0008.html",
+    "license": "CC0 1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "download": "https://bigsoundbank.com/UPLOAD/mp3/0008.mp3",
+    "downloadSha256": "d87757bca6d6a832a2c43f34fcddfda89d3ec85da5dfac33e8c4ce62060503b2",
+    "member": null,
+    "changes": "Peak level -2 dBFS, silence trimmed at the start and end, encoded as Ogg Opus; 0.4 s from 11.565 s into the recording, fading out over the last 60 ms",
+    "durationUs": 406542,
+    "sha256": "d8f7b1d87c2fbdb147842b23cb4ac05dc7c833400513f8af1931f1fa9b7ef33d"
+  },
+  {
+    "id": "scissors-snip-2",
+    "file": "scissors-snip-2.ogg",
+    "title": "Scissors snip 2",
+    "category": "Everyday",
+    "author": "Joseph Sardin",
+    "source": "https://bigsoundbank.com/scissors-s0008.html",
+    "license": "CC0 1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "download": "https://bigsoundbank.com/UPLOAD/mp3/0008.mp3",
+    "downloadSha256": "d87757bca6d6a832a2c43f34fcddfda89d3ec85da5dfac33e8c4ce62060503b2",
+    "member": null,
+    "changes": "Peak level -2 dBFS, silence trimmed at the start and end, encoded as Ogg Opus; 0.3 s from 2.5 s into the recording, fading out over the last 60 ms",
+    "durationUs": 306542,
+    "sha256": "294a663a4a8703c6332ca7b82aa630ee6b782fe8ae91ac257ce55b5d8f929100"
+  },
+  {
+    "id": "scissors-snip-3",
+    "file": "scissors-snip-3.ogg",
+    "title": "Scissors snip 3",
+    "category": "Everyday",
+    "author": "Joseph Sardin",
+    "source": "https://bigsoundbank.com/scissors-s0008.html",
+    "license": "CC0 1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "download": "https://bigsoundbank.com/UPLOAD/mp3/0008.mp3",
+    "downloadSha256": "d87757bca6d6a832a2c43f34fcddfda89d3ec85da5dfac33e8c4ce62060503b2",
+    "member": null,
+    "changes": "Peak level -2 dBFS, silence trimmed at the start and end, encoded as Ogg Opus; 0.3 s from 5.02 s into the recording, fading out over the last 60 ms",
+    "durationUs": 306542,
+    "sha256": "8959313be9e4f10a789fe26c43e45398da2cbd3f1b1f22e7fa32db4150ded8fe"
   }
 ]

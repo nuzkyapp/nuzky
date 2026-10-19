@@ -4,7 +4,7 @@ use nuzky_engine::{
     edit::{EditCmd, Editor, TimeRange},
     media::probe,
     model::*,
-    recap::{Recap, RecapCut, RecapOptions, RecapWord, duration_us, render, sections},
+    recap::{Recap, RecapCut, RecapOptions, RecapWord, cut_times, duration_us, render, sections},
 };
 use qa_support::*;
 use std::{
@@ -15,8 +15,14 @@ use std::{
 
 const S: i64 = 1_000_000;
 
-/// A 20 s vertical talking-head take with a 440 Hz tone, cut at 2–4 s and 10–12.5 s.
-fn recap(dir: &Path) -> Recap {
+fn sound(id: &str) -> Asset {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/sounds").join(format!("{id}.ogg"));
+    probe(&path, format!("nuzky:{id}")).unwrap()
+}
+
+/// A 20 s vertical talking-head take with a 440 Hz tone, cut at 2–4 s and 10–12.5 s, with the built-in snips.
+/// With `music`, an 880 Hz tone on an audio track ducks under it, as music does.
+fn recap(dir: &Path, music: bool) -> Recap {
     let take = dir.join("take.mp4");
     if !take.exists() {
         let face = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../site/public/media/ugc.jpg");
@@ -51,6 +57,26 @@ fn recap(dir: &Path) -> Recap {
     let mut before = Project::new("Recap QA");
     before.assets.push(probe(&take, "take".into()).unwrap());
     before.tracks[0].clips.push(clip("take-clip", "take", 0, 20 * S));
+    if music {
+        let song = dir.join("song.m4a");
+        if !song.exists() {
+            ff(&["-f", "lavfi", "-i", "sine=f=880:r=48000:d=40", "-c:a", "aac"], &song);
+        }
+        before.assets.push(probe(&song, "song".into()).unwrap());
+        let mut song = clip("song-clip", "song", 0, 20 * S);
+        if let ClipContent::Media { duck_db, .. } = &mut song.content {
+            *duck_db = 12.0;
+        }
+        before.tracks.push(Track {
+            id: "music".into(),
+            kind: TrackKind::Audio,
+            name: "Music".into(),
+            muted: false,
+            hidden: false,
+            keep_in_place: true,
+            clips: vec![song],
+        });
+    }
     let mut editor = Editor::new(before.clone());
     let cut = |a: i64, b: i64| TimeRange { start_us: a, end_us: b };
     editor
@@ -91,7 +117,7 @@ fn recap(dir: &Path) -> Recap {
         after: editor.project,
         words,
         transcribed: true,
-        tick: None,
+        snips: ["scissors-snip", "scissors-snip-2", "scissors-snip-3"].map(sound).to_vec(),
         whoosh: None,
     }
 }
@@ -110,13 +136,15 @@ fn red([r, g, b]: [u8; 3]) -> bool {
     r > 200 && g < 110 && b < 110
 }
 
-/// Root mean square of the recap's sound from `a` to `b` seconds.
-fn rms(path: &Path, a: f64, b: f64) -> f64 {
+/// Root mean square of the recap's sound from `a` to `b` seconds, through `filter`.
+fn rms(path: &Path, a: f64, b: f64, filter: &str) -> f64 {
     let out = run(Command::new("ffmpeg").args(["-v", "error", "-i"]).arg(path).args([
         "-ss",
         &a.to_string(),
         "-to",
         &b.to_string(),
+        "-af",
+        filter,
         "-ac",
         "1",
         "-f",
@@ -128,12 +156,12 @@ fn rms(path: &Path, a: f64, b: f64) -> f64 {
 }
 
 #[test]
-fn recap_marks_the_cuts_and_ends_on_the_finished_cut_as_the_renderer_draws_it() {
+fn recap_snaps_each_cut_shut_on_the_bar_and_ends_on_the_finished_cut_as_the_renderer_draws_it() {
     if !available() {
         return;
     }
     let d = dir("recap");
-    let recap = recap(&d);
+    let recap = recap(&d, false);
     let out = d.join("recap.mp4");
     let options = RecapOptions { end_card: true, replace_existing: true };
     render(&recap, &d.join("cache"), &out, &options, &AtomicBool::new(false), |_| {}).unwrap();
@@ -148,28 +176,44 @@ fn recap_marks_the_cuts_and_ends_on_the_finished_cut_as_the_renderer_draws_it() 
     assert!((length - expected).abs() < 0.05, "{length} s instead of {expected} s");
     assert!(length <= 30.0);
 
-    // The opening bar is red where the recording was cut and not where it was kept.
-    let [hook, fast, hold, ..] = sections(&recap, true);
-    assert_eq!((hook, fast), (1_500_000, 5 * S));
-    let opening = frame(&out, 15);
+    // Once drawn, the opening bar is red where the recording was cut and not where it was kept.
+    let [hook, fast, landing, ..] = sections(&recap, true);
+    let opening = frame(&out, 33);
     let bar_x = |at_us: i64| (60.0 + 840.0 * at_us as f64 / (20 * S) as f64) as usize;
-    assert!(red(pixel(&opening, bar_x(11 * S), 1046)), "{:?}", pixel(&opening, bar_x(11 * S), 1046));
-    assert!(!red(pixel(&opening, bar_x(7 * S), 1046)), "{:?}", pixel(&opening, bar_x(7 * S), 1046));
+    assert!(red(pixel(&opening, bar_x(11 * S), 1260)), "{:?}", pixel(&opening, bar_x(11 * S), 1260));
+    assert!(!red(pixel(&opening, bar_x(7 * S), 1260)), "{:?}", pixel(&opening, bar_x(7 * S), 1260));
 
-    // The recording plays at 4×: 3 s into it is cut; 8 s is kept, on a caption page without cut words.
-    let at = |recording_us: i64| ((hook + recording_us / 4) * 30 / S) as u32;
-    let cut = frame(&out, at(3 * S));
-    let kept = frame(&out, at(8 * S));
-    assert!(red(pixel(&cut, 5, 960)), "the cut has a red edge: {:?}", pixel(&cut, 5, 960));
-    assert!(!red(pixel(&kept, 5, 960)), "a kept moment has no red edge: {:?}", pixel(&kept, 5, 960));
-    let struck = |rgba: &[u8]| {
-        (1250..1400).flat_map(|y| (60..900).map(move |x| (x, y))).filter(|&(x, y)| red(pixel(rgba, x, y))).count()
+    // Each cut stays on screen at least 0.7 s, its picture stepped back to the graphite around it, its chip red
+    // under the bar and its words struck; kept footage between them fills the frame.
+    let times = cut_times(&recap);
+    assert_eq!(times.len(), 2);
+    assert!(times.iter().all(|t| t.end - t.start >= 700_000), "{times:?}");
+    let at = |us: i64| (us * 30 / S) as u32;
+    let cut = frame(&out, at((times[0].start + times[0].end) / 2));
+    let kept = frame(&out, at((times[0].end + times[1].start) / 2 + 300_000));
+    let graphite = |rgba: &[u8]| pixel(rgba, 8, 8).iter().all(|&c| c < 24);
+    assert!(graphite(&cut), "the cut steps the picture back: {:?}", pixel(&cut, 8, 8));
+    assert!(!graphite(&kept), "kept footage fills the frame: {:?}", pixel(&kept, 8, 8));
+    let reds = |rgba: &[u8], (top, bottom): (usize, usize)| {
+        (top..bottom).flat_map(|y| (60..900).map(move |x| (x, y))).filter(|&(x, y)| red(pixel(rgba, x, y))).count()
     };
-    assert!(struck(&cut) > 500, "the cut words are struck through: {} red pixels", struck(&cut));
-    assert_eq!(struck(&kept), 0, "nothing kept is struck through");
+    assert!(reds(&cut, (1312, 1380)) > 2000, "the cut's chip hangs under the bar: {}", reds(&cut, (1312, 1380)));
+    assert!(reds(&cut, (900, 1090)) > 300, "the cut words are struck through: {} red pixels", reds(&cut, (900, 1090)));
+    assert_eq!(reds(&kept, (900, 1090)) + reds(&kept, (1312, 1380)), 0, "nothing kept is struck or labelled");
 
-    // Five seconds into the finished cut, past its label, the recap shows the renderer's frame.
-    let start = hook + fast + hold;
+    // Once both pieces have snapped shut, the bar ends where 15.5 s of 20 s ends.
+    let landed = frame(&out, at(hook + fast + landing - 100_000));
+    let end = bar_x(15_500_000);
+    let lit = |x: usize| pixel(&landed, x, 1028).iter().all(|&c| c > 170);
+    assert!(
+        lit(end - 12) && !lit(end + 12),
+        "{:?} {:?}",
+        pixel(&landed, end - 12, 1028),
+        pixel(&landed, end + 12, 1028)
+    );
+
+    // Five seconds into the finished cut, past its bar, the recap shows the renderer's frame.
+    let start = hook + fast + landing;
     let n = ((start + 5 * S) * 30 / S) as u32;
     let into = nuzky_engine::export::frame_time_us(n as u64, 30) - start;
     let mut renderer = Renderer::new().unwrap();
@@ -178,12 +222,41 @@ fn recap_marks_the_cuts_and_ends_on_the_finished_cut_as_the_renderer_draws_it() 
     let error = mae(&drawn, &shown);
     assert!(error < 4.0, "the finished cut differs from the renderer by {error:.2} per channel");
 
-    // The fast recording is silent and the finished cut plays its own sound.
-    let (fast_rms, cut_rms) = (rms(&out, 2.0, 6.0), rms(&out, start as f64 / 1e6 + 1.0, start as f64 / 1e6 + 4.0));
-    assert!(fast_rms < 0.001 && cut_rms > 0.1, "fast {fast_rms:.4}, finished cut {cut_rms:.4}");
+    // The racing recording is silent but for a snip as each piece snaps shut; the finished cut plays its sound.
+    let secs = |us: i64| us as f64 / 1e6;
+    let snip = |t: &std::ops::Range<i64>| rms(&out, secs(t.end) - 0.1, secs(t.end) + 0.3, "highpass=f=2000");
+    let quiet = rms(&out, secs(hook) + 0.1, secs(times[0].end) - 0.2, "anull");
+    let voice = rms(&out, secs(start) + 1.0, secs(start) + 4.0, "anull");
+    assert!(times.iter().all(|t| snip(t) > 0.005), "snips {:.4} {:.4}", snip(&times[0]), snip(&times[1]));
+    assert!(quiet < 0.001 && voice > 0.1, "race {quiet:.4}, finished cut {voice:.4}");
     assert!(
         !std::fs::read_dir(&d).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().starts_with(".nuzky-part-"))
     );
+}
+
+#[test]
+fn the_finished_cuts_music_plays_from_the_start_of_the_recap_and_its_speech_only_with_its_picture() {
+    if !available() {
+        return;
+    }
+    let d = dir("recap-music");
+    let recap = recap(&d, true);
+    let out = d.join("recap.mp4");
+    let options = RecapOptions { end_card: true, replace_existing: true };
+    render(&recap, &d.join("cache"), &out, &options, &AtomicBool::new(false), |_| {}).unwrap();
+    let [hook, fast, landing, sample, _] = sections(&recap, true);
+    let secs = |us: i64| us as f64 / 1e6;
+    let (music, speech) = ("bandpass=f=880:width_type=q:w=8", "bandpass=f=440:width_type=q:w=8");
+    let race = (secs(hook) + 0.5, secs(hook + fast) - 0.2);
+    let finished = (secs(hook + fast + landing) + 1.0, secs(hook + fast + landing + sample) - 1.0);
+    let (race_music, race_speech) = (rms(&out, race.0, race.1, music), rms(&out, race.0, race.1, speech));
+    let (cut_music, cut_speech) = (rms(&out, finished.0, finished.1, music), rms(&out, finished.0, finished.1, speech));
+    assert!(race_music > 0.02 && race_speech < 0.005, "race: music {race_music:.4}, speech {race_speech:.4}");
+    assert!(cut_speech > 0.1, "the finished cut has its speech: {cut_speech:.4}");
+    // Under the racing recording the music is lower, so the snips stand out, and under speech it ducks further.
+    assert!(cut_music < race_music, "music under speech {cut_music:.4}, while racing {race_music:.4}");
+    let end = rms(&out, secs(duration_us(&recap, true)) - 0.15, secs(duration_us(&recap, true)) - 0.02, music);
+    assert!(end < race_music / 4.0, "the music fades out at the end: {end:.4}");
 }
 
 #[test]
@@ -192,7 +265,7 @@ fn recap_keeps_an_existing_file_and_stops_when_cancelled() {
         return;
     }
     let d = dir("recap-refuse");
-    let recap = recap(&d);
+    let recap = recap(&d, false);
     let out = d.join("existing.mp4");
     std::fs::write(&out, b"someone's video").unwrap();
     let options = RecapOptions { end_card: false, replace_existing: false };

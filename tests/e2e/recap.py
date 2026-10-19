@@ -6,9 +6,12 @@ from e2e.home import resize
 from e2e.reel import poll
 
 DIALOG = "return document.querySelector('[role=dialog]')?.innerText ?? ''"
-# The recording plays in the recap after 1.5 s of opening, its cuts under an 11 px red edge. The test pattern of
-# talk.mp4 is red along its left edge and cyan along its right one, so the right edge tells.
-OPENING_S = 1.5
+# The recording plays in the recap after 1.2 s of opening, then the new length lands for 1.4 s; with the end card the
+# recap ends on 2 s of it. While a cut plays, the picture steps back to 90 % and leaves the graphite around it: the
+# test pattern of talk.mp4 fills its right edge when kept and the edge goes dark in a cut.
+OPENING_S = 1.2
+LANDING_S = 1.4
+END_CARD_S = 2.0
 EDGE = (1069, 400, 1080, 1500)
 
 
@@ -63,14 +66,16 @@ def red_share(image, box):
     return sum(1 for (red, green, blue) in pixels if red > 200 and green < 110 and blue < 110) / max(1, len(pixels))
 
 
-def recording_at(talk_us, fast_s, at_us):
-    """Where the recap shows `at_us` of the recording: it plays at a constant speed after the opening."""
-    return OPENING_S + at_us / talk_us * fast_s
+def dark_share(image, box):
+    """Share of the box that is the graphite behind a picture stepped back."""
+    pixels = list(image.crop(box).getdata())
+    return sum(1 for pixel in pixels if max(pixel) < 24) / max(1, len(pixels))
 
 
-def fast_seconds(talk_us):
-    """The fast part of a recap, as crates/engine/src/recap.rs `sections` lays it out."""
-    return min(talk_us, max(3_000_000, min(17_000_000, talk_us // 4))) / 1e6
+def race_seconds(info, end_card):
+    """How long the recording races in a recap, from its length and the parts around the race."""
+    sample = min(info['totals']['afterUs'], 8_000_000) / 1e6
+    return info['durationUs'] / 1e6 - OPENING_S - LANDING_S - sample - (END_CARD_S if end_card else 0)
 
 
 @flow('recap', 'A recap of an AI run, of a run that only shortened a pause and of everything cut since the import: the run card '
@@ -110,16 +115,23 @@ def recap(r):
         r.check('the recap is a 1080 × 1920 H.264 and AAC video of at most 30 s, as long as the dialog said',
                 size == (1080, 1920) and codecs == {'h264', 'aac'} and duration <= 30 and abs(duration - first['durationUs'] / 1e6) < 0.06,
                 [duration, size, codecs, first['durationUs']])
-        fast = fast_seconds(talk_us)
-        cut = frame(r, video, recording_at(talk_us, fast, 2_800_000), 'recap-cut')
-        kept = frame(r, video, recording_at(talk_us, fast, 6_000_000), 'recap-kept')
-        r.check('the cut passage plays under a red edge and the kept one does not',
-                red_share(cut, EDGE) > 0.9 and red_share(kept, EDGE) < 0.05, [red_share(cut, EDGE), red_share(kept, EDGE)])
-        r.check('the cut words are struck through in the caption', red_share(cut, (60, 1250, 900, 1405)) > 0.002,
-                red_share(cut, (60, 1250, 900, 1405)))
-        frame(r, video, 0.7, 'recap-opening')
-        # Five seconds into the finished cut, past its label, the recap shows what the renderer draws there.
-        sample_s = OPENING_S + fast + 0.6
+        fast = race_seconds(first, True)
+        # The cut is at the start, so it plays in the first part of the race; the end of the race is kept.
+        stepped = [(at, dark_share(frame(r, video, at, 'recap-scan'), EDGE)) for at in
+                   [OPENING_S + fast * i / 20 for i in range(1, 10)]]
+        at = max(stepped, key=lambda s: s[1])[0]
+        cut = frame(r, video, at, 'recap-cut')
+        kept = frame(r, video, OPENING_S + fast - 0.3, 'recap-kept')
+        r.check('the cut steps the picture back to the graphite and the kept passage fills the frame',
+                dark_share(cut, EDGE) > 0.9 and dark_share(kept, EDGE) < 0.05, [stepped, dark_share(kept, EDGE)])
+        r.check("the cut's red chip hangs under the bar and the kept passage has none",
+                red_share(cut, (60, 1312, 900, 1380)) > 0.02 and red_share(kept, (60, 1312, 900, 1380)) == 0,
+                [red_share(cut, (60, 1312, 900, 1380)), red_share(kept, (60, 1312, 900, 1380))])
+        r.check('the cut words are struck through in the caption', red_share(cut, (60, 900, 900, 1090)) > 0.002,
+                red_share(cut, (60, 900, 900, 1090)))
+        frame(r, video, 1.0, 'recap-opening')
+        # Five seconds into the finished cut, past its bar, the recap shows what the renderer draws there.
+        sample_s = OPENING_S + fast + LANDING_S
         shown = frame(r, video, sample_s + 5.0, 'recap-finished')
         drawn = r.work / 'frame-finished.png'
         subprocess.run([str(CLI), 'frame', str(r.saved_project()), '5', str(drawn), '1080'], env=r.env, check=True, capture_output=True)
@@ -166,7 +178,7 @@ def recap(r):
             resize(r, 1440, 900)
         video = make(r, 'pause-recap.mp4', run, False)
         duration, size, _ = probe(video)
-        r.check('without the end card the recap is 1.5 s shorter than with it', size == (1080, 1920) and abs(duration - (pause['durationUs'] / 1e6 - 1.5)) < 0.06,
+        r.check('without the end card the recap is 2 s shorter than with it', size == (1080, 1920) and abs(duration - (pause['durationUs'] / 1e6 - END_CARD_S)) < 0.06,
                 [duration, pause['durationUs']])
 
         # A hand cut, then everything cut since the import.
@@ -188,9 +200,9 @@ def recap(r):
         video = make(r, 'project-recap.mp4', None, True)
         duration, size, _ = probe(video)
         r.check('the whole-project recap is 9:16 and at most 30 s', size == (1080, 1920) and duration <= 30, [duration, size])
-        opening = frame(r, video, 0.7, 'project-opening')
+        opening = frame(r, video, 1.0, 'project-opening')
         # The bar is the whole take; its red share is the share of the take that was cut, the run's, the pause and the hand cut.
-        share, gone = red_share(opening, (60, 1040, 900, 1052)), 1 - now_us / talk_us
+        share, gone = red_share(opening, (60, 1250, 900, 1270)), 1 - now_us / talk_us
         r.check('the opening bar is red where the take was cut, in proportion', abs(share - gone) < 0.03, [share, gone])
         r.check('no error toast', not r.errors(), r.errors())
     finally:

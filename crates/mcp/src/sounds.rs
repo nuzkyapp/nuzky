@@ -169,6 +169,9 @@ const FILES: &[(&str, &[u8])] = pack![
     "typing.ogg",
     "typing-steady.ogg",
     "heartbeat.ogg",
+    "scissors-snip.ogg",
+    "scissors-snip-2.ogg",
+    "scissors-snip-3.ogg",
 ];
 
 fn packed() -> &'static [Packed] {
