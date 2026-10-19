@@ -58,7 +58,8 @@ function mainInsertIndex(others: Clip[], startUs: number) {
 /**
  * The main track as the drag in progress would leave it, so neighbours move live: a moved clip
  * opens a slot where it would go in (`slotUs`, null when it leaves the track) and the gap it left
- * closes; a trim keeps the clip's start and moves everything after it by the change in length.
+ * closes; a trim of the end moves everything after it with the edge. A trim of the start leaves the
+ * track still, so the edge stays under the pointer as in CapCut; the gap closes when it lands.
  */
 function mainLayout(project: Project, d: Drag | null, minUs: number): { timing: Map<string, Timing>; slotUs: number | null } | null {
   if (!d?.moved) return null;
@@ -83,7 +84,7 @@ function mainLayout(project: Project, d: Drag | null, minUs: number): { timing: 
     if (at === others.length) slotUs = t;
     return { timing, slotUs };
   }
-  if (d.trackId !== MAIN_TRACK) return null;
+  if (d.trackId !== MAIN_TRACK || d.mode === "trimL") return null;
   const shift = r.durationUs - d.clip.durationUs;
   for (const c of main)
     timing.set(c.id, c.id === d.clip.id ? { startUs: c.startUs, durationUs: r.durationUs } : { startUs: c.startUs > d.clip.startUs ? c.startUs + shift : c.startUs, durationUs: c.durationUs });
@@ -341,7 +342,7 @@ export function Timeline({ height }: { height: number }) {
   const fadeUs = fading ? dragFade(fading) : 0;
   const fadeContent = fading?.clip.content.type === "media" ? fading.clip.content : null;
   const fades = fading && fadeContent ? { inUs: fading.mode === "fadeIn" ? fadeUs : fadeContent.fadeInUs, outUs: fading.mode === "fadeOut" ? fadeUs : fadeContent.fadeOutUs } : undefined;
-  // A trimmed main-track clip shows where it ends up; elsewhere the ghost follows the pointer.
+  // A main-track clip trimmed at its end shows where it ends up; elsewhere the ghost follows the pointer.
   const ghostTiming = drag?.moved ? ((drag.mode !== "move" && layout?.timing.get(drag.clip.id)) || dragResult(drag, minUs)) : null;
   const ghostTrackId = drag?.moved ? (drag.target === undefined ? drag.trackId : drag.target) : null;
   // Media dropped on the magnetic main track goes in at a cut, so the line shows that cut.
@@ -632,7 +633,7 @@ export function Timeline({ height }: { height: number }) {
                     )}
                     {track.clips.map((clip) => {
                       if (drag?.moved && drag.clip.id === clip.id) {
-                        // A trimmed main-track clip is drawn by its ghost in place; a moved one leaves its old spot.
+                        // A main-track clip trimmed at its end is drawn by its ghost in place; otherwise its old spot stays outlined.
                         if (isMain && layout) return null;
                         return (
                           <div

@@ -21,6 +21,17 @@ const at = (type, dx) => new PointerEvent(type, {bubbles: true, button: 0, point
   clientX: b.right - 3 + dx, clientY: b.top + b.height / 2});
 el.dispatchEvent(at('pointerdown', 0));
 window.dispatchEvent(at('pointermove', arguments[1]));"""
+# Presses a clip just inside its left edge and drags that edge `arguments[1]` px along the timeline, without letting go.
+TRIM_LEFT = """const el = document.querySelector(`[data-clip-id='${arguments[0]}']`);
+const b = el.getBoundingClientRect();
+const at = (type, dx) => new PointerEvent(type, {bubbles: true, button: 0, pointerId: 1,
+  clientX: b.left + 3 + dx, clientY: b.top + b.height / 2});
+el.dispatchEvent(at('pointerdown', 0));
+window.dispatchEvent(at('pointermove', arguments[1]));"""
+# The left edge of the clip `arguments[0]` and of the ghost a drag draws, in window pixels.
+LEFTS = """const ghost = document.querySelector('section[aria-label=Timeline] .opacity-85');
+return {next: document.querySelector(`[data-clip-id='${arguments[0]}']`).getBoundingClientRect().left,
+  ghost: ghost ? ghost.getBoundingClientRect().left : null};"""
 TIP = "return [...document.querySelectorAll('section[aria-label=Timeline] div')].some((d) => d.textContent === arguments[0])"
 FADES = """const c = window.__nuzky.store.getState().snap.project.tracks.flatMap((t) => t.clips).find((c) => c.id === arguments[0]);
 return [c.content.fadeInUs, c.content.fadeOutUs];"""
@@ -112,6 +123,27 @@ def edit(r):
     for _ in range(2):
         r.key('z', ctrlKey=True)
     r.check('undo puts the clip and the title back', wait(lambda: r.track() == undone and title() is None, 5), r.track())
+
+    # Dragging a main-track clip's left edge in, as in CapCut, moves only that edge while dragging; the clips after it
+    # stay still and close up on release. The right side of the clip and everything after it once slid left instead.
+    r.s.run('window.__nuzky.store.getState().setZoom(100)')
+    time.sleep(0.5)
+    before = r.s.run(LEFTS, undone[1]['id'])
+    r.s.run(TRIM_LEFT, undone[0]['id'], 50)
+    time.sleep(0.3)
+    during = r.s.run(LEFTS, undone[1]['id'])
+    r.check('dragging the first clip\'s left edge 50 px in leaves the next clip where it was',
+            during['next'] == before['next'], {'before': before, 'during': during})
+    r.check('the trimmed clip\'s left edge follows the pointer', during['ghost'] is not None and abs(during['ghost'] - before['next'] + 150) < 2,
+            {'before': before, 'during': during})
+    r.shot('trim-left-drag')
+    r.s.run(RELEASE)
+    cut = wait(lambda: (c := r.track()) and c[0]['durationUs'] < undone[0]['durationUs'] and c, 5)
+    r.check('on release the clip keeps its start and the next clip closes up behind it',
+            cut and cut[0]['startUs'] == undone[0]['startUs'] and cut[1]['startUs'] == cut[0]['startUs'] + cut[0]['durationUs']
+            and cut[0]['durationUs'] == undone[0]['durationUs'] - 500_000, cut)
+    r.key('z', ctrlKey=True)
+    r.check('undo puts the left edge back', wait(lambda: r.track() == undone, 5), r.track())
 
     # Deleting a main-track clip takes the captions over it along and moves the later ones with their picture, also
     # when the captions were selected with it. Deleting the video alone once left its captions, and deleting both
