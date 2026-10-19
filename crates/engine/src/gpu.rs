@@ -61,7 +61,6 @@ fn linear_to_srgb(rgb: vec3<f32>) -> vec3<f32> {
     return select(1.055 * pow(rgb, vec3<f32>(1.0 / 2.4)) - 0.055, rgb * 12.92, rgb <= vec3<f32>(0.0031308));
 }
 
-const SDR_WHITE_NITS = 203.0;
 const BT2020_LUMA = vec3<f32>(0.2627, 0.678, 0.0593);
 // Linear BT.2020 to BT.709 primaries; columns are the BT.2020 red, green and blue.
 const BT2020_TO_BT709 = mat3x3<f32>(
@@ -69,54 +68,37 @@ const BT2020_TO_BT709 = mat3x3<f32>(
     vec3<f32>(-0.5876, 1.1329, -0.1006),
     vec3<f32>(-0.0728, -0.0083, 1.1187),
 );
-// libplacebo's default "spline" tone curve in PQ space, mapping a 1000 nit source peak (HLG's nominal
-// peak) to SDR white with the pivot at 40 % of the source range, as libplacebo does when the scene
-// average is unknown. Coefficients: Pa (below the pivot), Qa and Qb (above it), shared slope.
-const PQ_SOURCE_PEAK = 0.75183;
-const SPLINE_SRC_PIVOT = 0.30073;
-const SPLINE_DST_PIVOT = 0.27335;
-const SPLINE_SLOPE = 0.97912;
-const SPLINE_PA = 0.23334;
-const SPLINE_QA = 0.73174;
-const SPLINE_QB = -0.99026;
+// HDR scene light to SDR: luminance to this power, with a toe that keeps near-black deep.
+const HDR_POWER = 0.93;
+const HDR_TOE = 0.0014;
 
 fn pq_to_nits(e: vec3<f32>) -> vec3<f32> {
     let p = pow(e, vec3<f32>(1.0 / 78.84375));
     return 10000.0 * pow(max(p - 0.8359375, vec3<f32>(0.0)) / (18.8515625 - 18.6875 * p), vec3<f32>(1.0 / 0.1593017578125));
 }
 
-fn nits_to_pq(nits: f32) -> f32 {
-    let y = pow(nits / 10000.0, 0.1593017578125);
-    return pow((0.8359375 + 18.8515625 * y) / (1.0 + 18.6875 * y), 78.84375);
-}
-
-fn tone_map_nits(nits: f32) -> f32 {
-    let x = min(nits_to_pq(nits), PQ_SOURCE_PEAK) - SPLINE_SRC_PIVOT;
-    let below = (SPLINE_PA * x + SPLINE_SLOPE) * x;
-    let above = ((SPLINE_QA * x + SPLINE_QB) * x + SPLINE_SLOPE) * x;
-    return pq_to_nits(vec3<f32>(select(below, above, x > 0.0) + SPLINE_DST_PIVOT)).x;
-}
-
-// PQ or HLG BT.2020 colour to SDR BT.709. The curve compresses the whole range instead of keeping
-// everything up to HDR reference white (203 nits) and clipping above it: phone HLG puts walls and
-// faces above reference white, which then washed out. The curve maps the brightest BT.709 channel and
-// the colour is scaled with it, keeping hue and saturation. Mapping luminance instead, as libplacebo
-// does, left the red of lit skin above SDR white, and clipping it turned foreheads and cheeks into flat
-// orange patches. Greys come out the same either way. The result is encoded for a BT.1886 display like
-// SDR video.
+// PQ or HLG BT.2020 colour to SDR BT.709, encoded for a BT.1886 display like SDR video.
+//
+// iPhones record HLG, so HDR shows the way Apple's own SDR conversion (AVFoundation) shows HLG, from scene
+// light. The power and the toe are fitted to its output, 2/255 off on average on skin tones. Tone mapping
+// the light of a 1000 nit display instead shows midtones about 17 levels brighter and less saturated than
+// Apple's, so footage looks flat next to the phone. PQ (HDR10 from Android phones) first becomes the scene
+// light it shows on a 1000 nit display, as BT.2100 converts PQ to HLG, so one scene shot on either phone
+// looks the same; it clips above 1000 nits. One gain from luminance scales the colour, so hue and
+// saturation stay.
 fn hdr_to_sdr(rgb: vec3<f32>, transfer: f32) -> vec3<f32> {
     let e = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
-    var nits: vec3<f32>;
+    var scene: vec3<f32>;
     if transfer < 1.5 {
-        nits = pq_to_nits(e);
+        // The inverse of HLG's OOTF (system gamma 1.2) on display light relative to 1000 nits.
+        let display = pq_to_nits(e) / 1000.0;
+        scene = display * pow(max(dot(display, BT2020_LUMA), 1e-6), -1.0 / 6.0);
     } else {
-        let scene = select((exp((e - 0.55991073) / 0.17883277) + 0.28466892) / 12.0, e * e / 3.0, e <= vec3<f32>(0.5));
-        // HLG's OOTF on a 1000 nit display (system gamma 1.2).
-        nits = 1000.0 * pow(dot(scene, BT2020_LUMA), 0.2) * scene;
+        scene = select((exp((e - 0.55991073) / 0.17883277) + 0.28466892) / 12.0, e * e / 3.0, e <= vec3<f32>(0.5));
     }
-    let bt709 = BT2020_TO_BT709 * nits;
-    let peak = max(max(bt709.r, bt709.g), max(bt709.b, 1e-6));
-    let sdr = clamp(bt709 * (tone_map_nits(peak) / peak / SDR_WHITE_NITS), vec3<f32>(0.0), vec3<f32>(1.0));
+    let y = max(dot(scene, BT2020_LUMA), 1e-6);
+    let lum = pow(y, HDR_POWER);
+    let sdr = clamp(BT2020_TO_BT709 * (scene * (lum / y * lum / (lum + HDR_TOE))), vec3<f32>(0.0), vec3<f32>(1.0));
     return pow(sdr, vec3<f32>(1.0 / 2.4));
 }
 

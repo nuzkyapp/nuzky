@@ -1,3 +1,4 @@
+import math
 import subprocess
 import time
 
@@ -26,26 +27,49 @@ def centre(crop, index):
     return [sum(p[c] for p in pixels) / len(pixels) for c in range(3)]
 
 
-@flow('hdr', 'A phone HLG clip shows in the preview tone mapped like the renderer, with walls and highlights not blown out')
-def hdr(r):
-    values = list(PATCHES.values())
+def hlg_to_pq(e):
+    """The same light as PQ, as an Android phone records HDR10: HLG on its nominal 1000 nit display, then the PQ curve."""
+    scene = [v * v / 3 if v <= 0.5 else (math.exp((v - 0.55991073) / 0.17883277) + 0.28466892) / 12 for v in e]
+    luma = 0.2627 * scene[0] + 0.678 * scene[1] + 0.0593 * scene[2]
+    pq = []
+    for s in scene:
+        y = (luma ** 0.2 * s / 10) ** 0.1593017578125
+        pq.append(((0.8359375 + 18.8515625 * y) / (1 + 18.6875 * y)) ** 78.84375)
+    return pq
+
+
+def phone_clip(r, name, transfer, values):
+    """A 2 s HEVC clip of the patches with the given HDR transfer, as a phone records it."""
     pixel = lambda patch: b''.join(round(v * 65535).to_bytes(2, 'big') for v in patch)
     rows = [(pixel(values[2 * band]) * (WIDTH // 2) + pixel(values[2 * band + 1]) * (WIDTH // 2)) * (HEIGHT // ROWS + 1)
             for band in range(ROWS)]
     picture = b''.join(rows)[:WIDTH * HEIGHT * 6]
-    (r.work / 'hlg.ppm').write_bytes(f'P6\n{WIDTH} {HEIGHT}\n65535\n'.encode() + picture)
-    clip = r.work / 'hlg-phone.mov'
-    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-loop', '1', '-i', str(r.work / 'hlg.ppm'), '-t', '2', '-r', '30', '-vf',
+    (r.work / f'{name}.ppm').write_bytes(f'P6\n{WIDTH} {HEIGHT}\n65535\n'.encode() + picture)
+    clip = r.work / f'{name}.mov'
+    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-loop', '1', '-i', str(r.work / f'{name}.ppm'), '-t', '2', '-r', '30', '-vf',
                     'scale=in_range=pc:out_color_matrix=bt2020nc:out_range=tv,format=yuv420p10le', '-c:v', 'libx265',
-                    '-x265-params', 'log-level=error:crf=4:colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc',
+                    '-x265-params', f'log-level=error:crf=4:colorprim=bt2020:transfer={transfer}:colormatrix=bt2020nc',
                     '-tag:v', 'hvc1', str(clip)], check=True)
-    r.import_media(clip)
-    r.add_clip(clip.name)
-    r.seek(1_000_000)
+    return clip
+
+
+def shown_patches(r, shot, at_us):
+    r.seek(at_us)
     time.sleep(1.5)
-    r.shot('hdr-preview')
-    shown = preview_crop(r.work / 'hdr-preview.png', preview_rect(r))
-    preview = {name: centre(shown, i) for i, name in enumerate(PATCHES)}
+    r.shot(shot)
+    crop = preview_crop(r.work / f'{shot}.png', preview_rect(r))
+    return {name: centre(crop, i) for i, name in enumerate(PATCHES)}
+
+
+@flow('hdr', "Phone HDR, HLG and PQ, shows in the preview as Apple's SDR conversion shows HLG, the same as the renderer, "
+             'with walls and highlights not blown out')
+def hdr(r):
+    hlg = phone_clip(r, 'hlg-phone', 'arib-std-b67', list(PATCHES.values()))
+    pq = phone_clip(r, 'pq-phone', 'smpte2084', [hlg_to_pq(v) for v in PATCHES.values()])
+    r.import_media(hlg, pq)
+    r.add_clip(hlg.name)
+    r.add_clip(pq.name)
+    preview = shown_patches(r, 'hdr-preview', 1_000_000)
     rendered_png = r.work / 'hdr-rendered.png'
     subprocess.run([str(CLI), 'frame', str(r.saved_project()), '1', str(rendered_png), str(WIDTH)], env=r.env, check=True,
                    capture_output=True)
@@ -53,9 +77,11 @@ def hdr(r):
     rendered = Image.open(rendered_png).convert('RGB')
     off = max(abs(a - b) for i, name in enumerate(PATCHES) for a, b in zip(preview[name], centre(rendered, i)))
     r.check('the preview shows the same colours as the renderer', off <= 8, f'{off:.0f} levels apart')
-    # The old curve showed the 75 % grey at 244 and the wall and every highlight at 255.
+    # Apple's SDR conversion (avconvert -p PresetHighestQuality, macOS 27.0.1) shows the 75 % grey at 155.
+    # libplacebo's tone curve on the light of a 1000 nit display showed it at 172, flatter; clipping at reference
+    # white showed 244.
     grey = preview['grey 75 %'][1]
-    r.check('HDR reference white shows as a light grey, not white', 150 <= grey <= 200, round(grey))
+    r.check("HDR reference white shows as Apple's light grey (155)", abs(grey - 155) <= 8, round(grey))
     r.check('the lit wall keeps its colour instead of turning white', max(preview['wall']) < 235,
             [round(v) for v in preview['wall']])
     step = preview['grey 95 %'][1] - preview['grey 85 %'][1]
@@ -64,4 +90,14 @@ def hdr(r):
     cheek, forehead = preview['lit cheek'], preview['lit forehead']
     r.check('lit skin keeps its shades instead of clipping', max(forehead) < 248 and forehead[0] - cheek[0] >= 4,
             f'cheek {[round(v) for v in cheek]}, forehead {[round(v) for v in forehead]}')
+    # The PQ clip comes after the HLG one. The preview decodes PQ with a little noise and shows the lit cheek's red
+    # a few levels lower than the renderer draws it, as it did before PQ showed like HLG; the renderer's own frames
+    # of the two clips are within 4 levels.
+    pq_preview = shown_patches(r, 'hdr-pq-preview', 3_000_000)
+    off, worst = max((max(abs(a - b) for a, b in zip(pq_preview[name], preview[name])), name) for name in PATCHES)
+    r.check('the same scene recorded as PQ shows as the HLG clip does', off <= 12,
+            f'{off:.0f} levels apart at {worst}: PQ {[round(v) for v in pq_preview[worst]]}, '
+            f'HLG {[round(v) for v in preview[worst]]}')
+    grey = pq_preview['grey 75 %'][1]
+    r.check("PQ's HDR reference white also shows as Apple's light grey (155)", abs(grey - 155) <= 8, round(grey))
     r.check('nothing shows an error', not r.errors(), r.errors())

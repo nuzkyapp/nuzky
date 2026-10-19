@@ -620,33 +620,19 @@ fn mpeg_ts_seek_matches_ffmpeg_pts_and_pixels() {
 }
 
 #[test]
-fn hlg_and_pq_sources_are_tone_mapped_like_libplacebo() {
+fn hlg_and_pq_sources_are_tone_mapped_like_apples_hlg_conversion() {
     if !available() {
         return;
     }
-    let tools = |kind: &str| {
-        String::from_utf8_lossy(&run(Command::new("ffmpeg").args(["-hide_banner", kind])).stdout).into_owned()
-    };
-    if !tools("-encoders").contains("libx265") || !tools("-filters").contains("libplacebo") {
-        eprintln!("SKIP: ffmpeg without libx265 or libplacebo");
-        return;
-    }
-    // libplacebo makes the reference on a Vulkan GPU; a machine without one, like a CI runner, cannot.
-    // Any other failure of this probe fails the test, so the comparison never goes quiet by accident.
-    let probe = Command::new("ffmpeg")
-        .args(["-v", "error", "-threads", "2", "-filter_threads", "1", "-f", "lavfi", "-i", "color=s=16x16:d=0.04"])
-        .args(["-vf", "libplacebo", "-f", "null", "-"])
-        .output()
-        .unwrap();
-    if !probe.status.success() {
-        let error = String::from_utf8_lossy(&probe.stderr);
-        assert!(error.contains("Vulkan device"), "libplacebo probe failed:\n{error}");
-        eprintln!("SKIP: libplacebo has no Vulkan device");
+    let encoders =
+        String::from_utf8_lossy(&run(Command::new("ffmpeg").args(["-hide_banner", "-encoders"])).stdout).into_owned();
+    if !encoders.contains("libx265") {
+        eprintln!("SKIP: ffmpeg without libx265");
         return;
     }
     // HLG signal of a phone shot: greys from shadows to highlights, skin, a lit wall and a red that only
     // looks saturated once converted from BT.2020. Phones put faces and walls around and above HDR
-    // reference white (75 %), which the old curve kept at full strength and clipped to white.
+    // reference white (75 %).
     const PATCHES: [[f64; 3]; 8] = [
         [0.25; 3],
         [0.5; 3],
@@ -667,6 +653,19 @@ fn hlg_and_pq_sources_are_tone_mapped_like_libplacebo() {
             ((0.8359375 + 18.8515625 * y) / (1.0 + 18.6875 * y)).powf(78.84375)
         })
     };
+    // What Apple's SDR conversion shows for the HLG patches encoded as below: avconvert -p
+    // PresetHighestQuality on macOS 27.0.1, read back from the centres of its BT.709 patches. The checks run
+    // on Linux, which has no AVFoundation.
+    const APPLE: [[f64; 3]; 8] = [
+        [55.0; 3],
+        [98.0; 3],
+        [155.0; 3],
+        [190.0; 3],
+        [232.0; 3],
+        [131.0, 102.0, 93.0],
+        [198.0, 180.0, 150.0],
+        [177.0, 25.0, 40.0],
+    ];
     let d = dir("hdr");
     let mut renderer = Renderer::new().unwrap();
     for transfer in ["arib-std-b67", "smpte2084"] {
@@ -681,7 +680,8 @@ fn hlg_and_pq_sources_are_tone_mapped_like_libplacebo() {
         }
         std::fs::write(&source, ppm).unwrap();
         let path = d.join(format!("{transfer}.mp4"));
-        // PQ declares a 1000 nit peak like phone HDR10, so libplacebo assumes the peak Nuzky does.
+        // PQ declares a 1000 nit peak like phone HDR10. Nuzky reads the light the same with any peak, as
+        // Apple does.
         let metadata = if pq {
             ":master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1):max-cll=1000,400"
         } else {
@@ -693,9 +693,6 @@ fn hlg_and_pq_sources_are_tone_mapped_like_libplacebo() {
         let input = source.to_str().unwrap();
         let yuv = "scale=in_range=pc:out_color_matrix=bt2020nc:out_range=tv,format=yuv420p10le";
         ff(&["-i", input, "-vf", yuv, "-c:v", "libx265", "-x265-params", &x265, "-frames:v", "1"], &path);
-        // libplacebo's default tone mapping without per-frame peak detection, which a static curve cannot follow.
-        let placebo = "libplacebo=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=pc:peak_detect=0:apply_dolbyvision=0:format=rgba";
-        let reference = raw(&path, &["-vf", placebo]);
         let frame = renderer.render(&project(&path, 200_000), 0, 640, 80, Wait::Exact, false).unwrap();
         let patch = |rgba: &[u8], i: usize| -> [f64; 3] {
             let pixels: Vec<&[u8]> = (20..60)
@@ -705,31 +702,19 @@ fn hlg_and_pq_sources_are_tone_mapped_like_libplacebo() {
             std::array::from_fn(|c| pixels.iter().map(|p| p[c] as f64).sum::<f64>() / pixels.len() as f64)
         };
         let ours: Vec<_> = (0..PATCHES.len()).map(|i| patch(&frame, i)).collect();
-        let theirs: Vec<_> = (0..PATCHES.len()).map(|i| patch(&reference, i)).collect();
-        eprintln!("QA HDR {transfer}: Nuzky {ours:.0?}\n  libplacebo {theirs:.0?}");
-        // The old curve showed the 75 % grey at 246 and the wall at (255, 235, 198) against libplacebo's
-        // 179 and (221, 203, 172).
-        for i in 0..5 {
-            let off = (0..3).map(|c| (ours[i][c] - theirs[i][c]).abs()).fold(0.0, f64::max);
-            assert!(off <= 12.0, "{transfer} patch {i}: Nuzky {:?}, libplacebo {:?}", ours[i], theirs[i]);
-        }
-        // Skin and the wall keep libplacebo's hue but come out darker. libplacebo maps luminance, which
-        // clipped the red of 12 % of a lit face in an iPhone clip; Nuzky maps the brightest channel. Apple's
-        // AVFoundation shows these patches darker still, at (132, 103, 94) and (198, 180, 150).
-        for i in [5, 6] {
-            let (o, t) = (ours[i], theirs[i]);
-            let hue = (1..3).map(|c| (o[c] / o[0] - t[c] / t[0]).abs()).fold(0.0, f64::max);
-            assert!(
-                o[0] <= t[0] + 4.0 && o[0] >= t[0] - 20.0 && hue <= 0.04,
-                "{transfer} patch {i}: Nuzky {o:?}, libplacebo {t:?}"
-            );
+        eprintln!("QA HDR {transfer}: Nuzky {ours:.0?}\n  Apple {APPLE:.0?}");
+        // libplacebo's tone curve on the light of a 1000 nit display showed the 50 % and 75 % greys at 114 and
+        // 172, and skin 12 to 14 levels brighter than Apple.
+        for i in 0..7 {
+            let off = (0..3).map(|c| (ours[i][c] - APPLE[i][c]).abs()).fold(0.0, f64::max);
+            assert!(off <= 8.0, "{transfer} patch {i}: Nuzky {:?}, Apple {:?}", ours[i], APPLE[i]);
         }
         // Highlights above reference white keep their steps instead of all clipping to white.
         assert!(ours[4][1] - ours[3][1] > 20.0, "{transfer}: highlights {:?} {:?}", ours[3], ours[4]);
-        // Shown untouched, the red is (179, 77, 64); Apple shows it at (178, 26, 41). It is left out of the
-        // comparison because libplacebo also remaps the gamut.
+        // Apple shows this red more saturated, with less green and blue than a plain conversion to BT.709
+        // gives. It must still show as bright and stay a red.
         let red = ours[7];
-        assert!(red[0] > 160.0 && red[1] < 60.0, "{transfer}: red {red:?}");
+        assert!((red[0] - APPLE[7][0]).abs() <= 10.0 && red[1] < 60.0 && red[2] < 60.0, "{transfer}: red {red:?}");
     }
 }
 
