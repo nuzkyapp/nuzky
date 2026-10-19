@@ -2815,7 +2815,6 @@ mod tests {
         // Under the overlay below it, though it is free there.
         p.apply(move_to(&high, Some(low_track.clone()), TrackSide::Below)).unwrap();
         assert_eq!(layers(&p)[1..], [Some(high.clone()), Some(low.clone())]);
-        // And back above it.
         p.apply(move_to(&high, Some(low_track.clone()), TrackSide::Above)).unwrap();
         assert_eq!(layers(&p)[1..], [Some(low.clone()), Some(high.clone())]);
         assert!(p.apply(move_to(&high, Some(MAIN_TRACK.into()), TrackSide::Below)).is_err());
