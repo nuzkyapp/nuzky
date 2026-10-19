@@ -2,7 +2,7 @@ import json
 import subprocess
 import time
 
-from e2e.harness import CLI, FIXTURES, changed_share, close_window_and_confirm, ffprobe, flow, wait
+from e2e.harness import CLI, FIXTURES, MACOS, changed_share, close_window_and_confirm, ffprobe, flow, wait, webdriver
 
 
 @flow('export', 'Export refuses to overwrite, replaces only when asked, matches the rendered frame, offers the presets that fit '
@@ -129,3 +129,39 @@ def youtube(r, start_export):
     summary = log[log.rfind('Summary:'):].split()
     lufs, peak = float(summary[summary.index('I:') + 1]), float(summary[summary.index('Peak:') + 1])
     r.check('the sound is levelled to -14 LUFS with true peak at most -1 dBTP', abs(lufs + 14) <= 1 and peak <= -1, [lufs, peak])
+
+
+def file_dialog(r):
+    sheet = r.s.path + '/nuzky/sheet'
+    toasts = "return document.querySelector('[aria-label=Notifications]').textContent"
+    export = "[...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent === 'Export…').click()"
+    r.import_media(FIXTURES / 'talk.mp4')
+    r.add_clip('talk.mp4')
+    r.key('e', ctrlKey=True)
+    r.check('Ctrl+E opens the export dialog', wait(lambda: r.s.run(DIALOG), 5))
+    time.sleep(0.5)  # the dialog fades in over 200 ms
+    r.s.run(export)
+    shown = wait(lambda: webdriver('GET', sheet), 5)
+    time.sleep(4)  # longer than Nuzky waits for a dialog to show
+    r.check('a save dialog macOS shows stays open', shown and shown['onScreen'] and webdriver('GET', sheet)
+            and not r.s.run(toasts), [shown, r.s.run(toasts)])
+    webdriver('POST', sheet + '/cancel')
+    r.check('Cancel closes it and keeps the export dialog', wait(lambda: webdriver('GET', sheet) is None, 5) and r.s.run(DIALOG))
+    r.s.run(export)
+    r.check('Export… opens the save dialog again', wait(lambda: (webdriver('GET', sheet) or {}).get('onScreen'), 5))
+    time.sleep(0.8)  # AppKit orders the sheet in again until it has slid in
+    webdriver('POST', sheet + '/hide')
+    time.sleep(0.3)
+    hidden = webdriver('GET', sheet)
+    r.check('hidden, it still darkens the window but is off the screen', hidden and not hidden['onScreen'], hidden)
+    closed = wait(lambda: webdriver('GET', sheet) is None, 6)
+    told = wait(lambda: "macOS didn't show the window for choosing a file. Quit Nuzky, open it again" in r.s.run(toasts), 5)
+    r.check('Nuzky closes it within seconds and a toast says to reopen Nuzky', closed and told, r.s.run(toasts))
+    r.check('the export dialog stays open and nothing is exported', r.s.run(DIALOG)
+            and not any(j['kind'] == 'export' for j in r.state()['jobs']), r.state()['jobs'])
+    r.shot('file-dialog-hidden')
+
+
+if MACOS:
+    flow('file_dialog', 'On macOS a save dialog macOS leaves off the screen closes within seconds and a toast says to '
+         'reopen Nuzky, while one it shows stays open')(file_dialog)

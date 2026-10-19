@@ -19,8 +19,8 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject, Bool, Imp, Sel};
 use objc2::{class, ffi, msg_send, sel};
 use objc2_app_kit::{
-    NSBitmapImageFileType, NSBitmapImageRep, NSButton, NSEvent, NSEventModifierFlags, NSEventType, NSImage, NSView,
-    NSWindow, NSWindowCollectionBehavior,
+    NSBitmapImageFileType, NSBitmapImageRep, NSButton, NSEvent, NSEventModifierFlags, NSEventType, NSImage,
+    NSSavePanel, NSView, NSWindow, NSWindowCollectionBehavior,
 };
 use objc2_foundation::{NSActivityOptions, NSArray, NSDictionary, NSError, NSPoint, NSProcessInfo, NSString};
 use objc2_web_kit::WKWebView;
@@ -28,6 +28,13 @@ use serde_json::{Value, json};
 use tauri::{LogicalSize, Manager, WebviewWindow};
 
 static TOKEN: OnceLock<Option<String>> = OnceLock::new();
+
+#[link(name = "CoreGraphics", kind = "framework")]
+unsafe extern "C" {
+    fn CGSMainConnectionID() -> i32;
+    /// Place 0 orders the window out.
+    fn CGSOrderWindow(connection: i32, window: i32, place: i32, relative_to: i32) -> i32;
+}
 
 /// Takes the secret out of the environment before any other thread exists, so the agents and `nuzky mcp` the
 /// app starts never inherit it.
@@ -220,6 +227,25 @@ fn handle(app: &tauri::AppHandle, method: &str, path: &str, body: &Value) -> Res
             let buttons: Retained<NSArray<NSButton>> = unsafe { msg_send![alert, buttons] };
             ensure!(buttons.count() > 0, "the dialog has no buttons");
             unsafe { buttons.objectAtIndex(0).performClick(None) };
+            Ok(Value::Null)
+        }),
+        // A file dialog: null, or whether the window server shows it.
+        ("GET", "nuzky/sheet") => on_main(&window, |_, ns_window| {
+            Ok(ns_window
+                .attachedSheet()
+                .map_or(Value::Null, |sheet| json!({"onScreen": crate::file_dialogs::on_screen(sheet.windowNumber())})))
+        }),
+        // As macOS 27 once left file dialogs: AppKit has the sheet on the window, which darkens, but the window
+        // server does not show it. AppKit's own orderOut would end the sheet.
+        ("POST", "nuzky/sheet/hide") => on_main(&window, |_, ns_window| {
+            let number = sheet(ns_window)?.windowNumber() as i32;
+            ensure!(unsafe { CGSOrderWindow(CGSMainConnectionID(), number, 0, 0) } == 0, "the window server refused");
+            Ok(Value::Null)
+        }),
+        ("POST", "nuzky/sheet/cancel") => on_main(&window, |_, ns_window| {
+            let panel =
+                sheet(ns_window)?.downcast::<NSSavePanel>().map_err(|_| anyhow!("the dialog is not a file dialog"))?;
+            unsafe { panel.cancel(None) };
             Ok(Value::Null)
         }),
         // The page's own process, whose memory the waveform flow watches.

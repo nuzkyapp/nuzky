@@ -345,6 +345,11 @@ function useBackendEvents() {
       }),
     );
     offs.push(
+      listen("file-dialog-hidden", () =>
+        useEditor.getState().toast({ kind: "error", text: "macOS didn't show the window for choosing a file. Quit Nuzky, open it again and try once more." }),
+      ),
+    );
+    offs.push(
       listen<string>("close-save-failed", (e) =>
         useEditor.getState().toast({ kind: "error", text: `Your last changes could not be saved: ${e.payload}. Free some disk space and close again, or close again to quit without them.` }),
       ),

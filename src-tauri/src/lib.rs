@@ -6,6 +6,8 @@ mod connect;
 mod cover;
 mod diagnostics;
 mod engine;
+#[cfg(target_os = "macos")]
+mod file_dialogs;
 mod jobs;
 mod library;
 mod model_question;
@@ -1219,6 +1221,10 @@ pub fn run() {
             jobs::prepare_media(&app.state::<AppState>(), &project);
             style::watch(app.handle().clone());
             app.emit("ready", ()).ok();
+            #[cfg(target_os = "macos")]
+            if let Err(error) = file_dialogs::watch(app) {
+                log::warn!("Not watching file dialogs: {error:#}");
+            }
             #[cfg(all(target_os = "macos", debug_assertions))]
             test_bridge::start(app)?;
             Ok(())
