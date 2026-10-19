@@ -280,7 +280,7 @@ export function Timeline({ height }: { height: number }) {
     return () => el.removeEventListener("wheel", onWheel);
   }, [setZoom]);
 
-  const { drag: gesture, startClipDrag, startScrub } = useTimelineGestures({ project, zoom, snapping, minUs, rows, timeAt });
+  const { drag: gesture, box, startClipDrag, startScrub, startBoxSelect } = useTimelineGestures({ project, zoom, snapping, minUs, rows, scroller, timeAt });
   // A fade drag changes only the clip's fades; the ghost, the slot and the snap guide belong to moves and trims.
   const drag = gesture && !isFade(gesture.mode) ? gesture : null;
   const fading = gesture?.moved && isFade(gesture.mode) ? gesture : null;
@@ -585,6 +585,8 @@ export function Timeline({ height }: { height: number }) {
           {/* Tracks */}
           <div
             className="relative flex flex-1 flex-col"
+            // Empty lane space, between and below the lanes too: a click moves the playhead, a drag selects clips with a box.
+            onPointerDown={(e) => (e.target as HTMLElement).hasAttribute("data-lane") && startBoxSelect(e)}
             onKeyDown={onClipKey}
             onFocus={(e) => {
               const id = (e.target as HTMLElement).getAttribute?.("data-clip-id");
@@ -600,24 +602,19 @@ export function Timeline({ height }: { height: number }) {
               const h = rowHeight(track);
               const isMain = track.id === MAIN_TRACK;
               return (
-                <div key={track.id} className="flex shrink-0" style={{ height: h + ROW_GAP }}>
+                <div key={track.id} data-lane className="flex shrink-0" style={{ height: h + ROW_GAP }}>
                   <TrackHeader track={track} width={HEADER_W} locked={locked} />
                   <div
                     ref={(el) => {
                       if (el) rows.current.set(track.id, el);
                       else rows.current.delete(track.id);
                     }}
+                    data-lane
                     role="listbox"
                     aria-label={`${track.name || track.kind} track`}
                     aria-multiselectable
                     className={`relative flex-1 ${isMain ? "bg-white/[0.035]" : "bg-white/[0.015]"} ${assetDrag && dropTime !== null ? "outline-1 outline-dashed outline-white/20" : ""}`}
                     style={{ marginBlock: ROW_GAP / 2 }}
-                    onPointerDown={(e) => {
-                      if (e.target === e.currentTarget) {
-                        select([]);
-                        startScrub(e);
-                      }
-                    }}
                   >
                     {isMain && emptyTimeline && !peekShown && (
                       <div className="pointer-events-none absolute inset-1 flex items-center justify-center rounded-[7px] border border-dashed border-white/15 text-[12px] text-muted">
@@ -677,7 +674,7 @@ export function Timeline({ height }: { height: number }) {
             })}
             {drag?.moved && drag.target === null && dragKind === "audio" && <div className="ml-[140px] h-0.5 rounded-full bg-accent" />}
             {/* The header column runs on below the last track, so nothing scrolled under it shows through. */}
-            <div className="flex flex-1">
+            <div data-lane className="flex flex-1">
               <div className="sticky left-0 z-[47] shrink-0 border-r border-white/[.07] bg-panel" style={{ width: HEADER_W }} />
             </div>
           </div>
@@ -709,6 +706,8 @@ export function Timeline({ height }: { height: number }) {
               style={{ left: HEADER_W + endX, top: RULER_H, width: laneWidth - endX }}
             />
           )}
+
+          {box && <div data-box className="pointer-events-none absolute z-[35] rounded-[3px] border border-accent bg-accent/15 shadow-[0_0_0_1px_rgb(0_0_0/.45)]" style={box} />}
 
           {/* Snap guide */}
           {drag?.moved && drag.snapUs !== null && (

@@ -57,6 +57,9 @@ export function dragFade(d: Drag): number {
   return Math.max(0, Math.min(d.maxFadeUs, Math.round(us / FADE_STEP_US) * FADE_STEP_US));
 }
 
+/** The box a drag over empty lane space draws, in the timeline scroller's content pixels. */
+export type Box = { left: number; top: number; width: number; height: number };
+
 function snap(value: number, candidates: number[], thr: number): number | null {
   let best: number | null = null;
   for (const c of candidates) if (Math.abs(c - value) <= thr && (best === null || Math.abs(c - value) < Math.abs(best - value))) best = c;
@@ -64,8 +67,8 @@ function snap(value: number, candidates: number[], thr: number): number | null {
 }
 
 /**
- * Moving and trimming clips, dragging their sound fades, and scrubbing the ruler and empty lanes;
- * all follow the pointer on the window. A drag binds its listeners once when it starts and reads
+ * Moving and trimming clips, dragging their sound fades, scrubbing the ruler, and clicking or box
+ * selecting in empty lane space; all follow the pointer on the window. A drag binds its listeners once when it starts and reads
  * the latest zoom and snapping from a ref, so pointer moves only update the drag state.
  */
 export function useTimelineGestures({
@@ -74,6 +77,7 @@ export function useTimelineGestures({
   snapping,
   minUs,
   rows,
+  scroller,
   timeAt,
 }: {
   project: Project | undefined;
@@ -81,6 +85,7 @@ export function useTimelineGestures({
   snapping: boolean;
   minUs: number;
   rows: RefObject<Map<string, HTMLDivElement>>;
+  scroller: RefObject<HTMLDivElement | null>;
   timeAt: (clientX: number) => number;
 }) {
   const [drag, setDrag] = useState<Drag | null>(null);
@@ -233,30 +238,113 @@ export function useTimelineGestures({
     [step],
   );
 
-  const startScrub = useCallback((e: PointerEvent) => {
-    if (e.button !== 0) return;
-    const { seek } = useEditor.getState();
-    const timeAt = (x: number) => {
-      const { project, zoom, snapping, timeAt } = live.current;
-      const t = timeAt(x);
-      if (!project) return t;
-      const { fps } = project.canvas;
-      return (snapping ? snap(t, clipEdges(project), (SNAP_PX / zoom) * US) : null) ?? Math.min(nearestFrame(t, fps), lastFrame(projectDuration(project), fps));
-    };
-    seek(timeAt(e.clientX));
-    let raf = 0;
-    let lastX = e.clientX;
-    followPointer({
-      move: (ev) => {
-        lastX = ev.clientX;
-        if (!raf)
-          raf = requestAnimationFrame(() => {
-            raf = 0;
-            seek(timeAt(lastX));
-          });
-      },
-    });
+  /** Where the playhead lands for a pointer at `x`: on a frame, or on a clip edge within 8 px while snapping. */
+  const playheadAt = useCallback((x: number) => {
+    const { project, zoom, snapping, timeAt } = live.current;
+    const t = timeAt(x);
+    if (!project) return t;
+    const { fps } = project.canvas;
+    return (snapping ? snap(t, clipEdges(project), (SNAP_PX / zoom) * US) : null) ?? Math.min(nearestFrame(t, fps), lastFrame(projectDuration(project), fps));
   }, []);
 
-  return { drag, startClipDrag, startScrub };
+  const startScrub = useCallback(
+    (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      const { seek } = useEditor.getState();
+      seek(playheadAt(e.clientX));
+      let raf = 0;
+      let lastX = e.clientX;
+      followPointer({
+        move: (ev) => {
+          lastX = ev.clientX;
+          if (!raf)
+            raf = requestAnimationFrame(() => {
+              raf = 0;
+              seek(playheadAt(lastX));
+            });
+        },
+      });
+    },
+    [playheadAt],
+  );
+
+  const [box, setBox] = useState<Box | null>(null);
+
+  /**
+   * A press on empty lane space: a click moves the playhead there and clears the selection; a drag
+   * draws a box and selects every clip it touches, added to the selection with Shift or Cmd/Ctrl.
+   */
+  const startBoxSelect = useCallback(
+    (e: PointerEvent) => {
+      const el = scroller.current;
+      if (e.button !== 0 || !el) return;
+      stopDrag.current?.();
+      const { select, seek, selection: before } = useEditor.getState();
+      const add = e.shiftKey || (MAC ? e.metaKey : e.ctrlKey);
+      const base = add ? before : [];
+      // In the scroller's content, so the box stays on the clips when the timeline scrolls.
+      const at = (x: number, y: number) => {
+        const r = el.getBoundingClientRect();
+        return { x: x - r.left + el.scrollLeft, y: y - r.top + el.scrollTop };
+      };
+      const start = at(e.clientX, e.clientY);
+      let b: Box | null = null;
+      let frame = 0;
+      let latest: globalThis.PointerEvent | null = null;
+      const apply = () => {
+        frame = 0;
+        const ev = latest;
+        latest = null;
+        if (!ev || (!b && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) <= 3)) return;
+        const p = at(ev.clientX, ev.clientY);
+        b = { left: Math.min(start.x, p.x), top: Math.min(start.y, p.y), width: Math.abs(p.x - start.x), height: Math.abs(p.y - start.y) };
+        setBox(b);
+        const r = el.getBoundingClientRect();
+        const [x0, y0] = [b.left + r.left - el.scrollLeft, b.top + r.top - el.scrollTop];
+        const hit: string[] = [];
+        for (const c of el.querySelectorAll<HTMLElement>("[data-clip-id]")) {
+          const cr = c.getBoundingClientRect();
+          if (cr.right > x0 && cr.left < x0 + b.width && cr.bottom > y0 && cr.top < y0 + b.height) hit.push(c.dataset.clipId!);
+        }
+        const ids = [...base, ...hit.filter((id) => !base.includes(id))];
+        const sel = useEditor.getState().selection;
+        if (ids.length !== sel.length || ids.some((id, i) => id !== sel[i])) select(ids);
+      };
+      const end = (commit: boolean) => {
+        unfollow();
+        window.removeEventListener("keydown", onKey, true);
+        cancelAnimationFrame(frame);
+        stopDrag.current = null;
+        if (commit) apply();
+        setBox(null);
+        if (!commit) select(before);
+        else if (!b) {
+          if (!add) select([]);
+          seek(playheadAt(e.clientX));
+        }
+      };
+      const onKey = (ev: KeyboardEvent) => {
+        if (ev.key === "Escape") {
+          ev.stopPropagation();
+          end(false);
+        }
+      };
+      const unfollow = followPointer({
+        move: (ev) => {
+          latest = ev;
+          frame ||= requestAnimationFrame(apply);
+        },
+        up: (ev) => {
+          latest = ev;
+          end(true);
+        },
+        cancel: () => end(false),
+      });
+      window.addEventListener("keydown", onKey, true);
+      stopDrag.current = () => end(false);
+    },
+    [scroller, playheadAt],
+  );
+
+  return { drag, box, startClipDrag, startScrub, startBoxSelect };
 }
