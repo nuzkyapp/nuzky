@@ -190,10 +190,15 @@ class ChatGptPanelServer:
         return events, 1 if count in (1, 2, 3) else 0
 
 
+# The creator's style ChatGPT has to read before the guide.
+STYLE = '# Editing style\n\nKeep pauses under 120 ms.\n'
+
+
 def setup_chatgpt(r):
     from e2e.chatgpt import SCOPES
     setup(r)
     r.env.update(NUZKY_AGENT_CLAUDE=str(r.work / 'no-claude'), NUZKY_AGENT_CODEX=str(r.work / 'no-codex'))
+    (r.work / 'data/nuzky/EDIT.md').write_text(STYLE)
     (r.work / 'data/nuzky/chatgpt.json').write_text(json.dumps({
         'host_id': f'urn:uuid:{uuid.uuid4()}', 'client_id': 'oaiapp_e2e', 'subject': 'e2e-editor', 'email': 'editor@example.test'}))
     (r.work / 'keychain.json').write_text(json.dumps({
@@ -321,6 +326,10 @@ def ai_panel_chatgpt(r):
                   and body['tools'][0].get('name') == 'nuzky' and all(t.get('type') == 'function' for t in body['tools'][0]['tools'])
                   and {'get_state', 'begin_run', 'apply_edits', 'end_run'} <= {t['name'] for t in body['tools'][0]['tools']}
                   for request, body in zip(requests, bodies)), {'requests': len(bodies), 'server_errors': server.errors})
+        style_first = lambda text: STYLE in text and heading in text and text.index(STYLE) < text.index(heading)
+        check("ChatGPT reads the creator's style before the guide and that it decides how to cut, caption and zoom",
+              all(style_first(body.get('instructions', '')) and 'decides how you cut, caption and zoom' in body['instructions']
+                  for body in bodies), bodies[0].get('instructions', '')[:2000])
         calls = [i for i in bodies[-1]['input'] if i['type'] == 'function_call']
         check('the first prompt carries the playhead and later inputs pair calls without item ids with their outputs',
               any('[Nuzky] Playhead' in p['text'] for i in bodies[0]['input'] if i.get('role') == 'user' for p in i['content'])

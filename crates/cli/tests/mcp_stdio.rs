@@ -1112,22 +1112,28 @@ fn a_creator_style_reaches_the_agent_and_without_one_nothing_changes() {
 
     let style = "# Editing style\n\nKeep pauses under 120 ms.\n";
     let mut styled = Client::with_style(Some(style));
+    // The style comes before the whole guide, so its rules are the first thing the agent reads.
+    let style_first = |text: &str| {
+        let at = |part: &str| text.find(part).unwrap_or_else(|| panic!("{part:?} is missing from {text}"));
+        assert!(at(style) < at("# Edit with Nuzky"), "{text}");
+        assert!(text.contains(guide), "{text}");
+    };
     let instructions = styled.init["result"]["instructions"].as_str().unwrap().to_owned();
-    assert!(instructions.starts_with("This creator has their own editing style, nuzky://style"), "{instructions}");
-    assert!(instructions.contains(guide) && instructions.ends_with(style));
+    assert!(instructions.starts_with("This creator has their own editing style"), "{instructions}");
+    style_first(&instructions);
     let resources = styled.rpc("resources/list", json!({}));
     let uris: Vec<&str> =
         resources["result"]["resources"].as_array().unwrap().iter().map(|r| r["uri"].as_str().unwrap()).collect();
     assert_eq!(uris, ["nuzky://guide", "nuzky://schema", "nuzky://style"]);
     assert_eq!(styled.rpc("resources/read", json!({"uri":"nuzky://style"}))["result"]["contents"][0]["text"], style);
-    assert!(
-        styled.rpc("resources/read", json!({"uri":"nuzky://guide"}))["result"]["contents"][0]["text"]
-            .as_str()
-            .unwrap()
-            .ends_with(style)
-    );
-    let prompt = styled.rpc("prompts/get", json!({"name":"edit_selected","arguments":{"goal":"Make a reel"}}));
-    assert!(prompt["result"]["messages"][0]["content"]["text"].as_str().unwrap().ends_with(style));
+    let read = styled.rpc("resources/read", json!({"uri":"nuzky://guide"}));
+    assert_eq!(read["result"]["contents"][0]["text"], instructions);
+    for (name, arguments) in
+        [("edit_selected", json!({"goal":"Make a reel"})), ("rough_cut", json!({})), ("thumbnail", json!({}))]
+    {
+        let prompt = styled.rpc("prompts/get", json!({"name": name, "arguments": arguments}));
+        style_first(prompt["result"]["messages"][0]["content"]["text"].as_str().unwrap());
+    }
     styled.finish();
 }
 
