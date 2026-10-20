@@ -38,7 +38,8 @@
       "minimumSystemVersion": "14.0"
     },
     "windows": {
-      "bundleVCRuntime": true
+      "bundleVCRuntime": true,
+      "nsis": { "installerIcon": "icons/icon.ico" }
     },
     "linux": {
       "deb": { "depends": ["libvulkan1"] }
