@@ -107,6 +107,7 @@ enum Stage {
     /// The new version is in place; it runs from the next start.
     Installed,
     /// Quitting, to start the updated AppImage once it has.
+    #[cfg(target_os = "linux")]
     Restarting,
 }
 
