@@ -200,7 +200,7 @@ export function MoreStyle({ style, styles, setStyle }: StyleProps) {
       <Slider label="Outline" mixed={differ((s) => s.strokeWidth)} value={style.strokeWidth} min={0} max={20} step={0.5} format={(v) => v.toFixed(1)} onChange={(v) => setStyle({ strokeWidth: v }, "stroke")} />
       {all((s) => s.strokeWidth > 0) && <ColorInput label="Outline color" mixed={differ((s) => s.strokeColor)} value={style.strokeColor} onChange={(v) => setStyle({ strokeColor: v }, "strokeColor")} />}
       <Checkbox label="Background box" {...on((s) => s.background !== null)} onChange={(v) => setStyle((s) => ({ background: v ? (s.background ?? "#000000b3") : null }), "bg")} />
-      {all((s) => s.background !== null) && <ColorInput label="Box color" mixed={differ((s) => s.background)} value={style.background ?? "#000000b3"} onChange={(v) => setStyle({ background: v }, "bgColor")} />}
+      {all((s) => s.background !== null) && <ColorInput label="Box color" mixed={differ((s) => s.background)} value={style.background ?? "#000000b3"} onChange={(v) => setStyle((s) => ({ background: v.slice(0, 7) + (s.background ?? "").slice(7) }), "bgColor")} />}
       <Checkbox label="Shadow" {...on((s) => !!s.shadow)} onChange={(v) => setStyle((s) => ({ shadow: v ? (s.shadow ?? SHADOW) : null }), "shadow")} />
       {shadow && (
         <>
