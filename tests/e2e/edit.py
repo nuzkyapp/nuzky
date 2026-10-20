@@ -38,6 +38,8 @@ return el ? [...el.querySelectorAll('div[style*="background-position"]')].map((d
 TIP = "return [...document.querySelectorAll('section[aria-label=Timeline] div')].some((d) => d.textContent === arguments[0])"
 FADES = """const c = window.__nuzky.store.getState().snap.project.tracks.flatMap((t) => t.clips).find((c) => c.id === arguments[0]);
 return [c.content.fadeInUs, c.content.fadeOutUs];"""
+SOURCE_IN = """return window.__nuzky.store.getState().snap.project.tracks.flatMap((t) => t.clips)
+  .find((c) => c.id === arguments[0]).content.sourceInUs"""
 UNDER = """const b = document.querySelector(`[data-clip-id='${arguments[0]}'] [data-fade='${arguments[1]}']`).getBoundingClientRect();
 return document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)?.closest('[data-fade]')?.dataset.fade ?? null;"""
 KNOBS = "return document.querySelectorAll(`[data-clip-id='${arguments[0]}'] [data-fade]`).length"
@@ -132,7 +134,8 @@ def edit(r):
     r.s.run('window.__nuzky.store.getState().setZoom(100)')
     time.sleep(0.5)
     before = r.s.run(LEFTS, undone[1]['id'])
-    first_frames = r.s.run(TILES, undone[0]['id'])
+    source_in = r.s.run(SOURCE_IN, undone[0]['id'])
+    first_frames = wait(lambda: r.s.run(TILES, undone[0]['id']), 5)
     r.s.run(TRIM_LEFT, undone[0]['id'], 50)
     time.sleep(0.3)
     during = r.s.run(LEFTS, undone[1]['id'])
@@ -147,6 +150,8 @@ def edit(r):
     r.check('on release the clip keeps its start and the next clip closes up behind it',
             cut and cut[0]['startUs'] == undone[0]['startUs'] and cut[1]['startUs'] == cut[0]['startUs'] + cut[0]['durationUs']
             and cut[0]['durationUs'] == undone[0]['durationUs'] - 500_000, cut)
+    r.check('the clip loses the first 0.5 s of its footage', r.s.run(SOURCE_IN, undone[0]['id']) == source_in + 500_000,
+            [source_in, r.s.run(SOURCE_IN, undone[0]['id'])])
     # The footage goes from the left: while dragging, the clip already shows the frames it keeps. It once showed its
     # first frames and lost them from the right, and only jumped to the kept ones on release.
     kept = wait(lambda: (t := r.s.run(TILES, undone[0]['id'])) and t != first_frames and t, 5)
