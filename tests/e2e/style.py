@@ -313,7 +313,7 @@ def sources(r):
 
 @flow('style_auto', 'Nuzky learns by itself: never from the AI\'s own cut or its export, but from the user\'s edits of it, their corrected '
                     'words and their export, all as suggestions that leave the style unchanged, each as sure as the moments of the one project '
-                    'make it; accepted, a rule learning would change says so', before=project_setup, home=True)
+                    'make it; accepted, a rule learning would change says so, and once the change is rejected that the user kept it', before=project_setup, home=True)
 def style_auto(r):
     bridge = Bridge(r, r.saved_project())
     try:
@@ -407,4 +407,11 @@ def style_auto(r):
         width = r.s.run(f"const m = document.querySelector('{PAGE}'); return [m.scrollWidth, m.clientWidth]")
         r.check('the page fits the smallest window', width[0] <= width[1], width)
         resize(r, 1440, 900)
+
+    accepted = edit_md(r)
+    click(r, 'Reject')
+    r.check('Reject leaves the change out', wait(lambda: not view(r)['suggestions'], 10) and edit_md(r) == accepted, view(r)['suggestions'])
+    rows = r.s.run(ROWS, PAGE)
+    r.check('Spelling says the user kept it while learning finds other choices', rows.get('Spelling') == 'Kept as you chose', rows)
+    r.shot('kept-as-you-chose')
     r.check('no error toast', not r.errors(), r.errors())

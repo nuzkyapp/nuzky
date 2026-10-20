@@ -1390,11 +1390,13 @@ export type StyleRule = {
    * How well the videos learned from now back it; none when they no longer make its choices.
    */
   confidence: StyleConfidence | null,
-  /**
-   * Learning now makes other choices and suggests changing it.
-   */
-  changeSuggested: boolean,
+  state: StyleRuleState,
 };
+
+/**
+ * What learning finds now for a rule of the style.
+ */
+export type StyleRuleState = "backed" | "changeSuggested" | "kept" | "notSeen";
 
 export type StyleSource = {
   title: string,

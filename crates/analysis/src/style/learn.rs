@@ -1100,7 +1100,11 @@ fn zoom(edits: &[Edit], say: &dyn Fn(&[Example]) -> String) -> Option<Rule> {
                 in_cut.iter().filter(|w| w.0 >= t - 100_000).take(5).map(|w| w.2.text.trim()).collect();
             words.join(" ")
         };
-        samples.extend(picture.framing.iter().map(|f| (edit.index, *f, said(f.time_us))));
+        let pieces = &edit.source.alignment.pieces;
+        samples.extend(picture.framing.iter().map(|f| {
+            let piece = pieces.iter().position(|p| p.start_us <= f.time_us && f.time_us < p.end_us);
+            (edit.index, piece, *f, said(f.time_us))
+        }));
         for (k, z) in picture.zooms.iter().enumerate() {
             let line = |what: String| Example {
                 source: edit.index,
@@ -1139,15 +1143,24 @@ fn zoom(edits: &[Edit], say: &dyn Fn(&[Example]) -> String) -> Option<Rule> {
         percentile(&ys, 0.5) as f32 / 1000.0,
     );
     let changes = ins.len() + outs.len() + moves.len();
-    let base: Vec<Example> = samples
-        .iter()
-        .filter(|(_, f, said)| (f.scale - scale).abs() <= 0.02 && !said.is_empty())
-        .map(|(source, f, said)| Example {
+    let (mut base, mut framed) = (Vec::new(), Vec::new());
+    let mut held = std::collections::BTreeSet::new();
+    for (source, piece, f, said) in &samples {
+        if (f.scale - scale).abs() > 0.02 || said.is_empty() {
+            continue;
+        }
+        let example = Example {
             source: *source,
             time_us: f.time_us,
             line: format!("scale {:.2}, x {:.3}, y {:.3} on \"{said}\"", f.scale, f.x, f.y),
-        })
-        .collect();
+        };
+        // The framing is sampled every half second, so a piece of the cut held at the base
+        // framing is one moment however long it plays.
+        if piece.is_some_and(|p| held.insert((*source, p))) {
+            framed.push(example.clone());
+        }
+        base.push(example);
+    }
     let mut out = String::from(
         "## Zoom\n\nNuzky transform: scale 1 fits the recording, x and y move it by fractions of the frame. Times in the examples are in the finished cut.",
     );
@@ -1221,7 +1234,7 @@ fn zoom(edits: &[Edit], say: &dyn Fn(&[Example]) -> String) -> Option<Rule> {
     }
     let mut summary = summary.join(", ");
     summary[..1].make_ascii_uppercase();
-    let moments = base.into_iter().chain(ins).chain(outs).chain(moves).collect();
+    let moments = framed.into_iter().chain(ins).chain(outs).chain(moves).collect();
     Some(Rule { title: "Zoom", summary, text: out, settings, choices, moments })
 }
 

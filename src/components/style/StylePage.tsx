@@ -250,6 +250,13 @@ function toastUndo(text: string, version: number) {
   useEditor.getState().toast({ kind: "success", text, action: undoTo(version) });
 }
 
+/** What a learned rule's row says when the videos learned from do not back it as it is. */
+const RULE_STATE = {
+  changeSuggested: ["Change suggested", "What learning finds now differs from this rule. Accept or Reject the change under Suggestions."],
+  kept: ["Kept as you chose", "What learning finds now differs from this rule, and you kept it as it is. Learn again under Not learned suggests the change."],
+  notSeen: ["Not seen lately", "The videos learned from no longer show this rule."],
+} as const;
+
 function LearnedRules({ view, changed }: { view: StyleView; changed: Set<string> }) {
   const [menu, setMenu] = useState<{ rule: StyleRule; at: { x: number; y: number; align: "end" }; keyboard: boolean; back: HTMLElement } | null>(null);
   if (view.rules.length === 0) return null;
@@ -277,14 +284,12 @@ function LearnedRules({ view, changed }: { view: StyleView; changed: Set<string>
             </span>
             {rule.confidence ? (
               <Confidence c={rule.confidence} />
-            ) : rule.byYou ? (
+            ) : rule.byYou || rule.state === "backed" ? (
               <span />
-            ) : rule.changeSuggested ? (
-              <span className="text-[12px] text-muted" title="What learning finds now differs from this rule. Accept or Reject the change under Suggestions.">
-                Change suggested
-              </span>
             ) : (
-              <span className="text-[12px] text-muted">Not seen lately</span>
+              <span className="text-[12px] text-muted" title={RULE_STATE[rule.state][1]}>
+                {RULE_STATE[rule.state][0]}
+              </span>
             )}
             <IconButton
               label={`More for ${rule.title}`}
