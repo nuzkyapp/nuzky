@@ -43,7 +43,7 @@ jobs:
           find artifacts -type f -exec cp {} . \;
           git archive --format=tar.gz --prefix="nuzky-${RELEASE_TAG#v}/" -o "Nuzky_${RELEASE_TAG#v}_source.tar.gz" "$RELEASE_TAG"
           for file in ./*.AppImage ./*.deb ./*-setup.exe ./*.app.tar.gz; do
-            node_modules/.bin/tauri signer sign "$file"
+            node_modules/.bin/tauri signer sign --app-version "${RELEASE_TAG#v}" "$file"
           done
           # Installed copies read the version and signed update packages from the latest published release.
           node <<'NODE'
