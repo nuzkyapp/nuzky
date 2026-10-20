@@ -96,8 +96,8 @@ export const ClipView = memo(function ClipView({
   fades?: { inUs: number; outUs: number };
   /** While Undo or Redo is hovered: how this clip changes when the step is taken. */
   mark?: PeekMark;
-  /** Dragged media dropped now would go in this clip. */
-  replacing?: boolean;
+  /** Dragged media dropped now would go in this clip, or is too short for it. */
+  replacing?: "replace" | "short";
   /** While Undo or Redo is hovered: the clip stays as it is, so it steps back for the ones that change. */
   dimmed?: boolean;
   onPointerDown?: (e: React.PointerEvent, clip: Clip, track: Track) => void;
@@ -214,8 +214,10 @@ export const ClipView = memo(function ClipView({
             ? "border-2 border-dashed border-accent"
             : mark === "gone"
               ? "border-2 border-dashed border-danger bg-[repeating-linear-gradient(135deg,rgb(0_0_0/.55)_0_6px,rgb(255_69_58/.25)_6px_12px)]"
-              : mark || replacing
-                ? "inset-ring-2 inset-ring-accent"
+              : replacing
+                ? `inset-ring-2 ${replacing === "short" ? "inset-ring-danger bg-danger/15" : "inset-ring-accent bg-accent/15"}`
+                : mark
+                  ? "inset-ring-2 inset-ring-accent"
                 : selected
                   ? "inset-ring-2 inset-ring-accent"
                   : "inset-ring inset-ring-white/10 group-hover:inset-ring-white/30"
@@ -224,9 +226,9 @@ export const ClipView = memo(function ClipView({
 
       {(mark || replacing) && width > 56 && (
         <span
-          className={`pointer-events-none absolute right-1 top-1 flex h-[17px] items-center rounded-[5px] px-1.5 text-[10px] font-semibold ${mark === "gone" ? "bg-black/75 text-danger" : "bg-accent-strong text-white"}`}
+          className={`pointer-events-none absolute right-1 top-1 flex h-[17px] items-center rounded-[5px] px-1.5 text-[10px] font-semibold ${mark === "gone" || replacing === "short" ? "bg-black/75 text-danger" : "bg-accent-strong text-white"}`}
         >
-          {mark ? PEEK_WORDS[mark] : "Replace"}
+          {mark ? PEEK_WORDS[mark] : replacing === "short" ? "Too short" : "Replace"}
         </span>
       )}
       {clip.animIn && (

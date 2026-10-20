@@ -213,7 +213,7 @@ export function Timeline({ height }: { height: number }) {
   const dragMedia = useEditor(
     useShallow((s): DropMedia | null => {
       const asset = s.assetDrag && s.snap?.project.assets.find((a) => a.id === s.assetDrag!.assetId);
-      return asset ? { kind: asset.kind, hasAudio: asset.hasAudio } : s.fileDrag?.kind ? { kind: s.fileDrag.kind } : null;
+      return asset ? { kind: asset.kind, hasAudio: asset.hasAudio, durationUs: asset.durationUs } : s.fileDrag?.kind ? { kind: s.fileDrag.kind } : null;
     }),
   );
   const locked = useAiLocked();
@@ -266,18 +266,23 @@ export function Timeline({ height }: { height: number }) {
   const visible = useMemo<[number, number]>(() => [windowFrom - 200, windowFrom + view.width + VISIBLE_STEP + 200], [windowFrom, view.width]);
 
   // Media dropped on the middle of a clip that can show or play it goes in that clip; its ends insert beside it.
+  // While Undo or Redo is hovered the clips are drawn where they were, so nothing is offered.
+  const peeking = !!peekShown;
   const replaceTarget = useCallback(
     (x: number, y: number, media: DropMedia | null) => {
       const el = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-clip-id]");
-      if (!media || !project || !el || !scroller.current?.contains(el)) return null;
+      if (peeking || !media || !project || !el || !scroller.current?.contains(el)) return null;
       const r = el.getBoundingClientRect();
       const end = Math.min(r.width / 4, REPLACE_END);
       const found = findClip(project, el.dataset.clipId!);
-      if (!found || found.clip.content.type !== "media" || x < r.left + end || x > r.right - end) return null;
+      const c = found?.clip.content;
+      if (!found || c?.type !== "media" || x < r.left + end || x > r.right - end) return null;
       const fits = found.track.kind === "video" ? media.kind !== "audio" : found.track.kind === "audio" && media.kind !== "image" && media.hasAudio !== false;
-      return fits ? found.clip.id : null;
+      // The engine's tolerance: one frame of the clip's source.
+      const short = media.kind !== "image" && media.durationUs !== undefined && media.durationUs + minUs * c.speed < found.clip.durationUs * c.speed;
+      return fits ? { clipId: found.clip.id, short } : null;
     },
-    [project],
+    [project, peeking, minUs],
   );
 
   // Media dragged from the media panel lands here.
@@ -292,7 +297,7 @@ export function Timeline({ height }: { height: number }) {
         const rr = row.getBoundingClientRect();
         if (y >= rr.top && y <= rr.bottom) trackId = id;
       }
-      return { trackId, startUs: Math.round(timeAt(x)), replaceId: replaceTarget(x, y, media) };
+      return { trackId, startUs: Math.round(timeAt(x)), replaceId: replaceTarget(x, y, media)?.clipId ?? null };
     });
     return () => setDropResolver(null);
   }, [timeAt, replaceTarget]);
@@ -378,7 +383,6 @@ export function Timeline({ height }: { height: number }) {
   }, [project, select]);
 
   // A preview can take the focused clip off screen for a moment; when it ends, the clip gets focus back.
-  const peeking = !!peekShown;
   useEffect(() => {
     const id = focusPlace.current;
     if (peeking || !id || (document.activeElement && document.activeElement !== document.body)) return;
@@ -709,7 +713,7 @@ export function Timeline({ height }: { height: number }) {
                           selected={!peekShown && selection.includes(clip.id)}
                           locked={locked || !!peekShown}
                           mark={described?.marks.get(clip.id)}
-                          replacing={clip.id === replacing}
+                          replacing={clip.id === replacing?.clipId ? (replacing.short ? "short" : "replace") : undefined}
                           dimmed={!!peekShown && !described?.marks.has(clip.id)}
                           tabbable={!cover && clip.id === tabStop}
                           timing={isMain ? layout?.timing.get(clip.id) : undefined}

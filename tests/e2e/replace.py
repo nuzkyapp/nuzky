@@ -100,7 +100,9 @@ def replace_flow(r):
     r.check('nothing in the app failed', not r.errors(), r.errors())
 
     before = r.s.run(PROJECT)
-    drag(r, 'green.mp4', middle)
+    short = "return document.querySelector(`[data-clip-id='${arguments[0]}']`)?.textContent.includes('Too short') ?? false"
+    warned = drag(r, 'green.mp4', middle, lambda: (wait(lambda: r.s.run(short, copy['id']), 5), r.shot('too-short-target'))[0])
+    r.check('over the clip, the 1 s file shows Too short before it is dropped', warned)
     refused = wait(lambda: any(t.startswith('This media is 1.0 s and the clip needs 4.0 s') for t in r.errors()), 5)
     r.check('a 1 s file dropped on a 4 s clip is refused with both lengths', refused, r.errors())
     r.check('and changes nothing', r.s.run(PROJECT) == before)

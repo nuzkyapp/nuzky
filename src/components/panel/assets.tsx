@@ -166,6 +166,7 @@ export interface DropMedia {
   kind: Asset["kind"];
   /** Unknown for a file not imported yet. */
   hasAudio?: boolean;
+  durationUs?: number;
 }
 export let dropResolver: ((x: number, y: number, media: DropMedia | null) => DropTarget | null) | null = null;
 export function setDropResolver(fn: typeof dropResolver) {

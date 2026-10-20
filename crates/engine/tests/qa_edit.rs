@@ -260,7 +260,7 @@ fn replacing_media_keeps_everything_but_the_source() {
     };
     let project = e.project.clone();
     let err = replace(&mut e, "b").map(|_| ()).unwrap_err().to_string();
-    assert!(err.starts_with("This media is"), "{err}");
+    assert!(err.starts_with("This media is 3.0 s and the clip needs 4.0 s at 2x."), "{err}");
     assert_eq!(e.project, project, "too short media changes nothing");
     let err = replace(&mut e, "music").map(|_| ()).unwrap_err().to_string();
     assert!(err.starts_with("Sound can't go in a video clip"), "{err}");

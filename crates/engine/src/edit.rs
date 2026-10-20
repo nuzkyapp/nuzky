@@ -1140,9 +1140,10 @@ impl Project {
                     let available = asset.duration_us;
                     ensure!(
                         needed as f64 <= available as f64 + min as f64 * speed as f64,
-                        "This media is {:.1} s and the clip needs {:.1} s. Pick longer media or shorten the clip first",
+                        "This media is {:.1} s and the clip needs {:.1} s{}. Pick longer media or shorten the clip first.",
                         available as f64 / 1e6,
-                        needed as f64 / 1e6
+                        needed as f64 / 1e6,
+                        if speed == 1.0 { String::new() } else { format!(" at {speed}x") }
                     );
                     source_span(&asset).0.min(available - needed).max(0)
                 };
