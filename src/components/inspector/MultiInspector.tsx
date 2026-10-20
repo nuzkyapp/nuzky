@@ -4,12 +4,11 @@ import { LIMITS } from "../../lib/limits";
 import { ADJUST_ROWS, DEFAULT_TRANSFORM, NO_ADJUST, sameAdjust } from "../../lib/presets";
 import { deleteSelection, duplicateSelection, editClips, findClip, isCaptionTrack, readoutTime, transformAtPlayhead, useEditor } from "../../lib/store";
 import type { Adjust, Clip, EditCmd, Project, Track, Transform } from "../../lib/types";
-import { FontPicker } from "../FontPicker";
 import { Button, IconButton, Section, Slider } from "../ui";
 import { InspectorHeader, QUIET } from "./Header";
 import { BackgroundSection } from "./BackgroundSection";
 import { DuckingRow, VoiceSection } from "./MediaSections";
-import { FieldRow } from "./TextSection";
+import { StyleSection, patched, type StylePatch } from "./TextSection";
 
 type Found = { clip: Clip; track: Track };
 
@@ -141,21 +140,12 @@ function VolumeRow({ found, coalesce }: { found: Found[]; coalesce: string }) {
   );
 }
 
-function FontRow({ found }: { found: Found[] }) {
-  const fonts = found.map((f) => (f.clip.content.type === "text" ? (f.clip.content.style.fontFamily ?? null) : null));
-  const mixed = fonts.some((f) => f !== fonts[0]);
+function StyleRows({ found, coalesce }: { found: Found[]; coalesce: string }) {
   const ids = found.map((f) => f.clip.id);
-  return (
-    <Section title="Text">
-      <FieldRow label="Font">
-        <FontPicker
-          value={fonts[0]}
-          mixed={mixed}
-          onChange={(fontFamily) => editClips(ids, (c) => (c.content.type === "text" ? { type: "updateClip", clipId: c.id, style: { ...c.content.style, fontFamily } } : null))}
-        />
-      </FieldRow>
-    </Section>
-  );
+  const styles = found.flatMap((f) => (f.clip.content.type === "text" ? [f.clip.content.style] : []));
+  const setStyle = (patch: StylePatch, key: string) =>
+    editClips(ids, (c) => (c.content.type === "text" ? { type: "updateClip", clipId: c.id, style: patched(c.content.style, patch) } : null), `${coalesce}:style:${key}`);
+  return <StyleSection style={styles[0]} styles={styles} setStyle={setStyle} />;
 }
 
 /** Several clips: the controls they all share, each change applied to all of them as one undo step. */
@@ -182,7 +172,7 @@ export function MultiInspector({ ids }: { ids: string[] }) {
           </Button>
         </div>
         {all("transform") && <TransformRows found={found} coalesce={coalesce} />}
-        {all("text") && <FontRow found={found} />}
+        {all("text") && <StyleRows found={found} coalesce={coalesce} />}
         {all("adjust") && <BackgroundSection clips={found.map((f) => f.clip)} />}
         {all("adjust") && <AdjustRows found={found} coalesce={coalesce} />}
         {all("sound") && <VolumeRow found={found} coalesce={coalesce} />}

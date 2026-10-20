@@ -122,24 +122,38 @@ export function patched(style: TextStyle, patch: StylePatch): TextStyle {
   return { ...style, ...(typeof patch === "function" ? patch(style) : patch) };
 }
 
-export function StyleSection({ style, setStyle, maxSize = 300 }: { style: TextStyle; setStyle: SetStyle; maxSize?: number }) {
+/** `styles`: every selected text's, `style` being the first; a dash shows where they differ. */
+type StyleProps = { style: TextStyle; styles?: TextStyle[]; setStyle: SetStyle };
+
+/** Whether the texts differ in a value, and whether all or only some of them have a setting on. */
+function across(style: TextStyle, styles: TextStyle[] = [style]) {
+  const json = (v: unknown) => JSON.stringify(v ?? null);
+  return {
+    differ: (get: (s: TextStyle) => unknown) => styles.some((s) => json(get(s)) !== json(get(style))),
+    all: (has: (s: TextStyle) => boolean) => styles.every(has),
+    on: (has: (s: TextStyle) => boolean) => ({ checked: styles.every(has), mixed: styles.some(has) && !styles.every(has) }),
+  };
+}
+
+export function StyleSection({ style, styles, setStyle, maxSize = 300 }: StyleProps & { maxSize?: number }) {
   return (
     <Section title="Style">
-      <MainStyle style={style} setStyle={setStyle} maxSize={maxSize} />
-      <MoreStyle style={style} setStyle={setStyle} />
+      <MainStyle style={style} styles={styles} setStyle={setStyle} maxSize={maxSize} />
+      <MoreStyle style={style} styles={styles} setStyle={setStyle} />
     </Section>
   );
 }
 
 /** Font, size and colour: what a text needs most. */
-export function MainStyle({ style, setStyle, maxSize = 300 }: { style: TextStyle; setStyle: SetStyle; maxSize?: number }) {
+export function MainStyle({ style, styles, setStyle, maxSize = 300 }: StyleProps & { maxSize?: number }) {
+  const { differ } = across(style, styles);
   return (
     <>
       <FieldRow label="Font">
-        <FontPicker value={style.fontFamily} onChange={(fontFamily) => setStyle({ fontFamily }, "font")} />
+        <FontPicker value={style.fontFamily} mixed={differ((s) => s.fontFamily)} onChange={(fontFamily) => setStyle({ fontFamily }, "font")} />
       </FieldRow>
-      <Slider label="Size" value={style.fontSize} min={12} max={maxSize} step={1} format={(v) => String(Math.round(v))} onChange={(v) => setStyle({ fontSize: v }, "size")} />
-      <ColorInput label="Color" value={style.color} onChange={(v) => setStyle({ color: v }, "color")} />
+      <Slider label="Size" mixed={differ((s) => s.fontSize)} value={style.fontSize} min={12} max={maxSize} step={1} format={(v) => String(Math.round(v))} onChange={(v) => setStyle({ fontSize: v }, "size")} />
+      <ColorInput label="Color" mixed={differ((s) => s.color)} value={style.color} onChange={(v) => setStyle({ color: v }, "color")} />
     </>
   );
 }
@@ -166,41 +180,44 @@ const SHADOW: TextShadow = { color: "#000000", opacity: 0.9, blur: 15, distance:
 const percent = (v: number) => String(Math.round(v));
 const degrees = (s: string) => ((((parseNumber(s) + 180) % 360) + 360) % 360) - 180;
 
-export function MoreStyle({ style, setStyle }: { style: TextStyle; setStyle: SetStyle }) {
-  const shadow = style.shadow;
-  // Merged into the shadow as it is when the edit goes out, so quick changes to two of its settings both stick.
+/** A setting that some texts have on shows its own controls once all of them have it. */
+export function MoreStyle({ style, styles, setStyle }: StyleProps) {
+  const { differ, all, on } = across(style, styles);
+  const shadow = all((s) => !!s.shadow) ? style.shadow : null;
+  // Merged into each shadow as it is when the edit goes out, so quick changes to two of its settings both stick.
   const setShadow = (patch: Partial<TextShadow>, key: string) => setStyle((s) => (s.shadow ? { shadow: { ...s.shadow, ...patch } } : {}), key);
+  const shadowDiffers = (k: keyof TextShadow) => differ((s) => s.shadow?.[k]);
   return (
     <>
-      <Checkbox label="Bold" checked={style.bold} onChange={(v) => setStyle({ bold: v }, "bold")} />
+      <Checkbox label="Bold" {...on((s) => s.bold)} onChange={(v) => setStyle({ bold: v }, "bold")} />
       <FieldRow label="Case">
         <div className="min-w-0 flex-1">
-          <Segmented label="Case" value={style.letterCase ?? "none"} onChange={(letterCase) => setStyle({ letterCase }, "case")} options={CASES} />
+          <Segmented label="Case" value={differ((s) => s.letterCase ?? "none") ? null : (style.letterCase ?? "none")} onChange={(letterCase) => setStyle({ letterCase }, "case")} options={CASES} />
         </div>
       </FieldRow>
-      <Slider label="Letter spacing" value={(style.letterSpacing ?? 0) * 100} min={-50} max={200} step={1} unit="%" format={percent} onChange={(v) => setStyle({ letterSpacing: v / 100 }, "letterSpacing")} />
-      <Slider label="Line spacing" value={(style.lineSpacing ?? 0) * 100} min={-60} max={300} step={1} unit="%" format={percent} onChange={(v) => setStyle({ lineSpacing: v / 100 }, "lineSpacing")} />
-      <Slider label="Outline" value={style.strokeWidth} min={0} max={20} step={0.5} format={(v) => v.toFixed(1)} onChange={(v) => setStyle({ strokeWidth: v }, "stroke")} />
-      {style.strokeWidth > 0 && <ColorInput label="Outline color" value={style.strokeColor} onChange={(v) => setStyle({ strokeColor: v }, "strokeColor")} />}
-      <Checkbox label="Background box" checked={style.background !== null} onChange={(v) => setStyle({ background: v ? "#000000b3" : null }, "bg")} />
-      {style.background !== null && <ColorInput label="Box color" value={style.background ?? "#000000b3"} onChange={(v) => setStyle({ background: v }, "bgColor")} />}
-      <Checkbox label="Shadow" checked={!!shadow} onChange={(v) => setStyle({ shadow: v ? SHADOW : null }, "shadow")} />
+      <Slider label="Letter spacing" mixed={differ((s) => s.letterSpacing ?? 0)} value={(style.letterSpacing ?? 0) * 100} min={-50} max={200} step={1} unit="%" format={percent} onChange={(v) => setStyle({ letterSpacing: v / 100 }, "letterSpacing")} />
+      <Slider label="Line spacing" mixed={differ((s) => s.lineSpacing ?? 0)} value={(style.lineSpacing ?? 0) * 100} min={-60} max={300} step={1} unit="%" format={percent} onChange={(v) => setStyle({ lineSpacing: v / 100 }, "lineSpacing")} />
+      <Slider label="Outline" mixed={differ((s) => s.strokeWidth)} value={style.strokeWidth} min={0} max={20} step={0.5} format={(v) => v.toFixed(1)} onChange={(v) => setStyle({ strokeWidth: v }, "stroke")} />
+      {all((s) => s.strokeWidth > 0) && <ColorInput label="Outline color" mixed={differ((s) => s.strokeColor)} value={style.strokeColor} onChange={(v) => setStyle({ strokeColor: v }, "strokeColor")} />}
+      <Checkbox label="Background box" {...on((s) => s.background !== null)} onChange={(v) => setStyle((s) => ({ background: v ? (s.background ?? "#000000b3") : null }), "bg")} />
+      {all((s) => s.background !== null) && <ColorInput label="Box color" mixed={differ((s) => s.background)} value={style.background ?? "#000000b3"} onChange={(v) => setStyle({ background: v }, "bgColor")} />}
+      <Checkbox label="Shadow" {...on((s) => !!s.shadow)} onChange={(v) => setStyle((s) => ({ shadow: v ? (s.shadow ?? SHADOW) : null }), "shadow")} />
       {shadow && (
         <>
-          <ColorInput label="Color" name="Shadow color" value={shadow.color} onChange={(color) => setShadow({ color }, "shadowColor")} />
+          <ColorInput label="Color" name="Shadow color" mixed={shadowDiffers("color")} value={shadow.color} onChange={(color) => setShadow({ color }, "shadowColor")} />
           {/* A cell each, so stacked sliders' pull towards the one above leaves these rows level. */}
           <div className="grid grid-cols-2 gap-2">
             <div className="min-w-0">
-              <Slider label="Opacity" name="Shadow opacity" narrow value={shadow.opacity * 100} min={0} max={100} step={1} unit="%" format={percent} onChange={(v) => setShadow({ opacity: v / 100 }, "shadowOpacity")} />
+              <Slider label="Opacity" name="Shadow opacity" narrow mixed={shadowDiffers("opacity")} value={shadow.opacity * 100} min={0} max={100} step={1} unit="%" format={percent} onChange={(v) => setShadow({ opacity: v / 100 }, "shadowOpacity")} />
             </div>
             <div className="min-w-0">
-              <Slider label="Blur" name="Shadow blur" narrow value={shadow.blur} min={0} max={100} step={1} unit="%" format={percent} onChange={(blur) => setShadow({ blur }, "shadowBlur")} />
+              <Slider label="Blur" name="Shadow blur" narrow mixed={shadowDiffers("blur")} value={shadow.blur} min={0} max={100} step={1} unit="%" format={percent} onChange={(blur) => setShadow({ blur }, "shadowBlur")} />
             </div>
             <div className="min-w-0">
-              <Slider label="Distance" name="Shadow distance" narrow value={shadow.distance} min={0} max={100} step={1} format={percent} onChange={(distance) => setShadow({ distance }, "shadowDistance")} />
+              <Slider label="Distance" name="Shadow distance" narrow mixed={shadowDiffers("distance")} value={shadow.distance} min={0} max={100} step={1} format={percent} onChange={(distance) => setShadow({ distance }, "shadowDistance")} />
             </div>
             <div className="min-w-0">
-              <Slider label="Angle" name="Shadow angle" narrow value={shadow.angle} min={-180} max={180} step={1} unit="°" format={percent} parse={degrees} onChange={(angle) => setShadow({ angle }, "shadowAngle")} />
+              <Slider label="Angle" name="Shadow angle" narrow mixed={shadowDiffers("angle")} value={shadow.angle} min={-180} max={180} step={1} unit="°" format={percent} parse={degrees} onChange={(angle) => setShadow({ angle }, "shadowAngle")} />
             </div>
           </div>
         </>
