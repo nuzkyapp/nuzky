@@ -35,12 +35,12 @@ export function Download({ release }: { release: Release }) {
         </div>
 
         <div className="flex flex-col items-center gap-2 text-center text-[14px] leading-[1.5] text-muted">
-          <p className="flex items-start gap-2">
-            <RefreshCw aria-hidden className="mt-[3px] size-4 shrink-0" />
-            Once it&apos;s installed, new versions install from inside Nuzky in one click.
+          <p>
+            <RefreshCw aria-hidden className="mr-2 inline size-4 -translate-y-px" />
+            Once it&apos;s installed, new versions download inside Nuzky in one click, and install when you restart.
           </p>
-          <p className="flex items-start gap-2">
-            <CircleMinus aria-hidden className="mt-[3px] size-4 shrink-0" />
+          <p>
+            <CircleMinus aria-hidden className="mr-2 inline size-4 -translate-y-px" />
             Intel Macs, and Windows or Linux on ARM, aren&apos;t supported.
           </p>
         </div>

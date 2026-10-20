@@ -267,7 +267,8 @@ export function Hero({ release }: { release: Release }) {
           <span className="text-subtle">Nuzky does the boring one.</span>
         </h1>
         <p className="mt-7 max-w-[600px] text-[17px] text-muted sm:text-[20px]">
-          A free desktop video editor that opens your CapCut drafts. Your own ChatGPT or Claude cuts while you watch, and one undo takes it all back.
+          A free desktop video editor that opens your CapCut drafts. <span data-show="windows">On Mac and Linux, your</span>
+          <span data-show="unknown mac intel linux arm phone">Your</span> own ChatGPT or Claude cuts while you watch, and one undo takes it all back.
         </p>
 
         <div className="mt-10 w-full sm:mt-11">

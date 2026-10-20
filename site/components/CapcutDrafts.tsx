@@ -112,7 +112,7 @@ export function CapcutDrafts() {
     <section id="capcut" className="mx-auto w-full max-w-[1240px] scroll-mt-10 px-5 pt-32 sm:pt-[180px]">
       <SectionHeading center first="Your CapCut drafts open here." second="With the cuts, captions and keyframes." />
       <p className="mx-auto mt-6 max-w-[640px] text-center text-[17px] leading-[1.55] text-muted">
-        Nuzky&apos;s home screen lists the CapCut drafts on your computer. Open one and keep editing where you left off, in an editor that never asks you to upgrade.
+        On a Mac or a Windows PC, Nuzky&apos;s home screen lists your CapCut drafts. Open one and keep editing where you left off, in an editor that never asks you to upgrade.
       </p>
 
       <div className="surface mt-12 grid gap-10 rounded-3xl p-5 sm:p-9 lg:grid-cols-[1fr_auto_1.08fr] lg:gap-7">

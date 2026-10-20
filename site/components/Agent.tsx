@@ -73,18 +73,19 @@ export function Agent() {
           working={working ? `0:${String(stage + 1).padStart(2, "0")}` : undefined}
         >
           {history.map((k) => (
-            <Run key={k} x={at(k)} stage={doneStage(at(k))} latest={k === n - 1 && stage === TYPING} />
+            <Run key={k} x={at(k)} stage={doneStage(at(k))} past={k < n - 1 || stage !== TYPING} />
           ))}
           {stage !== TYPING && <Run key={n} x={current} stage={stage} />}
         </AgentPanel>
         <div className="flex min-w-0 flex-1 flex-col gap-4">
           <div className="surface flex flex-1 flex-col justify-center gap-5 rounded-[20px] p-7">
             <div className="capsule flex h-9 w-fit max-w-full items-center gap-2 rounded-full pl-3.5 pr-1.5 text-[13px] font-medium">
-              {working ? (
+              {/* Only a run locks the editor; the export comes after its run has ended. */}
+              {working && current.run ? (
                 <>
                   <Sparkles className="size-3.5 shrink-0 text-accent" />
                   <span className="truncate">
-                    AI is editing <span className="font-normal text-muted">· {current.title}</span>
+                    AI is editing <span className="font-normal text-muted">· {current.run.title}</span>
                   </span>
                   <span className="flex h-[26px] shrink-0 items-center rounded-full bg-white/[0.09] px-2.5 text-[12px]">Stop and edit</span>
                 </>
@@ -112,19 +113,21 @@ export function Agent() {
           </div>
           <div className="surface flex flex-col gap-4 rounded-[20px] px-7 py-6">
             <span className="text-[15px] font-semibold">Connect your AI</span>
-            {/* A picture of the app's sign-in, in its blue, so nobody takes it for a button on this page. */}
-            <div aria-hidden className="flex flex-col gap-3 rounded-[14px] bg-panel p-4 ring-1 ring-inset ring-white/[0.07] sm:flex-row sm:items-center">
-              <span className="flex flex-1 items-center gap-3">
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-white/[0.07]">
-                  <OpenAILogo className="size-[18px]" />
+            {/* A picture of the app's sign-in: labelled, framed and muted, so nobody takes it for a button on this page. */}
+            <figure aria-hidden className="relative rounded-[14px] border border-dashed border-white/[0.14] px-4 pb-4 pt-6">
+              <figcaption className="absolute -top-2 left-3 bg-card px-1.5 text-[11px] font-medium text-subtle">In Nuzky</figcaption>
+              <div className="flex flex-wrap items-center gap-3 opacity-75">
+                <span className="flex flex-1 items-center gap-3">
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-white/[0.07]">
+                    <OpenAILogo className="size-[18px]" />
+                  </span>
+                  <span className="whitespace-nowrap text-[13.5px] font-semibold">Use your ChatGPT plan</span>
                 </span>
-                <span className="flex flex-col">
-                  <span className="text-[13.5px] font-semibold">ChatGPT</span>
-                  <span className="text-[12px] text-muted">Uses your ChatGPT plan</span>
+                <span className="flex h-8 items-center rounded-[8px] bg-white/[0.07] px-3.5 text-[12.5px] font-medium text-muted ring-1 ring-inset ring-white/[0.08]">
+                  Continue with ChatGPT
                 </span>
-              </span>
-              <span className="flex h-8 items-center justify-center rounded-[8px] bg-accent-strong px-3.5 text-[12.5px] font-medium text-white">Continue with ChatGPT</span>
-            </div>
+              </div>
+            </figure>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px]">
               <span className="text-muted">Already use one of these?</span>
               <span className="flex items-center gap-1.5 font-medium">

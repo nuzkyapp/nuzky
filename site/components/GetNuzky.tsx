@@ -1,24 +1,24 @@
 "use client";
 
 import { Fragment, useState } from "react";
-import { ArrowDownToLine, CircleCheck, CircleDashed, CircleMinus, Link2, Monitor, Share, Smartphone, TriangleAlert } from "lucide-react";
+import { ArrowDown, ArrowDownToLine, CircleCheck, CircleDashed, CircleMinus, Link2, Monitor, Share, Smartphone, TriangleAlert } from "lucide-react";
 import { GitHubLogo, systemLogo } from "./Logos";
 import { type FileId, type Release, type Status, type SystemId, bugReport, repo, statusWord, systems, url } from "@/lib/site";
 
 // The visitor's system goes on <html> as `data-os` while the page is still parsing, so the first paint already shows
 // the right download and nothing jumps. Elements with `data-show` show only for the systems they list (globals.css);
 // without this script the page shows the "unknown" state, whose links all work. Only Chromium can tell an Intel Mac
-// or an ARM PC apart, and only asynchronously, so that correction can come a moment later.
+// or an ARM PC apart, and only asynchronously, so that correction can come a moment later. An iPad and an Android
+// tablet asking for the desktop site say Macintosh and Linux, so touch and Chromium's platform give them away.
 const detect = `(function (h) {
   try {
-    var ua = navigator.userAgent, os = "unknown";
-    if (/iPhone|iPad|iPod|Android/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) os = "phone";
+    var ua = navigator.userAgent, d = navigator.userAgentData, os = "unknown";
+    if (/iPhone|iPad|iPod|Android/i.test(ua) || (d && d.platform === "Android") || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) os = "phone";
     else if (/Windows/.test(ua)) os = "windows";
     else if (/Mac OS X/.test(ua)) os = "mac";
     else if (/CrOS/.test(ua)) os = "unknown";
     else if (/Linux|X11/.test(ua)) os = /aarch64|arm/i.test(ua) ? "arm" : "linux";
     h.dataset.os = os;
-    var d = navigator.userAgentData;
     if (d && d.getHighEntropyValues && os !== "phone" && os !== "unknown")
       d.getHighEntropyValues(["architecture"]).then(function (v) {
         if (os === "mac" && v.architecture === "x86") h.dataset.os = "intel";
@@ -112,7 +112,7 @@ function useSend() {
       });
   const send = () => {
     if (!navigator.share) return void copy();
-    navigator.share({ title: "Nuzky", text: "Download Nuzky on my computer", url: page }).catch((e) => {
+    navigator.share({ title: "Nuzky", text: "Nuzky, a free video editor for Mac, Windows and Linux", url: page }).catch((e) => {
       if (e?.name !== "AbortError") void copy();
     });
   };
@@ -201,7 +201,7 @@ export function HeroDownload({ release, base = "" }: { release: Release; base?: 
           true,
           <>
             <Status status="untested">
-              <span className="text-muted">on Windows 10 or 11, 64-bit</span>
+              <span className="text-muted">on 64-bit Intel or AMD PCs with Windows 10 or 11</span>
             </Status>
             <p className="flex max-w-[540px] items-start gap-2 text-left text-[14px] leading-[1.45] text-fg/85">
               <TriangleAlert aria-hidden className="mt-[2px] size-4 shrink-0 text-warn" />
@@ -235,7 +235,7 @@ export function HeroDownload({ release, base = "" }: { release: Release; base?: 
           true,
           <>
             <Status status="partly">
-              <span className="text-muted">on 64-bit PCs</span>
+              <span className="text-muted">on 64-bit Intel or AMD PCs</span>
             </Status>
             <Note>
               The .deb is for Ubuntu 24.04 or newer, the AppImage for other distributions with glibc 2.39 or newer.
@@ -302,13 +302,14 @@ export function HeroDownload({ release, base = "" }: { release: Release; base?: 
                     {statusWord[s.status]}
                   </span>
                 </span>
+                <ArrowDown aria-hidden className="ml-auto size-4 shrink-0 text-muted" />
               </a>
             );
           })}
         </div>
         <div className="flex min-h-16 flex-col items-center">
           <Note>
-            Choose your system. {version} ·{" "}
+            Choose your system. Nuzky doesn&apos;t run on Chromebooks. {version} ·{" "}
             <a href={repo} className={`${link} whitespace-nowrap`}>
               Star on GitHub
             </a>
@@ -333,7 +334,7 @@ export function DownloadRows({ release }: { release: Release }) {
           <p className="flex flex-1 items-start gap-3 text-[14px] leading-[1.5]">
             <Smartphone aria-hidden className="mt-[2px] size-[18px] shrink-0 text-muted" />
             <span>
-              <span className="font-semibold">You&apos;re on a phone.</span>{" "}
+              <span className="font-semibold">You&apos;re on a phone or tablet.</span>{" "}
               <span className="text-muted">Nuzky runs on computers, so send this page to yours and download it there.</span>
             </span>
           </p>
@@ -352,21 +353,26 @@ export function DownloadRows({ release }: { release: Release }) {
 
       {systems.map((s, i) => {
         const Logo = systemLogo[s.id];
-        const mine = s.id === "mac" ? "mac intel" : s.id;
         return (
           <Fragment key={s.id}>
             {i > 0 && <div className="mx-5 h-px bg-white/[0.07]" />}
             <div id={`dl-${s.id}`} className="@container relative scroll-mt-28 rounded-[20px] p-5 @3xl:px-6">
-              <span aria-hidden data-show={mine} className="absolute inset-0 rounded-[20px] bg-white/[0.05] ring-1 ring-inset ring-accent/45" />
+              <span aria-hidden data-show={s.id} className="absolute inset-0 rounded-[20px] bg-white/[0.05] ring-1 ring-inset ring-accent/45" />
+              {s.id === "mac" && <span aria-hidden data-show="intel" className="absolute inset-0 rounded-[20px] ring-1 ring-inset ring-white/[0.12]" />}
               <div className="relative grid gap-4 @3xl:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_208px] @3xl:items-start @3xl:gap-8">
                 <div className="flex items-start gap-3.5">
                   <Logo className="mt-[3px] size-[22px] shrink-0" />
                   <div className="flex flex-col gap-1">
                     <h3 className="flex flex-wrap items-baseline gap-x-2.5 text-[17px] font-semibold tracking-[-0.01em]">
                       {s.name}
-                      <span data-show={mine} className="text-[12px] font-medium tracking-normal text-accent">
+                      <span data-show={s.id} className="text-[12px] font-medium tracking-normal text-accent">
                         Your computer
                       </span>
+                      {s.id === "mac" && (
+                        <span data-show="intel" className="text-[12px] font-medium tracking-normal text-muted">
+                          Not for this Mac
+                        </span>
+                      )}
                     </h3>
                     <span className="text-[14px] leading-[1.45] text-muted">{s.requirement}</span>
                   </div>

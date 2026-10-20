@@ -28,7 +28,7 @@ const summary =
   "Nuzky is a free, open source desktop video editor in the spirit of CapCut, for TikTok, Reels, Shorts and YouTube. It opens your CapCut drafts, writes captions locally in your language and lets ChatGPT, Claude Code or Codex make the rough cut in the open project while you watch.";
 
 const status = (r: Release) =>
-  `Status: early, so expect rough edges. ${r.version ? `Current version: ${r.version}. ` : ""}Download it at ${url}/#download for a Mac with Apple silicon and macOS 14 or newer (tested), a 64-bit Linux PC with glibc 2.39 or newer (partly tested) or Windows 10 or 11 on a 64-bit PC (not tested yet, and AI editing is off there). Intel Macs, and Windows or Linux on ARM, aren't supported. License: GPL-3.0-or-later.`;
+  `Status: early, so expect rough edges. ${r.version ? `Current version: ${r.version}. ` : ""}Download it at ${url}/#download for a Mac with Apple silicon and macOS 14 or newer (tested), a 64-bit Intel or AMD PC with Linux and glibc 2.39 or newer (partly tested) or Windows 10 or 11 on a 64-bit Intel or AMD PC (not tested yet, and AI editing is off there). Intel Macs, and Windows or Linux on ARM, aren't supported. License: GPL-3.0-or-later.`;
 
 const downloads = (r: Release) =>
   systems
@@ -51,7 +51,7 @@ No account, no watermark, no subscription and no paid plan coming. Editing, capt
 
 ## Your CapCut drafts open here
 
-Nuzky's home screen lists the CapCut drafts on your computer; New project, then From a CapCut draft, opens one too. ${capcutDraftParts} come over, a list names anything that didn't, and the draft in CapCut stays as it was. Then press Finish with AI to hand the rest to ChatGPT or Claude.
+On a Mac or a Windows PC, Nuzky's home screen lists your CapCut drafts; New project, then From a CapCut draft, opens one too. ${capcutDraftParts} come over, a list names anything that didn't, and the draft in CapCut stays as it was. Then press Finish with AI to hand the rest to ChatGPT or Claude.
 
 ## Why ${maker.name} builds Nuzky
 
@@ -83,7 +83,7 @@ ${list(features)}
 
 ${downloads(r)}
 
-Once it's installed, new versions install from inside Nuzky in one click. Checksums: ${r.checksums}
+Once it's installed, new versions download inside Nuzky in one click, and install when you restart. Checksums: ${r.checksums}
 
 ## Questions
 

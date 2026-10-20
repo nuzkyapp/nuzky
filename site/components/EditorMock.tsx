@@ -59,9 +59,6 @@ const media = [
   ["tile-4", "0:21", "IMG_2052.MOV"],
   ["tile-6", "0:45", "IMG_2058.MOV"],
   ["tile-8", "Image", "coffee.jpg"],
-  ["tile-5", "", ""],
-  ["tile-7", "", ""],
-  ["tile-9", "", ""],
 ];
 
 // The timeline draws 110 px per 3 s. The preview shows the frame under the playhead: the selected clip, the caption

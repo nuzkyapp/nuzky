@@ -27,13 +27,16 @@ export type Release = {
   files: Record<FileId, { href: string; name: string | null }>;
 };
 
+// A release version, x.y.z with an optional prerelease such as -alpha or -beta.2, and nothing else.
+const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-(0|[1-9]\d*|\d*[A-Za-z-][\dA-Za-z-]*)(\.(0|[1-9]\d*|\d*[A-Za-z-][\dA-Za-z-]*))*)?$/;
+
 // The version comes from the latest.json that installed copies read, never from package.json: main can be ahead
-// of what is published. It goes into links, so only a plain version is used. Without the file (nothing published
+// of what is published. It goes into links, so only a valid version is used. Without the file (nothing published
 // yet, no network) the page still renders, with every download leading to the latest release page.
 export async function getRelease(): Promise<Release> {
   const version: string | null = await fetch(`${latest}/download/latest.json`, { next: { revalidate: 3600 }, signal: AbortSignal.timeout(5000) })
     .then((res) => (res.ok ? res.json() : null))
-    .then((json) => (typeof json?.version === "string" && /^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$/.test(json.version) ? json.version : null))
+    .then((json) => (typeof json?.version === "string" && semver.test(json.version) ? json.version : null))
     .catch(() => null);
   const at = (file: string) => (version ? `${releases}/download/v${version}/${file}` : latest);
   const files = Object.fromEntries(
@@ -65,13 +68,13 @@ export const systems: {
     name: "Mac",
     requirement: "Apple silicon (M1 or newer), macOS 14 or newer",
     status: "tested",
-    note: "I test it on my own Mac, and Apple has checked it.",
+    note: "I test it on my own Mac, and Apple notarized it.",
     files: [{ id: "dmg", label: "Download .dmg", what: "Disk image. Drag Nuzky to Applications.", phone: "A .dmg disk image" }],
   },
   {
     id: "linux",
     name: "Linux",
-    requirement: "64-bit PC (x86_64) with glibc 2.39 or newer",
+    requirement: "64-bit Intel or AMD PC (x86_64) with glibc 2.39 or newer",
     status: "partly",
     note: "Only partly tested so far, so expect more rough edges.",
     report: "Tell me what breaks",
@@ -83,7 +86,7 @@ export const systems: {
   {
     id: "windows",
     name: "Windows",
-    requirement: "Windows 10 or 11 on a 64-bit PC",
+    requirement: "Windows 10 or 11 on a 64-bit Intel or AMD PC",
     status: "untested",
     note: "It builds, but nobody has tried it on a Windows PC yet.",
     report: "Tell me how it goes",
@@ -91,6 +94,6 @@ export const systems: {
       "Windows warns you the first time, because the installer isn't signed yet. Click More info, then Run anyway.",
       "AI editing is off on Windows, and captions take longer there.",
     ],
-    files: [{ id: "exe", label: "Download installer", what: "Setup program (.exe)", phone: "A -setup.exe installer" }],
+    files: [{ id: "exe", label: "Download installer", what: "Setup program (.exe)", phone: "A setup program (.exe)" }],
   },
 ];

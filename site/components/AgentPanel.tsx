@@ -1,92 +1,56 @@
-import { ArrowUp, Camera, Check, ChevronDown, CircleCheck, CircleDot, Film, Loader, MessagesSquare, Plus, SquarePen, Undo2, X } from "lucide-react";
+import { ArrowUp, Camera, Check, ChevronDown, ChevronRight, CircleCheck, CircleDot, CircleStop, Clapperboard, Film, Loader, MessagesSquare, Plus, SquarePen, Undo2, X } from "lucide-react";
 import { OpenAILogo } from "./Logos";
 
 export type Exchange = {
   ask: string;
-  /** What the top bar says while the run edits: "AI is editing · …". */
-  title: string;
   /** The chips that went with the message. */
   context?: string;
   reply: string;
-  steps: [string, string][];
-  result: string;
-  changes: [string, string][];
-  /** An export cannot be taken back, so its result has no Undo. */
-  undo?: boolean;
-  /** A run that cut the video offers a recap of its cuts. */
-  recap?: boolean;
+  /** Each tool call as the app titles it, with what it shows beside it: how many times, or which file. */
+  steps: [string, string?][];
+  /** The run the agent opened: its name, which the top bar shows while it edits and the card after, and what changed,
+      as the app sums it up from the project before and after. A line with a time leads there. */
+  run?: { title: string; changes: [string, string?][]; recap?: boolean };
+  /** An export runs after its run has ended, so it gets no card, and the agent says where the file is. */
+  outro?: string;
 };
 
 export const exchanges: Exchange[] = [
   {
     ask: "Cut the ums and long pauses, then add captions in the Spotlight style.",
-    title: "Cut the ums",
     reply: "On it. I'll transcribe first, then cut.",
-    steps: [
-      ["Transcribe 0:31 of audio", "12 s"],
-      ["Remove 14 filler words", "0.4 s"],
-      ["Cut 6 pauses over 0.8 s", "0.3 s"],
-      ["Add captions · Spotlight", "0.2 s"],
-    ],
-    result: "21 changes",
-    changes: [
-      ["Cut “um” at", "00:09.4"],
-      ["Cut pause at", "00:12.1"],
-      ["Added 5 captions", "00:00–00:22"],
-    ],
-    recap: true,
+    steps: [["Transcribing"], ["Finding filler words"], ["Cutting by the transcript"], ["Adding captions"]],
+    run: {
+      title: "Cut the ums",
+      changes: [["Shortened the video from 31.2 s to 24.6 s"], ["Cut out 20 passages, 6.6 s in total"], ["Added 9 captions", "00:00"]],
+      recap: true,
+    },
   },
   {
     ask: "The intro drags. Start on the first thing I say.",
-    title: "Tighten the start",
     context: "1 clip · Playhead 00:00",
     reply: "Trimming the quiet start of the first clip.",
-    steps: [
-      ["Find the first spoken word", "0.2 s"],
-      ["Trim 2.4 s from the start", "0.1 s"],
-    ],
-    result: "1 change",
-    changes: [["Trimmed the start to", "00:02.4"]],
+    steps: [["Read the transcript"], ["Editing", "1 change"]],
+    run: { title: "Tighten the start", changes: [["Shortened the video from 24.6 s to 22.2 s"], ["Cut out 1 passage, 2.4 s in total"]], recap: true },
   },
   {
     ask: "Put Sunrise under the whole video, quietly.",
-    title: "Add music",
     reply: "Adding it under everything at −18 dB, with a fade at the end.",
-    steps: [
-      ["Import Sunrise.m4a", "0.3 s"],
-      ["Set the volume to −18 dB", "0.1 s"],
-      ["Fade out over 2 s", "0.1 s"],
-    ],
-    result: "3 changes",
-    changes: [
-      ["Added music at", "00:00"],
-      ["Fade out from", "00:28.0"],
-    ],
+    steps: [["Importing media", "Sunrise.m4a"], ["Editing", "3 changes"]],
+    run: { title: "Add music", changes: [["Added Sunrise.m4a on an audio track", "00:00"]] },
   },
   {
     ask: "The caption at 0:07 should say “ridge”, not “bridge”.",
-    title: "Fix a caption",
     context: "Playhead 00:07",
     reply: "Fixing the word in the transcript.",
-    steps: [
-      ["Correct “bridge” to “ridge”", "0.1 s"],
-      ["Rebuild 1 caption", "0.1 s"],
-    ],
-    result: "1 change",
-    changes: [["Fixed the caption at", "00:07.2"]],
+    steps: [["Read the transcript"], ["Correcting words"]],
+    run: { title: "Fix a caption", changes: [["Corrected 1 word"]] },
   },
   {
     ask: "Looks good. Export it for Reels.",
-    title: "Export for Reels",
     reply: "Exporting 1080 × 1920 at 30 fps.",
-    steps: [
-      ["Level the sound to −14 LUFS", "1.1 s"],
-      ["Render 0:30 of video", "9 s"],
-      ["Save morning-run.mp4", "0.1 s"],
-    ],
-    result: "Exported · 12.4 MB",
-    changes: [["Saved to", "Movies/morning-run.mp4"]],
-    undo: false,
+    steps: [["Exporting", "morning-run.mp4"]],
+    outro: "Done. It's in Movies as morning-run.mp4, 22 s and 9.8 MB.",
   },
 ];
 
@@ -94,10 +58,12 @@ export const exchanges: Exchange[] = [
 export const doneStage = (x: Exchange) => 2 + x.steps.length;
 
 const appear = "animate-[fade-up_240ms_ease-out]";
-const button = "flex h-[26px] w-fit items-center gap-[5px] rounded-lg bg-white/[0.09] px-2.5 text-[12px] font-medium ring-1 ring-inset ring-white/[0.07]";
+const button = "flex h-7 w-fit items-center gap-[5px] rounded-lg bg-white/[0.09] px-2.5 text-[12px] font-medium ring-1 ring-inset ring-white/[0.07]";
 
-export function Run({ x, stage, latest = true }: { x: Exchange; stage: number; latest?: boolean }) {
+/** `past`: an earlier exchange, so its steps are folded and later runs keep its Undo off, as in the app. */
+export function Run({ x, stage, past = false }: { x: Exchange; stage: number; past?: boolean }) {
   const running = stage - 2;
+  const done = stage >= doneStage(x);
   return (
     <>
       <div className={`flex shrink-0 flex-col items-end gap-1 ${appear}`}>
@@ -105,38 +71,43 @@ export function Run({ x, stage, latest = true }: { x: Exchange; stage: number; l
         {x.context && <span className="text-[11px] text-muted">{x.context}</span>}
       </div>
       {stage >= 1 && <p className={`shrink-0 text-[13px] leading-[1.5] text-fg/90 ${appear}`}>{x.reply}</p>}
-      {stage >= 2 && (
-        <div className={`shrink-0 border-y border-white/[0.06] py-1.5 ${appear}`}>
-          {x.steps.slice(0, running + 1).map(([t, d], j) => (
-            <div key={t} className={`flex h-7 items-center gap-2 text-[12px] ${appear}`}>
-              {j < running ? <Check className="size-3.5 text-ok" /> : <Loader className="size-3.5 animate-[spin_1.6s_linear_infinite] text-accent" />}
-              <span className={`flex-1 ${j < running ? "" : "text-muted"}`}>{t}</span>
-              {j < running && <span className="tabular-nums text-muted">{d}</span>}
-            </div>
-          ))}
-        </div>
-      )}
-      {stage >= doneStage(x) && (
-        <div className={`flex shrink-0 flex-col gap-2 rounded-[10px] bg-raised p-3 ${appear}`}>
-          <div className="flex h-[26px] items-center gap-2">
-            <CircleCheck className="size-3.5 text-ok" />
-            <span className="flex-1 text-[13px] font-semibold">{x.result}</span>
-            {latest && x.undo !== false && (
-              <span className={button}>
-                <Undo2 className="size-3" />
-                Undo
-              </span>
-            )}
+      {stage >= 2 &&
+        (past || (done && x.outro) ? (
+          <span className="-ml-1 flex shrink-0 items-center gap-1 px-1 text-[12px] text-muted">
+            <ChevronRight className="size-3.5" />
+            {x.steps.length === 1 ? "1 step" : `${x.steps.length} steps`}
+          </span>
+        ) : (
+          <div className={`shrink-0 border-y border-white/[0.06] py-1.5 ${appear}`}>
+            {x.steps.slice(0, running + 1).map(([t, d], j) => (
+              <div key={t} className={`flex h-[26px] items-center gap-2 text-[12px] ${appear}`}>
+                {j < running ? <Check className="size-3.5 text-ok" /> : <Loader className="size-3.5 animate-[spin_1.6s_linear_infinite] text-accent" />}
+                <span className={`flex-1 ${j < running ? "text-fg/80" : ""}`}>{t}</span>
+                {d && <span className="tabular-nums text-muted">{d}</span>}
+              </div>
+            ))}
           </div>
-          {x.changes.map(([a, t]) => (
-            <div key={a} className="flex pl-[22px] text-[12px]">
-              <span className="flex-1">{a}</span>
-              <span className="tabular-nums text-muted">{t}</span>
+        ))}
+      {done && x.outro && <p className={`shrink-0 text-[13px] leading-[1.5] text-fg/90 ${appear}`}>{x.outro}</p>}
+      {done && x.run && (
+        <div className={`flex shrink-0 flex-col gap-1.5 rounded-[10px] bg-raised p-3 ${appear}`}>
+          <div className="flex items-center gap-2">
+            <CircleCheck className="size-4 shrink-0 text-ok" />
+            <span className="flex-1 truncate text-[13px] font-semibold">{x.run.title}</span>
+            <span className={`${button} ${past ? "opacity-45" : ""}`}>
+              <Undo2 className="size-[13px]" />
+              Undo
+            </span>
+          </div>
+          {x.run.changes.map(([text, at]) => (
+            <div key={text} className="flex py-1 pl-[24px] text-[12px] leading-[17px] text-fg/90">
+              <span className="flex-1">{text}</span>
+              {at && <span className="tabular-nums text-muted">{at}</span>}
             </div>
           ))}
-          {x.recap && (
-            <span className={`ml-[22px] mt-0.5 ${button}`}>
-              <Film className="size-3" />
+          {x.run.recap && (
+            <span className={`ml-6 ${button}`}>
+              <Clapperboard className="size-[13px]" />
               Export recap…
             </span>
           )}
@@ -207,18 +178,29 @@ export function AgentPanel({
                   <Loader className="size-3.5 animate-[spin_1.6s_linear_infinite] text-accent" />
                   Working · {working}
                 </span>
-                <span className="flex h-7 items-center gap-1.5 rounded-full bg-white/[0.09] px-2.5 text-[12px] font-medium text-fg ring-1 ring-inset ring-white/[0.08]">
-                  <span className="size-2 rounded-[2px] bg-fg" />
+                <span className={`${button} text-fg`}>
+                  <CircleStop className="size-[13px]" />
                   Stop
                 </span>
               </>
             ) : (
-              <span className={`ml-auto flex size-7 shrink-0 items-center justify-center rounded-full transition-colors ${draft ? "bg-fg text-bg" : "bg-white/[0.08] text-muted"}`}>
-                <ArrowUp className="size-3.5" />
-              </span>
+              <>
+                {/* The model the account lists first, at the effort picked in the menu. */}
+                <span className="-ml-1.5 flex h-7 items-center gap-1 px-1.5 text-[12px] text-fg/85">
+                  GPT 6.1 Sol <span className="text-subtle">·</span> High
+                  <ChevronDown className="size-[13px] text-muted" />
+                </span>
+                <span className={`ml-auto flex size-7 shrink-0 items-center justify-center rounded-full transition-colors ${draft ? "bg-fg text-bg" : "bg-white/[0.08] text-muted"}`}>
+                  <ArrowUp className="size-3.5" />
+                </span>
+              </>
             )}
           </div>
         </div>
+        <p className="mt-1.5 flex items-center gap-1.5 px-1 text-[12px] text-muted">
+          <OpenAILogo className="size-3" />
+          Using ChatGPT plan <span aria-hidden>·</span> <span className="text-accent">Manage usage</span>
+        </p>
       </div>
     </div>
   );

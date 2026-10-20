@@ -19,12 +19,12 @@ export const capcutDraftParts = "Clips, cuts, speed, volume, keyframes, texts, c
 export const faq: Faq[] = [
   {
     q: "Which computers does it run on?",
-    a: "Macs with Apple silicon and macOS 14 or newer, where I test it. 64-bit Linux PCs with glibc 2.39 or newer, like Ubuntu 24.04, partly tested. Windows 10 or 11 on a 64-bit PC, not tested yet, and AI editing is off there. Intel Macs, and Windows or Linux on ARM, aren't supported.",
+    a: "Macs with Apple silicon and macOS 14 or newer, where I test it. 64-bit Intel or AMD PCs with Linux and glibc 2.39 or newer, like Ubuntu 24.04, partly tested. Windows 10 or 11 on a 64-bit Intel or AMD PC, not tested yet, and AI editing is off there. Intel Macs, and Windows or Linux on ARM, aren't supported.",
     link: { label: "See the downloads", href: "#download" },
   },
   {
     q: "Can I open my CapCut projects?",
-    a: `Yes, the CapCut drafts on your computer. Find them on Nuzky's home screen, or choose New project, then From a CapCut draft. ${capcutDraftParts} come over, a list names anything that didn't, and the draft in CapCut stays as it was.`,
+    a: `Yes, drafts from CapCut on a Mac or a Windows PC. Find them on Nuzky's home screen, or choose New project, then From a CapCut draft. ${capcutDraftParts} come over, a list names anything that didn't, and the draft in CapCut stays as it was.`,
   },
   {
     q: "Is Nuzky really free?",
@@ -45,7 +45,7 @@ export const faq: Faq[] = [
   },
   {
     q: "How do updates work?",
-    a: "Nuzky tells you when a new version is out and installs it from inside the app, in one click.",
+    a: "Nuzky tells you when a new version is out. One click downloads it inside the app, and it installs when you restart Nuzky, never by itself.",
   },
   {
     q: "Are my videos private?",
@@ -89,7 +89,7 @@ export const features = [
   "Saves after every edit and recovers after a crash",
   "AI editing in the app: sign in with ChatGPT, or use Claude Code, Codex or any MCP client, with one undo per run (not on Windows yet)",
   "Learns how a creator edits from their finished cuts or CapCut drafts into an EDIT.md that agents follow",
-  "Updates install from inside the app in one click",
+  "New versions download inside the app in one click, and install when you restart",
 ];
 
 // What the comparison page says about CapCut was checked against capcut.com/pricing, CapCut's help centre
@@ -145,7 +145,7 @@ export const fromCapcut = [
 export const capcutFaq: Faq[] = [
   {
     q: "Can I open my CapCut projects in Nuzky?",
-    a: `Yes, the CapCut drafts on your computer. ${capcutDraftParts} come over. A list names anything that didn't, like effects and colour adjustments, and the draft in CapCut stays as it was.`,
+    a: `Yes, drafts from CapCut on a Mac or a Windows PC. ${capcutDraftParts} come over. A list names anything that didn't, like effects and colour adjustments, and the draft in CapCut stays as it was.`,
   },
   {
     q: "Are CapCut's auto captions free?",

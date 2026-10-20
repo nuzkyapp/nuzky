@@ -6,14 +6,13 @@ import { EditorMock, type EditorFocus } from "./EditorMock";
 import { Fit, type FitView } from "./Fit";
 import { usePlaying } from "@/lib/playing";
 
-// `side` places the tooltip where it covers nothing the tab is showing. Without it the
-// tooltip goes below the hotspot, or above it in the lower half. A phone has no room for hotspots
-// and shows `view`, the part of the editor the spot talks about, with the text in a card below.
-// Its 16:15 window fits the editor's 740 px height only up to `w` 789.
-type Spot = { x: number; y: number; title: string; text: string; side?: "left" | "right" | "above"; view: FitView };
+// Positions are in the editor's own 1200 × 740 space. A hotspot sits on a gap beside what it describes, never on a
+// control or a label, and `tip` is its tooltip's top left corner, placed where it covers neither that nor the
+// picture. A phone has no room for hotspots and shows `view`, the part of the editor the spot talks about, with the
+// text in a card below. Its 16:15 window fits the editor's 740 px height only up to `w` 789.
+type Spot = { x: number; y: number; tip: [number, number]; title: string; text: string; view: FitView };
 type Tab = { id: EditorFocus; label: string; icon: typeof Scissors; summary: string; spots: Spot[] };
 
-// Hotspot positions are in the editor's own 1200 × 740 space.
 const tabs: Tab[] = [
   {
     id: "edit",
@@ -21,9 +20,9 @@ const tabs: Tab[] = [
     icon: Scissors,
     summary: "A timeline, a live preview and an inspector, laid out the way you know from CapCut.",
     spots: [
-      { x: 712, y: 618, title: "Magnetic timeline", text: "Clips snap together and every cut lands on the exact frame, even in phone video.", view: { x: 640, y: 610, w: 360 } },
-      { x: 352, y: 171, title: "Your media, and YouTube", text: "Drop in video, sound and images, or paste a YouTube link to something that's yours to use.", side: "right", view: { x: 181, y: 230, w: 350 } },
-      { x: 1049, y: 300, title: "Inspector", text: "Video, Adjust, Speed, Animation and Audio, with a value you can type beside every slider.", side: "left", view: { x: 1049, y: 284, w: 300 } },
+      { x: 330, y: 512, tip: [16, 404], title: "Magnetic timeline", text: "Clips snap together and every cut lands on the exact frame, even in phone video.", view: { x: 640, y: 610, w: 360 } },
+      { x: 360, y: 440, tip: [16, 404], title: "Your media, and YouTube", text: "Drop in video, sound and images, or paste a YouTube link to something that's yours to use.", view: { x: 181, y: 230, w: 350 } },
+      { x: 960, y: 512, tip: [900, 546], title: "Inspector", text: "Video, Adjust, Speed, Animation and Audio, with a value you can type beside every slider.", view: { x: 1049, y: 284, w: 300 } },
     ],
   },
   {
@@ -32,9 +31,9 @@ const tabs: Tab[] = [
     icon: Captions,
     summary: "AI on your computer writes the captions and puts each line on the timeline as a clip.",
     spots: [
-      { x: 300, y: 318, title: "19 styles, or your own", text: "Pick a style, save your own look, and colour the key words.", side: "right", view: { x: 181, y: 220, w: 350 } },
-      { x: 572, y: 571, title: "A clip per line", text: "Fix a word or move a line right on the timeline.", side: "above", view: { x: 480, y: 580, w: 360 } },
-      { x: 745, y: 329, title: "The spoken word lights up", text: "Each word lights up as you say it, in the preview and in the export.", side: "right", view: { x: 630, y: 260, w: 330 } },
+      { x: 180, y: 418, tip: [16, 488], title: "19 styles, or your own", text: "Pick a style, save your own look, and colour the key words.", view: { x: 181, y: 220, w: 350 } },
+      { x: 1130, y: 570, tip: [880, 600], title: "A clip per line", text: "Fix a word or move a line right on the timeline.", view: { x: 480, y: 580, w: 360 } },
+      { x: 745, y: 329, tip: [775, 305], title: "The spoken word lights up", text: "Each word lights up as you say it, in the preview and in the export.", view: { x: 630, y: 260, w: 330 } },
     ],
   },
   {
@@ -43,9 +42,9 @@ const tabs: Tab[] = [
     icon: Film,
     summary: "One long video becomes several reels. AI finds the moments, and you trim them by words.",
     spots: [
-      { x: 285, y: 556, title: "AI finds the moments", text: "Each reel opens on a hook and says why it works. Check the ones you want.", side: "above", view: { x: 300, y: 620, w: 430 } },
-      { x: 181, y: 310, title: "Trim by words", text: "Click a word to play from it, and move the start or the end a word at a time.", side: "right", view: { x: 181, y: 250, w: 350 } },
-      { x: 1186, y: 517, title: "Each one its own project", text: "Make 2 reels writes two 9:16 projects. The long video stays as it was.", side: "above", view: { x: 960, y: 560, w: 470 } },
+      { x: 359, y: 488, tip: [60, 340], title: "AI finds the moments", text: "Each reel opens on a hook and says why it works. Check the ones you want.", view: { x: 300, y: 620, w: 430 } },
+      { x: 181, y: 310, tip: [211, 286], title: "Trim by words", text: "Click a word to play from it, and move the start or the end a word at a time.", view: { x: 181, y: 250, w: 350 } },
+      { x: 1130, y: 484, tip: [880, 322], title: "Each one its own project", text: "Make 2 reels writes two 9:16 projects. The long video stays as it was.", view: { x: 960, y: 560, w: 470 } },
     ],
   },
   {
@@ -54,9 +53,9 @@ const tabs: Tab[] = [
     icon: ImagePlus,
     summary: "A 9:16 cover and a 16:9 YouTube thumbnail, made from a frame of your video.",
     spots: [
-      { x: 84, y: 616, title: "Cover first", text: "The cover sits before your first clip, as in CapCut. Click it to make one.", side: "right", view: { x: 200, y: 610, w: 380 } },
-      { x: 330, y: 197, title: "Pick for me", text: "Nuzky looks through the video for sharp, well framed frames of you, best first. Or let AI make the whole cover.", side: "right", view: { x: 181, y: 260, w: 350 } },
-      { x: 908, y: 246, title: "Text behind you", text: "Put the title behind the person, draw a line around them, or blur what's behind. Export it as PNG or JPEG.", side: "left", view: { x: 1049, y: 230, w: 300 } },
+      { x: 78, y: 625, tip: [108, 601], title: "Cover first", text: "The cover sits before your first clip, as in CapCut. Click it to make one.", view: { x: 200, y: 610, w: 380 } },
+      { x: 180, y: 462, tip: [100, 490], title: "Pick for me", text: "Nuzky looks through the video for sharp, well framed frames of you, best first. Or let AI make the whole cover.", view: { x: 181, y: 260, w: 350 } },
+      { x: 1050, y: 462, tip: [880, 490], title: "Text behind you", text: "Put the title behind the person, draw a line around them, or blur what's behind. Export it as PNG or JPEG.", view: { x: 1049, y: 230, w: 300 } },
     ],
   },
   {
@@ -65,23 +64,15 @@ const tabs: Tab[] = [
     icon: Upload,
     summary: "Export for Reels, TikTok or YouTube in one click. The file looks exactly like the preview.",
     spots: [
-      { x: 720, y: 343, title: "Made for Reels and TikTok", text: "1080 × 1920 at 30 fps, with the sound as loud as the rest of the feed.", side: "right", view: { x: 600, y: 370, w: 500 } },
-      { x: 380, y: 260, title: "Same renderer", text: "The same renderer draws the preview and the export.", side: "left", view: { x: 600, y: 370, w: 500 } },
-      { x: 840, y: 271, title: "Cover and recap too", text: "Export the cover as a picture, or a short video of everything that was cut.", side: "right", view: { x: 600, y: 370, w: 500 } },
+      { x: 866, y: 378, tip: [896, 354], title: "Made for Reels and TikTok", text: "1080 × 1920 at 30 fps, with the sound as loud as the rest of the feed.", view: { x: 600, y: 370, w: 500 } },
+      { x: 334, y: 532, tip: [12, 508], title: "Same renderer", text: "The same renderer draws the preview and the export.", view: { x: 600, y: 370, w: 500 } },
+      { x: 866, y: 271, tip: [896, 247], title: "Cover and recap too", text: "Export the cover as a picture, or a short video of everything that was cut.", view: { x: 600, y: 370, w: 500 } },
     ],
   },
 ];
 
 // Each hotspot opens in turn for this long; after the last one the tour moves to the next tab.
 const SPOT_MS = 3200;
-const TIP_W = 292;
-
-function tipPosition(s: Spot): React.CSSProperties {
-  if (s.side === "left") return { left: s.x - 30 - TIP_W, top: s.y - 24 };
-  if (s.side === "right") return { left: s.x + 30, top: s.y - 24 };
-  const left = Math.min(Math.max(s.x - TIP_W / 2, 16), 1200 - TIP_W - 16);
-  return s.side === "above" || s.y > 420 ? { left, bottom: 740 - s.y + 30 } : { left, top: s.y + 30 };
-}
 
 function Choice({ items, on }: { items: string[]; on: number }) {
   return (
@@ -190,6 +181,16 @@ export function Showcase() {
     cards.current?.scrollTo({ left: 0 });
   };
 
+  // The tab bar is one Tab stop; the arrow keys, Home and End pick a tab.
+  const arrows = (e: React.KeyboardEvent) => {
+    const to = { ArrowLeft: active - 1, ArrowRight: active + 1, Home: 0, End: tabs.length - 1 }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    const i = (to + tabs.length) % tabs.length;
+    choose(i);
+    document.getElementById(`tab-${tabs[i].id}`)?.focus();
+  };
+
   // The cards exist only on a phone, so a window that grows past them gets the desktop tour back.
   useEffect(() => {
     const desktop = window.matchMedia("(min-width: 48rem)");
@@ -231,7 +232,7 @@ export function Showcase() {
           <span className="text-subtle">From the first cut to the cover.</span>
         </h2>
 
-        <div role="tablist" aria-label="Editor tour" className="glass flex h-12 max-w-full items-center gap-0.5 overflow-x-auto rounded-full p-[5px] no-scrollbar">
+        <div role="tablist" aria-label="Editor tour" onKeyDown={arrows} className="glass flex h-12 max-w-full items-center gap-0.5 overflow-x-auto rounded-full p-[5px] no-scrollbar">
           {tabs.map((t, i) => (
             <button
               key={t.id}
@@ -239,6 +240,7 @@ export function Showcase() {
               id={`tab-${t.id}`}
               aria-selected={i === active}
               aria-controls="editor-stage"
+              tabIndex={i === active ? 0 : -1}
               onClick={() => choose(i)}
               className={`flex h-[38px] shrink-0 items-center gap-2 rounded-full px-3.5 text-[14px] font-medium transition-colors sm:px-[18px] ${
                 i === active ? "bg-white/[0.16] text-fg" : "text-muted hover:text-fg"
@@ -270,7 +272,7 @@ export function Showcase() {
                 <button
                   key={`${tab.id}-${i}`}
                   aria-label={s.title}
-                  aria-pressed={i === spot}
+                  aria-describedby={`tip-${tab.id}-${i}`}
                   onPointerEnter={() => {
                     setSpot(i);
                     setHeld(true);
@@ -302,17 +304,19 @@ export function Showcase() {
                 </button>
               ))}
 
-              {current && (
+              {/* Each hotspot's tooltip is there for screen readers; only the open one shows. Solid, so the editor never shows through its text. */}
+              {tab.spots.map((s, i) => (
                 <div
-                  key={`${tab.id}-${spot}`}
+                  key={`${tab.id}-${i}`}
+                  id={`tip-${tab.id}-${i}`}
                   role="tooltip"
-                  className="glass pointer-events-none absolute hidden w-[292px] flex-col gap-1.5 rounded-[20px] bg-[#1c1c1f]/80 px-[18px] py-4 text-left animate-[fade-up_180ms_ease-out] md:flex"
-                  style={tipPosition(current)}
+                  className={`pointer-events-none absolute w-[292px] flex-col gap-1.5 rounded-[20px] bg-[#232327] px-[18px] py-4 text-left shadow-[0_18px_50px_rgb(0_0_0/0.55)] ring-1 ring-white/10 animate-[fade-up_180ms_ease-out] ${i === spot ? "hidden md:flex" : "hidden"}`}
+                  style={{ left: s.tip[0], top: s.tip[1] }}
                 >
-                  <span className="text-[15px] font-semibold">{current.title}</span>
-                  <span className="text-[13px] leading-[1.45] text-fg/75">{current.text}</span>
+                  <span className="text-[15px] font-semibold">{s.title}</span>
+                  <span className="text-[13px] leading-[1.45] text-fg/75">{s.text}</span>
                 </div>
-              )}
+              ))}
             </div>
           </Fit>
         </div>

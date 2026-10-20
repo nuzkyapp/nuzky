@@ -254,7 +254,7 @@ const more = [
   ["A recap of every cut", "Export a short video of everything that was cut."],
   ["Copy and paste", "Copy clips, or just their settings, and paste them anywhere in the project."],
   ["Project status", "A checklist in the inspector shows what's left: speech, captions, zooms, music and the cover."],
-  ["Updates in one click", "Nuzky tells you when a new version is out and installs it from inside the app."],
+  ["Updates in one click", "Nuzky tells you when a new version is out. One click downloads it inside the app, and it installs when you restart."],
   ["Exports for every feed", "1080 × 1920 for Reels, TikTok and Shorts, or widescreen up to 4K. Never a watermark."],
 ];
 
