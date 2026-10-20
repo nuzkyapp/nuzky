@@ -1,6 +1,6 @@
 # Nuzky
 
-Nuzky ([nuzky.app](https://nuzky.app)) is an open-source desktop video editor in the spirit of CapCut (GPL-3.0-or-later). A Rust engine (`crates/engine`: project model, edits and undo, FFmpeg decoding, wgpu compositor, audio mixing, export), local Whisper (`crates/analysis`), local face and subject models (`crates/vision`), the editing authority (`crates/session`), tools for AI agents (`crates/mcp`, `crates/cli`), a Tauri 2 desktop shell (`src-tauri`) and a React 19 + zustand UI (`src`). Status: prototype. Linux is verified; macOS and Windows only compile so far.
+Nuzky ([nuzky.app](https://nuzky.app)) is an open-source desktop video editor in the spirit of CapCut (GPL-3.0-or-later). A Rust engine (`crates/engine`: project model, edits and undo, FFmpeg decoding, wgpu compositor, audio mixing, export), local Whisper (`crates/analysis`), local face and subject models (`crates/vision`), the editing authority (`crates/session`), tools for AI agents (`crates/mcp`, `crates/cli`), a Tauri 2 desktop shell (`src-tauri`) and a React 19 + zustand UI (`src`). Status: alpha. The maintainer tests macOS by hand, Linux only partly and Windows not at all.
 
 People edit videos from their phones and often let an AI agent do the cutting for them. A change rarely belongs to one surface only: the UI, the engine, the MCP tools, the CLI and the export share the same project.
 
@@ -48,7 +48,7 @@ The most common defect is a change that works only on the path you tried.
 - Write a change of behaviour or keys into `docs/INTERACTION.md` in the same PR, and visuals into `DESIGN.md`.
 - A new control respects the AI lock (`useLockReason`, `lockedProps` in `src/components/ui.tsx`), has a keyboard path and shows why it is disabled.
 - New media reading goes through `media::open_input` and has a test on phone media (rotation, VFR, HEVC) against an FFmpeg reference.
-- Platforms: Linux is verified; CI only compiles macOS and Windows. Do not claim anything works there.
+- Platforms: macOS is tested by hand, Linux only partly, and Windows not at all; CI only builds Windows and runs its Rust tests. Claim only what you ran, and nothing about Windows.
 
 ## Verification
 

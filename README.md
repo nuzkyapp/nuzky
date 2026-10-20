@@ -14,7 +14,7 @@
 
 Cut a talking video by deleting words from its transcript, caption it with speech recognition that runs on your own machine, and let an AI agent do the tedious parts while you watch. Nuzky is licensed under GPLv3 and has a native Rust engine.
 
-**Nuzky is in alpha.** It is early, so expect rough edges. Nuzky never changes or deletes your original videos. Linux is where it is tested most. Builds for macOS and Windows are new, and the AI panel is off on Windows.
+**Nuzky is in alpha.** It is early, so expect rough edges. Nuzky never changes or deletes your original videos. macOS works and is where Nuzky is tested. Linux is only partly tested. Windows isn't tested at all: the installer builds, but nobody has tried it on a Windows PC yet, and the AI panel is off there.
 
 ## What you can do
 
@@ -39,9 +39,9 @@ Nuzky itself sends nothing you edit anywhere. It goes online only to download mo
 
 Download the installer for your system from [Releases](https://github.com/nuzkyapp/nuzky/releases). Apple has checked the macOS app. Nuzky has no Microsoft signing certificate yet, so Windows warns you the first time you open it.
 
-- **macOS 14 or newer on Apple Silicon**: open the `.dmg` and drag Nuzky to Applications. The first time you open it, macOS asks whether to open an app downloaded from the internet; click Open.
-- **Windows 10 or 11, x64**: run the `-setup.exe`. When SmartScreen says "Windows protected your PC", click More info, then Run anyway. The installer downloads Microsoft WebView2 if it is missing.
-- **Linux, x86_64**: on Ubuntu 24.04 or newer, `sudo apt install ./Nuzky_*.deb`. On other distributions with glibc 2.39 or newer, make the `.AppImage` executable with `chmod +x` and run it.
+- **macOS 14 or newer on Apple Silicon**, tested: open the `.dmg` and drag Nuzky to Applications. The first time you open it, macOS asks whether to open an app downloaded from the internet; click Open.
+- **Windows 10 or 11, x64**, not tested at all: run the `-setup.exe`. When SmartScreen says "Windows protected your PC", click More info, then Run anyway. The installer downloads Microsoft WebView2 if it is missing.
+- **Linux, x86_64**, partly tested: on Ubuntu 24.04 or newer, `sudo apt install ./Nuzky_*.deb`. On other distributions with glibc 2.39 or newer, make the `.AppImage` executable with `chmod +x` and run it.
 
 The first captions or transcript download the speech model once. Nuzky tells you when a newer version is out; it doesn't update itself.
 
