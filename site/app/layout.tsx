@@ -26,7 +26,8 @@ export const viewport: Viewport = { themeColor: "#08080a", colorScheme: "dark" }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${inter.variable} ${mono.variable}`}>
+    // The download block's script names the visitor's system on <html> before React hydrates (components/GetNuzky.tsx).
+    <html lang="en" className={`${inter.variable} ${mono.variable}`} suppressHydrationWarning>
       <body className="min-h-dvh overflow-x-hidden bg-site">
         {children}
         {/* Vercel Web Analytics counts visits without cookies or stored identifiers. */}

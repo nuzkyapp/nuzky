@@ -1,8 +1,6 @@
 // Copy that the pages, the structured data for search engines and the Markdown for AI agents all share,
 // so a fact changes in one place. It is written for creators who edit their videos, not for developers.
 
-import { releaseNotes } from "./site";
-
 export type Faq = { q: string; a: string; link?: { label: string; href: string } };
 
 export const maker = { name: "Tomáš Mach", photo: "/media/tomas.jpg", role: "Makes videos, builds Nuzky" };
@@ -15,39 +13,43 @@ export const makerNote = [
   "Nuzky is free, and it stays free. There's no paid plan coming. The code is public, so nobody can take the free version away. Not even me.",
 ];
 
-// Under every email field. The field collects one thing for one email, and the copy has to keep that promise.
-export const notifyNote = "One email when the first version is out. No newsletter, and I won't sell or share your address.";
+// What comes over from a CapCut draft (docs/INTERACTION.md, CapCut drafts). Keep the list to what the import reads.
+export const capcutDraftParts = "Clips, cuts, speed, volume, keyframes, texts, captions and transitions";
 
 export const faq: Faq[] = [
+  {
+    q: "Which computers does it run on?",
+    a: "Macs with Apple silicon and macOS 14 or newer, where I test it. 64-bit Linux PCs with glibc 2.39 or newer, like Ubuntu 24.04, partly tested. Windows 10 or 11 on a 64-bit PC, not tested yet, and AI editing is off there. Intel Macs, and Windows or Linux on ARM, aren't supported.",
+    link: { label: "See the downloads", href: "#download" },
+  },
+  {
+    q: "Can I open my CapCut projects?",
+    a: `Yes, the CapCut drafts on your computer. Find them on Nuzky's home screen, or choose New project, then From a CapCut draft. ${capcutDraftParts} come over, a list names anything that didn't, and the draft in CapCut stays as it was.`,
+  },
   {
     q: "Is Nuzky really free?",
     a: "Yes. No subscription, no watermark on your videos, no sign-up and no paid plan coming. The code is public, so it stays free. If you let AI do the cutting, it runs on the ChatGPT or Claude plan you already have.",
   },
   {
-    q: "When can I download it?",
-    a: "Soon. The first version for Mac, Windows and Linux is on its way. Leave your email below and you'll get one email when it's out. If you're on GitHub, you can also watch the releases.",
-    link: { label: "Nuzky releases on GitHub", href: releaseNotes },
-  },
-  {
     q: "How is Nuzky different from CapCut?",
-    a: "Nothing in Nuzky is locked behind a paid plan, so export never asks you to upgrade. It's made for editing on a computer. CapCut has more templates and effects, and a phone app.",
+    a: "Nothing in Nuzky is locked behind a paid plan, so export never asks you to upgrade. It's made for editing on a computer, and it opens your CapCut drafts. CapCut has more templates and effects, and a phone app.",
     link: { label: "Compare Nuzky and CapCut", href: "/capcut-alternative" },
   },
   {
     q: "Are the auto captions free?",
-    a: "Yes, with no limit. AI on your computer writes them from what you say. Pick the model that's best for your language, give it the names and words you use, and fix anything it still gets wrong. Then pick a style and make the spoken word light up.",
+    a: "Yes, with no limit. AI on your computer writes them from what you say. Pick the model that's best for your language, give it the names and words you use, and fix anything it still gets wrong. Then pick one of 19 styles or your own, and make the spoken word light up.",
+  },
+  {
+    q: "Can AI edit the video for me?",
+    a: "Yes, if you want it to. Type what you want, like “cut the ums and pauses and add captions”, and watch it edit in the app. Stop it any time, and one undo takes it all back. Sign in with ChatGPT inside Nuzky to use the plan you already pay for, with no terminal, or connect Claude Code or Codex. Editing, captions and export work without any AI. AI editing doesn't work on Windows yet.",
+  },
+  {
+    q: "How do updates work?",
+    a: "Nuzky tells you when a new version is out and installs it from inside the app, in one click.",
   },
   {
     q: "Are my videos private?",
     a: "Yes. Your videos stay on your computer, and nothing gets uploaded to edit, caption or export them. If you ask an AI to edit for you, it sees what's said in the video and the frames it checks.",
-  },
-  {
-    q: "Can AI edit the video for me?",
-    a: "Yes. Type what you want, like “cut the ums and pauses and add captions”, and watch it edit in the app. Stop it any time, and one undo takes it all back. It runs on the ChatGPT or Claude plan you already pay for, and Nuzky walks you through setting it up. It doesn't work on Windows yet.",
-  },
-  {
-    q: "Do I need ChatGPT or Claude?",
-    a: "Only if you want AI to make the rough cut. Editing, captions and export work without them. AI cutting doesn't work on Windows yet.",
   },
   {
     q: "Will videos from my phone work?",
@@ -65,21 +67,29 @@ export const faq: Faq[] = [
 
 // For search engines and AI agents, which want the full picture.
 export const features = [
-  "Vertical 9:16 canvas, plus 16:9, 1:1 and 4:5",
+  "Opens CapCut drafts from your computer, with their clips, cuts, speed, volume, keyframes, texts, captions and transitions",
+  "Vertical 9:16 canvas, plus 16:9, 1:1 and 4:5, and Reframe, which keeps the speaker's face in frame when the ratio changes",
   "Opens phone and camera footage, including HEVC, H.264, variable frame rate, rotated and front camera video",
   "Magnetic main track with overlay video, audio and text tracks",
-  "Trim, split, move and delete with snapping, undo and redo",
+  "Trim, split, move, copy and paste with snapping, undo and redo, and Versions to bring back an earlier state",
   "Edit by text: delete words in the transcript and the video cuts with them",
+  "Remove retakes and pauses, including filler words inside sentences and hesitations the transcript doesn't show",
   "Keyframes, speed, entry and exit animations, transitions and filter presets",
-  "Text with outline, background box, colour, position, rotation and opacity",
-  "Auto captions on your computer with no limit, a choice of models for your language, a list of the names and words you use, seven caption styles and a highlight on the spoken word",
-  "Clean voice for speech recorded with room noise or hum",
+  "Text with outline, background box, colour, position, rotation and opacity, plus built-in stickers and emoji that work offline",
+  "Auto captions on your computer with no limit, a choice of models for your language, a list of the names and words you use, 19 caption styles plus your own, key word colours and a highlight on the spoken word",
+  "Clean voice, Reduce echo, Even out volume and Match loudness",
+  "Background: blur, a colour or an image behind the person in a video",
+  "Reels from a long video: AI finds the moments, you trim them by words, and each becomes its own 9:16 project",
+  "Covers and thumbnails: a 9:16 cover and a 16:9 YouTube thumbnail with text behind the person, Pick for me and Make it with AI",
+  "A sound library of CC0 and CC BY music and effects from Openverse and Freesound, with credits to copy, and built-in effects that work offline",
+  "Music and video from a YouTube or YouTube Music link you have the rights to, video up to 1080p",
   "Real-time preview with sound",
   "MP4 export from 720p to 4K with no watermark, drawn by the same renderer as the preview",
   "Reels and TikTok preset: 1080 × 1920 at 30 fps, sound levelled to −14 LUFS",
   "Saves after every edit and recovers after a crash",
-  "AI agents edit the open project through MCP: Claude Code, Codex or any MCP client, with one undo per run (not on Windows yet)",
-  "Learns how a creator edits from their finished cuts into an EDIT.md that agents follow",
+  "AI editing in the app: sign in with ChatGPT, or use Claude Code, Codex or any MCP client, with one undo per run (not on Windows yet)",
+  "Learns how a creator edits from their finished cuts or CapCut drafts into an EDIT.md that agents follow",
+  "Updates install from inside the app in one click",
 ];
 
 // What the comparison page says about CapCut was checked against capcut.com/pricing, CapCut's help centre
@@ -102,15 +112,19 @@ export const comparison: { label: string; nuzky: string; capcut: string }[] = [
   },
   {
     label: "AI editing",
-    nuzky: "Type what to cut and watch it work. Uses your Claude or ChatGPT plan. Not on Windows yet.",
+    nuzky: "Type what to cut and watch it work. Sign in with ChatGPT inside the app, or use Claude Code or Codex, on the plan you already have. Not on Windows yet.",
     capcut: "Built-in AI tools, paid with credits",
   },
   {
     label: "Templates and effects",
-    nuzky: "Filters, transitions, animations and seven caption styles. No template library.",
+    nuzky: "Filters, transitions, animations, stickers and 19 caption styles. No template library.",
     capcut: "A large library of templates, effects and stickers",
   },
-  { label: "Where it runs", nuzky: "Mac (Apple silicon), Windows and Linux", capcut: "Phones, Mac, Windows and the web" },
+  {
+    label: "Where it runs",
+    nuzky: "Mac with Apple silicon (tested), Linux (partly tested) and Windows (not tested yet)",
+    capcut: "Phones, Mac, Windows and the web",
+  },
 ];
 
 export const pickNuzky = [
@@ -120,12 +134,7 @@ export const pickNuzky = [
   "You'd like AI to do the boring first cut",
 ];
 
-export const pickCapcut = [
-  "You edit on your phone",
-  "You build videos from templates, effects and stickers",
-  "You need your projects on every device",
-  "You need an app you can download today",
-];
+export const pickCapcut = ["You edit on your phone", "You build videos from templates and effects", "You need your projects on every device"];
 
 export const fromCapcut = [
   { title: "The same layout", text: "Media on the left, the preview in the middle, settings on the right and the timeline at the bottom." },
@@ -136,7 +145,7 @@ export const fromCapcut = [
 export const capcutFaq: Faq[] = [
   {
     q: "Can I open my CapCut projects in Nuzky?",
-    a: "No. Bring your original clips and edit them again. CapCut templates and stickers don't come along.",
+    a: `Yes, the CapCut drafts on your computer. ${capcutDraftParts} come over. A list names anything that didn't, like effects and colour adjustments, and the draft in CapCut stays as it was.`,
   },
   {
     q: "Are CapCut's auto captions free?",

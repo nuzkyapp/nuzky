@@ -1,7 +1,8 @@
 import { llmsTxt, markdownResponse } from "@/lib/markdown";
+import { getRelease } from "@/lib/site";
 
 export const dynamic = "force-static";
 
-export function GET() {
-  return markdownResponse(llmsTxt(), { plain: true });
+export async function GET() {
+  return markdownResponse(llmsTxt(await getRelease()), { plain: true });
 }

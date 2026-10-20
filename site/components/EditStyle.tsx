@@ -2,7 +2,7 @@ import Image from "next/image";
 import { ChevronRight, FileText, Sparkles } from "lucide-react";
 import { SectionHeading } from "./SectionHeading";
 
-// How the style learner works, left to right: the creator's own cuts, the EDIT.md it writes from them,
+// How the style learner works, left to right: the creator's own cuts or CapCut drafts, the EDIT.md it writes from them,
 // and the next recording cut by an agent that follows it. Each rule is one `style learn` can write
 // (crates/analysis/src/style/learn.rs): it measures caption length and position and zoom scale and rate,
 // not caption looks or what is on screen.
@@ -11,9 +11,9 @@ import { SectionHeading } from "./SectionHeading";
 type Recording = { name: string; from: string; to: string; parts: [0 | 1, number][] };
 
 const cuts: Recording[] = [
-  { name: "IMG_3104.MOV", from: "4:12", to: "0:41", parts: [[1, 5], [0, 9], [1, 3], [0, 14], [1, 4], [0, 8], [1, 2], [0, 22], [1, 4], [0, 29]] },
-  { name: "IMG_3117.MOV", from: "3:05", to: "0:34", parts: [[0, 6], [1, 6], [0, 12], [1, 3], [0, 18], [1, 5], [0, 7], [1, 4], [0, 39]] },
-  { name: "IMG_3131.MOV", from: "5:40", to: "0:52", parts: [[1, 4], [0, 16], [1, 5], [0, 6], [1, 2], [0, 25], [1, 3], [0, 10], [1, 2], [0, 27]] },
+  { name: "Talking reel", from: "4:12", to: "0:41", parts: [[1, 5], [0, 9], [1, 3], [0, 14], [1, 4], [0, 8], [1, 2], [0, 22], [1, 4], [0, 29]] },
+  { name: "Selfie Q&A", from: "3:05", to: "0:34", parts: [[0, 6], [1, 6], [0, 12], [1, 3], [0, 18], [1, 5], [0, 7], [1, 4], [0, 39]] },
+  { name: "Ridge sunrise", from: "5:40", to: "0:52", parts: [[1, 4], [0, 16], [1, 5], [0, 6], [1, 2], [0, 25], [1, 3], [0, 10], [1, 2], [0, 27]] },
 ];
 const next: Recording = { name: "IMG_3188.MOV", from: "3:48", to: "0:39", parts: [[1, 4], [0, 11], [1, 4], [0, 9], [1, 3], [0, 20], [1, 4], [0, 8], [1, 2], [0, 35]] };
 
@@ -65,14 +65,22 @@ export function EditStyle() {
   return (
     <section id="style" className="mx-auto w-full max-w-[1240px] scroll-mt-10 px-5 pt-32 sm:pt-[180px]">
       <SectionHeading center first="It learns how you edit." second="Then cuts the next video your way." />
-      <p className="mx-auto mt-6 max-w-[640px] text-center text-[17px] leading-[1.55] text-muted">
-        Give Nuzky a few raw recordings and the videos you cut from them. It writes down how you edit, with examples from your own videos, and your AI
-        follows it on every new video. Change a line, and the next cut changes with it.
+      <p className="mx-auto mt-6 max-w-[660px] text-center text-[17px] leading-[1.55] text-muted">
+        Give Nuzky a few raw recordings and the videos you cut from them, or just your CapCut drafts. It writes down how you edit, with examples from
+        your own videos, and your AI follows it on every new video. Change a line, and the next cut changes with it.
       </p>
 
       <div className="surface mt-12 grid gap-10 rounded-3xl p-7 sm:p-9 md:grid-cols-[1fr_auto_1fr_auto_1fr] md:gap-6">
-        <Step n={1} text="Your recordings and the videos you cut from them">
+        <Step n={1} text="Your recordings and the videos you cut from them, or your CapCut drafts">
           <div className="flex w-full max-w-[300px] flex-col gap-5">
+            {/* Your style's Learn my style takes videos, CapCut drafts or an .otio timeline. */}
+            <div aria-hidden className="flex rounded-[9px] bg-white/[0.045] p-0.5 text-[11.5px] font-medium">
+              {["Videos", "CapCut", ".otio"].map((t) => (
+                <span key={t} className={`flex-1 rounded-[7px] py-[5px] text-center ${t === "CapCut" ? "bg-white/15" : "text-muted"}`}>
+                  {t}
+                </span>
+              ))}
+            </div>
             {cuts.map((r) => (
               <Bar key={r.name} r={r} />
             ))}

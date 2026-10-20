@@ -1,5 +1,5 @@
 import Image from "next/image";
-import { ArrowRight, Check, Equal, HardDrive, MoveHorizontal, Scale, Scissors, Sparkles, Type } from "lucide-react";
+import { ArrowRight, Check, Equal, HardDrive, History as VersionsIcon, Scale } from "lucide-react";
 import { Fit } from "./Fit";
 import { GitHubLogo } from "./Logos";
 import { SectionHeading } from "./SectionHeading";
@@ -114,7 +114,7 @@ function SameRender() {
 
 // The caption model picker: the visitor's language is the point, so the caption is in Czech.
 function Language() {
-  const languages = ["English", "Čeština", "Español"];
+  const languages = ["English", "Čeština"];
   return (
     <>
       <div className="flex w-[250px] flex-col gap-0.5 rounded-[12px] bg-panel p-1 ring-1 ring-inset ring-white/[0.07]">
@@ -128,11 +128,22 @@ function Language() {
       <span lang="cs" className="rounded-md bg-black/70 px-2.5 py-1 text-[15px] font-extrabold ring-1 ring-white/10">
         a pak jsme vylezli až <span className="text-caption-yellow">nahoru</span>
       </span>
+      {/* Three of the 19 caption styles, in their own colours (assets/presets/captions.json). */}
+      <div aria-hidden className="flex gap-1.5">
+        <span className="flex h-8 items-center rounded-[8px] bg-raised px-2.5 text-[11px] font-black ring-1 ring-inset ring-white/[0.06]">
+          Hormozi <span className="ml-1 text-[#3ce35a]">green</span>
+        </span>
+        <span className="flex h-8 items-center rounded-[8px] bg-raised px-2.5 text-[11px] font-black ring-1 ring-inset ring-white/[0.06]">
+          <span className="rounded-[3px] bg-[#ffd400] px-1 text-black">Yellow box</span>
+        </span>
+        <span className="flex h-8 items-center rounded-[8px] bg-raised px-2.5 text-[11px] font-black text-[#ff8cf0] ring-1 ring-inset ring-white/[0.06]">Neon</span>
+        <span className="flex h-8 items-center rounded-[8px] px-2 text-[11px] font-medium text-muted ring-1 ring-inset ring-white/[0.06]">+16</span>
+      </div>
     </>
   );
 }
 
-function Loudness() {
+function Voice() {
   return (
     <>
       <div className="flex h-14 items-end gap-[3px]" aria-hidden>
@@ -147,22 +158,22 @@ function Loudness() {
           />
         ))}
       </div>
-      <div className="flex gap-1.5">
-        <Chip>Reels</Chip>
-        <Chip>TikTok</Chip>
-        <Chip>Shorts</Chip>
-        <Chip>YouTube</Chip>
+      <div className="flex max-w-[300px] flex-wrap justify-center gap-1.5">
+        <Chip>Clean voice</Chip>
+        <Chip>Reduce echo</Chip>
+        <Chip>Even out volume</Chip>
+        <Chip>Match loudness</Chip>
       </div>
     </>
   );
 }
 
-function History() {
+function Versions() {
   const rows = [
-    [Scissors, "Split IMG_2044.MOV", "now", 1],
-    [Type, "Edit caption “first light”", "12 s", 0.75],
-    [MoveHorizontal, "Trim IMG_2041.MOV", "40 s", 0.5],
-    [Sparkles, "Claude Code · 21 changes", "2 min", 0.3],
+    ["Now", "21 changes", 1],
+    ["Today, 12:20", "Restore", 0.8],
+    ["Yesterday, 18:05", "", 0.6],
+    ["Oct 14, 09:12", "", 0.4],
   ] as const;
   return (
     <div className="flex w-[290px] flex-col items-center gap-3">
@@ -172,11 +183,18 @@ function History() {
         <Check className="size-3.5 text-ok" />
       </span>
       <div className="w-full rounded-[14px] bg-panel p-1.5 ring-1 ring-inset ring-white/[0.07]">
-        {rows.map(([I, t, when, o], i) => (
-          <div key={t} className={`flex h-8 items-center gap-[9px] rounded-lg px-2.5 text-[12px] ${i === 0 ? "bg-white/5" : ""}`} style={{ opacity: o }}>
-            <I className={`size-[13px] ${I === Sparkles ? "text-accent" : "text-muted"}`} />
-            <span className="flex-1 truncate">{t}</span>
-            <span className="text-[11px] text-muted">{when}</span>
+        <span className="flex h-7 items-center gap-2 px-2.5 text-[11px] font-semibold text-muted">
+          <VersionsIcon className="size-3" />
+          Versions
+        </span>
+        {rows.map(([when, what, o], i) => (
+          <div key={when} className={`flex h-8 items-center gap-[9px] rounded-lg px-2.5 text-[12px] ${i === 0 ? "bg-white/5" : ""}`} style={{ opacity: o }}>
+            <span className="flex-1">{when}</span>
+            {what === "Restore" ? (
+              <span className="flex h-6 items-center rounded-full bg-white/[0.09] px-2.5 text-[11px] font-medium ring-1 ring-inset ring-white/[0.07]">Restore</span>
+            ) : (
+              <span className="text-[11px] text-muted">{what}</span>
+            )}
           </div>
         ))}
       </div>
@@ -224,6 +242,22 @@ function Free() {
   );
 }
 
+// The rest of the release, in a list instead of a wall of tiles.
+const more = [
+  ["Reels from a long video", "AI finds the moments that work on their own. Trim them by words, and Nuzky makes each one its own 9:16 project."],
+  ["Reframe", "Change the ratio and the speaker's face stays in the frame."],
+  ["Background", "Blur what's behind you, or put a colour or an image there."],
+  ["Music and video from YouTube", "Paste a YouTube or YouTube Music link to something that's yours to use. Video comes in at up to 1080p, whole or just a part."],
+  ["A sound library", "Search Openverse and Freesound for CC0 and CC BY music and effects, and copy the credits. The built-in effects work offline."],
+  ["Stickers and emoji", "Built in, searchable, and they work offline."],
+  ["Remove retakes and pauses", "Also cuts the filler words inside sentences and the hesitations the transcript doesn't show."],
+  ["A recap of every cut", "Export a short video of everything that was cut."],
+  ["Copy and paste", "Copy clips, or just their settings, and paste them anywhere in the project."],
+  ["Project status", "A checklist in the inspector shows what's left: speech, captions, zooms, music and the cover."],
+  ["Updates in one click", "Nuzky tells you when a new version is out and installs it from inside the app."],
+  ["Exports for every feed", "1080 × 1920 for Reels, TikTok and Shorts, or widescreen up to 4K. Never a watermark."],
+];
+
 export function Features() {
   return (
     <section id="features" className="mx-auto w-full max-w-[1240px] scroll-mt-10 px-5 pt-32 sm:pt-[180px]">
@@ -238,18 +272,33 @@ export function Features() {
         <Tile title="What you see is what you export" text="The file you post looks exactly like the preview.">
           <SameRender />
         </Tile>
-        <Tile title="Captions in your language" text="Pick your language and the model that knows it best, and tell it the names you use. It runs on your computer, with no limit.">
+        <Tile
+          title="Captions in your language"
+          text="The model that knows your language writes them on your computer, with no limit. Pick one of 19 styles or save your own, and colour the key words."
+        >
           <Language />
         </Tile>
-        <Tile title="As loud as the feed" text="Export levels your sound the way social apps expect, so nobody has to turn you up.">
-          <Loudness />
+        <Tile title="Clear voice, steady volume" text="Clean voice and Reduce echo fix the room. Even out volume and Match loudness keep you as loud as the rest of the feed.">
+          <Voice />
         </Tile>
-        <Tile tall title="Saves every edit" text="A crash or a closed window never costs you a cut.">
-          <History />
+        <Tile tall title="Saves every edit" text="A crash or a closed window never costs you a cut, and Versions bring back any earlier state.">
+          <Versions />
         </Tile>
         <Tile wide tall title="Free, for good" text="The code is public, so it stays free. Your videos stay on your computer while you edit, caption and export." backdrop={<Waves height={0.3} intensity={0.5} />}>
           <Free />
         </Tile>
+      </div>
+
+      <div className="mt-20">
+        <h3 className="text-[24px] font-semibold tracking-[-0.025em]">Also in Nuzky</h3>
+        <dl className="mt-6 grid border-t border-white/[0.08] sm:grid-cols-2 sm:gap-x-10 lg:grid-cols-3">
+          {more.map(([t, d]) => (
+            <div key={t} className="flex flex-col gap-1 border-b border-white/[0.08] py-5">
+              <dt className="text-[15px] font-semibold">{t}</dt>
+              <dd className="text-[14px] leading-[1.5] text-muted">{d}</dd>
+            </div>
+          ))}
+        </dl>
       </div>
     </section>
   );

@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Captions, Plus, Scissors, Sparkles, Upload } from "lucide-react";
-import { AgentPanel } from "./AgentPanel";
+import { Captions, ChevronDown, Film, ImagePlus, Plus, Scissors, Upload, X } from "lucide-react";
 import { EditorMock, type EditorFocus } from "./EditorMock";
 import { Fit, type FitView } from "./Fit";
 import { usePlaying } from "@/lib/playing";
@@ -20,32 +19,44 @@ const tabs: Tab[] = [
     id: "edit",
     label: "Edit",
     icon: Scissors,
-    summary: "A timeline, a live preview and an inspector, laid out the way you already know.",
+    summary: "A timeline, a live preview and an inspector, laid out the way you know from CapCut.",
     spots: [
-      { x: 500, y: 656, title: "Magnetic timeline", text: "Clips snap together and every cut lands on the exact frame, even in phone video.", view: { x: 482, y: 600, w: 331 } },
-      { x: 306, y: 280, title: "Your media", text: "Drop in video, sound and images. Phone footage opens the right way up.", view: { x: 150, y: 219, w: 312 } },
-      { x: 934, y: 292, title: "Inspector", text: "Scale, opacity, volume and speed, each with a value you can type.", view: { x: 1064, y: 226, w: 284 } },
+      { x: 712, y: 618, title: "Magnetic timeline", text: "Clips snap together and every cut lands on the exact frame, even in phone video.", view: { x: 640, y: 610, w: 360 } },
+      { x: 352, y: 171, title: "Your media, and YouTube", text: "Drop in video, sound and images, or paste a YouTube link to something that's yours to use.", side: "right", view: { x: 181, y: 230, w: 350 } },
+      { x: 1049, y: 300, title: "Inspector", text: "Video, Adjust, Speed, Animation and Audio, with a value you can type beside every slider.", side: "left", view: { x: 1049, y: 284, w: 300 } },
     ],
   },
   {
     id: "captions",
     label: "Captions",
     icon: Captions,
-    summary: "Whisper writes the captions on your computer and puts each line on the timeline as a clip.",
+    summary: "AI on your computer writes the captions and puts each line on the timeline as a clip.",
     spots: [
-      { x: 680, y: 344, title: "Captions in one click", text: "One click transcribes the speech. The spoken word lights up as it plays.", side: "above", view: { x: 620, y: 258, w: 360 } },
-      { x: 236, y: 573, title: "A clip per line", text: "Fix a word or move a line right on the timeline.", view: { x: 120, y: 640, w: 264 } },
-      { x: 934, y: 482, title: "Caption styles", text: "Bold, Clean or Pop, or make your own.", view: { x: 1064, y: 341, w: 280 } },
+      { x: 300, y: 318, title: "19 styles, or your own", text: "Pick a style, save your own look, and colour the key words.", side: "right", view: { x: 181, y: 220, w: 350 } },
+      { x: 572, y: 571, title: "A clip per line", text: "Fix a word or move a line right on the timeline.", side: "above", view: { x: 480, y: 580, w: 360 } },
+      { x: 745, y: 329, title: "The spoken word lights up", text: "Each word lights up as you say it, in the preview and in the export.", side: "right", view: { x: 630, y: 260, w: 330 } },
     ],
   },
   {
-    id: "agent",
-    label: "AI agent",
-    icon: Sparkles,
-    summary: "Claude Code or Codex edits the open project while you watch. One undo takes the whole run back.",
+    id: "reels",
+    label: "Reels",
+    icon: Film,
+    summary: "One long video becomes several reels. AI finds the moments, and you trim them by words.",
     spots: [
-      { x: 854, y: 110, title: "Your agent, in the app", text: "Connect Claude Code or Codex in one click. Any other MCP client works too.", side: "left", view: { x: 1024, y: 246, w: 330 } },
-      { x: 854, y: 428, title: "One undo", text: "Every change the agent made goes back in one step.", side: "left", view: { x: 1024, y: 406, w: 330 } },
+      { x: 285, y: 556, title: "AI finds the moments", text: "Each reel opens on a hook and says why it works. Check the ones you want.", side: "above", view: { x: 300, y: 620, w: 430 } },
+      { x: 181, y: 310, title: "Trim by words", text: "Click a word to play from it, and move the start or the end a word at a time.", side: "right", view: { x: 181, y: 250, w: 350 } },
+      { x: 1186, y: 517, title: "Each one its own project", text: "Make 2 reels writes two 9:16 projects. The long video stays as it was.", side: "above", view: { x: 960, y: 560, w: 470 } },
+    ],
+  },
+  {
+    id: "cover",
+    label: "Cover",
+    icon: ImagePlus,
+    summary: "A 9:16 cover and a 16:9 YouTube thumbnail, made from a frame of your video.",
+    spots: [
+      { x: 84, y: 616, title: "Cover first", text: "The cover sits before your first clip, as in CapCut. Click it to make one.", side: "right", view: { x: 200, y: 610, w: 380 } },
+      { x: 330, y: 197, title: "Pick for me", text: "Nuzky looks through the video for sharp, well framed frames of you, best first. Or let AI make the whole cover.", side: "right", view: { x: 181, y: 260, w: 350 } },
+      { x: 908, y: 246, title: "Text behind you", text: "Put the title behind the person, draw a line around them, or blur what's behind. Export it as PNG or JPEG.", side: "left", view: { x: 1049, y: 230, w: 300 } },
     ],
   },
   {
@@ -54,8 +65,9 @@ const tabs: Tab[] = [
     icon: Upload,
     summary: "Export for Reels, TikTok or YouTube in one click. The file looks exactly like the preview.",
     spots: [
-      { x: 380, y: 300, title: "Same renderer", text: "The same renderer draws the preview and the export.", side: "left", view: { x: 600, y: 333, w: 480 } },
-      { x: 820, y: 360, title: "Made for Reels and TikTok", text: "1080 × 1920 at 30 fps, with the sound as loud as the rest of the feed.", side: "right", view: { x: 600, y: 333, w: 480 } },
+      { x: 720, y: 343, title: "Made for Reels and TikTok", text: "1080 × 1920 at 30 fps, with the sound as loud as the rest of the feed.", side: "right", view: { x: 600, y: 370, w: 500 } },
+      { x: 380, y: 260, title: "Same renderer", text: "The same renderer draws the preview and the export.", side: "left", view: { x: 600, y: 370, w: 500 } },
+      { x: 840, y: 271, title: "Cover and recap too", text: "Export the cover as a picture, or a short video of everything that was cut.", side: "right", view: { x: 600, y: 370, w: 500 } },
     ],
   },
 ];
@@ -71,36 +83,62 @@ function tipPosition(s: Spot): React.CSSProperties {
   return s.side === "above" || s.y > 420 ? { left, bottom: 740 - s.y + 30 } : { left, top: s.y + 30 };
 }
 
+function Choice({ items, on }: { items: string[]; on: number }) {
+  return (
+    <div className="flex flex-1 rounded-[9px] bg-white/[0.045] p-0.5">
+      {items.map((t, i) => (
+        <span key={t} className={`flex-1 rounded-[7px] py-1.5 text-center text-[12px] font-medium ${i === on ? "bg-white/15" : "text-muted"}`}>
+          {t}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// The app's Export dialog on the Reels & TikTok preset.
 function ExportDialog() {
-  const rows = [
-    ["Size", "1080 × 1920"],
-    ["Frame rate", "30 fps"],
-    ["Loudness", "−14 LUFS · −1 dBTP"],
-    ["Format", "MP4 · H.264 + AAC"],
-    ["Save to", "Movies/morning-run.mp4"],
+  const rows: [string, React.ReactNode][] = [
+    ["Export", <Choice key="e" items={["Video", "Cover", "Recap"]} on={0} />],
+    [
+      "Preset",
+      <span key="p" className="flex h-[30px] flex-1 items-center justify-between rounded-[8px] bg-white/[0.07] px-3 text-[12px] ring-1 ring-inset ring-white/[0.08]">
+        Reels &amp; TikTok
+        <ChevronDown className="size-3.5 text-muted" />
+      </span>,
+    ],
+    ["Resolution", <Choice key="r" items={["720p", "1080p", "1440p", "4K"]} on={1} />],
+    ["Frame rate", <Choice key="f" items={["24", "25", "30", "50", "60"]} on={2} />],
+    ["Quality", <Choice key="q" items={["High", "Recommended", "Smaller file"]} on={1} />],
   ];
   return (
-    <div className="absolute inset-0 flex items-center justify-center rounded-[14px] bg-black/45 animate-[fade-up_200ms_ease-out] max-md:pb-12">
-      <div className="flex w-[440px] flex-col gap-[18px] rounded-[20px] bg-[#232327] p-6 text-left shadow-[0_24px_60px_rgb(0_0_0/0.6)] ring-1 ring-white/10">
-        <span className="text-[17px] font-semibold">Export</span>
-        <div className="flex rounded-[9px] bg-white/[0.045] p-0.5">
-          {["Reels & TikTok", "Original", "Custom"].map((t, i) => (
-            <span key={t} className={`flex-1 rounded-[7px] py-1.5 text-center text-[12px] font-medium ${i === 0 ? "bg-white/15" : "text-muted"}`}>
-              {t}
-            </span>
-          ))}
+    <div className="absolute inset-0 flex items-center justify-center rounded-[14px] bg-black/45 animate-[fade-up_200ms_ease-out]">
+      <div className="flex w-[480px] flex-col gap-4 rounded-[20px] bg-[#232327] p-6 text-left shadow-[0_24px_60px_rgb(0_0_0/0.6)] ring-1 ring-white/10">
+        <div className="flex items-start justify-between">
+          <div className="flex flex-col gap-1">
+            <span className="text-[17px] font-semibold">Export video</span>
+            <span className="text-[12px] tabular-nums text-muted">MP4 · H.264 + AAC · 9:16 · 00:30.00</span>
+          </div>
+          <X className="size-4 text-muted" />
         </div>
         <div className="flex flex-col gap-2.5">
-          {rows.map(([a, b]) => (
-            <div key={a} className="flex items-center gap-4 text-[13px]">
-              <span className="w-24 text-right text-muted">{a}</span>
-              <span className="tabular-nums">{b}</span>
+          {rows.map(([label, control], i) => (
+            <div key={label} className="flex flex-col gap-1.5">
+              <div className="flex items-center gap-3">
+                <span className="w-[76px] shrink-0 text-right text-[12px] text-muted">{label}</span>
+                {control}
+              </div>
+              {i === 1 && <span className="pl-[88px] text-[11.5px] text-muted">Loudness −14 LUFS, applied to the file</span>}
             </div>
           ))}
         </div>
-        <div className="flex justify-end gap-2.5 pt-1.5">
-          <span className="flex h-8 items-center rounded-full bg-white/[0.09] px-4 text-[13px] font-medium ring-1 ring-inset ring-white/[0.07]">Cancel</span>
-          <span className="flex h-8 items-center rounded-full bg-accent-strong px-4 text-[13px] font-medium text-white">Export</span>
+        <div className="flex items-center justify-between border-t border-white/[0.07] pt-4">
+          <span className="text-[12px] text-muted">
+            about <span className="font-semibold text-fg">12 MB</span>
+          </span>
+          <div className="flex gap-2.5">
+            <span className="flex h-8 items-center rounded-full bg-white/[0.09] px-4 text-[13px] font-medium ring-1 ring-inset ring-white/[0.07]">Close</span>
+            <span className="flex h-8 items-center rounded-full bg-accent-strong px-4 text-[13px] font-medium text-white">Export…</span>
+          </div>
         </div>
       </div>
     </div>
@@ -190,7 +228,7 @@ export function Showcase() {
         <h2 className="heading-lg">
           Everything where you expect it.
           <br />
-          <span className="text-subtle">And an agent that edits with you.</span>
+          <span className="text-subtle">From the first cut to the cover.</span>
         </h2>
 
         <div role="tablist" aria-label="Editor tour" className="glass flex h-12 max-w-full items-center gap-0.5 overflow-x-auto rounded-full p-[5px] no-scrollbar">
@@ -226,11 +264,6 @@ export function Showcase() {
           >
             <div className="relative size-full rounded-[14px] shadow-[0_50px_140px_rgb(0_0_0/0.9),0_0_0_1px_rgb(255_255_255/0.08)]">
               <EditorMock focus={tab.id} framed />
-              {tab.id === "agent" && (
-                <div className="absolute bottom-1.5 right-1.5 top-[84px] w-[340px] animate-[fade-up_240ms_ease-out] shadow-[0_30px_60px_rgb(0_0_0/0.55)]">
-                  <AgentPanel compact className="h-full ring-white/[0.12]" />
-                </div>
-              )}
               {tab.id === "export" && <ExportDialog />}
 
               {tab.spots.map((s, i) => (

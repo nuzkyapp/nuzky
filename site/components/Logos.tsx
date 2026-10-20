@@ -30,4 +30,4 @@ export const GitHubLogo = (p: MarkProps) => <Mark d={github} {...p} />;
 export const ClaudeCodeLogo = (p: MarkProps) => <Mark d={claudeCode} {...p} />;
 export const OpenAILogo = (p: MarkProps) => <Mark d={openai} {...p} />;
 
-export const platformLogo = { macos: AppleLogo, windows: WindowsLogo, linux: LinuxLogo } as const;
+export const systemLogo = { mac: AppleLogo, windows: WindowsLogo, linux: LinuxLogo } as const;

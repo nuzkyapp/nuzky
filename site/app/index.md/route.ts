@@ -1,7 +1,8 @@
 import { homeMarkdown, markdownResponse } from "@/lib/markdown";
+import { getRelease } from "@/lib/site";
 
 export const dynamic = "force-static";
 
-export function GET() {
-  return markdownResponse(homeMarkdown(), { canonical: "/" });
+export async function GET() {
+  return markdownResponse(homeMarkdown(await getRelease()), { canonical: "/" });
 }

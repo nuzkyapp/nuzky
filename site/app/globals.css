@@ -208,6 +208,20 @@
   }
 }
 
+/* The visitor's system, which GetNuzky.tsx names on <html> before the first paint: an element with `data-show` shows only
+   for the systems it lists, and without the script the page shows the "unknown" state. Outside the layers, so it beats
+   the display utilities on the same element. */
+html:not([data-os]) [data-show]:not([data-show~="unknown"]),
+html[data-os="unknown"] [data-show]:not([data-show~="unknown"]),
+html[data-os="mac"] [data-show]:not([data-show~="mac"]),
+html[data-os="intel"] [data-show]:not([data-show~="intel"]),
+html[data-os="windows"] [data-show]:not([data-show~="windows"]),
+html[data-os="linux"] [data-show]:not([data-show~="linux"]),
+html[data-os="arm"] [data-show]:not([data-show~="arm"]),
+html[data-os="phone"] [data-show]:not([data-show~="phone"]) {
+  display: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

@@ -4,12 +4,10 @@ import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { Fit } from "./Fit";
-import { GitHubLogo } from "./Logos";
-import { NotifyForm } from "./NotifyForm";
-import { notifyNote } from "@/lib/content";
+import { HeroDownload } from "./GetNuzky";
 import { fitSizes } from "@/lib/fit";
 import { usePlaying } from "@/lib/playing";
-import { repo } from "@/lib/site";
+import type { Release } from "@/lib/site";
 
 // One sunrise on one ridge runs through every step, so what goes in is what comes out: tile-2 is the summit
 // clip the reel shows, its last take is the one kept, and its words are the captions. The two photos are crops
@@ -256,43 +254,33 @@ function PipelineNarrow({ spoken }: { spoken: Spoken }) {
   );
 }
 
-export function Hero() {
+export function Hero({ release }: { release: Release }) {
   const section = useRef<HTMLElement>(null);
   const spoken = useSpokenWord(usePlaying(section));
 
   return (
     <section ref={section} className="relative">
-      <div className="relative z-10 flex flex-col items-center px-5 pt-12 text-center sm:pt-24">
+      <div className="relative z-10 flex flex-col items-center px-5 pt-12 text-center sm:pt-20">
         <h1 className="heading-xl">
           Recording is the fun part.
           <br />
           <span className="text-subtle">Nuzky does the boring one.</span>
         </h1>
-        <p className="mt-7 max-w-[560px] text-[17px] text-muted sm:text-[20px]">
-          A free desktop video editor. Your own ChatGPT or Claude cuts while you watch, and one undo takes it all back.
+        <p className="mt-7 max-w-[600px] text-[17px] text-muted sm:text-[20px]">
+          A free desktop video editor that opens your CapCut drafts. Your own ChatGPT or Claude cuts while you watch, and one undo takes it all back.
         </p>
 
-        <div data-waves="swell" className="mt-12 flex w-full justify-center sm:mt-16">
+        <div className="mt-10 w-full sm:mt-11">
+          <HeroDownload release={release} />
+        </div>
+
+        <div data-waves="swell" className="mt-14 flex w-full justify-center sm:mt-20">
           <Fit width={WIDE} height={330} className="hidden lg:block">
             <Pipeline spoken={spoken} />
           </Fit>
           <Fit width={NARROW} height={308} className="lg:hidden">
             <PipelineNarrow spoken={spoken} />
           </Fit>
-        </div>
-
-        <div className="mt-12 flex flex-col items-center gap-3.5 sm:mt-16">
-          {/* Not released yet: the email field takes the download's place until the first build ships. */}
-          <div className="flex w-full max-w-[400px] flex-col items-center gap-3 sm:max-w-none sm:flex-row sm:items-start sm:justify-center">
-            <NotifyForm id="notify" noteId="hero-notify-note" />
-            <a href={repo} className="glass flex h-12 shrink-0 items-center gap-2 rounded-full px-[22px] text-[15px] font-semibold transition-colors hover:bg-white/10">
-              <GitHubLogo className="size-[17px]" />
-              Star on GitHub
-            </a>
-          </div>
-          <p id="hero-notify-note" className="max-w-[460px] text-[14px] leading-[1.5] text-muted">
-            Coming soon for Mac, Windows and Linux. {notifyNote}
-          </p>
         </div>
       </div>
     </section>

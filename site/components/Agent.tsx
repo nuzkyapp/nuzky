@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
-import { CircleCheck, Loader } from "lucide-react";
+import { CircleCheck, Sparkles } from "lucide-react";
 import { AgentPanel, Run, doneStage, exchanges } from "./AgentPanel";
 import { ClaudeCodeLogo, OpenAILogo } from "./Logos";
 import { SectionHeading } from "./SectionHeading";
@@ -66,8 +66,12 @@ export function Agent() {
   return (
     <section id="agents" ref={section} className="mx-auto w-full max-w-[1240px] scroll-mt-10 px-5 pt-32 sm:pt-[180px]">
       <SectionHeading center first="Or hand the cut to ChatGPT or Claude." second="You watch, and one undo takes it all back." />
-      <div className="mt-10 flex flex-col gap-4 lg:h-[560px] lg:flex-row">
-        <AgentPanel className="h-[560px] lg:h-auto lg:w-[440px] lg:shrink-0" draft={stage === TYPING ? current.ask.slice(0, typed) : ""}>
+      <div className="mt-10 flex flex-col gap-4 lg:h-[580px] lg:flex-row">
+        <AgentPanel
+          className="h-[580px] lg:h-auto lg:w-[440px] lg:shrink-0"
+          draft={stage === TYPING ? current.ask.slice(0, typed) : ""}
+          working={working ? `0:${String(stage + 1).padStart(2, "0")}` : undefined}
+        >
           {history.map((k) => (
             <Run key={k} x={at(k)} stage={doneStage(at(k))} latest={k === n - 1 && stage === TYPING} />
           ))}
@@ -75,12 +79,14 @@ export function Agent() {
         </AgentPanel>
         <div className="flex min-w-0 flex-1 flex-col gap-4">
           <div className="surface flex flex-1 flex-col justify-center gap-5 rounded-[20px] p-7">
-            <div className="capsule flex h-9 w-fit items-center gap-2 rounded-full pl-3.5 pr-1.5 text-[13px] font-medium">
+            <div className="capsule flex h-9 w-fit max-w-full items-center gap-2 rounded-full pl-3.5 pr-1.5 text-[13px] font-medium">
               {working ? (
                 <>
-                  <Loader className="size-3.5 animate-[spin_1.6s_linear_infinite] text-accent" />
-                  Claude Code is editing
-                  <span className="flex h-[26px] items-center rounded-full bg-white/[0.09] px-2.5 text-[12px]">Stop</span>
+                  <Sparkles className="size-3.5 shrink-0 text-accent" />
+                  <span className="truncate">
+                    AI is editing <span className="font-normal text-muted">· {current.title}</span>
+                  </span>
+                  <span className="flex h-[26px] shrink-0 items-center rounded-full bg-white/[0.09] px-2.5 text-[12px]">Stop and edit</span>
                 </>
               ) : (
                 <>
@@ -99,29 +105,40 @@ export function Agent() {
                 </div>
               ))}
             </div>
-            <p className="max-w-[420px] text-[14px] leading-[1.5] text-muted">
-              Every change goes through the same undo as yours. Your controls lock while it works and come back when it stops.
-            </p>
-          </div>
-          <div className="surface flex flex-col gap-3.5 rounded-[20px] px-7 py-6">
-            <span className="text-[15px] font-semibold">Connect your AI</span>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {[
-                { name: "ChatGPT", via: "with Codex", logo: <OpenAILogo className="size-[18px]" /> },
-                { name: "Claude", via: "with Claude Code", logo: <ClaudeCodeLogo className="size-[18px] text-claude" /> },
-              ].map(({ name, via, logo }) => (
-                <div key={name} className="flex h-12 items-center gap-2.5 rounded-[10px] bg-raised px-3.5 text-[13px] font-medium">
-                  {logo}
-                  <span className="flex-1">
-                    {name} <span className="font-normal text-muted">{via}</span>
-                  </span>
-                  <CircleCheck className="size-4 text-ok" />
-                </div>
-              ))}
+            <div className="flex max-w-[460px] flex-col gap-2 text-[14px] leading-[1.5] text-muted">
+              <p>Every change goes through the same undo as yours. Your controls lock while it works and come back when it stops.</p>
+              <p>Write to it while it works, attach a screenshot or a video, pick the model, and come back to past chats.</p>
             </div>
-            <span className="text-[13px] leading-[1.5] text-muted">
-              Runs on the ChatGPT or Claude plan you already pay for, with no credits to buy. The first time, Nuzky walks you through setting it up.
-            </span>
+          </div>
+          <div className="surface flex flex-col gap-4 rounded-[20px] px-7 py-6">
+            <span className="text-[15px] font-semibold">Connect your AI</span>
+            {/* A picture of the app's sign-in, in its blue, so nobody takes it for a button on this page. */}
+            <div aria-hidden className="flex flex-col gap-3 rounded-[14px] bg-panel p-4 ring-1 ring-inset ring-white/[0.07] sm:flex-row sm:items-center">
+              <span className="flex flex-1 items-center gap-3">
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-white/[0.07]">
+                  <OpenAILogo className="size-[18px]" />
+                </span>
+                <span className="flex flex-col">
+                  <span className="text-[13.5px] font-semibold">ChatGPT</span>
+                  <span className="text-[12px] text-muted">Uses your ChatGPT plan</span>
+                </span>
+              </span>
+              <span className="flex h-8 items-center justify-center rounded-[8px] bg-accent-strong px-3.5 text-[12.5px] font-medium text-white">Continue with ChatGPT</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px]">
+              <span className="text-muted">Already use one of these?</span>
+              <span className="flex items-center gap-1.5 font-medium">
+                <ClaudeCodeLogo className="size-4 text-claude" />
+                Claude Code
+              </span>
+              <span className="flex items-center gap-1.5 font-medium">
+                <OpenAILogo className="size-4" />
+                Codex
+              </span>
+            </div>
+            <p className="text-[13px] leading-[1.5] text-muted">
+              Sign in with ChatGPT inside Nuzky. No terminal, and no credits to buy. AI editing doesn&apos;t work on Windows yet.
+            </p>
           </div>
         </div>
       </div>

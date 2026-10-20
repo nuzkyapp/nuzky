@@ -1,11 +1,11 @@
 import Image from "next/image";
-import { buildFromSource, license, releaseNotes, repo } from "@/lib/site";
+import { buildFromSource, license, releases, repo } from "@/lib/site";
 
 export function Footer() {
   const links = [
     ["Nuzky vs CapCut", "/capcut-alternative"],
     ["GitHub", repo],
-    ["Releases", releaseNotes],
+    ["Releases", releases],
     ["Building from source", buildFromSource],
     ["License", license],
   ] as const;

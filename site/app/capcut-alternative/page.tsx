@@ -6,12 +6,12 @@ import { FaqList } from "@/components/Faq";
 import { Fit } from "@/components/Fit";
 import { Footer } from "@/components/Footer";
 import { JsonLd } from "@/components/JsonLd";
-import { GitHubLogo } from "@/components/Logos";
+import { HeroDownload } from "@/components/GetNuzky";
 import { Nav } from "@/components/Nav";
 import { SectionHeading } from "@/components/SectionHeading";
 import { Waves } from "@/components/Waves";
 import { capcutChecked, capcutFaq, capcutSources, comparison, fromCapcut, pickCapcut, pickNuzky } from "@/lib/content";
-import { releaseNotes, url } from "@/lib/site";
+import { getRelease, url } from "@/lib/site";
 
 const path = "/capcut-alternative";
 const title = "Nuzky vs CapCut: the open source CapCut alternative";
@@ -68,7 +68,8 @@ function Picks({ title, items, ours }: { title: string; items: string[]; ours: b
 
 const link = "underline decoration-white/20 underline-offset-4 transition-colors hover:text-fg";
 
-export default function CapcutAlternative() {
+export default async function CapcutAlternative() {
+  const release = await getRelease();
   return (
     <>
       <JsonLd data={structuredData} />
@@ -82,21 +83,14 @@ export default function CapcutAlternative() {
               <span className="text-subtle">CapCut alternative.</span>
             </h1>
             <p className="mt-7 max-w-[720px] text-[17px] text-muted sm:text-[20px]">
-              Nuzky is an open source video editor for TikTok, Reels, Shorts and YouTube. Captions, 4K export and every effect cost nothing, so export never asks you to
-              upgrade.
+              Nuzky is an open source video editor for TikTok, Reels, Shorts and YouTube, and it opens your CapCut drafts. Captions, 4K export and every effect cost
+              nothing, so export never asks you to upgrade.
             </p>
-            <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
-              <a href={releaseNotes} className="btn-light flex h-12 items-center gap-2 rounded-full px-6 text-[15px] font-semibold">
-                <GitHubLogo className="size-[17px]" />
-                Follow releases on GitHub
-              </a>
-              <a href="/#editor" className="glass flex h-12 items-center rounded-full px-[22px] text-[15px] font-semibold transition-colors hover:bg-white/10">
-                See the editor
-              </a>
+            <div className="mt-10 w-full">
+              <HeroDownload release={release} base="/" />
             </div>
-            <p className="mt-3.5 text-[14px] text-muted">Coming soon for macOS, Windows and Linux.</p>
 
-            <Fit width={1200} height={740} className="mt-14 sm:mt-16">
+            <Fit width={1200} height={740} className="mt-10 sm:mt-12">
               <div className="relative size-full rounded-[14px] shadow-[0_50px_140px_rgb(0_0_0/0.9),0_0_0_1px_rgb(255_255_255/0.08)]">
                 <EditorMock focus="edit" />
               </div>
