@@ -258,6 +258,79 @@ fn learns_the_creators_style_and_scores_cuts_against_it() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// Learned into Nuzky's own data folder, the style keeps what it was learned from, as the app's learning does: Your
+/// style shows how well the videos back each rule, and the same pair or timeline learned again counts once.
+#[test]
+#[ignore = "Recognises speech: needs ffmpeg, espeak-ng and the models in tmp-test/xdg/data/nuzky/models (scripts/fixtures.sh)"]
+fn learning_into_the_style_keeps_what_it_learned_from() {
+    let root = dunce::canonicalize(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap();
+    let dir = root.join("tmp-test/style-tests").join(format!("store-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let fixture = fixture(&dir);
+    let (otio, _) = timeline(&fixture);
+    // A data folder of its own, so the style written is never the one of tmp-test or of the user.
+    let nuzky_dir = dir.join("data/nuzky");
+    std::fs::create_dir_all(nuzky_dir.join("models")).unwrap();
+    for file in ["ggml-small.bin", "ggml-silero-v5.1.2.bin", "wav2vec2-base-960h.gguf"] {
+        let (from, to) = (data().join("nuzky/models").join(file), nuzky_dir.join("models").join(file));
+        std::fs::hard_link(&from, &to).or_else(|_| std::fs::copy(&from, &to).map(|_| ())).unwrap();
+    }
+    let learn = |more: &[&Path]| {
+        Command::new(env!("CARGO_BIN_EXE_nuzky"))
+            .args(["style", "learn"])
+            .args(more)
+            .args([&fixture.recording, &fixture.cut])
+            .env("NUZKY_DATA_DIR", &nuzky_dir)
+            .env("HOME", dir.join("home"))
+            .env("XDG_CACHE_HOME", dir.join("cache"))
+            .output()
+            .unwrap()
+    };
+    let evidence = || std::fs::read_dir(nuzky_dir.join("style/evidence")).map_or(0, |files| files.count());
+    let out = learn(&[]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let store = style::Store::at(&nuzky_dir);
+    let backed = |view: &style::StyleView, sources: &[&str]| {
+        let titles: Vec<&str> = view.sources.iter().rev().map(|s| s.title.as_str()).collect();
+        assert_eq!(titles, sources);
+        assert_eq!(evidence(), sources.len());
+        assert!(view.suggestions.is_empty(), "the style is what its evidence teaches: {:?}", view.suggestions);
+        assert!(!view.rules.is_empty());
+        for rule in &view.rules {
+            let confidence = rule.confidence.unwrap_or_else(|| panic!("{} is not seen lately", rule.title));
+            assert!(confidence.videos >= 1 && confidence.of == sources.len(), "{}: {confidence:?}", rule.title);
+            assert!(confidence.moments > 0, "{}", rule.title);
+        }
+    };
+    let pair = "talk.mp4 and reel.mp4";
+    backed(&store.view().unwrap(), &[pair]);
+
+    // Learned again over the creator's own rule: refused without --replace, then with a timeline too, twice, and each
+    // video counts once.
+    store
+        .act(style::StyleAction::SetOwn { index: None, text: "Never cut the product name.".into(), was: None })
+        .unwrap();
+    assert!(!learn(&[]).status.success(), "an existing EDIT.md may hold the creator's own changes");
+    let both = [pair, "talk.mp4 in Reel"];
+    for _ in 0..2 {
+        let out = learn(&[Path::new("--replace"), Path::new("--from"), &otio]);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let view = store.view().unwrap();
+        backed(&view, &both);
+        assert_eq!(view.own, ["Never cut the product name."]);
+    }
+
+    // Elsewhere it writes a plain file and leaves the style as it was.
+    let kept = |name: &str| std::fs::read(nuzky_dir.join(name)).unwrap();
+    let before = (kept("EDIT.md"), kept("style/versions.jsonl"));
+    let elsewhere = dir.join("elsewhere.md");
+    assert!(learn(&[Path::new("--out"), &elsewhere]).status.success());
+    assert!(elsewhere.is_file());
+    assert_eq!((kept("EDIT.md"), kept("style/versions.jsonl")), before);
+    backed(&store.view().unwrap(), &both);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 /// The creator's pieces as an editor exports them to OpenTimelineIO: the camera's picture on V1 and its
 /// sound on A1, cut on frames of 30 fps against the file's timecode of 01:00:00:00, the sound counted in
 /// samples, a gap after the third piece and a dissolve after the fourth, the finished video as B-roll

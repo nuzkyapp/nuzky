@@ -63,12 +63,12 @@ pub fn run(args: &[String], cache: &Path) -> Result<()> {
                 "{} already exists and may hold your own changes. Pass --replace to overwrite it, or --out for another file.",
                 out.display()
             );
-            let mut learned = Vec::new();
+            let mut lessons = Vec::new();
             for pair in files.chunks(2) {
                 let recording = video(&pair[0])?;
                 let cut = video(&pair[1])?;
                 eprintln!("Comparing {} with {}", pair[1].display(), pair[0].display());
-                learned.push(style::compare(&recording, &cut, &store, cache, &|| false)?);
+                lessons.push(style::compare(&recording, &cut, &store, cache, &|| false)?);
             }
             for timeline in &timelines {
                 let plan = style::plan(timeline);
@@ -83,18 +83,24 @@ pub fn run(args: &[String], cache: &Path) -> Result<()> {
                     match evidence {
                         Ok(evidence) => {
                             eprintln!("Learning from {recording} as {} cut it", plan.name);
-                            learned.push(evidence);
+                            lessons.push(evidence);
                         }
                         Err(why) => eprintln!("Not learning from {recording} in {}: {why}", timeline.display()),
                     }
                 }
             }
-            ensure!(!learned.is_empty(), "Nothing to learn from: no recording with speech is cut in these timelines");
-            let sources: Vec<learning::Source> = learned.iter().map(style::Evidence::source).collect();
+            ensure!(!lessons.is_empty(), "Nothing to learn from: no recording with speech is cut in these timelines");
+            let sources: Vec<learning::Source> = lessons.iter().map(style::Evidence::source).collect();
             let learned = learning::learned(&sources);
-            // The style the app shows is a version, keeps the creator's own rules and can be undone.
+            // The style the app shows is a version, keeps the creator's own rules and can be undone. What it learned
+            // from is kept as the app's learning keeps it, so Your style shows how well the videos back each rule and
+            // later learning builds on them.
             if same_file(&out, &default) {
-                style::Store::default().replace(&learned, "Learned with nuzky style learn", None)?;
+                let style_store = style::Store::default();
+                style_store.replace(&learned, "Learned with nuzky style learn", None)?;
+                for evidence in lessons {
+                    style_store.keep_evidence(evidence)?;
+                }
             } else {
                 write_new(&out, learned.document().as_bytes())?;
             }
