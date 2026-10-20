@@ -169,6 +169,10 @@ export type Boot = {
    * The Nuzky that ran before this one ended without quitting.
    */
   crashed: boolean,
+  /**
+   * What the Nuzky before this one left when it restarted to update (`restartToUpdate` in src/lib/updates.ts).
+   */
+  updateNote: string | null,
 };
 
 /**

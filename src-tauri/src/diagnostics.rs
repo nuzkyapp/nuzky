@@ -131,6 +131,11 @@ pub fn crashed_before() -> bool {
     CRASHED.load(Ordering::Relaxed)
 }
 
+/// The Nuzky before this one restarted to update; on Windows its installer ended it without quitting.
+pub fn ended_for_update() {
+    CRASHED.store(false, Ordering::Relaxed);
+}
+
 /// The file this app holds locked while it runs and removes when it quits.
 static MARKER: OnceLock<(PathBuf, File)> = OnceLock::new();
 

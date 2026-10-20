@@ -459,7 +459,7 @@ async function startEditor() {
   if (boot.engineError) useEditor.setState({ engineError: boot.engineError });
   useEditor.getState().setSnap(boot.snapshot, true, true);
   useEditor.setState({ saveState: "saved" });
-  startUpdates(boot.version, boot.updateChecks);
+  startUpdates(boot.version, boot.updateChecks, boot.updateNote);
   void checkYtdlp();
   // A warning stays until dismissed, so the reason a different project opened is not missed.
   // Once per launch: StrictMode and Try again can start the editor more than once.

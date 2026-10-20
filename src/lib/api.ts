@@ -210,11 +210,13 @@ export const api = {
   reelBounds: (id: string, from: number, to: number) => invoke<ReelCandidate>("reel_bounds", { id, from, to }),
   /** A project of its own beside this one for each reel candidate, as a `reels` job; marked made here as one undo step. */
   startMakeReels: (ids: string[], canvas: ReelFraming, epoch: Epoch) => invoke<string>("start_make_reels", { ids, canvas, expectedEpoch: epoch }),
-  /** A newer released version, or null when this one is the latest. */
-  checkForUpdate: () => invoke<string | null>("check_for_update"),
-  /** Downloads the newer version, checks its signature, saves the project, installs it and restarts Nuzky. `progress` gets the percentage downloaded, then 100 while it checks and installs. */
-  installUpdate: (progress: Channel<number>) => invoke<void>("install_update", { progress }),
-  /** Stops the download; `installUpdate` then fails with CANCELLED. */
+  /** A newer released version and whether this copy can install it itself, or null when this one is the latest. */
+  checkForUpdate: () => invoke<{ version: string; canInstall: boolean } | null>("check_for_update"),
+  /** Downloads the newer version and checks its signature; the backend keeps it for `restartToUpdate`. `progress` gets the percentage downloaded. */
+  downloadUpdate: (progress: Channel<number>) => invoke<string>("download_update", { progress }),
+  /** Saves the project, installs the downloaded update and restarts Nuzky; `note` goes to the restarted UI. Returns the work that started meanwhile, which postpones the restart. */
+  restartToUpdate: (note: string) => invoke<string | null>("restart_to_update", { note }),
+  /** Stops the download; `downloadUpdate` then fails with CANCELLED. */
   cancelUpdate: () => invoke<void>("cancel_update"),
   openReleasePage: () => invoke<void>("open_release_page"),
   /** The idea form with this version filled in, or the author's X profile, in the browser. */

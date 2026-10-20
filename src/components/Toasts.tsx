@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "re
 import { AlertCircle, AlertTriangle, CheckCircle2, Info, X } from "lucide-react";
 import { useEditor, type Toast } from "../lib/store";
 
-/** How long a toast stays, in ms; errors, warnings and sticky notices stay until dismissed. */
-const lifetime = (t: Toast) => (t.kind === "error" || t.kind === "warning" || t.sticky ? null : t.action ? 7000 : 5000);
+/** How long a toast stays, in ms; errors, warnings, sticky notices and countdowns stay until dismissed. */
+const lifetime = (t: Toast) => (t.kind === "error" || t.kind === "warning" || t.sticky || t.countdown ? null : t.action ? 7000 : 5000);
 
 /** The `overlay` shadow with the hairline in the toast's colour; a border would double the hairline. */
 const EDGE = {
@@ -25,15 +25,31 @@ function ToastItem({ toast: t, paused, dismiss }: { toast: Toast; paused: boolea
     };
   }, [paused, onDismiss]);
   const action = t.action && (t.action.valid?.() ?? true) ? t.action : null;
-  // Two actions, or one beside a long text, would leave the text a narrow column; they go under it instead.
-  const stacked = !!t.secondary || t.text.length > 64;
+  // A countdown runs its action at zero, and stops with the clock like the toast's own time.
+  const [seconds, setSeconds] = useState(t.countdown?.seconds ?? 0);
+  useEffect(() => {
+    if (paused || !t.countdown || !action) return;
+    const timer = window.setTimeout(() => {
+      if (seconds > 1) return setSeconds(seconds - 1);
+      action.run();
+      onDismiss();
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [paused, seconds, t.countdown, action, onDismiss]);
+  // Two actions, or a long one beside a long text, would leave the text a narrow column; they go under it instead.
+  const stacked = !!t.secondary || (!!action && action.label.length >= 12 && t.text.length + action.label.length > 40);
+  // A clicked button that goes with its toast would leave the stack thinking it has the focus, and every clock stopped.
+  const close = (button: HTMLButtonElement) => {
+    if (document.activeElement === button) button.blur();
+    onDismiss();
+  };
   const choice = (c: { label: string; run: () => void }) => (
     <button
       type="button"
       className="shrink-0 rounded-md px-1.5 py-1 font-semibold text-accent transition-colors duration-[120ms] ease-out hover:bg-white/[.08]"
-      onClick={() => {
+      onClick={(e) => {
         c.run();
-        onDismiss();
+        close(e.currentTarget);
       }}
     >
       {c.label}
@@ -51,9 +67,9 @@ function ToastItem({ toast: t, paused, dismiss }: { toast: Toast; paused: boolea
       role={t.kind === "error" ? "alert" : undefined}
       // Only the keyboard (F8, Esc) focuses a toast, so it always shows the focus outline; a click on its text does not focus it.
       onMouseDown={(e) => !(e.target as Element).closest("button") && e.preventDefault()}
-      className={`overlay pointer-events-auto flex min-h-12 max-w-full flex-wrap items-center gap-x-2.5 gap-y-0 rounded-[14px] py-2 pr-2 pl-3.5 text-[13px] font-medium text-fg focus:outline-2 focus:outline-offset-1 focus:outline-accent ${
-        t.kind === "error" || t.kind === "warning" ? EDGE[t.kind] : ""
-      }`}
+      className={`overlay pointer-events-auto flex min-h-12 max-w-full items-center rounded-[14px] py-2 pr-2 pl-3.5 text-[13px] font-medium text-fg focus:outline-2 focus:outline-offset-1 focus:outline-accent ${
+        stacked ? "flex-wrap gap-x-2.5 gap-y-0" : "gap-2.5"
+      } ${t.kind === "error" || t.kind === "warning" ? EDGE[t.kind] : ""}`}
     >
       {t.kind === "error" ? (
         <AlertCircle size={18} className="shrink-0 text-danger" />
@@ -64,23 +80,24 @@ function ToastItem({ toast: t, paused, dismiss }: { toast: Toast; paused: boolea
       ) : (
         <Info size={18} className="shrink-0 text-muted" />
       )}
-      <span className="min-w-0 flex-1 break-words">{t.text}</span>
+      <span className="min-w-0 flex-1 break-words">{t.countdown ? t.countdown.text(seconds) : t.text}</span>
       {action && !stacked && choice(action)}
-      <button
-        type="button"
-        aria-label="Dismiss"
-        title="Dismiss (Esc)"
-        className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full text-muted transition-colors duration-[120ms] ease-out hover:bg-white/[.08] hover:text-fg"
-        onClick={onDismiss}
-      >
-        <X size={14} />
-      </button>
+      {/* After the text, so Tab reaches the actions before Dismiss, which `order` keeps on the first line. */}
       {action && stacked && (
-        <div className="-mt-1 flex basis-full justify-end gap-1">
+        <div className="order-2 -mt-1 flex basis-full justify-end gap-1">
           {t.secondary && choice(t.secondary)}
           {choice(action)}
         </div>
       )}
+      <button
+        type="button"
+        aria-label="Dismiss"
+        title="Dismiss (Esc)"
+        className="order-1 flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full text-muted transition-colors duration-[120ms] ease-out hover:bg-white/[.08] hover:text-fg"
+        onClick={(e) => close(e.currentTarget)}
+      >
+        <X size={14} />
+      </button>
     </div>
   );
 }

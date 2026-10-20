@@ -976,9 +976,10 @@ export function Menu({
   const ref = useRef<HTMLDivElement>(null);
   const id = useId();
   const choices = items.flatMap((item, i) => (item === "separator" ? [] : [i]));
-  // From the keyboard it starts on the current choice among several, so Enter keeps it; a lone switch is not a choice.
+  // From the keyboard it starts on the current choice among several, so Enter keeps it (a lone switch is not a choice), or on the first item that can be chosen.
   const among = items.filter((item) => item !== "separator" && item.checked !== undefined).length > 1;
-  const [active, setActive] = useState(keyboard ? ((among ? choices.find((i) => (items[i] as MenuItemEntry).checked) : undefined) ?? choices[0] ?? -1) : -1);
+  const first = choices.find((i) => !(items[i] as MenuItemEntry).disabled) ?? choices[0] ?? -1;
+  const [active, setActive] = useState(keyboard ? ((among ? choices.find((i) => (items[i] as MenuItemEntry).checked) : undefined) ?? first) : -1);
   const [open, setOpen] = useState<{ index: number; keyboard: boolean } | null>(null);
   const [place, setPlace] = useState<{ left: number; top: number } | null>(null);
 
