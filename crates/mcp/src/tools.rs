@@ -1923,7 +1923,7 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
         assert!(host.session.state().unwrap().open_run.is_some());
-        drop((agent, viewer));
+        drop((agent, viewer, host));
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -1955,7 +1955,8 @@ mod tests {
         assert_eq!(cancel["cancel_requested"], true);
         host.jobs.get(&theirs, true).unwrap();
         drop((writer, reader));
-        host.jobs.shutdown();
+        // Closing the project waits for its writer, which may still be saving the version it opened as.
+        drop(host);
         std::fs::remove_dir_all(dir).unwrap();
     }
 
