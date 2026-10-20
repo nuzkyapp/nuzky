@@ -17,6 +17,8 @@ const SHOWN: usize = 4;
 const SENTENCE_GAP_US: i64 = 700_000;
 /// Calls to action are looked for in the last part of a recording.
 const ENDING_SHARE: f64 = 0.7;
+/// Speech played at least this much faster than recorded counts as sped up.
+const FASTER: f64 = 1.05;
 
 const FILLERS_CS: &[&str] =
     &["ehm", "hmm", "hm", "eee", "ee", "em", "mmm", "no", "jako", "jakoby", "prostě", "vlastně", "teda", "takže", "jo"];
@@ -179,6 +181,7 @@ pub const RULES: &[&str] = &[
 pub const SETTINGS: &[(&str, &str)] = &[
     ("Filler words to cut", "Filler words"),
     ("edit_transcript shorten_pauses_us", "Pauses"),
+    ("Speech speed", "Pace"),
     ("Cuts per minute", "Cuts"),
     ("build_captions max_words", "Captions"),
     ("build_captions max_chars", "Captions"),
@@ -786,65 +789,63 @@ fn pauses(edits: &[Edit], say: &dyn Fn(&[Example]) -> String) -> Option<Rule> {
     })
 }
 
-/// Words per second before and after the cut.
+/// How fast the cut plays the speech it keeps whole, by the length of its words alone, so shorter
+/// pauses do not count. A rule only when the creator speeds speech up.
 fn pace(edits: &[Edit], say: &dyn Fn(&[Example]) -> String) -> Option<Rule> {
-    let (mut words, mut spoken, mut kept, mut cut) = (0usize, 0i64, 0usize, 0i64);
-    let mut examples: Vec<(i64, Example)> = Vec::new();
+    let mut speeds: Vec<f64> = Vec::new();
+    let mut faster: Vec<(f64, Example)> = Vec::new();
     for edit in edits {
-        let (Some(first), Some(last)) = (edit.words.first(), edit.words.last()) else { continue };
-        words += edit.words.len();
-        spoken += last.word.end_us - first.word.start_us;
-        let in_cut = edit.cut_words();
-        if let (Some(a), Some(b)) = (in_cut.first(), in_cut.last()) {
-            kept += in_cut.len();
-            cut += b.1 - a.0;
+        if edit.words.is_empty() {
+            continue;
         }
         for (from, to) in sentences(edit, 0, edit.words.len() - 1) {
             if to - from < 3 || !(from..=to).all(|k| edit.kept(k)) {
                 continue;
             }
-            let recorded = edit.words[to].word.end_us - edit.words[from].word.start_us;
-            let (Some(a), Some(b)) = (edit.words[from].cut, edit.words[to].cut) else { continue };
-            let played = b.2 - a.1;
-            if played > 0 {
-                let n = to - from + 1;
+            let (recorded, played) = edit.words[from..=to]
+                .iter()
+                .filter_map(|w| w.cut.map(|(_, start, end)| (w.word.end_us - w.word.start_us, end - start)))
+                .fold((0i64, 0i64), |(r, p), (a, b)| (r + a, p + b));
+            if recorded <= 0 || played <= 0 {
+                continue;
+            }
+            let speed = recorded as f64 / played as f64;
+            speeds.push(speed);
+            if speed >= FASTER {
                 let line = format!(
-                    "\"{}\": {} words in {} recorded, {} in the cut ({:.1} to {:.1} words per second)",
+                    "\"{}\": its words last {} recorded and {} in the cut ({speed:.2}x)",
                     edit.text(from, to),
-                    n,
                     seconds(recorded),
-                    seconds(played),
-                    n as f64 / (recorded as f64 / 1e6),
-                    n as f64 / (played as f64 / 1e6)
+                    seconds(played)
                 );
-                examples.push((
-                    recorded - played,
-                    Example { source: edit.index, time_us: edit.words[from].word.start_us, line },
-                ));
+                faster.push((speed, Example { source: edit.index, time_us: edit.words[from].word.start_us, line }));
             }
         }
     }
-    if spoken <= 0 || cut <= 0 || examples.len() < MIN_EXAMPLES {
+    speeds.sort_by(f64::total_cmp);
+    let median = *speeds.get(speeds.len() / 2)?;
+    if median < FASTER || faster.len() < MIN_EXAMPLES {
         return None;
     }
-    examples.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.source.cmp(&b.1.source)).then(a.1.time_us.cmp(&b.1.time_us)));
-    let moments: Vec<Example> = examples.iter().map(|(_, e)| e.clone()).collect();
-    let mut best: Vec<Example> = examples.into_iter().take(SHOWN).map(|(_, e)| e).collect();
+    let speed = (median * 20.0).round() / 20.0;
+    faster.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.source.cmp(&b.1.source)).then(a.1.time_us.cmp(&b.1.time_us)));
+    let moments: Vec<Example> = faster.iter().map(|(_, e)| e.clone()).collect();
+    let mut best: Vec<Example> = faster.into_iter().take(SHOWN).map(|(_, e)| e).collect();
     best.sort_by_key(|e| (e.source, e.time_us));
     let mut out = String::from("## Pace\n\n");
     let _ = writeln!(
         out,
-        "The recording runs at {:.1} words per second from its first to its last word; the cut at {:.1}. Sentences the cut kept whole got faster like this:\n\n{}",
-        words as f64 / (spoken as f64 / 1e6),
-        kept as f64 / (cut as f64 / 1e6),
+        "The creator speeds up the speech they keep: {} of {} sentences the cut kept whole play faster than recorded, at a median of {median:.2}x. Play kept speech at {speed:.2}x with updateClip speed on the clips that carry it, keeping the pitch.\n\n{}",
+        moments.len(),
+        speeds.len(),
         say(&best)
     );
     Some(Rule {
         title: "Pace",
-        summary: format!("{:.1} words per second in the cut", kept as f64 / (cut as f64 / 1e6)),
+        summary: format!("Play speech at {speed:.2}x"),
         text: out,
-        settings: Vec::new(),
-        choices: Vec::new(),
+        settings: vec![("Speech speed".into(), format!("{speed:.2}"))],
+        choices: vec![Choice::number("Speech speed", format!("{speed:.2}"), speed, 0.05)],
         moments,
     })
 }

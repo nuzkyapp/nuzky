@@ -220,6 +220,7 @@ fn learns_the_creators_style_and_scores_cuts_against_it() {
         "{style}"
     );
     assert!(style.contains("The creator kept the latest attempt 3 of 3 times."), "{style}");
+    assert!(!style.contains("## Pace"), "the cut plays its speech as recorded, only its pauses are shorter: {style}");
     assert!(style.contains(&format!("{} cuts,", fixture.pieces.len() - 1)), "{style}");
     let number = |after: &str| -> f64 {
         let rest = &style[style.find(after).unwrap_or_else(|| panic!("no {after:?} in {style}")) + after.len()..];

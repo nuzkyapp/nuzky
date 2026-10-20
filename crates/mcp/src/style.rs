@@ -1872,6 +1872,34 @@ mod tests {
     }
 
     #[test]
+    fn speech_the_creator_speeds_up_teaches_its_speed_and_shorter_pauses_alone_do_not() {
+        let (dir, host) = talk();
+        host.session.edit(cut(5, 0), None, Default::default()).unwrap();
+        let path = dir.join("talk.nuzky");
+        let pace = |host: &Host| {
+            let evidence =
+                project_evidence(&host.session.state().unwrap().project, &path, &host.transcripts).unwrap().unwrap();
+            learning::learned(&[evidence.source()]).rules.into_iter().find(|r| r.title == "Pace")
+        };
+        assert!(pace(&host).is_none(), "a cut that only drops a sentence plays speech as recorded");
+        let clips: Vec<String> =
+            host.session.state().unwrap().project.tracks[0].clips.iter().map(|c| c.id.clone()).collect();
+        let faster = clips
+            .iter()
+            .map(|id| {
+                serde_json::from_value(serde_json::json!({"type": "updateClip", "clipId": id, "speed": 1.2})).unwrap()
+            })
+            .collect();
+        host.session.edit(faster, None, Default::default()).unwrap();
+        let rule = pace(&host).expect("sped up speech is a rule");
+        assert_eq!(rule.summary, "Play speech at 1.20x");
+        assert_eq!(rule.settings, [("Speech speed".to_owned(), "1.20".to_owned())]);
+        assert!(rule.text.contains("5 of 5 sentences the cut kept whole play faster"), "{}", rule.text);
+        drop(host);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn a_project_shows_its_captions_zoom_and_corrected_words() {
         let (dir, host) = talk();
         host.session.edit(cut(2, 0), None, Default::default()).unwrap();
