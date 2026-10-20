@@ -61,6 +61,15 @@ def ink(image):
     return centre(yellow), centre(dark), len(dark) / (w * h), span
 
 
+def shadow_shift(image):
+    pixels = list(image.getdata())
+    yellow = [(i % image.width, i // image.width) for i, (r, g, b) in enumerate(pixels) if r > 200 and g > 190 and b < 140]
+    dark = {(i % image.width, i // image.width): 128 - max(px) for i, px in enumerate(pixels) if max(px) < 128}
+    score, dx, dy = max((sum(dark.get((x + dx, y + dy), 0) for x, y in yellow), dx, dy)
+                       for dx in range(-4, 5) for dy in range(-4, 5))
+    return (dx, dy) if score else (0, 0)
+
+
 def frame(screenshot, rect):
     """The grey frame the preview draws inside its canvas, without the dark stage around it."""
     crop = preview_crop(screenshot, rect).convert('RGB')
@@ -222,10 +231,13 @@ def text_style(r):
     preview = ink(shown)
     # The preview draws the frame much smaller, so the soft shadow's edge fades sooner: compare at its size.
     from PIL import Image
-    engine = ink(Image.open(r.work / 'engine-shadow.png').convert('RGB').resize(shown.size, Image.LANCZOS))
+    drawn = Image.open(r.work / 'engine-shadow.png').convert('RGB').resize(shown.size, Image.LANCZOS)
+    engine = ink(drawn)
+    shifts = {'preview': shadow_shift(shown), 'engine': shadow_shift(drawn)}
     near = lambda a, b: a and b and all(abs(x - y) < 0.02 for x, y in zip(a, b))
-    r.check('the preview draws text and shadow where the engine does', near(preview[0], engine[0]) and near(preview[1], engine[1]),
-            {'preview': preview, 'engine': engine})
+    r.check('the preview draws text and shadow where the engine does',
+            near(preview[0], engine[0]) and all(dx > 0 and dy > 0 for dx, dy in shifts.values()),
+            {'preview': preview, 'engine': engine, 'shifts': shifts})
     r.check('capitals and spacing make the text wider, still centred where it was',
             preview[3] > plain[3] * 1.15 and preview[0] and abs(preview[0][0] - plain[0][0]) < 0.01, {'now': preview, 'typed': plain})
     target = export(r, 'text-style.mp4')
