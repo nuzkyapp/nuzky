@@ -71,8 +71,6 @@ export function createDmg(app, dmg, target) {
   try {
     run('ditto', [app, path.join(content, 'Nuzky.app')]);
     symlinkSync('/Applications', path.join(content, 'Applications'));
-    // The mounted disk shows this icon once its custom icon flag is set below.
-    copyFileSync('src-tauri/icons/icon.icns', path.join(content, '.VolumeIcon.icns'));
     mkdirSync(path.join(content, '.background'));
     run('tiffutil', ['-cathidpicheck', 'src-tauri/dmg/background.png', 'src-tauri/dmg/background@2x.png',
       '-out', path.join(content, '.background', 'background.tiff')]);
@@ -81,6 +79,10 @@ export function createDmg(app, dmg, target) {
     // Detaching by the mount point fails once a busy eject has already unmounted the volume; the device stays.
     const device = attached.match(/^\/dev\/disk\d+/m)[0];
     try {
+      // hdiutil leaves a .VolumeIcon.icns out of -srcfolder, so it goes onto the mounted disk, which shows it once
+      // the disk has its custom icon flag.
+      copyFileSync('src-tauri/icons/icon.icns', path.join(mount, '.VolumeIcon.icns'));
+      run('SetFile', ['-c', 'icnC', path.join(mount, '.VolumeIcon.icns')]);
       run('SetFile', ['-a', 'C', mount]);
       run('osascript', ['-e', layout(mount)]);
       if (!existsSync(path.join(mount, '.DS_Store'))) throw new Error('Finder did not save the layout of the dmg window.');
