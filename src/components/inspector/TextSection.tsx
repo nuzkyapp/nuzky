@@ -125,7 +125,6 @@ export function patched(style: TextStyle, patch: StylePatch): TextStyle {
 /** `styles`: every selected text's, `style` being the first; a dash shows where they differ. */
 type StyleProps = { style: TextStyle; styles?: TextStyle[]; setStyle: SetStyle };
 
-/** Whether the texts differ in a value, and whether all or only some of them have a setting on. */
 function across(style: TextStyle, styles: TextStyle[] = [style]) {
   const json = (v: unknown) => JSON.stringify(v ?? null);
   return {
@@ -180,7 +179,6 @@ const SHADOW: TextShadow = { color: "#000000", opacity: 0.9, blur: 15, distance:
 const percent = (v: number) => String(Math.round(v));
 const degrees = (s: string) => ((((parseNumber(s) + 180) % 360) + 360) % 360) - 180;
 
-/** A setting that some texts have on shows its own controls once all of them have it. */
 export function MoreStyle({ style, styles, setStyle }: StyleProps) {
   const { differ, all, on } = across(style, styles);
   const shadow = all((s) => !!s.shadow) ? style.shadow : null;

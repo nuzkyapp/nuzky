@@ -293,7 +293,6 @@ def several(r, first, font):
     r.check('the engine draws a shadow down and to the right of each of the three texts',
             all(b[0] and b[1] and b[1][0] > b[0][0] and b[1][1] > b[0][1] and b[2] > 0.0005 for b in bands), bands)
 
-    # Boxes of different colours and opacities: a picked colour goes on all of them, each keeping its opacity.
     r.s.call(BOX, [[first, '#000000b3'], *[[i, '#ff000080'] for i in others]])
     r.check('Box color shows a dash while the box colours differ', wait(lambda: r.s.run(BOX_LABEL) == '—', 5), r.s.run(BOX_LABEL))
     r.s.run(PICK, '#2050ff')
