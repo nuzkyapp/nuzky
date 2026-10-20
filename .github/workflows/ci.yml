@@ -76,6 +76,7 @@ jobs:
             target/release/bundle/appimage/*.AppImage
             target/release/bundle/deb/*.deb
             target/release/bundle/dmg/*.dmg
+            target/release/bundle/macos/*.app.tar.gz
             target/release/bundle/nsis/*-setup.exe
             target/release/bundle/build-info-*.txt
           if-no-files-found: error
@@ -109,6 +110,7 @@ jobs:
           name: nuzky-macos-14
           path: |
             target/release/bundle/dmg/*.dmg
+            target/release/bundle/macos/*.app.tar.gz
             target/release/bundle/build-info-darwin.txt
           if-no-files-found: error
           retention-days: 14

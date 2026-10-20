@@ -21,8 +21,18 @@ jobs:
           URL: https://github.com/${{ github.repository }}/releases/latest/download/latest.json
         run: |
           for attempt in 1 2 3 4 5; do
-            version=$(curl -fsSL --proto '=https' --max-filesize 65536 "$URL" | jq -r .version) || version=
-            if [ "v$version" = "$TAG" ]; then echo "Installed copies see $TAG."; exit 0; fi
+            manifest=$(curl -fsSL --proto '=https' --max-filesize 65536 "$URL") || manifest=
+            version=$(jq -r .version <<< "$manifest") || version=
+            if [ "v$version" = "$TAG" ] && urls=$(jq -er '
+              [.platforms["darwin-aarch64-app", "darwin-aarch64", "windows-x86_64-nsis", "windows-x86_64", "linux-x86_64-appimage", "linux-x86_64-deb"]] |
+              if all(.[]; (.url | type == "string" and length > 0) and (.signature | type == "string" and length > 0))
+              then .[].url else error("Missing update URL or signature") end' <<< "$manifest"); then
+              reachable=true
+              while IFS= read -r url; do
+                curl -fsIL --proto '=https' "$url" || reachable=false
+              done <<< "$urls"
+              if $reachable; then echo "Installed copies see $TAG."; exit 0; fi
+            fi
             sleep 30
           done
           echo "::error::Installed copies cannot see $TAG: $URL gave '${version:-nothing}'. Is the repository public?"

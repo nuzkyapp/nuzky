@@ -84,6 +84,7 @@ run(process.execPath, ['node_modules/@tauri-apps/cli/tauri.js', 'build', '--bund
 if (process.platform === 'darwin') {
   const app = path.join(bundle, 'macos', 'Nuzky.app');
   run('python3', ['scripts/bundle-macos-libs.py', app, ort.library]);
+  execFileSync('tar', ['--no-mac-metadata', '-czf', path.join(bundle, 'macos', `Nuzky_${version}_aarch64.app.tar.gz`), '-C', path.dirname(app), 'Nuzky.app'], { stdio: 'inherit', env: { ...process.env, COPYFILE_DISABLE: '1' } });
   // It lists where each copied library came from, so it names the exact Homebrew FFmpeg.
   const libs = readFileSync(path.join(app, 'Contents/Resources/bundled-libraries.txt'), 'utf8');
   const [, formula, cellar] = libs.match(/\/Cellar\/([^/]+)\/([^/]+)\/lib\/libavcodec\./);

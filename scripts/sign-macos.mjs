@@ -68,32 +68,35 @@ try {
   run('codesign', ['--verify', '--deep', '--strict', app]);
   createDmg(app, dmg, target);
   run('codesign', [...sign, dmg]);
+
+  let signature = 'Developer ID, not notarized';
+  if (signing.notary) {
+    const credentials = ['--apple-id', signing.notary.appleId, '--team-id', signing.notary.teamId, '--password', signing.notary.password];
+    const notarytool = (...args) =>
+      spawnSync('xcrun', ['notarytool', ...args, ...credentials], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] }).stdout;
+    // notarytool can print its JSON answer and still exit with an error, so the answer decides.
+    const answer = notarytool('submit', dmg, '--wait', '--timeout', '30m', '--output-format', 'json');
+    console.log(answer);
+    const { id, status } = JSON.parse(answer || '{}');
+    if (status !== 'Accepted') {
+      if (id) console.log(notarytool('log', id));
+      throw new Error(`Apple's notary service did not accept the dmg (status: ${status ?? 'none'}).`);
+    }
+    run('xcrun', ['stapler', 'staple', app]);
+    run('xcrun', ['stapler', 'validate', app]);
+    run('xcrun', ['stapler', 'staple', dmg]);
+    run('xcrun', ['stapler', 'validate', dmg]);
+    run('spctl', ['--assess', '--type', 'open', '--context', 'context:primary-signature', '-vv', dmg]);
+    signature = 'Developer ID, notarized and stapled';
+  } else {
+    warn('the dmg is Developer ID signed and NOT notarized, because APPLE_ID, APPLE_TEAM_ID and APPLE_APP_PASSWORD are not set.');
+  }
+  const info = path.join(bundle, 'build-info-darwin.txt');
+  writeFileSync(info, readFileSync(info, 'utf8').replace(/^macOS signature: .*$/m, `macOS signature: ${signature}`));
+  execFileSync('tar', ['--no-mac-metadata', '-czf', path.join(bundle, 'macos', `Nuzky_${version}_aarch64.app.tar.gz`), '-C', work, 'Nuzky.app'], { stdio: 'inherit', env: { ...process.env, COPYFILE_DISABLE: '1' } });
 } finally {
   if (searchList) spawnSync('security', ['list-keychains', '-d', 'user', '-s', ...searchList], { stdio: 'inherit' });
   if (keychain) spawnSync('security', ['delete-keychain', keychain], { stdio: 'inherit' });
   if (keychainDir) rmSync(keychainDir, { recursive: true, force: true });
   rmSync(work, { recursive: true, force: true });
 }
-
-let signature = 'Developer ID, not notarized';
-if (signing.notary) {
-  const credentials = ['--apple-id', signing.notary.appleId, '--team-id', signing.notary.teamId, '--password', signing.notary.password];
-  const notarytool = (...args) =>
-    spawnSync('xcrun', ['notarytool', ...args, ...credentials], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] }).stdout;
-  // notarytool can print its JSON answer and still exit with an error, so the answer decides.
-  const answer = notarytool('submit', dmg, '--wait', '--timeout', '30m', '--output-format', 'json');
-  console.log(answer);
-  const { id, status } = JSON.parse(answer || '{}');
-  if (status !== 'Accepted') {
-    if (id) console.log(notarytool('log', id));
-    throw new Error(`Apple's notary service did not accept the dmg (status: ${status ?? 'none'}).`);
-  }
-  run('xcrun', ['stapler', 'staple', dmg]);
-  run('xcrun', ['stapler', 'validate', dmg]);
-  run('spctl', ['--assess', '--type', 'open', '--context', 'context:primary-signature', '-vv', dmg]);
-  signature = 'Developer ID, notarized and stapled';
-} else {
-  warn('the dmg is Developer ID signed and NOT notarized, because APPLE_ID, APPLE_TEAM_ID and APPLE_APP_PASSWORD are not set.');
-}
-const info = path.join(bundle, 'build-info-darwin.txt');
-writeFileSync(info, readFileSync(info, 'utf8').replace(/^macOS signature: .*$/m, `macOS signature: ${signature}`));

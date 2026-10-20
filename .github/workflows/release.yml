@@ -18,6 +18,11 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+      # Only the Tauri CLI is needed, to sign the update packages; no dependency's install script runs.
+      - run: npm ci --ignore-scripts
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: nuzky-*
@@ -27,13 +32,40 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           node -e 'const v = require("./src-tauri/tauri.conf.json").version; if (process.env.RELEASE_TAG !== `v${v}`) throw new Error(`Tag must match app version v${v}`)'
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY is empty; update packages must be signed."
+            exit 1
+          fi
           find artifacts -type f -exec cp {} . \;
           git archive --format=tar.gz --prefix="nuzky-${RELEASE_TAG#v}/" -o "Nuzky_${RELEASE_TAG#v}_source.tar.gz" "$RELEASE_TAG"
-          # Installed copies read the version from this file on the latest published release.
-          node -e 'const { version } = require("./src-tauri/tauri.conf.json"); require("fs").writeFileSync("latest.json", JSON.stringify({ version, pub_date: new Date().toISOString() }) + "\n")'
-          sha256sum ./*.AppImage ./*.deb ./*.dmg ./*-setup.exe ./*_source.tar.gz > SHA256SUMS
+          for file in ./*.AppImage ./*.deb ./*-setup.exe ./*.app.tar.gz; do
+            node_modules/.bin/tauri signer sign "$file"
+          done
+          # Installed copies read the version and signed update packages from the latest published release.
+          node <<'NODE'
+          const fs = require('fs');
+          const { version } = require('./src-tauri/tauri.conf.json');
+          const platforms = {};
+          for (const [keys, suffix] of [
+            [['darwin-aarch64-app', 'darwin-aarch64'], '.app.tar.gz'],
+            [['windows-x86_64-nsis', 'windows-x86_64'], '-setup.exe'],
+            [['linux-x86_64-appimage'], '.AppImage'],
+            [['linux-x86_64-deb'], '.deb'],
+          ]) {
+            const file = fs.readdirSync('.').find(name => name.endsWith(suffix));
+            const entry = {
+              url: `https://github.com/${{ github.repository }}/releases/download/${process.env.RELEASE_TAG}/${file}`,
+              signature: fs.readFileSync(`${file}.sig`, 'utf8'),
+            };
+            for (const key of keys) platforms[key] = entry;
+          }
+          fs.writeFileSync('latest.json', JSON.stringify({ version, pub_date: new Date().toISOString(), platforms }) + '\n');
+          NODE
+          sha256sum ./*.AppImage ./*.deb ./*.dmg ./*.app.tar.gz ./*-setup.exe ./*_source.tar.gz > SHA256SUMS
           # A notarized dmg opens without Open Anyway.
           if grep -Fxq 'macOS signature: Developer ID, notarized and stapled' build-info-darwin.txt; then
             sed '/^- \*\*macOS\*\*:/d' scripts/release-notes.md > release-notes.md
@@ -47,4 +79,4 @@ jobs:
           else
             gh release create "$RELEASE_TAG" --verify-tag --draft --title "Nuzky $RELEASE_TAG" --notes-file release-notes.md
           fi
-          gh release upload "$RELEASE_TAG" ./*.AppImage ./*.deb ./*.dmg ./*-setup.exe ./*_source.tar.gz ./build-info-*.txt SHA256SUMS latest.json --clobber
+          gh release upload "$RELEASE_TAG" ./*.AppImage ./*.deb ./*.dmg ./*.app.tar.gz ./*-setup.exe ./*_source.tar.gz ./build-info-*.txt ./*.sig SHA256SUMS latest.json --clobber
