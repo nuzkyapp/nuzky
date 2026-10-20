@@ -385,7 +385,8 @@ pub struct Job {
 #[serde(deny_unknown_fields)]
 pub struct Captions {
     pub run_id: String,
-    /// A full caption style, including optional keywords {color, pick}; leave it out to use style_preset or Reel.
+    /// A full caption style, including optional keywords {color, pick}; leave it out to use style_preset, the
+    /// creator's learned look or Reel.
     pub style: Option<TextStyle>,
     /// A built-in style package: reel, outline, yellow, box, clean, karaoke, green_box, hormozi,
     /// hormozi_green, spotlight, impact, headline, punchline, neon, neon_blue, yellow_box,
@@ -446,23 +447,24 @@ pub struct ExportThumbnail {
 }
 
 impl Captions {
-    /// The style asked for: a full style or a preset with its animations, Reel when neither is given.
-    pub fn look(&self) -> anyhow::Result<CaptionPreset> {
+    /// The style asked for: a full style or a preset with its animations; when neither is given, the
+    /// creator's learned look on a canvas of this size, else Reel.
+    pub fn look(&self, from: &mut crate::style::Defaults, canvas: (u32, u32)) -> anyhow::Result<CaptionPreset> {
+        let plain = |style| CaptionPreset { name: String::new(), style, anim_in: None, anim_out: None };
         match (&self.style, &self.style_preset) {
             (Some(_), Some(_)) => anyhow::bail!("INVALID_ARGUMENTS: give style or style_preset, not both"),
-            (Some(style), None) => {
-                Ok(CaptionPreset { name: String::new(), style: style.clone(), anim_in: None, anim_out: None })
-            }
+            (Some(style), None) => Ok(plain(style.clone())),
             (None, Some(name)) => crate::caption_styles::find(name),
-            (None, None) => Ok(reel()),
+            (None, None) => Ok(from.caption_style(canvas).map_or_else(reel, plain)),
         }
     }
 
-    pub fn grouping(&self) -> nuzky_analysis::CaptionGrouping {
+    /// The limits given, else the creator's, else Reel's.
+    pub fn grouping(&self, from: &mut crate::style::Defaults) -> nuzky_analysis::CaptionGrouping {
         let defaults = nuzky_analysis::CaptionGrouping::default();
         nuzky_analysis::CaptionGrouping {
-            max_words: self.max_words.unwrap_or(defaults.max_words),
-            max_chars: self.max_chars.unwrap_or(defaults.max_chars),
+            max_words: self.max_words.or_else(|| from.max_words()).unwrap_or(defaults.max_words),
+            max_chars: self.max_chars.or_else(|| from.max_chars()).unwrap_or(defaults.max_chars),
             ..defaults
         }
     }
@@ -488,9 +490,10 @@ mod tests {
         }))
         .unwrap();
         let defaults = nuzky_analysis::CaptionGrouping::default();
-        assert_eq!(args.grouping().max_words, defaults.max_words);
-        assert_eq!(args.grouping().max_chars, defaults.max_chars);
-        let style = args.look().unwrap().style;
+        let mut none = crate::style::Defaults::default();
+        assert_eq!(args.grouping(&mut none).max_words, defaults.max_words);
+        assert_eq!(args.grouping(&mut none).max_chars, defaults.max_chars);
+        let style = args.look(&mut none, (1080, 1920)).unwrap().style;
         assert_eq!(
             serde_json::to_value(style).unwrap(),
             serde_json::json!({
@@ -505,7 +508,10 @@ mod tests {
         let captions = |value: serde_json::Value| {
             let mut args = serde_json::json!({"run_id": "run"});
             args.as_object_mut().unwrap().extend(value.as_object().unwrap().clone());
-            serde_json::from_value::<Captions>(args).unwrap().look().map(|look| look.style)
+            serde_json::from_value::<Captions>(args)
+                .unwrap()
+                .look(&mut crate::style::Defaults::default(), (1080, 1920))
+                .map(|look| look.style)
         };
         let karaoke = captions(serde_json::json!({"style_preset": "karaoke"})).unwrap();
         assert_eq!(karaoke.highlight.as_deref(), Some("#ffe14d"));

@@ -20,7 +20,7 @@ use nuzky_analysis::style::{
     ZoomChange,
 };
 use nuzky_engine::effects::transform_at;
-use nuzky_engine::model::{Asset, AssetKind, ClipContent, Project};
+use nuzky_engine::model::{Asset, AssetKind, ClipContent, Project, TextStyle};
 use nuzky_engine::speech::is_heard;
 use nuzky_session::ProjectSession;
 use nuzky_session::transcripts::{Record, TranscriptStore};
@@ -848,6 +848,83 @@ pub fn for_agent(view: &StyleView) -> Result<serde_json::Value> {
         versions.truncate(10);
     }
     Ok(value)
+}
+
+/// The rows of EDIT.md's Settings that stand in for tool arguments an agent leaves out, read anew
+/// on every call. A row that does not hold a value the tool takes is skipped with a warning, so
+/// the style never stops an edit.
+#[derive(Default)]
+pub struct Defaults {
+    rows: Vec<(String, String)>,
+    used: serde_json::Map<String, serde_json::Value>,
+    warnings: Vec<String>,
+}
+
+impl Defaults {
+    pub fn read() -> Self {
+        let text = fs::read_to_string(learning::style_path()).unwrap_or_default();
+        Self { rows: Doc::parse(&text).settings(), ..Self::default() }
+    }
+
+    pub fn pause_us(&mut self) -> Option<i64> {
+        self.take("edit_transcript shorten_pauses_us", "shorten_pauses_us", "a whole number from 0 to 10000000", |v| {
+            v.parse().ok().filter(|us| (0..=10_000_000).contains(us))
+        })
+    }
+
+    pub fn max_words(&mut self) -> Option<usize> {
+        self.take("build_captions max_words", "max_words", "a whole number above 0", |v| {
+            v.parse().ok().filter(|&n| n > 0)
+        })
+    }
+
+    pub fn max_chars(&mut self) -> Option<usize> {
+        self.take("build_captions max_chars", "max_chars", "a whole number above 0", |v| {
+            v.parse().ok().filter(|&n| n > 0)
+        })
+    }
+
+    /// The learned caption look on a canvas of this size. Learning writes its sizes for a frame
+    /// 1080 pixels across its shorter side.
+    pub fn caption_style(&mut self, (width, height): (u32, u32)) -> Option<TextStyle> {
+        self.take("build_captions style", "style", "a caption style that fits this canvas", |v| {
+            let mut style: TextStyle = serde_json::from_str(v).ok()?;
+            let scale = width.min(height) as f32 / 1080.0;
+            style.font_size *= scale;
+            style.stroke_width *= scale;
+            style.max_width = style.max_width.map(|w| w * scale);
+            nuzky_session::text_style(&style, (width, height)).is_ok().then_some(style)
+        })
+    }
+
+    fn take<T: Serialize>(
+        &mut self,
+        row: &str,
+        argument: &str,
+        expected: &str,
+        parse: impl FnOnce(&str) -> Option<T>,
+    ) -> Option<T> {
+        let (_, value) = self.rows.iter().find(|(name, _)| name == row)?;
+        let parsed = parse(value);
+        if let Some(p) = &parsed {
+            self.used.insert(argument.to_owned(), serde_json::to_value(p).unwrap_or_default());
+        } else {
+            self.warnings
+                .push(format!("EDIT.md's Settings row \"{row}\" is not {expected}, so the default applies instead"));
+        }
+        parsed
+    }
+
+    /// `response` with `from_style`, the values taken from the style, and `style_warnings`.
+    pub fn note(self, mut response: serde_json::Value) -> serde_json::Value {
+        if !self.used.is_empty() {
+            response["from_style"] = self.used.into();
+        }
+        if !self.warnings.is_empty() {
+            response["style_warnings"] = self.warnings.into();
+        }
+        response
+    }
 }
 
 fn accept(rule: &Rule) -> Accepted {

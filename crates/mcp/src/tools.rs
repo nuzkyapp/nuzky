@@ -1192,12 +1192,14 @@ impl Backend {
             }
             _ => Vec::new(),
         };
+        let mut from = crate::style::Defaults::read();
+        let pause = args.shorten_pauses_us.or_else(|| from.pause_us()).unwrap_or(transcript::DEFAULT_PAUSE_US);
         let ranges = transcript::edit_ranges(
             &state.project,
             &derived,
             args.delete.as_deref(),
             args.keep.as_deref(),
-            Some(args.shorten_pauses_us.unwrap_or(transcript::DEFAULT_PAUSE_US)),
+            Some(pause),
             &hesitations,
         )?;
         let cut = transcript::plan_cut(&state.project, &derived, ranges)?;
@@ -1210,9 +1212,9 @@ impl Backend {
                 revision: Some(state.stamp.revision),
                 speech_layout_key: Some(state.speech_layout_key.clone()),
             },
-            response: json!({"duration_us":{"before":before,"after":after},
+            response: from.note(json!({"duration_us":{"before":before,"after":after},
                 "removed_us":before-after,"ranges":cut.ranges,"preview_text":preview_text,
-                "transcript_key":transcript::word_key(&cut.preview, &cut.words),"revision":state.stamp.revision,"dry_run":args.dry_run}),
+                "transcript_key":transcript::word_key(&cut.preview, &cut.words),"revision":state.stamp.revision,"dry_run":args.dry_run})),
             edits: vec![cut.edit],
         })
     }
@@ -1268,8 +1270,9 @@ impl Backend {
         let project = self.media_project(&state.project);
         let derived = transcript::derive(&project, &self.host.transcripts)?;
         ensure!(derived.untranscribed.is_empty(), "TRANSCRIPT_MISSING: transcribe all heard assets before captions");
-        let grouping = args.grouping();
-        let look = args.look()?;
+        let mut from = crate::style::Defaults::read();
+        let grouping = args.grouping(&mut from);
+        let look = args.look(&mut from, (state.project.canvas.width, state.project.canvas.height))?;
         let energy =
             nuzky_analysis::prepared_word_energy(&project, &derived.words, &derived.sources, &self.host.cache_dir)?;
         let keys = nuzky_analysis::key_words(&derived.words, &energy);
@@ -1284,10 +1287,10 @@ impl Backend {
             vec![edit],
             Expect { revision: Some(state.stamp.revision), speech_layout_key: None },
         )?;
-        Ok(with_warnings(
+        Ok(from.note(with_warnings(
             json!({"revision": result.stamp.revision, "session_epoch": result.stamp.session_epoch, "caption_count": result.outcome.created.len(), "created": result.outcome.created, "removed": result.outcome.removed}),
             warnings,
-        ))
+        )))
     }
 
     /// Punch-ins on word ranges as one edit of the run. Splitting clips moves the speech layout and
@@ -1353,12 +1356,14 @@ impl Backend {
         let made: Vec<_> =
             state.project.reel_candidates.iter().filter(|c| c.status == ReelStatus::Made).cloned().collect();
         let max = args.max_duration_us.unwrap_or(reels::DEFAULT_MAX_DURATION_US);
-        let proposed = reels::plan(&state.project, &derived, &args.candidates, max)?;
+        let mut from = crate::style::Defaults::read();
+        let pause = from.pause_us().unwrap_or(transcript::DEFAULT_PAUSE_US);
+        let proposed = reels::plan(&state.project, &derived, &args.candidates, max, pause)?;
         let prepared = requests.entry(key).or_insert(PreparedTranscriptEdit {
             arguments,
             edits: vec![EditCmd::SetReelCandidates { candidates: made.into_iter().chain(proposed.clone()).collect() }],
             expect: Expect { revision: Some(state.stamp.revision), speech_layout_key: None },
-            response: json!({ "candidates": proposed }),
+            response: from.note(json!({ "candidates": proposed })),
         });
         self.apply_transcript_edit(&args.run_id, &request_id, prepared)
     }
@@ -1378,16 +1383,18 @@ impl Backend {
         }
         let derived = transcript::derive(&self.media_project(&state.project), &self.host.transcripts)?;
         let framing = args.canvas.unwrap_or_default();
+        let mut from = crate::style::Defaults::read();
+        let pause = from.pause_us().unwrap_or(transcript::DEFAULT_PAUSE_US);
         let (made, edits) =
-            reels::make(&self.project_path, &state.project, &derived, &args.ids, framing, &mut |_| Ok(()))?;
+            reels::make(&self.project_path, &state.project, &derived, &args.ids, framing, pause, &mut |_| Ok(()))?;
         let prepared = requests.entry(key.clone()).or_insert(PreparedTranscriptEdit {
             arguments,
             edits,
             expect: Expect { revision: Some(state.stamp.revision), speech_layout_key: None },
-            response: with_warnings(
+            response: from.note(with_warnings(
                 json!({ "reels": made }),
                 crate::fonts::warnings(made.iter().flat_map(|reel| reel.fonts.iter().map(String::as_str))),
-            ),
+            )),
         });
         let applied = self.apply_transcript_edit(&args.run_id, &request_id, prepared);
         if applied.is_err() && reels::forget(&made, &self.host.session.state()?.project) {

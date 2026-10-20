@@ -1520,10 +1520,165 @@ fn captions_and_reels_name_fonts_this_computer_lacks_over_stdio() {
     c.finish();
 }
 
+/// A learned style whose Settings give edit_transcript, build_captions and the reels' cut their values.
+const SETTINGS_STYLE: &str = "# Editing style\n\nLearned from one video.\n\n## Settings\n\n| Setting | Value |\n|---|---|\n| edit_transcript shorten_pauses_us | 530000 |\n| Cuts per minute | 15.5 |\n| build_captions max_words | 3 |\n| build_captions max_chars | 30 |\n| build_captions style | {\"fontSize\":120,\"color\":\"#ffe14d\",\"bold\":true,\"strokeWidth\":0} |\n\n## Pauses\n\nShorten every pause longer than 530 ms to that length.\n\n";
+
+/// Two sentences 2 s apart, with 0.1 s between their words and 1 s of silence after them, on a 720x1280 canvas, in
+/// a run.
+fn two_sentences(c: &mut Client) -> Value {
+    let run = c.call("begin_run", json!({"label": "reel"}))["run_id"].clone();
+    let said = [
+        ("Everybody", 200_000, 600_000),
+        ("saves", 700_000, 1_000_000),
+        ("money", 1_100_000, 1_500_000),
+        ("every", 1_600_000, 1_900_000),
+        ("month.", 2_000_000, 2_400_000),
+        ("Then", 4_400_000, 4_700_000),
+        ("spend", 4_800_000, 5_100_000),
+        ("it.", 5_200_000, 5_500_000),
+    ];
+    place_take(c, 6_500_000, &said, &run);
+    let canvas = json!([{"type": "setCanvas", "width": 720, "height": 1280}]);
+    c.call("apply_edits", json!({"run_id": run, "request_id": "canvas", "edits": canvas}));
+    run
+}
+
+fn plan_cut(c: &mut Client, pause: Option<i64>) -> Value {
+    let key = c.call("get_transcript", json!({}))["transcript_key"].clone();
+    let mut args = json!({"transcript_key": key, "dry_run": true});
+    if let Some(pause) = pause {
+        args["shorten_pauses_us"] = json!(pause);
+    }
+    c.call("edit_transcript", args)
+}
+
+/// The reel of both sentences, proposed and made.
+fn whole_reel(c: &mut Client, run: &Value) -> (Value, Value) {
+    let key = c.call("get_transcript", json!({}))["transcript_key"].clone();
+    let candidates = json!([{"from": 0, "to": 7, "title": "Money", "why": "All of it.", "score": 0.5}]);
+    let proposed = c.call("propose_reels", json!({"run_id": run, "transcript_key": key, "candidates": candidates}));
+    let made = c.call("make_reels", json!({"run_id": run, "ids": [proposed["candidates"][0]["id"]]}));
+    let reel: Project =
+        serde_json::from_slice(&std::fs::read(made["reels"][0]["path"].as_str().unwrap()).unwrap()).unwrap();
+    assert_eq!(json!(reel.duration_us()), proposed["candidates"][0]["durationUs"]);
+    (proposed, made)
+}
+
+/// Each caption's text and style.
+fn captions_of(tracks: &Value) -> Vec<(String, Value)> {
+    let track = tracks.as_array().unwrap().iter().find(|t| t["name"] == "Captions").unwrap();
+    let clips = track["clips"].as_array().unwrap().iter();
+    clips.map(|clip| (clip["content"]["text"].as_str().unwrap().to_owned(), clip["content"]["style"].clone())).collect()
+}
+
+fn most_words(captions: &[(String, Value)]) -> usize {
+    captions.iter().map(|(text, _)| text.split(' ').count()).max().unwrap()
+}
+
+fn most_chars(captions: &[(String, Value)]) -> usize {
+    captions.iter().map(|(text, _)| text.chars().count()).max().unwrap()
+}
+
+/// An agent that never reads EDIT.md and leaves the arguments out cuts with the creator's pause, captions with their
+/// limits and look, and cuts reels with their pause. Arguments it gives win one by one, a row its tool cannot take
+/// is skipped with a warning, and without the style every answer stays as it was.
+#[test]
+fn the_creators_settings_fill_in_what_an_agent_leaves_out_over_stdio() {
+    let mut plain = Client::start(true, None, Some(None));
+    let plain_run = two_sentences(&mut plain);
+    let (plain_reel, plain_made) = whole_reel(&mut plain, &plain_run);
+    assert!(plain_reel.get("from_style").is_none() && plain_made.get("from_style").is_none(), "{plain_made}");
+    assert_eq!(plan_cut(&mut plain, None), plan_cut(&mut plain, Some(300_000)));
+    let key = plain.call("get_transcript", json!({}))["transcript_key"].clone();
+    plain.call("edit_transcript", json!({"run_id": plain_run, "transcript_key": key}));
+    let built = plain.call("build_captions", json!({"run_id": plain_run}));
+    let mut fields: Vec<&String> = built.as_object().unwrap().keys().collect();
+    fields.sort();
+    assert_eq!(fields, ["caption_count", "created", "removed", "revision", "session_epoch"]);
+    let captions = captions_of(&plain.call("get_state", json!({}))["tracks"]);
+    assert_eq!((most_words(&captions), most_chars(&captions) <= 15), (2, true), "{captions:?}");
+    assert!(captions.iter().all(|(_, style)| style["fontSize"] == 95.0 && style["color"] == "#ffffff"));
+    plain.call("end_run", json!({"run_id": plain_run, "action": "keep"}));
+    plain.finish();
+
+    let mut styled = Client::start(true, None, Some(Some(SETTINGS_STYLE)));
+    let run = two_sentences(&mut styled);
+    let planned = plan_cut(&mut styled, None);
+    let tight = plan_cut(&mut styled, Some(300_000));
+    let after = |plan: &Value| plan["duration_us"]["after"].as_i64().unwrap();
+    assert_eq!(after(&planned) - after(&tight), 230_000, "the 2 s pause shortens to 530 ms, not 300 ms");
+    assert_eq!(planned["from_style"], json!({"shorten_pauses_us": 530_000}));
+    let mut same = planned.clone();
+    same.as_object_mut().unwrap().remove("from_style");
+    assert_eq!(same, plan_cut(&mut styled, Some(530_000)), "an explicit pause names nothing from the style");
+    let (reel, made) = whole_reel(&mut styled, &run);
+    let length = |reel: &Value| reel["candidates"][0]["durationUs"].as_i64().unwrap();
+    assert_eq!(length(&reel) - length(&plain_reel), 230_000);
+    assert_eq!((&reel["from_style"], &made["from_style"]), (&planned["from_style"], &planned["from_style"]));
+
+    let key = styled.call("get_transcript", json!({}))["transcript_key"].clone();
+    let cut = styled.call("edit_transcript", json!({"run_id": run, "transcript_key": key}));
+    assert_eq!(cut["duration_us"], planned["duration_us"]);
+
+    // Rows a tool cannot take are skipped with a warning; EDIT.md is read again on every call.
+    let edit_md = styled.dir.join("data/nuzky/EDIT.md");
+    let broken = SETTINGS_STYLE.replace("| 530000 |", "| fast |").replace("| 3 |", "| 0 |").replace("120", "-1");
+    std::fs::write(&edit_md, broken).unwrap();
+    let mut warned = plan_cut(&mut styled, None);
+    let warning = warned.as_object_mut().unwrap().remove("style_warnings").unwrap();
+    assert!(warning[0].as_str().unwrap().contains("edit_transcript shorten_pauses_us"), "{warning}");
+    assert_eq!(warned, plan_cut(&mut styled, Some(300_000)));
+    let rebuilt = styled.call("build_captions", json!({"run_id": run}));
+    assert_eq!(rebuilt["from_style"], json!({"max_chars": 30}));
+    let warnings = rebuilt["style_warnings"].to_string();
+    assert!(warnings.contains("build_captions max_words") && warnings.contains("build_captions style"), "{warnings}");
+    let captions = captions_of(&styled.call("get_state", json!({}))["tracks"]);
+    assert_eq!(most_words(&captions), 2, "{captions:?}");
+    assert!(captions.iter().all(|(_, style)| style["fontSize"] == 95.0 && style["color"] == "#ffffff"));
+    std::fs::write(&edit_md, SETTINGS_STYLE).unwrap();
+
+    // A preset replaces the learned look as a whole, and a limit given replaces only itself.
+    let karaoke = styled.call("build_captions", json!({"run_id": run, "style_preset": "karaoke", "max_chars": 14}));
+    assert_eq!(karaoke["from_style"], json!({"max_words": 3}));
+    let captions = captions_of(&styled.call("get_state", json!({}))["tracks"]);
+    assert_eq!((most_words(&captions), most_chars(&captions)), (3, 14), "{captions:?}");
+    assert!(captions.iter().all(|(_, style)| style["fontSize"] == 95.0 && style["highlight"] == "#ffe14d"));
+
+    let built = styled.call("build_captions", json!({"run_id": run}));
+    assert_eq!((&built["from_style"]["max_words"], &built["from_style"]["max_chars"]), (&json!(3), &json!(30)));
+    assert_eq!(built["from_style"]["style"]["fontSize"], 80.0, "120 px for 1080 across is 80 px for 720");
+    assert!(built.get("style_warnings").is_none(), "{built}");
+    styled.call("end_run", json!({"run_id": run, "action": "keep"}));
+    styled.finish();
+    let saved: Value = serde_json::from_slice(&std::fs::read(styled.dir.join("project.nuzky")).unwrap()).unwrap();
+    let project: Project = serde_json::from_value(saved.clone()).unwrap();
+    assert_eq!(json!(project.duration_us()), planned["duration_us"]["after"]);
+    let captions = captions_of(&saved["tracks"]);
+    assert_eq!(most_words(&captions), 3, "{captions:?}");
+    assert!(most_chars(&captions) > 15, "{captions:?}");
+    for (_, style) in &captions {
+        assert_eq!(
+            (&style["fontSize"], &style["color"], &style["bold"], &style["strokeWidth"]),
+            (&json!(80.0), &json!("#ffe14d"), &json!(true), &json!(0.0)),
+            "{style}"
+        );
+    }
+}
+
 /// A 4 s take whose words are stored as recognised, 0.8 s apart, and placed on the timeline by a
 /// run. Words come from the store, so the file is never decoded and any bytes do. The client
 /// must have a data directory of its own (`style: Some(..)`).
 fn place_transcribed_take(c: &mut Client, said: &[&str], run_id: &Value) {
+    let said: Vec<_> = said
+        .iter()
+        .enumerate()
+        .map(|(i, text)| (*text, 200_000 + i as i64 * 800_000, 700_000 + i as i64 * 800_000))
+        .collect();
+    place_take(c, 4_000_000, &said, run_id);
+}
+
+/// A take of `duration_us` whose words (text, start, end) are stored and placed as above.
+fn place_take(c: &mut Client, duration_us: i64, said: &[(&str, i64, i64)], run_id: &Value) {
     use nuzky_engine::{model::Asset, model::AssetKind, speech::Word};
     use nuzky_session::transcripts::{Record, TranscriptStore, VERSION};
     let path = c.dir.join("take.mov");
@@ -1533,7 +1688,7 @@ fn place_transcribed_take(c: &mut Client, said: &[&str], run_id: &Value) {
         name: "take.mov".into(),
         path: path.to_string_lossy().into(),
         kind: AssetKind::Video,
-        duration_us: 4_000_000,
+        duration_us,
         width: 1080,
         height: 1920,
         fps: 30.0,
@@ -1545,13 +1700,7 @@ fn place_transcribed_take(c: &mut Client, said: &[&str], run_id: &Value) {
     };
     let words = said
         .iter()
-        .enumerate()
-        .map(|(i, text)| Word {
-            start_us: 200_000 + i as i64 * 800_000,
-            end_us: 700_000 + i as i64 * 800_000,
-            text: (*text).into(),
-            probability: 0.9,
-        })
+        .map(|&(text, start_us, end_us)| Word { start_us, end_us, text: text.into(), probability: 0.9 })
         .collect();
     let store = TranscriptStore::at(c.dir.join("data/nuzky/transcripts")).unwrap();
     let record = Record {
