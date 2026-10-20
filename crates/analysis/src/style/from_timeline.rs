@@ -530,6 +530,11 @@ mod tests {
         // The look of most captions, its size on a frame 1080 pixels wide with the captions' own scale.
         let look = picture.look.unwrap();
         assert_eq!((look.font.as_deref(), look.size, look.color.as_str()), (Some("Montserrat"), 180.0, "#fff059"));
+        // Kept as evidence byte for byte as before a look could have a box, a highlight, key words or a case.
+        assert_eq!(
+            serde_json::to_string(&look).unwrap(),
+            r##"{"font":"Montserrat","size":180.0,"color":"#fff059","bold":false,"outline":null,"shadow":{"color":"#000000","opacity":0.41,"blur":23.0,"distance":5.0,"angle":-45.0},"letter_spacing":0.05,"line_spacing":0.0}"##
+        );
         let shadow = look.shadow.unwrap();
         assert_eq!((shadow.blur, shadow.distance, shadow.opacity, shadow.angle), (23.0, 5.0, 0.41, -45.0));
         assert_eq!((look.letter_spacing, look.line_spacing), (0.05, 0.0));

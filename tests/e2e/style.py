@@ -386,6 +386,15 @@ def style_auto(r):
         return
     style = json.loads(row()[1])
     r.check('the look is the user\'s, sized for a frame 1080 pixels across', style == {**LOOK, 'fontSize': size}, style)
+    click(r, 'Edit as text')
+    shown = wait(lambda: r.s.run("return document.querySelector('textarea[aria-label=\"EDIT.md\"]')?.value") == edit_md(r), 5)
+    r.check('the style shows the Captions rule with the look', shown and f"bold in capitals, {size:g} pixels" in edit_md(r), edit_md(r))
+    r.s.run("""const el = document.querySelector('textarea[aria-label="EDIT.md"]');
+        el.scrollTop = el.scrollHeight * el.value.indexOf('## Captions') / el.value.length;
+        const {toasts, dismissToast} = window.__nuzky.store.getState();
+        toasts.filter((t) => t.text.startsWith('Learned from')).forEach((t) => dismissToast(t.id));""")
+    r.shot('captions-look')
+    click(r, 'Cancel')
 
     learned_at = sources(r)[0]['atMs']
     bridge = Bridge(r, r.saved_project())

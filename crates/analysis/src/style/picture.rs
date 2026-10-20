@@ -77,14 +77,14 @@ pub struct CaptionLook {
     #[serde(default)]
     pub line_spacing: f32,
     /// `#rrggbbaa` box behind the text.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub background: Option<String>,
     /// `#rrggbb` fill of the word being spoken.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub highlight: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keywords: Option<Keywords>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "LetterCase::is_none")]
     pub letter_case: LetterCase,
 }
 

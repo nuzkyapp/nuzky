@@ -1182,8 +1182,10 @@ fn project_picture(project: &Project, clips: &[&nuzky_engine::model::Clip]) -> P
             words: text.split_whitespace().count(),
         });
         heights.push(0.5 + transform.y);
+        // The size viewers see: keyframes set the scale drawn, and its middle is past any animation.
+        let scale = transform_at(clip, clip.start_us + clip.duration_us / 2).0.scale;
         // Half pixels, so Reel's 7.5 pixel outline stays as it is.
-        let px = |v: f32| (v * transform.scale * to_reel * 2.0).round() / 2.0;
+        let px = |v: f32| (v * scale * to_reel * 2.0).round() / 2.0;
         looks.push(CaptionLook {
             font: style.font_family.clone(),
             size: px(style.font_size),
@@ -1915,7 +1917,8 @@ mod tests {
             keep_in_place: false,
             clips: Vec::new(),
         };
-        // The creator's look on three captions half again as large, on a canvas half a Reel's size; Reel on one.
+        // The creator's look on three captions half again as large, two of them by keyframes, on a canvas half a
+        // Reel's size; Reel on one.
         let mine = serde_json::json!({"fontSize": 40.0, "color": "#ffe14d", "bold": true, "strokeWidth": 2.5,
             "strokeColor": "#000000", "background": "#000000b3", "highlight": "#4ade80",
             "keywords": {"color": "#ff4d4d", "pick": "last"}, "letterCase": "upper"});
@@ -1929,7 +1932,12 @@ mod tests {
             } else {
                 (mine.clone(), 1.5)
             };
-            let transform = nuzky_engine::model::Transform { y: 0.15, scale, ..Default::default() };
+            let mut transform = nuzky_engine::model::Transform { y: 0.15, scale, ..Default::default() };
+            if i >= 2 {
+                let at = |t_us| nuzky_engine::model::Keyframe { t_us, transform, ease: Default::default() };
+                clip.keyframes = vec![at(0), at(500_000)];
+                transform.scale = 1.0;
+            }
             clip.content = serde_json::from_value(
                 serde_json::json!({"type": "text", "text": "two words", "style": style, "transform": transform}),
             )
