@@ -64,8 +64,8 @@ function useShortcuts() {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const s = useEditor.getState();
-      // The home screen and the launcher have their own keys.
-      if (s.view === "home" || s.launcherOpen || s.snap?.recovery) return;
+      // The home screen and the launcher have their own keys. While an update installs, a key would change the project it is saving.
+      if (s.view === "home" || s.launcherOpen || s.snap?.recovery || useUpdates.getState().install?.stage === "installing") return;
       const mod = e.ctrlKey || e.metaKey;
       // Ctrl+J opens and closes the AI panel, also from inside its own field.
       if (mod && e.key.toLowerCase() === "j") {
@@ -333,6 +333,7 @@ function useBackendEvents() {
         showHome();
       }),
     );
+    offs.push(listen("close-while-installing", () => useEditor.getState().toast({ kind: "info", text: "Installing the update. Nuzky restarts in a moment." })));
     offs.push(
       listen<string>("close-save-failed", (e) =>
         useEditor.getState().toast({ kind: "error", text: `Your last changes could not be saved: ${e.payload}. Free some disk space and close again, or close again to quit without them.` }),

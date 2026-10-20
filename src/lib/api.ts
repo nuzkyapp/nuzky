@@ -214,8 +214,8 @@ export const api = {
   checkForUpdate: () => invoke<{ version: string; canInstall: boolean } | null>("check_for_update"),
   /** Downloads the newer version and checks its signature; the backend keeps it for `restartToUpdate`. `progress` gets the percentage downloaded. */
   downloadUpdate: (progress: Channel<number>) => invoke<string>("download_update", { progress }),
-  /** Saves the project, installs the downloaded update and restarts Nuzky; `note` goes to the restarted UI. Returns the work that started meanwhile, which postpones the restart. */
-  restartToUpdate: (note: string) => invoke<string | null>("restart_to_update", { note }),
+  /** Saves the project, installs the downloaded update and restarts Nuzky; `note` goes to the restarted UI. True when work started meanwhile, which postpones the restart. */
+  restartToUpdate: (note: string) => invoke<boolean>("restart_to_update", { note }),
   /** Stops the download; `downloadUpdate` then fails with CANCELLED. */
   cancelUpdate: () => invoke<void>("cancel_update"),
   openReleasePage: () => invoke<void>("open_release_page"),

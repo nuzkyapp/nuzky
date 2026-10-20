@@ -33,7 +33,7 @@ macOS works and is where Nuzky is tested. Linux is only partly tested. Windows i
 
 ## Updates
 
-Once a day Nuzky reads the version number of the latest release on this page, and nothing else. When a newer one is out, the version at the bottom of the home screen's sidebar says so. Click it and choose Install and restart: Nuzky downloads the new version from this page and keeps it only if its signature matches the key built into Nuzky. Then it saves your project, installs the new version and restarts, after counting down five seconds, so you can choose Not now and restart later. While an export or another job runs, it waits. Nothing downloads or installs before you click. To turn the check off, untick Check automatically in the same menu.
+Once a day Nuzky reads the version number of the latest release on this page, and nothing else. When a newer one is out, the version at the bottom of the home screen's sidebar says so. Click it and choose Update: Nuzky downloads the new version from this page and keeps it only if its signature matches the key built into Nuzky. When you click Restart to update, it saves your project, installs the new version and restarts. It never restarts by itself, and while an export or another job runs, Restart to update waits for it. Nothing downloads or installs before you click. To turn the check off, untick Check automatically in the same menu.
 
 ## Found a bug?
 

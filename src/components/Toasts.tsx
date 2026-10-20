@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { AlertCircle, AlertTriangle, CheckCircle2, Info, X } from "lucide-react";
 import { useEditor, type Toast } from "../lib/store";
+import { useUpdates } from "../lib/updates";
 
-/** How long a toast stays, in ms; errors, warnings, sticky notices and countdowns stay until dismissed. */
-const lifetime = (t: Toast) => (t.kind === "error" || t.kind === "warning" || t.sticky || t.countdown ? null : t.action ? 7000 : 5000);
+/** How long a toast stays, in ms; errors, warnings and sticky notices stay until dismissed. */
+const lifetime = (t: Toast) => (t.kind === "error" || t.kind === "warning" || t.sticky ? null : t.action ? 7000 : 5000);
 
 /** The `overlay` shadow with the hairline in the toast's colour; a border would double the hairline. */
 const EDGE = {
@@ -25,17 +26,6 @@ function ToastItem({ toast: t, paused, dismiss }: { toast: Toast; paused: boolea
     };
   }, [paused, onDismiss]);
   const action = t.action && (t.action.valid?.() ?? true) ? t.action : null;
-  // A countdown runs its action at zero, and stops with the clock like the toast's own time.
-  const [seconds, setSeconds] = useState(t.countdown?.seconds ?? 0);
-  useEffect(() => {
-    if (paused || !t.countdown || !action) return;
-    const timer = window.setTimeout(() => {
-      if (seconds > 1) return setSeconds(seconds - 1);
-      action.run();
-      onDismiss();
-    }, 1000);
-    return () => window.clearTimeout(timer);
-  }, [paused, seconds, t.countdown, action, onDismiss]);
   // Two actions, or a long one beside a long text, would leave the text a narrow column; they go under it instead.
   const stacked = !!t.secondary || (!!action && action.label.length >= 12 && t.text.length + action.label.length > 40);
   // A clicked button that goes with its toast would leave the stack thinking it has the focus, and every clock stopped.
@@ -80,11 +70,11 @@ function ToastItem({ toast: t, paused, dismiss }: { toast: Toast; paused: boolea
       ) : (
         <Info size={18} className="shrink-0 text-muted" />
       )}
-      <span className="min-w-0 flex-1 break-words">{t.countdown ? t.countdown.text(seconds) : t.text}</span>
+      <span className="min-w-0 flex-1 break-words">{t.text}</span>
       {action && !stacked && choice(action)}
       {/* After the text, so Tab reaches the actions before Dismiss, which `order` keeps on the first line. */}
       {action && stacked && (
-        <div className="order-2 -mt-1 flex basis-full justify-end gap-1">
+        <div className="order-2 mt-1 flex basis-full justify-end gap-1">
           {t.secondary && choice(t.secondary)}
           {choice(action)}
         </div>
@@ -112,8 +102,10 @@ export function Toasts({ bottom, left }: { bottom: number; /** From the window's
   const toasts = useEditor((s) => s.toasts);
   const lift = useEditor((s) => s.toastLift);
   const dismiss = useEditor((s) => s.dismissToast);
-  // An action such as Undo checks the project each render, so it hides once the history moved on.
-  useEditor((s) => `${s.snap?.sessionEpoch}:${s.snap?.revision}`);
+  // An action checks what it depends on each render, so it goes once it no longer applies: Undo once the history moved on,
+  // Restart now once work started, Update once the update downloads.
+  useEditor((s) => s.toasts.map((t) => t.action?.valid?.() ?? true).join());
+  useUpdates((s) => s.install?.stage);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const stack = useRef<HTMLDivElement>(null);

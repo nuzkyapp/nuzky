@@ -2,6 +2,7 @@ import { Channel } from "@tauri-apps/api/core";
 import { create } from "zustand";
 import { useAgent } from "./agent";
 import { api, errorText } from "./api";
+import { reportBug } from "./diagnostics";
 import { showEditor } from "./library";
 import { useEditor, whenIdle } from "./store";
 import type { JobEvent } from "./types";
@@ -10,8 +11,8 @@ import type { JobEvent } from "./types";
  * Whether a newer Nuzky was released, and installing it. A check asks the backend, which reads only
  * the version on the latest GitHub release. Automatic checks run 10 s after start and then at most
  * once a day, also across launches, and say nothing when they fail; Check for updates always answers.
- * Only Install and restart downloads anything: the backend keeps the package once its signature
- * matches the key built into Nuzky, and installs it and restarts when the user is ready.
+ * Only Update downloads anything: the backend keeps the package once its signature matches the key
+ * built into Nuzky, and installs it and restarts only when the user chooses Restart to update.
  */
 type Updates = {
   /** This Nuzky's version. */
@@ -39,7 +40,6 @@ const KEY = "nuzky.updates";
 const FIRST_CHECK_MS = 10_000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
-const RESTART_IN_S = 5;
 
 function load(): Partial<Saved> {
   try {
@@ -112,7 +112,11 @@ export async function checkForUpdates(manual: boolean) {
     if (asked()) {
       const toast = useEditor.getState().toast;
       if (latest)
-        toast({ kind: "info", text: `Nuzky ${latest} is available.`, action: found?.canInstall ? { label: "Install and restart", run: () => void installUpdate() } : { label: "Download from GitHub…", run: downloadUpdate } });
+        toast({
+          kind: "info",
+          text: `Nuzky ${latest} is available.`,
+          action: found?.canInstall ? { label: "Update", run: () => void installUpdate(), valid: () => !useUpdates.getState().install } : { label: "Download from GitHub…", run: downloadUpdate },
+        });
       else toast({ kind: "success", text: `Nuzky ${version} is the latest version.` });
     }
   } catch (e) {
@@ -164,7 +168,7 @@ export const waitFor = (work: string) => `Restart when ${work} finishes`;
 /** Errors that trying again cannot fix; Download from GitHub can. */
 const FINAL = ["UPDATE_NO_PACKAGE", "UPDATE_SIGNATURE", "UPDATE_SOURCE", "UPDATE_FOLDER"];
 
-/** Downloads the newer version and checks its signature; then, with nothing running, restarts into it in 5 s unless the user says Not now. */
+/** Downloads the newer version and checks its signature. Nuzky then restarts into it only when the user chooses Restart to update. */
 export async function installUpdate() {
   const { latest, install, canInstall } = useUpdates.getState();
   if (!latest || install) return;
@@ -180,14 +184,11 @@ export async function installUpdate() {
   }
   useUpdates.setState({ install: { stage: "ready" } });
   if (restartBlocker()) return;
-  const text = (left: number) => `Nuzky ${latest} is ready. Restarting in ${left} s.`;
   useEditor.getState().toast({
     kind: "info",
-    text: text(RESTART_IN_S),
-    countdown: { seconds: RESTART_IN_S, text },
+    text: `Nuzky ${latest} is ready.`,
     // Work that starts meanwhile takes the toast away, and Restart to update waits for it.
-    action: { label: "Restart now", run: () => void restartToUpdate(), valid: () => !restartBlocker() },
-    secondary: { label: "Not now", run: focusUpdateButton },
+    action: { label: "Restart now", run: () => void restartToUpdate(), valid: () => useUpdates.getState().install?.stage === "ready" && !restartBlocker() },
   });
 }
 
@@ -205,17 +206,17 @@ export async function restartToUpdate() {
   const note: Note = { from: version, view: useEditor.getState().view, draft: useAgent.getState().draft };
   try {
     // Unless work started while it installed, Nuzky restarts and this page ends here.
-    const busy = await api.restartToUpdate(JSON.stringify(note));
-    if (!busy) return;
+    if (!(await api.restartToUpdate(JSON.stringify(note)))) return;
+    // Restart to update waits for the work, then offers itself again.
     useUpdates.setState({ install: { stage: "installed" } });
-    toast({ kind: "info", sticky: true, text: `Nuzky ${latest} is installed. ${busy}`, action: { label: "Restart", run: () => void restartToUpdate() } });
+    toast({ kind: "info", text: `Nuzky ${latest} is installed and starts at the next restart.` });
   } catch (e) {
     useUpdates.setState({ install: { stage: install.stage } });
     failed(e, () => void restartToUpdate());
   }
 }
 
-/** Says what went wrong and offers what can help: trying again, or the installers on GitHub. */
+/** Says what went wrong and offers what can help: trying again, the installers on GitHub, or for a bad signature a bug report. */
 function failed(e: unknown, retry: () => void) {
   focusUpdateButton();
   const error = errorText(e);
@@ -235,14 +236,14 @@ function failed(e: unknown, retry: () => void) {
   // This copy can't install this version; the menus offer the release page instead.
   useUpdates.setState({ install: null, canInstall: false });
   save();
-  toast({ kind: "error", text, action: download });
+  toast({ kind: "error", text, action: code === "UPDATE_SIGNATURE" ? { label: "Report a bug…", run: reportBug } : download });
 }
 
 export function cancelUpdate() {
   void api.cancelUpdate();
 }
 
-/** Where the keyboard goes on after the download's Stop, a failure or Not now took the focused control away. */
+/** Where the keyboard goes on after the download's Stop or a failure took the focused control away. */
 function focusUpdateButton() {
   requestAnimationFrame(() => {
     if (document.activeElement && document.activeElement !== document.body) return;

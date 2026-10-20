@@ -1408,6 +1408,7 @@ pub fn run() {
                 // Quitting would cut short the rewriting of the app; it restarts in a moment.
                 if updates::installing(app) {
                     api.prevent_close();
+                    app.emit("close-while-installing", ()).ok();
                     return;
                 }
                 let state = app.state::<AppState>();

@@ -16,8 +16,6 @@ export interface Toast {
   action?: { label: string; run: () => void; valid?: () => boolean };
   /** A second choice beside `action`, such as Download from GitHub beside Try again; both then sit under the text. */
   secondary?: { label: string; run: () => void };
-  /** `action` runs by itself after `seconds`, which `text` shows as they count down; the toast stays until then. */
-  countdown?: { seconds: number; text: (left: number) => string };
 }
 
 /** A media item being dragged from the media panel onto the timeline. */

@@ -1,14 +1,14 @@
 """Update checks and installing. The foot of the home sidebar says when a newer Nuzky was released, from a latest.json
 served here in place of GitHub's. The automatic check runs 10 s after start and at most once a day, also across launches,
-says nothing when it fails and can be turned off; Check for updates always answers in a toast. Install and restart
-downloads the package latest.json names, signed here with a throwaway key, with its progress and a Stop, and keeps it;
-with nothing running Nuzky restarts into it after a 5 s countdown, otherwise Restart to update waits for the work. This
-debug build installs into a folder that stands in for the installed copy (NUZKY_UPDATE_INSTALL) and is never started
-again: the flow reloads the page where a release would restart."""
+says nothing when it fails and can be turned off; Check for updates always answers in a toast. Update downloads the
+package latest.json names, signed here with a throwaway key, with its progress and a Stop, and keeps it; Nuzky never
+restarts by itself, only when the user chooses Restart to update, which waits for running work. This debug build
+installs into a folder that stands in for the installed copy (NUZKY_UPDATE_INSTALL) and is never started again: the
+flow reloads the page where a release would restart."""
 import gzip, json, os, re, subprocess, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from e2e.harness import FIXTURES, ROOT, Bridge, close_window, flow, wait, webdriver
+from e2e.harness import FIXTURES, ROOT, Bridge, close_window, flow, press, wait, webdriver
 
 ROW = """const b = document.querySelector('[data-version]');
 return b && {text: b.textContent, focused: document.activeElement === b};"""
@@ -30,14 +30,40 @@ CHOICES = """return window.__nuzky.store.getState().toasts.map((t) => ({kind: t.
 # A click focuses the button it lands on, as WebKitGTK does for a person's click.
 TOAST_BUTTON = """const b = [...document.querySelectorAll('[data-toast] button')].find((b) => b.textContent === arguments[0]);
 if (!b) return false; b.focus(); b.click(); return true;"""
+# `shown`: the texts drawn larger than the 1 px of one kept only for screen readers.
 PROGRESS = """const p = document.querySelector('[data-update-progress]');
 return p && {text: p.textContent, stop: p.querySelector('button')?.textContent ?? null, width: p.getBoundingClientRect().width,
-             stopFocused: document.activeElement === p.querySelector('button')};"""
+             stopFocused: document.activeElement === p.querySelector('button'),
+             shown: [...p.querySelectorAll('span, button')].filter((e) => !e.children.length && e.getBoundingClientRect().width > 1).map((e) => e.textContent)};"""
 INSTALL = 'return window.__nuzky.updates.getState().install'
 RELOAD = "window.__oldPage = true; location.reload()"
 EDITOR_BUTTON = """const b = document.querySelector('[data-update-button]');
 return b && {label: b.getAttribute('aria-label') ?? b.innerText.trim(), focused: document.activeElement === b,
-             disabled: b.getAttribute('aria-disabled') === 'true'};"""
+             disabled: b.getAttribute('aria-disabled') === 'true', width: Math.round(b.getBoundingClientRect().width)};"""
+# Why Restart to update waits, in the top bar: a status, not a disabled button.
+WAITING = """const w = document.querySelector('[data-update-waiting]');
+return w && {tag: w.tagName, role: w.getAttribute('role'), text: w.textContent, title: w.title, color: getComputedStyle(w).color,
+             opacity: getComputedStyle(w).opacity, width: Math.round(w.getBoundingClientRect().width),
+             shown: [...w.querySelectorAll('span')].filter((e) => e.getBoundingClientRect().width > 1).map((e) => e.textContent)};"""
+MUTED = 'rgb(161, 161, 169)'
+# Where the top bar's update control, the project's name, its save state and the AI run capsule are, left to right.
+HEADER = """const h = document.querySelector('header'), x = (e) => e && [Math.round(e.getBoundingClientRect().left), Math.round(e.getBoundingClientRect().right)];
+const statuses = [...h.querySelectorAll('[role=status]')];
+return {update: x(h.querySelector('[data-update-button], [data-update-waiting], [data-update-progress]')),
+        name: x(h.querySelector('div.flex-1 > div.relative')?.firstElementChild),
+        saved: x(statuses.find((s) => /^(Saved|Saving)/.test(s.textContent.trim()))),
+        run: x(statuses.find((s) => s.textContent.includes('AI is editing')))};"""
+# The sidebar row's text, percentage and Stop as drawn: hidden or covered, the percentage is not what a point on it hits.
+ROW_PROGRESS = """const b = document.querySelector('[data-version]'), stop = b.parentElement.querySelector('button:not([data-version])');
+const pct = [...b.querySelectorAll('span')].find((s) => !s.children.length && /^\\d+%$/.test(s.textContent)), label = pct?.parentElement;
+if (!pct || !stop) return null;
+const p = pct.getBoundingClientRect(), s = stop.getBoundingClientRect();
+const at = (r) => document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+return {text: label.textContent, cut: label.scrollWidth > label.clientWidth, focused: document.activeElement === b, percentShown: at(p) === pct,
+        stopShown: getComputedStyle(stop).opacity === '1' && at(s)?.closest('button') === stop, apart: p.right <= s.left};"""
+BUG_TEXT = "const t = document.getElementById('bug-report-text'); return t && t.closest('dialog')?.open ? t.value : null"
+REVISION = 'return window.__nuzky.store.getState().snap.revision'
+
 # What the toasts show and the order Tab reaches their buttons in.
 SHOWN = """return [...document.querySelectorAll('[data-toast]')].map((t) => ({text: t.querySelector('span').textContent,
   buttons: [...t.querySelectorAll('button')].map((b) => b.getAttribute('aria-label') ?? b.textContent)}));"""
@@ -182,10 +208,12 @@ def updates(r):
 
         r.s.run(OPEN_MENU)
         menu = wait(lambda: r.s.run(MENU), 3)
-        r.check("its menu offers to install it and restart, what's new, a check and the automatic check, which is on",
-                menu == [{'label': 'Install Nuzky 99.0.0 and restart', 'checked': None}, {'label': "What's new in Nuzky 99.0.0…", 'checked': None},
+        r.check("its menu offers to update to it, what's new, a check and the automatic check, which is on",
+                menu == [{'label': 'Update to Nuzky 99.0.0', 'checked': None}, {'label': "What's new in Nuzky 99.0.0…", 'checked': None},
                          {'label': 'Check for updates', 'checked': None}, {'label': 'Check automatically', 'checked': 'true'}], menu)
         r.check('opened from the keyboard, the menu has the focus', wait(lambda: r.s.run(IN_MENU), 3))
+        # The menu fades in.
+        time.sleep(0.5)
         r.shot('update-menu')
         r.key('Escape')
         r.check('Esc closes the menu and focus returns to the row', wait(lambda: not r.s.run(MENU) and row(r).get('focused'), 3), row(r))
@@ -201,13 +229,13 @@ def updates(r):
 
         r.s.run("window.__nuzky.store.setState({view: 'editor'})")
         r.check('in the editor a small button next to Projects says so',
-                wait(lambda: r.s.run(EDITOR_BUTTON), 3) == {'label': 'Nuzky 99.0.0 is available', 'focused': False, 'disabled': False},
+                wait(lambda: r.s.run(EDITOR_BUTTON), 3) == {'label': 'Nuzky 99.0.0 is available', 'focused': False, 'disabled': False, 'width': 32},
                 r.s.run(EDITOR_BUTTON))
         r.shot('editor-update')
         r.s.run("const b = document.querySelector('[data-update-button]'); b.focus(); b.click();")
         menu = wait(lambda: r.s.run(MENU), 3)
         r.check('it opens the same menu, with the focus in it',
-                (menu or [{}])[0].get('label') == 'Install Nuzky 99.0.0 and restart' and wait(lambda: r.s.run(IN_MENU), 3), menu)
+                (menu or [{}])[0].get('label') == 'Update to Nuzky 99.0.0' and wait(lambda: r.s.run(IN_MENU), 3), menu)
         r.shot('editor-update-menu')
         r.key('Escape')
         r.check('Esc closes it and focus returns to the button', wait(lambda: not r.s.run(MENU) and (r.s.run(EDITOR_BUTTON) or {}).get('focused'), 3))
@@ -237,6 +265,8 @@ def updates(r):
         r.check('nor is one that arrives small and unpacks large',
                 len(server.body) < 65_536 and (answer or {}).get('kind') == 'error' and row(r).get('text') == f'Nuzky {version}',
                 (len(server.body), answer, row(r)))
+        # The menu fades out over the toast.
+        time.sleep(0.5)
         r.shot('check-failed')
 
         server.serve('99.0.0')
@@ -283,7 +313,7 @@ def updates(r):
                 and server.requests == asked + 1, (toasts(r), server.requests, asked))
         server.delay = 0
         r.check('nothing went wrong on the way', [t for t in toasts(r) if t['kind'] == 'error'] == [], toasts(r))
-        r.check('its toast offers to install it', (r.s.run(CHOICES) or [{}])[-1].get('choices') == ['Install and restart'], r.s.run(CHOICES))
+        r.check('its toast offers to update', (r.s.run(CHOICES) or [{}])[-1].get('choices') == ['Update'], r.s.run(CHOICES))
         install(r, server, version)
     finally:
         server.http.shutdown()
@@ -360,11 +390,11 @@ def install(r, server, version):
             (opened(r), server.package_requests))
     r.installed.mkdir()
     answer = offered(r)
-    r.check('a copy that can install itself is offered Install and restart', (answer or {}).get('choices') == ['Install and restart'], answer)
+    r.check('a copy that can install itself is offered Update', (answer or {}).get('choices') == ['Update'], answer)
 
     # latest.json can name any address; only GitHub's release downloads are fetched (the debug build also takes 127.0.0.1).
     server.serve('99.0.0', signature=r.signature, keys=keys, url=f'http://localhost:{server.http.server_port}/package')
-    answer = choices_after(r, lambda: from_row(r, 'Install'))
+    answer = choices_after(r, lambda: from_row(r, 'Update'))
     r.check('a package that is not on the release downloads is refused before anything downloads, and GitHub is offered',
             answer == {'kind': 'error', 'text': "The update isn't on Nuzky's GitHub releases, so it wasn't downloaded. Download the new version from GitHub instead.",
                        'choices': [OPEN_DOWNLOAD]} and server.package_requests == 0, (answer, server.package_requests))
@@ -374,13 +404,16 @@ def install(r, server, version):
 
     server.serve('99.0.0', signature=r.other_signature, keys=keys)
     offered(r)
-    answer = choices_after(r, lambda: from_row(r, 'Install'))
-    r.check("a download whose signature doesn't match is not installed; the toast says so and offers GitHub",
-            answer == {'kind': 'error', 'text': "The download isn't signed by Nuzky, so it wasn't installed. Download the new version from GitHub instead.",
-                       'choices': [OPEN_DOWNLOAD]} and row(r).get('text') == 'Update available99.0.0', (answer, row(r)))
+    answer = choices_after(r, lambda: from_row(r, 'Update'))
+    r.check("a download whose signature doesn't match is not installed; the toast says the copy is unchanged and offers a bug report, not GitHub",
+            answer == {'kind': 'error', 'text': "The update's signature doesn't match, so Nuzky didn't install it. Your copy is unchanged.",
+                       'choices': ['Report a bug…']} and row(r).get('text') == 'Update available99.0.0', (answer, row(r)))
     r.shot('update-bad-signature')
-    r.s.run(TOAST_BUTTON, OPEN_DOWNLOAD)
-    r.check('its Download from GitHub… opens the release page', wait(lambda: opened(r) == [RELEASE_PAGE] * 2, 5), opened(r))
+    r.s.run(TOAST_BUTTON, 'Report a bug…')
+    r.check('its Report a bug… opens the bug report', wait(lambda: r.s.run(BUG_TEXT) is not None, 5) and opened(r) == [RELEASE_PAGE], opened(r))
+    r.s.run("document.getElementById('bug-report-text').focus()")
+    r.key('Escape')
+    wait(lambda: r.s.run(BUG_TEXT) is None, 3)
     r.s.call(RENAME, 'After the update failed')
     r.check('and the app keeps working', wait(lambda: r.s.run(NAME) == 'After the update failed', 5), r.s.run(NAME))
 
@@ -390,16 +423,26 @@ def install(r, server, version):
     editor(r)
     r.import_media(FIXTURES / 'filmstrip-long.mp4')
     r.add_clip('filmstrip-long.mp4')
-    server.pace = 0.08
+    server.pace = 0.15
     r.s.run(OPEN_EDITOR_MENU)
     wait(lambda: r.s.run(IN_MENU), 3)
     r.key('Enter')
     progress = wait(lambda: (p := r.s.run(PROGRESS)) and re.search(r'\d%', p['text']) and p, 10)
-    r.check('Install and restart from the keyboard downloads in the background, with its percentage and Stop, which has the focus',
+    r.check('Update from the keyboard downloads in the background, with its percentage and Stop, which has the focus',
             progress and re.fullmatch(r'Downloading update\d{1,2}%Stop', progress['text']) and progress['stopFocused'], progress)
     r.shot('update-downloading-editor')
     later = wait(lambda: (p := r.s.run(PROGRESS)) and p['text'] != progress['text'] and p, 5)
     r.check('the capsule keeps its width while the percentage grows', later and progress and later['width'] == progress['width'], (progress, later))
+    webdriver('POST', r.s.path + '/window/rect', {'width': 1024, 'height': 640})
+    if wait(lambda: r.s.run('return window.innerWidth') == 1024, 5):
+        small = r.s.run(PROGRESS)
+        r.check('in a 1024 px window it shows only the spinner, the percentage and Stop, and gives the project name the room',
+                small and len(small['shown']) == 2 and re.fullmatch(r'\d{1,3}%', small['shown'][0]) and small['shown'][1] == 'Stop'
+                and small['width'] < progress['width'] - 100 and (h := r.s.run(HEADER))['update'][1] <= h['name'][0], (small, progress, r.s.run(HEADER)))
+        r.shot('update-downloading-editor-small')
+    webdriver('POST', r.s.path + '/window/rect', {'width': 1440, 'height': 900})
+    wait(lambda: r.s.run('return window.innerWidth') == 1440, 5)
+    r.s.run("document.querySelector('[data-update-progress] button').focus()")
     r.s.run('document.activeElement.click()')
     stopped = wait(lambda: r.s.run(INSTALL) is None and (b := r.s.run(EDITOR_BUTTON)) and b['focused'] and b, 5)
     r.check('Stop ends the download at once, without an error; the update stays offered and its button has the focus',
@@ -408,9 +451,11 @@ def install(r, server, version):
     home(r)
     r.s.run('window.__nuzky.store.setState({toasts: []})')
     server.pace = 0.04
-    from_row(r, 'Install')
-    downloading = wait(lambda: re.fullmatch(r'Downloading\d{1,2}%', row(r).get('text', '')), 10)
-    r.check('on the home screen the sidebar foot shows the download and its percentage', downloading, row(r))
+    from_row(r, 'Update')
+    downloading = wait(lambda: re.fullmatch(r'Downloading\d{1,2}%', row(r).get('text', '')) and r.s.run(ROW_PROGRESS), 10)
+    r.check('on the home screen the sidebar foot shows the download with its percentage beside its Stop, also with the row focused after the menu',
+            downloading and downloading['focused'] and re.fullmatch(r'Downloading\d{1,2}%', downloading['text']) and not downloading['cut']
+            and downloading['percentShown'] and downloading['stopShown'] and downloading['apart'], (row(r), downloading))
     r.s.run(OPEN_MENU)
     menu = wait(lambda: r.s.run(MENU), 3) or []
     check_item = next((i for i in menu if i['label'] == 'Check for updates'), None)
@@ -422,9 +467,6 @@ def install(r, server, version):
     # The menu fades out and gives the focus back to the row.
     time.sleep(0.4)
     r.s.run("document.querySelector('[data-version]').focus()")
-    stop = r.s.run("""const b = document.querySelector('[data-version]').parentElement.querySelector('button:not([data-version])');
-                      return b && {text: b.textContent, opacity: getComputedStyle(b).opacity}""")
-    r.check('with the row focused its Stop shows', stop and stop['text'] == 'Stop' and stop['opacity'] == '1', stop)
     r.shot('update-downloading')
     r.s.run("document.querySelector('[data-version]').parentElement.querySelector('button:not([data-version])').click()")
     r.check('and stops the download', wait(lambda: r.s.run(INSTALL) is None and row(r).get('text') == 'Update available99.0.0', 5), row(r))
@@ -432,13 +474,23 @@ def install(r, server, version):
     # A download that fails, and Try again while an agent edits: the package is kept for when the AI is done.
     server.pace = 0
     server.package_status = 404
-    answer = choices_after(r, lambda: from_row(r, 'Install'))
-    r.check('a download that fails offers Download from GitHub… and Try again',
-            answer == {'kind': 'error', 'text': "Couldn't download the update. Check your internet connection and try again.",
-                       'choices': [OPEN_DOWNLOAD, 'Try again']}, answer)
+    answer = choices_after(r, lambda: from_row(r, 'Update'))
+    r.check('a download GitHub answers with an error says to try again later, with Download from GitHub… and Try again',
+            answer == {'kind': 'error', 'text': "Couldn't download the update. Try again later.", 'choices': [OPEN_DOWNLOAD, 'Try again']}, answer)
     shown = (r.s.run(SHOWN) or [{}])[-1]
     r.check('Tab reaches its actions before Dismiss', shown.get('buttons') == [OPEN_DOWNLOAD, 'Try again', 'Dismiss'], shown)
     r.shot('update-download-failed')
+    # A port nothing listens on, as when the computer is offline.
+    closed = ThreadingHTTPServer(('127.0.0.1', 0), BaseHTTPRequestHandler)
+    port = closed.server_port
+    closed.server_close()
+    server.serve('99.0.0', signature=r.signature, keys=keys, url=f'http://127.0.0.1:{port}/package')
+    r.s.run(TOAST_BUTTON, 'Try again')
+    answer = wait(lambda: next((t for t in r.s.run(CHOICES) or [] if 'internet' in t['text']), None), 15)
+    r.check('one that cannot reach the server says to check the internet connection',
+            answer == {'kind': 'error', 'text': "Couldn't download the update. Check your internet connection and try again.",
+                       'choices': [OPEN_DOWNLOAD, 'Try again']}, answer)
+    server.serve('99.0.0', signature=r.signature, keys=keys)
     server.package_status = 200
     asked = server.package_requests
     bridge = Bridge(r, r.saved_project())
@@ -449,7 +501,7 @@ def install(r, server, version):
         r.check('Try again downloads it while an agent edits', wait(lambda: (r.s.run(INSTALL) or {}).get('stage') == 'ready', 30)
                 and server.package_requests == asked + 1 and server.sent == len(server.package), (r.s.run(INSTALL), server.package_requests))
         time.sleep(1)
-        r.check('with work running nothing counts down to a restart', ready_toast(r) is None, r.s.run(SHOWN))
+        r.check('with work running no ready toast offers a restart', ready_toast(r) is None, r.s.run(SHOWN))
         r.check('the sidebar foot says it restarts when the AI edit finishes', row(r).get('text') == 'Restart when an AI edit finishes', row(r))
         r.s.run(OPEN_MENU)
         item = wait(lambda: r.s.run(FIRST_ITEM), 3)
@@ -459,12 +511,18 @@ def install(r, server, version):
         r.shot('restart-waits-home')
         r.key('Escape')
         editor(r)
-        button = r.s.run(EDITOR_BUTTON)
-        r.check('in the editor the top bar says the same, disabled',
-                button and button['label'].strip() == 'Restart when an AI edit finishes' and button['disabled'], button)
+        waiting = wait(lambda: r.s.run(WAITING), 3)
+        r.check('in the editor the top bar says the same in a muted status, not a disabled button',
+                waiting and waiting['tag'] == 'SPAN' and waiting['role'] == 'status' and waiting['shown'] == ['Restart when an AI edit finishes']
+                and waiting['color'] == MUTED and waiting['opacity'] == '1' and not r.s.run(EDITOR_BUTTON), waiting)
         r.shot('restart-waits-editor')
         webdriver('POST', r.s.path + '/window/rect', {'width': 1024, 'height': 640})
         if wait(lambda: r.s.run('return window.innerWidth') == 1024, 5):
+            waiting, header = r.s.run(WAITING), r.s.run(HEADER)
+            r.check('in a 1024 px window it is a 32 px circle with the reason in its tooltip, and the AI run capsule leaves the save state clear',
+                    waiting and waiting['width'] == 32 and waiting['shown'] == [] and waiting['title'] == 'Nuzky 99.0.0 is ready. Restart when an AI edit finishes.'
+                    and header['run'] and header['saved'] and header['saved'][1] <= header['run'][0] and header['update'][1] <= header['name'][0],
+                    (waiting, header))
             r.shot('restart-waits-editor-small')
         webdriver('POST', r.s.path + '/window/rect', {'width': 1440, 'height': 900})
         wait(lambda: r.s.run('return window.innerWidth') == 1440, 5)
@@ -479,9 +537,9 @@ def install(r, server, version):
     r.check('and never restarts by itself', not (r.installed / 'installed').exists() and (r.s.run(INSTALL) or {}).get('stage') == 'ready', r.s.run(INSTALL))
 
     export = start_export(r)
-    button = wait(lambda: (b := r.s.run(EDITOR_BUTTON)) and b['disabled'] and b, 5)
-    r.check('during an export it says it restarts when the export finishes', button and button['label'].strip() == 'Restart when the export finishes', button)
-    r.s.run("document.querySelector('[data-update-button]').click()")
+    waiting = wait(lambda: r.s.run(WAITING), 5)
+    r.check('during an export it says it restarts when the export finishes', waiting and waiting['shown'] == ['Restart when the export finishes'], waiting)
+    r.s.run("document.querySelector('[data-update-waiting]').click()")
     time.sleep(0.5)
     r.check('and a click does nothing', not (r.installed / 'installed').exists() and (r.s.run(INSTALL) or {}).get('stage') == 'ready', r.s.run(INSTALL))
     stop_export(r, export)
@@ -508,58 +566,114 @@ def install(r, server, version):
             server.package_requests == asked and (answer or {}).get('text') == "Nuzky can't update this copy by itself. Download the new version from GitHub.",
             (server.package_requests, answer))
     r.installed.mkdir()
-    offered(r)
-    r.s.run('window.__nuzky.store.setState({toasts: []})')
+
+    # Downloaded with nothing running: a toast says it is ready, and nothing restarts until the user says so.
+    answer = offered(r)
+    asked = server.package_requests
     r.s.run(OPEN_EDITOR_MENU)
     wait(lambda: r.s.run(MENU), 3)
-    r.s.run(CHOOSE, 'Install')
+    r.s.run(CHOOSE, 'Update')
+    r.check("Check for updates' toast loses its Update once the update downloads, chosen here from the menu",
+            (answer or {}).get('choices') == ['Update'] and wait(lambda: (r.s.run(INSTALL) or {}).get('stage') == 'downloading'
+                                                                 and not any(t['text'] == 'Nuzky 99.0.0 is available.' for t in r.s.run(SHOWN) or []), 2),
+            (answer, r.s.run(INSTALL), r.s.run(SHOWN)))
     toast = wait(lambda: ready_toast(r), 30)
-    r.check('downloaded with nothing running, a toast counts down to the restart, with Not now and Restart now',
-            toast == {'text': 'Nuzky 99.0.0 is ready. Restarting in 5 s.', 'buttons': ['Not now', 'Restart now', 'Dismiss']}, toast)
-    r.shot('ready-countdown')
-    later = wait(lambda: (t := ready_toast(r)) and t['text'] != toast['text'] and t, 3)
-    r.check('and counts down', later and later['text'] == 'Nuzky 99.0.0 is ready. Restarting in 4 s.', later)
-    r.s.run(TOAST_BUTTON, 'Not now')
-    button = wait(lambda: (b := r.s.run(EDITOR_BUTTON)) and b['focused'] and b, 3) or r.s.run(EDITOR_BUTTON)
-    r.check('Not now leaves Restart to update in the top bar, with the focus', button and button['label'].strip() == 'Restart to update' and button['focused'], button)
-    time.sleep(6)
-    r.check('and nothing restarts by itself', not (r.installed / 'installed').exists() and ready_toast(r) is None, r.s.run(SHOWN))
+    r.check('downloaded with nothing running, a toast says it is ready, with Restart now',
+            toast == {'text': 'Nuzky 99.0.0 is ready.', 'buttons': ['Restart now', 'Dismiss']}, toast)
+    r.shot('ready')
+    name, view, revision = r.s.run(NAME), r.s.run(VIEW), r.s.run(REVISION)
+    time.sleep(10)
+    r.check('10 s later nothing has restarted: nothing installed, no note for a restart, the editor and the project as they were',
+            (r.s.run(INSTALL) or {}).get('stage') == 'ready' and not (r.installed / 'installed').exists() and not r.note.exists()
+            and (r.s.run(NAME), r.s.run(VIEW), r.s.run(REVISION)) == (name, view, revision) and server.package_requests == asked + 1,
+            (r.s.run(INSTALL), r.s.run(NAME), r.s.run(VIEW)))
+    button = r.s.run(EDITOR_BUTTON)
+    r.check('the top bar offers Restart to update', button and button['label'] == 'Restart to update' and not button['disabled'], button)
+    webdriver('POST', r.s.path + '/window/rect', {'width': 1024, 'height': 640})
+    if wait(lambda: r.s.run('return window.innerWidth') == 1024, 5):
+        button = r.s.run(EDITOR_BUTTON)
+        r.check('in a 1024 px window as a round 32 px button named in its tooltip',
+                button and button['label'] == 'Restart to update to Nuzky 99.0.0' and button['width'] == 32
+                and r.s.run("return document.querySelector('[data-update-button]').title") == button['label']
+                and (h := r.s.run(HEADER))['update'][1] <= h['name'][0], (button, r.s.run(HEADER)))
+        r.shot('restart-to-update-small')
+    webdriver('POST', r.s.path + '/window/rect', {'width': 1440, 'height': 900})
+    wait(lambda: r.s.run('return window.innerWidth') == 1440, 5)
 
-    # Once more, letting the countdown run out; an export starts while it installs.
+    # Once more, ready while the Report a bug dialog is open and the user types in it.
     r.installed.rmdir()
     r.s.run("document.querySelector('[data-update-button]').click()")
     wait(lambda: (r.s.run(CHOICES) or [{}])[-1].get('kind') == 'error', 10)
     r.installed.mkdir()
     offered(r)
-    (r.installed / 'hold').touch()
     r.s.run('window.__nuzky.store.setState({toasts: []})')
+    server.pace = 0.1
     asked = server.package_requests
     r.s.run(OPEN_EDITOR_MENU)
     wait(lambda: r.s.run(MENU), 3)
-    r.s.run(CHOOSE, 'Install')
-    wait(lambda: ready_toast(r), 30)
+    r.s.run(CHOOSE, 'Update')
+    r.s.run("document.querySelector('header [aria-label=\"Send feedback\"]').click()")
+    wait(lambda: r.s.run("return !!document.querySelector('[role=menu][aria-label=\"Send feedback\"]')"), 3)
+    r.s.run("""[...document.querySelectorAll('[role=menu][aria-label="Send feedback"] [role^=menuitem]')]
+               .find((i) => i.textContent.startsWith('Report a bug')).click()""")
+    wait(lambda: r.s.run(BUG_TEXT) is not None, 3)
+    r.s.run("document.getElementById('bug-report-text').focus()")
+    for key in 'the sound is late':
+        press('space' if key == ' ' else key)
+    typed, stage = r.s.run(BUG_TEXT), (r.s.run(INSTALL) or {}).get('stage')
+    ready = wait(lambda: (r.s.run(INSTALL) or {}).get('stage') == 'ready', 30)
+    r.check('the update finished downloading while the user typed in the dialog', typed == 'the sound is late' and stage == 'downloading' and ready, (typed, stage))
+    for key in ' again':
+        press('space' if key == ' ' else key)
+    time.sleep(0.5)
+    r.shot('ready-dialog-open')
+    time.sleep(10)
+    r.check('ready while a dialog is open, 10 s later the dialog is still open with what was typed before and after, and nothing restarted',
+            r.s.run(BUG_TEXT) == 'the sound is late again' and (r.s.run(INSTALL) or {}).get('stage') == 'ready'
+            and not (r.installed / 'installed').exists() and not r.note.exists() and r.s.run(VIEW) == 'editor', (r.s.run(BUG_TEXT), r.s.run(INSTALL)))
+    press('Escape')
+    wait(lambda: r.s.run(BUG_TEXT) is None, 3)
+
+    # Restart to update while the install is held: the editor's keys do nothing, closing the window says why it stays,
+    # and an export started meanwhile postpones the restart.
+    (r.installed / 'hold').touch()
+    clips = [c['id'] for c in r.track()]
+    r.s.run('window.__nuzky.store.getState().select([arguments[0]])', clips[0])
+    revision = r.s.run(REVISION)
+    r.s.run("document.querySelector('[data-update-button]').click()")
     progress = wait(lambda: (p := r.s.run(PROGRESS)) and p['text'] == 'Installing update…' and p, 10)
-    r.check('when the countdown runs out it installs, saying so in place of the button, with nothing to choose',
-            progress and progress['stop'] is None and server.package_requests == asked + 1, progress)
+    r.check('Restart to update installs, saying so in place of the button, with nothing to choose', progress and progress['stop'] is None, progress)
     r.shot('installing')
-    close_window()
+    for key in ('Delete', 's', 'BackSpace', 'q'):
+        press(key)
     time.sleep(1)
-    r.check('closing the window meanwhile neither quits nor leaves the editor', r.s.run(VIEW, retries=3) == 'editor')
+    r.check('while it installs, Delete, S (split), Backspace and Q (delete left) change nothing in the project',
+            [c['id'] for c in r.track()] == clips and r.s.run(REVISION) == revision, ([c['id'] for c in r.track()], clips, r.s.run(REVISION), revision))
+    close_window()
+    closing = wait(lambda: next((t for t in r.s.run(SHOWN, retries=3) or [] if t['text'].startswith('Installing the update')), None), 5)
+    r.check('closing the window meanwhile neither quits nor leaves the editor, and says why',
+            closing == {'text': 'Installing the update. Nuzky restarts in a moment.', 'buttons': ['Dismiss']} and r.s.run(VIEW, retries=3) == 'editor', closing)
+    r.shot('close-while-installing')
     export = start_export(r)
     (r.installed / 'hold').unlink()
     toast = wait(lambda: next((t for t in r.s.run(SHOWN) or [] if t['text'].startswith('Nuzky 99.0.0 is installed')), None), 10)
-    r.check('work that started while it installed keeps Nuzky running, and the toast says when to restart',
-            toast == {'text': 'Nuzky 99.0.0 is installed. Restart when the export finishes.', 'buttons': ['Restart', 'Dismiss']}
+    r.check('work that started while it installed keeps Nuzky running, and the toast says the update starts at the next restart, offering nothing',
+            toast == {'text': 'Nuzky 99.0.0 is installed and starts at the next restart.', 'buttons': ['Dismiss']}
             and (r.installed / 'installed').read_bytes() == server.package and not r.note.exists(), toast)
     r.shot('installed-waits')
-    button = r.s.run(EDITOR_BUTTON)
-    r.check('the top bar waits for the export too', button and button['label'].strip() == 'Restart when the export finishes' and button['disabled'], button)
+    waiting = r.s.run(WAITING)
+    r.check('the top bar waits for the export', waiting and waiting['shown'] == ['Restart when the export finishes'], waiting)
     stop_export(r, export)
+    button = wait(lambda: r.s.run(EDITOR_BUTTON), 5)
+    r.check('once the export stops, the top bar offers Restart to update again', button and button['label'] == 'Restart to update' and not button['disabled'], button)
+    home(r)
+    r.check('and so does the sidebar foot', wait(lambda: row(r).get('text') == 'Restart to update99.0.0', 3), row(r))
+    editor(r)
 
     # Restart to update, with the AI panel's draft and the editor to come back to.
     r.s.run("window.__nuzky.agent.setState({draft: 'Cut the long pauses'})")
     r.s.call(RENAME, 'Survives the update')
-    button = wait(lambda: (b := r.s.run(EDITOR_BUTTON)) and not b['disabled'] and b, 5)
+    button = wait(lambda: r.s.run(EDITOR_BUTTON), 5)
     r.s.run("document.querySelector('[data-update-button]').click()")
     note = wait(lambda: r.note.exists() and json.loads(r.note.read_text()), 10)
     r.check('Restart to update saves the project and leaves the restarted Nuzky where to go on, without installing again',
@@ -588,20 +702,24 @@ def install(r, server, version):
 
 
 def toast_layout(r):
-    """Toasts with a short action keep it beside the text, as before; Tab reaches actions before Dismiss."""
+    """Toasts with a short action keep it beside the text, as before; two actions sit under the text, clear of Dismiss;
+    Tab reaches actions before Dismiss."""
     for width, height in ((1440, 900), (1024, 640)):
         webdriver('POST', r.s.path + '/window/rect', {'width': width, 'height': height})
         wait(lambda: r.s.run('return window.innerWidth') == width, 5)
         editor(r)
         r.s.run("""const st = window.__nuzky.store.getState(); window.__nuzky.store.setState({toasts: []});
                    st.toast({kind: 'error', text: 'Export failed: The disk is full. Free some space and export again.', action: {label: 'Details', run: () => {}}});
-                   st.toast({kind: 'info', text: 'Nuzky 99.0.0 is ready. Restarting in 5 s.', action: {label: 'Restart now', run: () => {}},
-                             secondary: {label: 'Not now', run: () => {}}, sticky: true});""")
+                   st.toast({kind: 'error', text: 'The update failed.', action: {label: 'Try again', run: () => {}},
+                             secondary: {label: 'Download from GitHub…', run: () => {}}});""")
         time.sleep(0.5)
         place = r.s.run("""const t = document.querySelector('[data-toast]'), text = t.querySelector('span').getBoundingClientRect();
                            const b = [...t.querySelectorAll('button')].find((b) => b.textContent === 'Details').getBoundingClientRect();
                            return {beside: b.left >= text.right && b.top < text.bottom, buttons: [...t.querySelectorAll('button')].map((b) => b.getAttribute('aria-label') ?? b.textContent)}""")
         r.check(f'at {width} x {height} a failed export keeps Details beside its text, then Dismiss',
                 place == {'beside': True, 'buttons': ['Details', 'Dismiss']}, place)
+        gap = r.s.run("""const t = document.querySelectorAll('[data-toast]')[1], b = (l) => [...t.querySelectorAll('button')].find((b) => (b.getAttribute('aria-label') ?? b.textContent) === l).getBoundingClientRect();
+                         return Math.round(b('Try again').top - b('Dismiss').bottom)""")
+        r.check(f'at {width} x {height} two actions sit under the text, clear of Dismiss', gap is not None and gap >= 2, gap)
         r.shot(f'toasts-{width}')
     webdriver('POST', r.s.path + '/window/rect', {'width': 1440, 'height': 900})

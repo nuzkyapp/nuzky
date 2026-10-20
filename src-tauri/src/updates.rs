@@ -1,7 +1,7 @@
 //! Whether a newer Nuzky was released, and installing it when the user asks. The check reads only the version from
-//! `latest.json` on the newest published GitHub release. Install and restart downloads the package that file names for
-//! this kind of install, installs it only when its signature matches the key built into Nuzky (tauri.conf.json), and
-//! restarts. Nothing is downloaded or installed without the user's click.
+//! `latest.json` on the newest published GitHub release. Update downloads the package that file names for this kind of
+//! install and keeps it only when its signature matches the key built into Nuzky (tauri.conf.json); Restart to update
+//! installs it and restarts. Nothing is downloaded, installed or restarted without the user's click.
 use std::io::Read;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -185,10 +185,10 @@ pub fn cancel_update(updates: State<'_, Updates>) {
 }
 
 /// Saves the project, installs the downloaded update and restarts into it; refused while work runs that restarting
-/// would cancel. `note` is for the restarted UI (`take_note`). Returns the work that started while it installed: Nuzky
+/// would cancel. `note` is for the restarted UI (`take_note`). Returns true when work started while it installed: Nuzky
 /// then goes on, and the new version starts with the next restart.
 #[tauri::command]
-pub async fn restart_to_update(app: AppHandle, updates: State<'_, Updates>, note: String) -> CmdResult<Option<String>> {
+pub async fn restart_to_update(app: AppHandle, updates: State<'_, Updates>, note: String) -> CmdResult<bool> {
     let ready = {
         let mut stage = updates.0.lock().unwrap();
         if !matches!(*stage, Stage::Ready(_) | Stage::Installed) {
@@ -235,15 +235,15 @@ pub async fn restart_to_update(app: AppHandle, updates: State<'_, Updates>, note
         }
         log::info!(target: "action", "update installed");
     }
-    if let Some(work) = busy(&app) {
+    if busy(&app).is_some() {
         remove_note();
-        return Ok(Some(wait_for(work)));
+        return Ok(true);
     }
     save(&app)?;
     write_note(&note);
     log::info!(target: "action", "restarting to update");
     restart(&app);
-    Ok(None)
+    Ok(false)
 }
 
 /// Whether an install is under way; the window then stays open, so quitting doesn't cut it short.
@@ -473,14 +473,15 @@ fn failure(error: UpdateError) -> String {
     log::warn!("Update failed: {error}");
     match error {
         Minisign(_) | Base64(_) | SignatureUtf8(_) | SignedVersionMismatch { .. } | MissingSignedVersion => {
-            "UPDATE_SIGNATURE: The download isn't signed by Nuzky, so it wasn't installed. Download the new version \
-             from GitHub instead."
+            "UPDATE_SIGNATURE: The update's signature doesn't match, so Nuzky didn't install it. Your copy is unchanged."
                 .into()
         }
         TargetNotFound(_) | TargetsNotFound(_) | InvalidUpdaterFormat | BinaryNotFoundInArchive => NO_PACKAGE.into(),
-        Reqwest(_) | Network(_) | ReleaseNotFound => {
+        Reqwest(ref error) if error.is_connect() || error.is_timeout() => {
             "UPDATE_NETWORK: Couldn't download the update. Check your internet connection and try again.".into()
         }
+        // GitHub answered with an error, or the answer broke off.
+        Reqwest(_) | Network(_) | ReleaseNotFound => "UPDATE_NETWORK: Couldn't download the update. Try again later.".into(),
         AuthenticationFailed | PackageInstallFailed | DebInstallFailed => {
             "UPDATE_PASSWORD: The update wasn't installed. It needs your password; try again and enter it.".into()
         }
