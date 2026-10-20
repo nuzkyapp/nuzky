@@ -1357,7 +1357,7 @@ impl Backend {
             state.project.reel_candidates.iter().filter(|c| c.status == ReelStatus::Made).cloned().collect();
         let max = args.max_duration_us.unwrap_or(reels::DEFAULT_MAX_DURATION_US);
         let mut from = crate::style::Defaults::read();
-        let pause = from.pause_us().unwrap_or(transcript::DEFAULT_PAUSE_US);
+        let pause = args.shorten_pauses_us.or_else(|| from.pause_us()).unwrap_or(transcript::DEFAULT_PAUSE_US);
         let proposed = reels::plan(&state.project, &derived, &args.candidates, max, pause)?;
         let prepared = requests.entry(key).or_insert(PreparedTranscriptEdit {
             arguments,
@@ -1383,18 +1383,16 @@ impl Backend {
         }
         let derived = transcript::derive(&self.media_project(&state.project), &self.host.transcripts)?;
         let framing = args.canvas.unwrap_or_default();
-        let mut from = crate::style::Defaults::read();
-        let pause = from.pause_us().unwrap_or(transcript::DEFAULT_PAUSE_US);
         let (made, edits) =
-            reels::make(&self.project_path, &state.project, &derived, &args.ids, framing, pause, &mut |_| Ok(()))?;
+            reels::make(&self.project_path, &state.project, &derived, &args.ids, framing, &mut |_| Ok(()))?;
         let prepared = requests.entry(key.clone()).or_insert(PreparedTranscriptEdit {
             arguments,
             edits,
             expect: Expect { revision: Some(state.stamp.revision), speech_layout_key: None },
-            response: from.note(with_warnings(
+            response: with_warnings(
                 json!({ "reels": made }),
                 crate::fonts::warnings(made.iter().flat_map(|reel| reel.fonts.iter().map(String::as_str))),
-            )),
+            ),
         });
         let applied = self.apply_transcript_edit(&args.run_id, &request_id, prepared);
         if applied.is_err() && reels::forget(&made, &self.host.session.state()?.project) {

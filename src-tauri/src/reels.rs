@@ -14,12 +14,6 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::jobs::{Reporter, check_cancelled, crashed, register, unregister};
 use crate::{AppState, CmdResult};
 
-/// The pause length the creator's style gives reels, as agents' reels get it, so a reel is made as long as it was
-/// proposed.
-fn pause_us() -> i64 {
-    nuzky_mcp::style::Defaults::read().pause_us().unwrap_or(transcript::DEFAULT_PAUSE_US)
-}
-
 /// Writes the reels, calling `step` before each, then hands the edit that marks them made to `apply`; when it is
 /// refused, the reels go again.
 fn make(
@@ -27,13 +21,12 @@ fn make(
     state: &SessionState,
     ids: &[String],
     framing: Framing,
-    pause_us: i64,
     step: &mut dyn FnMut(usize) -> Result<()>,
     apply: impl FnOnce(Vec<EditCmd>, Expect) -> Result<()>,
 ) -> Result<Vec<MadeReel>> {
     anyhow::ensure!(state.open_run.is_none(), "RUN_ACTIVE: stop the open run before editing");
     let derived = transcript::derive(&state.project, &host.transcripts)?;
-    let (made, edits) = reels::make(&host.session.path(), &state.project, &derived, ids, framing, pause_us, step)?;
+    let (made, edits) = reels::make(&host.session.path(), &state.project, &derived, ids, framing, step)?;
     let expect = Expect { revision: Some(state.stamp.revision), speech_layout_key: None };
     if let Err(error) = apply(edits, expect) {
         reels::forget(&made, &host.session.state()?.project);
@@ -48,7 +41,7 @@ pub async fn reel_bounds(app: AppHandle, id: String, from: usize, to: usize) -> 
         let host = app.state::<AppState>().session.lock().unwrap().host.clone();
         let state = host.session.state().map_err(crate::err)?;
         let derived = transcript::derive(&state.project, &host.transcripts).map_err(crate::err)?;
-        reels::bounds(&state.project, &derived, &id, from, to, pause_us()).map_err(crate::err)
+        reels::bounds(&state.project, &derived, &id, from, to).map_err(crate::err)
     })
     .await
     .map_err(crate::err)?
@@ -79,7 +72,6 @@ pub fn start_make_reels(
                 &view,
                 &ids,
                 canvas.unwrap_or_default(),
-                pause_us(),
                 &mut |i| {
                     check_cancelled(&cancel)?;
                     rep.progress(i as f32 / ids.len() as f32, Some(&format!("Making reel {} of {}", i + 1, ids.len())));
@@ -127,17 +119,15 @@ mod tests {
         let state = host.session.state().unwrap();
         let derived = transcript::derive(&state.project, &host.transcripts).unwrap();
         let proposal = ReelProposal { from: 2, to: 4, title: "Middle".into(), why: String::new(), score: 0.5 };
-        let pause = transcript::DEFAULT_PAUSE_US;
-        let candidates =
-            reels::plan(&state.project, &derived, &[proposal], reels::DEFAULT_MAX_DURATION_US, pause).unwrap();
+        let max = reels::DEFAULT_MAX_DURATION_US;
+        let candidates = reels::plan(&state.project, &derived, &[proposal], max, transcript::DEFAULT_PAUSE_US).unwrap();
         let proposed = EditCmd::SetReelCandidates { candidates: candidates.clone() };
         host.session.edit(vec![proposed], None, Expect::default()).unwrap();
         let ids = vec![candidates[0].id.clone()];
         let reel = dunce::canonicalize(&dir).unwrap().join("project-reel-1.nuzky");
 
         let make = || {
-            let state = host.session.state().unwrap();
-            super::make(&host, &state, &ids, Framing::Crop, pause, &mut |_| Ok(()), |edits, expect| {
+            super::make(&host, &host.session.state().unwrap(), &ids, Framing::Crop, &mut |_| Ok(()), |edits, expect| {
                 host.session.edit(edits, None, expect).map(|_| ())
             })
         };

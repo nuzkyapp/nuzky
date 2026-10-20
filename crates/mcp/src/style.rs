@@ -852,18 +852,22 @@ pub fn for_agent(view: &StyleView) -> Result<serde_json::Value> {
 
 /// The rows of EDIT.md's Settings that stand in for tool arguments an agent leaves out, read anew
 /// on every call. A row that does not hold a value the tool takes is skipped with a warning, so
-/// the style never stops an edit.
+/// the style never stops an edit; so is an EDIT.md that exists but cannot be read.
 #[derive(Default)]
 pub struct Defaults {
     rows: Vec<(String, String)>,
+    unreadable: Option<String>,
     used: serde_json::Map<String, serde_json::Value>,
     warnings: Vec<String>,
 }
 
 impl Defaults {
     pub fn read() -> Self {
-        let text = fs::read_to_string(learning::style_path()).unwrap_or_default();
-        Self { rows: Doc::parse(&text).settings(), ..Self::default() }
+        match fs::read_to_string(learning::style_path()) {
+            Ok(text) => Self { rows: Doc::parse(&text).settings(), ..Self::default() },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Self::default(),
+            Err(e) => Self { unreadable: Some(e.to_string()), ..Self::default() },
+        }
     }
 
     pub fn pause_us(&mut self) -> Option<i64> {
@@ -904,6 +908,9 @@ impl Defaults {
         expected: &str,
         parse: impl FnOnce(&str) -> Option<T>,
     ) -> Option<T> {
+        if let Some(error) = self.unreadable.take() {
+            self.warnings.push(format!("EDIT.md could not be read ({error}), so the defaults apply instead"));
+        }
         let (_, value) = self.rows.iter().find(|(name, _)| name == row)?;
         let parsed = parse(value);
         if let Some(p) = &parsed {

@@ -85,6 +85,10 @@ pub struct ReelCandidate {
     /// The reel's cover; nothing makes it yet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thumbnail: Option<Thumbnail>,
+    /// The pause length `duration_us` was measured with, which trimming and making the reel keep. Candidates
+    /// proposed before it was kept were all measured with 300 ms.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shorten_pauses_us: Option<i64>,
 }
 
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

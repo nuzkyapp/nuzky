@@ -1564,6 +1564,49 @@ fn whole_reel(c: &mut Client, run: &Value) -> (Value, Value) {
     (proposed, made)
 }
 
+/// A reel is made with the pause length it was proposed with, whatever EDIT.md says by then: the style's when the
+/// agent left it out, and the one the agent gave, such as a creator's rule for reels that overrides the style.
+#[test]
+fn a_reel_keeps_the_pause_it_was_proposed_with_over_stdio() {
+    let mut c = Client::start(true, None, Some(None));
+    let run = two_sentences(&mut c);
+    let (plain, _) = whole_reel(&mut c, &run);
+    let length = |reel: &Value| reel["candidates"][0]["durationUs"].as_i64().unwrap();
+    let edit_md = c.dir.join("data/nuzky/EDIT.md");
+    let mut propose_then_make = |pause: Option<i64>, style_then: &str| {
+        std::fs::write(&edit_md, SETTINGS_STYLE).unwrap();
+        let key = c.call("get_transcript", json!({}))["transcript_key"].clone();
+        let candidates = json!([{"from": 0, "to": 7, "title": "Money", "why": "All of it.", "score": 0.5}]);
+        let mut args = json!({"run_id": run, "transcript_key": key, "candidates": candidates});
+        if let Some(pause) = pause {
+            args["shorten_pauses_us"] = json!(pause);
+        }
+        let proposed = c.call("propose_reels", args);
+        std::fs::write(&edit_md, SETTINGS_STYLE.replace("530000", style_then)).unwrap();
+        let stored = c.call("get_state", json!({}))["reel_candidates"].clone();
+        let made = c.call("make_reels", json!({"run_id": run, "ids": [proposed["candidates"][0]["id"]]}));
+        assert!(made.get("from_style").is_none() && made.get("style_warnings").is_none(), "{made}");
+        let reel: Project =
+            serde_json::from_slice(&std::fs::read(made["reels"][0]["path"].as_str().unwrap()).unwrap()).unwrap();
+        assert_eq!(json!(reel.duration_us()), proposed["candidates"][0]["durationUs"], "{proposed} {stored}");
+        (proposed, stored)
+    };
+
+    let (styled, stored) = propose_then_make(None, "900000");
+    assert_eq!(length(&styled) - length(&plain), 230_000, "the 2 s pause shortens to 530 ms, not 300 ms");
+    assert_eq!(styled["from_style"], json!({"shorten_pauses_us": 530_000}));
+    let id = &styled["candidates"][0]["id"];
+    let kept = stored.as_array().unwrap().iter().find(|c| &c["id"] == id).unwrap();
+    assert_eq!(kept["shortenPausesUs"], 530_000, "{stored}");
+
+    let (rule, _) = propose_then_make(Some(300_000), "fast");
+    assert_eq!(length(&rule), length(&plain), "the pause the agent gave wins over the style's");
+    assert!(rule.get("from_style").is_none() && rule.get("style_warnings").is_none(), "{rule}");
+    assert_eq!(rule["candidates"][0]["shortenPausesUs"], 300_000);
+    c.call("end_run", json!({"run_id": run, "action": "keep"}));
+    c.finish();
+}
+
 /// Each caption's text and style.
 fn captions_of(tracks: &Value) -> Vec<(String, Value)> {
     let track = tracks.as_array().unwrap().iter().find(|t| t["name"] == "Captions").unwrap();
@@ -1614,7 +1657,8 @@ fn the_creators_settings_fill_in_what_an_agent_leaves_out_over_stdio() {
     let (reel, made) = whole_reel(&mut styled, &run);
     let length = |reel: &Value| reel["candidates"][0]["durationUs"].as_i64().unwrap();
     assert_eq!(length(&reel) - length(&plain_reel), 230_000);
-    assert_eq!((&reel["from_style"], &made["from_style"]), (&planned["from_style"], &planned["from_style"]));
+    assert_eq!(reel["from_style"], planned["from_style"]);
+    assert!(made.get("from_style").is_none(), "the reel keeps the pause it was proposed with: {made}");
 
     let key = styled.call("get_transcript", json!({}))["transcript_key"].clone();
     let cut = styled.call("edit_transcript", json!({"run_id": run, "transcript_key": key}));
@@ -1635,6 +1679,12 @@ fn the_creators_settings_fill_in_what_an_agent_leaves_out_over_stdio() {
     let captions = captions_of(&styled.call("get_state", json!({}))["tracks"]);
     assert_eq!(most_words(&captions), 2, "{captions:?}");
     assert!(captions.iter().all(|(_, style)| style["fontSize"] == 95.0 && style["color"] == "#ffffff"));
+    // An EDIT.md that is there but cannot be read gives the defaults with a warning, and only when they are used.
+    std::fs::write(&edit_md, b"\xff\xfe").unwrap();
+    let mut unreadable = plan_cut(&mut styled, None);
+    let warning = unreadable.as_object_mut().unwrap().remove("style_warnings").unwrap();
+    assert!(warning[0].as_str().unwrap().starts_with("EDIT.md could not be read"), "{warning}");
+    assert_eq!(unreadable, plan_cut(&mut styled, Some(300_000)));
     std::fs::write(&edit_md, SETTINGS_STYLE).unwrap();
 
     // A preset replaces the learned look as a whole, and a limit given replaces only itself.

@@ -105,15 +105,13 @@ fn cut(project: &Project, derived: &Derived, from: usize, to: usize, pause_us: i
     transcript::plan_cut(preview, &reel, edges)
 }
 
-/// Recomputes a candidate's words and cut without changing the project.
-pub fn bounds(
-    project: &Project,
-    derived: &Derived,
-    id: &str,
-    from: usize,
-    to: usize,
-    pause_us: i64,
-) -> Result<ReelCandidate> {
+/// The pause length a candidate was measured with.
+fn pause_of(candidate: &ReelCandidate) -> i64 {
+    candidate.shorten_pauses_us.unwrap_or(transcript::DEFAULT_PAUSE_US)
+}
+
+/// Recomputes a candidate's words and cut, with the pause length it was measured with, without changing the project.
+pub fn bounds(project: &Project, derived: &Derived, id: &str, from: usize, to: usize) -> Result<ReelCandidate> {
     let candidate =
         project.reel_candidates.iter().find(|c| c.id == id).with_context(|| format!("UNKNOWN_REEL: {id}"))?;
     ensure!(candidate.project_path.is_none(), "REEL_MADE: reel {id} is already made");
@@ -124,7 +122,7 @@ pub fn bounds(
         "REEL_OUTSIDE_TRANSCRIPT: words {from}-{to} are not in the transcript of {} words",
         words.len()
     );
-    let (hook, duration_us) = hook_and_duration(project, derived, from, to, pause_us)?;
+    let (hook, duration_us) = hook_and_duration(project, derived, from, to, pause_of(candidate))?;
     Ok(ReelCandidate {
         from,
         to,
@@ -195,6 +193,7 @@ pub fn plan(
             status: ReelStatus::Proposed,
             project_path: None,
             thumbnail: None,
+            shorten_pauses_us: Some(pause_us),
         });
     }
     let mut all: Vec<&ReelCandidate> = candidates.iter().collect();
@@ -213,15 +212,14 @@ pub fn plan(
 }
 
 /// Writes a project beside `source` for each candidate in `ids`: only its words, cut as edit_transcript keep
-/// cuts with pauses shortened to `pause_us`, on a 9:16 canvas filled as `framing` says. Returns them with the
-/// edits that mark them made in the source, which the caller applies; see [`forget`] when that fails.
+/// cuts with the pause length the candidate was measured with, on a 9:16 canvas filled as `framing` says. Returns
+/// them with the edits that mark them made in the source, which the caller applies; see [`forget`] when that fails.
 pub fn make(
     source: &Path,
     project: &Project,
     derived: &Derived,
     ids: &[String],
     framing: Framing,
-    pause_us: i64,
     step: &mut dyn FnMut(usize) -> Result<()>,
 ) -> Result<(Vec<MadeReel>, Vec<EditCmd>)> {
     ensure!(!ids.is_empty(), "INVALID_ARGUMENTS: give the ids of the reels to make");
@@ -241,7 +239,7 @@ pub fn make(
                 && words.get(candidate.to).is_some_and(|w| w.end_us == candidate.end_us),
             "SPEECH_CHANGED: the video changed since reel {id} was proposed; propose it again"
         );
-        let mut reel = cut(project, derived, candidate.from, candidate.to, pause_us)?.preview;
+        let mut reel = cut(project, derived, candidate.from, candidate.to, pause_of(candidate))?.preview;
         ensure!(
             reel.duration_us() == candidate.duration_us,
             "SPEECH_CHANGED: the video changed since reel {id} was proposed; propose it again"
@@ -356,9 +354,9 @@ mod tests {
         let proposal = ReelProposal { from: 0, to: 2, title: "First".into(), why: "Why".into(), score: 0.5 };
         project.reel_candidates = plan(&project, &derived, &[proposal], DEFAULT_MAX_DURATION_US, PAUSE).unwrap();
         let original = &project.reel_candidates[0];
-        let same = bounds(&project, &derived, &original.id, 0, 2, PAUSE).unwrap();
+        let same = bounds(&project, &derived, &original.id, 0, 2).unwrap();
         assert_eq!((same.duration_us, same.hook), (original.duration_us, original.hook.clone()));
-        let trimmed = bounds(&project, &derived, &original.id, 1, 1, PAUSE).unwrap();
+        let trimmed = bounds(&project, &derived, &original.id, 1, 1).unwrap();
         assert_eq!((trimmed.from, trimmed.to, trimmed.start_us, trimmed.end_us), (1, 1, 1_000_000, 1_400_000));
         assert_eq!(trimmed.hook, "word1");
         assert_eq!(trimmed.duration_us, cut(&project, &derived, 1, 1, PAUSE).unwrap().preview.duration_us());
@@ -382,7 +380,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("reels-stop-{}", new_id()));
         std::fs::create_dir_all(&dir).unwrap();
         let ids = project.reel_candidates.iter().map(|c| c.id.clone()).collect::<Vec<_>>();
-        let result = make(&dir.join("source.nuzky"), &project, &derived, &ids, Framing::Crop, PAUSE, &mut |i| {
+        let result = make(&dir.join("source.nuzky"), &project, &derived, &ids, Framing::Crop, &mut |i| {
             if i == 1 {
                 assert!(dir.join("source-reel-1.nuzky").is_file());
                 bail!("CANCELLED: stopped");

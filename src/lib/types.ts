@@ -1091,6 +1091,11 @@ export type ReelCandidate = {
    * The reel's cover; nothing makes it yet.
    */
   thumbnail?: Thumbnail | null,
+  /**
+   * The pause length `duration_us` was measured with, which trimming and making the reel keep. Candidates
+   * proposed before it was kept were all measured with 300 ms.
+   */
+  shortenPausesUs?: number | null,
 };
 
 /**

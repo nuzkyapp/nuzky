@@ -339,6 +339,9 @@ pub struct ProposeReels {
     pub candidates: Vec<crate::reels::ReelProposal>,
     /// Longest reel once made, 60 s by default.
     pub max_duration_us: Option<i64>,
+    /// Pauses longer than this are shortened to it when the reels are measured, trimmed and made; left out, the
+    /// creator's style's edit_transcript shorten_pauses_us, else 300000.
+    pub shorten_pauses_us: Option<i64>,
 }
 #[derive(Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

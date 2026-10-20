@@ -320,6 +320,7 @@ fn reel_candidates(project: &Project) -> Result<()> {
             c.score.is_finite() && (0.0..=1.0).contains(&c.score),
             "INVALID_PROJECT: a reel's score goes from 0 to 1"
         );
+        ensure!(c.shorten_pauses_us.is_none_or(|us| us >= 0), "INVALID_PROJECT: a reel's pause length is not negative");
         ensure!(
             (c.status == ReelStatus::Made) == c.project_path.is_some(),
             "INVALID_PROJECT: a made reel names its project, and only a made one"
@@ -872,13 +873,14 @@ mod tests {
         })
         .unwrap();
         type Break = fn(&mut Vec<ReelCandidate>);
-        let broken: [(&str, Break); 10] = [
+        let broken: [(&str, Break); 11] = [
             ("shared words", |c| c[0].from = 39),
             ("shared time", |c| c[0].start_us = 39_000_000),
             ("same id", |c| c[0].id = "a".into()),
             ("title", |c| c[0].title = " ".into()),
             ("two lines", |c| c[0].why = "One\nTwo".into()),
             ("score", |c| c[0].score = f32::NAN),
+            ("negative pause", |c| c[0].shorten_pauses_us = Some(-1)),
             ("no time", |c| c[0].end_us = c[0].start_us),
             ("path before made", |c| {
                 c[0].project_path = Some(std::env::temp_dir().join("x.nuzky").to_string_lossy().into())
