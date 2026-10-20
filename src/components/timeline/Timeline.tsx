@@ -32,7 +32,7 @@ import { ClipView } from "./ClipView";
 import { CutMarkers } from "./CutMarkers";
 import { HistoryButton, type Peek } from "./HistoryButton";
 import { TrackHeader } from "./TrackHeader";
-import { dragFade, dragResult, isFade, useTimelineGestures, type Drag } from "./useTimelineGestures";
+import { SNAP_PX, dragFade, dragResult, isFade, snap, useTimelineGestures, type Drag } from "./useTimelineGestures";
 
 const HEADER_W = 140;
 const RULER_H = 28;
@@ -285,11 +285,13 @@ export function Timeline({ height }: { height: number }) {
     [project, peeking, minUs],
   );
 
-  // Media dragged from the media panel lands here.
-  useEffect(() => {
-    setDropResolver((x, y, media) => {
+  const playing = useEditor((s) => s.playing);
+  // Where media dropped at a point lands. Over a track beside the main one, which takes video at a cut, it snaps
+  // like a moved clip, but not to a playing playhead, which moves on without redrawing the drop line.
+  const dropAt = useCallback(
+    (x: number, y: number) => {
       const el = scroller.current;
-      if (!el) return null;
+      if (!el || !project) return null;
       const r = el.getBoundingClientRect();
       if (x < r.left || x > r.right || y < r.top || y > r.bottom) return null;
       let trackId: string | null = null;
@@ -297,10 +299,22 @@ export function Timeline({ height }: { height: number }) {
         const rr = row.getBoundingClientRect();
         if (y >= rr.top && y <= rr.bottom) trackId = id;
       }
-      return { trackId, startUs: Math.round(timeAt(x)), replaceId: replaceTarget(x, y, media)?.clipId ?? null };
+      const t = timeAt(x);
+      const edges = [0, ...(playing ? [] : [useEditor.getState().timeUs]), ...allClips(project).flatMap((c) => [c.startUs, c.startUs + c.durationUs])];
+      const snapped = snapping && trackId && trackId !== MAIN_TRACK ? snap(t, edges, (SNAP_PX / zoom) * US) : null;
+      return { trackId, startUs: Math.round(snapped ?? t) };
+    },
+    [project, playing, snapping, timeAt, zoom],
+  );
+
+  // Media dragged from the media panel lands here.
+  useEffect(() => {
+    setDropResolver((x, y, media) => {
+      const place = dropAt(x, y);
+      return place && { ...place, replaceId: replaceTarget(x, y, media)?.clipId ?? null };
     });
     return () => setDropResolver(null);
-  }, [timeAt, replaceTarget]);
+  }, [dropAt, replaceTarget]);
 
   useLayoutEffect(() => {
     const el = scroller.current;
@@ -417,19 +431,16 @@ export function Timeline({ height }: { height: number }) {
   const ghostTrackId = drag?.moved && !gapBelow ? (drag.target === undefined ? drag.trackId : (drag.target as string | null)) : null;
   const replacing = assetDrag ? replaceTarget(assetDrag.x, assetDrag.y, dragMedia) : null;
   // Media dropped on the magnetic main track goes in at a cut, so the line shows that cut.
-  const dropTime =
-    assetDrag && !replacing && scroller.current
-      ? (() => {
-          const r = scroller.current.getBoundingClientRect();
-          if (assetDrag.x < r.left || assetDrag.x > r.right || assetDrag.y < r.top || assetDrag.y > r.bottom) return null;
-          const t = timeAt(assetDrag.x);
-          const mainRow = rows.current.get(MAIN_TRACK)?.getBoundingClientRect();
-          if (!mainRow || assetDrag.y < mainRow.top || assetDrag.y > mainRow.bottom) return t;
+  const place = assetDrag && !replacing ? dropAt(assetDrag.x, assetDrag.y) : null;
+  const dropTime = !place
+    ? null
+    : place.trackId !== MAIN_TRACK
+      ? place.startUs
+      : (() => {
           const main = mainClips(project);
-          const i = mainInsertIndex(main, t);
+          const i = mainInsertIndex(main, place.startUs);
           return i < main.length ? main[i].startUs : main.reduce((end, c) => Math.max(end, c.startUs + c.durationUs), 0);
-        })()
-      : null;
+        })();
   const emptyTimeline = allClips(drawn).length === 0;
   // One tab stop for all clips: the last focused, else the first selected, else the first main-track clip.
   const known = (id: string | null | undefined) => !!id && allClips(project).some((c) => c.id === id);

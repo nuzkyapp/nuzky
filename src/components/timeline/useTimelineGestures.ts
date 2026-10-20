@@ -5,7 +5,7 @@ import { US, lastFrame, nearestFrame } from "../../lib/time";
 import type { Clip, Project, Track } from "../../lib/types";
 import { EDGE, clipAsset } from "./ClipView";
 
-const SNAP_PX = 8;
+export const SNAP_PX = 8;
 // How near the line between two tracks the pointer drops a clip on a new track there.
 const GAP_PX = 6;
 // Cmd on a Mac, where Ctrl-click is a right click.
@@ -78,7 +78,7 @@ function trackAboveGap(project: Project, rects: (readonly [string, DOMRect])[], 
   }
 }
 
-function snap(value: number, candidates: number[], thr: number): number | null {
+export function snap(value: number, candidates: number[], thr: number): number | null {
   let best: number | null = null;
   for (const c of candidates) if (Math.abs(c - value) <= thr && (best === null || Math.abs(c - value) < Math.abs(best - value))) best = c;
   return best;
