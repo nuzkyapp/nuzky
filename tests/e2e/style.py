@@ -37,6 +37,12 @@ JOB = """const l = window.__nuzky.style.getState().learning; if (!l) return null
 const j = window.__nuzky.store.getState().jobs[l.jobId]; return j && {status: j.status, phase: j.phase, results: l.results, message: j.message};"""
 DIALOG = '[role=dialog][aria-labelledby=learn-title]'
 PAGE = 'main[aria-label="Your style"]'
+# What each suggestion card and learned rule row says about its confidence: the tooltip of its level, or what
+# the row says in its place.
+LEVELS = """return Object.fromEntries([...document.querySelectorAll(arguments[0] + ' section[aria-label^="Suggestion: "]')]
+  .map((s) => [s.getAttribute('aria-label').slice('Suggestion: '.length), s.querySelector('[title*=" confidence: "]')?.title ?? null]))"""
+ROWS = """return Object.fromEntries([...document.querySelectorAll(arguments[0] + ' section[aria-label="Learned rules"] li')]
+  .map((l) => [l.firstElementChild.textContent, l.querySelector('[title*=" confidence: "]')?.title ?? l.children[2].textContent]))"""
 
 
 def run(*command, **kw):
@@ -306,7 +312,8 @@ def sources(r):
 
 
 @flow('style_auto', 'Nuzky learns by itself: never from the AI\'s own cut or its export, but from the user\'s edits of it, their corrected '
-                    'words and their export, all as suggestions that leave the style unchanged', before=project_setup, home=True)
+                    'words and their export, all as suggestions that leave the style unchanged, each as sure as the moments of the one project '
+                    'make it; accepted, a rule learning would change says so', before=project_setup, home=True)
 def style_auto(r):
     bridge = Bridge(r, r.saved_project())
     try:
@@ -353,6 +360,10 @@ def style_auto(r):
     r.check('a toast says what was learned, with Review', toast and toast['action']['label'] == 'Review', toast)
     r.s.run("window.__nuzky.store.getState().toasts.find((t) => t.text.startsWith('Learned from')).action.run()")
     r.check('Review shows the suggestions', wait(lambda: r.s.run(f"return !!document.querySelector('{PAGE}')"), 5))
+    # Learning by itself makes one video of the project however long the user works in it.
+    shown, many = r.s.run(LEVELS, PAGE), [s['title'] for s in view(r)['suggestions'] if s['confidence']['moments'] >= 3]
+    r.check('a suggestion seen at 3 or more moments of the one project does not say Low',
+            many and all(shown.get(t) and not shown[t].startswith('Low') for t in many), shown)
     r.shot('learned-by-itself')
 
     learned_at = sources(r)[0]['atMs']
@@ -369,4 +380,31 @@ def style_auto(r):
     export(r, 'mine.mp4')
     r.check('the user\'s export is learned again', wait(lambda: sources(r)[0]['atMs'] > learned_at, 10), sources(r))
     r.check('as the same video, not a second one', len(sources(r)) == 1, sources(r))
+
+    click(r, 'Accept all')
+    r.check('Accept all writes the style', wait(lambda: edit_md(r) is not None and not view(r)['suggestions'], 10), view(r))
+    rules = {x['title']: x for x in view(r)['rules']}
+    rows = r.s.run(ROWS, PAGE)
+    r.check('each accepted rule shows how well the project backs it', rows and all(' confidence: ' in rows.get(t, '') for t in rules), rows)
+    r.check('and one seen at 3 or more moments is not Low', all(not rows[t].startswith('Low') for t, x in rules.items()
+                                                                if x['confidence']['moments'] >= 3), rows)
+    r.shot('learned-rules')
+
+    # One more corrected word: learning now makes other choices for Spelling than the user accepted.
+    shown = answer(r, "window.__nuzky.api.transcriptView(700000)")
+    said = [w['text'].strip() for w in shown['words']]
+    i = [w.lower().strip('.,') for w in said].index('music')
+    fix = [{'i': i, 'text': 'Sound' + trail(said[i]), 'expected': said[i]}]
+    r.check('the user corrects another word', r.s.call(f"window.__nuzky.api.correctWords(arguments[0], arguments[1], {epoch})", shown['key'], fix)['ok'])
+    r.check('learning suggests changing Spelling', wait(lambda: [(s['title'], s['update']) for s in view(r)['suggestions']] == [('Spelling', True)], 25), view(r)['suggestions'])
+    rows = r.s.run(ROWS, PAGE)
+    r.check('the accepted Spelling says a change is suggested, not the confidence of the change', rows.get('Spelling') == 'Change suggested', rows)
+    r.check('the other rules keep their confidence', all(' confidence: ' in v for t, v in rows.items() if t != 'Spelling'), rows)
+    r.shot('change-suggested')
+    if r.check('the window goes to its smallest size', resize(r, 1024, 640)):
+        r.s.run(f"document.querySelector('{PAGE} section[aria-label=\"Learned rules\"]').scrollIntoView()")
+        r.shot('change-suggested-1024')
+        width = r.s.run(f"const m = document.querySelector('{PAGE}'); return [m.scrollWidth, m.clientWidth]")
+        r.check('the page fits the smallest window', width[0] <= width[1], width)
+        resize(r, 1440, 900)
     r.check('no error toast', not r.errors(), r.errors())

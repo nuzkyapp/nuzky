@@ -235,7 +235,7 @@ fn catalog() -> Result<Vec<Tool>> {
         )?,
         tool::<params::GetStyle>(
             "get_style",
-            "Read the creator's editing style as the app's Your style page shows it: text is EDIT.md exactly as every agent gets it (also nuzky://style), own the creator's own rules in their words, rules the learned rules in it with a one-line summary (by_you when they changed one by hand, so learning leaves it alone), suggestions what learning found that is not in it yet (update when it would change a rule: changes from and to, confidence by videos and moments, the first moments, the text it would add), not_learned the rules learning leaves alone and why, sources the videos learned from, versions the newest changes, and version, which setText needs. The style is about all of the creator's videos, not the open project. Read-only.",
+            "Read the creator's editing style as the app's Your style page shows it: text is EDIT.md exactly as every agent gets it (also nuzky://style), own the creator's own rules in their words, rules the learned rules in it with a one-line summary (by_you when they changed one by hand, so learning leaves it alone; confidence only while learning makes the same choices; change_suggested when learning would change it), suggestions what learning found that is not in it yet (update when it would change a rule: changes from and to, confidence by videos and moments, the first moments, the text it would add), not_learned the rules learning leaves alone and why, sources the videos learned from, versions the newest changes, and version, which setText needs. The style is about all of the creator's videos, not the open project. Read-only.",
         )?,
         tool::<params::ChangeStyle>(
             "change_style",

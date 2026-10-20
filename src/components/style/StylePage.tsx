@@ -19,7 +19,10 @@ const LEVEL = { high: ["High", 3], medium: ["Medium", 2], low: ["Low", 1] } as c
 function Confidence({ c }: { c: StyleConfidence }) {
   const [label, lit] = LEVEL[c.level];
   return (
-    <span className="flex items-center gap-1.5 text-[12px] text-muted" title={`${label} confidence: seen in ${c.videos} of the ${plural(c.of, "video")} learned from`}>
+    <span
+      className="flex items-center gap-1.5 text-[12px] text-muted"
+      title={`${label} confidence: seen at ${plural(c.moments, "moment")} in ${c.videos} of the ${plural(c.of, "video")} learned from. High takes 3 videos or 10 moments, Medium 2 videos or 3 moments.`}
+    >
       <Bars lit={lit} />
       <span className="text-fg/85">{label}</span>
       <span aria-hidden>·</span>
@@ -272,7 +275,17 @@ function LearnedRules({ view, changed }: { view: StyleView; changed: Set<string>
                 </span>
               )}
             </span>
-            {rule.confidence ? <Confidence c={rule.confidence} /> : rule.byYou ? <span /> : <span className="text-[12px] text-muted">Not seen lately</span>}
+            {rule.confidence ? (
+              <Confidence c={rule.confidence} />
+            ) : rule.byYou ? (
+              <span />
+            ) : rule.changeSuggested ? (
+              <span className="text-[12px] text-muted" title="What learning finds now differs from this rule. Accept or Reject the change under Suggestions.">
+                Change suggested
+              </span>
+            ) : (
+              <span className="text-[12px] text-muted">Not seen lately</span>
+            )}
             <IconButton
               label={`More for ${rule.title}`}
               aria-haspopup="menu"
