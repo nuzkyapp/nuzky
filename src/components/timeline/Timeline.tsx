@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Copy, Magnet, Maximize2, PanelLeftClose, PanelRightClose, RotateCwSquare, Scissors, Trash2, Unlink, ZoomIn, ZoomOut } from "lucide-react";
+import { useShallow } from "zustand/react/shallow";
 import {
   MAIN_TRACK,
   allClips,
@@ -24,7 +25,7 @@ import { US, formatDuration, formatTime } from "../../lib/time";
 import type { Clip, EditCmd, Project, Track } from "../../lib/types";
 import { candidateReason, thumbnailOf, useCandidates, useCover } from "../../lib/cover";
 import { describePeek } from "../../lib/peek";
-import { setDropResolver } from "../panel/assets";
+import { setDropResolver, type DropMedia } from "../panel/assets";
 import { IconButton, RangeInput } from "../ui";
 import { ClipMenu, type MenuAt } from "./ClipMenu";
 import { ClipView } from "./ClipView";
@@ -38,6 +39,8 @@ const RULER_H = 28;
 /** Space between lanes. It belongs to the rows, so the track header column runs unbroken. */
 const ROW_GAP = 4;
 const LANES_AT = { left: HEADER_W, top: RULER_H };
+/** How far into each end of a clip dropped media still goes in beside it instead of replacing it, in px. */
+const REPLACE_END = 24;
 const END_TIP = "The video ends here. Sound after this point is not exported.";
 
 function rowHeight(track: Track) {
@@ -207,6 +210,12 @@ export function Timeline({ height }: { height: number }) {
   const zoom = useEditor((s) => s.zoom);
   // Media dragged from the panel, or files dragged in from the desktop.
   const assetDrag = useEditor((s) => s.assetDrag ?? s.fileDrag);
+  const dragMedia = useEditor(
+    useShallow((s): DropMedia | null => {
+      const asset = s.assetDrag && s.snap?.project.assets.find((a) => a.id === s.assetDrag!.assetId);
+      return asset ? { kind: asset.kind, hasAudio: asset.hasAudio } : s.fileDrag?.kind ? { kind: s.fileDrag.kind } : null;
+    }),
+  );
   const locked = useAiLocked();
   // In the cover editor the timeline chooses the cover's frame: clicks and drags move the playhead, which is the frame.
   const cover = useCover((s) => s.open);
@@ -256,9 +265,24 @@ export function Timeline({ height }: { height: number }) {
   const windowFrom = Math.floor(view.left / VISIBLE_STEP) * VISIBLE_STEP;
   const visible = useMemo<[number, number]>(() => [windowFrom - 200, windowFrom + view.width + VISIBLE_STEP + 200], [windowFrom, view.width]);
 
+  // Media dropped on the middle of a clip that can show or play it goes in that clip; its ends insert beside it.
+  const replaceTarget = useCallback(
+    (x: number, y: number, media: DropMedia | null) => {
+      const el = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-clip-id]");
+      if (!media || !project || !el || !scroller.current?.contains(el)) return null;
+      const r = el.getBoundingClientRect();
+      const end = Math.min(r.width / 4, REPLACE_END);
+      const found = findClip(project, el.dataset.clipId!);
+      if (!found || found.clip.content.type !== "media" || x < r.left + end || x > r.right - end) return null;
+      const fits = found.track.kind === "video" ? media.kind !== "audio" : found.track.kind === "audio" && media.kind !== "image" && media.hasAudio !== false;
+      return fits ? found.clip.id : null;
+    },
+    [project],
+  );
+
   // Media dragged from the media panel lands here.
   useEffect(() => {
-    setDropResolver((x, y) => {
+    setDropResolver((x, y, media) => {
       const el = scroller.current;
       if (!el) return null;
       const r = el.getBoundingClientRect();
@@ -268,10 +292,10 @@ export function Timeline({ height }: { height: number }) {
         const rr = row.getBoundingClientRect();
         if (y >= rr.top && y <= rr.bottom) trackId = id;
       }
-      return { trackId, startUs: Math.round(timeAt(x)) };
+      return { trackId, startUs: Math.round(timeAt(x)), replaceId: replaceTarget(x, y, media) };
     });
     return () => setDropResolver(null);
-  }, [timeAt]);
+  }, [timeAt, replaceTarget]);
 
   useLayoutEffect(() => {
     const el = scroller.current;
@@ -387,9 +411,10 @@ export function Timeline({ height }: { height: number }) {
   const ghostTiming = drag?.moved ? ((drag.mode !== "move" && layout?.timing.get(drag.clip.id)) || dragResult(drag, minUs)) : null;
   const gapBelow = drag?.moved && drag.target && typeof drag.target === "object" ? drag.target.below : null;
   const ghostTrackId = drag?.moved && !gapBelow ? (drag.target === undefined ? drag.trackId : (drag.target as string | null)) : null;
+  const replacing = assetDrag ? replaceTarget(assetDrag.x, assetDrag.y, dragMedia) : null;
   // Media dropped on the magnetic main track goes in at a cut, so the line shows that cut.
   const dropTime =
-    assetDrag && scroller.current
+    assetDrag && !replacing && scroller.current
       ? (() => {
           const r = scroller.current.getBoundingClientRect();
           if (assetDrag.x < r.left || assetDrag.x > r.right || assetDrag.y < r.top || assetDrag.y > r.bottom) return null;
@@ -684,6 +709,7 @@ export function Timeline({ height }: { height: number }) {
                           selected={!peekShown && selection.includes(clip.id)}
                           locked={locked || !!peekShown}
                           mark={described?.marks.get(clip.id)}
+                          replacing={clip.id === replacing}
                           dimmed={!!peekShown && !described?.marks.has(clip.id)}
                           tabbable={!cover && clip.id === tabStop}
                           timing={isMain ? layout?.timing.get(clip.id) : undefined}
@@ -762,7 +788,7 @@ export function Timeline({ height }: { height: number }) {
           )}
 
           {/* Drop position for media dragged from the panel */}
-          {dropTime !== null && <div className="pointer-events-none absolute bottom-0 top-0 z-30 w-0.5 bg-accent" style={{ left: HEADER_W + (dropTime / US) * zoom }} />}
+          {dropTime !== null && <div data-testid="drop-line" className="pointer-events-none absolute bottom-0 top-0 z-30 w-0.5 bg-accent" style={{ left: HEADER_W + (dropTime / US) * zoom }} />}
 
           <Playhead zoom={zoom} scroller={scroller} follow={!box} />
 

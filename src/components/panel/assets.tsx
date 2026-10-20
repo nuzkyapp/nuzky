@@ -13,6 +13,7 @@ export const MEDIA_EXTENSIONS = [...VIDEO_EXTENSIONS, ...AUDIO_EXTENSIONS, ...IM
 
 const fileName = (path: string) => path.split(/[\\/]/).pop() || path;
 const extension = (path: string) => path.split(".").pop()?.toLowerCase() ?? "";
+export const mediaKind = (path: string): Asset["kind"] => (AUDIO_EXTENSIONS.includes(extension(path)) ? "audio" : IMAGE_EXTENSIONS.includes(extension(path)) ? "image" : "video");
 
 let importKey = 0;
 
@@ -33,14 +34,13 @@ export function importFailures(failed: { path: string; error: string }[]) {
   return [lead, ...other].filter(Boolean).join(". ");
 }
 
-/** Imports files; optionally places them on the timeline one after another. Resolves to the ids of the new assets. */
-export async function importPaths(paths: string[], place?: { trackId: string | null; startUs: number | null }): Promise<string[]> {
+/** Imports files; optionally places them on the timeline one after another, or puts the first in a clip. Resolves to the ids of the new assets. */
+export async function importPaths(paths: string[], place?: DropTarget | { replaceId: string }): Promise<string[]> {
   const { setSnap, toast, edit } = useEditor.getState();
   if (paths.length === 0 || aiLocked()) return [];
   const epoch = currentEpoch();
   // Placeholders show at once, while the files are probed.
-  const kind = (p: string): Asset["kind"] => (AUDIO_EXTENSIONS.includes(extension(p)) ? "audio" : IMAGE_EXTENSIONS.includes(extension(p)) ? "image" : "video");
-  const pending = paths.map((p) => ({ key: ++importKey, name: fileName(p), kind: kind(p) }));
+  const pending = paths.map((p) => ({ key: ++importKey, name: fileName(p), kind: mediaKind(p) }));
   useEditor.setState({ importing: [...useEditor.getState().importing, ...pending] });
   const done = () => useEditor.setState({ importing: useEditor.getState().importing.filter((i) => !pending.includes(i)) });
   try {
@@ -49,7 +49,9 @@ export async function importPaths(paths: string[], place?: { trackId: string | n
     done();
     if (res.failed.length > 0) toast({ kind: "error", text: importFailures(res.failed) });
     // Placing waits for the import; another project may have opened meanwhile.
-    if (place && currentEpoch() === epoch) {
+    if (place && "replaceId" in place && place.replaceId) {
+      if (currentEpoch() === epoch && res.added[0]) await edit({ type: "replaceClip", clipId: place.replaceId, assetId: res.added[0] });
+    } else if (place && "startUs" in place && currentEpoch() === epoch) {
       let startUs = place.startUs;
       for (const id of res.added) {
         if (currentEpoch() !== epoch) break;
@@ -129,6 +131,16 @@ export async function pickAndImport(audioOnly = false) {
   if (picked) await importPaths(Array.isArray(picked) ? picked : [picked]);
 }
 
+/** Opens the file picker for media to put in a clip, keeping everything else about the clip. */
+export async function pickAndReplace(clipId: string, audioOnly: boolean) {
+  if (aiLocked()) return;
+  const picked = await open({
+    multiple: false,
+    filters: [audioOnly ? { name: "Audio", extensions: [...AUDIO_EXTENSIONS, ...VIDEO_EXTENSIONS] } : { name: "Video and images", extensions: [...VIDEO_EXTENSIONS, ...IMAGE_EXTENSIONS] }],
+  });
+  if (typeof picked === "string") await importPaths([picked], { replaceId: clipId });
+}
+
 export async function addAtPlayhead(assetId: string) {
   const { edit, seek } = useEditor.getState();
   const snap = await edit({ type: "addClip", assetId, startUs: useEditor.getState().timeUs, trackId: null });
@@ -143,7 +155,19 @@ export function addPictureInPicture(assetId: string) {
   return edit({ type: "addPictureInPicture", assetId, startUs: Math.round(timeUs), durationUs: null });
 }
 
-export let dropResolver: ((x: number, y: number) => { trackId: string | null; startUs: number } | null) | null = null;
+/** Where media dropped at a point lands: on a track at a time, or in the clip it replaces. */
+export interface DropTarget {
+  trackId: string | null;
+  startUs: number;
+  replaceId: string | null;
+}
+/** What is dragged, so the timeline knows which clips it can replace. */
+export interface DropMedia {
+  kind: Asset["kind"];
+  /** Unknown for a file not imported yet. */
+  hasAudio?: boolean;
+}
+export let dropResolver: ((x: number, y: number, media: DropMedia | null) => DropTarget | null) | null = null;
 export function setDropResolver(fn: typeof dropResolver) {
   dropResolver = fn;
 }
@@ -162,8 +186,10 @@ export function assetDragHandler(assetId: string) {
       const drag = useEditor.getState().assetDrag;
       useEditor.setState({ assetDrag: null });
       if (!dragging || !drag) return;
-      const target = dropResolver?.(ev.clientX, ev.clientY);
-      if (target) useEditor.getState().edit({ type: "addClip", assetId, startUs: target.startUs, trackId: target.trackId });
+      const asset = useEditor.getState().snap?.project.assets.find((a) => a.id === assetId);
+      const target = dropResolver?.(ev.clientX, ev.clientY, asset ?? null);
+      if (target?.replaceId) useEditor.getState().edit({ type: "replaceClip", clipId: target.replaceId, assetId });
+      else if (target) useEditor.getState().edit({ type: "addClip", assetId, startUs: target.startUs, trackId: target.trackId });
     };
     // A cancelled drag drops nothing.
     followPointer({ move, up, cancel: () => useEditor.setState({ assetDrag: null }) });

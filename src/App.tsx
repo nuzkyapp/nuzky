@@ -10,11 +10,11 @@ import { canRetrySpeech, retrySpeech, useSpeech } from "./lib/speech";
 import { reportBug } from "./lib/diagnostics";
 import { copySelection, currentEpoch, cutSelection, deleteSelection, deleteSide, duplicateSelection, openExport, pasteAttributes, pasteClips, edgeBeside, projectDuration, runWasDiscarded, splitAtPlayhead, undoAction, useEditor } from "./lib/store";
 import { US, formatDuration, lastFrame, nearestFrame, stepFrame } from "./lib/time";
-import type { JobEvent, ProjectSummary, Snapshot, ModelQuestion, Transport } from "./lib/types";
+import type { Asset, JobEvent, ProjectSummary, Snapshot, ModelQuestion, Transport } from "./lib/types";
 import { AGENT_VISION_MODELS } from "./components/ModelQuestionDialog";
 import { showsVisionDownload } from "./components/setup/steps/VisionStep";
 import { useYoutube } from "./lib/youtube";
-import { MEDIA_EXTENSIONS, dropResolver, importPaths, pickAndImport } from "./components/panel/assets";
+import { MEDIA_EXTENSIONS, dropResolver, importPaths, mediaKind, pickAndImport } from "./components/panel/assets";
 import { Toasts } from "./components/Toasts";
 import { listenAgentEvents, panelRunEnded, useAgent } from "./lib/agent";
 import { togglePanel, useDock, useDockLayout, useWindowSize } from "./lib/dock";
@@ -278,6 +278,7 @@ function useBackendEvents() {
     // null: the preview recovered, e.g. after a failed frame.
     offs.push(listen<string | null>("engine-error", (e) => useEditor.setState({ engineError: e.payload })));
     let hasMedia = false;
+    let single: Asset["kind"] | null = null;
     // The run seen last, also one already open at boot; a snapshot can clear `aiRun` before this event.
     let lastRun: string | null = useEditor.getState().aiRun;
     // The revision the run started from, unknown for a run already open at boot.
@@ -344,8 +345,12 @@ function useBackendEvents() {
         const dpr = window.devicePixelRatio || 1;
         const p = e.payload;
         // While media files are dragged over the window, the timeline shows where they would land.
-        if (p.type === "enter") hasMedia = p.paths.some(isMedia);
-        if ((p.type === "enter" || p.type === "over") && hasMedia) useEditor.setState({ fileDrag: { x: p.position.x / dpr, y: p.position.y / dpr } });
+        if (p.type === "enter") {
+          const media = p.paths.filter(isMedia);
+          hasMedia = media.length > 0;
+          single = media.length === 1 ? mediaKind(media[0]) : null;
+        }
+        if ((p.type === "enter" || p.type === "over") && hasMedia) useEditor.setState({ fileDrag: { x: p.position.x / dpr, y: p.position.y / dpr, kind: single } });
         if (p.type === "leave" || p.type === "drop") useEditor.setState({ fileDrag: null });
         if (p.type !== "drop" || useEditor.getState().snap?.recovery) return;
         // On the home screen a dropped project opens, and dropped videos start a new project.
@@ -360,7 +365,7 @@ function useBackendEvents() {
           useEditor.getState().toast({ kind: "error", text: "Those files are not video, audio or images Nuzky can open." });
           return;
         }
-        const target = dropResolver?.(p.position.x / dpr, p.position.y / dpr) ?? undefined;
+        const target = dropResolver?.(p.position.x / dpr, p.position.y / dpr, paths.length === 1 ? { kind: mediaKind(paths[0]) } : null) ?? undefined;
         importPaths(paths, target);
       }),
     );

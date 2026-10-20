@@ -233,11 +233,16 @@ pub(crate) fn label(cmds: &[EditCmd]) -> &'static str {
     if cmds.iter().any(|c| matches!(c, EditCmd::AddSticker { .. })) {
         return "Sticker";
     }
+    // So does media picked to replace a clip.
+    if cmds.iter().any(|c| matches!(c, EditCmd::ReplaceClip { .. })) {
+        return "Replace clip";
+    }
     match cmd {
         EditCmd::AddSticker { .. } => "Sticker",
         EditCmd::AddAssets { .. } => "Import media",
         EditCmd::RemoveAsset { .. } => "Remove media",
         EditCmd::AddClip { .. } => "Add clip",
+        EditCmd::ReplaceClip { .. } => "Replace clip",
         EditCmd::AddText { .. } => "Add text",
         EditCmd::AddPictureInPicture { .. } => "Picture in picture",
         EditCmd::MoveClip { .. } => "Move clip",

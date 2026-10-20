@@ -630,6 +630,10 @@ export type EditCmd = {
   "type": "detachAudio",
   clipId: string,
 } | {
+  "type": "replaceClip",
+  clipId: string,
+  assetId: string,
+} | {
   "type": "updateTrack",
   trackId: string,
   muted?: boolean | null,

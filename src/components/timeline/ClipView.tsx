@@ -73,6 +73,7 @@ export const ClipView = memo(function ClipView({
   visible,
   fades,
   mark,
+  replacing,
   dimmed,
   onPointerDown,
   onContextMenu,
@@ -95,6 +96,8 @@ export const ClipView = memo(function ClipView({
   fades?: { inUs: number; outUs: number };
   /** While Undo or Redo is hovered: how this clip changes when the step is taken. */
   mark?: PeekMark;
+  /** Dragged media dropped now would go in this clip. */
+  replacing?: boolean;
   /** While Undo or Redo is hovered: the clip stays as it is, so it steps back for the ones that change. */
   dimmed?: boolean;
   onPointerDown?: (e: React.PointerEvent, clip: Clip, track: Track) => void;
@@ -211,7 +214,7 @@ export const ClipView = memo(function ClipView({
             ? "border-2 border-dashed border-accent"
             : mark === "gone"
               ? "border-2 border-dashed border-danger bg-[repeating-linear-gradient(135deg,rgb(0_0_0/.55)_0_6px,rgb(255_69_58/.25)_6px_12px)]"
-              : mark
+              : mark || replacing
                 ? "inset-ring-2 inset-ring-accent"
                 : selected
                   ? "inset-ring-2 inset-ring-accent"
@@ -219,11 +222,11 @@ export const ClipView = memo(function ClipView({
         }`}
       />
 
-      {mark && width > 56 && (
+      {(mark || replacing) && width > 56 && (
         <span
           className={`pointer-events-none absolute right-1 top-1 flex h-[17px] items-center rounded-[5px] px-1.5 text-[10px] font-semibold ${mark === "gone" ? "bg-black/75 text-danger" : "bg-accent-strong text-white"}`}
         >
-          {PEEK_WORDS[mark]}
+          {mark ? PEEK_WORDS[mark] : "Replace"}
         </span>
       )}
       {clip.animIn && (

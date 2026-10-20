@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { ClipboardCopy, ClipboardPaste, Copy, ListChecks, Paintbrush, Scissors, ScissorsLineDashed, Trash2, Unlink } from "lucide-react";
+import { ClipboardCopy, ClipboardPaste, Copy, ListChecks, Paintbrush, Replace, Scissors, ScissorsLineDashed, Trash2, Unlink } from "lucide-react";
+import { pickAndReplace } from "../panel/assets";
 import { AI_EDITING, NOTHING_COPIED, attributeTargets, canSplitClip, copySelection, cutSelection, deleteSelection, detachAudio, detachBlocker, duplicateSelection, findClip, pasteAttributes, pasteAttributesBlocker, pasteClips, selectTrack, splitAtPlayhead, useAiLocked, useEditor } from "../../lib/store";
 import type { Clip } from "../../lib/types";
 
@@ -89,6 +90,7 @@ export function ClipMenu({ at, onClose }: { at: MenuAt; onClose: () => void }) {
   const many = (one: string, verb: string) => (n === 1 ? one : `${verb} ${n} clips`);
   const detachable = picked.filter((c) => !detachBlocker(project, c));
   const detachReason = n === 1 ? detachBlocker(project, picked[0]) : "None of the selected clips has sound to detach";
+  const replaceReason = n > 1 ? "Select one clip to replace its media" : clip.content.type !== "media" ? "Only video, image and sound clips take other media" : null;
   const copies = clipboard?.length ?? 0;
   const looks = attributeTargets(project, selection, clipboard).reduce((sum, g) => sum + g.clipIds.length, 0);
   const run = (fn: () => unknown) => () => {
@@ -139,6 +141,13 @@ export function ClipMenu({ at, onClose }: { at: MenuAt; onClose: () => void }) {
         disabled={locked || detachable.length === 0}
         reason={locked ? AI_EDITING : detachReason}
         onSelect={run(() => detachAudio(detachable.map((c) => c.id)))}
+      />
+      <Item
+        icon={<Replace size={14} />}
+        label="Replace media…"
+        disabled={locked || !!replaceReason}
+        reason={locked ? AI_EDITING : replaceReason}
+        onSelect={run(() => pickAndReplace(clip.id, found.track.kind === "audio"))}
       />
       <Item icon={<ListChecks size={14} />} label="Select all on track" onSelect={run(() => selectTrack(clip.id))} />
       <div className="mx-2 my-1 h-px bg-white/[.08]" />

@@ -229,6 +229,14 @@ pub enum EditCmd {
     DetachAudio {
         clip_id: String,
     },
+    /// Puts other media in a clip. The clip keeps its id, place, length, speed, size, position, keyframes,
+    /// animations and effects, and reads the new media from its start, or from the part the user chose.
+    /// A video track takes a video or an image, an audio track a file with sound. Media shorter than the
+    /// clip at its speed is refused. Sound settings drop off when the new media has no sound.
+    ReplaceClip {
+        clip_id: String,
+        asset_id: String,
+    },
     #[cfg_attr(feature = "ts", ts(optional_fields = nullable))]
     UpdateTrack {
         track_id: String,
@@ -908,7 +916,8 @@ impl Project {
             | EditCmd::AddPictureInPicture { .. }
             | EditCmd::AddSticker { .. }
             | EditCmd::AddText { .. }
-            | EditCmd::DetachAudio { .. } => self.apply_media(cmd, &mut out, &mut moved)?,
+            | EditCmd::DetachAudio { .. }
+            | EditCmd::ReplaceClip { .. } => self.apply_media(cmd, &mut out, &mut moved)?,
             EditCmd::MoveClip { .. }
             | EditCmd::TrimClip { .. }
             | EditCmd::SplitClip { .. }
@@ -1109,6 +1118,49 @@ impl Project {
                 let target = self.free_track(TrackKind::Audio, clip.start_us, clip.end_us(), false);
                 out.select.push(sound.id.clone());
                 self.tracks[target].clips.push(sound);
+            }
+            EditCmd::ReplaceClip { clip_id, asset_id } => {
+                let (ti, ci) = self.find_clip(&clip_id).ok_or_else(|| anyhow!("Unknown clip"))?;
+                let asset = self.asset(&asset_id).ok_or_else(|| anyhow!("Unknown media"))?.clone();
+                let clip = &self.tracks[ti].clips[ci];
+                let ClipContent::Media { speed, .. } = clip.content else {
+                    bail!("Only video, image and sound clips take other media")
+                };
+                match self.tracks[ti].kind {
+                    TrackKind::Video => ensure!(
+                        asset.kind != AssetKind::Audio,
+                        "Sound can't go in a video clip; drop it on an audio track"
+                    ),
+                    _ => ensure!(crate::audio::has_audio(&asset), "This media has no sound for an audio clip"),
+                }
+                let needed = (clip.duration_us as f64 * speed as f64).round() as i64;
+                let source_in = if asset.kind == AssetKind::Image {
+                    0
+                } else {
+                    let available = asset.duration_us;
+                    ensure!(
+                        needed as f64 <= available as f64 + min as f64 * speed as f64,
+                        "This media is {:.1} s and the clip needs {:.1} s. Pick longer media or shorten the clip first",
+                        available as f64 / 1e6,
+                        needed as f64 / 1e6
+                    );
+                    source_span(&asset).0.min(available - needed).max(0)
+                };
+                let sound = crate::audio::has_audio(&asset);
+                if let ClipContent::Media {
+                    asset_id: a, source_in_us, clean_voice, dereverb, normalize, leveler, ..
+                } = &mut self.tracks[ti].clips[ci].content
+                {
+                    *a = asset.id;
+                    *source_in_us = source_in;
+                    if !sound {
+                        *clean_voice = false;
+                        *dereverb = 0.0;
+                        *normalize = false;
+                        *leveler = 0.0;
+                    }
+                }
+                out.select.push(clip_id);
             }
             _ => unreachable!("command dispatched to the wrong edit group"),
         }

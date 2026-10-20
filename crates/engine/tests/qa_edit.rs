@@ -223,3 +223,67 @@ fn equal_start_captions_do_not_overlap() {
     );
     invariants(&e.project).unwrap();
 }
+#[test]
+fn replacing_media_keeps_everything_but_the_source() {
+    let mut e = editor();
+    let mut image = asset("still", 0);
+    image.kind = AssetKind::Image;
+    image.has_audio = false;
+    let mut silent = asset("silent", 9_000_000);
+    silent.has_audio = false;
+    let mut music = asset("music", 9_000_000);
+    music.kind = AssetKind::Audio;
+    let mut chosen = asset("chosen", 20_000_000);
+    chosen.part = Some(Part { start_us: 12_000_000, end_us: 16_000_000 });
+    e.project.assets.extend([image, silent, music, chosen]);
+    e.apply(EditCmd::AddClip { asset_id: "a".into(), start_us: None, track_id: None }, None).unwrap();
+    let id = e.project.tracks[0].clips[0].id.clone();
+    e.apply(
+        EditCmd::TrimClip { clip_id: id.clone(), start_us: 0, duration_us: 4_000_000, source_in_us: Some(1_000_000) },
+        None,
+    )
+    .unwrap();
+    e.apply(update_speed(&id, 2.0), None).unwrap();
+    let mut styled = update_speed(&id, 2.0);
+    if let EditCmd::UpdateClip { speed, transform, clean_voice, normalize, .. } = &mut styled {
+        *speed = None;
+        *transform = Some(Transform { x: 0.2, y: -0.1, scale: 0.6, ..Transform::default() });
+        *clean_voice = Some(true);
+        *normalize = Some(true);
+    }
+    e.apply(styled, None).unwrap();
+    let before = e.project.tracks[0].clips[0].clone();
+    assert_eq!(before.duration_us, 2_000_000, "4 s at 2x play in 2 s");
+
+    let replace = |e: &mut Editor, asset: &str| {
+        e.apply(EditCmd::ReplaceClip { clip_id: id.clone(), asset_id: asset.into() }, None)
+    };
+    let project = e.project.clone();
+    let err = replace(&mut e, "b").map(|_| ()).unwrap_err().to_string();
+    assert!(err.starts_with("This media is"), "{err}");
+    assert_eq!(e.project, project, "too short media changes nothing");
+    let err = replace(&mut e, "music").map(|_| ()).unwrap_err().to_string();
+    assert!(err.starts_with("Sound can't go in a video clip"), "{err}");
+
+    replace(&mut e, "silent").unwrap();
+    let after = e.project.tracks[0].clips[0].clone();
+    let ClipContent::Media { asset_id, source_in_us, clean_voice, normalize, .. } = &after.content else { panic!() };
+    assert_eq!((asset_id.as_str(), *source_in_us, *clean_voice, *normalize), ("silent", 0, false, false));
+    let mut expected = before.clone();
+    if let ClipContent::Media { asset_id, source_in_us, clean_voice, normalize, .. } = &mut expected.content {
+        *asset_id = "silent".into();
+        *source_in_us = 0;
+        *clean_voice = false;
+        *normalize = false;
+    }
+    assert_eq!(after, expected, "only the media and its sound settings change");
+    assert!(e.undo());
+    assert_eq!(e.project.tracks[0].clips[0], before);
+
+    replace(&mut e, "chosen").unwrap();
+    let ClipContent::Media { source_in_us, .. } = e.project.tracks[0].clips[0].content else { panic!() };
+    assert_eq!(source_in_us, 12_000_000, "starts at the part the user chose");
+    replace(&mut e, "still").unwrap();
+    assert_eq!(e.project.tracks[0].clips[0].duration_us, 2_000_000);
+    invariants(&e.project).unwrap();
+}
