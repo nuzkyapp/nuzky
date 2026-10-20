@@ -112,6 +112,17 @@ PLACE = """window.__nuzky.store.getState().edit((p) => {
 })"""
 SHADOW_BOX = f"[...document.querySelectorAll('{SECTION} label')].find((l) => l.textContent.trim() === 'Shadow')?.querySelector('input')"
 OPACITY = f"document.querySelector('{SECTION} input[aria-label=\"Shadow opacity value\"]')"
+BOX = """window.__nuzky.store.getState().edit((p) => arguments[0].map(([id, background]) => {
+  const c = p.tracks.flatMap((t) => t.clips).find((c) => c.id === id);
+  return {type: 'updateClip', clipId: id, style: {...c.content.style, background}};
+}))"""
+BOXES = """return window.__nuzky.store.getState().snap.project.tracks.flatMap((t) => t.clips)
+  .filter((c) => c.content.type === 'text').map((c) => [c.id, c.content.style.background]);"""
+PICK = f"""const input = document.querySelector('{SECTION} input[type=color][aria-label="Box color"]');
+Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, arguments[0]);
+input.dispatchEvent(new Event('input', {{bubbles: true}}));"""
+BOX_LABEL = f"""return [...document.querySelectorAll('{SECTION} label')].find((l) => l.querySelector('input[aria-label="Box color"]'))
+  ?.querySelector('span.tabular')?.textContent"""
 
 
 def shadow(r):
@@ -281,3 +292,12 @@ def several(r, first, font):
     bands = [ink(drawn.crop((0, h * i // 3, w, h * (i + 1) // 3))) for i in range(3)]
     r.check('the engine draws a shadow down and to the right of each of the three texts',
             all(b[0] and b[1] and b[1][0] > b[0][0] and b[1][1] > b[0][1] and b[2] > 0.0005 for b in bands), bands)
+
+    # Boxes of different colours and opacities: a picked colour goes on all of them, each keeping its opacity.
+    r.s.call(BOX, [[first, '#000000b3'], *[[i, '#ff000080'] for i in others]])
+    r.check('Box color shows a dash while the box colours differ', wait(lambda: r.s.run(BOX_LABEL) == '—', 5), r.s.run(BOX_LABEL))
+    r.s.run(PICK, '#2050ff')
+    boxes = lambda: dict(r.s.run(BOXES))
+    r.check('a picked box colour goes on all three, each keeping its own opacity',
+            wait(lambda: boxes()[first] == '#2050ffb3' and all(boxes()[i] == '#2050ff80' for i in others), 5), boxes())
+    r.check('and the dash gives way to the picked colour', wait(lambda: r.s.run(BOX_LABEL) == '#2050FF', 5), r.s.run(BOX_LABEL))
