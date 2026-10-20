@@ -16,6 +16,7 @@ pub(crate) fn command(req: &TurnRequest) -> Command {
     let env: Map<String, Value> = req.mcp.env.iter().map(|(k, v)| (k.clone(), Value::String(v.clone()))).collect();
     let mcp = json!({"mcpServers": {"nuzky": {"type": "stdio", "command": req.mcp.command, "args": req.mcp.args, "env": env}}});
     let mut c = Command::new(&req.exe);
+    c.env("PATH", crate::discover::agent_path());
     c.args([
         "-p",
         "--input-format",

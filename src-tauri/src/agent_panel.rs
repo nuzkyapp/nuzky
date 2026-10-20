@@ -415,15 +415,36 @@ pub async fn agent_chat_save(app: AppHandle, chat: String, title: String, items:
 #[tauri::command]
 pub async fn agent_models(agent: AgentId) -> CmdResult<Vec<AgentModel>> {
     tauri::async_runtime::spawn_blocking(move || match agent {
-        AgentId::Claude => Ok([("fable", "Fable"), ("opus", "Opus"), ("sonnet", "Sonnet"), ("haiku", "Haiku")]
-            .into_iter()
-            .map(|(slug, name)| AgentModel {
-                slug: slug.into(),
-                display_name: name.into(),
-                efforts: nuzky_chatgpt::EFFORTS.map(str::to_owned).into(),
-                default_effort: Some(if slug == "sonnet" { "high" } else { "medium" }.into()),
-            })
-            .collect()),
+        AgentId::Claude => {
+            let failed = "MODELS_FAILED: Couldn't list Claude Code's models. Try again.";
+            let path = nuzky_agent::find(agent).path.ok_or(failed)?;
+            // Claude Code names its models only to a client that starts a session, so this starts one and
+            // sends nothing to the model. The user's settings stay, as they pick what each alias runs.
+            let args = [
+                "-p",
+                "--input-format",
+                "stream-json",
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--setting-sources",
+                "user",
+                "--settings",
+                r#"{"disableAllHooks":true}"#,
+                "--strict-mcp-config",
+                "--tools",
+                "",
+                "--disable-slash-commands",
+                "--no-session-persistence",
+            ];
+            let request = br#"{"type":"control_request","request_id":"models","request":{"subtype":"initialize"}}
+"#;
+            let output =
+                nuzky_agent::run_with_input(&path, &args, &[], None, Some(request), std::time::Duration::from_secs(15))
+                    .map_err(|_| failed)?
+                    .ok_or(failed)?;
+            claude_models(&output.stdout).ok_or_else(|| failed.into())
+        }
         AgentId::Codex => {
             let failed = "MODELS_FAILED: Couldn't list Codex's models. Try again.";
             let path = nuzky_agent::find(agent).path.ok_or(failed)?;
@@ -439,6 +460,58 @@ pub async fn agent_models(agent: AgentId) -> CmdResult<Vec<AgentModel>> {
     })
     .await
     .map_err(err)?
+}
+
+/// The models from Claude Code's answer to `initialize`, without its Default, which the menu has
+/// already, and once per model, since the user's settings can point two aliases at the same one.
+fn claude_models(stdout: &[u8]) -> Option<Vec<AgentModel>> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Entry {
+        value: String,
+        resolved_model: Option<String>,
+        display_name: String,
+        #[serde(default)]
+        description: String,
+        #[serde(default)]
+        supports_effort: bool,
+        #[serde(default)]
+        supported_effort_levels: Vec<String>,
+    }
+    let answer = String::from_utf8_lossy(stdout)
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .find(|v| v["type"] == "control_response" && v["response"]["request_id"] == "models")?;
+    let entries: Vec<Entry> = serde_json::from_value(answer["response"]["response"]["models"].clone()).ok()?;
+    let mut seen = std::collections::HashSet::new();
+    Some(
+        entries
+            .into_iter()
+            .filter(|m| {
+                m.value != "default" && seen.insert(m.resolved_model.clone().unwrap_or_else(|| m.value.clone()))
+            })
+            .map(|m| {
+                // "Sonnet" says which version only in its description, "Sonnet 5.5 · Efficient for…".
+                let versioned = m.description.split(" · ").next().filter(|first| {
+                    first.starts_with(&m.display_name) && !m.display_name.chars().any(|c| c.is_ascii_digit())
+                });
+                let efforts = if m.supports_effort {
+                    m.supported_effort_levels
+                        .into_iter()
+                        .filter(|effort| nuzky_chatgpt::EFFORTS.contains(&effort.as_str()))
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                AgentModel {
+                    display_name: versioned.map_or(m.display_name.clone(), str::to_owned),
+                    slug: m.value,
+                    efforts,
+                    default_effort: None,
+                }
+            })
+            .collect(),
+    )
 }
 
 fn codex_models(bytes: &[u8]) -> serde_json::Result<Vec<AgentModel>> {
@@ -734,6 +807,44 @@ mod tests {
         for effort in ["", "ultra", "High", "high "] {
             assert!(validate_model_effort(None, Some(effort)).is_err());
         }
+    }
+
+    #[test]
+    fn claude_models_skip_default_and_aliases_of_the_same_model() {
+        let model = |value: &str, resolved: Option<&str>, name: &str, description: &str, efforts: &[&str]| {
+            serde_json::json!({"value": value, "resolvedModel": resolved, "displayName": name, "description": description,
+                "supportsEffort": value != "gateway", "supportedEffortLevels": efforts})
+        };
+        let models = [
+            model("default", Some("claude-opus-5-5"), "Default (recommended)", "", &["low", "high"]),
+            model(
+                "opus",
+                Some("claude-opus-5-5"),
+                "Opus 5.5",
+                "Custom Opus model (claude-opus-5-5)",
+                &["low", "medium", "high", "xhigh", "max", "ultra"],
+            ),
+            model(
+                "sonnet",
+                Some("claude-sonnet-5-5"),
+                "Sonnet",
+                "Sonnet 5.5 · Efficient for routine tasks",
+                &["low", "high"],
+            ),
+            model("haiku", Some("claude-opus-5-5"), "Opus 5.5", "Custom Haiku model (claude-opus-5-5)", &["low"]),
+            model("gateway", None, "Gateway", "Their model · fast", &["low"]),
+        ];
+        let answer = serde_json::json!({"type": "control_response",
+            "response": {"subtype": "success", "request_id": "models", "response": {"models": models}}});
+        let stdout = format!("{}\n{answer}\n", serde_json::json!({"type": "system", "subtype": "hook_started"}));
+        let models = claude_models(stdout.as_bytes()).unwrap();
+        let names: Vec<_> = models.iter().map(|m| (m.slug.as_str(), m.display_name.as_str())).collect();
+        assert_eq!(names, [("opus", "Opus 5.5"), ("sonnet", "Sonnet 5.5"), ("gateway", "Gateway")]);
+        assert_eq!(models[0].efforts, ["low", "medium", "high", "xhigh", "max"]);
+        assert_eq!(models[1].efforts, ["low", "high"]);
+        assert!(models[2].efforts.is_empty());
+        assert!(models.iter().all(|m| m.default_effort.is_none()));
+        assert!(claude_models(b"{\"type\":\"result\"}\n").is_none());
     }
 
     #[test]

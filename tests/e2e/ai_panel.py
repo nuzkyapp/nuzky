@@ -916,22 +916,25 @@ def ai_panel(r):
             r.s.run(MODEL) == 'Default' and '--model' not in first['argv'] and '--effort' not in first['argv'],
             {'button': r.s.run(MODEL), 'argv': first['argv']})
     open_models(r)
-    r.check('the menu offers Default and the four Claude models, with no effort picked and the line saying why',
-            wait(lambda: r.s.run(MODELS) == ['DefaultClaude Code setting', 'Fable', 'Opus', 'Sonnet', 'Haiku'], 3)
+    r.check("the menu offers Default and each model Claude Code names, by its version and once, with no effort picked and the line saying why",
+            wait(lambda: r.s.run(MODELS) == ['DefaultClaude Code setting', 'Opus 5.5', 'Fable 5.1', 'Sonnet 5.5'], 10)
             and [e for e, _ in r.s.run(EFFORT)] == ['Low', 'Med', 'High', 'X-High', 'Max']
             and all(pressed == 'false' for _, pressed in r.s.run(EFFORT))
             and 'Uses your Claude Code setting.' in r.s.run(f"return document.querySelector('{MENU}').innerText"),
             {'models': r.s.run(MODELS), 'effort': r.s.run(EFFORT)})
-    click(r, 'Opus', MENU)
-    r.check("picking Opus keeps the menu open on Opus's own default effort, Medium",
-            wait(lambda: ['Med', 'true'] in r.s.run(EFFORT), 3) and r.s.run(MODEL) == 'Opus·Medium', {'button': r.s.run(MODEL), 'effort': r.s.run(EFFORT)})
+    click(r, 'High', MENU)
+    r.check('an effort picked on Default shows on the button and keeps the menu open',
+            wait(lambda: ['High', 'true'] in r.s.run(EFFORT), 3) and r.s.run(MODEL) == 'Default·High', {'button': r.s.run(MODEL), 'effort': r.s.run(EFFORT)})
+    click(r, 'Opus 5.5', MENU)
+    r.check('picking Opus keeps the effort picked before',
+            wait(lambda: ['High', 'true'] in r.s.run(EFFORT), 3) and r.s.run(MODEL) == 'Opus 5.5·High', {'button': r.s.run(MODEL), 'effort': r.s.run(EFFORT)})
     click(r, 'X-High', MENU)
     wait(lambda: ['X-High', 'true'] in r.s.run(EFFORT), 3)
     time.sleep(0.5)  # WebKitGTK's screenshot can trail a change made just before it.
     r.shot('model-menu')
     r.key('Escape')
     r.check('Esc closes the menu and the button shows the choice',
-            wait(lambda: not r.s.run(MODELS) and r.s.run(MODEL) == 'Opus·Extra high', 3), r.s.run(MODEL))
+            wait(lambda: not r.s.run(MODELS) and r.s.run(MODEL) == 'Opus 5.5·Extra high', 3), r.s.run(MODEL))
 
     # Choices: the next message continues the conversation; a picked option is the next message.
     send(r, 'What options do I have?')

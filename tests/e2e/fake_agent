@@ -60,6 +60,22 @@ if CODEX and args[:2] == ['debug', 'models']:
          'default_reasoning_level': 'medium'},
     ]}))
     sys.exit(0)
+if not CODEX and '--no-session-persistence' in args:
+    # The model list: Claude Code names its models, and what each alias runs, only in its answer to `initialize`.
+    request = json.loads(sys.stdin.readline())
+    assert request['request']['subtype'] == 'initialize', request
+    efforts = ['low', 'medium', 'high', 'xhigh', 'max']
+    model = lambda value, resolved, name, description: dict(value=value, resolvedModel=resolved, displayName=name, description=description,
+                                                            supportsEffort=True, supportedEffortLevels=efforts)
+    print(json.dumps({'type': 'control_response', 'response': {'subtype': 'success', 'request_id': request['request_id'], 'response': {'models': [
+        model('default', 'claude-opus-5-5', 'Default (recommended)', 'Use the default model (currently Opus 5.5)'),
+        model('opus', 'claude-opus-5-5', 'Opus 5.5', 'Custom Opus model (claude-opus-5-5)'),
+        model('fable', 'claude-fable-5-1', 'Fable', 'Fable 5.1 · Most capable for your hardest tasks'),
+        model('sonnet', 'claude-sonnet-5-5', 'Sonnet', 'Sonnet 5.5 · Efficient for routine tasks'),
+        # A gateway can point an alias at a model another alias runs already.
+        model('haiku', 'claude-opus-5-5', 'Opus 5.5', 'Custom Haiku model (claude-opus-5-5)'),
+    ]}}}), flush=True)
+    sys.exit(0)
 signed_out = os.environ.get('FAKE_AGENT_SIGNED_OUT') == '1'
 if not CODEX and args[:2] == ['auth', 'status']:
     print(json.dumps({'loggedIn': not signed_out, 'authMethod': 'none' if signed_out else 'claude.ai'}))

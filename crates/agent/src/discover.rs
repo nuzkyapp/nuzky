@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
+use std::ffi::OsString;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -68,13 +70,49 @@ fn executable(path: &Path) -> bool {
     }
 }
 
+/// The `PATH` agents are looked for and run with. An app started from the Dock or Finder gets only
+/// launchd's `PATH`, which misses CLIs from version managers such as vite-plus or nvm, and a Node CLI
+/// found anyway could not start `node`. The login shell's `PATH` adds the folders the user's terminal has.
+pub fn agent_path() -> &'static OsString {
+    static PATH: LazyLock<OsString> = LazyLock::new(|| {
+        let current = std::env::var_os("PATH").unwrap_or_default();
+        #[cfg(target_os = "macos")]
+        if let Some(shell) = login_shell_path() {
+            let mut dirs: Vec<PathBuf> = Vec::new();
+            // The app's own come first, so a start from a terminal keeps the terminal's order.
+            for dir in std::env::split_paths(&current).chain(std::env::split_paths(&shell)) {
+                if !dirs.contains(&dir) {
+                    dirs.push(dir);
+                }
+            }
+            if let Ok(joined) = std::env::join_paths(dirs) {
+                return joined;
+            }
+        }
+        current
+    });
+    &PATH
+}
+
+#[cfg(target_os = "macos")]
+fn login_shell_path() -> Option<OsString> {
+    let shell = std::env::var_os("SHELL")?;
+    // Between markers, since an interactive shell's startup files may print too; `printenv`, since fish
+    // joins its "$PATH" with spaces.
+    let script = "printf '<nuzky-path>'; printenv PATH; printf '</nuzky-path>'";
+    let output = run_in(Path::new(&shell), &["-ilc", script], &[], None, None, Duration::from_secs(5), None).ok()??;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let (_, rest) = text.rsplit_once("<nuzky-path>")?;
+    Some(rest.split_once("</nuzky-path>")?.0.trim_end().into())
+}
+
 fn locate(id: AgentId) -> Option<PathBuf> {
     let (program, override_var) = id.program()?;
     if let Some(path) = std::env::var_os(override_var) {
         return Some(PathBuf::from(path)).filter(|p| executable(p));
     }
     let name = if cfg!(windows) { format!("{program}.exe") } else { program.to_owned() };
-    let path = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default();
+    let path = std::env::split_paths(agent_path()).collect::<Vec<_>>();
     let home = std::env::var_os("HOME").map(PathBuf::from);
     path.into_iter().chain(known_dirs(home.as_deref())).map(|dir| dir.join(&name)).find(|p| executable(p))
 }
@@ -94,14 +132,50 @@ pub fn run(
     cwd: Option<&Path>,
     timeout: Duration,
 ) -> std::io::Result<Option<Output>> {
+    run_with_input(program, args, env, cwd, None, timeout)
+}
+
+/// `run` with `input` on its stdin, which then closes.
+pub fn run_with_input(
+    program: &Path,
+    args: &[&str],
+    env: &[(&str, &str)],
+    cwd: Option<&Path>,
+    input: Option<&[u8]>,
+    timeout: Duration,
+) -> std::io::Result<Option<Output>> {
+    run_in(program, args, env, cwd, input, timeout, Some(agent_path()))
+}
+
+fn run_in(
+    program: &Path,
+    args: &[&str],
+    env: &[(&str, &str)],
+    cwd: Option<&Path>,
+    input: Option<&[u8]>,
+    timeout: Duration,
+    path: Option<&OsString>,
+) -> std::io::Result<Option<Output>> {
     let mut command = Command::new(program);
-    command.args(args).envs(env.iter().copied()).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    if let Some(path) = path {
+        command.env("PATH", path);
+    }
+    command
+        .args(args)
+        .envs(env.iter().copied())
+        .stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     if let Some(cwd) = cwd {
         command.current_dir(cwd);
     }
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut command, 0);
     let mut child = command.spawn()?;
+    if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
+        // A CLI that exits without reading closes the pipe; its output says what went wrong.
+        let _ = std::io::Write::write_all(&mut stdin, input);
+    }
     let read = |mut pipe: Box<dyn Read + Send>| {
         std::thread::spawn(move || {
             let mut bytes = Vec::new();

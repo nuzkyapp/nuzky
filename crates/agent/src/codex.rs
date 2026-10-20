@@ -45,6 +45,7 @@ fn string(s: &str) -> String {
 
 pub(crate) fn command(req: &TurnRequest) -> Command {
     let mut c = Command::new(&req.exe);
+    c.env("PATH", crate::discover::agent_path());
     c.arg("exec");
     if req.resume {
         c.arg("resume");
