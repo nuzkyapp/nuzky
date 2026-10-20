@@ -419,6 +419,8 @@ def install(r, server, version):
     r.check('while it downloads the menu offers Stop downloading, and Check for updates waits and says why',
             menu[:1] == [{'label': 'Stop downloading', 'checked': None}] and check_item and reason == 'The update is downloading.', (menu, reason))
     r.key('Escape')
+    # The menu fades out and gives the focus back to the row.
+    time.sleep(0.4)
     r.s.run("document.querySelector('[data-version]').focus()")
     stop = r.s.run("""const b = document.querySelector('[data-version]').parentElement.querySelector('button:not([data-version])');
                       return b && {text: b.textContent, opacity: getComputedStyle(b).opacity}""")
@@ -574,6 +576,8 @@ def install(r, server, version):
             wait(lambda: updated in (toasts(r) or []), 5) and r.s.run(VIEW) == 'editor' and r.s.run(NAME) == 'Survives the update'
             and r.s.run(DRAFT) == 'Cut the long pauses' and not r.note.exists() and not r.s.run(EDITOR_BUTTON),
             (toasts(r), r.s.run(VIEW), r.s.run(DRAFT), r.s.run(EDITOR_BUTTON)))
+    wait(lambda: r.s.run("return !!document.querySelector('header')"), 10)
+    time.sleep(0.5)
     r.shot('updated')
     r.s.run(RELOAD)
     wait(lambda: r.s.run(LOADED, retries=3), 30)
