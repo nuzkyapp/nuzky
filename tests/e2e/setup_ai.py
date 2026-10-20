@@ -189,7 +189,8 @@ def agents(r, home):
     r.check('opened again, Gemini shows its installed version and offers Connect',
             c and c['Gemini']['buttons'] == ['Connect', 'Details'], cards(r))
     r.check('Connect Gemini from the keyboard', press_button(r, 'Connect', f'{BOX} [role=group][aria-label=Gemini]'))
-    c = wait(lambda: card_says(r, 'Gemini', 'Gemini sees Nuzky') and cards(r), 30)
+    # "Checking that Gemini sees Nuzky" comes first; how to ask shows once the check passed.
+    c = wait(lambda: card_says(r, 'Gemini', 'ask it, for example') and cards(r), 30)
     r.check('Gemini connects, lists both backups, turns on Agent access and allows its tools',
             c and all(line in c['Gemini']['text'] for line in ('Backed up ~/.gemini/config/mcp_config.json',
                 'Backed up ~/.gemini/antigravity-cli/settings.json', 'Added Nuzky and turned on Agent access',
@@ -197,7 +198,8 @@ def agents(r, home):
     commands = r.s.run("return [...document.querySelectorAll('#setup-panel [role=group][aria-label=Gemini] code')].map((c) => c.textContent)")
     r.check('Gemini shows how to ask in a terminal, with the agy Nuzky found and an example',
             commands == [str(r.work / 'bin/agy'), 'Cut the pauses and retakes in the video open in Nuzky, then add captions']
-            and c and 'choose Google OAuth' in c['Gemini']['text'] and 'quit it and run it again' in c['Gemini']['text'], commands)
+            and c and 'choose Google OAuth' in c['Gemini']['text'] and 'close that window and paste the command in a new one' in c['Gemini']['text'], commands)
+    r.check('the focus goes to copying agy, the next thing to do, not to Done', r.s.run(FOCUS) == 'Copy the command', r.s.run(FOCUS))
     r.check('with all three connected, only Done is left in the footer', c and (dialog(r) or {}).get('buttons') == ['Done'], dialog(r))
     r.s.run("document.querySelector('#setup-panel [role=group][aria-label=Gemini]').scrollIntoView({block: 'start'})")
     time.sleep(0.3)

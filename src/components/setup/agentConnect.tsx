@@ -9,6 +9,8 @@ import { IconButton } from "../ui";
 export const MAC = navigator.userAgent.includes("Mac");
 export const TERMINAL = MAC ? "Terminal" : "a terminal";
 export const RETURN = MAC ? "Return" : "Enter";
+/** A terminal on Linux pastes with Ctrl+Shift+V, which someone new to it would not guess. */
+export const PASTE = MAC ? "paste this" : "paste this (Ctrl+Shift+V)";
 
 export const GUIDE: Record<AgentKind, string> = {
   claudeCode: "https://code.claude.com/docs/en/setup",
@@ -127,7 +129,7 @@ export function GeminiWhy() {
       {open ? (
         <p className="mt-1.5">
           Google turned off Gemini CLI for personal Google accounts on 18 June 2026. Antigravity CLI, which replaced it, may not be run by another app: Google's terms call that a breach and
-          can suspend the Google account. Google also offers no Sign in with Google for a Gemini plan, as ChatGPT does.
+          can suspend the Google account. And unlike ChatGPT, Gemini has no way to let another app use your plan.
         </p>
       ) : (
         <button type="button" onClick={() => setOpen(true)} className="mt-0.5 text-[12px] text-accent hover:underline">
@@ -140,17 +142,25 @@ export function GeminiWhy() {
 
 const EXAMPLE = "Cut the pauses and retakes in the video open in Nuzky, then add captions";
 
+/** The path as one argument to paste into a shell; `~/` stays outside the quotes, where the shell expands it. */
+function shellPath(path: string) {
+  if (/^[\w@%+=:,./~-]+$/.test(path)) return path;
+  const home = path.startsWith("~/") ? "~/" : "";
+  return `${home}'${path.slice(home.length).replaceAll("'", "'\\''")}'`;
+}
+
 /** How to ask Gemini once Nuzky is in its settings. `agy` is the path Nuzky found, which works also before a new terminal knows the command. */
 export function AskGemini({ agy, fresh }: { agy: string; fresh: boolean }) {
   return (
     <div className="text-[12px] leading-[18px] text-muted">
       <p>
-        In {TERMINAL}, paste this and press {RETURN}. The first time, choose Google OAuth and sign in with your Google account: a free account works, Pro and Ultra get more use.
+        In {TERMINAL}, {PASTE} and press {RETURN}. The first time, choose Google OAuth and sign in with the Google account that has your Gemini plan; a free
+        account works too.
       </p>
-      <Command parts={agy.split(/(?=\/)/)} />
-      <p className="mt-2.5">Then ask it, for example:</p>
+      <Command parts={shellPath(agy).split(/(?=\/)/)} />
+      <p className="mt-2.5">With a video open in Nuzky, ask it, for example:</p>
       <Command parts={EXAMPLE.split(" ")} label="Copy the example" />
-      {fresh && <p className="mt-2.5 text-fg">If agy was already open, quit it and run it again, so it sees Nuzky.</p>}
+      {fresh && <p className="mt-2.5 text-fg">If Gemini was already running in a terminal, close that window and paste the command in a new one, so it sees Nuzky.</p>}
     </div>
   );
 }

@@ -324,6 +324,28 @@ pub fn verify(agent: Agent, program: &Path, home: &Path) -> std::result::Result<
         let missing = "Gemini doesn't see Nuzky in its settings. Press Connect again.";
         let text = read(&agent.config(home)).ok().flatten().ok_or(missing)?;
         let found = entry(agent, Some(&text), false).ok().flatten().filter(|c| !c.program.is_empty()).ok_or(missing)?;
+        if let Some(settings) = agent.settings(home)
+            && let Ok(Some(text)) = read(&settings)
+        {
+            let shown = tilde(&settings.display().to_string(), home);
+            // agy refuses to start at all with settings it cannot parse, whatever its servers are.
+            let Ok(settings) = serde_json::from_str::<Value>(&text) else {
+                return Err(format!("{shown} isn't valid JSON, so agy can't start. Fix it, then try again."));
+            };
+            // agy weighs deny over ask over allow, so such a rule beats the one Connect added.
+            let blocking: Vec<&str> = ["deny", "ask"]
+                .iter()
+                .flat_map(|kind| settings["permissions"][kind].as_array().into_iter().flatten())
+                .filter_map(Value::as_str)
+                .filter(|rule| rule.starts_with("mcp(nuzky/") || *rule == "mcp(*)")
+                .collect();
+            if !blocking.is_empty() {
+                return Err(format!(
+                    "{shown} denies or asks before Nuzky's tools ({}), which wins over letting Gemini use them. Remove that there, then try again.",
+                    blocking.join(", ")
+                ));
+            }
+        }
         let config: Value = serde_json::from_str(&text).map_err(|_| missing)?;
         let env: std::collections::BTreeMap<String, String> =
             serde_json::from_value(config["mcpServers"][NAME]["env"].clone()).unwrap_or_default();

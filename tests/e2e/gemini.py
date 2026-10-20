@@ -55,7 +55,8 @@ def gemini(r):
 
     # Without Claude Code or Codex the panel offers ChatGPT, and Gemini under it.
     text = wait(lambda: (t := r.s.run("return document.querySelector('aside[aria-label=AI]').innerText")) and 'Use your ChatGPT plan' in t and t, 10)
-    r.check('without Claude Code or Codex, the ChatGPT view names Gemini too', text and 'Or use Claude Code, Codex or Gemini' in text, text)
+    r.check('without Claude Code or Codex, the ChatGPT view offers to set up Gemini under them', text and 'Or use Claude Code or Codex' in text
+            and 'Gemini' in text.split('Or use Claude Code or Codex')[1] and 'Set up' in text.split('Or use Claude Code or Codex')[1], text)
     items = menu(r)
     row = next((i for i in items if i['text'].startswith('Gemini')), None)
     r.check('the agent menu lists Gemini after ChatGPT, not installed', row and row['text'] == 'GeminiNot installed'
@@ -75,7 +76,7 @@ def gemini(r):
     click(r, 'Details')
     g = guide(r)
     r.check("Details gives Google's reasons: Gemini CLI turned off, Antigravity's terms, no sign-in for other apps",
-            '18 June 2026' in g['text'] and "Google's terms call that a breach" in g['text'] and 'no Sign in with Google' in g['text'], g)
+            '18 June 2026' in g['text'] and "Google's terms call that a breach" in g['text'] and 'unlike ChatGPT, Gemini has no way to let another app use your plan' in g['text'], g)
     time.sleep(0.3)
     r.shot('gemini-not-installed')
 
@@ -99,7 +100,8 @@ def gemini(r):
                                                                   'Added Nuzky and turned on Agent access', "Let Gemini use Nuzky's tools without asking")), guide(r))
     r.check('step 3 says how to ask in a terminal, with the agy Nuzky found and an example',
             g and g['steps'][2]['commands'] == [str(agy), 'Cut the pauses and retakes in the video open in Nuzky, then add captions']
-            and 'choose Google OAuth' in g['steps'][2]['text'] and 'quit it and run it again' in g['steps'][2]['text'], g)
+            and 'choose Google OAuth' in g['steps'][2]['text'] and 'close that window and paste the command in a new one' in g['steps'][2]['text'], g)
+    r.check('once connected, the why gives way to how to ask', g and "Google doesn't let other apps" not in g['text'], g)
     r.check('the focus moves on from the vanished Connect to copying agy', r.s.run("return document.activeElement?.getAttribute('aria-label')") == 'Copy the command',
             r.s.run("return document.activeElement?.outerHTML.slice(0, 120)"))
     time.sleep(0.3)
@@ -122,12 +124,12 @@ def gemini(r):
         name = r.s.run('return window.__nuzky.store.getState().snap.project.name')
         r.check('the agent agy starts reads the project open in the app', agent.call('get_state', {})['name'] == name)
         run = agent.call('begin_run', {'label': 'Cut the pauses'})
-        g = wait(lambda: (x := guide(r)) and 'Another agent is editing' in x['text'] and x, 10)
-        r.check("while it edits, the panel says another agent is editing and how to stop it", g and 'Cut the pauses. Wait until it finishes, or stop it with Stop and edit in the top bar.' in g['text'], guide(r))
+        g = wait(lambda: (x := guide(r)) and 'An agent outside Nuzky is editing' in x['text'] and x, 10)
+        r.check("while it edits, the panel says an agent outside Nuzky is editing and how to stop it", g and 'Cut the pauses. Stop and edit in the top bar stops it.' in g['text'], guide(r))
         time.sleep(0.3)
         r.shot('gemini-editing')
         agent.call('end_run', {'run_id': run['run_id'], 'action': 'discard'})
-        r.check('the note goes when the run ends', wait(lambda: 'Another agent is editing' not in guide(r)['text'], 10))
+        r.check('the note goes when the run ends', wait(lambda: 'is editing' not in guide(r)['text'], 10))
     finally:
         agent.close()
 
@@ -149,4 +151,37 @@ def gemini(r):
     time.sleep(0.5)
     r.shot('gemini-1024')
     webdriver('POST', r.s.path + '/window/rect', {'width': 1440, 'height': 900})
+    # Back in its column the panel is drawn anew and quietly checks the connection again; that check ends first.
+    wait(lambda: (x := guide(r)) and x.get('steps') and x['steps'][2]['commands'], 10)
+    time.sleep(1)
+
+    # agy turned Nuzky off meanwhile (`agy mcp disable nuzky`): back in Nuzky, the guide no longer says Connected.
+    mcp = home / '.gemini/config/mcp_config.json'
+    config = json.loads(mcp.read_text())
+    config['mcpServers']['nuzky']['disabled'] = True
+    mcp.write_text(json.dumps(config, indent=2))
+    r.s.run("window.dispatchEvent(new Event('focus'))")
+    g = wait(lambda: (x := guide(r)) and x['steps'][1]['buttons'] == ['Connect'] and x, 10)
+    r.check('with Nuzky turned off in agy, step 2 offers Connect again and step 3 hides', g and not g['steps'][2]['commands'], guide(r))
+    r.check('Connect', click(r, 'Connect'))
+    r.check('Connect turns it back on', wait(lambda: (x := guide(r)) and x['steps'][2]['commands'], 30)
+            and 'disabled' not in mcp.read_text(), (mcp.read_text(), guide(r)))
+
+    # A settings file agy cannot start with: the check says so, though Nuzky's server would answer.
+    settings_file = home / '.gemini/antigravity-cli/settings.json'
+    good = settings_file.read_text()
+    settings_file.write_text('{"permissions":')
+    click(r, 'Close AI (Ctrl+J)')
+    r.s.run("""const b = [...document.querySelectorAll('header button')].find((b) => b.textContent.trim() === 'AI'); b.click();""")
+    g = wait(lambda: (x := guide(r)) and x.get('steps') and "Couldn't connect" in x['steps'][1]['text'] and x, 15)
+    r.check("with agy's settings broken, step 2 says it couldn't connect and why, with Try again",
+            g and "settings.json isn't valid JSON, so agy can't start" in g['steps'][1]['text'] and g['steps'][1]['buttons'] == ['Try again'], guide(r))
+    # A rule of the person's own that denies a Nuzky tool wins over the one Connect added, so the check says so.
+    settings_file.write_text(good.replace('"deny": ["mcp(other/*)"]', '"deny": ["mcp(other/*)", "mcp(nuzky/apply_edits)"]'))
+    click(r, 'Close AI (Ctrl+J)')
+    r.s.run("""const b = [...document.querySelectorAll('header button')].find((b) => b.textContent.trim() === 'AI'); b.click();""")
+    g = wait(lambda: (x := guide(r)) and x.get('steps') and "Couldn't connect" in x['steps'][1]['text'] and x, 15)
+    r.check("with a rule in agy's settings that denies a Nuzky tool, step 2 names it",
+            g and "denies or asks before Nuzky's tools (mcp(nuzky/apply_edits))" in g['steps'][1]['text'], guide(r))
+    settings_file.write_text(good)
     r.check('no error toast', not r.errors(), r.errors())

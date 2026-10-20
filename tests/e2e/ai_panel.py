@@ -293,8 +293,8 @@ def ai_panel_chatgpt(r):
         wait(lambda: not r.s.run(dialog), 3)
         r.s.run("window.__nuzky.agent.setState({draft: ''})")
         click(r, 'New chat')
-        check('signed out, the empty panel offers Continue with ChatGPT and, without Claude Code or Codex, how to install them or set up Gemini',
-              wait(lambda: all(s in panel(r)['text'] for s in ('Use your ChatGPT plan', 'Continue with ChatGPT', 'Or use Claude Code, Codex or Gemini'))
+        check('signed out, the empty panel offers Continue with ChatGPT and, without Claude Code or Codex, how to install them',
+              wait(lambda: all(s in panel(r)['text'] for s in ('Use your ChatGPT plan', 'Continue with ChatGPT', 'Or use Claude Code or Codex'))
                    and 'Using ChatGPT plan' not in panel(r)['text'], 5), panel(r)['text'])
         r.shot('chatgpt-sign-in')
         r.s.run("""document.querySelector('aside[aria-label=AI] button[title="Choose the agent"]').click()""")

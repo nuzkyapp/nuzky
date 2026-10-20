@@ -6,7 +6,7 @@ import { api, errorText, plainError } from "../../lib/api";
 import { useEditor } from "../../lib/store";
 import type { AgentAccess } from "../../lib/types";
 import { Button } from "../ui";
-import { AskGemini, Command, ConnectRows, GUIDE, GeminiWhy, INSTALL, MAC, TERMINAL, connectAgent, type Run } from "../setup/agentConnect";
+import { AskGemini, Command, ConnectRows, GUIDE, GeminiWhy, INSTALL, MAC, PASTE, TERMINAL, connectAgent, type Run } from "../setup/agentConnect";
 
 /** One numbered step: its number, or a check once done, the title and what it needs now. */
 function Step({ n, title, state, done, current, action, children }: { n: number; title: string; state?: string; done: boolean; current: boolean; action?: ReactNode; children?: ReactNode }) {
@@ -45,21 +45,24 @@ export function GeminiGuide() {
   const title = useRef<HTMLHeadingElement>(null);
   const ask = useRef<HTMLDivElement>(null);
   const live = useRef(true);
-  const update = (next: Run) => live.current && setRun(next);
-
-  const look = () => {
-    void loadGemini();
-    api.agentAccess().then((a) => live.current && setAccess(a), () => {});
+  const look = () =>
+    Promise.all([loadGemini(), api.agentAccess().then((a) => live.current && setAccess(a), () => {})]);
+  // A check that passed shows once agy's settings are read again, so Connected always comes from them and a change there
+  // later, such as `agy mcp disable`, is not hidden by an old success.
+  const update = (next: Run) => {
+    if (next.phase === "connected") void look().then(() => live.current && setRun(next));
+    else if (live.current) setRun(next);
   };
   useEffect(() => {
     live.current = true;
     look();
     // The title, never Connect, so a stray Enter writes nothing.
     title.current?.focus();
-    window.addEventListener("focus", look);
+    const onFocus = () => void look();
+    window.addEventListener("focus", onFocus);
     return () => {
       live.current = false;
-      window.removeEventListener("focus", look);
+      window.removeEventListener("focus", onFocus);
     };
   }, []);
 
@@ -83,8 +86,7 @@ export function GeminiGuide() {
   }, [checking]);
 
   const connect = async () => {
-    await connectAgent("antigravity", true, update);
-    look();
+    if (!(await connectAgent("antigravity", true, update))) void look();
   };
   const turnOn = async () => {
     try {
@@ -97,7 +99,7 @@ export function GeminiGuide() {
 
   const unreadable = state === "unreadable";
   const accessOff = installed && state === "connected" && access !== null && !access.on && !checking;
-  const connected = run?.phase === "connected" || (installed && state === "connected" && !!access?.on && !run);
+  const connected = installed && state === "connected" && !!access?.on && run?.phase !== "failed" && !checking;
   const connectState = !installed
     ? undefined
     : unreadable
@@ -118,9 +120,8 @@ export function GeminiGuide() {
       <h3 ref={title} tabIndex={-1} className="text-[15px] font-semibold text-fg outline-none">
         Use Gemini from {TERMINAL}
       </h3>
-      <div className="mb-4 mt-1.5">
-        <GeminiWhy />
-      </div>
+      {/* Once Gemini is connected, how to ask it matters more than why. */}
+      <div className="mb-4 mt-1.5">{!connected && <GeminiWhy />}</div>
       {gemini === null ? (
         <p className="text-[12px] text-muted">Looking for Antigravity CLI…</p>
       ) : (
@@ -142,10 +143,10 @@ export function GeminiGuide() {
             {!installed && (
               <>
                 <p className="text-[12px] leading-[18px] text-muted">
-                  {MAC ? "Open Terminal: press ⌘ Space, type Terminal and press Return. Paste this there and press Return." : "Open a terminal, paste this and press Enter."}
+                  {MAC ? "Open Terminal: press ⌘ Space, type Terminal and press Return. Paste this there and press Return." : `Open a terminal, ${PASTE} and press Enter.`}
                 </p>
                 <Command parts={INSTALL.antigravity} />
-                <Button className={`mt-2.5 ${small}`} onClick={look}>
+                <Button className={`mt-2.5 ${small}`} onClick={() => void look()}>
                   <RefreshCw size={13} /> Check again
                 </Button>
               </>
@@ -178,7 +179,7 @@ export function GeminiGuide() {
                 <p className="text-[12px] leading-[18px] text-muted" title={gemini.connection.problem ?? undefined}>
                   {gemini.connection.path} can't be read, so Nuzky leaves it alone. Fix it, then press Check again.
                 </p>
-                <Button className={`mt-2.5 ${small}`} onClick={look}>
+                <Button className={`mt-2.5 ${small}`} onClick={() => void look()}>
                   <RefreshCw size={13} /> Check again
                 </Button>
               </>
@@ -189,7 +190,7 @@ export function GeminiGuide() {
               </p>
             )}
             {accessOff && <p className="text-[12px] leading-[18px] text-muted">Turn on lets Gemini edit here now and every time Nuzky starts.</p>}
-            {run && (run.fresh || run.phase === "failed") && <ConnectRows agent="antigravity" name="Gemini" run={run} now={now} />}
+            {run && (run.fresh || run.phase === "failed") && (run.phase !== "connected" || connected) && <ConnectRows agent="antigravity" name="Gemini" run={run} now={now} />}
           </Step>
           <Step n={3} title={`Ask Gemini in ${TERMINAL}`} done={false} current={connected}>
             {connected && (

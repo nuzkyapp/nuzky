@@ -29,8 +29,10 @@ if (!el) return false; el.focus(); return document.activeElement === el;"""
 CLICK = """const el = [...document.querySelectorAll(arguments[1] + ' button')].find((b) => b.textContent.trim().startsWith(arguments[0]) || b.getAttribute('aria-label') === arguments[0]);
 if (!el) return false; el.click(); return true;"""
 FITS = """const d = document.querySelector('[aria-labelledby=setup-title]'), b = d.getBoundingClientRect();
+// What a step's own scrolling region holds may lie above or below it; it must still fit across.
 const out = [...d.querySelectorAll('h2, h3, p, button, [role=tab]')].filter((el) => {
-  const e = el.getBoundingClientRect(); return e.width && (e.left < b.left || e.right > b.right || e.top < b.top || e.bottom > b.bottom); })
+  const e = el.getBoundingClientRect(), scrolls = el.closest('.overflow-y-auto');
+  return e.width && (e.left < b.left || e.right > b.right || (!scrolls && (e.top < b.top || e.bottom > b.bottom))); })
   .map((el) => el.textContent.trim());
 if (b.top < 0 || b.bottom > innerHeight || b.left < 0 || b.right > innerWidth) out.push(`the dialog leaves the window: ${JSON.stringify(b)}`);
 return out;"""

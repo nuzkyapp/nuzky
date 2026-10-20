@@ -141,8 +141,8 @@ def connect(r):
             # A connected row has no button, so keyboard focus moves on inside the dialog instead of getting lost.
             r.check(f"after {name}, focus moves to {next_row + ' Connect' if next_row else 'Done'}", wait(lambda: r.s.run(focused) == next_focus, 3), r.s.run(focused))
         toast = wait(lambda: next((t for t in r.state()['toasts'] if t['text'].startswith('Gemini is connected.')), None), 5)
-        r.check('after Gemini connects, the toast says to run agy in a terminal',
-                toast and toast['kind'] == 'success' and 'Run agy in a terminal' in toast['text'], toast)
+        r.check("after Gemini connects, the toast points to the AI panel's guide, which gives the command to paste",
+                toast and toast['kind'] == 'success' and 'Choose Gemini in the AI panel' in toast['text'], toast)
         access = r.s.run(ACCESS)
         saved = r.work / 'data/nuzky/agent-access.json'
         r.check('connecting turns Agent access on, and on at every launch, so a connected agent keeps working',

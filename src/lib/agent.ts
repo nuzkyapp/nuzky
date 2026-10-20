@@ -310,11 +310,14 @@ export async function loadAgents() {
   }
 }
 
-/** Looks for Antigravity CLI and reads its settings again; Windows has no AI editing, so there is nothing to find. */
+let geminiLooks = 0;
+/** Looks for Antigravity CLI and reads its settings again; Windows has no AI editing, so there is nothing to find. Only the latest look counts. */
 export async function loadGemini() {
   if (navigator.userAgent.includes("Windows")) return;
+  const look = ++geminiLooks;
   try {
-    useAgent.setState({ gemini: await api.agentStatus("antigravity") });
+    const gemini = await api.agentStatus("antigravity");
+    if (look === geminiLooks) useAgent.setState({ gemini });
   } catch (e) {
     useEditor.getState().toast({ kind: "error", text: `Nuzky couldn't look for Antigravity CLI. ${plainError(errorText(e))}` });
   }

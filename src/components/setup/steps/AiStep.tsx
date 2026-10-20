@@ -8,7 +8,7 @@ import { useEditor } from "../../../lib/store";
 import type { AgentKind, AgentStatus } from "../../../lib/types";
 import { Button } from "../../ui";
 import { StepActions } from "../StepActions";
-import { AskGemini, Command, ConnectRows, GUIDE, GeminiWhy, INSTALL, MAC, RETURN, TERMINAL, connectAgent, type Run } from "../agentConnect";
+import { AskGemini, Command, ConnectRows, GUIDE, GeminiWhy, INSTALL, MAC, PASTE, RETURN, TERMINAL, connectAgent, type Run } from "../agentConnect";
 
 const AGENTS: AgentKind[] = ["claudeCode", "codex", "antigravity"];
 /** Gemini runs in Google's Antigravity CLI, `agy`, which is what gets installed and connected. */
@@ -106,7 +106,7 @@ function Agents() {
   return (
     <div className="flex flex-col gap-3 pt-3">
       <p className="text-[13px] leading-[18px] text-fg">
-        Claude Code, Codex or Gemini can cut your videos in Nuzky.
+        Claude Code, Codex or Gemini can cut your videos.
         <span className="block text-muted">Set up one of them.</span>
       </p>
       <div className="flex flex-col gap-2">
@@ -185,6 +185,13 @@ function AgentCard({
                   ? "Signed in"
                   : "Installed";
   const canConnect = !!status?.installed && status.signedIn !== "signedOut" && !unreadable && phase !== "connected";
+  // Gemini answers in a terminal, so once it is connected, how to ask it is the next thing to do, not Done.
+  const ask = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!gemini || phase !== "connected" || !run?.fresh) return;
+    ask.current?.scrollIntoView({ block: "nearest" });
+    ask.current?.querySelector("button")?.focus();
+  }, [gemini, phase, run?.fresh]);
   return (
     <div role="group" aria-label={name} className="rounded-xl bg-white/[.055] px-3.5 py-3 shadow-[inset_0_0_0_1px_rgb(255_255_255/.06)]">
       <div className="flex min-h-8 items-center gap-3">
@@ -225,7 +232,9 @@ function AgentCard({
           <p className="mt-2.5 text-[12px] leading-4 text-muted">
             {gemini && MAC
               ? "To install Google's Antigravity CLI, open Terminal (press ⌘ Space, type Terminal and press Return), paste this and press Return."
-              : `To install${gemini ? " Google's Antigravity CLI" : ""}, paste this into ${TERMINAL} and press ${RETURN}.`}
+              : gemini
+                ? `To install Google's Antigravity CLI, open a terminal, ${PASTE} and press Enter.`
+                : `To install, paste this into ${TERMINAL} and press ${RETURN}.`}
           </p>
           <Command parts={INSTALL[agent]} />
         </>
@@ -244,7 +253,7 @@ function AgentCard({
       {run && <ConnectRows agent={agent} name={name} run={run} now={now} />}
       {run?.phase === "connected" &&
         (gemini ? (
-          <div className="mt-2">
+          <div ref={ask} className="mt-2">
             <AskGemini agy={status?.path ?? "agy"} fresh={run.fresh} />
           </div>
         ) : (

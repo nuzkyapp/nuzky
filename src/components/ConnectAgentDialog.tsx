@@ -79,9 +79,10 @@ export function ConnectAgentDialog() {
       setRows((all) => all?.map((r) => (r.agent === done.agent ? done : r)) ?? null);
       // Connecting turns Agent access on, now and at every launch.
       setAccess(await api.agentAccess());
-      const old = done.backups.length ? ` Your old settings are in ${done.backups.join(" and ")}.` : "";
-      const next = done.agent === "antigravity" ? "Run agy in a terminal, or quit and run it again if it's open, then ask it" : `Restart ${done.name}, then ask it`;
-      useEditor.getState().toast({ kind: "success", text: `${done.name} is connected. ${next} to edit your video.${old}` });
+      const old = done.backups.length > 1 ? " Your old settings are backed up next to them." : done.backups.length ? ` Your old settings are in ${done.backups[0]}.` : "";
+      // agy may not be on a new terminal's PATH yet, so the AI panel's Gemini guide gives the command to paste.
+      const next = done.agent === "antigravity" ? "Choose Gemini in the AI panel to see how to ask it in a terminal." : `Restart ${done.name}, then ask it to edit your video.`;
+      useEditor.getState().toast({ kind: "success", text: `${done.name} is connected. ${next}${old}` });
     } catch (e) {
       setError(errorText(e));
     } finally {

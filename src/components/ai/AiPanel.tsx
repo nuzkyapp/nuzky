@@ -611,6 +611,7 @@ const About = createContext<AiAbout>("project");
 /** ChatGPT chosen but not ready: signing in, or allowing the plan, is the way on. Without Claude Code or Codex, how to get them or Gemini too. */
 function ChatGptSignIn() {
   const agents = useAgent((s) => s.agents) ?? [];
+  const gemini = useAgent((s) => s.gemini);
   const signedIn = useChatGpt((s) => s.status?.state === "signedIn");
   return (
     <div className="my-auto flex flex-col items-start px-1">
@@ -623,7 +624,7 @@ function ChatGptSignIn() {
       <ContinueButton onClick={continueWithChatGpt} />
       {!agents.some((a) => a.path) && (
         <div className="mt-6 flex w-full flex-col">
-          <p className="mb-1.5 text-[12px] leading-[18px] text-muted">Or use Claude Code, Codex or Gemini: install one, sign in from your terminal, then check again.</p>
+          <p className="mb-1.5 text-[12px] leading-[18px] text-muted">Or use Claude Code or Codex: install one, sign in from your terminal, then check again.</p>
           {agents.map((a) => (
             <div key={a.id} className="flex h-9 items-center justify-between border-t border-white/[.07] text-[13px]">
               {a.name}
@@ -635,7 +636,7 @@ function ChatGptSignIn() {
           <div className="flex h-9 items-center justify-between border-t border-white/[.07] text-[13px]">
             Gemini
             <Button variant="ghost" className="h-7 px-2 text-[12px] text-accent" onClick={() => chooseAgent("antigravity")}>
-              Set up <ChevronRight size={12} />
+              {gemini?.connection.state === "connected" ? "Show" : "Set up"} <ChevronRight size={12} />
             </Button>
           </div>
           <Button className="mt-3 h-7 self-start px-2.5 text-[12px]" onClick={() => void loadAgents()}>
@@ -947,14 +948,15 @@ async function pickAttachments() {
   if (picked) await attach(Array.isArray(picked) ? picked : [picked]);
 }
 
-/** An agent outside the panel, such as one in a terminal, is editing: the panel waits, and the top bar stops it. */
-function OtherRun({ label }: { label: string }) {
+/** An agent outside the panel, such as one in a terminal, is editing: the panel waits, and the top bar stops it. With Gemini, which
+ * answers only in a terminal, that is most likely the person's own ask, so it says what is editing rather than to wait. */
+function OtherRun({ label, outside = false }: { label: string; outside?: boolean }) {
   return (
     <div role="status" className="mb-2 grid grid-cols-[20px_1fr] gap-2 rounded-[10px] bg-raised p-3 text-[12px] leading-[18px] text-fg/85">
       <Info size={16} className="text-accent" />
       <div>
-        <div className="text-[13px] font-semibold text-fg">Another agent is editing.</div>
-        {label}. Wait until it finishes, or stop it with Stop and edit in the top bar.
+        <div className="text-[13px] font-semibold text-fg">{outside ? "An agent outside Nuzky is editing." : "Another agent is editing."}</div>
+        {label}. {outside ? "Stop and edit in the top bar stops it." : "Wait until it finishes, or stop it with Stop and edit in the top bar."}
       </div>
     </div>
   );
@@ -1425,7 +1427,7 @@ export function AiPanel({
           <GeminiGuide />
           {otherRun && (
             <div className="shrink-0 px-2.5 pb-0.5">
-              <OtherRun label={otherRun} />
+              <OtherRun label={otherRun} outside />
             </div>
           )}
         </>
