@@ -232,11 +232,17 @@ fn learns_the_creators_style_and_scores_cuts_against_it() {
         style.contains(&format!("3 instant zoom ins to a median scale of {ZOOM:.2}, 100% of them at a cut")),
         "{style}"
     );
-    assert!(style.contains("Closing calls to action, 1 seen"), "{style}");
+    // A video has one closing call to action, so cutting it once is a rule.
+    assert!(
+        style.contains("### Closing calls to action\n\nAsking viewers to comment, follow or share near the end: the creator cut 1 of 1. Cut them unless the user asks for one.\n\n- 0:"),
+        "{style}"
+    );
+    assert!(!style.contains("Closing calls to action, 1 seen"), "{style}");
     let overview = ["# Settings", "# What gets cut", "# Seen too rarely for a rule"];
     for section in style.split("\n#").skip(1).filter(|s| !overview.iter().any(|o| s.starts_with(o))) {
         let examples = section.lines().filter(|l| l.starts_with("- ")).count();
-        assert!(examples >= 3, "a rule needs three examples: {section}");
+        let once = section.starts_with("## Closing calls to action");
+        assert!(examples >= if once { 1 } else { 3 }, "a rule needs three examples: {section}");
     }
 
     // A cut of exactly the creator's pieces matches; keeping everything has every creator word

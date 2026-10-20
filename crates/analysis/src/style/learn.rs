@@ -9,13 +9,14 @@ use crate::Word;
 
 use super::{Alignment, Caption, CaptionLook, Picture, Place, token};
 
-/// Rules need at least this many moments from the recordings to be written down.
+/// Rules need at least this many moments from the recordings to be written down, except those
+/// about what a video has once (`Kind::min_examples`).
 const MIN_EXAMPLES: usize = 3;
 /// Examples shown for one rule.
 const SHOWN: usize = 4;
 /// A pause this long ends a sentence even without punctuation.
 const SENTENCE_GAP_US: i64 = 700_000;
-/// Calls to action are looked for in the last part of a recording.
+/// Calls to action are looked for in the last part of a recording, and of a cut for those it kept.
 const ENDING_SHARE: f64 = 0.7;
 
 const FILLERS_CS: &[&str] =
@@ -265,24 +266,32 @@ pub fn learned(sources: &[Source]) -> Learned {
     rules.extend(said_once(&edits, &removals, &say));
     for kind in Kind::ALL {
         let found: Vec<&Removal> = removals.iter().filter(|r| r.kind == kind).collect();
-        if found.is_empty() {
+        // Calls to action count both ways: what the cuts kept as well as what they removed.
+        let kept = if kind == Kind::Call { kept_calls(&edits) } else { Vec::new() };
+        if found.is_empty() && kept.is_empty() {
             continue;
         }
-        let examples: Vec<Example> = found.iter().map(|r| r.example.clone()).collect();
-        if examples.len() < MIN_EXAMPLES {
+        let examples: Vec<Example> = found.iter().map(|r| r.example.clone()).chain(kept.iter().cloned()).collect();
+        if examples.len() < kind.min_examples() || found.len() == kept.len() {
             let seen: Vec<String> = spread(&examples).iter().map(|e| e.line.clone()).collect();
-            rare.push(format!("{}, {} seen: {}", kind.title(), examples.len(), seen.join("; ")));
+            let counts = if kind == Kind::Call {
+                format!("{} cut and {} kept", found.len(), kept.len())
+            } else {
+                format!("{} seen", examples.len())
+            };
+            rare.push(format!("{}, {counts}: {}", kind.title(), seen.join("; ")));
             continue;
         }
         let seconds: i64 = found.iter().map(|r| r.duration_us).sum();
         let shorter = found.iter().any(|r| r.longer_than_retake);
+        let keep = kept.len() > found.len();
         rules.push(Rule {
             title: kind.title(),
-            summary: kind.summary().into(),
+            summary: if keep { "Keep closing calls to action".into() } else { kind.summary().into() },
             text: format!(
                 "### {}\n\n{}\n\n{}\n",
                 kind.title(),
-                kind.rule(found.len(), seconds, &removals, &edits),
+                kind.rule(found.len(), kept.len(), seconds, &removals),
                 say(&examples)
             ),
             settings: Vec::new(),
@@ -291,6 +300,7 @@ pub fn learned(sources: &[Source]) -> Learned {
                     "Keep the latest attempt even when an earlier one is longer",
                     if shorter { "yes" } else { "no" },
                 )],
+                Kind::Call => vec![Choice::text("Closing calls to action", if keep { "keep" } else { "cut" })],
                 _ => Vec::new(),
             },
             moments: examples,
@@ -340,7 +350,7 @@ pub fn learned(sources: &[Source]) -> Learned {
     }
     let rare = (!rare.is_empty()).then(|| {
         let mut out = format!(
-            "## Seen too rarely for a rule\n\nFewer than {MIN_EXAMPLES} times, so these are not rules and the guide's defaults apply. They only show what else happened.\n\n"
+            "## Seen too rarely for a rule\n\nFewer than {MIN_EXAMPLES} times, or kept as often as cut, so these are not rules and the guide's defaults apply. They only show what else happened.\n\n"
         );
         for line in &rare {
             let _ = writeln!(out, "- {line}");
@@ -399,7 +409,17 @@ impl Kind {
         }
     }
 
-    fn rule(self, count: usize, duration_us: i64, all: &[Removal], edits: &[Edit]) -> String {
+    /// A video has at most one closing call to action, one lead-in and one ending, so one is
+    /// enough for a rule.
+    fn min_examples(self) -> usize {
+        match self {
+            Kind::Call | Kind::LeadIn | Kind::Ending => 1,
+            _ => MIN_EXAMPLES,
+        }
+    }
+
+    /// `kept` counts the calls to action the cuts kept.
+    fn rule(self, count: usize, kept: usize, duration_us: i64, all: &[Removal]) -> String {
         let total = format!("{count} cut, {} in total", seconds(duration_us));
         match self {
             Kind::Restart => {
@@ -428,12 +448,14 @@ impl Kind {
             Kind::Slip => {
                 format!("One to three words between kept speech that are not part of the sentence: {total}. Cut them.")
             }
-            Kind::Call => {
-                let heard = edits.iter().map(|e| calls(e).len()).sum::<usize>();
-                format!(
-                    "Asking viewers to comment, follow or share near the end: {total}, of {heard} such sentences recorded. Cut them unless the user asks for one."
-                )
-            }
+            Kind::Call if kept > count => format!(
+                "Asking viewers to comment, follow or share near the end: the creator kept {kept} of {}. Keep them unless the user asks to cut them.",
+                count + kept
+            ),
+            Kind::Call => format!(
+                "Asking viewers to comment, follow or share near the end: the creator cut {count} of {}. Cut them unless the user asks for one.",
+                count + kept
+            ),
             Kind::LeadIn => {
                 format!("Anything before the first kept sentence: {total}. Start the cut at the first real sentence.")
             }
@@ -632,16 +654,24 @@ fn is_call(token: &str) -> bool {
     CALLS.iter().any(|stem| token.starts_with(stem))
 }
 
-/// Sentences that ask viewers for something near the end of a recording.
-fn calls(edit: &Edit) -> Vec<(usize, usize)> {
-    sentences(edit, 0, edit.words.len().saturating_sub(1))
-        .into_iter()
-        .filter(|&(from, to)| {
-            !edit.words.is_empty()
-                && edit.words[from].word.start_us as f64 >= edit.source.recording_us as f64 * ENDING_SHARE
+/// Sentences that ask viewers for something and that the cuts kept, mostly, near their end.
+fn kept_calls(edits: &[Edit]) -> Vec<Example> {
+    let mut out = Vec::new();
+    for edit in edits {
+        let ending = edit.source.alignment.cut_duration_us as f64 * ENDING_SHARE;
+        for (from, to) in sentences(edit, 0, edit.words.len().saturating_sub(1)) {
+            let played = (from..=to).filter(|&k| edit.kept(k)).count();
+            let starts = (from..=to).find_map(|k| edit.words[k].cut).map(|(_, start, _)| start);
+            if played * 2 > to - from + 1
+                && starts.is_some_and(|start| start as f64 >= ending)
                 && (from..=to).any(|k| is_call(&edit.words[k].token))
-        })
-        .collect()
+            {
+                let line = format!("kept \"{}\"", edit.text(from, to));
+                out.push(Example { source: edit.index, time_us: edit.words[from].word.start_us, line });
+            }
+        }
+    }
+    out
 }
 
 /// How often each filler word is cut where it is heard.
@@ -1336,26 +1366,32 @@ mod tests {
     use crate::Range;
     use crate::style::{Framing, Piece, ZoomChange};
 
-    /// A recording of sentences, which of them the cut keeps, and what the cut shows.
+    /// Sentences of a recording and whether the cut keeps them.
+    const SENTENCES: &[(&str, bool)] = &[
+        ("So today I want to", false),
+        ("So today I want to show you my edit.", true),
+        ("First I record it all", false),
+        ("First I record it all in one take.", true),
+        ("Um", false),
+        ("Then I remove the", false),
+        ("Then I remove the slips \u{2013} and pauses.", true),
+        ("This is a side remark nobody needs.", false),
+        ("Um so captions go on top.", true),
+        ("Um", false),
+        ("That is all for today.", true),
+        ("Um", false),
+        ("Follow me and leave a comment.", false),
+    ];
+
     fn fixture() -> (Vec<Word>, Vec<Word>, Alignment, Picture) {
-        let sentences = [
-            ("So today I want to", false),
-            ("So today I want to show you my edit.", true),
-            ("First I record it all", false),
-            ("First I record it all in one take.", true),
-            ("Um", false),
-            ("Then I remove the", false),
-            ("Then I remove the slips \u{2013} and pauses.", true),
-            ("This is a side remark nobody needs.", false),
-            ("Um so captions go on top.", true),
-            ("Um", false),
-            ("That is all for today.", true),
-            ("Um", false),
-            ("Follow me and leave a comment.", false),
-        ];
+        recorded(SENTENCES)
+    }
+
+    /// A recording of `sentences`, the cut of those it keeps, and what the cut shows.
+    fn recorded(sentences: &[(&str, bool)]) -> (Vec<Word>, Vec<Word>, Alignment, Picture) {
         let (mut words, mut cut_words, mut pieces) = (Vec::new(), Vec::new(), Vec::new());
         let (mut t, mut c) = (500_000i64, 0i64);
-        for (text, kept) in sentences {
+        for &(text, kept) in sentences {
             let first = words.len();
             for w in text.split(' ') {
                 words.push(Word { start_us: t, end_us: t + 300_000, text: w.into(), probability: 1.0 });
@@ -1440,7 +1476,7 @@ mod tests {
     }
 
     #[test]
-    fn sorts_what_the_creator_cut_and_shows_every_rule_on_three_moments() {
+    fn sorts_what_the_creator_cut_and_shows_every_rule_on_its_moments() {
         let doc = learned();
         assert!(
             doc.contains("### Restarted sentences\n\nAn attempt at a sentence that the creator then said again: 3 cut"),
@@ -1455,17 +1491,77 @@ mod tests {
         assert!(doc.contains("| um | 4 | 3 (75%) |"), "{doc}");
         assert!(doc.contains("### Filler sounds"), "{doc}");
         assert!(doc.contains("- Dropped passages, 1 seen: cut \"This is a side remark nobody needs.\""), "{doc}");
-        assert!(doc.contains("- Closing calls to action, 1 seen: cut \"Follow me and leave a comment.\""), "{doc}");
+        assert!(
+            doc.contains("### Closing calls to action\n\nAsking viewers to comment, follow or share near the end: the creator cut 1 of 1. Cut them unless the user asks for one.\n\n- 0:31.1 cut \"Follow me and leave a comment.\" (2.0 s)\n"),
+            "{doc}"
+        );
         assert!(doc.contains("| build_captions max_words | 2 |"), "{doc}");
         assert!(doc.contains("| Base framing | scale 1.10, x 0.000, y -0.030 |"), "{doc}");
         assert!(doc.contains("4 cuts"), "{doc}");
-        // A section that shows moments shows at least three.
-        // Every rule shows at least three moments; only the overview sections show none.
+        // Every rule shows at least three moments, or one for what a video has once; only the
+        // overview sections show none.
         let overview = ["# Settings", "# What gets cut", "# Seen too rarely for a rule"];
+        let once = ["## Closing calls to action", "## Talk before the start", "## Talk after the end"];
         for section in doc.split("\n#").skip(1).filter(|s| !overview.iter().any(|o| s.starts_with(o))) {
             let examples = section.lines().filter(|l| l.starts_with("- ")).count();
-            assert!(examples >= MIN_EXAMPLES, "too few examples in {section}");
+            let least = if once.iter().any(|o| section.starts_with(o)) { 1 } else { MIN_EXAMPLES };
+            assert!(examples >= least, "too few examples in {section}");
         }
+    }
+
+    /// What videos ending on a call to action teach: `cut` of them cut it, `kept` kept it.
+    fn calls_to_action(cut: usize, kept: usize) -> Learned {
+        let mut keeping = SENTENCES.to_vec();
+        keeping.last_mut().unwrap().1 = true;
+        let videos: Vec<_> = (0..cut + kept).map(|i| recorded(if i < cut { SENTENCES } else { &keeping })).collect();
+        let sources: Vec<Source> = videos
+            .iter()
+            .enumerate()
+            .map(|(i, (words, cut_words, alignment, picture))| Source {
+                recording: format!("talk{i}.mov"),
+                cut: format!("reel{i}.mp4"),
+                language: "en".into(),
+                recording_us: 30_000_000,
+                words,
+                cut_words,
+                alignment,
+                picture,
+                places: None,
+                corrections: &[],
+            })
+            .collect();
+        super::learned(&sources)
+    }
+
+    #[test]
+    fn a_call_to_action_is_learned_from_one_video_and_the_creator_mostly_cutting_or_keeping_decides() {
+        let rule = |learned: &Learned| learned.rules.iter().find(|r| r.title == "Closing calls to action").cloned();
+        let cut = rule(&calls_to_action(1, 0)).expect("cut once is a rule");
+        assert!(cut.text.contains("the creator cut 1 of 1. Cut them unless the user asks for one."), "{}", cut.text);
+        assert_eq!(cut.summary, "Cut closing calls to action");
+
+        let kept = rule(&calls_to_action(0, 1)).expect("kept once is a rule");
+        assert!(
+            kept.text.contains("the creator kept 1 of 1. Keep them unless the user asks to cut them.\n\n- 0:31.1 kept \"Follow me and leave a comment.\"\n"),
+            "{}",
+            kept.text
+        );
+        assert_eq!(kept.summary, "Keep closing calls to action");
+        assert_eq!(kept.moments.len(), 1);
+
+        // A minority of cuts never says to cut them.
+        let mostly_kept = rule(&calls_to_action(3, 9)).expect("kept 9 of 12 is a rule");
+        assert!(mostly_kept.text.contains("the creator kept 9 of 12. Keep them"), "{}", mostly_kept.text);
+        assert!(!mostly_kept.text.contains("Cut them"), "{}", mostly_kept.text);
+        assert_eq!(mostly_kept.moments.len(), 12);
+
+        // Learning that flips the choice suggests a change; more of the same does not.
+        assert!(!Rule::same(&cut.choices, &kept.choices));
+        assert!(Rule::same(&kept.choices, &mostly_kept.choices));
+
+        let even = calls_to_action(1, 1);
+        assert!(rule(&even).is_none(), "{}", even.document());
+        assert!(even.document().contains("- Closing calls to action, 1 cut and 1 kept: "), "{}", even.document());
     }
 
     #[test]
