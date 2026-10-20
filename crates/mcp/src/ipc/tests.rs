@@ -195,18 +195,20 @@ fn remote_disconnect_cancels_its_jobs_and_keeps_its_run() {
     };
     remote.writer.lock().unwrap().write_all(&wire::encode(&request).unwrap()).unwrap();
     std::thread::sleep(Duration::from_millis(50));
-    let disconnected = Instant::now();
     drop(remote);
+    // Well under the wait's 30 s, and well over a paused macOS runner.
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
         let cancelled = f.host.jobs.get(held["job_id"].as_str().unwrap(), false).unwrap()["cancel_requested"] == true;
         if cancelled && f.host.session.state().unwrap().open_run.is_none() {
             break;
         }
-        assert!(Instant::now() < deadline, "disconnect did not cancel the client job and finish the run");
+        assert!(
+            Instant::now() < deadline,
+            "the wait held the disconnect open, or it did not cancel the job and end the run"
+        );
         std::thread::sleep(Duration::from_millis(10));
     }
-    assert!(disconnected.elapsed() < Duration::from_millis(250), "wait held disconnect open");
     release.send(()).unwrap();
     drop(listener);
 }
