@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import path from 'node:path';
 
@@ -43,6 +43,22 @@ tell application "Finder"
   close w
 end tell`;
 
+// GitHub's macOS runners sometimes hold a disk image for a moment, and hdiutil gives up with "Resource busy" while
+// creating or ejecting it (actions/runner-images#7522). A few seconds later it succeeds.
+export function hdiutil(args, waits = [2, 4, 8, 16]) {
+  for (const wait of [...waits, null]) {
+    const { status, stdout, stderr } = spawnSync('hdiutil', args,
+      { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' });
+    process.stdout.write(stdout);
+    process.stderr.write(stderr);
+    if (status === 0) return stdout;
+    if (wait === null || !stderr.includes('Resource busy')) {
+      throw new Error(`hdiutil ${args[0]} failed with exit code ${status}`);
+    }
+    execFileSync('sleep', [String(wait)]);
+  }
+}
+
 export function createDmg(app, dmg, target) {
   // Finder finds a disk by its name, so it would lay out the other one.
   if (existsSync('/Volumes/Nuzky')) throw new Error('Eject the Nuzky disk image that is open in Finder, then build again.');
@@ -58,15 +74,17 @@ export function createDmg(app, dmg, target) {
     mkdirSync(path.join(content, '.background'));
     run('tiffutil', ['-cathidpicheck', 'src-tauri/dmg/background.png', 'src-tauri/dmg/background@2x.png',
       '-out', path.join(content, '.background', 'background.tiff')]);
-    run('hdiutil', ['create', '-format', 'UDRW', '-volname', 'Nuzky', '-srcfolder', content, image]);
-    run('hdiutil', ['attach', '-readwrite', '-noverify', '-noautoopen', '-mountpoint', mount, image]);
+    hdiutil(['create', '-ov', '-format', 'UDRW', '-volname', 'Nuzky', '-srcfolder', content, image]);
+    const attached = hdiutil(['attach', '-readwrite', '-noverify', '-noautoopen', '-mountpoint', mount, image]);
+    // Detaching by the mount point fails once a busy eject has already unmounted the volume; the device stays.
+    const device = attached.match(/^\/dev\/disk\d+/m)[0];
     try {
       run('osascript', ['-e', layout(mount)]);
       if (!existsSync(path.join(mount, '.DS_Store'))) throw new Error('Finder did not save the layout of the dmg window.');
     } finally {
-      run('hdiutil', ['detach', mount]);
+      hdiutil(['detach', device]);
     }
-    run('hdiutil', ['convert', image, '-ov', '-format', 'UDZO', '-o', dmg]);
+    hdiutil(['convert', image, '-ov', '-format', 'UDZO', '-o', dmg]);
   } finally {
     rmSync(stage, { recursive: true, force: true });
   }

@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { macosSigning } from './macos-signing.mjs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { hdiutil, macosSigning } from './macos-signing.mjs';
 
 const identity = 'Developer ID Application: Example (TEAM123456)';
 const certificate = { APPLE_CERTIFICATE: 'cDEy', APPLE_CERTIFICATE_PASSWORD: 'certificate-password' };
@@ -45,4 +47,44 @@ test('the release notes have the one macOS line that release.yml drops for a not
   const lines = notes.split('\n').filter((line) => line.startsWith('- **macOS**:'));
   assert.equal(lines.length, 1);
   assert.match(lines[0], /System Settings → Privacy & Security, click Open Anyway/);
+});
+
+test('hdiutil tries again only while the disk is busy', t => {
+  const bin = mkdtempSync(path.join(tmpdir(), 'nuzky-hdiutil-'));
+  const calls = path.join(bin, 'calls');
+  const path0 = process.env.PATH;
+  process.env.PATH = `${bin}${path.delimiter}${path0}`;
+  t.after(() => {
+    process.env.PATH = path0;
+    rmSync(bin, { recursive: true, force: true });
+  });
+  // Fails with each listed message in turn, then succeeds.
+  const fake = (...errors) => {
+    writeFileSync(calls, '');
+    writeFileSync(path.join(bin, 'hdiutil'), `#!/bin/sh
+echo "$*" >> "${calls}"
+n=$(grep -c "" "${calls}")
+case $n in
+${errors.map((error, i) => `  ${i + 1}) echo "${error}" >&2; exit 1;;`).join('\n')}
+esac
+`);
+    chmodSync(path.join(bin, 'hdiutil'), 0o755);
+  };
+  const called = () => readFileSync(calls, 'utf8').trim().split('\n');
+
+  fake('hdiutil: create failed - Resource busy', 'hdiutil: create failed - Resource busy');
+  assert.equal(hdiutil(['create', '-ov', 'rw.dmg'], [0, 0]), '');
+  assert.deepEqual(called(), Array(3).fill('create -ov rw.dmg'));
+
+  fake('hdiutil: couldn\'t eject "disk4" - Resource busy');
+  hdiutil(['detach', '/dev/disk4'], [0, 0]);
+  assert.deepEqual(called(), Array(2).fill('detach /dev/disk4'));
+
+  fake(...Array(3).fill('hdiutil: create failed - Resource busy'));
+  assert.throws(() => hdiutil(['create', 'rw.dmg'], [0, 0]), { message: 'hdiutil create failed with exit code 1' });
+  assert.equal(called().length, 3);
+
+  fake('hdiutil: create failed - No space left on device');
+  assert.throws(() => hdiutil(['create', 'rw.dmg'], [0, 0]), { message: 'hdiutil create failed with exit code 1' });
+  assert.equal(called().length, 1);
 });

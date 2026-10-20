@@ -7,7 +7,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'n
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createDmg, macosSigning } from './macos-signing.mjs';
+import { createDmg, hdiutil, macosSigning } from './macos-signing.mjs';
 
 const signing = macosSigning(process.env);
 const warn = (message) => console.error(`${process.env.GITHUB_ACTIONS ? '::warning::' : ''}macOS: ${message} Gatekeeper blocks it until the user clicks Open Anyway (docs/BUILDING.md, Signing and notarization).`);
@@ -37,11 +37,11 @@ const keychain = keychainDir && path.join(keychainDir, 'signing.keychain-db');
 let searchList;
 try {
   const mount = path.join(work, 'dmg');
-  run('hdiutil', ['attach', '-nobrowse', '-readonly', '-mountpoint', mount, dmg]);
+  const device = hdiutil(['attach', '-nobrowse', '-readonly', '-mountpoint', mount, dmg]).match(/^\/dev\/disk\d+/m)[0];
   try {
     run('ditto', [path.join(mount, 'Nuzky.app'), app]);
   } finally {
-    run('hdiutil', ['detach', mount]);
+    hdiutil(['detach', device]);
   }
   if (keychain) {
     const password = randomBytes(32).toString('hex');
