@@ -94,13 +94,14 @@ pub fn run(args: &[String], cache: &Path) -> Result<()> {
             let learned = learning::learned(&sources);
             // The style the app shows is a version, keeps the creator's own rules and can be undone. What it learned
             // from is kept as the app's learning keeps it, so Your style shows how well the videos back each rule and
-            // later learning builds on them.
+            // later learning builds on them. It is kept first: a failure on the way leaves suggestions, never a
+            // replaced style without what it was learned from.
             if same_file(&out, &default) {
                 let style_store = style::Store::default();
-                style_store.replace(&learned, "Learned with nuzky style learn", None)?;
                 for evidence in lessons {
                     style_store.keep_evidence(evidence)?;
                 }
+                style_store.replace(&learned, "Learned with nuzky style learn", None)?;
             } else {
                 write_new(&out, learned.document().as_bytes())?;
             }
