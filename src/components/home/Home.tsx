@@ -723,7 +723,7 @@ function FirstRun() {
             <button type="button" onClick={() => useEditor.setState({ connectOpen: true })} className="text-accent hover:underline">
               connect an agent
             </button>{" "}
-            you already use, like Claude Code or Codex.
+            you already use, like Claude Code, Codex or Gemini.
           </p>
         )}
         <p>Or drop videos from your phone anywhere in this window.</p>

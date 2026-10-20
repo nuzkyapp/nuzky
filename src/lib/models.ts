@@ -32,7 +32,7 @@ export const useModels = create<Models>(() => ({
   lists: {},
   errors: {},
   chatgptFor: null,
-  choices: { claude: saved("claude"), codex: saved("codex"), chatgpt: saved("chatgpt") },
+  choices: { claude: saved("claude"), codex: saved("codex"), chatgpt: saved("chatgpt"), antigravity: saved("antigravity") },
 }));
 
 export const EFFORTS: Record<string, { label: string; short: string; hint: string }> = {

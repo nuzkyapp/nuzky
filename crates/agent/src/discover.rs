@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 pub enum AgentId {
     Claude,
     Codex,
+    Antigravity,
     /// Runs in Nuzky on the user's ChatGPT sign-in, so there is nothing to install or find.
     #[serde(rename = "chatgpt")]
     ChatGpt,
@@ -21,6 +22,7 @@ impl AgentId {
         match self {
             AgentId::Claude => "Claude Code",
             AgentId::Codex => "Codex",
+            AgentId::Antigravity => "Antigravity CLI",
             AgentId::ChatGpt => "ChatGPT",
         }
     }
@@ -30,6 +32,7 @@ impl AgentId {
         match self {
             AgentId::Claude => Some(("claude", "NUZKY_AGENT_CLAUDE")),
             AgentId::Codex => Some(("codex", "NUZKY_AGENT_CODEX")),
+            AgentId::Antigravity => Some(("agy", "NUZKY_AGENT_AGY")),
             AgentId::ChatGpt => None,
         }
     }
@@ -222,7 +225,7 @@ pub fn signed_in(id: AgentId, path: &Path) -> SignIn {
     let args: &[&str] = match id {
         AgentId::Claude => &["auth", "status", "--json"],
         AgentId::Codex => &["login", "status"],
-        AgentId::ChatGpt => return SignIn::Unknown,
+        AgentId::ChatGpt | AgentId::Antigravity => return SignIn::Unknown,
     };
     let Ok(Some(output)) = run(path, args, &[], None, Duration::from_secs(5)) else { return SignIn::Unknown };
     let logged_in = match id {
@@ -234,7 +237,7 @@ pub fn signed_in(id: AgentId, path: &Path) -> SignIn {
             Some(1) => Some(false),
             _ => None,
         },
-        AgentId::ChatGpt => None,
+        AgentId::ChatGpt | AgentId::Antigravity => None,
     };
     match logged_in {
         Some(true) => SignIn::SignedIn,
@@ -258,6 +261,7 @@ mod tests {
     fn versions_come_from_both_agents_wording() {
         assert_eq!(version_of("2.1.292 (Claude Code)\n").as_deref(), Some("2.1.292"));
         assert_eq!(version_of("codex-cli 0.160.1\n").as_deref(), Some("0.160.1"));
+        assert_eq!(version_of("1.4.3\n").as_deref(), Some("1.4.3"));
         assert_eq!(version_of("unknown"), None);
     }
 }

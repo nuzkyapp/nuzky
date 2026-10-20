@@ -819,7 +819,6 @@ fn list_projects() -> Vec<ProjectSummary> {
     store::list()
 }
 
-/// Claude Code's and Codex's link to Nuzky, read from their own configs.
 #[tauri::command]
 async fn agent_connections() -> CmdResult<Vec<connect::Connection>> {
     tauri::async_runtime::spawn_blocking(|| {
@@ -838,6 +837,8 @@ async fn agent_connections() -> CmdResult<Vec<connect::Connection>> {
 #[serde(rename_all = "camelCase")]
 pub struct AgentStatus {
     installed: bool,
+    /// The executable, with `~/` for the home folder, to run in a terminal before a new terminal knows the command.
+    path: Option<String>,
     version: Option<String>,
     #[cfg_attr(test, ts(as = "Option<crate::typescript::SignIn>"))]
     signed_in: Option<nuzky_agent::SignIn>,
@@ -852,6 +853,7 @@ async fn agent_status(agent: connect::Agent) -> CmdResult<AgentStatus> {
         let command = connect::Command::this_app().map_err(err)?;
         Ok(AgentStatus {
             installed: info.path.is_some(),
+            path: info.path.as_deref().map(|path| connect::tilde(&path.to_string_lossy(), &home)),
             version: info.version,
             signed_in: info.path.as_deref().map(|path| nuzky_agent::signed_in(agent.id(), path)),
             connection: connect::status(agent, &agent.config(&home), &command).shown_from(&home),
@@ -885,7 +887,9 @@ async fn connect_agent(agent: connect::Agent) -> CmdResult<connect::Connection> 
         let command = connect::Command::this_app().map_err(err)?;
         let home = dirs::home_dir().ok_or("No home folder")?;
         let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-        let connection = connect::connect(agent, &agent.config(&home), &command, stamp).map_err(err)?;
+        let connection =
+            connect::connect(agent, &agent.config(&home), agent.settings(&home).as_deref(), &command, stamp)
+                .map_err(err)?;
         connect::set_access(true, true).map_err(err)?;
         Ok(connection.shown_from(&home))
     })

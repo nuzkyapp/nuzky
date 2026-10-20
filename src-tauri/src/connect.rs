@@ -1,4 +1,4 @@
-//! Connect your agent: writes the `nuzky` MCP server into Claude Code's and Codex's own
+//! Connect your agent: writes the `nuzky` MCP server into the agents' own
 //! configuration, after a backup, and changes nothing else in those files. The entry runs this
 //! app's `mcp --current`, so the agent edits whichever project is open here, live, while Agent
 //! access is on. Other agents get the same server as text to paste.
@@ -21,15 +21,18 @@ pub const NAME: &str = "nuzky";
 pub enum Agent {
     ClaudeCode,
     Codex,
+    Antigravity,
 }
 
 impl Agent {
-    pub const ALL: [Agent; 2] = [Agent::ClaudeCode, Agent::Codex];
+    pub const ALL: [Agent; 3] = [Agent::ClaudeCode, Agent::Codex, Agent::Antigravity];
 
     fn name(self) -> &'static str {
         match self {
             Agent::ClaudeCode => "Claude Code",
             Agent::Codex => "Codex",
+            // Gemini runs in Google's Antigravity CLI, which is what gets connected.
+            Agent::Antigravity => "Gemini",
         }
     }
 
@@ -37,6 +40,7 @@ impl Agent {
         match self {
             Agent::ClaudeCode => nuzky_agent::AgentId::Claude,
             Agent::Codex => nuzky_agent::AgentId::Codex,
+            Agent::Antigravity => nuzky_agent::AgentId::Antigravity,
         }
     }
 
@@ -46,7 +50,12 @@ impl Agent {
         match self {
             Agent::ClaudeCode => from("CLAUDE_CONFIG_DIR").unwrap_or_else(|| home.to_path_buf()).join(".claude.json"),
             Agent::Codex => from("CODEX_HOME").unwrap_or_else(|| home.join(".codex")).join("config.toml"),
+            Agent::Antigravity => home.join(".gemini/config/mcp_config.json"),
         }
+    }
+
+    pub fn settings(self, home: &Path) -> Option<PathBuf> {
+        (self == Agent::Antigravity).then(|| home.join(".gemini/antigravity-cli/settings.json"))
     }
 }
 
@@ -184,20 +193,20 @@ pub struct Connection {
     pub state: State,
     /// Why the file could not be read.
     pub problem: Option<String>,
-    /// The copy made before the last change.
-    pub backup: Option<String>,
+    /// The copies made before the last change, in order.
+    pub backups: Vec<String>,
 }
 
 impl Connection {
     /// Paths in the home folder as `~/…`, as people read them.
     pub fn shown_from(mut self, home: &Path) -> Self {
         self.path = tilde(&self.path, home);
-        self.backup = self.backup.map(|backup| tilde(&backup, home));
+        self.backups = self.backups.iter().map(|backup| tilde(backup, home)).collect();
         self
     }
 }
 
-fn tilde(path: &str, home: &Path) -> String {
+pub fn tilde(path: &str, home: &Path) -> String {
     match Path::new(path).strip_prefix(home) {
         Ok(rest) => format!("~/{}", rest.display()),
         Err(_) => path.to_string(),
@@ -310,27 +319,44 @@ pub fn verify(agent: Agent, program: &Path, home: &Path) -> std::result::Result<
         return Err(format!("{failed}{}. Try again.", server_issue(issue)));
     }
 
-    let output = nuzky_agent::run(program, &["mcp", "get", NAME, "--json"], &[], Some(home), Duration::from_secs(10))
-        .map_err(|_| "Codex couldn't read its Nuzky settings. Try again.")?
-        .ok_or("Codex didn't answer within 10 seconds. Run codex in a terminal once to finish an update or sign-in it waits for, then try again.")?;
-    if !output.status.success() {
-        return Err("Codex doesn't see Nuzky in its settings. Press Connect again.".into());
-    }
-    let CodexStdio { command, args, env, env_vars, cwd } = codex_server(&output.stdout)?;
-    // Mirrors the default environment variables Codex passes to its stdio servers.
-    const DEFAULT_ENV: &[&str] =
-        &["HOME", "LANG", "LOGNAME", "PATH", "SHELL", "TMPDIR", "USER", "__CF_USER_TEXT_ENCODING"];
-    let mut command = std::process::Command::new(command);
-    command.args(args).env_clear().current_dir(cwd.as_deref().unwrap_or(home));
-    for name in DEFAULT_ENV.iter().copied().chain(env_vars.as_deref().unwrap_or_default().iter().map(String::as_str)) {
-        if let Some(value) = std::env::var_os(name) {
-            command.env(name, value);
+    let mut command = if agent == Agent::Antigravity {
+        // agy starts the entry with its own environment and the entry's `env` on top; `agy mcp list` starts nothing.
+        let missing = "Gemini doesn't see Nuzky in its settings. Press Connect again.";
+        let text = read(&agent.config(home)).ok().flatten().ok_or(missing)?;
+        let found = entry(agent, Some(&text), false).ok().flatten().filter(|c| !c.program.is_empty()).ok_or(missing)?;
+        let config: Value = serde_json::from_str(&text).map_err(|_| missing)?;
+        let env: std::collections::BTreeMap<String, String> =
+            serde_json::from_value(config["mcpServers"][NAME]["env"].clone()).unwrap_or_default();
+        let mut command = std::process::Command::new(found.program);
+        command.args(found.args).envs(env).current_dir(home);
+        command
+    } else {
+        let output = nuzky_agent::run(program, &["mcp", "get", NAME, "--json"], &[], Some(home), Duration::from_secs(10))
+            .map_err(|_| "Codex couldn't read its Nuzky settings. Try again.")?
+            .ok_or("Codex didn't answer within 10 seconds. Run codex in a terminal once to finish an update or sign-in it waits for, then try again.")?;
+        if !output.status.success() {
+            return Err("Codex doesn't see Nuzky in its settings. Press Connect again.".into());
         }
-    }
-    command.envs(env.unwrap_or_default()).env(nuzky_mcp::bridge::VERIFY_VAR, &nonce);
+        let CodexStdio { command, args, env, env_vars, cwd } = codex_server(&output.stdout)?;
+        // Mirrors the default environment variables Codex passes to its stdio servers.
+        const DEFAULT_ENV: &[&str] =
+            &["HOME", "LANG", "LOGNAME", "PATH", "SHELL", "TMPDIR", "USER", "__CF_USER_TEXT_ENCODING"];
+        let mut command = std::process::Command::new(command);
+        command.args(args).env_clear().current_dir(cwd.as_deref().unwrap_or(home));
+        for name in
+            DEFAULT_ENV.iter().copied().chain(env_vars.as_deref().unwrap_or_default().iter().map(String::as_str))
+        {
+            if let Some(value) = std::env::var_os(name) {
+                command.env(name, value);
+            }
+        }
+        command.envs(env.unwrap_or_default());
+        command
+    };
+    command.env(nuzky_mcp::bridge::VERIFY_VAR, &nonce);
     command.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped());
     std::os::unix::process::CommandExt::process_group(&mut command, 0);
-    let stopped = "Nuzky's server for Codex stopped before it reached Nuzky";
+    let stopped = format!("Nuzky's server for {} stopped before it reached Nuzky", agent.name());
     let mut child = command.spawn().map_err(|error| format!("{stopped}: {error}. Try again."))?;
     let mut stderr = child.stderr.take().unwrap();
     let reader = std::thread::spawn(move || {
@@ -361,7 +387,9 @@ pub fn verify(agent: Agent, program: &Path, home: &Path) -> std::result::Result<
             let last = stderr.lines().rev().find(|line| !line.trim().is_empty()).unwrap_or_default().trim();
             Err(format!("{stopped}{}. Try again.", server_issue(last)))
         }
-        Err(false) => Err("Nuzky's server for Codex didn't reach Nuzky within 15 seconds. Try again.".into()),
+        Err(false) => {
+            Err(format!("Nuzky's server for {} didn't reach Nuzky within 15 seconds. Try again.", agent.name()))
+        }
     }
 }
 
@@ -378,43 +406,78 @@ pub fn status(agent: Agent, path: &Path, command: &Command) -> Connection {
         Ok(Some(_)) => (State::Other, None),
         Err(error) => (State::Unreadable, Some(format!("{error:#}"))),
     };
-    Connection { agent, name: agent.name(), path: path.display().to_string(), state, problem, backup: None }
+    Connection { agent, name: agent.name(), path: path.display().to_string(), state, problem, backups: Vec::new() }
 }
 
 /// Writes the entry unless it is already there. The file is copied first, next to itself, and
 /// replaced in one step; a symlinked config is written where the link points.
-pub fn connect(agent: Agent, path: &Path, command: &Command, stamp: u64) -> Result<Connection> {
+pub fn connect(
+    agent: Agent,
+    path: &Path,
+    settings: Option<&Path>,
+    command: &Command,
+    stamp: u64,
+) -> Result<Connection> {
+    let settings = settings
+        .map(|path| {
+            resolved(path)
+                .and_then(|resolved| {
+                    let before = read(&resolved)?;
+                    let text = with_permissions(before.as_deref())?;
+                    Ok((resolved, before, text))
+                })
+                .with_context(|| {
+                    format!(
+                        "{} is not readable Antigravity settings, so Nuzky left it alone; agy can't start with it either",
+                        path.display()
+                    )
+                })
+        })
+        .transpose()?;
     let path = resolved(path)?;
     let before = read(&path)?;
-    let mut connection = status(agent, &path, command);
+    let connection = status(agent, &path, command);
+    let mut changes = Vec::new();
     match connection.state {
-        State::Connected => return Ok(connection),
+        State::Connected => {}
         State::Unreadable => bail!(
             "{} is not valid, so Nuzky left it alone: {}",
             path.display(),
             connection.problem.as_deref().unwrap_or_default()
         ),
-        State::Missing | State::Other => {}
+        State::Missing | State::Other => {
+            let text = match agent {
+                Agent::ClaudeCode => with_json_entry(
+                    before.as_deref(),
+                    &serde_json::json!({"type": "stdio", "command": command.program, "args": command.args, "env": {}}),
+                )?,
+                Agent::Antigravity => with_json_entry(
+                    before.as_deref(),
+                    &serde_json::json!({"command": command.program, "args": command.args}),
+                )?,
+                Agent::Codex => with_codex_entry(before.as_deref(), command)?,
+            };
+            changes.push((path.clone(), before, text));
+        }
     }
-    let text = match agent {
-        Agent::ClaudeCode => with_claude_entry(before.as_deref(), command)?,
-        Agent::Codex => with_codex_entry(before.as_deref(), command)?,
-    };
-    let backup = match &before {
-        Some(_) => {
+    if let Some((path, before, Some(text))) = settings {
+        changes.push((path, before, text));
+    }
+    let mut backups = Vec::new();
+    for (path, before, text) in changes {
+        if before.is_some() {
             let backup = path.with_file_name(format!(
                 "{}.nuzky-backup-{stamp}",
                 path.file_name().context("Config has no file name")?.to_string_lossy()
             ));
             std::fs::copy(&path, &backup).with_context(|| format!("Backing up {}", path.display()))?;
-            Some(backup)
+            backups.push(backup.display().to_string());
         }
-        None => None,
-    };
-    replace(&path, text.as_bytes())?;
-    connection = status(agent, &path, command);
+        replace(&path, text.as_bytes())?;
+    }
+    let mut connection = status(agent, &path, command);
     ensure!(connection.state == State::Connected, "{} did not take the Nuzky entry", path.display());
-    connection.backup = backup.map(|b| b.display().to_string());
+    connection.backups = backups;
     Ok(connection)
 }
 
@@ -467,13 +530,16 @@ fn replace(path: &Path, bytes: &[u8]) -> Result<()> {
 fn entry(agent: Agent, text: Option<&str>, runtime_dir: bool) -> Result<Option<Command>> {
     let Some(text) = text.filter(|t| !t.trim().is_empty()) else { return Ok(None) };
     let found = match agent {
-        Agent::ClaudeCode => {
+        Agent::ClaudeCode | Agent::Antigravity => {
             let config: Value = serde_json::from_str(text).context("Not valid JSON")?;
             ensure!(config.is_object(), "Not a JSON object");
-            config
-                .get("mcpServers")
-                .and_then(|s| s.get(NAME))
-                .map(|e| (e.get("command").cloned(), e.get("args").cloned()))
+            config.get("mcpServers").and_then(|s| s.get(NAME)).map(|e| {
+                if agent == Agent::Antigravity && e["disabled"] == true {
+                    (None, None)
+                } else {
+                    (e.get("command").cloned(), e.get("args").cloned())
+                }
+            })
         }
         Agent::Codex => {
             let config: toml_edit::DocumentMut = text.parse().context("Not valid TOML")?;
@@ -507,10 +573,9 @@ fn toml_to_json(value: &toml_edit::Value) -> Value {
     }
 }
 
-/// Claude Code keeps user-wide servers under `mcpServers` in `.claude.json`, a file it also
-/// writes itself. Every other key keeps its exact text: only that object is rebuilt.
-fn with_claude_entry(text: Option<&str>, command: &Command) -> Result<String> {
-    let server = serde_json::json!({"type": "stdio", "command": command.program, "args": command.args, "env": {}});
+/// Claude Code and Antigravity CLI keep user-wide servers under `mcpServers` in a JSON file they
+/// also write themselves. Every other key keeps its exact text: only that object is rebuilt.
+fn with_json_entry(text: Option<&str>, server: &Value) -> Result<String> {
     let mut top = match text.filter(|t| !t.trim().is_empty()) {
         Some(text) => serde_json::from_str::<Entries>(text).context("Not valid JSON")?.0,
         None => Vec::new(),
@@ -520,7 +585,7 @@ fn with_claude_entry(text: Option<&str>, command: &Command) -> Result<String> {
         Some(i) => serde_json::from_str::<Entries>(top[i].1.get()).context("mcpServers is not an object")?.0,
         None => Vec::new(),
     };
-    let ours = RawValue::from_string(indent(&serde_json::to_string_pretty(&server)?, "    "))?;
+    let ours = RawValue::from_string(indent(&serde_json::to_string_pretty(server)?, "    "))?;
     match inner.iter().position(|(key, _)| key == NAME) {
         Some(i) => inner[i].1 = ours,
         None => inner.push((NAME.into(), ours)),
@@ -531,6 +596,44 @@ fn with_claude_entry(text: Option<&str>, command: &Command) -> Result<String> {
         None => top.push(("mcpServers".into(), rebuilt)),
     }
     Ok(object(&top, "")? + "\n")
+}
+
+fn with_permissions(text: Option<&str>) -> Result<Option<String>> {
+    let mut top = match text {
+        Some(text) => serde_json::from_str::<Entries>(text).context("Not valid JSON")?.0,
+        None => Vec::new(),
+    };
+    let permissions = top.iter().position(|(key, _)| key == "permissions");
+    let mut inner = match permissions {
+        Some(i) => serde_json::from_str::<Entries>(top[i].1.get()).context("permissions is not an object")?.0,
+        None => Vec::new(),
+    };
+    let allow = inner.iter().position(|(key, _)| key == "allow");
+    let rule = "mcp(nuzky/*)";
+    match allow {
+        Some(i) => {
+            let raw = inner[i].1.get();
+            let rules: Vec<String> =
+                serde_json::from_str(raw).context("permissions.allow is not an array of strings")?;
+            if rules.iter().any(|r| r == rule) {
+                return Ok(None);
+            }
+            inner[i].1 = RawValue::from_string(format!(
+                "{}{}{}]",
+                &raw[..raw.len() - 1],
+                if rules.is_empty() { "" } else { ", " },
+                serde_json::to_string(rule)?
+            ))?;
+        }
+        None => inner
+            .push(("allow".into(), RawValue::from_string(indent(&serde_json::to_string_pretty(&[rule])?, "    "))?)),
+    }
+    let rebuilt = RawValue::from_string(object(&inner, "  ")?)?;
+    match permissions {
+        Some(i) => top[i].1 = rebuilt,
+        None => top.push(("permissions".into(), rebuilt)),
+    }
+    Ok(Some(object(&top, "")? + "\n"))
 }
 
 fn indent(text: &str, by: &str) -> String {
@@ -678,7 +781,7 @@ mod tests {
         let path = dir.join(".claude.json");
         std::fs::write(&path, CLAUDE).unwrap();
         assert_eq!(status(Agent::ClaudeCode, &path, &command()).state, State::Missing);
-        let done = connect(Agent::ClaudeCode, &path, &command(), 7).unwrap();
+        let done = connect(Agent::ClaudeCode, &path, None, &command(), 7).unwrap();
         assert_eq!(done.state, State::Connected);
         assert_eq!(std::fs::read_to_string(dir.join(".claude.json.nuzky-backup-7")).unwrap(), CLAUDE);
         let text = std::fs::read_to_string(&path).unwrap();
@@ -690,9 +793,167 @@ mod tests {
         assert_eq!(config["mcpServers"][NAME]["args"], serde_json::json!(["mcp", "--current", "--allow-write"]));
         assert_eq!(config["numStartups"], 42);
         // Connecting again changes nothing and makes no backup.
-        let again = connect(Agent::ClaudeCode, &path, &command(), 8).unwrap();
-        assert!(again.backup.is_none() && !dir.join(".claude.json.nuzky-backup-8").exists());
+        let again = connect(Agent::ClaudeCode, &path, None, &command(), 8).unwrap();
+        assert!(again.backups.is_empty() && !dir.join(".claude.json.nuzky-backup-8").exists());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn antigravity_gets_only_the_nuzky_entry_and_keeps_every_other_byte() {
+        let dir = dir();
+        let path = dir.join("mcp_config.json");
+        std::fs::write(&path, CLAUDE).unwrap();
+        assert_eq!(status(Agent::Antigravity, &path, &command()).state, State::Missing);
+        let settings = dir.join("settings.json");
+        let original = r#"{
+  "theme": { "name": "dark" },
+  "permissions": {
+    "allow": ["mcp(other/\u0074ool)", "read /my files"],
+    "deny": [ "shell(rm *)" ],
+    "ask": ["mcp(nuzky/delete)"]
+  },
+  "other": [1,  2]
+}
+"#;
+        std::fs::write(&settings, original).unwrap();
+        let done = connect(Agent::Antigravity, &path, Some(&settings), &command(), 7).unwrap();
+        assert_eq!(done.state, State::Connected);
+        assert_eq!(std::fs::read_to_string(&done.backups[0]).unwrap(), CLAUDE);
+        assert_eq!(std::fs::read_to_string(&done.backups[1]).unwrap(), original);
+        let allowed = original.replace("\"read /my files\"]", "\"read /my files\", \"mcp(nuzky/*)\"]");
+        assert_eq!(std::fs::read_to_string(&settings).unwrap(), allowed);
+        let shown = done.shown_from(&dir);
+        assert_eq!(shown.backups, ["~/mcp_config.json.nuzky-backup-7", "~/settings.json.nuzky-backup-7"]);
+        let modified = std::fs::metadata(&settings).unwrap().modified().unwrap();
+        let again = connect(Agent::Antigravity, &path, Some(&settings), &command(), 8).unwrap();
+        assert!(again.backups.is_empty());
+        assert_eq!(std::fs::read_to_string(&settings).unwrap(), allowed);
+        assert_eq!(std::fs::metadata(&settings).unwrap().modified().unwrap(), modified);
+        assert!(!dir.join("settings.json.nuzky-backup-8").exists());
+        let text = std::fs::read_to_string(&path).unwrap();
+        let (head, tail) = CLAUDE.split_once("\n  },\n  \"theme\"").unwrap();
+        assert!(text.starts_with(head) && text.ends_with(&format!("\n  }},\n  \"theme\"{tail}")), "{text}");
+        let config: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(
+            config["mcpServers"][NAME],
+            serde_json::json!({
+                "command": command().program, "args": command().args,
+            })
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn antigravity_creates_a_private_config_with_its_folders() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = dir();
+        let path = Agent::Antigravity.config(&dir);
+        assert_eq!(path, dir.join(".gemini/config/mcp_config.json"));
+        let settings = Agent::Antigravity.settings(&dir).unwrap();
+        assert_eq!(settings, dir.join(".gemini/antigravity-cli/settings.json"));
+        let done = connect(Agent::Antigravity, &path, Some(&settings), &command(), 1).unwrap();
+        assert_eq!(done.state, State::Connected);
+        assert!(done.backups.is_empty());
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(std::fs::metadata(&settings).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            std::fs::read_to_string(settings).unwrap(),
+            "{\n  \"permissions\": {\n    \"allow\": [\n      \"mcp(nuzky/*)\"\n    ]\n  }\n}\n"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn antigravity_checks_settings_before_writing_either_file() {
+        let dir = dir();
+        let path = dir.join("mcp_config.json");
+        let settings = dir.join("settings.json");
+        for invalid in [
+            "// comment\n{}",
+            "{\"permissions\": {},}",
+            "",
+            "[]",
+            "{\"permissions\":null}",
+            "{\"permissions\":{\"allow\":false}}",
+            "{\"permissions\":{\"allow\":[1]}}",
+        ] {
+            std::fs::write(&settings, invalid).unwrap();
+            assert!(connect(Agent::Antigravity, &path, Some(&settings), &command(), 2).is_err());
+            assert!(!path.exists());
+            std::fs::write(&path, CLAUDE).unwrap();
+            let error = connect(Agent::Antigravity, &path, Some(&settings), &command(), 2).unwrap_err().to_string();
+            assert!(
+                error.contains(&settings.display().to_string())
+                    && error.contains("left it alone")
+                    && error.contains("agy can't start"),
+                "{error}"
+            );
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), CLAUDE);
+            assert_eq!(std::fs::read_to_string(&settings).unwrap(), invalid);
+            assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2);
+            std::fs::remove_file(&path).unwrap();
+        }
+        std::fs::remove_file(&settings).unwrap();
+        std::fs::create_dir(&settings).unwrap();
+        assert!(connect(Agent::Antigravity, &path, Some(&settings), &command(), 2).is_err());
+        assert!(!path.exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn antigravity_writes_settings_where_the_symlink_points() {
+        let dir = dir();
+        let path = dir.join("mcp_config.json");
+        let real = dir.join("real.json");
+        let settings = dir.join("settings.json");
+        std::fs::write(&real, "{}").unwrap();
+        std::os::unix::fs::symlink(&real, &settings).unwrap();
+        let done = connect(Agent::Antigravity, &path, Some(&settings), &command(), 3).unwrap();
+        assert!(std::fs::symlink_metadata(&settings).unwrap().file_type().is_symlink());
+        assert_eq!(done.backups, [dir.join("real.json.nuzky-backup-3").display().to_string()]);
+        assert_eq!(std::fs::read_to_string(&done.backups[0]).unwrap(), "{}");
+        assert!(std::fs::read_to_string(&real).unwrap().contains("mcp(nuzky/*)"));
+        std::fs::write(&real, "not json").unwrap();
+        assert_eq!(status(Agent::Antigravity, &path, &command()).state, State::Connected);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn antigravity_leaves_jsonc_alone() {
+        let dir = dir();
+        let path = dir.join("mcp_config.json");
+        let jsonc = "{\n  // My servers\n  \"mcpServers\": {}\n}\n";
+        std::fs::write(&path, jsonc).unwrap();
+        assert_eq!(status(Agent::Antigravity, &path, &command()).state, State::Unreadable);
+        assert!(connect(Agent::Antigravity, &path, None, &command(), 2).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), jsonc);
+        assert!(!path.with_file_name("mcp_config.json.nuzky-backup-2").exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn antigravity_reconnects_a_server_disabled_by_agy() {
+        let dir = dir();
+        let path = dir.join("mcp_config.json");
+        let disabled = r#"{
+  "mcpServers": {
+    "nuzky": {
+      "args": ["mcp", "--current", "--allow-write"],
+      "command": "/opt/Nuzky/nuzky-app",
+      "disabled": true
+    }
+  }
+}
+"#;
+        std::fs::write(&path, disabled).unwrap();
+        assert_eq!(status(Agent::Antigravity, &path, &command()).state, State::Other);
+        let done = connect(Agent::Antigravity, &path, None, &command(), 3).unwrap();
+        assert_eq!(done.state, State::Connected);
+        assert_eq!(std::fs::read_to_string(&done.backups[0]).unwrap(), disabled);
+        assert!(!std::fs::read_to_string(&path).unwrap().contains("disabled"));
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -703,8 +964,8 @@ mod tests {
         let dir = dir();
         let path = dir.join("config.toml");
         std::fs::write(&path, CODEX).unwrap();
-        let done = connect(Agent::Codex, &path, &command(), 3).unwrap();
-        assert_eq!((done.state, done.backup.is_some()), (State::Connected, true));
+        let done = connect(Agent::Codex, &path, None, &command(), 3).unwrap();
+        assert_eq!((done.state, !done.backups.is_empty()), (State::Connected, true));
         let text = std::fs::read_to_string(&path).unwrap();
         // Without the new table the file is exactly what it was, comments included.
         let ours = "[mcp_servers.nuzky]\ncommand = \"/opt/Nuzky/nuzky-app\"\nargs = [\"mcp\", \"--current\", \"--allow-write\"]\nenv_vars = [\"XDG_RUNTIME_DIR\"]\n\n";
@@ -713,14 +974,14 @@ mod tests {
         // Another Nuzky entry is replaced, after a new backup.
         let moved = Command { program: "/new/nuzky-app".into(), ..command() };
         assert_eq!(status(Agent::Codex, &path, &moved).state, State::Other);
-        connect(Agent::Codex, &path, &moved, 4).unwrap();
+        connect(Agent::Codex, &path, None, &moved, 4).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert_eq!(text.matches("[mcp_servers.nuzky]").count(), 1);
         assert!(text.contains("/new/nuzky-app") && !text.contains("/opt/Nuzky"));
         // An entry turned off in Codex runs nothing, so it is turned back on by connecting again.
         std::fs::write(&path, text.replace("[mcp_servers.nuzky]\n", "[mcp_servers.nuzky]\nenabled = false\n")).unwrap();
         assert_eq!(status(Agent::Codex, &path, &moved).state, State::Other);
-        assert_eq!(connect(Agent::Codex, &path, &moved, 5).unwrap().state, State::Connected);
+        assert_eq!(connect(Agent::Codex, &path, None, &moved, 5).unwrap().state, State::Connected);
         assert!(!std::fs::read_to_string(&path).unwrap().contains("enabled"));
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -740,16 +1001,16 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let dir = dir();
         let codex = dir.join("codex/config.toml");
-        connect(Agent::Codex, &codex, &command(), 1).unwrap();
+        connect(Agent::Codex, &codex, None, &command(), 1).unwrap();
         assert_eq!(std::fs::metadata(&codex).unwrap().permissions().mode() & 0o777, 0o600);
         assert!(std::fs::read_to_string(&codex).unwrap().starts_with("[mcp_servers.nuzky]"));
         let claude = dir.join(".claude.json");
-        connect(Agent::ClaudeCode, &claude, &command(), 1).unwrap();
+        connect(Agent::ClaudeCode, &claude, None, &command(), 1).unwrap();
         let config: Value = serde_json::from_str(&std::fs::read_to_string(&claude).unwrap()).unwrap();
         assert_eq!(config["mcpServers"][NAME]["command"], "/opt/Nuzky/nuzky-app");
         std::fs::write(&claude, "{ not json").unwrap();
         assert_eq!(status(Agent::ClaudeCode, &claude, &command()).state, State::Unreadable);
-        assert!(connect(Agent::ClaudeCode, &claude, &command(), 2).is_err());
+        assert!(connect(Agent::ClaudeCode, &claude, None, &command(), 2).is_err());
         assert_eq!(std::fs::read_to_string(&claude).unwrap(), "{ not json");
         assert!(!dir.join(".claude.json.nuzky-backup-2").exists());
         std::fs::remove_dir_all(dir).unwrap();
@@ -776,7 +1037,7 @@ mod tests {
         std::fs::write(&real, CLAUDE).unwrap();
         let link = dir.join(".claude.json");
         std::os::unix::fs::symlink(&real, &link).unwrap();
-        connect(Agent::ClaudeCode, &link, &command(), 5).unwrap();
+        connect(Agent::ClaudeCode, &link, None, &command(), 5).unwrap();
         assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
         assert_eq!(status(Agent::ClaudeCode, &link, &command()).state, State::Connected);
         std::fs::remove_dir_all(dir).unwrap();

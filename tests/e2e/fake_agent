@@ -33,6 +33,7 @@ Each start is logged to $NUZKY_FAKE_AGENT_LOG/runs.jsonl (argv, pid, session, th
 Claude got while working to steered.jsonl; sessions live there too.
 With $NUZKY_FAKE_AGENT_LOG/vanish, `--version` takes this executable's execute bit away, so the turn cannot start.
 `auth status` (Claude) and `login status` (Codex) answer as the real ones, signed out with FAKE_AGENT_SIGNED_OUT=1.
+As `fake_agy` (or a link named `agy`), `--version` reports Antigravity CLI; Nuzky runs no other agy commands.
 With FAKE_AGENT_OLD=1, Claude is a version that does not know `--no-session-persistence`, so it names no models.
 `mcp get nuzky` reads the agent's own settings: Codex prints the entry as JSON, Claude really starts the server and
 reports whether it answered; with FAKE_AGENT_MCP=broken it starts it in an empty runtime folder, so it finds no app.
@@ -46,7 +47,7 @@ if len(sys.argv) > 1 and sys.argv[1] == '--version':
         # Found, then gone before it starts, slower than the panel's polling.
         time.sleep(1.5)
         os.chmod(sys.argv[0], 0o644)
-    print('codex-cli 0.162.1' if CODEX else '2.1.292 (Claude Code)')
+    print('1.4.3' if Path(sys.argv[0]).name in ('fake_agy', 'agy') else 'codex-cli 0.162.1' if CODEX else '2.1.292 (Claude Code)')
     sys.exit(0)
 
 args = sys.argv[1:]

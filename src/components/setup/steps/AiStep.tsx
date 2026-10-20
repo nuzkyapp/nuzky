@@ -1,30 +1,22 @@
 import { useEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { AlertCircle, AlertTriangle, Check, Copy, ExternalLink, Loader2 } from "lucide-react";
+import { AlertTriangle, Check, ExternalLink } from "lucide-react";
 import { api, errorText, plainError } from "../../../lib/api";
-import { copyText } from "../../../lib/clipboard";
 import { pickOneVideo } from "../../../lib/library";
 import { useSetup } from "../../../lib/setup";
 import { useEditor } from "../../../lib/store";
 import type { AgentKind, AgentStatus } from "../../../lib/types";
-import { Button, IconButton } from "../../ui";
+import { Button } from "../../ui";
 import { StepActions } from "../StepActions";
+import { AskGemini, Command, ConnectRows, GUIDE, GeminiWhy, INSTALL, MAC, RETURN, TERMINAL, connectAgent, type Run } from "../agentConnect";
 
-const AGENTS: AgentKind[] = ["claudeCode", "codex"];
-const NAME: Record<AgentKind, string> = { claudeCode: "Claude Code", codex: "Codex" };
-const GUIDE: Record<AgentKind, string> = { claudeCode: "https://code.claude.com/docs/en/setup", codex: "https://learn.chatgpt.com/docs/codex/cli" };
-/** The official commands for macOS and Linux, in the parts a narrow column may wrap between. */
-const INSTALL: Record<AgentKind, string[]> = {
-  claudeCode: ["curl -fsSL", "https://claude.ai/install.sh", "| bash"],
-  codex: ["curl -fsSL", "https://chatgpt.com/codex/install.sh | sh"],
-};
-const SIGN_IN: Record<AgentKind, string[]> = { claudeCode: ["claude"], codex: ["codex login"] };
-const MAC = navigator.userAgent.includes("Mac");
+const AGENTS: AgentKind[] = ["claudeCode", "codex", "antigravity"];
+/** Gemini runs in Google's Antigravity CLI, `agy`, which is what gets installed and connected. */
+const NAME: Record<AgentKind, string> = { claudeCode: "Claude Code", codex: "Codex", antigravity: "Gemini" };
+/** Antigravity CLI cannot say whether it is signed in without going online, so it is never shown signed out. */
+const SIGN_IN: Partial<Record<AgentKind, string[]>> = { claudeCode: ["claude"], codex: ["codex login"] };
 
-/** A Connect (`wrote` once Nuzky is in the agent's settings), or the check of an agent connected before. */
-type Run = { phase: "writing" | "checking" | "connected" | "failed"; fresh: boolean; wrote: boolean; backup?: string | null; error?: string; started: number; took?: number };
-
-/** Connect your AI: whether Claude Code and Codex are installed, signed in and reach Nuzky, and how to get each there. */
+/** Connect your AI: whether Claude Code, Codex and Gemini's Antigravity CLI are installed, signed in and reach Nuzky, and how to get each there. */
 export function AiStep() {
   const skipped = useSetup((s) => s.states.ai === "skipped");
   const [again, setAgain] = useState(false);
@@ -47,23 +39,7 @@ function Agents() {
   const update = (agent: AgentKind, run: Run) => live.current && setRuns((all) => ({ ...all, [agent]: run }));
 
   const connect = async (agent: AgentKind, write: boolean) => {
-    let run: Run = { phase: write ? "writing" : "checking", fresh: write, wrote: false, started: Date.now() };
-    update(agent, run);
-    if (write) {
-      try {
-        run = { ...run, phase: "checking", wrote: true, backup: (await api.connectAgent(agent)).backup, started: Date.now() };
-      } catch (e) {
-        return update(agent, { ...run, phase: "failed", error: errorText(e) });
-      }
-      update(agent, run);
-    }
-    try {
-      await api.verifyAgent(agent);
-      update(agent, { ...run, phase: "connected", took: Date.now() - run.started });
-      useSetup.getState().finishStep("ai");
-    } catch (e) {
-      update(agent, { ...run, phase: "failed", error: errorText(e) });
-    }
+    if (await connectAgent(agent, write, (run) => update(agent, run))) useSetup.getState().finishStep("ai");
   };
 
   // A connected agent is checked again, also one checked before, so Connected always means it reaches Nuzky now.
@@ -130,7 +106,7 @@ function Agents() {
   return (
     <div className="flex flex-col gap-3 pt-3">
       <p className="text-[13px] leading-[18px] text-fg">
-        Claude Code or Codex can cut your videos in Nuzky.
+        Claude Code, Codex or Gemini can cut your videos in Nuzky.
         <span className="block text-muted">Set up one of them.</span>
       </p>
       <div className="flex flex-col gap-2">
@@ -148,7 +124,10 @@ function Agents() {
         ))}
       </div>
       {!Object.keys(runs).length && AGENTS.some(connectable) && (
-        <p className="text-[12px] leading-4 text-muted">Connect backs up the agent's settings and adds Nuzky to them, so it can edit your videos now and every time Nuzky starts.</p>
+        <p className="text-[12px] leading-4 text-muted">
+          Connect backs up the agent's settings and adds Nuzky to them, so it can edit your videos now and every time Nuzky starts. Gemini may then use Nuzky's tools without asking before
+          each step.
+        </p>
       )}
       {error && (
         <p className="flex gap-1.5 text-[12px] text-danger" role="alert">
@@ -158,7 +137,7 @@ function Agents() {
       )}
       {waiting && (
         <StepActions>
-          <Button pill variant={prominent || done ? "secondary" : "primary"} disabled={looking} disabledReason="Looking for Claude Code and Codex…" onClick={() => void look()}>
+          <Button pill variant={prominent || done ? "secondary" : "primary"} disabled={looking} disabledReason="Looking for your agents…" onClick={() => void look()}>
             Check again
           </Button>
         </StepActions>
@@ -185,6 +164,7 @@ function AgentCard({
   onConnect: () => void;
 }) {
   const name = NAME[agent];
+  const gemini = agent === "antigravity";
   const phase = run?.phase;
   const unreadable = status?.connection.state === "unreadable" && !run;
   const state = !status
@@ -205,14 +185,13 @@ function AgentCard({
                   ? "Signed in"
                   : "Installed";
   const canConnect = !!status?.installed && status.signedIn !== "signedOut" && !unreadable && phase !== "connected";
-  const seconds = (ms: number) => `${Math.max(1, Math.round(ms / 1000))} s`;
   return (
     <div role="group" aria-label={name} className="rounded-xl bg-white/[.055] px-3.5 py-3 shadow-[inset_0_0_0_1px_rgb(255_255_255/.06)]">
       <div className="flex min-h-8 items-center gap-3">
         <div className="flex min-w-0 flex-1 flex-col gap-[3px]">
           <span className="text-[13px] font-medium leading-4 text-fg">
             {name}
-            {status?.version && <span className="tabular ml-1.5 text-[12px] font-normal text-muted">{status.version}</span>}
+            {status?.version && <span className="tabular ml-1.5 text-[12px] font-normal text-muted">{gemini ? `Antigravity CLI ${status.version}` : status.version}</span>}
           </span>
           <span aria-live="polite" className={`flex items-center gap-[5px] text-[12px] leading-[15px] ${phase === "connected" || phase === "failed" ? "text-fg" : "text-muted"}`}>
             {phase === "connected" && <Check size={13} strokeWidth={2.5} className="shrink-0 text-ok" />}
@@ -236,15 +215,22 @@ function AgentCard({
           </Button>
         )}
       </div>
+      {gemini && phase !== "connected" && (
+        <div className="mt-2">
+          <GeminiWhy />
+        </div>
+      )}
       {status && !status.installed && (
         <>
           <p className="mt-2.5 text-[12px] leading-4 text-muted">
-            To install, paste this into {MAC ? "Terminal" : "a terminal"} and press {MAC ? "Return" : "Enter"}.
+            {gemini && MAC
+              ? "To install Google's Antigravity CLI, open Terminal (press ⌘ Space, type Terminal and press Return), paste this and press Return."
+              : `To install${gemini ? " Google's Antigravity CLI" : ""}, paste this into ${TERMINAL} and press ${RETURN}.`}
           </p>
           <Command parts={INSTALL[agent]} />
         </>
       )}
-      {status?.installed && status.signedIn === "signedOut" && (
+      {status?.installed && status.signedIn === "signedOut" && SIGN_IN[agent] && (
         <>
           <p className="mt-2.5 text-[12px] leading-4 text-muted">To sign in, run this in a new {MAC ? "Terminal" : "terminal"} window and follow its steps.</p>
           <Command parts={SIGN_IN[agent]} />
@@ -255,66 +241,15 @@ function AgentCard({
           {status.connection.path} can't be read, so Nuzky leaves it alone. Fix it, then press Check again.
         </p>
       )}
-      {run && (
-        <ol aria-label="Steps" className="mt-2.5 flex flex-col border-t border-white/[.06] pt-1.5 text-[12px] leading-4">
-          {run.phase === "writing" && <Row icon="running" text={`Adding Nuzky to ${name}'s settings`} />}
-          {run.wrote && run.backup && <Row icon="done" text={`Backed up ${status?.connection.path ?? ""}`} title={`Old settings: ${run.backup}`} />}
-          {run.wrote && <Row icon="done" text="Added Nuzky and turned on Agent access" />}
-          {run.phase === "checking" && <Row icon="running" text={`Checking that ${name} sees Nuzky`} detail={seconds(now - run.started)} />}
-          {run.phase === "connected" && <Row icon="done" text={`${name} sees Nuzky`} detail={seconds(run.took ?? 0)} />}
-          {run.phase === "failed" && <Row icon="failed" text={run.error ?? ""} />}
-        </ol>
-      )}
-      {run?.phase === "connected" && run.fresh && <p className="mt-1.5 text-[12px] leading-4 text-fg">If {name} is open, restart it so it sees Nuzky.</p>}
-    </div>
-  );
-}
-
-const ROW_ICON = {
-  running: <Loader2 size={14} className="animate-spin text-accent" />,
-  done: <Check size={14} className="text-ok" />,
-  failed: <AlertCircle size={14} className="mt-px text-danger" />,
-};
-
-/** A step of a Connect, as the AI panel's steps. */
-function Row({ icon, text, detail, title }: { icon: keyof typeof ROW_ICON; text: string; detail?: string; title?: string }) {
-  const failed = icon === "failed";
-  return (
-    <li role={failed ? "alert" : undefined} title={title} className={`grid min-h-[26px] grid-cols-[18px_minmax(0,1fr)_auto] gap-x-1.5 ${failed ? "items-start py-[5px]" : "items-center"}`}>
-      {ROW_ICON[icon]}
-      <span className={failed || icon === "running" ? "text-fg" : "text-fg/80"}>{text}</span>
-      {detail && <span className="tabular text-muted">{detail}</span>}
-    </li>
-  );
-}
-
-/** A command to paste, which wraps only between its parts, and Copy. */
-function Command({ parts }: { parts: string[] }) {
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    if (!copied) return;
-    const id = window.setTimeout(() => setCopied(false), 1500);
-    return () => window.clearTimeout(id);
-  }, [copied]);
-  const text = parts.join(" ");
-  const copy = () =>
-    copyText(text, "The clipboard is not available here. Select the command and copy it.").then(
-      () => setCopied(true),
-      (e: Error) => useEditor.getState().toast({ kind: "error", text: e.message }),
-    );
-  return (
-    <div className="mt-1.5 flex items-start gap-1 rounded-lg bg-black/25 py-1 pl-2.5 pr-1 shadow-[inset_0_0_0_1px_rgb(255_255_255/.08)]">
-      <code className="min-w-0 flex-1 select-all py-1 font-mono text-[11.5px] leading-4 text-fg [overflow-wrap:anywhere]">
-        {parts.map((part, i) => (
-          <span key={part}>
-            {i > 0 && " "}
-            <span className="whitespace-nowrap">{part}</span>
-          </span>
+      {run && <ConnectRows agent={agent} name={name} run={run} now={now} />}
+      {run?.phase === "connected" &&
+        (gemini ? (
+          <div className="mt-2">
+            <AskGemini agy={status?.path ?? "agy"} fresh={run.fresh} />
+          </div>
+        ) : (
+          run.fresh && <p className="mt-1.5 text-[12px] leading-4 text-fg">If {name} is open, restart it so it sees Nuzky.</p>
         ))}
-      </code>
-      <IconButton label={copied ? "Copied" : "Copy the command"} onClick={() => void copy()} className="h-6 w-6 shrink-0">
-        {copied ? <Check size={13} strokeWidth={2.5} className="text-ok" /> : <Copy size={13} />}
-      </IconButton>
     </div>
   );
 }
@@ -335,7 +270,7 @@ function WithoutAi({ windows, onAgents }: { windows: boolean; onAgents: () => vo
     <div className="flex flex-col gap-3 pt-3">
       {windows && (
         <p className="text-[13px] leading-[18px] text-fg">
-          AI editing isn't available on Windows yet. <span className="text-muted">Claude Code and Codex edit in Nuzky on macOS and Linux.</span>
+          AI editing isn't available on Windows yet. <span className="text-muted">Claude Code, Codex and Gemini edit in Nuzky on macOS and Linux.</span>
         </p>
       )}
       <div>
@@ -352,7 +287,7 @@ function WithoutAi({ windows, onAgents }: { windows: boolean; onAgents: () => vo
       </ol>
       {!windows && (
         <button type="button" onClick={onAgents} className="self-start text-[12px] font-medium text-accent hover:underline">
-          Set up Claude Code or Codex instead
+          Set up Claude Code, Codex or Gemini instead
         </button>
       )}
       <StepActions>

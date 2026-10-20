@@ -54,12 +54,12 @@ export type AgentConnection = {
    */
   problem: string | null,
   /**
-   * The copy made before the last change.
+   * The copies made before the last change, in order.
    */
-  backup: string | null,
+  backups: Array<string>,
 };
 
-export type AgentKind = "claudeCode" | "codex";
+export type AgentKind = "claudeCode" | "codex" | "antigravity";
 
 /**
  * A model and the reasoning efforts the AI panel can offer for it.
@@ -78,6 +78,10 @@ export type AgentSetup = "claude" | "cursor" | "other";
 
 export type AgentStatus = {
   installed: boolean,
+  /**
+   * The executable, with `~/` for the home folder, to run in a terminal before a new terminal knows the command.
+   */
+  path: string | null,
   version: string | null,
   signedIn: SignIn | null,
   connection: AgentConnection,

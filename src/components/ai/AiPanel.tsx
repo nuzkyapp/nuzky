@@ -79,6 +79,7 @@ import { ContinueButton, USAGE_PAGE } from "../ChatGptDialog";
 import { continueWithChatGpt, openChatGpt, planReady, useChatGpt } from "../../lib/chatgpt";
 import { EFFORTS, chooseEffort, chooseModel, effortLabel, loadModels, resolved, useModels } from "../../lib/models";
 import { moveFloatBy, startMove } from "./AiDock";
+import { GeminiGuide } from "./GeminiGuide";
 
 const INSTALL: Record<CliAgentId, string> = {
   claude: "https://docs.claude.com/en/docs/claude-code/setup",
@@ -229,6 +230,8 @@ function AgentMenu() {
   const agent = useAgent((s) => s.agent);
   const busy = useAgent((s) => s.status !== "idle");
   const chatgpt = useChatGpt((s) => s.status);
+  const gemini = useAgent((s) => s.gemini);
+  const windows = navigator.userAgent.includes("Windows");
   const name = agentName(agent, agents);
   return (
     <Menu
@@ -278,6 +281,18 @@ function AgentMenu() {
           >
             <span className="flex-1">ChatGPT</span>
             <span className="text-[12px] text-muted">{planReady(chatgpt) ? "Signed in" : chatgpt?.state === "signedIn" ? "Plan not allowed" : chatgpt ? "Not signed in" : ""}</span>
+          </MenuItem>
+          <MenuItem
+            checked={agent === "antigravity"}
+            disabled={windows || busy}
+            reason={windows ? "AI editing isn't available on Windows yet" : "Wait for the answer, or stop it"}
+            onClick={() => {
+              chooseAgent("antigravity");
+              close();
+            }}
+          >
+            <span className="flex-1">Gemini</span>
+            <span className="text-[12px] text-muted">{windows ? "Not on Windows" : !gemini ? "" : !gemini.installed ? "Not installed" : gemini.connection.state === "connected" ? "Connected" : "Not connected"}</span>
           </MenuItem>
           <div className="mx-1.5 my-1 h-px bg-white/[.08]" />
           <MenuItem
@@ -495,7 +510,7 @@ function ErrorNotice({ code, message, retryText, retryAttachments, last = false 
     </Button>
   );
   const term = (text: string) => <code className="rounded bg-white/[.08] px-1">{text}</code>;
-  const cmd = agent === "chatgpt" ? null : term(COMMAND[agent]);
+  const cmd = agent === "chatgpt" || agent === "antigravity" ? null : term(COMMAND[agent]);
   const signIn = agent === "codex" ? <>run {term("codex login")} and choose Sign in with ChatGPT</> : <>run {cmd} and sign in</>;
   // A message that failed after the agent began answering stays in the conversation, with Try again, not in the field.
   const kept = retryText !== undefined ? message : <>{message} Your message is still here.</>;
@@ -593,7 +608,7 @@ const STYLE_STARTERS: [ReactNode, string][] = [
 /** What the panel is about; on the Your style page, the creator's style. */
 const About = createContext<AiAbout>("project");
 
-/** ChatGPT chosen but not ready: signing in, or allowing the plan, is the way on. Without Claude Code or Codex, how to get them too. */
+/** ChatGPT chosen but not ready: signing in, or allowing the plan, is the way on. Without Claude Code or Codex, how to get them or Gemini too. */
 function ChatGptSignIn() {
   const agents = useAgent((s) => s.agents) ?? [];
   const signedIn = useChatGpt((s) => s.status?.state === "signedIn");
@@ -608,7 +623,7 @@ function ChatGptSignIn() {
       <ContinueButton onClick={continueWithChatGpt} />
       {!agents.some((a) => a.path) && (
         <div className="mt-6 flex w-full flex-col">
-          <p className="mb-1.5 text-[12px] leading-[18px] text-muted">Or use Claude Code or Codex: install one, sign in from your terminal, then check again.</p>
+          <p className="mb-1.5 text-[12px] leading-[18px] text-muted">Or use Claude Code, Codex or Gemini: install one, sign in from your terminal, then check again.</p>
           {agents.map((a) => (
             <div key={a.id} className="flex h-9 items-center justify-between border-t border-white/[.07] text-[13px]">
               {a.name}
@@ -617,6 +632,12 @@ function ChatGptSignIn() {
               </Button>
             </div>
           ))}
+          <div className="flex h-9 items-center justify-between border-t border-white/[.07] text-[13px]">
+            Gemini
+            <Button variant="ghost" className="h-7 px-2 text-[12px] text-accent" onClick={() => chooseAgent("antigravity")}>
+              Set up <ChevronRight size={12} />
+            </Button>
+          </div>
           <Button className="mt-3 h-7 self-start px-2.5 text-[12px]" onClick={() => void loadAgents()}>
             <RefreshCw size={13} /> Check again
           </Button>
@@ -926,6 +947,19 @@ async function pickAttachments() {
   if (picked) await attach(Array.isArray(picked) ? picked : [picked]);
 }
 
+/** An agent outside the panel, such as one in a terminal, is editing: the panel waits, and the top bar stops it. */
+function OtherRun({ label }: { label: string }) {
+  return (
+    <div role="status" className="mb-2 grid grid-cols-[20px_1fr] gap-2 rounded-[10px] bg-raised p-3 text-[12px] leading-[18px] text-fg/85">
+      <Info size={16} className="text-accent" />
+      <div>
+        <div className="text-[13px] font-semibold text-fg">Another agent is editing.</div>
+        {label}. Wait until it finishes, or stop it with Stop and edit in the top bar.
+      </div>
+    </div>
+  );
+}
+
 function Composer() {
   const about = useContext(About);
   const draft = useAgent((s) => s.draft);
@@ -1017,15 +1051,7 @@ function Composer() {
 
   return (
     <div className="shrink-0 px-2.5 pb-2.5">
-      {otherRun && (
-        <div role="status" className="mb-2 grid grid-cols-[20px_1fr] gap-2 rounded-[10px] bg-raised p-3 text-[12px] leading-[18px] text-fg/85">
-          <Info size={16} className="text-accent" />
-          <div>
-            <div className="text-[13px] font-semibold text-fg">Another agent is editing.</div>
-            {otherRun}. Wait until it finishes, or stop it with Stop and edit in the top bar.
-          </div>
-        </div>
-      )}
+      {otherRun && <OtherRun label={otherRun} />}
       {/* A click on the model menu or its button keeps the focus there, which the menu needs to stay open. */}
       <div onClick={(e) => !(e.target as Element).closest("[role=menu],[aria-haspopup=menu]") && field.current?.focus()} className="rounded-xl border border-white/[.08] bg-white/[.055] px-2.5 pb-1.5 pt-2 transition-colors duration-[120ms] has-[textarea:focus]:border-accent">
         {about === "style" && (
@@ -1325,6 +1351,9 @@ export function AiPanel({
   const left = useAgent((s) => s.jobs.some((j) => j.status === "running"));
   const kept = useAgent((s) => (s.chats === null ? null : s.chats.length));
   const projectName = useEditor((s) => s.snap?.project.name);
+  // Gemini answers in a terminal, so the panel shows how to reach it there instead of a conversation.
+  const gemini = useAgent((s) => s.agent === "antigravity");
+  const otherRun = useEditor((s) => s.aiRun);
   const [listing, setListing] = useState(false);
   // An answer starting elsewhere, such as Make it with AI, brings the conversation back.
   useEffect(() => {
@@ -1391,6 +1420,15 @@ export function AiPanel({
       </header>
       {listing ? (
         <ChatList onBack={() => setListing(false)} />
+      ) : gemini ? (
+        <>
+          <GeminiGuide />
+          {otherRun && (
+            <div className="shrink-0 px-2.5 pb-0.5">
+              <OtherRun label={otherRun} />
+            </div>
+          )}
+        </>
       ) : (
         <>
           <Conversation />

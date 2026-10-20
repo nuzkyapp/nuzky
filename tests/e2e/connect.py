@@ -1,4 +1,4 @@
-"""Connect your agent: one click puts Nuzky into Claude Code's and Codex's own settings, after a backup and without
+"""Connect your agent: one click puts Nuzky into Claude Code's, Codex's and Gemini's own settings, after a backup and without
 touching anything else there, a copy gives any other agent the same server and a first message, and Agent access
 decides whether an agent attached to the open project may edit it, without restarting the agent."""
 import json, subprocess, time
@@ -7,8 +7,10 @@ from e2e.harness import AI_EDITING, MACOS, Bridge, clipboard, flow, press, wait,
 
 CLAUDE = '{\n  "numStartups": 12,\n  "projects": {\n    "/home/me/site": {\n      "allowedTools": []\n    }\n  },\n  "mcpServers": {\n    "other": {\n      "type": "stdio",\n      "command": "other-server"\n    }\n  }\n}\n'
 CODEX = '# my Codex settings\nmodel = "gpt-6.1-sol" # keep this\n\n[mcp_servers.other]\ncommand = "other"\n\n[profiles.fast]\nmodel_reasoning_effort = "low"\n'
+MCP = '{\n  "mcpServers": {\n    "other": {\n      "command": "other-server",\n      "args": ["--x"]\n    }\n  }\n}\n'
+SETTINGS = '{\n  "theme": "dark",\n  "permissions": {\n    "allow": ["command(git)"],\n    "deny": ["mcp(other/*)"]\n  }\n}\n'
 ROWS = """return [...document.querySelectorAll('[role=dialog] [role=group]')]
-  .filter((row) => ['Claude Code', 'Codex'].includes(row.getAttribute('aria-label')))
+  .filter((row) => ['Claude Code', 'Codex', 'Gemini'].includes(row.getAttribute('aria-label')))
   .map((row) => ({text: row.textContent, button: row.querySelector('button')?.textContent}));"""
 ACCESS = """const row = document.querySelector('[role=dialog] [role=group][aria-label="Agent access"]');
 const toggle = row && row.querySelector('[role=switch]');
@@ -22,6 +24,10 @@ def home(r):
     (folder / '.codex').mkdir(parents=True)
     (folder / '.claude.json').write_text(CLAUDE)
     (folder / '.codex/config.toml').write_text(CODEX)
+    (folder / '.gemini/config').mkdir(parents=True)
+    (folder / '.gemini/antigravity-cli').mkdir(parents=True)
+    (folder / '.gemini/config/mcp_config.json').write_text(MCP)
+    (folder / '.gemini/antigravity-cli/settings.json').write_text(SETTINGS)
     r.env['HOME'] = str(folder)
     for variable in ('CLAUDE_CONFIG_DIR', 'CODEX_HOME'):
         r.env.pop(variable, None)
@@ -51,7 +57,7 @@ def server_of(text):
     return json.loads(text[text.index('{'):text.rindex('}') + 1])['mcpServers']['nuzky']
 
 
-@flow('connect', 'Connect an agent outside Nuzky (in the AI panel) writes only the nuzky entry into Claude Code and Codex settings, '
+@flow('connect', 'Connect an agent outside Nuzky (in the AI panel) writes only the nuzky entry into Claude Code, Codex and Gemini settings, '
       'after a backup, a copy gives other agents the same server, and Agent access lets the agent edit the open project live',
       before=home)
 def connect(r):
@@ -68,9 +74,9 @@ def connect(r):
                 and wait(lambda: r.s.run("""const item = [...document.querySelectorAll('[role=menu] [role=menuitem]')]
                     .find((b) => b.textContent.includes('Connect an agent outside Nuzky')); if (!item) return false; item.click(); return true;"""), 5))
         rows = wait(lambda: r.s.run(ROWS) or None, 10)
-        r.check('the dialog lists Claude Code and Codex, not yet connected',
-                rows and [('Claude Code' in x['text'], 'Not connected' in x['text']) for x in rows][0] == (True, True)
-                and 'Codex' in rows[1]['text'] and 'Not connected' in rows[1]['text'], rows)
+        r.check('the dialog lists Claude Code, Codex and Gemini, not yet connected',
+                rows and len(rows) == 3 and all(name in row['text'] and 'Not connected' in row['text']
+                for name, row in zip(('Claude Code', 'Codex', 'Gemini'), rows)), rows)
         access = wait(lambda: r.s.run(ACCESS), 5)
         r.check('Agent access starts off and is not turned on at launch', access and not access['on'] and not access['atLaunch']
                 and "can't edit" in access['text'], access)
@@ -91,7 +97,10 @@ def connect(r):
             text, _ = copy(r, label)
             r.check(f'{label} copies the same server and says where it goes', place in text and server_of(text) == server, text)
         r.check('copying changes no file', (folder / '.claude.json').read_text() == CLAUDE
-                and (folder / '.codex/config.toml').read_text() == CODEX and not list(folder.rglob('*.nuzky-backup-*'))
+                and (folder / '.codex/config.toml').read_text() == CODEX
+                and (folder / '.gemini/config/mcp_config.json').read_text() == MCP
+                and (folder / '.gemini/antigravity-cli/settings.json').read_text() == SETTINGS
+                and not list(folder.rglob('*.nuzky-backup-*'))
                 and not (r.work / 'data/nuzky/agent-access.json').exists())
 
         # An agent set up from that copy, the way its settings start it.
@@ -121,14 +130,19 @@ def connect(r):
         r.check('and the agent is refused again', wait(lambda: 'AGENT_ACCESS_OFF' in json.dumps(tool(agent, 'get_state', {})), 5),
                 tool(agent, 'get_state', {}))
 
-        focused = "const el = document.activeElement; return el && el.closest('[role=dialog]') ? el.textContent.trim() : null;"
-        for name, next_focus in (('Claude Code', 'Connect'), ('Codex', 'Done')):
+        focused = """const el = document.activeElement; return el && el.closest('[role=dialog]')
+            ? {text: el.textContent.trim(), row: el.closest('[role=group]')?.getAttribute('aria-label') ?? null} : null;"""
+        for name, next_row in (('Claude Code', 'Codex'), ('Codex', 'Gemini'), ('Gemini', None)):
+            next_focus = {'text': 'Connect' if next_row else 'Done', 'row': next_row}
             r.s.run("""const row = document.querySelector(`[role=dialog] [role=group][aria-label="${arguments[0]}"]`);
                 row.querySelector('button').focus(); row.querySelector('button').click();""", name)
             r.check(f'{name} shows connected', wait(lambda: any(name in x['text'] and 'Connected' in x['text'] for x in r.s.run(ROWS)), 10),
                     r.s.run(ROWS))
             # A connected row has no button, so keyboard focus moves on inside the dialog instead of getting lost.
-            r.check(f'after {name}, focus moves to {next_focus}', wait(lambda: r.s.run(focused) == next_focus, 3), r.s.run(focused))
+            r.check(f"after {name}, focus moves to {next_row + ' Connect' if next_row else 'Done'}", wait(lambda: r.s.run(focused) == next_focus, 3), r.s.run(focused))
+        toast = wait(lambda: next((t for t in r.state()['toasts'] if t['text'].startswith('Gemini is connected.')), None), 5)
+        r.check('after Gemini connects, the toast says to run agy in a terminal',
+                toast and toast['kind'] == 'success' and 'Run agy in a terminal' in toast['text'], toast)
         access = r.s.run(ACCESS)
         saved = r.work / 'data/nuzky/agent-access.json'
         r.check('connecting turns Agent access on, and on at every launch, so a connected agent keeps working',
@@ -164,11 +178,25 @@ def connect(r):
     backups = sorted(folder.glob('.claude.json.nuzky-backup-*'))
     r.check("Claude Code's settings were backed up first", len(backups) == 1 and backups[0].read_text() == CLAUDE, backups)
     codex = (folder / '.codex/config.toml').read_text()
-    block = f'[mcp_servers.nuzky]\ncommand = {json.dumps(entry["command"])}\nargs = ["mcp", "--current", "--allow-write"]\n\n'
+    block = f'[mcp_servers.nuzky]\ncommand = {json.dumps(entry["command"])}\nargs = ["mcp", "--current", "--allow-write"]\nenv_vars = ["XDG_RUNTIME_DIR"]\n\n'
     r.check("Codex gets the same command and keeps every comment and setting", block in codex and codex.replace(block, '') == CODEX,
             codex)
     backups = sorted((folder / '.codex').glob('config.toml.nuzky-backup-*'))
     r.check("Codex's settings were backed up first", len(backups) == 1 and backups[0].read_text() == CODEX, backups)
+    gemini = (folder / '.gemini/config/mcp_config.json').read_text()
+    config = json.loads(gemini)
+    gemini_entry = config['mcpServers'].pop('nuzky')
+    r.check("Gemini gets only the same command and args and keeps the other server's exact text",
+            gemini_entry == {'command': entry['command'], 'args': entry['args']}
+            and config == json.loads(MCP) and gemini.startswith(MCP.removesuffix('\n  }\n}\n') + ','), gemini)
+    settings = (folder / '.gemini/antigravity-cli/settings.json').read_text()
+    r.check("Gemini's settings keep every other byte and gain only mcp(nuzky/*)",
+            settings == SETTINGS.replace('["command(git)"]', '["command(git)", "mcp(nuzky/*)"]'), settings)
+    for relative, original in (('.gemini/config/mcp_config.json', MCP), ('.gemini/antigravity-cli/settings.json', SETTINGS)):
+        path = folder / relative
+        backups = sorted(path.parent.glob(path.name + '.nuzky-backup-*'))
+        r.check(f"Gemini's {path.name} was backed up once with its original text",
+                len(backups) == 1 and backups[0].read_text() == original, backups)
     r.check('the entry runs this app attached to the open project, as the copy does',
             entry['args'] == ['mcp', '--current', '--allow-write'] and entry['command'] == server['command'], entry)
 

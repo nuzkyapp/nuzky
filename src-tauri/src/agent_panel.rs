@@ -445,6 +445,7 @@ pub async fn agent_models(agent: AgentId) -> CmdResult<Vec<AgentModel>> {
             codex_models(&output.stdout).map_err(|_| failed.into())
         }
         AgentId::ChatGpt => chatgpt::chatgpt().models().map_err(err),
+        AgentId::Antigravity => Err("Run Antigravity CLI in your terminal and connect it to Nuzky.".into()),
     })
     .await
     .map_err(err)?

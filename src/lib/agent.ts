@@ -1,17 +1,20 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
-import { errorText, plainError } from "./api";
+import { api, errorText, plainError } from "./api";
 import { check as checkChatGpt, planReady, useChatGpt } from "./chatgpt";
 import { forgetChatGptModels, loadModels as loadAgentModels, resolved, useModels } from "./models";
 import { downloadModels, loadModels, useCover } from "./cover";
 import { useDock } from "./dock";
 import { formatTime } from "./time";
 import { useEditor } from "./store";
-import type { Snapshot } from "./types";
+import type { AgentStatus, Snapshot } from "./types";
 
-/** An agent the panel can run: the user's own installed Claude Code or Codex, or ChatGPT on the user's plan, which runs in Nuzky. */
-export type AgentId = CliAgentId | "chatgpt";
+/**
+ * An agent the panel can run: the user's own installed Claude Code or Codex, or ChatGPT on the user's plan, which runs in Nuzky.
+ * Gemini (`antigravity`) never runs here: Google lets no other app run it, so the panel shows how to use it from a terminal.
+ */
+export type AgentId = CliAgentId | "chatgpt" | "antigravity";
 export type CliAgentId = "claude" | "codex";
 export interface AgentInfo {
   id: CliAgentId;
@@ -128,6 +131,8 @@ export type AiAbout = "project" | "style";
 interface AgentState {
   agents: AgentInfo[] | null;
   agentsError: string | null;
+  /** Antigravity CLI, which Gemini runs in: installed, and whether Connect put Nuzky into its settings. */
+  gemini: AgentStatus | null;
   agent: AgentId;
   chat: string | null;
   /** How many items came from a reopened chat: their runs can no longer be undone and their choices no longer answered. */
@@ -161,10 +166,11 @@ interface AgentState {
 
 const AGENT_KEY = "nuzky.aiAgent";
 
-const AGENTS: AgentId[] = ["claude", "codex", "chatgpt"];
+const AGENTS: AgentId[] = ["claude", "codex", "chatgpt", "antigravity"];
 const usable = (a: AgentInfo) => !!a.path;
 
 export function agentName(id: AgentId, agents = useAgent.getState().agents): string {
+  if (id === "antigravity") return "Gemini";
   return id === "chatgpt" ? "ChatGPT" : (agents?.find((a) => a.id === id)?.name ?? (id === "codex" ? "Codex" : "Claude Code"));
 }
 
@@ -174,6 +180,7 @@ export const anyAgent = () => !!useAgent.getState().agents?.some(usable) || plan
 export const useAgent = create<AgentState>(() => ({
   agents: null,
   agentsError: null,
+  gemini: null,
   agent: AGENTS.includes(localStorage.getItem(AGENT_KEY) as AgentId) ? (localStorage.getItem(AGENT_KEY) as AgentId) : "claude",
   chat: null,
   pastCount: null,
@@ -292,13 +299,24 @@ function offered(input: unknown): Omit<Extract<ChatItem, { kind: "options" }>, "
 export async function loadAgents() {
   try {
     void checkChatGpt(false);
+    void loadGemini();
     const agents = await agentApi.list();
     const s = useAgent.getState();
-    // Keep the chosen agent when it is installed or is ChatGPT; otherwise pick one that is installed, or else ChatGPT.
-    const chosen = s.agent === "chatgpt" ? s.agent : (agents.find((a) => a.id === s.agent && usable(a)) ?? agents.find(usable))?.id;
+    // Keep the chosen agent when it is installed, ChatGPT or Gemini; otherwise pick one that is installed, or else ChatGPT.
+    const chosen = s.agent === "chatgpt" || s.agent === "antigravity" ? s.agent : (agents.find((a) => a.id === s.agent && usable(a)) ?? agents.find(usable))?.id;
     useAgent.setState({ agents, agentsError: null, agent: chosen ?? "chatgpt" });
   } catch (e) {
     useAgent.setState({ agentsError: plainError(errorText(e)) });
+  }
+}
+
+/** Looks for Antigravity CLI and reads its settings again; Windows has no AI editing, so there is nothing to find. */
+export async function loadGemini() {
+  if (navigator.userAgent.includes("Windows")) return;
+  try {
+    useAgent.setState({ gemini: await api.agentStatus("antigravity") });
+  } catch (e) {
+    useEditor.getState().toast({ kind: "error", text: `Nuzky couldn't look for Antigravity CLI. ${plainError(errorText(e))}` });
   }
 }
 
@@ -451,6 +469,7 @@ function describeContext(c: PromptContext): string | null {
 /** Why a message cannot be sent right now, or null; `thumbnail`: whether it asks for one. */
 export function sendBlocked(thumbnail = useAgent.getState().thumbnail): string | null {
   const s = useAgent.getState();
+  if (s.agent === "antigravity") return "Gemini works in your terminal, not in this panel. Ask it there";
   if (s.agent === "chatgpt") {
     const { status } = useChatGpt.getState();
     const error = useModels.getState().errors.chatgpt;

@@ -1,4 +1,4 @@
-"""Connect your AI in Get set up: for Claude Code and Codex it says whether each is installed, with its version, signed
+"""Connect your AI in Get set up: for Claude Code, Codex and Gemini it says whether each is installed, with its version, signed
 in and connected to Nuzky. A missing agent shows its official install command with Copy and the install guide, and
 Check again finds it once installed; a signed-out one says how to sign in; Connect puts Nuzky into the agent's own
 settings and checks that the agent's own command reaches this Nuzky, and when it does not, says why and offers Try
@@ -6,6 +6,7 @@ again. Skip leads to cutting by hand in the transcript, which works without any 
 import json, subprocess, time
 from pathlib import Path
 
+from e2e.connect import MCP, SETTINGS
 from e2e.corrections import Hands
 from e2e.harness import FIXTURES, MACOS, clipboard, flow, link_models, press, wait
 from e2e.setup import BOX, FOCUS, dialog, rail
@@ -30,11 +31,16 @@ def before(r):
     folder = r.work / 'home'
     folder.mkdir(exist_ok=True)
     (folder / '.claude.json').write_text(CLAUDE)
+    (folder / '.gemini/config').mkdir(parents=True)
+    (folder / '.gemini/antigravity-cli').mkdir(parents=True)
+    (folder / '.gemini/config/mcp_config.json').write_text(MCP)
+    (folder / '.gemini/antigravity-cli/settings.json').write_text(SETTINGS)
     r.env['HOME'] = str(folder)
     for variable in ('CLAUDE_CONFIG_DIR', 'CODEX_HOME'):
         r.env.pop(variable, None)
     (r.work / 'bin').mkdir()
-    r.env.update(NUZKY_AGENT_CLAUDE=str(r.work / 'bin/claude'), NUZKY_AGENT_CODEX=str(r.work / 'bin/codex'))
+    r.env.update(NUZKY_AGENT_CLAUDE=str(r.work / 'bin/claude'), NUZKY_AGENT_CODEX=str(r.work / 'bin/codex'),
+                 NUZKY_AGENT_AGY=str(r.work / 'bin/agy'))
     link_models(r)
 
 
@@ -45,7 +51,7 @@ def agent(r, name, gone=False, **answers):
     if gone:
         path.unlink(missing_ok=True)
         return
-    fake = HERE / ('fake_codex' if name == 'codex' else 'fake_agent')
+    fake = HERE / {'claude': 'fake_agent', 'codex': 'fake_codex', 'agy': 'fake_agy'}[name]
     path.write_text('#!/bin/sh\n' + ''.join(f'export {k}={v}\n' for k, v in answers.items()) + f'exec "{fake}" "$@"\n')
     path.chmod(0o755)
 
@@ -66,7 +72,7 @@ def press_button(r, label, scope=BOX):
     return True
 
 
-@flow('setup-ai', 'Connect your AI says whether Claude Code and Codex are installed, signed in and connected; Copy, Check '
+@flow('setup-ai', 'Connect your AI says whether Claude Code, Codex and Gemini are installed, signed in and connected; Copy, Check '
       'again, Connect and a check that the agent reaches Nuzky, a failed connection with its reason, and Skip to cutting '
       'by hand in the transcript', before=before, home=True)
 def setup_ai(r):
@@ -87,13 +93,15 @@ def agents(r, home):
     r.check('the rail lists only the steps that are built', rail(d) == [['Captions model'], ['Face and person models'], ['Music from YouTube'], ['Connect your AI']], rail(d))
     r.check('the header counts four steps', d and d['count'] == '0 of 4 done', d)
 
-    # Missing: neither stand-in is installed.
     c = wait(lambda: (x := cards(r)) and all('Not installed' in v['text'] for v in x.values()) and x, 10)
-    r.check('with neither agent installed, both say Not installed', c and list(c) == ['Claude Code', 'Codex'], cards(r))
+    r.check('with no agents installed, all three say Not installed', c and r.s.run("return [...document.querySelectorAll('#setup-panel [role=group]')].map((g) => g.getAttribute('aria-label'))") == ['Claude Code', 'Codex', 'Gemini'], cards(r))
     r.check('each shows its official install command, with Copy and the install guide',
             c and c['Claude Code']['command'] == 'curl -fsSL https://claude.ai/install.sh | bash'
             and c['Codex']['command'] == 'curl -fsSL https://chatgpt.com/codex/install.sh | sh'
-            and all(v['buttons'] == ['Install guide', 'Copy the command'] for v in c.values()), c)
+            and c['Gemini']['command'] == 'curl -fsSL https://antigravity.google/cli/install.sh | bash'
+            and all(c[name]['buttons'] == ['Install guide', 'Copy the command'] for name in ('Claude Code', 'Codex'))
+            and c['Gemini']['buttons'] == ['Install guide', 'Details', 'Copy the command'], c)
+    r.check('Gemini says why it runs in a terminal', c and "Google doesn't let other apps run Gemini" in c['Gemini']['text'], c)
     d = dialog(r)
     r.check('the footer offers Check again before Skip', d and d['buttons'] == ['Check again', 'Skip'], d)
     r.check('Copy for Claude Code', press_button(r, 'Copy the command', f'{BOX} [role=group][aria-label="Claude Code"]'))
@@ -101,6 +109,9 @@ def agents(r, home):
     r.check('and says Copied', wait(lambda: 'Copied' in cards(r)['Claude Code']['buttons'], 2), cards(r))
     time.sleep(0.3)
     r.shot('setup-ai-missing')
+    r.s.run("document.querySelector('#setup-panel [role=group][aria-label=Gemini]').scrollIntoView({block: 'end'})")
+    time.sleep(0.3)
+    r.shot('setup-ai-gemini-missing')
 
     # Installed, signed out.
     agent(r, 'claude', FAKE_AGENT_SIGNED_OUT=1)
@@ -140,7 +151,7 @@ def agents(r, home):
     d = wait(lambda: (x := dialog(r)) and x['steps'][3]['lines'] == ['Connect your AI', 'Done'] and x, 5)
     r.check('the step is done and the header counts it', d and d['count'] == '1 of 4 done', dialog(r))
     r.check('the focus goes to Done', wait(lambda: r.s.run(FOCUS) == 'Done', 3), r.s.run(FOCUS))
-    r.check('Check again stays for Codex, still missing, before Done', d and d['buttons'] == ['Check again', 'Done'], d)
+    r.check('Check again stays for Codex and Gemini, still missing, before Done', d and d['buttons'] == ['Check again', 'Done'], d)
     time.sleep(0.3)
     r.shot('setup-ai-connected')
 
@@ -167,7 +178,30 @@ def agents(r, home):
     r.check('Codex connects and its check passes', c and 'Codex sees Nuzky' in c['Codex']['text'], cards(r))
     config = (home / '.codex/config.toml').read_text()
     r.check("Codex's entry passes on the runtime folder Codex would not hand its server", 'env_vars = ["XDG_RUNTIME_DIR"]' in config, config)
-    r.check('with both connected, only Done is left in the footer', (dialog(r) or {}).get('buttons') == ['Done'], dialog(r))
+    r.check('with Gemini still missing, Check again stays before Done', (dialog(r) or {}).get('buttons') == ['Check again', 'Done'], dialog(r))
+
+    agent(r, 'agy')
+    press('Escape')
+    wait(lambda: not dialog(r), 3)
+    r.s.run("window.__nuzky.setup.getState().openSetup()")
+    c = wait(lambda: card_says(r, 'Claude Code', 'Connected') and card_says(r, 'Codex', 'Connected')
+             and card_says(r, 'Gemini', 'Antigravity CLI 1.4.3') and cards(r), 30)
+    r.check('opened again, Gemini shows its installed version and offers Connect',
+            c and c['Gemini']['buttons'] == ['Connect', 'Details'], cards(r))
+    r.check('Connect Gemini from the keyboard', press_button(r, 'Connect', f'{BOX} [role=group][aria-label=Gemini]'))
+    c = wait(lambda: card_says(r, 'Gemini', 'Gemini sees Nuzky') and cards(r), 30)
+    r.check('Gemini connects, lists both backups, turns on Agent access and allows its tools',
+            c and all(line in c['Gemini']['text'] for line in ('Backed up ~/.gemini/config/mcp_config.json',
+                'Backed up ~/.gemini/antigravity-cli/settings.json', 'Added Nuzky and turned on Agent access',
+                "Let Gemini use Nuzky's tools without asking")), cards(r))
+    commands = r.s.run("return [...document.querySelectorAll('#setup-panel [role=group][aria-label=Gemini] code')].map((c) => c.textContent)")
+    r.check('Gemini shows how to ask in a terminal, with the agy Nuzky found and an example',
+            commands == [str(r.work / 'bin/agy'), 'Cut the pauses and retakes in the video open in Nuzky, then add captions']
+            and c and 'choose Google OAuth' in c['Gemini']['text'] and 'quit it and run it again' in c['Gemini']['text'], commands)
+    r.check('with all three connected, only Done is left in the footer', c and (dialog(r) or {}).get('buttons') == ['Done'], dialog(r))
+    r.s.run("document.querySelector('#setup-panel [role=group][aria-label=Gemini]').scrollIntoView({block: 'start'})")
+    time.sleep(0.3)
+    r.shot('setup-ai-gemini')
     press_button(r, 'Done')
     r.check('Done closes it', wait(lambda: not dialog(r), 3), dialog(r))
 
@@ -176,6 +210,7 @@ def skip_to_transcript(r):
     """With no agent, Skip leads to cutting by hand: a video opens on its transcript, and a word deleted there is cut."""
     agent(r, 'claude', gone=True)
     agent(r, 'codex', gone=True)
+    agent(r, 'agy', gone=True)
     r.s.run("window.__nuzky.setup.setState({states: {}, current: 'ai'}); window.__nuzky.setup.getState().openSetup()")
     wait(lambda: card_says(r, 'Codex', 'Not installed'), 10)
 
@@ -187,7 +222,8 @@ def skip_to_transcript(r):
     text = r.s.run("return document.querySelector('#setup-panel').innerText") or ''
     r.check("on Windows the step says at once that AI editing isn't available there yet, with no agents to set up",
             [line for line in text.split('\n') if line.strip()][1].startswith("AI editing isn't available on Windows yet")
-            and 'Cut without AI' in text and not cards(r) and 'Set up Claude Code or Codex instead' not in text, text)
+            and 'Claude Code, Codex and Gemini edit in Nuzky on macOS and Linux' in text
+            and 'Cut without AI' in text and not cards(r) and 'Set up Claude Code, Codex or Gemini instead' not in text, text)
     r.check('and offers Open a video… before Skip', d and d['buttons'] == ['Open a video…', 'Skip'], d)
     r.shot('setup-ai-windows')
     r.s.run("delete navigator.userAgent")
@@ -197,7 +233,8 @@ def skip_to_transcript(r):
     r.check('Skip', press_button(r, 'Skip'))
     d = wait(lambda: (x := dialog(r)) and x['steps'][3]['lines'] == ['Connect your AI', 'Skipped'] and x, 5)
     text = r.s.run("return document.querySelector('#setup-panel').innerText") or ''
-    r.check('skipped, the step shows how to cut without AI', 'Cut without AI' in text and 'Remove retakes and pauses' in text and 'Transcribe timeline' in text, text)
+    r.check('skipped, the step shows how to cut without AI', 'Cut without AI' in text and 'Remove retakes and pauses' in text and 'Transcribe timeline' in text
+            and 'Set up Claude Code, Codex or Gemini instead' in text, text)
     r.check('Open a video… is the way on, and Done is secondary', d and d['buttons'] == ['Open a video…', 'Done'], d)
     r.check('the focus goes to Open a video…', wait(lambda: r.s.run(FOCUS) == 'Open a video…', 3), r.s.run(FOCUS))
     time.sleep(0.3)

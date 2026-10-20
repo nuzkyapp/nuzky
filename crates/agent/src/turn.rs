@@ -166,6 +166,7 @@ impl Turn {
             AgentId::Claude => claude::command(&req),
             AgentId::Codex => codex::command(&req),
             AgentId::ChatGpt => bail!("ChatGPT runs in Nuzky, not as a process"),
+            AgentId::Antigravity => bail!("Run Antigravity CLI in your terminal and connect it to Nuzky."),
         };
         cmd.current_dir(&req.cwd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
         for (name, _) in std::env::vars_os() {
@@ -212,7 +213,7 @@ impl Turn {
         let mut parser = match req.agent {
             AgentId::Claude => Parser::Claude(claude::Parser::default(), req.session),
             AgentId::Codex => Parser::Codex(codex::Parser::new(pid)),
-            AgentId::ChatGpt => unreachable!("refused above"),
+            AgentId::ChatGpt | AgentId::Antigravity => unreachable!("refused above"),
         };
         std::thread::spawn(move || {
             let mut failed: Option<(ErrorCode, String)> = None;
@@ -364,7 +365,7 @@ mod tests {
                         let command = match agent {
                             AgentId::Claude => claude::command(&req),
                             AgentId::Codex => codex::command(&req),
-                            AgentId::ChatGpt => unreachable!(),
+                            AgentId::ChatGpt | AgentId::Antigravity => unreachable!(),
                         };
                         let args: Vec<_> = command.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
                         let model_flag = if agent == AgentId::Claude { "--model" } else { "-m" };
