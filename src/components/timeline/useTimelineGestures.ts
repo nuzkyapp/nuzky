@@ -40,14 +40,15 @@ export interface Drag {
  * Clip timing while a drag is in progress. Every value is whole microseconds (the engine takes
  * integers), rounded towards the inside of the source the same way the engine clamps a trim.
  */
-export function dragResult(d: Drag, minUs: number): { startUs: number; durationUs: number } {
+export function dragResult(d: Drag, minUs: number): { startUs: number; durationUs: number; sourceInUs?: number } {
   const { clip } = d;
   if (d.mode === "move") return { startUs: Math.max(0, clip.startUs + d.dxUs), durationUs: clip.durationUs };
   if (d.mode === "trimL") {
     // The left edge stops where the source starts, at this clip's speed.
     const lower = d.sourceInUs !== null ? Math.ceil(-d.sourceInUs / d.speed) : -clip.startUs;
     const delta = Math.min(Math.max(d.dxUs, lower, -clip.startUs), clip.durationUs - minUs);
-    return { startUs: clip.startUs + delta, durationUs: clip.durationUs - delta };
+    const sourceInUs = d.sourceInUs !== null ? Math.max(0, d.sourceInUs + Math.round(delta * d.speed)) : undefined;
+    return { startUs: clip.startUs + delta, durationUs: clip.durationUs - delta, sourceInUs };
   }
   const dur = Math.max(minUs, Math.min(clip.durationUs + d.dxUs, d.maxDurUs ?? Infinity));
   return { startUs: clip.startUs, durationUs: dur };
@@ -193,8 +194,7 @@ export function useTimelineGestures({
         edit({ type: "moveClip", clipId: d.clip.id, trackId, startUs: r.startUs });
       }
     } else {
-      const sourceInUs = d.mode === "trimL" && d.sourceInUs !== null ? Math.max(0, d.sourceInUs + Math.round((r.startUs - d.clip.startUs) * d.speed)) : null;
-      edit({ type: "trimClip", clipId: d.clip.id, startUs: r.startUs, durationUs: r.durationUs, sourceInUs });
+      edit({ type: "trimClip", clipId: d.clip.id, startUs: r.startUs, durationUs: r.durationUs, sourceInUs: r.sourceInUs ?? null });
     }
     select([d.clip.id]);
   };

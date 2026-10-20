@@ -32,6 +32,9 @@ window.dispatchEvent(at('pointermove', arguments[1]));"""
 LEFTS = """const ghost = document.querySelector('section[aria-label=Timeline] .opacity-85');
 return {next: document.querySelector(`[data-clip-id='${arguments[0]}']`).getBoundingClientRect().left,
   ghost: ghost ? ghost.getBoundingClientRect().left : null};"""
+# The filmstrip frames drawn in the clip `arguments[0]`, or in the ghost a drag draws when it is null.
+TILES = """const el = arguments[0] ? document.querySelector(`[data-clip-id='${arguments[0]}']`) : document.querySelector('section[aria-label=Timeline] .opacity-85');
+return el ? [...el.querySelectorAll('div[style*="background-position"]')].map((d) => d.style.backgroundPosition) : [];"""
 TIP = "return [...document.querySelectorAll('section[aria-label=Timeline] div')].some((d) => d.textContent === arguments[0])"
 FADES = """const c = window.__nuzky.store.getState().snap.project.tracks.flatMap((t) => t.clips).find((c) => c.id === arguments[0]);
 return [c.content.fadeInUs, c.content.fadeOutUs];"""
@@ -129,6 +132,7 @@ def edit(r):
     r.s.run('window.__nuzky.store.getState().setZoom(100)')
     time.sleep(0.5)
     before = r.s.run(LEFTS, undone[1]['id'])
+    first_frames = r.s.run(TILES, undone[0]['id'])
     r.s.run(TRIM_LEFT, undone[0]['id'], 50)
     time.sleep(0.3)
     during = r.s.run(LEFTS, undone[1]['id'])
@@ -136,12 +140,18 @@ def edit(r):
             during['next'] == before['next'], {'before': before, 'during': during})
     r.check('the trimmed clip\'s left edge follows the pointer', during['ghost'] is not None and abs(during['ghost'] - before['next'] + 150) < 2,
             {'before': before, 'during': during})
+    dragged = r.s.run(TILES, None)
     r.shot('trim-left-drag')
     r.s.run(RELEASE)
     cut = wait(lambda: (c := r.track()) and c[0]['durationUs'] < undone[0]['durationUs'] and c, 5)
     r.check('on release the clip keeps its start and the next clip closes up behind it',
             cut and cut[0]['startUs'] == undone[0]['startUs'] and cut[1]['startUs'] == cut[0]['startUs'] + cut[0]['durationUs']
             and cut[0]['durationUs'] == undone[0]['durationUs'] - 500_000, cut)
+    # The footage goes from the left: while dragging, the clip already shows the frames it keeps. It once showed its
+    # first frames and lost them from the right, and only jumped to the kept ones on release.
+    kept = wait(lambda: (t := r.s.run(TILES, undone[0]['id'])) and t != first_frames and t, 5)
+    r.check('while the left edge is dragged, the clip shows the frames it keeps on release',
+            bool(dragged) and dragged == kept, {'dragged': dragged, 'kept': kept})
     r.key('z', ctrlKey=True)
     r.check('undo puts the left edge back', wait(lambda: r.track() == undone, 5), r.track())
 
