@@ -33,6 +33,7 @@ Each start is logged to $NUZKY_FAKE_AGENT_LOG/runs.jsonl (argv, pid, session, th
 Claude got while working to steered.jsonl; sessions live there too.
 With $NUZKY_FAKE_AGENT_LOG/vanish, `--version` takes this executable's execute bit away, so the turn cannot start.
 `auth status` (Claude) and `login status` (Codex) answer as the real ones, signed out with FAKE_AGENT_SIGNED_OUT=1.
+With FAKE_AGENT_OLD=1, Claude is a version that does not know `--no-session-persistence`, so it names no models.
 `mcp get nuzky` reads the agent's own settings: Codex prints the entry as JSON, Claude really starts the server and
 reports whether it answered; with FAKE_AGENT_MCP=broken it starts it in an empty runtime folder, so it finds no app.
 """
@@ -60,6 +61,9 @@ if CODEX and args[:2] == ['debug', 'models']:
          'default_reasoning_level': 'medium'},
     ]}))
     sys.exit(0)
+if not CODEX and '--no-session-persistence' in args and os.environ.get('FAKE_AGENT_OLD') == '1':
+    print("error: unknown option '--no-session-persistence'", file=sys.stderr)
+    sys.exit(1)
 if not CODEX and '--no-session-persistence' in args:
     # The model list: Claude Code names its models, and what each alias runs, only in its answer to `initialize`.
     request = json.loads(sys.stdin.readline())

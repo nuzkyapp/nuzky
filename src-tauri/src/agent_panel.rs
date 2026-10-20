@@ -415,35 +415,18 @@ pub async fn agent_chat_save(app: AppHandle, chat: String, title: String, items:
 #[tauri::command]
 pub async fn agent_models(agent: AgentId) -> CmdResult<Vec<AgentModel>> {
     tauri::async_runtime::spawn_blocking(move || match agent {
+        // An older Claude Code that does not name its models still takes these aliases.
         AgentId::Claude => {
-            let failed = "MODELS_FAILED: Couldn't list Claude Code's models. Try again.";
-            let path = nuzky_agent::find(agent).path.ok_or(failed)?;
-            // Claude Code names its models only to a client that starts a session, so this starts one and
-            // sends nothing to the model. The user's settings stay, as they pick what each alias runs.
-            let args = [
-                "-p",
-                "--input-format",
-                "stream-json",
-                "--output-format",
-                "stream-json",
-                "--verbose",
-                "--setting-sources",
-                "user",
-                "--settings",
-                r#"{"disableAllHooks":true}"#,
-                "--strict-mcp-config",
-                "--tools",
-                "",
-                "--disable-slash-commands",
-                "--no-session-persistence",
-            ];
-            let request = br#"{"type":"control_request","request_id":"models","request":{"subtype":"initialize"}}
-"#;
-            let output =
-                nuzky_agent::run_with_input(&path, &args, &[], None, Some(request), std::time::Duration::from_secs(15))
-                    .map_err(|_| failed)?
-                    .ok_or(failed)?;
-            claude_models(&output.stdout).ok_or_else(|| failed.into())
+            Ok(nuzky_agent::find(agent).path.and_then(|path| claude_listed(&path)).unwrap_or_else(|| {
+                [("fable", "Fable"), ("opus", "Opus"), ("sonnet", "Sonnet"), ("haiku", "Haiku")]
+                    .map(|(slug, name)| AgentModel {
+                        slug: slug.into(),
+                        display_name: name.into(),
+                        efforts: nuzky_chatgpt::EFFORTS.map(str::to_owned).into(),
+                        default_effort: None,
+                    })
+                    .into()
+            }))
         }
         AgentId::Codex => {
             let failed = "MODELS_FAILED: Couldn't list Codex's models. Try again.";
@@ -460,6 +443,33 @@ pub async fn agent_models(agent: AgentId) -> CmdResult<Vec<AgentModel>> {
     })
     .await
     .map_err(err)?
+}
+
+/// Claude Code names its models only to a client that starts a session, so this starts one and sends
+/// nothing to the model. The user's settings stay, as they pick what each alias runs.
+fn claude_listed(path: &Path) -> Option<Vec<AgentModel>> {
+    let args = [
+        "-p",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--setting-sources",
+        "user",
+        "--settings",
+        r#"{"disableAllHooks":true}"#,
+        "--strict-mcp-config",
+        "--tools",
+        "",
+        "--disable-slash-commands",
+        "--no-session-persistence",
+    ];
+    let request = br#"{"type":"control_request","request_id":"models","request":{"subtype":"initialize"}}
+"#;
+    let output = nuzky_agent::run_with_input(path, &args, &[], None, Some(request), std::time::Duration::from_secs(15))
+        .ok()??;
+    claude_models(&output.stdout).filter(|models| !models.is_empty())
 }
 
 /// The models from Claude Code's answer to `initialize`, without its Default, which the menu has

@@ -96,9 +96,9 @@ def idle(r):
 
 def setup_jobs(r):
     setup(r)
-    # A copy of the fake, so the flow can take the agent away.
+    # A copy of the fake, so the flow can take the agent away; an older Claude Code, which names no models.
     shutil.copy(FAKE, r.work / 'claude')
-    r.env['NUZKY_AGENT_CLAUDE'] = str(r.work / 'claude')
+    r.env.update(NUZKY_AGENT_CLAUDE=str(r.work / 'claude'), FAKE_AGENT_OLD='1')
 
 
 def setup_codex(r):
@@ -634,6 +634,13 @@ def ai_panel_jobs(r):
     answer = """const b = [...document.querySelectorAll('aside[aria-label=AI] [role=group] button')]
         .filter((b) => b.textContent.trim() === arguments[0] && !b.getAttribute('aria-disabled')).pop(); b?.click(); return !!b;"""
     said = lambda: (panel(r) or {}).get('text', '')
+
+    open_models(r)
+    r.check("an older Claude Code that names no models still offers its aliases, with every effort",
+            wait(lambda: r.s.run(MODELS) == ['DefaultClaude Code setting', 'Fable', 'Opus', 'Sonnet', 'Haiku'], 10)
+            and [e for e, _ in r.s.run(EFFORT)] == ['Low', 'Med', 'High', 'X-High', 'Max'],
+            {'models': r.s.run(MODELS), 'effort': r.s.run(EFFORT)})
+    r.key('Escape')
 
     def ask(text='Export it, a long job'):
         """The agent starts an export and ends its turn with a question; returns the job."""
