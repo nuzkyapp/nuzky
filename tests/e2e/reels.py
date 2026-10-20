@@ -12,7 +12,7 @@ from e2e.reel import MODEL, poll
 FAKE = Path(__file__).resolve().parent / 'fake_agent'
 CANDIDATES = """const p = window.__nuzky.store.getState().snap.project;
 return (p.reelCandidates ?? []).map((c) => ({id: c.id, from: c.from, to: c.to, durationUs: c.durationUs, status: c.status,
-  score: c.score, title: c.title, projectPath: c.projectPath ?? null}));"""
+  score: c.score, title: c.title, projectPath: c.projectPath ?? null, pause: c.shortenPausesUs ?? null}));"""
 # Clicks the button whose text or label is `arguments[0]` inside `arguments[1]`; null when there is none.
 CLICK = """const scope = arguments[1] ? document.querySelector(arguments[1]) : document;
 const b = [...(scope?.querySelectorAll('button') ?? [])].find((b) => b.textContent.trim() === arguments[0] || b.getAttribute('aria-label') === arguments[0]);
@@ -74,6 +74,7 @@ def reels(r):
         find_and_pick(r, bridge)
     finally:
         bridge.close()
+    style_changes(r)
     trim(r)
     make(r, source, collection)
     failure(r)
@@ -122,6 +123,17 @@ def find_and_pick(r, bridge):
         r.s.run(f"document.querySelector('{CARD.format(c['id'])} input[type=checkbox]').click()")
     r.check('two reels are checked', wait(lambda: [c['status'] for c in candidates(r)][:2] == ['picked', 'picked'], 10), candidates(r))
     r.check('Make names how many', r.s.run(f"return [...document.querySelectorAll('{LIST} button')].some((b) => b.textContent === 'Make 2 reels')"))
+
+
+def style_changes(r):
+    """The creator's style changes its pause length after the reels were proposed without one."""
+    r.check('each proposed reel keeps the pause it was measured with', all(c['pause'] == 300000 for c in candidates(r)), candidates(r))
+    (r.work / 'data/nuzky/EDIT.md').write_text('# Editing style\n\n## Settings\n\n| Setting | Value |\n|---|---|\n'
+                                               '| edit_transcript shorten_pauses_us | 1500000 |\n')
+    c = candidates(r)[0]
+    again = r.s.call('window.__nuzky.api.reelBounds(arguments[0], arguments[1], arguments[2]).then((b) => b.durationUs)',
+                     c['id'], c['from'], c['to'])
+    r.check('measuring a reel again keeps its pause after the style changed', again.get('value') == c['durationUs'], [again, c])
 
 
 def trim(r):
