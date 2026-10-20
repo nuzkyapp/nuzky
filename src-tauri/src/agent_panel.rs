@@ -150,6 +150,11 @@ impl AgentPanel {
         }
     }
 
+    /// Whether the agent is working on a message.
+    pub fn working(&self) -> bool {
+        self.active.lock().unwrap().as_ref().is_some_and(|(_, turn)| turn.running())
+    }
+
     /// Stops the jobs the conversation started; its next turn starts them under a new owner.
     fn stop_jobs(&self) {
         if let Some((owner, host)) = self.jobs.lock().unwrap().take()

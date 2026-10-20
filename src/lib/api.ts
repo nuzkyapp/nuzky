@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, type Channel } from "@tauri-apps/api/core";
 import type { AgentAccess, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, Boot, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Part, PreviewStarted, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFraming, Said, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied } from "./types";
 
 /**
@@ -212,6 +212,10 @@ export const api = {
   startMakeReels: (ids: string[], canvas: ReelFraming, epoch: Epoch) => invoke<string>("start_make_reels", { ids, canvas, expectedEpoch: epoch }),
   /** A newer released version, or null when this one is the latest. */
   checkForUpdate: () => invoke<string | null>("check_for_update"),
+  /** Downloads the newer version, checks its signature, saves the project, installs it and restarts Nuzky. `progress` gets the percentage downloaded, then 100 while it checks and installs. */
+  installUpdate: (progress: Channel<number>) => invoke<void>("install_update", { progress }),
+  /** Stops the download; `installUpdate` then fails with CANCELLED. */
+  cancelUpdate: () => invoke<void>("cancel_update"),
   openReleasePage: () => invoke<void>("open_release_page"),
   /** The idea form with this version filled in, or the author's X profile, in the browser. */
   openFeedback: (kind: FeedbackKind) => invoke<void>("open_feedback", { kind }),

@@ -13,7 +13,6 @@ The first alpha of Nuzky, a free, open-source video editor for your computer. It
 
 - AI editing doesn't work on Windows. The AI panel is off there.
 - On Windows, speech recognition runs on the CPU, so captions take longer than on Linux and macOS, which use the GPU when they can.
-- Nuzky doesn't update itself. It tells you when a new version is out, and you download it here.
 - Intel Macs, Linux on ARM and Windows on ARM aren't supported.
 - Export makes MP4 only. There's no template library and no phone app.
 
@@ -32,9 +31,9 @@ macOS works and is where Nuzky is tested. Linux is only partly tested. Windows i
 - **macOS**: Apple hasn't checked this build, so macOS won't open it the first time. Close the message, open System Settings → Privacy & Security, click Open Anyway next to Nuzky and confirm.
 - **Windows**: Nuzky has no Microsoft signing certificate yet, so SmartScreen says "Windows protected your PC" the first time. Click More info, then Run anyway.
 
-## Update check
+## Updates
 
-Once a day Nuzky reads the version number of the latest release on this page, and nothing else. It downloads and installs nothing by itself. To turn the check off, click the version at the bottom of the home screen's sidebar and untick Check automatically.
+Once a day Nuzky reads the version number of the latest release on this page, and nothing else. When a newer one is out, the version at the bottom of the home screen's sidebar says so. Click it and choose Install and restart: Nuzky saves your project, downloads the new version from this page, installs it only if its signature matches the key built into Nuzky, and restarts. Nothing downloads or installs before you click. To turn the check off, untick Check automatically in the same menu.
 
 ## Found a bug?
 

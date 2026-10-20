@@ -43,7 +43,7 @@ Download the installer for your system from [Releases](https://github.com/nuzkya
 - **Windows 10 or 11, x64**, not tested at all: run the `-setup.exe`. When SmartScreen says "Windows protected your PC", click More info, then Run anyway. The installer downloads Microsoft WebView2 if it is missing.
 - **Linux, x86_64**, partly tested: on Ubuntu 24.04 or newer, `sudo apt install ./Nuzky_*.deb`. On other distributions with glibc 2.39 or newer, make the `.AppImage` executable with `chmod +x` and run it.
 
-The first captions or transcript download the speech model once. Nuzky tells you when a newer version is out; it doesn't update itself.
+The first captions or transcript download the speech model once. Nuzky tells you when a newer version is out and installs it when you click Install and restart.
 
 ## Report a bug
 

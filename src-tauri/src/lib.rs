@@ -1181,6 +1181,8 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updates::Download::default())
         .setup(|app| {
             // GTK has set the process's locale from the system, so on a Czech or German system C code reads numbers
             // with a decimal comma. ONNX Runtime read its operators' default values that way when the first model
@@ -1380,6 +1382,8 @@ pub fn run() {
             style::style_use_learned,
             updates::check_for_update,
             updates::open_release_page,
+            updates::install_update,
+            updates::cancel_update,
             updates::open_feedback,
             diagnostics::diagnostics,
             diagnostics::open_logs,
@@ -1435,14 +1439,17 @@ pub fn run() {
                     log::error!("UI flow bridge: {error:#}");
                 }
             }
-            tauri::RunEvent::Exit => {
-                // The panel's agent runs in its own process group, so it would outlive the app.
-                app.state::<agent_panel::AgentPanel>().stop();
-                app.state::<AppState>().quit();
-                diagnostics::quit();
-            }
+            tauri::RunEvent::Exit => quit(app),
             _ => {}
         });
+}
+
+/// Also before the Windows update installer ends Nuzky, which skips `RunEvent::Exit`.
+fn quit(app: &AppHandle) {
+    // The panel's agent runs in its own process group, so it would outlive the app.
+    app.state::<agent_panel::AgentPanel>().stop();
+    app.state::<AppState>().quit();
+    diagnostics::quit();
 }
 
 /// How long quitting waits for cancelled jobs, so exports can remove their unfinished files.

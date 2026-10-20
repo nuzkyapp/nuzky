@@ -25,6 +25,20 @@ function ToastItem({ toast: t, paused, dismiss }: { toast: Toast; paused: boolea
     };
   }, [paused, onDismiss]);
   const action = t.action && (t.action.valid?.() ?? true) ? t.action : null;
+  // Two actions, or one beside a long text, would leave the text a narrow column; they go under it instead.
+  const stacked = !!t.secondary || t.text.length > 64;
+  const choice = (c: { label: string; run: () => void }) => (
+    <button
+      type="button"
+      className="shrink-0 rounded-md px-1.5 py-1 font-semibold text-accent transition-colors duration-[120ms] ease-out hover:bg-white/[.08]"
+      onClick={() => {
+        c.run();
+        onDismiss();
+      }}
+    >
+      {c.label}
+    </button>
+  );
   // A toast about an action that no longer applies, such as Undo after another change, goes.
   const expired = !!t.action && !action;
   useEffect(() => {
@@ -37,7 +51,7 @@ function ToastItem({ toast: t, paused, dismiss }: { toast: Toast; paused: boolea
       role={t.kind === "error" ? "alert" : undefined}
       // Only the keyboard (F8, Esc) focuses a toast, so it always shows the focus outline; a click on its text does not focus it.
       onMouseDown={(e) => !(e.target as Element).closest("button") && e.preventDefault()}
-      className={`overlay pointer-events-auto flex min-h-12 max-w-full items-center gap-2.5 rounded-[14px] py-2 pr-2 pl-3.5 text-[13px] font-medium text-fg focus:outline-2 focus:outline-offset-1 focus:outline-accent ${
+      className={`overlay pointer-events-auto flex min-h-12 max-w-full flex-wrap items-center gap-x-2.5 gap-y-0 rounded-[14px] py-2 pr-2 pl-3.5 text-[13px] font-medium text-fg focus:outline-2 focus:outline-offset-1 focus:outline-accent ${
         t.kind === "error" || t.kind === "warning" ? EDGE[t.kind] : ""
       }`}
     >
@@ -51,18 +65,7 @@ function ToastItem({ toast: t, paused, dismiss }: { toast: Toast; paused: boolea
         <Info size={18} className="shrink-0 text-muted" />
       )}
       <span className="min-w-0 flex-1 break-words">{t.text}</span>
-      {action && (
-        <button
-          type="button"
-          className="shrink-0 rounded-md px-1.5 py-1 font-semibold text-accent transition-colors duration-[120ms] ease-out hover:bg-white/[.08]"
-          onClick={() => {
-            action.run();
-            onDismiss();
-          }}
-        >
-          {action.label}
-        </button>
-      )}
+      {action && !stacked && choice(action)}
       <button
         type="button"
         aria-label="Dismiss"
@@ -72,6 +75,12 @@ function ToastItem({ toast: t, paused, dismiss }: { toast: Toast; paused: boolea
       >
         <X size={14} />
       </button>
+      {action && stacked && (
+        <div className="-mt-1 flex basis-full justify-end gap-1">
+          {t.secondary && choice(t.secondary)}
+          {choice(action)}
+        </div>
+      )}
     </div>
   );
 }

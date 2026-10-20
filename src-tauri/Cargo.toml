@@ -32,6 +32,7 @@ log.workspace = true
 tauri = { version = "2.12.1", features = [] }
 tauri-plugin-dialog = "2.8.1"
 tauri-plugin-opener = "2.7.0"
+tauri-plugin-updater = "2.14.0"
 env_logger = "0.11"
 jiff = { version = "0.2.37", default-features = false, features = ["std"] }
 tungstenite = "0.30"
@@ -53,6 +54,7 @@ unicode-normalization = "0.1.25"
 
 [dev-dependencies]
 ts-rs.workspace = true
+minisign-verify = "0.3.0"
 nuzky-engine = { workspace = true, features = ["ts"] }
 nuzky-mcp = { workspace = true, features = ["ts"] }
 nuzky-chatgpt = { workspace = true, features = ["ts"] }

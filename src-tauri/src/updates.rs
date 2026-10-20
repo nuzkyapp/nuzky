@@ -1,20 +1,24 @@
-//! Whether a newer Nuzky was released. Only the version is read from `latest.json` on the newest
-//! published GitHub release; nothing is downloaded or run. Download opens the release page.
+//! Whether a newer Nuzky was released, and installing it when the user asks. The check reads only the version from
+//! `latest.json` on the newest published GitHub release. Install and restart downloads the package that file names for
+//! this kind of install, installs it only when its signature matches the key built into Nuzky (tauri.conf.json), and
+//! restarts. Nothing is downloaded or installed without the user's click.
 use std::io::Read;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use anyhow::{Context, Result, ensure};
 use semver::Version;
 use serde::Deserialize;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager, State, ipc::Channel};
 use tauri_plugin_opener::OpenerExt;
+use tauri_plugin_updater::{Error as UpdateError, Updater, UpdaterExt};
 
-use crate::{CmdResult, err};
+use crate::{AppState, CmdResult, err};
 
 /// GitHub serves this from the newest release that is neither a draft nor a prerelease, so
-/// publishing a draft is what tells installed copies about it.
+/// publishing a draft is what tells installed copies about it. The installer reads the same file (tauri.conf.json).
 const LATEST_JSON: &str = "https://github.com/nuzkyapp/nuzky/releases/latest/download/latest.json";
-/// Download opens this fixed page, never an address from the file.
+/// What's new and Download from GitHub open this fixed page, never an address from the file.
 const RELEASE_PAGE: &str = "https://github.com/nuzkyapp/nuzky/releases/latest";
 const X_PROFILE: &str = "https://x.com/mach_builds";
 /// Tests serve the file locally through `NUZKY_UPDATE_URL`; no other address replaces GitHub.
@@ -43,8 +47,12 @@ fn newer(json: &str, current: &Version) -> Result<Option<Version>> {
     Ok(version.cmp_precedence(current).is_gt().then_some(version))
 }
 
+fn test_server() -> Option<String> {
+    std::env::var("NUZKY_UPDATE_URL").ok().filter(|url| url.starts_with(TEST_SERVER))
+}
+
 fn fetch() -> Result<String> {
-    let test = std::env::var("NUZKY_UPDATE_URL").ok().filter(|url| url.starts_with(TEST_SERVER));
+    let test = test_server();
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .https_only(test.is_none())
         .max_redirects(5)
@@ -74,9 +82,183 @@ pub async fn check_for_update(app: AppHandle) -> CmdResult<Option<String>> {
     })
 }
 
+/// Stops the update being downloaded.
+#[derive(Default)]
+pub struct Download(Mutex<Option<Box<dyn Fn() + Send>>>);
+
+/// A build from source, a debug build, or a release without a package for this kind of install.
+const NO_PACKAGE: &str =
+    "UPDATE_NO_PACKAGE: Nuzky can't update this copy by itself. Download the new version from GitHub.";
+
+/// Downloads the newest release for this kind of install, checks its signature, saves the project, installs it and
+/// restarts Nuzky. `progress` gets the percentage downloaded. On Windows the installer ends Nuzky and starts the new one.
+#[tauri::command]
+pub async fn install_update(app: AppHandle, download: State<'_, Download>, progress: Channel<u32>) -> CmdResult<()> {
+    if !enabled() {
+        return Err("UPDATES_OFF: update checks are turned off".into());
+    }
+    if download.0.lock().unwrap().is_some() {
+        return Err("UPDATE_BUSY: The update is already downloading.".into());
+    }
+    refuse_while_busy(&app)?;
+    let packaged = packaged();
+    // The UI flows serve a debug build a signed package; it downloads and checks it, but never replaces itself.
+    let flow = cfg!(debug_assertions) && test_server().is_some();
+    if !(packaged || flow) {
+        return Err(NO_PACKAGE.into());
+    }
+    let updater = updater(&app).map_err(failure)?;
+    let task = tauri::async_runtime::spawn(async move {
+        let Some(update) = updater.check().await? else { return Ok(None) };
+        let (mut done, mut shown) = (0, 0);
+        let on_chunk = |chunk: usize, total: Option<u64>| {
+            done += chunk as u64;
+            if let Some(total) = total.filter(|&total| total > 0) {
+                let percent = (done * 100 / total).min(100) as u32;
+                if percent > shown {
+                    shown = percent;
+                    progress.send(percent).ok();
+                }
+            }
+        };
+        let bytes = update
+            .download(on_chunk, || {
+                progress.send(100).ok();
+            })
+            .await?;
+        Ok(Some((update, bytes)))
+    });
+    let stop = task.inner().abort_handle();
+    *download.0.lock().unwrap() = Some(Box::new(move || stop.abort()));
+    let downloaded = task.await;
+    download.0.lock().unwrap().take();
+    let Some((update, bytes)) = downloaded.map_err(|_| "CANCELLED: the update was stopped")?.map_err(failure)? else {
+        return Err(format!("UPDATE_LATEST: Nuzky {} is the latest version.", app.package_info().version));
+    };
+    if !packaged {
+        return Err(NO_PACKAGE.into());
+    }
+    // Work may have started while it downloaded.
+    refuse_while_busy(&app)?;
+    save(&app)?;
+    tauri::async_runtime::spawn_blocking(move || update.install(bytes)).await.map_err(err)?.map_err(failure)?;
+    log::info!(target: "action", "update installed, restarting");
+    // Quitting stops what runs and saves again, as on any quit.
+    app.request_restart();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cancel_update(download: State<'_, Download>) {
+    if let Some(stop) = download.0.lock().unwrap().as_ref() {
+        stop();
+    }
+}
+
+/// The updater tauri.conf.json configures. In debug builds the UI flows give the address of their own release on this
+/// computer (`NUZKY_UPDATE_URL`) and the public key of their test packages (`NUZKY_UPDATE_PUBKEY`).
+fn updater(app: &AppHandle) -> tauri_plugin_updater::Result<Updater> {
+    let handle = app.clone();
+    // Only Windows runs this: its installer starts while Nuzky ends with `std::process::exit`, which skips quitting.
+    let builder = app.updater_builder().on_before_exit(move || {
+        crate::quit(&handle);
+        handle.cleanup_before_exit();
+    });
+    #[cfg(debug_assertions)]
+    let builder = {
+        let mut builder = builder;
+        if let Some(url) = test_server() {
+            builder = builder.endpoints(vec![url.parse()?])?;
+        }
+        if let Ok(key) = std::env::var("NUZKY_UPDATE_PUBKEY") {
+            builder = builder.pubkey(key);
+        }
+        builder
+    };
+    builder.build()
+}
+
+/// Whether this copy came from a release package that the updater can replace. A build from source has none: on macOS
+/// the updater would replace the folder holding the binary, on Windows install a second copy.
+fn packaged() -> bool {
+    use tauri::utils::{config::BundleType, platform};
+    let exe = platform::current_exe().unwrap_or_default();
+    !cfg!(debug_assertions)
+        && match platform::bundle_type() {
+            // Every macOS build says App, so the binary must be inside one.
+            Some(BundleType::App) => {
+                exe.parent().is_some_and(|dir| dir.ends_with("Contents/MacOS"))
+                    && exe.ancestors().nth(3).is_some_and(|app| app.extension().is_some_and(|ext| ext == "app"))
+            }
+            // The AppImage file is what gets replaced and started again, not the binary unpacked from it.
+            Some(BundleType::AppImage) => std::env::var_os("APPIMAGE").is_some(),
+            bundle => bundle.is_some(),
+        }
+}
+
+/// Restarting cancels running work, as quitting does, and would cut an AI edit short.
+fn refuse_while_busy(app: &AppHandle) -> CmdResult<()> {
+    let state = app.state::<AppState>();
+    let host = state.session.lock().unwrap().host.clone();
+    if host.session.state().is_ok_and(|s| s.open_run.is_some())
+        || app.state::<crate::agent_panel::AgentPanel>().working()
+    {
+        return Err("UPDATE_BUSY: Updating restarts Nuzky. Wait for the AI to finish.".into());
+    }
+    if state.running_work().is_some() {
+        return Err("UPDATE_BUSY: Updating restarts Nuzky. Wait for the export or analysis to finish.".into());
+    }
+    Ok(())
+}
+
+fn save(app: &AppHandle) -> CmdResult<()> {
+    let host = app.state::<AppState>().session.lock().unwrap().host.clone();
+    host.session
+        .disconnect()
+        .map_err(|error| format!("UPDATE_SAVE: Nuzky didn't update, as it couldn't save your project: {error:#}"))
+}
+
+/// What happened, as the UI shows it. The code says whether trying again can help (`UPDATE_NETWORK`, `UPDATE_PASSWORD`,
+/// `UPDATE_FAILED`) or only the installer from GitHub (`UPDATE_NO_PACKAGE`, `UPDATE_SIGNATURE`, `UPDATE_FOLDER`).
+fn failure(error: UpdateError) -> String {
+    use UpdateError::*;
+    log::warn!("Update failed: {error}");
+    match error {
+        Minisign(_) | Base64(_) | SignatureUtf8(_) | SignedVersionMismatch { .. } | MissingSignedVersion => {
+            "UPDATE_SIGNATURE: The download isn't signed by Nuzky, so it wasn't installed. Download the new version \
+             from GitHub instead."
+                .into()
+        }
+        TargetNotFound(_) | TargetsNotFound(_) | InvalidUpdaterFormat | BinaryNotFoundInArchive => NO_PACKAGE.into(),
+        Reqwest(_) | Network(_) | ReleaseNotFound => {
+            "UPDATE_NETWORK: Couldn't download the update. Check your internet connection and try again.".into()
+        }
+        AuthenticationFailed | PackageInstallFailed | DebInstallFailed => {
+            "UPDATE_PASSWORD: The update wasn't installed. It needs your password; try again and enter it.".into()
+        }
+        // An AppImage in a folder the user can't change, or a macOS app the user can't replace.
+        Io(ref io) if io.kind() == std::io::ErrorKind::PermissionDenied && cfg!(unix) => FOLDER.into(),
+        TempDirNotOnSameMountPoint => FOLDER.into(),
+        PreviousAppNotRestored(path) => format!(
+            "UPDATE_FOLDER: The update failed, and the previous Nuzky is now at {}. Download the new version from \
+             GitHub.",
+            path.display()
+        ),
+        other => format!("UPDATE_FAILED: Couldn't install the update ({other}). Try again."),
+    }
+}
+
+const FOLDER: &str = if cfg!(target_os = "macos") {
+    "UPDATE_FOLDER: Nuzky can't replace itself where it is. Move it to Applications, or download the new version from \
+     GitHub."
+} else {
+    "UPDATE_FOLDER: Nuzky can't replace itself in its folder. Move the AppImage to a folder of yours, such as your home \
+     folder, or download the new version from GitHub."
+};
+
 #[tauri::command]
 pub fn open_release_page(app: AppHandle) -> CmdResult<()> {
-    app.opener().open_url(RELEASE_PAGE, None::<&str>).map_err(err)
+    open(&app, RELEASE_PAGE)
 }
 
 #[derive(Deserialize)]
@@ -238,6 +420,23 @@ mod tests {
         assert!(url.len() <= MAX_URL, "{}", url.len());
         let diagnostics = fields(&url).into_iter().find(|(k, _)| k == "diagnostics").unwrap().1;
         assert!(diagnostics.starts_with(&summary[0]) && diagnostics.lines().count() > 20, "{diagnostics}");
+    }
+
+    /// The key in tauri.conf.json is the one the release job signs with (`TAURI_SIGNING_PRIVATE_KEY`), so installed
+    /// copies accept its packages. The signature was made with that key over the text below.
+    #[test]
+    fn the_built_in_key_accepts_what_the_release_key_signed() {
+        use base64::Engine as _;
+        const SIGNATURE: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUZHgvakd3NWk0VVlqVEhNZ003WVg3QUs3VzJiWjNGbFRqSmRmTktPVWE4TmNHa3U4MDFXUklpbDR6aXBGR2VXYis2VUpvbTlnSUNrdURrei9GYnc5bWNFOEs4NnlKNFFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNDk5MDQ3CWZpbGU6cHJvb2YudHh0CXZlcnNpb246MC4xLjAtYWxwaGEKUVh0RDczVDE0eXZuV3hYT2JrOWF4bHExNENyOHVvajdGQzdFdDhMYWdjMWNPbHl1b3lZalNEWVQzKzJ2cmtUVnNtRnF0dmRiM2JBSjJXWlcwbXhlRGc9PQo=";
+        let decode =
+            |text: &str| String::from_utf8(base64::engine::general_purpose::STANDARD.decode(text).unwrap()).unwrap();
+        let config: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let updater = &config["plugins"]["updater"];
+        assert_eq!(updater["endpoints"], serde_json::json!([LATEST_JSON]));
+        let key = minisign_verify::PublicKey::decode(&decode(updater["pubkey"].as_str().unwrap())).unwrap();
+        let signature = minisign_verify::Signature::decode(&decode(SIGNATURE)).unwrap();
+        key.verify(b"Nuzky update packages are signed with this key.\n", &signature, false).unwrap();
+        assert!(key.verify(b"Nuzky update packages are signed with another key.\n", &signature, false).is_err());
     }
 
     fn check(json: &str, current: &str) -> Option<String> {

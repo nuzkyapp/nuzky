@@ -1,11 +1,15 @@
+import { Channel } from "@tauri-apps/api/core";
 import { create } from "zustand";
+import { useAgent } from "./agent";
 import { api, errorText } from "./api";
 import { useEditor } from "./store";
 
 /**
- * Whether a newer Nuzky was released. A check asks the backend, which reads only the version on
- * the latest GitHub release. Automatic checks run 10 s after start and then at most once a day,
- * also across launches, and say nothing when they fail; Check for updates always answers.
+ * Whether a newer Nuzky was released, and installing it. A check asks the backend, which reads only
+ * the version on the latest GitHub release. Automatic checks run 10 s after start and then at most
+ * once a day, also across launches, and say nothing when they fail; Check for updates always answers.
+ * Only Install and restart downloads anything: the backend installs the package when its signature
+ * matches the key built into Nuzky, and restarts.
  */
 type Updates = {
   /** This Nuzky's version. */
@@ -18,11 +22,15 @@ type Updates = {
   latest: string | null;
   /** A check in flight; one the user asked for shows until it answers. */
   checking: "auto" | "manual" | null;
+  /** Install and restart under way: the percentage downloaded, or null while the size is unknown; at 100 it installs. */
+  install: { percent: number | null } | null;
 };
 
 type Saved = { auto: boolean; checkedAt: number; latest: string | null; /** The version that checked; another one checks anew. */ by: string };
 
 const KEY = "nuzky.updates";
+/** The version being installed, so the restarted Nuzky can say it is the one. */
+const INSTALLING_KEY = "nuzky.updates.installing";
 const FIRST_CHECK_MS = 10_000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
@@ -39,7 +47,7 @@ function load(): Partial<Saved> {
 let checkedAt = 0;
 let started = false;
 
-export const useUpdates = create<Updates>(() => ({ version: "", enabled: false, auto: true, latest: null, checking: null }));
+export const useUpdates = create<Updates>(() => ({ version: "", enabled: false, auto: true, latest: null, checking: null, install: null }));
 
 function save() {
   const { version, auto, latest } = useUpdates.getState();
@@ -50,6 +58,9 @@ function save() {
 export function startUpdates(version: string, enabled: boolean) {
   if (started) return;
   started = true;
+  const installing = localStorage.getItem(INSTALLING_KEY);
+  localStorage.removeItem(INSTALLING_KEY);
+  if (installing === version) useEditor.getState().toast({ kind: "success", text: `Updated to Nuzky ${version}.` });
   const saved = load();
   const same = saved.by === version;
   checkedAt = same && Number.isFinite(saved.checkedAt) ? Number(saved.checkedAt) : 0;
@@ -81,7 +92,7 @@ export async function checkForUpdates(manual: boolean) {
     useUpdates.setState({ latest });
     if (asked()) {
       const toast = useEditor.getState().toast;
-      if (latest) toast({ kind: "info", text: `Nuzky ${latest} is available.`, action: { label: "Download", run: downloadUpdate } });
+      if (latest) toast({ kind: "info", text: `Nuzky ${latest} is available.`, action: { label: "Install and restart", run: () => void installUpdate() } });
       else toast({ kind: "success", text: `Nuzky ${version} is the latest version.` });
     }
   } catch (e) {
@@ -99,7 +110,57 @@ export function setAutoCheck(auto: boolean) {
   if (auto) checkIfDue();
 }
 
-/** Opens the latest release's page in the browser, where the installers are. */
+/** Why Install and restart cannot run now: restarting would cancel running work or cut an AI edit short. */
+export function installBlocked(): string | null {
+  const { aiRun, jobs } = useEditor.getState();
+  if (aiRun || useAgent.getState().status !== "idle") return "Updating restarts Nuzky. Wait for the AI to finish.";
+  // Preparing sound, a preview copy or a person outline starts again after the restart.
+  const work = Object.values(jobs).filter((j) => j.status === "running" && j.kind !== "audio" && j.kind !== "proxy" && j.kind !== "matte");
+  if (work.some((j) => j.kind === "export")) return "Updating restarts Nuzky. Wait for the export to finish.";
+  if (work.length) return `Updating restarts Nuzky. Wait for ${work[0].label.toLowerCase()} to finish.`;
+  return null;
+}
+
+/** Errors that trying again cannot fix; Download from GitHub can. */
+const FINAL = ["UPDATE_NO_PACKAGE", "UPDATE_SIGNATURE", "UPDATE_FOLDER"];
+
+/** Downloads and installs the newer version, then Nuzky restarts. A failure says why and offers GitHub's installers. */
+export async function installUpdate() {
+  const { latest, install } = useUpdates.getState();
+  if (!latest || install) return;
+  const toast = useEditor.getState().toast;
+  const blocked = installBlocked();
+  if (blocked) return toast({ kind: "warning", text: blocked });
+  const progress = new Channel<number>();
+  progress.onmessage = (percent) => useUpdates.getState().install && useUpdates.setState({ install: { percent } });
+  useUpdates.setState({ install: { percent: null } });
+  localStorage.setItem(INSTALLING_KEY, latest);
+  try {
+    // On success Nuzky restarts, so this page ends here.
+    await api.installUpdate(progress);
+  } catch (e) {
+    localStorage.removeItem(INSTALLING_KEY);
+    useUpdates.setState({ install: null });
+    const error = errorText(e);
+    const code = error.match(/^[A-Z_]+(?=:)/)?.[0] ?? "";
+    if (code === "CANCELLED") return;
+    const text = code ? error.slice(code.length + 1).trim() : `Couldn't install the update (${error}). Try again.`;
+    if (code === "UPDATE_LATEST") {
+      useUpdates.setState({ latest: null });
+      save();
+      return toast({ kind: "info", text });
+    }
+    if (code === "UPDATE_BUSY") return toast({ kind: "warning", text });
+    const download = { label: "Download", run: downloadUpdate };
+    toast(FINAL.includes(code) ? { kind: "error", text, action: download } : { kind: "error", text, action: { label: "Try again", run: () => void installUpdate() }, secondary: download });
+  }
+}
+
+export function cancelUpdate() {
+  void api.cancelUpdate();
+}
+
+/** Opens the latest release's page in the browser: what's new, and the installers. */
 export function downloadUpdate() {
   api.openReleasePage().catch((e) => useEditor.getState().toast({ kind: "error", text: `Couldn't open the download page: ${errorText(e)}` }));
 }
