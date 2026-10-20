@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use nuzky_engine::model::TextShadow;
+use nuzky_engine::model::{LetterCase, TextShadow};
 use nuzky_interchange::{ImportedTimeline, MediaClip, TextClip, TrackKind, Transform};
 
 use super::picture::{EDGE_US, MIN_ZOOM, SAMPLE_US};
@@ -201,11 +201,10 @@ fn picture(timeline: &ImportedTimeline, path: &Path, heard: &[&MediaClip]) -> Pi
 /// How most of the captions are drawn, by how many of them are.
 fn look(timeline: &ImportedTimeline, texts: &[&TextClip]) -> Option<CaptionLook> {
     let to_reel = timeline.size.map_or(1.0, |(w, h)| 1080.0 / w.min(h).max(1) as f32);
-    let mut looks: Vec<(CaptionLook, usize)> = Vec::new();
-    for text in texts {
-        let Some(style) = &text.style else { continue };
+    CaptionLook::most_common(texts.iter().filter_map(|text| {
+        let style = text.style.as_ref()?;
         let px = |v: f32| (v * text.transform.map_or(1.0, |t| t.scale) * to_reel).round();
-        let look = CaptionLook {
+        Some(CaptionLook {
             font: style.font.clone(),
             size: px(style.size),
             color: style.color.clone(),
@@ -221,15 +220,13 @@ fn look(timeline: &ImportedTimeline, texts: &[&TextClip]) -> Option<CaptionLook>
             }),
             letter_spacing: style.letter_spacing,
             line_spacing: style.line_spacing,
-        };
-        match looks.iter_mut().find(|(l, _)| *l == look) {
-            Some((_, n)) => *n += 1,
-            None => looks.push((look, 1)),
-        }
-    }
-    // The first seen wins a tie.
-    let most = looks.iter().map(|(_, n)| *n).max()?;
-    looks.into_iter().find(|(_, n)| *n == most).map(|(look, _)| look)
+            // An imported timeline does not carry these.
+            background: None,
+            highlight: None,
+            keywords: None,
+            letter_case: LetterCase::None,
+        })
+    }))
 }
 
 /// Where the clip's picture sits `at_us` from its start, between its keyframes.

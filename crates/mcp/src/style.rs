@@ -16,8 +16,8 @@ use anyhow::{Context, Result, bail, ensure};
 use nuzky_analysis::Word;
 use nuzky_analysis::style::doc::{self, Doc, OVERVIEW, RARE};
 use nuzky_analysis::style::{
-    self as learning, Alignment, Caption, Choice, Correction, Framing, Learned, Picture, Piece, Place, Rule, Source,
-    ZoomChange,
+    self as learning, Alignment, Caption, CaptionLook, Choice, Correction, Framing, Learned, Picture, Piece, Place,
+    Rule, Source, ZoomChange,
 };
 use nuzky_engine::effects::transform_at;
 use nuzky_engine::model::{Asset, AssetKind, ClipContent, Project};
@@ -1168,18 +1168,36 @@ pub fn project_evidence(project: &Project, path: &Path, transcripts: &Transcript
     }))
 }
 
-/// Captions from the Captions track; framing and zoom from the clips of the recording.
+/// Captions and their look from the Captions track; framing and zoom from the clips of the recording.
 fn project_picture(project: &Project, clips: &[&nuzky_engine::model::Clip]) -> Picture {
+    let to_reel = 1080.0 / project.canvas.width.min(project.canvas.height).max(1) as f32;
     let mut captions: Vec<Caption> = Vec::new();
     let mut heights: Vec<f32> = Vec::new();
+    let mut looks: Vec<CaptionLook> = Vec::new();
     for clip in project.tracks.iter().filter(|t| t.is_captions() && !t.hidden).flat_map(|t| &t.clips) {
-        let ClipContent::Text { text, transform, .. } = &clip.content else { continue };
+        let ClipContent::Text { text, style, transform, .. } = &clip.content else { continue };
         captions.push(Caption {
             start_us: clip.start_us,
             end_us: clip.end_us(),
             words: text.split_whitespace().count(),
         });
         heights.push(0.5 + transform.y);
+        // Half pixels, so Reel's 7.5 pixel outline stays as it is.
+        let px = |v: f32| (v * transform.scale * to_reel * 2.0).round() / 2.0;
+        looks.push(CaptionLook {
+            font: style.font_family.clone(),
+            size: px(style.font_size),
+            color: style.color.clone(),
+            bold: style.bold,
+            outline: (style.stroke_width > 0.0).then(|| (style.stroke_color.clone(), px(style.stroke_width))),
+            shadow: style.shadow.clone(),
+            letter_spacing: style.letter_spacing,
+            line_spacing: style.line_spacing,
+            background: style.background.clone(),
+            highlight: style.highlight.clone(),
+            keywords: style.keywords.clone(),
+            letter_case: style.letter_case,
+        });
     }
     captions.sort_by_key(|c| c.start_us);
     heights.sort_by(f32::total_cmp);
@@ -1225,7 +1243,7 @@ fn project_picture(project: &Project, clips: &[&nuzky_engine::model::Clip]) -> P
         }
     }
     zooms.sort_by_key(|z| z.start_us);
-    Picture { skipped: None, captions, caption_band, framing, zooms, look: None }
+    Picture { skipped: None, captions, caption_band, framing, zooms, look: CaptionLook::most_common(looks) }
 }
 
 /// A project to learn from as it was at one moment, with the AI runs before it, so what it
@@ -1897,12 +1915,25 @@ mod tests {
             keep_in_place: false,
             clips: Vec::new(),
         };
+        // The creator's look on three captions half again as large, on a canvas half a Reel's size; Reel on one.
+        let mine = serde_json::json!({"fontSize": 40.0, "color": "#ffe14d", "bold": true, "strokeWidth": 2.5,
+            "strokeColor": "#000000", "background": "#000000b3", "highlight": "#4ade80",
+            "keywords": {"color": "#ff4d4d", "pick": "last"}, "letterCase": "upper"});
+        (project.canvas.width, project.canvas.height) = (540, 960);
         for i in 0..4 {
             let mut clip = project.tracks[0].clips[0].clone();
             clip.id = format!("caption{i}");
-            (clip.start_us, clip.duration_us) = (i * 1_000_000, 1_000_000);
-            let transform = nuzky_engine::model::Transform { y: 0.15, ..Default::default() };
-            clip.content = serde_json::from_value(serde_json::json!({"type": "text", "text": "two words", "style": crate::params::reel_style(), "transform": transform})).unwrap();
+            (clip.start_us, clip.duration_us) = (1_000_000 + i * 500_000, 500_000);
+            let (style, scale) = if i == 1 {
+                (serde_json::to_value(crate::params::reel_style()).unwrap(), 1.0)
+            } else {
+                (mine.clone(), 1.5)
+            };
+            let transform = nuzky_engine::model::Transform { y: 0.15, scale, ..Default::default() };
+            clip.content = serde_json::from_value(
+                serde_json::json!({"type": "text", "text": "two words", "style": style, "transform": transform}),
+            )
+            .unwrap();
             captions.clips.push(clip);
         }
         project.tracks.push(captions);
@@ -1927,8 +1958,28 @@ mod tests {
         assert_eq!(times, [1_000_000, 1_500_000, 2_000_000]);
         let style = learning::learn(&[evidence.source()]);
         assert!(style.contains("## Spelling") && style.contains("| w00 | Nuzky | 1 |"), "{style}");
-        let rule = learning::learned(&[evidence.source()]).rules.into_iter().find(|r| r.title == "Spelling").unwrap();
+        let rules = learning::learned(&[evidence.source()]).rules;
+        let rule = rules.iter().find(|r| r.title == "Spelling").unwrap();
         assert_eq!(rule.summary, r#"Write "w00" as "Nuzky", "w01" as "Nuzky", "w02" as "Nuzky""#);
+        // The look most captions have, as build_captions takes it: sizes for a frame 1080 pixels across.
+        let captions = rules.iter().find(|r| r.title == "Captions").unwrap();
+        let row = &captions.settings.iter().find(|(name, _)| name == "build_captions style").unwrap().1;
+        let learned: nuzky_engine::model::TextStyle = serde_json::from_str(row).unwrap();
+        let expected = nuzky_engine::model::TextStyle {
+            font_size: 120.0,
+            stroke_width: 7.5,
+            ..serde_json::from_value(mine).unwrap()
+        };
+        assert_eq!(learned, expected, "{row}");
+        assert!(
+            captions.text.contains("bold in capitals, 120 pixels, #ffe14d with a #000000 outline 7.5 pixels"),
+            "{}",
+            captions.text
+        );
+        let before: learning::CaptionLook =
+            serde_json::from_str(r##"{"font":null,"size":95.0,"color":"#ffffff","bold":false,"outline":null}"##)
+                .unwrap();
+        assert!(before.background.is_none() && before.keywords.is_none(), "evidence from before still reads");
         drop(host);
         fs::remove_dir_all(dir).unwrap();
     }

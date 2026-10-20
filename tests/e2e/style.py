@@ -1,7 +1,7 @@
 """Your style: Learn my style compares a recording with the creator's cut and suggests rules; Accept all writes the
 same EDIT.md as `nuzky style learn` and the agent reads exactly it; the creator's own rules, a removed and a rejected
 rule, an edit by hand, Back to default and Versions all change what the agent reads, and nothing else does."""
-import json, subprocess, time
+import json, re, subprocess, time
 
 from pathlib import Path
 
@@ -30,6 +30,8 @@ SCRIPT = [
     ("Follow me and leave a comment below.", False, 0.5),
 ]
 ZOOM = 1.25
+# The captions' look the user picks in style_auto.
+LOOK = {'fontSize': 60.0, 'color': '#ffe14d', 'bold': True, 'strokeWidth': 0, 'background': '#000000b3', 'letterCase': 'upper'}
 OTHER = FIXTURES / 'reel-1.mp4'
 
 VIEW = 'return window.__nuzky.style.getState().view'
@@ -326,6 +328,7 @@ def style_auto(r):
         retake = next(i for i in range(1, start) if words[i]['text'].strip().lower() == 'so')
         bridge.call('apply_edits', {'run_id': run, 'request_id': 'cut', 'edits': [
             {'type': 'rippleDeleteRanges', 'ranges': [{'startUs': words[0]['start_us'], 'endUs': words[retake]['start_us']}]}]})
+        r.check('the agent captions its cut', bridge.call('build_captions', {'run_id': run})['caption_count'] > 0)
         bridge.call('end_run', {'run_id': run, 'action': 'keep'})
         exported = bridge.call('export_video', {'path': str(r.work / 'agent.mp4'), 'resolution': 720, 'fps': 30, 'quality': 'small'})
         r.check('the agent exports its cut', poll(bridge, exported, 180)['status'] == 'done')
@@ -349,12 +352,23 @@ def style_auto(r):
              for word, right in (('phone', 'iPhone'), ('videos', 'reels'), ('captions', 'subtitles'))]
     corrected = r.s.call(f"window.__nuzky.api.correctWords(arguments[0], arguments[1], {epoch})", shown['key'], fixes)
     r.check('the user cuts a side remark and corrects three words', corrected['ok'], corrected)
+    # And gives the captions their own look, half again as large, as picking a style in Captions does.
+    restyled = r.s.call("""window.__nuzky.store.getState().edit((p) => {
+        const track = p.tracks.find((t) => t.kind === 'text' && t.name === 'Captions');
+        return track && {type: 'restyleTrack', trackId: track.id, style: arguments[0], transform: {scale: 1.5}};
+    }).then((snap) => (snap ? 1 : 0))""", LOOK)
+    r.check('and restyles every caption', restyled == {'ok': True, 'value': 1}, restyled)
     r.check('10 s after the last edit Nuzky learns from it', wait(lambda: [s['kind'] for s in sources(r)] == ['project'], 25), sources(r))
     titles = [s['title'] for s in view(r)['suggestions']]
     r.check('it suggests rules, the corrected words among them', 'Spelling' in titles, titles)
     spelling = next(s for s in view(r)['suggestions'] if s['title'] == 'Spelling')
     r.check('Spelling quotes the corrections', any(m['line'].startswith('"phone') and '"iPhone' in m['line'] for m in spelling['moments']), spelling['moments'])
     r.check('and the style is unchanged until accepted', edit_md(r) is None)
+    canvas = r.s.run('return window.__nuzky.store.getState().snap.project.canvas')
+    size = LOOK['fontSize'] * 1.5 * 1080 / min(canvas['width'], canvas['height'])
+    captions = next((s for s in view(r)['suggestions'] if s['title'] == 'Captions'), None)
+    r.check('Captions says the look the user gave them, sized for a Reel',
+            captions and f"bold in capitals, {size:g} pixels, #ffe14d, on a #000000b3 box" in captions['text'], captions)
     note = "return window.__nuzky.store.getState().toasts.find((t) => t.text.startsWith('Learned from')) ?? null"
     toast = wait(lambda: r.s.run(note), 5)
     r.check('a toast says what was learned, with Review', toast and toast['action']['label'] == 'Review', toast)
@@ -366,11 +380,21 @@ def style_auto(r):
             many and all(shown.get(t) and not shown[t].startswith('Low') for t in many), shown)
     r.shot('learned-by-itself')
 
+    r.s.run(f"[...document.querySelectorAll('{PAGE} section[aria-label=\"Suggestion: Captions\"] button')].find((b) => b.textContent.includes('Accept')).click()")
+    row = lambda: re.search(r'^\| build_captions style \| (\{.*\}) \|$', edit_md(r) or '', re.M)
+    if not r.check('Accept writes the look as the style build_captions takes', wait(row, 10), edit_md(r)):
+        return
+    style = json.loads(row()[1])
+    r.check('the look is the user\'s, sized for a frame 1080 pixels across', style == {**LOOK, 'fontSize': size}, style)
+
     learned_at = sources(r)[0]['atMs']
     bridge = Bridge(r, r.saved_project())
     try:
         run = bridge.call('begin_run', {'label': 'Discarded'})['run_id']
         bridge.call('apply_edits', {'run_id': run, 'request_id': 'cut', 'edits': [{'type': 'rippleDeleteRanges', 'ranges': [{'startUs': 0, 'endUs': 2_000_000}]}]})
+        made = bridge.call('build_captions', {'run_id': run, 'style': style})
+        clip = next(c for t in bridge.call('get_state', {'clip_ids': made['created'][:1]})['tracks'] for c in t['clips'])
+        r.check('build_captions draws new captions in it', {k: clip['content']['style'].get(k) for k in style} == style, clip)
         bridge.call('end_run', {'run_id': run, 'action': 'discard'})
     finally:
         bridge.close()

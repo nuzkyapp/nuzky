@@ -3,6 +3,7 @@
 
 use std::fmt::Write as _;
 
+use nuzky_engine::model::{KeywordPick, LetterCase};
 use serde::{Deserialize, Serialize};
 
 use crate::Word;
@@ -965,7 +966,7 @@ fn captions(edits: &[Edit], say: &dyn Fn(&[Example]) -> String) -> Option<Rule> 
         let font = look.font.as_deref().unwrap_or("the editor's default font");
         let weight = if look.bold { " bold" } else { "" };
         let outline =
-            look.outline.as_ref().map_or(String::new(), |(c, w)| format!(" with a {c} outline {w:.0} pixels wide"));
+            look.outline.as_ref().map_or(String::new(), |(c, w)| format!(" with a {c} outline {w} pixels wide"));
         let shadow = look.shadow.as_ref().map_or(String::new(), |s| {
             format!(
                 ", a {} shadow at {:.0} %, blur {:.0} %, distance {:.0}, at {:.0}°",
@@ -976,7 +977,27 @@ fn captions(edits: &[Edit], say: &dyn Fn(&[Example]) -> String) -> Option<Rule> 
                 s.angle
             )
         });
-        let said = format!("{font}{weight}, {:.0} pixels, {}{outline}{shadow}", look.size, look.color);
+        let case = match look.letter_case {
+            LetterCase::None => "",
+            LetterCase::Upper => " in capitals",
+            LetterCase::Lower => " in small letters",
+            LetterCase::Title => " with each word capitalised",
+        };
+        let background = look.background.as_ref().map_or(String::new(), |b| format!(", on a {b} box"));
+        let highlight = look.highlight.as_ref().map_or(String::new(), |h| format!(", the word being said in {h}"));
+        let keywords = look.keywords.as_ref().map_or(String::new(), |k| {
+            let which = match k.pick {
+                KeywordPick::Emphasis => "numbers and words said louder",
+                KeywordPick::First => "first word",
+                KeywordPick::Last => "last word",
+                KeywordPick::Longest => "longest word",
+            };
+            format!(", the {which} in {}", k.color)
+        });
+        let said = format!(
+            "{font}{weight}{case}, {} pixels, {}{outline}{shadow}{background}{highlight}{keywords}",
+            look.size, look.color
+        );
         let at = out.find("Times in the examples").unwrap_or(out.len());
         out.insert_str(at, &format!("They are drawn in {said}, on a frame 1080 pixels across its shorter side. "));
         let mut style = serde_json::json!({"fontSize": look.size, "color": look.color, "bold": look.bold});
@@ -999,6 +1020,17 @@ fn captions(edits: &[Edit], say: &dyn Fn(&[Example]) -> String) -> Option<Rule> 
             if value != 0.0 {
                 style[key] = hundredths(value).into();
             }
+        }
+        for (key, value) in [("background", &look.background), ("highlight", &look.highlight)] {
+            if let Some(value) = value {
+                style[key] = value.clone().into();
+            }
+        }
+        if let Some(keywords) = &look.keywords {
+            style["keywords"] = serde_json::json!(keywords);
+        }
+        if !look.letter_case.is_none() {
+            style["letterCase"] = serde_json::json!(look.letter_case);
         }
         settings.push(("build_captions style".into(), style.to_string()));
         choices.push(Choice::text("Look", said));

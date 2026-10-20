@@ -5,7 +5,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, ensure};
 use nuzky_engine::media::{VideoDecoder, orient};
-use nuzky_engine::model::{Asset, AssetKind, TextShadow};
+use nuzky_engine::model::{Asset, AssetKind, Keywords, LetterCase, TextShadow};
 use serde::{Deserialize, Serialize};
 
 use super::{Alignment, Piece};
@@ -76,6 +76,31 @@ pub struct CaptionLook {
     pub letter_spacing: f32,
     #[serde(default)]
     pub line_spacing: f32,
+    /// `#rrggbbaa` box behind the text.
+    #[serde(default)]
+    pub background: Option<String>,
+    /// `#rrggbb` fill of the word being spoken.
+    #[serde(default)]
+    pub highlight: Option<String>,
+    #[serde(default)]
+    pub keywords: Option<Keywords>,
+    #[serde(default)]
+    pub letter_case: LetterCase,
+}
+
+impl CaptionLook {
+    /// The look most of `looks` are; the first seen wins a tie.
+    pub fn most_common(looks: impl IntoIterator<Item = CaptionLook>) -> Option<CaptionLook> {
+        let mut counted: Vec<(CaptionLook, usize)> = Vec::new();
+        for look in looks {
+            match counted.iter_mut().find(|(l, _)| *l == look) {
+                Some((_, n)) => *n += 1,
+                None => counted.push((look, 1)),
+            }
+        }
+        let most = counted.iter().map(|(_, n)| *n).max()?;
+        counted.into_iter().find(|(_, n)| *n == most).map(|(look, _)| look)
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
