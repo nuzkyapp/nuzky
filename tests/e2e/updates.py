@@ -563,14 +563,17 @@ def install(r, server, version):
     r.check('Restart to update saves the project and leaves the restarted Nuzky where to go on, without installing again',
             button and note == {'from': version, 'view': 'editor', 'draft': 'Cut the long pauses'}
             and json.loads(r.saved_project().read_text())['name'] == 'Survives the update' and server.package_requests == asked + 1, (button, note))
-    # Started as the newer version: this debug build stays the same, so the note says it came from an older one.
+    # Started as the newer version: this debug build stays the same, so the note and the last check say they came from
+    # an older one.
     r.note.write_text(json.dumps(dict(note, **{'from': '0.0.9'})))
-    r.s.run("window.__nuzky.agent.setState({draft: ''});" + RELOAD)
+    r.s.run("const s = JSON.parse(localStorage.getItem('nuzky.updates')); s.by = '0.0.9';"
+            "localStorage.setItem('nuzky.updates', JSON.stringify(s)); window.__nuzky.agent.setState({draft: ''});" + RELOAD)
     wait(lambda: r.s.run(LOADED, retries=3), 30)
     updated = {'kind': 'success', 'text': f'Updated to Nuzky {version}.'}
-    r.check('the restarted Nuzky says it updated and opens on the editor with the project and the draft',
+    r.check('the restarted Nuzky says it updated and opens on the editor with the project and the draft, offering no update',
             wait(lambda: updated in (toasts(r) or []), 5) and r.s.run(VIEW) == 'editor' and r.s.run(NAME) == 'Survives the update'
-            and r.s.run(DRAFT) == 'Cut the long pauses' and not r.note.exists(), (toasts(r), r.s.run(VIEW), r.s.run(DRAFT)))
+            and r.s.run(DRAFT) == 'Cut the long pauses' and not r.note.exists() and not r.s.run(EDITOR_BUTTON),
+            (toasts(r), r.s.run(VIEW), r.s.run(DRAFT), r.s.run(EDITOR_BUTTON)))
     r.shot('updated')
     r.s.run(RELOAD)
     wait(lambda: r.s.run(LOADED, retries=3), 30)
