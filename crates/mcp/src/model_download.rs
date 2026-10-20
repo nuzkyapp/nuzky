@@ -45,8 +45,9 @@ static CHILD_SPAWN: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
-/// A connection that sends nothing for this long fails; the next attempt resumes the partial file.
-const STALL_TIMEOUT: Duration = if cfg!(test) { Duration::from_millis(500) } else { Duration::from_secs(30) };
+/// A connection that sends nothing for this long fails; the next attempt resumes the partial file. GitHub's macOS
+/// runners pause a test process for hundreds of milliseconds, so tests get well over that.
+const STALL_TIMEOUT: Duration = if cfg!(test) { Duration::from_secs(4) } else { Duration::from_secs(30) };
 /// Bounds how long an abandoned request thread can stay blocked. Slower downloads continue
 /// with another range request.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
@@ -429,6 +430,7 @@ mod tests {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             let url = format!("http://{}/model.bin", listener.local_addr().unwrap());
             let (release, held) = std::sync::mpsc::channel::<()>();
+            let (reached, requested) = std::sync::mpsc::channel::<()>();
             let server = scripted(
                 listener,
                 vec![
@@ -436,6 +438,7 @@ mod tests {
                         if sends_part {
                             write!(socket, "HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\nmode").unwrap();
                         }
+                        reached.send(()).unwrap();
                         let _ = held.recv();
                     }),
                     Box::new(resume),
@@ -446,16 +449,15 @@ mod tests {
             let worker =
                 std::thread::spawn(move || download(&worker_url, &worker_path, INTEGRITY, &worker_cancel, |_| {}));
             let part = sidecar(&path, ".part");
+            requested.recv_timeout(Duration::from_secs(10)).expect("the server never got the first request");
             if sends_part {
                 wait_until(|| std::fs::read(&part).is_ok_and(|bytes| bytes == b"mode"));
-            } else {
-                std::thread::sleep(Duration::from_millis(200));
             }
             cancel.store(true, Ordering::Relaxed);
             let began = Instant::now();
             let error = worker.join().unwrap().unwrap_err();
             assert!(error.to_string().starts_with("CANCELLED:"), "{error:#}");
-            assert!(began.elapsed() < Duration::from_secs(1), "cancel took {:?}", began.elapsed());
+            assert!(began.elapsed() < STALL_TIMEOUT / 2, "cancel took {:?}", began.elapsed());
             release.send(()).unwrap();
             download(&url, &path, INTEGRITY, &AtomicBool::new(false), |_| {}).unwrap();
             let heads = server.join().unwrap();
