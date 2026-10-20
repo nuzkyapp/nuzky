@@ -790,21 +790,29 @@ fn pauses(edits: &[Edit], say: &dyn Fn(&[Example]) -> String) -> Option<Rule> {
 }
 
 /// How fast the cut plays the speech it keeps whole, by the length of its words alone, so shorter
-/// pauses do not count. A rule only when the creator speeds speech up.
+/// pauses do not count. A rule only when the creator speeds speech up. Only a project or a timeline
+/// says exactly where each word plays: matching by sound maps the recording to the cut one to one.
+/// A word a piece's edge cuts into is left out, as it lost time without playing faster.
 fn pace(edits: &[Edit], say: &dyn Fn(&[Example]) -> String) -> Option<Rule> {
     let mut speeds: Vec<f64> = Vec::new();
     let mut faster: Vec<(f64, Example)> = Vec::new();
     for edit in edits {
-        if edit.words.is_empty() {
+        if edit.words.is_empty() || edit.source.places.is_none() {
             continue;
         }
+        let pieces = &edit.source.alignment.pieces;
         for (from, to) in sentences(edit, 0, edit.words.len() - 1) {
             if to - from < 3 || !(from..=to).all(|k| edit.kept(k)) {
                 continue;
             }
             let (recorded, played) = edit.words[from..=to]
                 .iter()
-                .filter_map(|w| w.cut.map(|(_, start, end)| (w.word.end_us - w.word.start_us, end - start)))
+                .filter_map(|w| {
+                    let (piece, start, end) = w.cut?;
+                    let piece = pieces.get(piece)?;
+                    (piece.start_us < start && end < piece.end_us)
+                        .then_some((w.word.end_us - w.word.start_us, end - start))
+                })
                 .fold((0i64, 0i64), |(r, p), (a, b)| (r + a, p + b));
             if recorded <= 0 || played <= 0 {
                 continue;
@@ -845,7 +853,8 @@ fn pace(edits: &[Edit], say: &dyn Fn(&[Example]) -> String) -> Option<Rule> {
         summary: format!("Play speech at {speed:.2}x"),
         text: out,
         settings: vec![("Speech speed".into(), format!("{speed:.2}"))],
-        choices: vec![Choice::number("Speech speed", format!("{speed:.2}"), speed, 0.05)],
+        // Compared by how many percent faster, so 1.10x and 1.25x are different choices.
+        choices: vec![Choice::number("Speech speed", format!("{speed:.2}"), ((speed - 1.0) * 100.0).round(), 5.0)],
         moments,
     })
 }

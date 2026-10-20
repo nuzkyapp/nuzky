@@ -1874,27 +1874,42 @@ mod tests {
     #[test]
     fn speech_the_creator_speeds_up_teaches_its_speed_and_shorter_pauses_alone_do_not() {
         let (dir, host) = talk();
-        host.session.edit(cut(5, 0), None, Default::default()).unwrap();
+        // Every sentence's first word loses 150 ms with the silence before it, and the last sentence goes.
+        let ranges: Vec<_> = (0..5)
+            .map(|s| serde_json::json!({"startUs": 900_000 + s * 5_000_000, "endUs": 1_150_000 + s * 5_000_000}))
+            .chain([serde_json::json!({"startUs": 25_900_000, "endUs": 27_900_000})])
+            .collect();
+        let trim = serde_json::from_value(serde_json::json!({"type": "rippleDeleteRanges", "ranges": ranges})).unwrap();
+        host.session.edit(vec![trim], None, Default::default()).unwrap();
         let path = dir.join("talk.nuzky");
-        let pace = |host: &Host| {
+        let pace = |speed: Option<f64>| {
+            if let Some(speed) = speed {
+                let clips = host.session.state().unwrap().project.tracks[0].clips.clone();
+                let edits = clips
+                    .iter()
+                    .map(|c| {
+                        serde_json::from_value(
+                            serde_json::json!({"type": "updateClip", "clipId": c.id, "speed": speed}),
+                        )
+                        .unwrap()
+                    })
+                    .collect();
+                host.session.edit(edits, None, Default::default()).unwrap();
+            }
             let evidence =
                 project_evidence(&host.session.state().unwrap().project, &path, &host.transcripts).unwrap().unwrap();
             learning::learned(&[evidence.source()]).rules.into_iter().find(|r| r.title == "Pace")
         };
-        assert!(pace(&host).is_none(), "a cut that only drops a sentence plays speech as recorded");
-        let clips: Vec<String> =
-            host.session.state().unwrap().project.tracks[0].clips.iter().map(|c| c.id.clone()).collect();
-        let faster = clips
-            .iter()
-            .map(|id| {
-                serde_json::from_value(serde_json::json!({"type": "updateClip", "clipId": id, "speed": 1.2})).unwrap()
-            })
-            .collect();
-        host.session.edit(faster, None, Default::default()).unwrap();
-        let rule = pace(&host).expect("sped up speech is a rule");
+        assert!(pace(None).is_none(), "words cut into at the edges and a dropped sentence play as recorded");
+        let rule = pace(Some(1.2)).expect("sped up speech is a rule");
         assert_eq!(rule.summary, "Play speech at 1.20x");
         assert_eq!(rule.settings, [("Speech speed".to_owned(), "1.20".to_owned())]);
         assert!(rule.text.contains("5 of 5 sentences the cut kept whole play faster"), "{}", rule.text);
+        let slightly = pace(Some(1.1)).unwrap();
+        assert_eq!(slightly.summary, "Play speech at 1.10x");
+        let more = pace(Some(1.25)).unwrap();
+        assert!(!learning::Rule::same(&slightly.choices, &more.choices), "1.10x and 1.25x are different choices");
+        assert!(learning::Rule::same(&rule.choices, &more.choices), "1.20x and 1.25x are the same");
         drop(host);
         fs::remove_dir_all(dir).unwrap();
     }
