@@ -428,6 +428,8 @@ def install(r, server, version):
     wait(lambda: r.s.run(IN_MENU), 3)
     r.key('Enter')
     progress = wait(lambda: (p := r.s.run(PROGRESS)) and re.search(r'\d%', p['text']) and p, 10)
+    # The menu passes the focus on in the frame after it closes, which on macOS can come after the first percentage.
+    progress = wait(lambda: (p := r.s.run(PROGRESS)) and p['stopFocused'] and p, 1) or progress
     r.check('Update from the keyboard downloads in the background, with its percentage and Stop, which has the focus',
             progress and re.fullmatch(r'Downloading update\d{1,2}%Stop', progress['text']) and progress['stopFocused'], progress)
     r.shot('update-downloading-editor')
@@ -453,6 +455,7 @@ def install(r, server, version):
     server.pace = 0.04
     from_row(r, 'Update')
     downloading = wait(lambda: re.fullmatch(r'Downloading\d{1,2}%', row(r).get('text', '')) and r.s.run(ROW_PROGRESS), 10)
+    downloading = wait(lambda: (p := r.s.run(ROW_PROGRESS)) and p['focused'] and p, 1) or downloading
     r.check('on the home screen the sidebar foot shows the download with its percentage beside its Stop, also with the row focused after the menu',
             downloading and downloading['focused'] and re.fullmatch(r'Downloading\d{1,2}%', downloading['text']) and not downloading['cut']
             and downloading['percentShown'] and downloading['stopShown'] and downloading['apart'], (row(r), downloading))
@@ -620,6 +623,8 @@ def install(r, server, version):
     r.s.run("document.getElementById('bug-report-text').focus()")
     for key in 'the sound is late':
         press('space' if key == ' ' else key)
+    # On macOS the page gets the keys a moment after they are pressed.
+    wait(lambda: r.s.run(BUG_TEXT) == 'the sound is late', 5)
     typed, stage = r.s.run(BUG_TEXT), (r.s.run(INSTALL) or {}).get('stage')
     ready = wait(lambda: (r.s.run(INSTALL) or {}).get('stage') == 'ready', 30)
     r.check('the update finished downloading while the user typed in the dialog', typed == 'the sound is late' and stage == 'downloading' and ready, (typed, stage))
@@ -644,11 +649,16 @@ def install(r, server, version):
     progress = wait(lambda: (p := r.s.run(PROGRESS)) and p['text'] == 'Installing update…' and p, 10)
     r.check('Restart to update installs, saying so in place of the button, with nothing to choose', progress and progress['stop'] is None, progress)
     r.shot('installing')
+    r.s.run("window.__keys = []; addEventListener('keydown', (e) => __keys.push(e.key), true)")
     for key in ('Delete', 's', 'BackSpace', 'q'):
         press(key)
+    # An edit they made would land a moment after them.
+    wait(lambda: len(r.s.run('return __keys')) == 4, 5)
     time.sleep(1)
+    keys = r.s.run('return __keys')
     r.check('while it installs, Delete, S (split), Backspace and Q (delete left) change nothing in the project',
-            [c['id'] for c in r.track()] == clips and r.s.run(REVISION) == revision, ([c['id'] for c in r.track()], clips, r.s.run(REVISION), revision))
+            keys == ['Delete', 's', 'Backspace', 'q'] and [c['id'] for c in r.track()] == clips and r.s.run(REVISION) == revision,
+            (keys, [c['id'] for c in r.track()], clips, r.s.run(REVISION), revision))
     close_window()
     closing = wait(lambda: next((t for t in r.s.run(SHOWN, retries=3) or [] if t['text'].startswith('Installing the update')), None), 5)
     r.check('closing the window meanwhile neither quits nor leaves the editor, and says why',

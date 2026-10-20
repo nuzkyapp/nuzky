@@ -193,15 +193,22 @@ fn handle(app: &tauri::AppHandle, method: &str, path: &str, body: &Value) -> Res
         ("GET", "screenshot") => screenshot(&window),
         ("POST", "window/rect") => {
             if let (Some(width), Some(height)) = (body["width"].as_f64(), body["height"].as_f64()) {
-                window.set_size(LogicalSize::new(width, height))?;
-                // AppKit resizes the page in more than one step and the app closes its menus on each, so the
-                // answer waits until the page has its new size and no resize for a moment, as under gamescope.
-                let settled = format!(
-                    "(() => {{ if (window.__nuzkyResizedAt === undefined) {{ window.__nuzkyResizedAt = performance.now();
-                        addEventListener('resize', () => {{ window.__nuzkyResizedAt = performance.now(); }}); }}
-                        return innerWidth === {width} && innerHeight === {height} && performance.now() - window.__nuzkyResizedAt > 300; }})()"
-                );
+                // AppKit resizes the page in more than one step and the app closes its menus on each. The page has
+                // its new width a moment before its resize event, which the app's layout follows, so the answer
+                // waits until a resize event saw the new size and none followed for a moment, as under gamescope.
                 let deadline = Instant::now() + Duration::from_secs(5);
+                evaluate(
+                    &window,
+                    "if (window.__nuzkyResized === undefined) {
+                        const seen = () => { window.__nuzkyResized = {width: innerWidth, height: innerHeight, at: performance.now()}; };
+                        seen(); addEventListener('resize', seen); }",
+                    deadline,
+                )?;
+                window.set_size(LogicalSize::new(width, height))?;
+                let settled = format!(
+                    "(() => {{ const seen = window.__nuzkyResized;
+                        return seen.width === {width} && seen.height === {height} && performance.now() - seen.at > 300; }})()"
+                );
                 while evaluate(&window, &settled, deadline)? != "true" && Instant::now() < deadline {
                     std::thread::sleep(Duration::from_millis(50));
                 }
@@ -458,9 +465,12 @@ fn key_code(key: &str) -> Result<(u16, String)> {
         "Return" => special(36, '\r'),
         "Tab" => special(48, '\t'),
         "space" => special(49, ' '),
+        // A Mac's Delete key is Backspace; Delete is its forward delete, Fn+Delete on a laptop.
+        "BackSpace" => special(51, '\u{7f}'),
         "Escape" => special(53, '\u{1b}'),
         "F8" => special(100, '\u{f70b}'),
         "Home" => special(115, '\u{f729}'),
+        "Delete" => special(117, '\u{f728}'),
         "End" => special(119, '\u{f72b}'),
         "Right" => special(124, '\u{f703}'),
         "Down" => special(125, '\u{f701}'),
