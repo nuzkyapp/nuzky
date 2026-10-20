@@ -190,7 +190,7 @@ def connect(r):
             gemini_entry == {'command': entry['command'], 'args': entry['args']}
             and config == json.loads(MCP) and gemini.startswith(MCP.removesuffix('\n  }\n}\n') + ','), gemini)
     settings = (folder / '.gemini/antigravity-cli/settings.json').read_text()
-    r.check("Gemini's settings keep every other byte and gain only mcp(nuzky/*)",
+    r.check("Gemini's settings keep every other setting as written and gain only mcp(nuzky/*)",
             settings == SETTINGS.replace('["command(git)"]', '["command(git)", "mcp(nuzky/*)"]'), settings)
     for relative, original in (('.gemini/config/mcp_config.json', MCP), ('.gemini/antigravity-cli/settings.json', SETTINGS)):
         path = folder / relative

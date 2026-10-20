@@ -56,7 +56,6 @@ const ROW_ICON = {
   failed: <AlertCircle size={14} className="mt-px text-danger" />,
 };
 
-/** A step of a Connect, as the AI panel's steps. */
 function Row({ icon, text, detail, title }: { icon: keyof typeof ROW_ICON; text: string; detail?: string; title?: string }) {
   const failed = icon === "failed";
   return (

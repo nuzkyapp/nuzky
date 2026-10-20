@@ -8,7 +8,6 @@ import type { AgentAccess } from "../../lib/types";
 import { Button } from "../ui";
 import { AskGemini, Command, ConnectRows, GUIDE, GeminiWhy, INSTALL, MAC, PASTE, TERMINAL, connectAgent, type Run } from "../setup/agentConnect";
 
-/** One numbered step: its number, or a check once done, the title and what it needs now. */
 function Step({ n, title, state, done, current, action, children }: { n: number; title: string; state?: string; done: boolean; current: boolean; action?: ReactNode; children?: ReactNode }) {
   return (
     <li className="grid grid-cols-[20px_minmax(0,1fr)] gap-x-2.5">

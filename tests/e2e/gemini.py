@@ -5,11 +5,10 @@ that entry edits the open project live, and the panel says so while it does."""
 import json, time
 from pathlib import Path
 
+from e2e.connect import MCP, SETTINGS
 from e2e.harness import Bridge, flow, press, wait, webdriver
 
 HERE = Path(__file__).parent
-MCP = '{\n  "mcpServers": {\n    "other": {\n      "command": "other-server",\n      "args": ["--x"]\n    }\n  }\n}\n'
-SETTINGS = '{\n  "theme": "dark",\n  "permissions": {\n    "allow": ["command(git)"],\n    "deny": ["mcp(other/*)"]\n  }\n}\n'
 GUIDE = """const a = document.querySelector('aside[aria-label=AI]');
 const steps = a && [...a.querySelectorAll('ol[aria-label="How to use Gemini"] > li')];
 return a && {text: a.innerText, title: a.querySelector('h3')?.textContent ?? null, focus: document.activeElement?.textContent ?? null,
