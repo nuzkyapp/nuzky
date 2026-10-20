@@ -1,10 +1,11 @@
 """Get set up: one dialog with the setup steps side by side and whether each is done or skipped, only the steps that
 are built. The first start's Get set up and the home sidebar's row open it, the keyboard moves through the steps,
 Skip moves on, and closing, also quitting Nuzky, loses neither the steps' states nor the step shown."""
-import subprocess, time
+import time
 
 from e2e.corrections import Hands
-from e2e.harness import FIXTURES, MACOS, Session, flow, press, start_driver, stop, wait
+from e2e.diagnostics import CRASHED, TOASTS, app_pid
+from e2e.harness import FIXTURES, MACOS, Session, close_window, leave_editor, flow, press, wait
 from e2e.home import FIRST_RUN_TEXT, OPEN_VIDEO, make, resize
 
 TITLES = ['Captions model', 'Face and person models', 'Music from YouTube', 'Connect your AI']
@@ -71,16 +72,16 @@ def row(r):
 
 def relaunch(r):
     """Starts the app again, with r.env as it is now."""
+    leave_editor(r)
+    close_window()
+    r.check('the window closes and Nuzky quits', wait(lambda: (r.app.poll() is not None) if MACOS else app_pid(r) is None, 15))
     r.s.close()
-    if not MACOS:
-        # The old app has to be gone before WebKitWebDriver stops and a new one starts.
-        wait(lambda: not subprocess.run(['pgrep', '-P', str(r.driver.pid)], capture_output=True).stdout, 10)
-        stop(r.driver)
-        start_driver(r)
     r.s = Session()
     if not wait(lambda: r.s.run('return !!window.__nuzky?.store.getState().snap', retries=3), 60):
         raise RuntimeError('the app did not start again')
     time.sleep(1)
+    r.check('after quitting normally the next start says nothing about a crash',
+            all(t['text'] != CRASHED for t in r.s.run(TOASTS)), r.s.run(TOASTS))
 
 
 @flow('setup', 'Get set up shows the built setup steps with their states; the first start and the sidebar open it, the keyboard '

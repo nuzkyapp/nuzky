@@ -44,9 +44,12 @@ def warm_hue(rgb):
 
 def type_value(r, label, value):
     """Types into an Adjust row's number field and confirms with Enter, as a person does."""
+    r.s.run(f"document.querySelector('aside[aria-label=Inspector] input[aria-label=\"{label} value\"]').focus()")
     r.s.run(f"document.querySelector('aside[aria-label=Inspector] input[aria-label=\"{label} value\"]').select()")
     for key in str(value):
         press(key)
+    typed = lambda: r.s.run(f"return document.querySelector('aside[aria-label=Inspector] input[aria-label=\"{label} value\"]').value")
+    r.check(f'{label} holds the typed text before Enter', wait(lambda: typed() == str(value), 3), typed())
     press('Return')
 
 

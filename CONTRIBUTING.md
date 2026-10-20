@@ -29,13 +29,13 @@ The first build compiles FFmpeg bindings, wgpu and whisper.cpp; compiling the te
 The full local gate also needs the tools for the UI flows. On Fedora or Nobara:
 
 ```sh
-sudo dnf install gamescope webkitgtk6.0 espeak-ng python3-pillow python3-xlib
+sudo dnf install gamescope webkitgtk6.0 espeak-ng python3-pillow python3-xlib yt-dlp
 ```
 
 On macOS, besides the build dependencies from [docs/BUILDING.md](docs/BUILDING.md), it needs:
 
 ```sh
-brew install flock espeak-ng ffmpeg-full
+brew install flock espeak-ng ffmpeg-full yt-dlp
 python3 -m pip install --user Pillow numpy
 ```
 

@@ -84,9 +84,12 @@ def saved_style(r):
 
 def type_value(r, label, value):
     """Types into a property row's number field and confirms with Enter, as a person does."""
+    r.s.run(f"document.querySelector('{SECTION} input[aria-label=\"{label} value\"]').focus()")
     r.s.run(f"document.querySelector('{SECTION} input[aria-label=\"{label} value\"]').select()")
     for key in str(value):
         press(key)
+    typed = lambda: r.s.run(f"return document.querySelector('{SECTION} input[aria-label=\"{label} value\"]').value")
+    r.check(f'{label} holds the typed text before Enter', wait(lambda: typed() == str(value), 3), typed())
     press('Return')
 
 

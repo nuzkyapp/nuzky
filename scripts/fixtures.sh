@@ -15,8 +15,8 @@ shared=${NUZKY_DEPS:-$HOME/.cache/nuzky/deps}/fixtures
 mkdir -p "$out/engine-evidence" "$models" "$shared"
 # An interrupted run leaves none of its temporary files behind.
 trap 'find "$out" "$shared" \( -name ".part-$$-*" -o -name "*.part.$$" \) -delete 2>/dev/null' EXIT
-for tool in ffmpeg espeak-ng curl sha256sum; do
-  command -v "$tool" >/dev/null || { echo "fixtures: $tool is required" >&2; exit 1; }
+for tool in ffmpeg espeak-ng yt-dlp curl sha256sum; do
+  command -v "$tool" >/dev/null || { echo "fixtures: $tool is required; install the gate tools listed in CONTRIBUTING.md" >&2; exit 1; }
 done
 
 # A clone shares disk blocks until one side changes; a hard link where the file system cannot clone.

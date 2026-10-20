@@ -762,12 +762,15 @@ def ai_panel_chats(r):
     check('ArrowDown focuses the cut chat', r.s.run('return document.activeElement?.innerText') == r.s.run(rows)[1])
     press('Return')
     check('Enter reopens the cut chat with its messages, run card, date and Claude Code, without Undo',
-          wait(lambda: panel(r) and cut in panel(r)['text'] and 'run' in agent(r)['kinds'], 10)
-          and 'Hotovo.' in panel(r)['text'] and 'Cut out 1 passage, 2.0 s in total' in panel(r)['text']
-          and 'Hello there' not in panel(r)['text'] and r.s.run("""const p = document.querySelector('aside[aria-label=AI]');
-              return !!p.querySelector('[role=separator]')?.textContent.trim()
+          wait(lambda: r.s.run("""const p = document.querySelector('aside[aria-label=AI]');
+              if (!p) return false;
+              const a = window.__nuzky.agent.getState(), text = p.innerText;
+              return !p.querySelector('ul[aria-label="Past chats"]') && text.includes(arguments[0])
+                && a.items.some((i) => i.kind === 'run') && text.includes('Hotovo.')
+                && text.includes('Cut out 1 passage, 2.0 s in total') && !text.includes('Hello there')
+                && !!p.querySelector('[role=separator]')?.textContent.trim()
                 && ![...p.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Undo')
-                && window.__nuzky.agent.getState().agent === 'claude';"""), panel(r)['text'])
+                && a.agent === 'claude';""", cut), 10), panel(r)['text'])
     r.shot('reopened')
     check('the reopened chat becomes the one last used, first in the list',
           wait(lambda: r.s.run("const a = window.__nuzky.agent.getState(); return a.chats?.[0]?.id === a.chat"), 5),
@@ -790,7 +793,9 @@ def ai_panel_chats(r):
     check('the app starts again with the project',
           wait(lambda: r.s.run('return !!window.__nuzky?.store.getState().snap', retries=3), 60))
     r.s.run("window.__nuzky.store.setState({view: 'editor'})")
-    if not panel(r):
+    ai_button = "document.querySelector('header button[title*=\"AI (Ctrl+J)\"]')"
+    check('the editor is ready after restart', wait(lambda: r.s.run(f'return !!{ai_button}'), 10))
+    if r.s.run(f"return {ai_button}.getAttribute('aria-pressed')") != 'true':
         r.s.run('document.body.focus()')
         r.key('j', ctrlKey=True)
     check('restart automatically reopens the last continued chat with Hello again, the original cut and nothing lost',

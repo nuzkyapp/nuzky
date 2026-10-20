@@ -12,6 +12,7 @@ ROWS = "[...document.querySelectorAll('[role=menu][aria-label=Versions] [role=me
 
 def menu(r):
     """Opens the versions menu; its rows as label, time and whether it is the current version."""
+    r.check('the Versions button is ready', wait(lambda: r.s.run(f'return !!{BUTTON}'), 10))
     r.s.run(f'{BUTTON}.click()')
     wait(lambda: r.s.run(f'return {ROWS}.length > 0'), 5)
     time.sleep(0.5)  # painted before a screenshot

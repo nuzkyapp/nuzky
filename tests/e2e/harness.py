@@ -398,9 +398,15 @@ def press(key):
     for window, name in _windows(d):
         if name == 'Nuzky':
             window.set_input_focus(X.RevertToParent, X.CurrentTime)
-    code = d.keysym_to_keycode(XK.string_to_keysym(key))
+    keysym = XK.string_to_keysym(key)
+    code = d.keysym_to_keycode(keysym)
+    shift = d.keycode_to_keysym(code, 0) != keysym
+    if shift:
+        xtest.fake_input(d, X.KeyPress, d.keysym_to_keycode(XK.XK_Shift_L))
     for kind in (X.KeyPress, X.KeyRelease):
         xtest.fake_input(d, kind, code)
+    if shift:
+        xtest.fake_input(d, X.KeyRelease, d.keysym_to_keycode(XK.XK_Shift_L))
     d.sync()
     d.close()
 
