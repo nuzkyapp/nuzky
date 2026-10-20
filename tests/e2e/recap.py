@@ -186,6 +186,15 @@ def recap(r):
         r.check('without the end card the recap is 1.5 s shorter than with it', size == (1080, 1920) and abs(duration - (pause['durationUs'] / 1e6 - END_CARD_S)) < 0.06,
                 [duration, pause['durationUs']])
 
+        # The new take lands on the main track by mistake and moves over the recording as an overlay: it is no
+        # take that was cut, so everything since the import still compares only the talk.
+        r.add_clip('new-take.mp4')
+        clip_id = r.track()[-1]['id']
+        moved = r.s.call("window.__nuzky.store.getState().edit({type: 'moveClip', clipId: arguments[0], trackId: null, startUs: 0})", clip_id)
+        r.check('the take moves off the main track', moved['ok'] and wait(lambda: all(c['id'] != clip_id for c in r.track()), 10), moved)
+        trimmed = r.s.call("window.__nuzky.store.getState().edit({type: 'trimClip', clipId: arguments[0], startUs: 0, durationUs: 2000000, sourceInUs: 0})", clip_id)
+        r.check('the overlay is trimmed to 2 s', trimmed['ok'], trimmed)
+
         # A hand cut, then everything cut since the import.
         clips = r.track()
         hand = (clips[0]['startUs'] + 7_000_000, clips[0]['startUs'] + 8_000_000)

@@ -13,19 +13,24 @@ use nuzky_session::{summary, transcripts::TranscriptStore};
 use crate::transcript::{self, Derived};
 
 /// The recording as imported: every video the main track plays now or played in a kept version (`kept`, in the
-/// order they first appear), whole, one after another, with the project's word corrections.
+/// order they first appear), whole, one after another, with the project's word corrections. A video that left the
+/// main track for another one is footage over the recording, not a take that was cut.
 pub fn raw_import(project: &Project, kept: &[Asset]) -> Result<Project> {
     let mut raw = Project::new(&project.name);
     raw.canvas = project.canvas.clone();
     raw.word_corrections = project.word_corrections.clone();
     let mut editor = Editor::new(raw);
-    let playing =
-        project.tracks.iter().filter(|t| t.id == MAIN_TRACK).flat_map(|t| &t.clips).filter_map(|c| match &c.content {
-            ClipContent::Media { asset_id, .. } => project.asset(asset_id),
-            ClipContent::Text { .. } => None,
-        });
+    let on = |main: bool| {
+        project.tracks.iter().filter(move |t| (t.id == MAIN_TRACK) == main).flat_map(|t| &t.clips).filter_map(|c| {
+            match &c.content {
+                ClipContent::Media { asset_id, .. } => project.asset(asset_id),
+                ClipContent::Text { .. } => None,
+            }
+        })
+    };
+    let elsewhere = |asset: &&Asset| !on(true).any(|a| a.id == asset.id) && on(false).any(|a| a.id == asset.id);
     let mut assets: Vec<Asset> = Vec::new();
-    for asset in kept.iter().chain(playing).filter(|a| a.kind == AssetKind::Video) {
+    for asset in kept.iter().filter(|a| !elsewhere(a)).chain(on(true)).filter(|a| a.kind == AssetKind::Video) {
         if !assets.iter().any(|a| a.id == asset.id) {
             let mut asset = project.asset(&asset.id).unwrap_or(asset).clone();
             if asset.part.is_some() {
@@ -346,7 +351,8 @@ mod tests {
         p.canvas.fps = 60;
         let mut dropped = p.assets[0].clone();
         dropped.id = "dropped".into();
-        let kept = [p.assets[0].clone(), dropped, p.assets[1].clone(), p.assets[3].clone()];
+        // The overlay was on the main track once and moved over the recording since.
+        let kept = [p.assets[0].clone(), dropped, p.assets[2].clone(), p.assets[1].clone(), p.assets[3].clone()];
         p.word_corrections.push(nuzky_engine::model::WordCorrection {
             asset_id: "current".into(),
             source_start_us: 0,
