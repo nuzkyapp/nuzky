@@ -341,17 +341,25 @@ fn restart(app: &AppHandle) {
     app.request_restart();
 }
 
-/// Once Nuzky has quit, starts the updated AppImage as `request_restart` would, but without the entries AppRun put into
-/// this AppImage's mount in front of PATH, XDG_DATA_DIRS and the like: they kept the replaced file mounted, and on disk,
-/// until the new Nuzky quit.
+/// Once Nuzky has quit, starts the updated AppImage as `request_restart` would, but without what tied it to this
+/// AppImage's mount, which kept the replaced file mounted, and on disk, until the new Nuzky quit: the entries AppRun put
+/// in front of PATH, XDG_DATA_DIRS and the like, and the pipe whose open end keeps the AppImage runtime mounting it.
 #[cfg(target_os = "linux")]
 pub fn start_again(app: &AppHandle) {
+    use std::os::unix::process::CommandExt;
     if !matches!(*app.state::<Updates>().0.lock().unwrap(), Stage::Restarting) {
         return;
     }
     let Some(appimage) = std::env::var_os("APPIMAGE") else { return };
     let mut command = std::process::Command::new(appimage);
     command.args(std::env::args_os().skip(1)).current_dir("/");
+    // Only a system call between fork and exec. Without close_range (Linux before 5.11) the pipe stays, as before.
+    unsafe {
+        command.pre_exec(|| {
+            libc::syscall(libc::SYS_close_range, 3, libc::c_uint::MAX, libc::CLOSE_RANGE_CLOEXEC);
+            Ok(())
+        })
+    };
     if let Ok(mount) = std::env::var("APPDIR")
         && mount.len() > 1
     {
