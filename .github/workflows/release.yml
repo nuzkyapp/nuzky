@@ -41,7 +41,6 @@ jobs:
             exit 1
           fi
           find artifacts -type f -exec cp {} . \;
-          git archive --format=tar.gz --prefix="nuzky-${RELEASE_TAG#v}/" -o "Nuzky_${RELEASE_TAG#v}_source.tar.gz" "$RELEASE_TAG"
           for file in ./*.AppImage ./*.deb ./*-setup.exe ./*.app.tar.gz; do
             node_modules/.bin/tauri signer sign --app-version "${RELEASE_TAG#v}" "$file"
           done
@@ -65,18 +64,29 @@ jobs:
           }
           fs.writeFileSync('latest.json', JSON.stringify({ version, pub_date: new Date().toISOString(), platforms }) + '\n');
           NODE
-          sha256sum ./*.AppImage ./*.deb ./*.dmg ./*.app.tar.gz ./*-setup.exe ./*_source.tar.gz > SHA256SUMS
           # A notarized dmg opens without Open Anyway.
           if grep -Fxq 'macOS signature: Developer ID, notarized and stapled' build-info-darwin.txt; then
             sed '/^- \*\*macOS\*\*:/d' scripts/release-notes.md > release-notes.md
           else
             cp scripts/release-notes.md release-notes.md
           fi
+          SOURCE_TAG="third-party-source-${RELEASE_TAG#v}"
+          sed "s/VERSION/${RELEASE_TAG#v}/g" scripts/third-party-source-notes.md > third-party-source-notes.md
+          for tag in "$RELEASE_TAG" "$SOURCE_TAG"; do
+            if gh release view "$tag" >/dev/null 2>&1; then
+              test "$(gh release view "$tag" --json isDraft --jq .isDraft)" = true
+            fi
+          done
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
             # A rerun can replace a notarized dmg with one that is not, or the other way round.
             gh release edit "$RELEASE_TAG" --notes-file release-notes.md
           else
             gh release create "$RELEASE_TAG" --verify-tag --draft --title "Nuzky $RELEASE_TAG" --notes-file release-notes.md
           fi
-          gh release upload "$RELEASE_TAG" ./*.AppImage ./*.deb ./*.dmg ./*.app.tar.gz ./*-setup.exe ./*_source.tar.gz ./build-info-*.txt ./*.sig SHA256SUMS latest.json --clobber
+          if gh release view "$SOURCE_TAG" >/dev/null 2>&1; then
+            gh release edit "$SOURCE_TAG" --prerelease --notes-file third-party-source-notes.md
+          else
+            gh release create "$SOURCE_TAG" --target "$(git rev-parse "${RELEASE_TAG}^{commit}")" --draft --prerelease --title "Third-party source for Nuzky $RELEASE_TAG" --notes-file third-party-source-notes.md
+          fi
+          gh release upload "$RELEASE_TAG" ./*.AppImage ./*.deb ./*.dmg ./*.app.tar.gz ./*-setup.exe latest.json --clobber
+          gh release upload "$SOURCE_TAG" ./build-info-*.txt --clobber

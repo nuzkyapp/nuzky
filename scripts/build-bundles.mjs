@@ -92,7 +92,7 @@ if (process.platform === 'darwin') {
   createDmg(app, path.join(bundle, 'dmg', `Nuzky_${version}_aarch64.dmg`), target);
 }
 const info = [
-  `Nuzky ${version}, commit ${output('git', ['rev-parse', 'HEAD'])}; its release carries the source as Nuzky_${version}_source.tar.gz`,
+  `Nuzky ${version}, commit ${output('git', ['rev-parse', 'HEAD'])}; its source is the Source code archive of the v${version} release`,
   `Platform: ${process.platform} ${process.arch}`,
   output('rustc', ['--version']),
   output('ffmpeg', ['-version']),
