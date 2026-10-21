@@ -98,7 +98,7 @@ pub struct Import {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SearchSounds {
-    /// What to look for, in English: "whoosh", "upbeat", "cinematic piano". Empty lists the built-in sound effects, or for music the songs already added from YouTube links.
+    /// What to look for, in English: "whoosh", "upbeat", "cinematic piano". Empty lists the built-in sounds of the kind, for music also the songs already added from YouTube links.
     pub query: String,
     pub kind: crate::sounds::Kind,
     /// Only this licence: "cc0" (no credit needed) or "by" (credit needed). Both by default, with music from YouTube links (no licence) too.

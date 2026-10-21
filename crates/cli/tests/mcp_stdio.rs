@@ -215,18 +215,21 @@ fn an_opened_capcut_draft_keeps_its_import_report_over_read_only_stdio() {
     c.finish();
 }
 
-/// The built-in sound effects need no network: listing finds them, and add_sound places one at the time
-/// asked as an edit of the run, with its credit saved in the project and its file in Nuzky's library.
+/// The built-in sound effects and songs need no network: listing finds each under its kind, and add_sound places
+/// one at the time asked as an edit of the run, with its credit saved in the project and its file in Nuzky's library.
 #[test]
 fn built_in_sounds_are_listed_and_added_with_their_credit() {
     let mut c = Client::start(true, None, Some(None));
     let listed = c.call("search_sounds", json!({"query": "", "kind": "effect"}));
     let sounds = listed["sounds"].as_array().unwrap();
     assert!(sounds.len() >= 40, "{listed}");
-    assert!(sounds.iter().all(|s| s["license"] == "cc0" && s["provider"] == "Built in"));
+    assert!(sounds.iter().all(|s| s["license"] == "cc0" && s["provider"] == "Built in" && s["kind"] == "effect"));
     assert!(sounds.iter().any(|s| s["id"] == "nuzky:whoosh" && s["category"] == "Whoosh"));
-    // Music has nothing built in, and an empty query sends nothing anywhere.
-    assert_eq!(c.call("search_sounds", json!({"query": " ", "kind": "music"}))["sounds"], json!([]));
+    // The built-in song is music only, and an empty query sends nothing anywhere.
+    let music = c.call("search_sounds", json!({"query": " ", "kind": "music"}));
+    let songs: Vec<_> =
+        music["sounds"].as_array().unwrap().iter().map(|s| (&s["id"], &s["kind"], &s["license"])).collect();
+    assert_eq!(songs, [(&json!("nuzky:dancing"), &json!("music"), &json!("cc0"))], "{music}");
 
     let run = c.call("begin_run", json!({"label": "Add a whoosh"}))["run_id"].clone();
     let added = c.call("add_sound", json!({"run_id": run, "id": "nuzky:whoosh", "at_us": 1_500_000}));
@@ -241,22 +244,31 @@ fn built_in_sounds_are_listed_and_added_with_their_credit() {
         c.error("add_sound", json!({"run_id": run, "id": "https://example.org/x.mp3", "at_us": 0}))
             .contains("SOUND_UNKNOWN")
     );
+    let song = c.call("add_sound", json!({"run_id": run, "id": "nuzky:dancing", "at_us": 0}));
+    assert_eq!((&song["needs_credit"], &song["credit"]["license"]), (&json!(false), &json!("cc0")), "{song}");
     c.call("end_run", json!({"run_id": run, "action": "keep"}));
 
     let disk: Value = serde_json::from_slice(&std::fs::read(c.dir.join("project.nuzky")).unwrap()).unwrap();
     let assets = disk["assets"].as_array().unwrap();
-    assert_eq!(assets.len(), 1);
-    assert_eq!(assets[0]["credit"]["title"], "Whoosh");
-    assert_eq!(assets[0]["credit"]["license"], "cc0");
-    let file = PathBuf::from(assets[0]["path"].as_str().unwrap());
-    // The temporary folder is a link on macOS (/var to /private/var); the sound is in its real path.
-    assert!(
-        file.starts_with(dunce::canonicalize(&c.dir).unwrap().join("data/nuzky/sounds")) && file.is_file(),
-        "{file:?}"
-    );
-    let clips: Vec<_> =
-        disk["tracks"].as_array().unwrap().iter().flat_map(|t| t["clips"].as_array().unwrap()).collect();
-    assert_eq!(clips.iter().map(|c| c["startUs"].as_i64().unwrap()).collect::<Vec<_>>(), [1_500_000, 4_000_000]);
+    let titles: Vec<_> = assets.iter().map(|a| (&a["credit"]["title"], &a["credit"]["license"])).collect();
+    assert_eq!(titles, [(&json!("Whoosh"), &json!("cc0")), (&json!("Dancing"), &json!("cc0"))]);
+    for asset in assets {
+        let file = PathBuf::from(asset["path"].as_str().unwrap());
+        // The temporary folder is a link on macOS (/var to /private/var); the sound is in its real path.
+        assert!(
+            file.starts_with(dunce::canonicalize(&c.dir).unwrap().join("data/nuzky/sounds")) && file.is_file(),
+            "{file:?}"
+        );
+    }
+    let mut starts: Vec<_> = disk["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|t| t["clips"].as_array().unwrap())
+        .map(|c| c["startUs"].as_i64().unwrap())
+        .collect();
+    starts.sort();
+    assert_eq!(starts, [0, 1_500_000, 4_000_000]);
 }
 
 #[test]
