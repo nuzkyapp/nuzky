@@ -141,7 +141,7 @@ export const api = {
   setSoundSettings: (freesound: boolean, key?: string) => invoke<SoundSettings>("set_sound_settings", { freesound, key: key ?? null }),
   openSoundPage: (url: string) => invoke<void>("open_sound_page", { url }),
   /** Without `replaceExisting` an existing file is kept and the export fails with DESTINATION_EXISTS. */
-  /** CC BY sounds bring `<name>.credits.txt`; without `replaceCredits` an existing one fails with CREDITS_EXIST. */
+  /** CC BY sounds and footage bring `<name>.credits.txt`; without `replaceCredits` an existing one fails with CREDITS_EXIST. */
   startExport: (path: string, options: ExportRequest, epoch: Epoch, replaceExisting: boolean, replaceCredits = false) =>
     invoke<string>("start_export", { path, options, expectedEpoch: epoch, replaceExisting, replaceCredits }),
   filmstrip: (assetId: string) => invoke<Filmstrip | null>("filmstrip", { assetId }),

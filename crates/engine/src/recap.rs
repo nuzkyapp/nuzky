@@ -292,7 +292,7 @@ pub fn render(
     );
     check_source_path(&recap.before, out)?;
     check_source_path(&recap.after, out)?;
-    // The finished cut plays its CC BY sounds, so they are credited beside the recap as beside an export.
+    // The finished cut plays its CC BY sounds and footage, so they are credited beside the recap as beside an export.
     let credits = crate::credits::credits(&recap.after);
     let credits_out = crate::credits::credits_path(out);
     if credits.is_some() && credits_out.symlink_metadata().is_ok() {

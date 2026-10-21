@@ -114,7 +114,7 @@ pub const MAX_DELIVERY_FPS: u32 = 60;
 pub struct ExportOptions {
     pub crf: u8,
     pub replace_existing: bool,
-    /// The credits file of CC BY sounds may replace one beside the video. Asked apart from the video,
+    /// The credits file of CC BY sounds and footage may replace one beside the video. Asked apart from the video,
     /// since a creator may keep their own notes in a file of that name.
     pub replace_credits: bool,
     /// x264 speed preset.
@@ -187,7 +187,7 @@ pub fn export(
     }
     check_options(project, options)?;
     check_source_path(project, out)?;
-    // CC BY sounds go out with their credits, beside the video and under the same consent.
+    // CC BY sounds and footage go out with their credits, beside the video and under the same consent.
     let credits = crate::credits::credits(project);
     let credits_out = crate::credits::credits_path(out);
     if credits.is_some() && !options.replace_credits && credits_out.symlink_metadata().is_ok() {

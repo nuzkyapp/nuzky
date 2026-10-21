@@ -120,7 +120,7 @@ export function ExportDialog() {
   const [error, setError] = useState<string | null>(null);
   /** The file asked for already exists; Replace exports over it. */
   const [exists, setExists] = useState<string | null>(null);
-  /** The credits file the video's CC BY sounds bring is already there; Replace writes over it. */
+  /** The credits file the video's CC BY sounds and footage bring is already there; Replace writes over it. */
   const [creditsExist, setCreditsExist] = useState<string | null>(null);
   const last = useRef<{ path: string; replace: boolean; credits: boolean } | null>(null);
   const startedAt = useRef(0);

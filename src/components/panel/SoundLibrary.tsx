@@ -604,7 +604,7 @@ export function SoundLibrary({ kind }: { kind: SoundKind }) {
   );
 }
 
-/** How many CC BY sounds play on the timeline; their credits go in the video's description. */
+/** How many CC BY sounds and videos play on the timeline; their credits go in the video's description. */
 export function CreditsBar() {
   const bar = useRef<HTMLDivElement>(null);
   // What needs credit, by kind, as a string, so the bar redraws only when that changes: "1 video and 2 sounds need credit".

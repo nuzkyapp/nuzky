@@ -465,7 +465,7 @@ pub fn start_export(
     if project.duration_us() <= 0 {
         return Err("Add something to the timeline before exporting.".into());
     }
-    // CC BY sounds bring a credits file beside the video; replacing one there is asked on its own.
+    // CC BY sounds and footage bring a credits file beside the video; replacing one there is asked on its own.
     let credits = nuzky_engine::credits::credits_path(&out);
     if nuzky_engine::credits::credits(&project).is_some() && !replace_credits && credits.symlink_metadata().is_ok() {
         let name = credits.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
