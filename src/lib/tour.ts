@@ -5,6 +5,7 @@ import { SAMPLE_REQUEST, lastDemoOutcome } from "./demo";
 import { dockMax, useDock } from "./dock";
 import { usedBefore } from "./launch";
 import { newSampleProject, onlyPristine, pickVideosForNewProject, useLibrary } from "./library";
+import { toggleFullPreview, usePreview } from "./preview";
 import { useSetup } from "./setup";
 import { useSounds } from "./sounds";
 import { useSpeech, useWordPick } from "./speech";
@@ -129,6 +130,8 @@ function show(step: TourStep) {
   window.clearTimeout(leaveWatch);
   // Only Next leaves Play the result, and the video stops there, so no later card stands over it playing.
   if (useTour.getState().step === "play" && useEditor.getState().playing) void api.pause();
+  // The full screen preview would cover what the other steps show.
+  if (step !== "play" && usePreview.getState().full) void toggleFullPreview();
   if (step !== "duck" && closedPanel) {
     closedPanel = false;
     useDock.setState({ open: true });

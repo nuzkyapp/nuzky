@@ -61,8 +61,11 @@ const FOCUSABLE = "button, input, select, textarea, a[href], [tabindex]:not([tab
 const focusables = (root: Element | null) =>
   root ? [...root.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => !el.matches(":disabled") && el.getClientRects().length > 0) : [];
 
-/** Something else is open over the editor that owns Esc and Tab now: a dialog or a menu. */
-const somethingOver = () => !!document.querySelector("dialog[open], [aria-modal='true'], [role=menu]");
+/**
+ * Something the tour does not own is over the editor and owns Esc and Tab now: a dialog such as the launcher, a menu, or
+ * the full screen preview, which covers every part but the preview. The tour steps aside meanwhile and comes back after.
+ */
+const somethingOver = (step: TourStep) => !!document.querySelector("dialog[open], [aria-modal='true'], [role=menu]") || (usePreview.getState().full && step !== "play");
 
 /**
  * The tour over the editor: everything but the step's target lies under a dim that takes the clicks, and a card next to
@@ -80,6 +83,7 @@ function Spotlight({ step }: { step: TourStep }) {
   const word = useTour((s) => s.word);
   const ai = useRealAi();
   const cut = useAgent((s) => s.items.some((i) => i.kind === "run"));
+  const layer = useRef<SVGSVGElement>(null);
   const dim = useRef<SVGPathElement>(null);
   const rings = useRef<SVGRectElement[]>([]);
   const card = useRef<HTMLDivElement>(null);
@@ -93,6 +97,8 @@ function Spotlight({ step }: { step: TourStep }) {
     let shown = false;
     const tick = () => {
       frame = requestAnimationFrame(tick);
+      const visibility = somethingOver(step) ? "hidden" : "";
+      for (const el of [layer.current, card.current]) if (el && el.style.visibility !== visibility) el.style.visibility = visibility;
       const target = last(def.target);
       if (target && !shown) {
         shown = true;
@@ -129,7 +135,7 @@ function Spotlight({ step }: { step: TourStep }) {
     };
     tick();
     return () => cancelAnimationFrame(frame);
-  }, [def]);
+  }, [def, step]);
 
   // The card takes the keyboard unless the step's action is on the target; Space then plays, as everywhere in the editor.
   useEffect(() => {
@@ -145,7 +151,7 @@ function Spotlight({ step }: { step: TourStep }) {
   // Esc ends the tour; Tab goes round the card and the target, as clicks reach only them.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (somethingOver()) return;
+      if (somethingOver(step)) return;
       if (e.key === "Escape") {
         // The full screen preview takes Esc first.
         if (usePreview.getState().full) return;
@@ -162,7 +168,7 @@ function Spotlight({ step }: { step: TourStep }) {
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [def]);
+  }, [def, step]);
 
   const index = TOUR_STEPS.indexOf(step);
   const text =
@@ -178,7 +184,7 @@ function Spotlight({ step }: { step: TourStep }) {
   const next = def.next || (step === "watch" && stopped);
   return (
     <>
-      <svg aria-hidden className="scrim-in pointer-events-none fixed inset-0 z-[85] h-full w-full">
+      <svg ref={layer} aria-hidden className="scrim-in pointer-events-none fixed inset-0 z-[85] h-full w-full">
         <path ref={dim} fillRule="evenodd" fill="rgb(0 0 0 / 0.62)" style={{ pointerEvents: "auto" }} />
         {[0, 1].map((i) => (
           <rect key={i} ref={(el) => void (el && (rings.current[i] = el))} fill="none" strokeWidth={1} stroke="rgb(255 255 255 / 0.24)" style={{ display: "none" }} />
