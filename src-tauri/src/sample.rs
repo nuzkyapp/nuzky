@@ -18,8 +18,9 @@ use tauri::{AppHandle, Manager};
 use crate::{AppState, CmdResult, ImportResult, OpenSession, err};
 
 const VIDEO: &[u8] = include_bytes!("../../assets/sample/spotlight-effect.mp4");
-/// In Nuzky's data folder. Another sample would go in a new folder, so projects of this one keep their file.
-const FILE: &str = "samples/1/The spotlight effect.mp4";
+/// In a numbered folder of Nuzky's data folder, the first one free or holding this video, so a file that
+/// changed there, and projects using it, are left as they are.
+const FILE: &str = "The spotlight effect.mp4";
 const PROJECT: &str = "Sample video";
 /// She speaks without retakes, so the cut finds none and only shortens pauses.
 const LABEL: &str = "Cut long pauses";
@@ -46,11 +47,14 @@ pub struct SampleRun {
     captions: usize,
 }
 
-/// The sample's file in `data`, written only when it is missing or different, with its transcript stored
-/// unless the file has one, which the user may have made again.
+/// The sample's file in `data`, written when it is not there yet, with its transcript stored unless the file
+/// has one, which the user may have made again.
 pub(crate) fn install(data: &Path, transcripts: &TranscriptStore) -> Result<Asset> {
-    let path = data.join(FILE);
-    if std::fs::read(&path).ok().as_deref() != Some(VIDEO) {
+    let path = (1..)
+        .map(|n| data.join(format!("samples/{n}/{FILE}")))
+        .find(|path| std::fs::read(path).map_or(true, |bytes| bytes == VIDEO))
+        .context("no folder for the sample")?;
+    if !path.exists() {
         nuzky_mcp::sounds::publish(&path, |file| Ok(std::io::Write::write_all(file, VIDEO)?))?;
     }
     let mut asset = nuzky_engine::media::probe(&path, new_id())?;
@@ -259,15 +263,18 @@ mod tests {
         store.put(&asset, &again).unwrap();
         install(&dir, &store).unwrap();
         assert_eq!(store.get(&asset).unwrap(), Some(again));
-        // The file is written again only when it differs.
         let file = Path::new(&asset.path);
         let written = std::fs::metadata(file).unwrap().modified().unwrap();
-        install(&dir, &store).unwrap();
+        assert_eq!(install(&dir, &store).unwrap().path, asset.path);
         assert_eq!(std::fs::metadata(file).unwrap().modified().unwrap(), written);
+        // A file changed since is someone's, and projects may use it: the sample goes beside it.
         std::fs::write(file, b"not the sample").unwrap();
         assert!(!sample::is_sample(&asset));
-        install(&dir, &store).unwrap();
-        assert_eq!(std::fs::read(file).unwrap(), VIDEO);
+        let beside = install(&dir, &store).unwrap();
+        assert!(std::fs::read(file).unwrap() == b"not the sample");
+        assert_ne!(beside.path, asset.path);
+        assert!(std::fs::read(&beside.path).unwrap() == VIDEO);
+        assert_eq!(install(&dir, &store).unwrap().path, beside.path);
         std::fs::remove_dir_all(dir).unwrap();
     }
 
