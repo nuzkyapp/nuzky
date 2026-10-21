@@ -375,7 +375,8 @@ def flow_tour(r):
     r.check('Esc ends the tour', wait(lambda: tour(r)['step'] is None, 5), tour(r))
 
     # Get set up's own Try the sample video, from the keyboard; Stop and edit in the top bar, inside the second hole, ends
-    # the turn as stopped; the home screen ends the tour.
+    # the turn as stopped after the cut, before the captions; One Undo then undoes and redoes that cut; the home screen
+    # ends the tour.
     leave_editor(r)
     r.s.run("[...document.querySelectorAll('nav[aria-label=Collections] [data-row]')].find((b) => b.textContent.startsWith('Get set up')).click()")
     r.check('the sidebar opens Get set up', wait(lambda: r.s.run(SETUP_OPEN), 5))
@@ -384,17 +385,41 @@ def flow_tour(r):
     press('Return')
     r.check('it closes Get set up and the tour starts again', wait(lambda: not r.s.run(SETUP_OPEN), 5) and at_step(r, 'ask', 20), tour(r))
     wait(lambda: tour(r)['focus'] == 'Request to the AI demo', 5)
+    uncut = project(r)['durationUs']
     press('Return')
     r.check('the run bar shows Stop and edit', wait(lambda: r.s.run("return !!document.querySelector('[data-tour=run-bar] button')"), 10))
+    r.check('the cut shows before the captions', wait(lambda: (x := project(r))['durationUs'] < uncut and x['captions'] == 0, 10), project(r))
     r.check('a real click reaches Stop and edit', click_at(hands, '[data-tour=run-bar] button'))
     t = wait(lambda: (x := tour(r))['stopped'] and x, 15) or tour(r)
-    r.check('the card says it was stopped and offers Next', t['step'] == 'watch' and 'You stopped it' in (t['card'] or '') and 'Next' in t['card'], t)
+    r.check('the card says what it changed stays and offers Next', t['step'] == 'watch' and 'What it changed so far stays' in (t['card'] or '')
+            and 'Next' in t['card'], t)
     a = agent(r)
     r.check('the turn ends stopped, without a reply', a['status'] == 'idle' and not any(i['kind'] == 'agent' for i in a['items'])
-            and any(i['kind'] == 'stopped' or (i['kind'] == 'run' and i['stopped']) for i in a['items']), a)
+            and any(i['kind'] == 'run' and i['stopped'] for i in a['items']), a)
+    stopped = project(r)
+    r.check('the cut stays, without captions', stopped['durationUs'] < uncut and stopped['captions'] == 0, stopped)
     r.shot('2-stopped-1024')
+    r.check('Next leads to One Undo', click_at(hands, card_button(r, 'Next')) and at_step(r, 'undo', 5), tour(r))
+    r.check('a real click reaches Undo on the stopped run card', click_at(hands, '[data-run-card] button[title="Undo everything this run did"]'))
+    t = wait(lambda: (x := tour(r))['undone'] and x, 10) or tour(r)
+    r.check('the cut is undone and the card offers Redo', project(r)['durationUs'] == uncut and t['buttons'][-2:] == ['Redo', 'Next'], [project(r), t])
+    r.check('a real click reaches Redo', click_at(hands, card_button(r, 'Redo')))
+    t = wait(lambda: not (x := tour(r))['undone'] and x, 10) or tour(r)
+    a = agent(r)
+    r.check('Redo brings the cut back, and the run card offers Undo again', project(r)['durationUs'] == stopped['durationUs']
+            and 'Redo' not in t['buttons'] and not any(i['kind'] == 'run' and i['undone'] for i in a['items']) and a['undo'] is True, [t, a])
     leave_editor(r)
     r.check('going home ends the tour', wait(lambda: tour(r)['step'] is None, 5), tour(r))
+    # The AI beside Your style shows the same conversation, so it says there too that no AI ran.
+    r.s.run("[...document.querySelectorAll('nav[aria-label=Collections] [data-row]')].find((b) => b.textContent.startsWith('Your style')).click()")
+    r.check('Your style opens', wait(lambda: r.s.run("return !!document.querySelector('main[aria-label=\"Your style\"]')"), 10))
+    ai = 'button[title^="Talk about your style"]'
+    r.s.run(f"document.querySelector('{ai}').click()")
+    chat = """const panel = document.querySelector('main[aria-label="Your style"] ~ aside[aria-label=AI]');
+        return panel && {items: panel.querySelectorAll('[data-run-card]').length, separators: [...panel.querySelectorAll('[role=separator]')].map((s) => s.textContent.trim())};"""
+    a = wait(lambda: r.s.run(chat), 5) or r.s.run(chat)
+    r.check("Your style's AI says the tour's turn was a demo", a and a['items'] and DEMO in a['separators'], a)
+    r.s.run("document.querySelector('button[title^=\"Close the AI\"]').click()")
 
     # Skipped while the AI edits, the panel stays a demo until its turn ends, and its own Stop ends that turn.
     r.s.run(TAKE_THE_TOUR)

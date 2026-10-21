@@ -106,7 +106,8 @@ let leaveWatch = 0;
 /** The project as the AI's edit left it, while One Undo shows; Undo and Redo are told apart from other edits by it. */
 let edited: string | null = null;
 
-const runCards = (items: ChatItem[]) => items.some((i) => i.kind === "run");
+/** The AI's turn changed the project, so its card has an Undo. */
+export const changed = (items: ChatItem[]) => items.some((i) => i.kind === "run" && !!i.snap);
 
 /** The song's clip, once it is on the timeline. */
 function songClip(project: Project) {
@@ -202,7 +203,7 @@ export function nextStep() {
   const i = TOUR_STEPS.indexOf(step);
   if (i === TOUR_STEPS.length - 1) return endTour();
   const next = TOUR_STEPS[i + 1];
-  show(next === "undo" && !runCards(useAgent.getState().items) ? "play" : next);
+  show(next === "undo" && !changed(useAgent.getState().items) ? "play" : next);
 }
 
 export function endTour() {
@@ -246,15 +247,15 @@ useAgent.subscribe((s, prev) => {
   const { step } = useTour.getState();
   if (step === "ask" && s.demo && s.status === "working" && prev.status === "idle") show("watch");
   if (step === "watch" && s.status === "idle" && prev.status !== "idle") {
+    // The run's card holds the project as the edit left it, also a stopped one; the editor's snapshot may still be on its way.
+    const run = s.items.findLast((it) => it.kind === "run");
+    edited = run?.kind === "run" && run.snap ? JSON.stringify(run.snap.project) : null;
     const outcome = lastDemoOutcome();
     if (outcome === "stopped") useTour.setState({ stopped: true });
     // The request is back in the field, to send again.
     else if (outcome === "failed") show("ask");
     else {
-      // The run's card holds the project as the edit left it; the editor's snapshot may still be on its way.
-      const run = s.items.findLast((it) => it.kind === "run");
-      edited = run?.kind === "run" && run.snap ? JSON.stringify(run.snap.project) : null;
-      leaveWatch = window.setTimeout(() => show(runCards(useAgent.getState().items) ? "undo" : "play"), WATCH_AFTER_MS);
+      leaveWatch = window.setTimeout(() => show(changed(useAgent.getState().items) ? "undo" : "play"), WATCH_AFTER_MS);
     }
   }
   // A turn that outlived the tour ends the demo with it.

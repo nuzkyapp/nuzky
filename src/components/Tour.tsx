@@ -4,7 +4,7 @@ import { planReady, useChatGpt } from "../lib/chatgpt";
 import { usePreview } from "../lib/preview";
 import { useSetup } from "../lib/setup";
 import { useEditor } from "../lib/store";
-import { STEP, TOUR_STEPS, endTour, nextStep, openOwnVideo, useTour, type TourStep } from "../lib/tour";
+import { STEP, TOUR_STEPS, changed, endTour, nextStep, openOwnVideo, useTour, type TourStep } from "../lib/tour";
 import { Button } from "./ui";
 
 /** Space between the target and the hole's edge, the hole and the card, and the card and the window's edges. */
@@ -82,7 +82,7 @@ function Spotlight({ step }: { step: TourStep }) {
   const undone = useTour((s) => s.undone);
   const word = useTour((s) => s.word);
   const ai = useRealAi();
-  const cut = useAgent((s) => s.items.some((i) => i.kind === "run"));
+  const cut = useAgent((s) => changed(s.items));
   const layer = useRef<SVGSVGElement>(null);
   const dim = useRef<SVGPathElement>(null);
   const rings = useRef<SVGRectElement[]>([]);

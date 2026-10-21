@@ -847,7 +847,6 @@ function dayAndTime(ms: number) {
   return `${today ? "Today" : whenLabel(ms)} ${time}`;
 }
 
-/** A 12 px line across the conversation between two hairlines, such as when a reopened chat was. */
 function Separator({ children }: { children: ReactNode }) {
   return (
     <div className="flex items-center gap-3 text-[12px] text-muted" role="separator">
@@ -869,7 +868,7 @@ function Conversation() {
     return () => useEditor.setState((s) => ({ aiChats: s.aiChats - 1 }));
   }, [project]);
   const pastCount = useAgent((s) => s.pastCount);
-  const demoItems = useAgent((s) => s.demoItems) && project;
+  const demoItems = useAgent((s) => s.demoItems);
   const working = useAgent((s) => s.status !== "idle");
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
