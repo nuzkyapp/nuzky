@@ -212,13 +212,14 @@ function SoundSearch({ kind }: { kind: SoundKind }) {
 /** Music from YouTube has no credit; its file in the library is named after the video. */
 const YOUTUBE_FILE = /^youtube-([\w-]{11})\.\w+$/;
 
-/** Ids of the library sounds the project already has. */
+/** Ids of the library sounds the project already has. A credited video, such as the tour's sample from YouTube, is no sound. */
 function useInProject() {
   const assets = useEditor((s) => s.snap?.project.assets);
   return new Set(
     (assets ?? []).flatMap((a) => {
+      if (a.kind !== "audio") return [];
       if (a.credit) return [`${a.credit.source}:${a.credit.id}`];
-      const video = a.kind === "audio" ? YOUTUBE_FILE.exec(a.path.split(/[\\/]/).pop() ?? "")?.[1] : undefined;
+      const video = YOUTUBE_FILE.exec(a.path.split(/[\\/]/).pop() ?? "")?.[1];
       return video ? [`youtube:${video}`] : [];
     }),
   );
@@ -248,7 +249,7 @@ function OnlineResults({ kind, titled = kind === "effect" }: { kind: SoundKind; 
           ))}
         </div>
       )}
-      {search.error && offline && kind === "effect" && (
+      {search.error && offline && (
         <div className="mx-1.5 flex items-center gap-2 text-[12px] text-muted" role="alert">
           <WifiOff size={14} className="shrink-0" />
           <span className="min-w-0 flex-1">You're offline.</span>
@@ -257,13 +258,10 @@ function OnlineResults({ kind, titled = kind === "effect" }: { kind: SoundKind; 
           </Button>
         </div>
       )}
-      {search.error && !(offline && kind === "effect") && (
+      {search.error && !offline && (
         <div className="mx-1.5 my-2 flex flex-col items-center gap-2 rounded-xl p-4 text-center" role="alert">
-          {offline && <WifiOff size={24} className="text-muted" />}
-          <p className="text-[13px] font-semibold text-fg">{offline ? "You're offline" : "Search didn't work"}</p>
-          <p className="text-[12px] text-muted">
-            {offline ? "Music search needs the internet. Built-in sound effects still work." : plainError(search.error)}
-          </p>
+          <p className="text-[13px] font-semibold text-fg">Search didn't work</p>
+          <p className="text-[12px] text-muted">{plainError(search.error)}</p>
           <Button className="mt-1 h-7 text-[12px]" onClick={() => searchSounds(kind, search.query)}>
             Try again
           </Button>
