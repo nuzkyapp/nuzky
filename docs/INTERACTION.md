@@ -286,7 +286,7 @@ Try the sample video (the first start, Get set up) and Take the tour (the home s
 Each of its eight steps points at one part of the editor: everything else lies under a dim that takes the clicks, so only the part shown and the tour's card respond to the pointer. The card sits beside that part and says "2 of 8", a title, one or two lines and Skip tour, and Next where the step does not move on by itself. The hole follows its part when the window, a pane or the AI panel changes.
 
 1. **Ask the AI to edit**, the AI panel's field: "Tell the AI what you want in your own words. Try this one: press Enter." Sending moves on.
-2. **Watch it edit**, the timeline and the AI run in the top bar: "Watch the timeline change. Stop and edit, at the top, lets you take over." It moves on when the edit ends; stopped, the card says so and offers Next.
+2. **Watch it edit**, the timeline and the AI run in the top bar: "Watch the timeline change. Stop and edit, at the top, lets you take over." It moves on 1.5 s after the edit ends, so the card can be read to the end; stopped, the card says so and offers Next.
 3. **One Undo takes it all back**, the edit's card in the AI panel. Left out when the edit changed nothing.
 4. **Play the result**, the preview: playing moves on, as does Next. The card has the keyboard, so `Space` plays.
 5. **Fix anything by hand**: the Transcript tab opens, and the library shows its words.

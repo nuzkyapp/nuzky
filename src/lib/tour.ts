@@ -84,6 +84,9 @@ export const useTour = create<TourState>(() => ({ step: null, epoch: null, stopp
 let closedPanel = false;
 /** What was in the AI field before the tour wrote its request there. */
 let keptDraft = "";
+/** Watch it edit stays a moment after the edit ends, so its card can be read to the end. */
+const WATCH_AFTER_MS = 1500;
+let leaveWatch = 0;
 
 const runCards = (items: ChatItem[]) => items.some((i) => i.kind === "run");
 
@@ -100,6 +103,7 @@ function panelInInspector() {
 }
 
 function show(step: TourStep) {
+  window.clearTimeout(leaveWatch);
   if (step !== "volume" && closedPanel) {
     closedPanel = false;
     useDock.setState({ open: true });
@@ -135,6 +139,7 @@ export function nextStep() {
 
 export function endTour() {
   if (!useTour.getState().step) return;
+  window.clearTimeout(leaveWatch);
   useTour.setState({ step: null, epoch: null, stopped: false });
   if (closedPanel) {
     closedPanel = false;
@@ -176,7 +181,7 @@ useAgent.subscribe((s, prev) => {
     if (outcome === "stopped") useTour.setState({ stopped: true });
     // The request is back in the field, to send again.
     else if (outcome === "failed") show("ask");
-    else show(runCards(s.items) ? "undo" : "play");
+    else leaveWatch = window.setTimeout(() => show(runCards(useAgent.getState().items) ? "undo" : "play"), WATCH_AFTER_MS);
   }
   // A turn that outlived the tour ends the demo with it.
   if (!step && s.demo && s.status === "idle" && prev.status !== "idle") useAgent.setState({ demo: false });
