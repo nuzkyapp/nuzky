@@ -512,7 +512,9 @@ fn youtube_links_download_with_mocked_ytdlp_and_require_rights() {
         ("XDG_RUNTIME_DIR", &runtime),
     ];
     let mut c = Client::spawn_at_env(dir, &project, true, Some(None), &env);
-    assert_eq!(c.call("search_sounds", json!({"query": "", "kind": "music"}))["sounds"], json!([]));
+    // Before any song from a link, music lists only the built-in one.
+    let ids = |found: &Value| found["sounds"].as_array().unwrap().iter().map(|s| s["id"].clone()).collect::<Vec<_>>();
+    assert_eq!(ids(&c.call("search_sounds", json!({"query": "", "kind": "music"}))), ["nuzky:dancing"]);
     for query in ["https://music.youtube.com/watch?v=yt_Song0001&list=RDtest", "https://youtu.be/yt_Song0001?si=test"] {
         let found = c.call("search_sounds", json!({"query": query, "kind": "music"}));
         assert_eq!(found["sounds"].as_array().unwrap().len(), 1, "{found}");
@@ -594,7 +596,11 @@ fn youtube_links_download_with_mocked_ytdlp_and_require_rights() {
     c.call("end_run", json!({"run_id": run, "action": "keep"}));
     assert_eq!(c.call("get_state", json!({}))["assets"][0]["path"], file.to_str().unwrap());
     for query in ["", "sTEAdY", "test ARTIST"] {
-        let found = c.call("search_sounds", json!({"query": query, "kind": "music"}));
+        let mut found = c.call("search_sounds", json!({"query": query, "kind": "music"}));
+        if query.is_empty() {
+            assert_eq!(ids(&found), ["nuzky:dancing", "youtube:yt_Song0001"]);
+            found["sounds"].as_array_mut().unwrap().remove(0);
+        }
         assert_eq!(found["sounds"].as_array().unwrap().len(), 1, "{found}");
         assert_eq!(found["sounds"][0]["id"], "youtube:yt_Song0001");
         assert_eq!(found["sounds"][0]["title"], "Steady Song");
