@@ -384,7 +384,6 @@ export function Slider({
   mixed,
   title,
   narrow = false,
-  tour,
 }: {
   label: string;
   /** What screen readers call it, when the row it sits in names the rest ("Shadow blur" under Shadow). */
@@ -403,14 +402,12 @@ export function Slider({
   /** The selected clips differ; the thumb sits at the first clip's value. */
   mixed?: boolean;
   title?: string;
-  /** Names the row for the first-run tour, which points at it. */
-  tour?: string;
 }) {
   const lock = useLockReason();
   disabled = disabled || !!lock;
   return (
     // 8 px between two sliders instead of the section's 12 px, so a column of them reads as one list.
-    <div className="flex flex-col gap-0.5 [&+&]:-mt-1" title={lock ?? title} data-tour={tour}>
+    <div className="flex flex-col gap-0.5 [&+&]:-mt-1" title={lock ?? title}>
       <span className={`truncate text-[12px] leading-4 ${disabled && !lock ? "text-subtle" : "text-muted"}`}>{label}</span>
       <div className="flex items-center gap-2">
         <RangeInput
@@ -505,6 +502,7 @@ export function Checkbox({
   tabIndex,
   detail,
   children,
+  tour,
 }: {
   label: string;
   checked: boolean;
@@ -520,6 +518,8 @@ export function Checkbox({
   detail?: ReactNode;
   /** What it says in place of `label`, such as a name over a line about it; `label` still names it. */
   children?: ReactNode;
+  /** Names it for the first-run tour, which points at it. */
+  tour?: string;
 }) {
   const lock = useLockReason();
   disabled = disabled || !!lock;
@@ -531,6 +531,7 @@ export function Checkbox({
     <label
       className={`flex cursor-pointer has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-40 ${children ? "min-w-0 flex-1 items-start gap-3" : "items-center gap-2"}`}
       title={lock ?? title}
+      data-tour={tour}
     >
       <span className={`relative inline-flex ${children ? "mt-0.5" : ""}`}>
         <input

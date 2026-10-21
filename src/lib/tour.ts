@@ -15,7 +15,7 @@ import type { Project, Snapshot } from "./types";
  * The first-run tour on the sample video: eight steps, each pointing at one part of the editor while the rest
  * waits under a dim (src/components/Tour.tsx). It starts with a scripted AI edit (src/lib/demo.ts).
  */
-export const TOUR_STEPS = ["ask", "watch", "undo", "play", "transcript", "song", "volume", "export"] as const;
+export const TOUR_STEPS = ["ask", "watch", "undo", "play", "transcript", "song", "duck", "export"] as const;
 export type TourStep = (typeof TOUR_STEPS)[number];
 
 /** The song built into Nuzky that the tour adds. */
@@ -66,11 +66,11 @@ export const STEP: Record<TourStep, { title: string; text: string; target: strin
     next: false,
     side: "right",
   },
-  volume: {
+  duck: {
     title: "Fine-tune what's selected",
-    text: "The song is selected. Turn its volume down so her voice stays clear.",
-    target: "[data-tour=volume]",
-    focus: "[data-tour=volume] input[type=range]",
+    text: "Tick Lower under speech: the song dips whenever she talks.",
+    target: "[data-tour=duck]",
+    focus: "[data-tour=duck] input[type=checkbox]",
     next: true,
     side: "left",
   },
@@ -111,17 +111,25 @@ function songClip(project: Project) {
   return asset ? allClips(project).find((c) => c.content.type === "media" && c.content.assetId === asset.id) : undefined;
 }
 
-/** The AI panel shows in the inspector's place: chosen so, or a column that does not fit this window. */
-function panelInInspector() {
+/**
+ * Lower under speech is in the inspector, so while its step shows the AI panel stays out of the way: in the inspector's
+ * place (chosen so, or a column that does not fit this window, under about 1330 px) or floating, maybe over it. Checked
+ * again whenever the panel or the window changes.
+ */
+function clearInspector() {
   const { open, mode } = useDock.getState();
-  return open && (mode === "inspector" || ((mode === "left" || mode === "right") && dockMax(window.innerWidth) === null));
+  if (useTour.getState().step !== "duck" || !open || ((mode === "left" || mode === "right") && dockMax(window.innerWidth) !== null)) return;
+  closedPanel = true;
+  useDock.setState({ open: false });
 }
+useDock.subscribe(clearInspector);
+window.addEventListener("resize", clearInspector);
 
 function show(step: TourStep) {
   window.clearTimeout(leaveWatch);
   // Only Next leaves Play the result, and the video stops there, so no later card stands over it playing.
   if (useTour.getState().step === "play" && useEditor.getState().playing) void api.pause();
-  if (step !== "volume" && closedPanel) {
+  if (step !== "duck" && closedPanel) {
     closedPanel = false;
     useDock.setState({ open: true });
   }
@@ -140,17 +148,13 @@ function show(step: TourStep) {
     // The built-in songs show while nothing is searched.
     useSounds.setState((s) => ({ tab: "music", search: { ...s.search, music: { ...s.search.music, query: "" } } }));
   }
-  if (step === "volume") {
+  if (step === "duck") {
     const project = useEditor.getState().snap?.project;
     const clip = project && songClip(project);
     if (clip) useEditor.getState().select([clip.id]);
-    // Below about 1330 px the panel takes the inspector's place, where the volume is.
-    if (panelInInspector()) {
-      closedPanel = true;
-      useDock.setState({ open: false });
-    }
   }
   useTour.setState({ step, stopped: false, undone: false, word: null });
+  clearInspector();
 }
 
 /** Selects the transcript's first word, so Delete cuts it, and names it on the card. */
@@ -252,7 +256,11 @@ useEditor.subscribe((s, prev) => {
   if (step === "undo" && s.snap && s.snap !== prev.snap) followUndo(s.snap);
   // Cut from the transcript: the video got shorter.
   if (step === "transcript" && s.snap && prev.snap && s.snap !== prev.snap && projectDuration(s.snap.project) < projectDuration(prev.snap.project)) show("song");
-  if (step === "song" && s.snap !== prev.snap && s.snap && songClip(s.snap.project)) show("volume");
+  if (step === "song" && s.snap !== prev.snap && s.snap && songClip(s.snap.project)) show("duck");
+  if (step === "duck" && s.snap !== prev.snap && s.snap) {
+    const clip = songClip(s.snap.project);
+    if (clip?.content.type === "media" && (clip.content.duckDb ?? 0) > 0) show("export");
+  }
 });
 
 /**
