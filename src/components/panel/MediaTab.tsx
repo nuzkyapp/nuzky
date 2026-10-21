@@ -11,6 +11,13 @@ import { ImportPlaceholder, ImportTile, KindIcon, addAtPlayhead, addPictureInPic
 const ACTION = "flex h-[26px] w-[26px] items-center justify-center rounded-full transition-colors duration-[120ms] ease-out aria-disabled:cursor-not-allowed aria-disabled:opacity-40";
 const QUIET_ACTION = `bg-black/55 text-white shadow-[inset_0_0_0_1px_rgb(255_255_255/.18)] hover:bg-black/75 aria-disabled:hover:bg-black/55 ${ACTION}`;
 
+/** Who made a file Nuzky brought in, such as the sample video, as its own line. */
+function credit({ credit: c, kind }: Asset) {
+  if (!c) return "";
+  const what = kind === "video" ? "Video" : kind === "image" ? "Picture" : "Sound";
+  return `\n${what}: ${c.author} · ${c.license === "by" ? `CC BY ${c.licenseVersion}` : "CC0"}`;
+}
+
 function MediaItem({ asset }: { asset: Asset }) {
   const thumb = useEditor((s) => s.thumbs[asset.id]);
   const job = useEditor((s) => s.jobs[`audio:${asset.id}`]);
@@ -24,7 +31,7 @@ function MediaItem({ asset }: { asset: Asset }) {
       onPointerDown={assetDragHandler(asset.id)}
       onDoubleClick={() => addAtPlayhead(asset.id)}
       className="group flex min-w-0 cursor-grab flex-col gap-1.5 active:cursor-grabbing"
-      title={`${asset.name}\nDrag onto the timeline, or press + to add at the playhead`}
+      title={`${asset.name}${credit(asset)}\nDrag onto the timeline, or press + to add at the playhead`}
     >
       {/* The hairline is an outline, so it draws over the thumbnail rather than under it. */}
       <div className="relative aspect-square overflow-hidden rounded-[10px] bg-bg outline-1 -outline-offset-1 outline-white/[.08] group-hover:outline-white/[.22]">

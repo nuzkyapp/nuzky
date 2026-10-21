@@ -1,11 +1,10 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
-import { X } from "lucide-react";
 import { useAgent } from "../lib/agent";
 import { planReady, useChatGpt } from "../lib/chatgpt";
 import { usePreview } from "../lib/preview";
 import { useSetup } from "../lib/setup";
 import { STEP, TOUR_STEPS, endTour, nextStep, openOwnVideo, useTour, type TourStep } from "../lib/tour";
-import { Button, IconButton } from "./ui";
+import { Button } from "./ui";
 
 /** Space between the target and the hole's edge, the hole and the card, and the card and the window's edges. */
 const PAD = 4;
@@ -107,12 +106,12 @@ function Spotlight({ step }: { step: TourStep }) {
         if (!ring) return;
         ring.style.display = h ? "" : "none";
         if (!h) return;
-        // The ring lies just outside the hole.
-        ring.setAttribute("x", String(h.x - 1));
-        ring.setAttribute("y", String(h.y - 1));
-        ring.setAttribute("width", String(h.w + 2));
-        ring.setAttribute("height", String(h.h + 2));
-        ring.setAttribute("rx", String(h.r + 1));
+        // A hairline just outside the hole, centred on its edge half a pixel out.
+        ring.setAttribute("x", String(h.x - 0.5));
+        ring.setAttribute("y", String(h.y - 0.5));
+        ring.setAttribute("width", String(h.w + 1));
+        ring.setAttribute("height", String(h.h + 1));
+        ring.setAttribute("rx", String(h.r + 0.5));
       });
       const at = place(holes[0], def.side, box.offsetWidth, box.offsetHeight);
       box.style.left = `${Math.round(at.x)}px`;
@@ -163,7 +162,7 @@ function Spotlight({ step }: { step: TourStep }) {
       <svg aria-hidden className="scrim-in pointer-events-none fixed inset-0 z-[85] h-full w-full">
         <path ref={dim} fillRule="evenodd" fill="rgb(0 0 0 / 0.62)" style={{ pointerEvents: "auto" }} />
         {[0, 1].map((i) => (
-          <rect key={i} ref={(el) => void (el && (rings.current[i] = el))} fill="none" strokeWidth={2} className="stroke-accent" style={{ display: "none" }} />
+          <rect key={i} ref={(el) => void (el && (rings.current[i] = el))} fill="none" strokeWidth={1} stroke="rgb(255 255 255 / 0.24)" style={{ display: "none" }} />
         ))}
       </svg>
       <div
@@ -178,12 +177,11 @@ function Spotlight({ step }: { step: TourStep }) {
         <p className="tabular text-[12px] leading-4 text-muted">
           {index + 1} of {TOUR_STEPS.length}
         </p>
-        <h2 id="tour-title" className="mt-1 pr-6 text-[15px] font-semibold leading-5">
+        <h2 id="tour-title" className="mt-1 text-[15px] font-semibold leading-5">
           {def.title}
         </h2>
         <div id="tour-text" aria-live="polite" className="mt-1 flex flex-col gap-2 text-[13px] leading-[18px] text-fg/85">
           <p>{text}</p>
-          {step === "play" && <p className="text-[12px] leading-4 text-muted">Video: Dianne Glavaš · CC BY 3.0</p>}
           {step === "export" && <DemoNote />}
         </div>
         <div className="mt-3 flex items-center gap-2">
@@ -209,9 +207,6 @@ function Spotlight({ step }: { step: TourStep }) {
             </>
           )}
         </div>
-        <IconButton label="Close the tour (Esc)" className="absolute right-2 top-2 h-7 w-7" onClick={endTour}>
-          <X size={15} />
-        </IconButton>
       </div>
     </>
   );
