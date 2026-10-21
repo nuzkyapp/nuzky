@@ -135,7 +135,7 @@ function show(step: TourStep) {
   // The full screen preview would cover what the other steps show.
   if (step !== "play" && usePreview.getState().full) void toggleFullPreview();
   const snap = useEditor.getState().snap;
-  edited = step === "undo" && snap ? JSON.stringify(snap.project) : null;
+  if (step !== "undo") edited = null;
   // The first caption's frame, so the still preview already shows the edit.
   const caption = step === "play" && snap ? Math.min(...snap.project.tracks.filter(isCaptionTrack).flatMap((t) => t.clips.map((c) => c.startUs))) : Infinity;
   if (caption !== Infinity) useEditor.getState().seek(caption);
@@ -155,6 +155,8 @@ function show(step: TourStep) {
     if (clip) useEditor.getState().select([clip.id]);
   }
   useTour.setState({ step, stopped: false, undone: false, word: null });
+  // Undo may have come while Watch it edit was still showing.
+  if (step === "undo" && snap) followUndo(snap);
   // Once the step is set, so the panel coming back is not kept out of the inspector again.
   if (step !== "duck" && closedPanel) {
     closedPanel = false;
@@ -248,7 +250,12 @@ useAgent.subscribe((s, prev) => {
     if (outcome === "stopped") useTour.setState({ stopped: true });
     // The request is back in the field, to send again.
     else if (outcome === "failed") show("ask");
-    else leaveWatch = window.setTimeout(() => show(runCards(useAgent.getState().items) ? "undo" : "play"), WATCH_AFTER_MS);
+    else {
+      // The run's card holds the project as the edit left it; the editor's snapshot may still be on its way.
+      const run = s.items.findLast((it) => it.kind === "run");
+      edited = run?.kind === "run" && run.snap ? JSON.stringify(run.snap.project) : null;
+      leaveWatch = window.setTimeout(() => show(runCards(useAgent.getState().items) ? "undo" : "play"), WATCH_AFTER_MS);
+    }
   }
   // A turn that outlived the tour ends the demo with it.
   if (!step && s.demo && s.status === "idle" && prev.status !== "idle") useAgent.setState({ demo: false });

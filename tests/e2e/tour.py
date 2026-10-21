@@ -324,7 +324,14 @@ def flow_tour(r):
     time.sleep(0.5)
     r.shot('1-ask-1024')
     press('Return')
-    r.check('at 1024 × 640 the edit runs too', at_step(r, 'undo', 30), tour(r))
+    r.check('at 1024 × 640 the edit runs too', wait(lambda: agent(r)['status'] == 'idle' and tour(r)['step'] == 'watch', 30), [agent(r), tour(r)])
+    # Ctrl+Z while Watch it edit still shows: One Undo then says the edit is undone and offers Redo, which brings it back.
+    r.s.run('document.activeElement?.blur()')
+    r.key('z', ctrlKey=True)
+    r.check('Undo while Watch it edit still shows is followed by One Undo saying so',
+            at_step(r, 'undo', 10) and wait(lambda: (t := tour(r))['undone'] and 'Redo' in t['buttons'], 5), tour(r))
+    click_at(hands, card_button(r, 'Redo'))
+    r.check('its Redo brings the edit back', wait(lambda: not tour(r)['undone'] and project(r)['captions'] > 0, 10), [tour(r), project(r)])
     time.sleep(0.5)
     r.shot('3-undo-1024')
     cut = project(r)
