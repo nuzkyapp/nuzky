@@ -56,8 +56,8 @@ const FOCUSABLE = "button, input, select, textarea, a[href], [tabindex]:not([tab
 const focusables = (root: Element | null) =>
   root ? [...root.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => !el.matches(":disabled") && el.getClientRects().length > 0) : [];
 
-/** Something else is open over the editor that owns Esc and Tab now: a dialog, a menu or a list. */
-const somethingOver = () => !!document.querySelector("dialog[open], [aria-modal='true'], [role=menu], [role=listbox]");
+/** Something else is open over the editor that owns Esc and Tab now: a dialog or a menu. */
+const somethingOver = () => !!document.querySelector("dialog[open], [aria-modal='true'], [role=menu]");
 
 /**
  * The tour over the editor: everything but the step's target lies under a dim that takes the clicks, and a card next to
