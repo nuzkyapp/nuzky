@@ -228,6 +228,8 @@ def flow_tour(r):
     r.shot('7-volume-1024')
     click_at(hands, f'{CARD} [data-primary]')
     r.check('Export, with the AI panel back', at_step(r, 'export', 5) and r.s.run('return window.__nuzky.dock.getState().open'), tour(r))
+    r.check('the keyboard is on Open my own video…, not in the field of the panel that came back',
+            wait(lambda: tour(r)['focus'] == 'Open my own video…', 5), tour(r))
     time.sleep(0.5)
     r.shot('8-export-1024')
     press('Escape')

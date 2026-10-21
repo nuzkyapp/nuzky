@@ -125,8 +125,12 @@ function Spotlight({ step }: { step: TourStep }) {
   // The card takes the keyboard unless the step's action is on the target; Space then plays, as everywhere in the editor.
   useEffect(() => {
     if (def.focus) return;
-    const box = card.current;
-    (box?.querySelector<HTMLElement>("[data-primary]") ?? box)?.focus();
+    // After the frame, so a panel the step opens again, whose field takes the focus as it appears, does not keep it.
+    const frame = requestAnimationFrame(() => {
+      const box = card.current;
+      (box?.querySelector<HTMLElement>("[data-primary]") ?? box)?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
   }, [def, stopped]);
 
   // Esc ends the tour; Tab goes round the card and the target, as clicks reach only them.
