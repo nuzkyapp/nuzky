@@ -1,5 +1,5 @@
 import { invoke, type Channel } from "@tauri-apps/api/core";
-import type { AgentAccess, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, Boot, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Part, PreviewStarted, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFraming, Said, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied } from "./types";
+import type { AgentAccess, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, Boot, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Part, PreviewStarted, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFraming, Said, SampleRun, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied } from "./types";
 
 /**
  * The session a change was made for. Mutating commands carry it, so a change still in flight when
@@ -8,16 +8,6 @@ import type { AgentAccess, AgentConnection, AgentKind, AgentSetup, AgentStatus, 
 type Epoch = string | undefined;
 
 export type FeedbackKind = "idea" | "message";
-
-/** What the sample's scripted edit did, as its run card counts it: the length before and after, the words, retakes and pauses it cut, the captions it added. */
-export interface SampleRun {
-  beforeUs: number;
-  afterUs: number;
-  words: number;
-  retakes: number;
-  pauses: number;
-  captions: number;
-}
 
 export const api = {
   setUiContext: (selection: string[], playheadUs: number) => invoke<void>("set_ui_context", { selection, playheadUs: Math.round(playheadUs) }),
@@ -75,10 +65,10 @@ export const api = {
   /** A new project with the media on its timeline, in the format of the first picture. */
   newProjectFromMedia: (paths: string[]) =>
     invoke<{ snapshot: Snapshot; added: string[]; failed: { path: string; error: string }[] }>("new_project_from_media", { paths }),
-  /** A new project "Sample video" with the talking head video Nuzky ships, its transcript included, as `newProjectFromMedia` opens one. */
+  /** A new, uncut project of the tour's sample video, opened at once. */
   openSample: () => invoke<{ snapshot: Snapshot; added: string[]; failed: { path: string; error: string }[] }>("open_sample"),
-  /** The tour's scripted AI edit of the sample: one run that cuts the long pauses, then adds captions. CANCELLED when it was stopped. */
-  sampleRun: (epoch: Epoch) => invoke<SampleRun>("sample_run", { epoch }),
+  /** The tour's AI edit of the open sample, as one run; CANCELLED when Stop ended it. */
+  sampleRun: (epoch: Epoch) => invoke<SampleRun>("sample_run", { expectedEpoch: epoch }),
   /** The CapCut draft in that folder as a new project, opened at once; the draft stays as it was. */
   openCapCutDraft: (path: string) => invoke<Snapshot>("open_capcut_draft", { path }),
   /** A PNG data URL of the picture CapCut keeps of a draft, or null. */

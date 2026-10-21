@@ -44,7 +44,7 @@ async fn blocking<T: Send + 'static>(work: impl FnOnce() -> anyhow::Result<T> + 
     tauri::async_runtime::spawn_blocking(work).await.map_err(err)?.map_err(err)
 }
 
-/// The sound effects built into Nuzky.
+/// The sound effects and songs built into Nuzky; `kind` tells them apart.
 #[tauri::command]
 pub fn sound_library() -> Vec<Sound> {
     sounds::built_in("")

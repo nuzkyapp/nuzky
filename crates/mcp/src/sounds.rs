@@ -1,4 +1,4 @@
-//! The sound library: sound effects built into Nuzky, and music and sounds found online through
+//! The sound library: sound effects and songs built into Nuzky, and music and sounds found online through
 //! Openverse, or Freesound with the user's own key. Only CC0 and CC BY ever show, the licences that
 //! allow monetized videos. Searching sends the search text; previewing or adding a sound downloads
 //! that one file. Nothing from the project leaves the computer. Music from a YouTube link comes through
@@ -110,6 +110,7 @@ struct Packed {
     file: String,
     title: String,
     category: String,
+    kind: Kind,
     author: String,
     source: String,
     duration_us: i64,
@@ -172,6 +173,7 @@ const FILES: &[(&str, &[u8])] = pack![
     "scissors-snip.ogg",
     "scissors-snip-2.ogg",
     "scissors-snip-3.ogg",
+    "dancing.ogg",
 ];
 
 fn packed() -> &'static [Packed] {
@@ -181,7 +183,7 @@ fn packed() -> &'static [Packed] {
     })
 }
 
-/// The built-in sound effects whose title, group or id contains `query`, all of them for an empty one.
+/// The built-in sound effects and songs whose title, group or id contains `query`, all of them for an empty one.
 pub fn built_in(query: &str) -> Vec<Sound> {
     let query = query.trim().to_lowercase();
     packed()
@@ -191,7 +193,7 @@ pub fn built_in(query: &str) -> Vec<Sound> {
         })
         .map(|p| Sound {
             id: format!("nuzky:{}", p.id),
-            kind: Kind::Effect,
+            kind: p.kind,
             title: p.title.clone(),
             author: p.author.clone(),
             duration_us: p.duration_us,
@@ -713,7 +715,7 @@ fn file_name(sound: &Sound) -> String {
 }
 
 /// Writes through a temporary file beside `path`, so a file there is always whole.
-pub(crate) fn publish(path: &Path, write: impl FnOnce(&mut std::fs::File) -> Result<()>) -> Result<()> {
+pub fn publish(path: &Path, write: impl FnOnce(&mut std::fs::File) -> Result<()>) -> Result<()> {
     std::fs::create_dir_all(path.parent().context("A file needs a directory")?)?;
     let tmp = path.with_file_name(format!(".nuzky-part-{}", new_id()));
     let result = std::fs::File::create(&tmp)
@@ -892,6 +894,8 @@ mod tests {
         assert!(
             built_in("WHOOSH").iter().all(|s| s.category.as_deref() == Some("Whoosh") || s.title.contains("hoosh"))
         );
+        let songs: Vec<_> = built_in("").into_iter().filter(|s| s.kind == Kind::Music).map(|s| s.id).collect();
+        assert_eq!(songs, ["nuzky:dancing"]);
     }
 
     fn audio(license: &str, version: &str, deed: &str) -> OpenverseAudio {

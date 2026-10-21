@@ -1,7 +1,7 @@
-import { api, errorText, plainError, type SampleRun } from "./api";
+import { api, errorText, plainError } from "./api";
 import { useAgent, type ChatItem, type Step } from "./agent";
 import { currentEpoch, isCaptionTrack, projectDuration, stopAiRun, useEditor } from "./store";
-import type { Project } from "./types";
+import type { Project, SampleRun } from "./types";
 
 /**
  * The AI turn of the tour, on the sample video: no agent runs. Nuzky itself makes the edit as one real run

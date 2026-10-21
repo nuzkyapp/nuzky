@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Builds the sound effects built into Nuzky, assets/sounds, from their CC0 sources.
+"""Builds the sound effects and songs built into Nuzky, assets/sounds, from their CC0 sources.
 
 Each source is downloaded once, checked against its pinned SHA-256 and kept in ~/.cache/nuzky/deps/sounds.
 Every sound then loses the silence at its edges, is shortened where the list says so, is levelled to a
-sample peak of -2 dBFS and is encoded as Ogg Opus. manifest.json records the author, source page and
+sample peak of -2 dBFS and is encoded as Ogg Opus. manifest.json records the kind, author, source page and
 licence of each, and what was changed. The output is committed; run this only after changing the list.
+Ids after the command build only those sounds and keep the others and their manifest entries as they are,
+since another FFmpeg encodes the same sound to other bytes.
 
-    python3 -I scripts/build-sounds.py
+    python3 -I scripts/build-sounds.py [id ...]
 """
 import hashlib, json, os, re, subprocess, sys, tempfile, urllib.request, zipfile
 from pathlib import Path
@@ -76,6 +78,9 @@ SOURCES = {
     'SC': ('Joseph Sardin', 'https://bigsoundbank.com/scissors-s0008.html',
            'https://bigsoundbank.com/UPLOAD/mp3/0008.mp3',
            'd87757bca6d6a832a2c43f34fcddfda89d3ec85da5dfac33e8c4ce62060503b2'),
+    'DA': ('HoliznaCC0', 'https://freemusicarchive.org/music/holiznacc0/only-in-the-milky-way-part-2/dancing/',
+           'https://files.freemusicarchive.org/storage-freemusicarchive-org/tracks/lgBMnIwv3Lz21FZ7fdLOhkTdMvxE6jlgod5oPYFC.mp3',
+           'c974c57cf242be09806002a236a4d97fad80e015c1f36535c800a782f9396228'),
 }
 
 # id, title, category, source, file inside the archive, seconds kept (None keeps all of it), or the start and
@@ -129,6 +134,11 @@ SOUNDS = [
     ('scissors-snip-3', 'Scissors snip 3', 'Everyday', 'SC', None, (5.02, 0.3)),
 ]
 
+# Songs, in the same form.
+MUSIC = [
+    ('dancing', 'Dancing', 'Music', 'DA', None, None),
+]
+
 # After levelling, silence more than 60 dB under the peak goes from the start and the end, never from
 # inside; a few milliseconds stay before the sound and 50 ms after it.
 EDGES = ('silenceremove=start_periods=1:start_threshold=-60dB:detection=peak:start_silence=0.005,areverse,'
@@ -174,7 +184,7 @@ def probe(path, entry):
     return out.stdout.strip()
 
 
-def build(sound, scratch):
+def build(sound, kind, scratch):
     id, title, category, key, member, keep = sound
     src = source_file(key, member, scratch)
     part = isinstance(keep, tuple)
@@ -200,16 +210,23 @@ def build(sound, scratch):
     elif keep:
         changes += f'; the first {keep} s, fading out over the last second'
     return {
-        'id': id, 'file': out.name, 'title': title, 'category': category, 'author': author, 'source': page,
+        'id': id, 'file': out.name, 'title': title, 'category': category, 'kind': kind, 'author': author, 'source': page,
         'license': 'CC0 1.0', 'licenseUrl': CC0, 'download': url, 'downloadSha256': pinned, 'member': member,
         'changes': changes, 'durationUs': round(float(probe(out, 'stream=duration')) * 1e6), 'sha256': sha256(out),
     }
 
 
 def main():
+    only = set(sys.argv[1:])
+    listed = [(sound, kind) for kind, sounds in (('effect', SOUNDS), ('music', MUSIC)) for sound in sounds]
+    unknown = only - {sound[0] for sound, _ in listed}
+    if unknown:
+        sys.exit(f'Not in the list: {", ".join(sorted(unknown))}')
     OUT.mkdir(parents=True, exist_ok=True)
+    built = {s['id']: s for s in json.loads((OUT / 'manifest.json').read_text())} if only else {}
     with tempfile.TemporaryDirectory() as scratch:
-        manifest = [build(sound, scratch) for sound in SOUNDS]
+        manifest = [build(sound, kind, scratch) if not only or sound[0] in only else built[sound[0]]
+                    for sound, kind in listed]
     for stale in set(OUT.glob('*.ogg')) - {OUT / s['file'] for s in manifest}:
         stale.unlink()
     (OUT / 'manifest.json').write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + '\n')
