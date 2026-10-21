@@ -862,12 +862,13 @@ pub fn existing<'a>(assets: &'a [Asset], id: &str) -> Option<&'a Asset> {
         let path = Path::new(&a.path);
         // Asset paths are canonical, as probe stores them.
         source == "youtube"
-            && a.kind == AssetKind::Audio
             && path.file_stem().is_some_and(|s| *s == *youtube)
             && path.parent().map(Path::to_path_buf) == dunce::canonicalize(library_dir()).ok()
     };
+    // Footage credits its source too, such as the tour's sample video from YouTube.
     assets.iter().find(|a| {
-        (a.credit.as_ref().is_some_and(|c| c.source == source && c.id == id) || linked(a))
+        a.kind == AssetKind::Audio
+            && (a.credit.as_ref().is_some_and(|c| c.source == source && c.id == id) || linked(a))
             && Path::new(&a.path).is_file()
     })
 }
@@ -992,6 +993,35 @@ mod tests {
         std::thread::sleep(Duration::from_millis(200));
         assert!(std::fs::read_dir(cache.join("sounds")).map_or(true, |mut d| d.next().is_none()));
         std::fs::remove_dir_all(cache).ok();
+    }
+
+    #[test]
+    fn only_a_sound_the_project_has_is_placed_again() {
+        let dir = std::env::temp_dir().join(format!("nuzky-existing-sound-{}", new_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("talk.mp4");
+        std::fs::write(&file, b"talk").unwrap();
+        let mut asset = Asset {
+            id: "talk".into(),
+            name: "talk.mp4".into(),
+            path: file.to_string_lossy().into(),
+            kind: AssetKind::Video,
+            duration_us: 60_000_000,
+            width: 1920,
+            height: 1080,
+            fps: 30.0,
+            has_audio: true,
+            rotation: 0,
+            mirror: false,
+            credit: Some(crate::sample::manifest().credit.clone()),
+            part: None,
+        };
+        // The tour's sample video credits the YouTube video it was cut from; that video's song is another sound.
+        let song = "youtube:SfmKRW_bSHI";
+        assert!(existing(std::slice::from_ref(&asset), song).is_none());
+        asset.kind = AssetKind::Audio;
+        assert_eq!(existing(std::slice::from_ref(&asset), song).map(|a| a.id.as_str()), Some("talk"));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
