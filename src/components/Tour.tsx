@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
-import { useAgent } from "../lib/agent";
+import { agentName, useAgent, type AgentId } from "../lib/agent";
 import { planReady, useChatGpt } from "../lib/chatgpt";
 import { usePreview } from "../lib/preview";
 import { useSetup } from "../lib/setup";
@@ -77,6 +77,7 @@ function Spotlight({ step }: { step: TourStep }) {
   const def = STEP[step];
   const stopped = useTour((s) => s.stopped);
   const undone = useTour((s) => s.undone);
+  const ai = useRealAi();
   const cut = useAgent((s) => s.items.some((i) => i.kind === "run"));
   const dim = useRef<SVGPathElement>(null);
   const rings = useRef<SVGRectElement[]>([]);
@@ -197,7 +198,7 @@ function Spotlight({ step }: { step: TourStep }) {
         </h2>
         <div id="tour-text" aria-live="polite" className="mt-1 flex flex-col gap-2 text-[13px] leading-[18px] text-fg/85">
           <p>{text}</p>
-          {step === "export" && <DemoNote />}
+          {step === "export" && <DemoNote ai={ai} />}
         </div>
         <div className="mt-3 flex items-center gap-2">
           {step !== "export" && (
@@ -218,9 +219,15 @@ function Spotlight({ step }: { step: TourStep }) {
           )}
           {step === "export" && (
             <>
-              <Button pill className="h-7 px-3 text-[12px]" onClick={endTour}>
-                Done
-              </Button>
+              {ai === null && !WINDOWS ? (
+                <Button pill className="h-7 px-3 text-[12px]" onClick={connectAi}>
+                  Connect your AI
+                </Button>
+              ) : (
+                <Button pill className="h-7 px-3 text-[12px]" onClick={endTour}>
+                  Done
+                </Button>
+              )}
               <Button variant="primary" pill data-primary className="h-7 px-3 text-[12px]" onClick={openOwnVideo}>
                 Open my own video…
               </Button>
@@ -232,27 +239,33 @@ function Spotlight({ step }: { step: TourStep }) {
   );
 }
 
-/** Without a real AI on this computer, the last step says the tour's was a demo and where a real one comes from. */
-function DemoNote() {
+/** The AI that edits for real after the tour: the panel's own when it can answer, else one that can; null without one,
+ * undefined while Nuzky is still looking. */
+function useRealAi() {
   const agents = useAgent((s) => s.agents);
+  const agent = useAgent((s) => s.agent);
   const chatgpt = useChatGpt((s) => planReady(s.status));
-  if (navigator.userAgent.includes("Windows")) return <p className="text-[12px] leading-4 text-muted">The AI in this tour was a demo. AI editing isn't available on Windows yet.</p>;
-  if (agents === null || agents.some((a) => a.path) || chatgpt) return null;
+  if (agents === null) return undefined;
+  const can = (id: AgentId) => (id === "chatgpt" ? chatgpt : !!agents.find((a) => a.id === id)?.path);
+  const id = can(agent) ? agent : (agents.find((a) => a.path)?.id ?? (chatgpt ? "chatgpt" : null));
+  return id && agentName(id, agents);
+}
+
+const WINDOWS = navigator.userAgent.includes("Windows");
+
+/** The last step always says the tour's AI was a demo, and what a real one does here. */
+function DemoNote({ ai }: { ai: string | null | undefined }) {
   return (
     <p className="text-[12px] leading-4 text-muted">
-      The AI in this tour was a demo.{" "}
-      <button
-        type="button"
-        onClick={() => {
-          endTour();
-          useSetup.getState().showStep("ai");
-          useSetup.getState().openSetup();
-        }}
-        className="text-accent hover:underline"
-      >
-        Get set up
-      </button>{" "}
-      connects a real one.
+      The AI in this tour was a demo.
+      {WINDOWS ? " AI editing isn't available on Windows yet." : ai ? ` ${ai} does it for real on your videos. Next time, type what you want in the AI panel.` : ""}
     </p>
   );
+}
+
+/** Without an AI, Get set up's AI step, where one is connected. */
+function connectAi() {
+  endTour();
+  useSetup.getState().showStep("ai");
+  useSetup.getState().openSetup();
 }

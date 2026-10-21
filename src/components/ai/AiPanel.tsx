@@ -847,11 +847,12 @@ function dayAndTime(ms: number) {
   return `${today ? "Today" : whenLabel(ms)} ${time}`;
 }
 
-function DateLine({ ms }: { ms: number }) {
+/** A 12 px line across the conversation between two hairlines, such as when a reopened chat was. */
+function Separator({ children }: { children: ReactNode }) {
   return (
     <div className="flex items-center gap-3 text-[12px] text-muted" role="separator">
       <span className="h-px flex-1 bg-white/[.06]" />
-      <span className="tabular">{dayAndTime(ms)}</span>
+      {children}
       <span className="h-px flex-1 bg-white/[.06]" />
     </div>
   );
@@ -868,6 +869,7 @@ function Conversation() {
     return () => useEditor.setState((s) => ({ aiChats: s.aiChats - 1 }));
   }, [project]);
   const pastCount = useAgent((s) => s.pastCount);
+  const demoItems = useAgent((s) => s.demoItems) && project;
   const working = useAgent((s) => s.status !== "idle");
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
@@ -901,7 +903,13 @@ function Conversation() {
       {items.length === 0 ? <Empty /> : <div className="mt-auto" />}
       {items.map((item, i) => (
         <Fragment key={i}>
-          {lines.has(i) && <DateLine ms={lines.get(i)!} />}
+          {lines.has(i) && (
+            <Separator>
+              <span className="tabular">{dayAndTime(lines.get(i)!)}</span>
+            </Separator>
+          )}
+          {/* The tour's scripted turn stays after the tour, under the real agent's name, so it says no AI wrote it. */}
+          {demoItems && i === 0 && <Separator>Tour demo · no AI ran</Separator>}
           {/* Steps fold away once the agent has answered after them. */}
           <Item item={item} index={i} last={i === items.length - 1} past={pastCount !== null && i < pastCount} collapsed={item.kind === "steps" && (i < lastUser || (!working && items.slice(i + 1).some((x) => x.kind === "agent")))} />
         </Fragment>
