@@ -1,0 +1,928 @@
+{
+  "version": 3,
+  "fingerprint": "000000000056bcba-cb6a28e967db71c1",
+  "duration_us": 61366667,
+  "model": "large-v3-turbo-q5_0",
+  "language": "en",
+  "words": [
+    {
+      "start_us": 300000,
+      "end_us": 445000,
+      "text": "But",
+      "probability": 0.6588413
+    },
+    {
+      "start_us": 460000,
+      "end_us": 590000,
+      "text": "the",
+      "probability": 0.9993841
+    },
+    {
+      "start_us": 590000,
+      "end_us": 1290000,
+      "text": "spotlight",
+      "probability": 0.99526954
+    },
+    {
+      "start_us": 1290000,
+      "end_us": 1760000,
+      "text": "effect",
+      "probability": 0.99919444
+    },
+    {
+      "start_us": 2080000,
+      "end_us": 2640000,
+      "text": "shows",
+      "probability": 0.99128443
+    },
+    {
+      "start_us": 2640000,
+      "end_us": 3050000,
+      "text": "us",
+      "probability": 0.9991554
+    },
+    {
+      "start_us": 3480000,
+      "end_us": 3770000,
+      "text": "that",
+      "probability": 0.93250614
+    },
+    {
+      "start_us": 3830000,
+      "end_us": 4090000,
+      "text": "it's",
+      "probability": 0.9989241
+    },
+    {
+      "start_us": 4220000,
+      "end_us": 4600000,
+      "text": "pretty",
+      "probability": 0.996989
+    },
+    {
+      "start_us": 4600000,
+      "end_us": 5360000,
+      "text": "likely",
+      "probability": 0.99745125
+    },
+    {
+      "start_us": 6140000,
+      "end_us": 6460000,
+      "text": "that",
+      "probability": 0.5525485
+    },
+    {
+      "start_us": 6900000,
+      "end_us": 7000000,
+      "text": "the",
+      "probability": 0.9653938
+    },
+    {
+      "start_us": 7120000,
+      "end_us": 7625000,
+      "text": "people",
+      "probability": 0.9937066
+    },
+    {
+      "start_us": 7645000,
+      "end_us": 7840000,
+      "text": "who",
+      "probability": 0.6610151
+    },
+    {
+      "start_us": 7840000,
+      "end_us": 8185000,
+      "text": "you",
+      "probability": 0.9763526
+    },
+    {
+      "start_us": 8220000,
+      "end_us": 8470000,
+      "text": "think",
+      "probability": 0.9595542
+    },
+    {
+      "start_us": 8570000,
+      "end_us": 8715000,
+      "text": "are",
+      "probability": 0.51876247
+    },
+    {
+      "start_us": 8740000,
+      "end_us": 9180000,
+      "text": "judging",
+      "probability": 0.99744076
+    },
+    {
+      "start_us": 9180000,
+      "end_us": 9565000,
+      "text": "you",
+      "probability": 0.99973494
+    },
+    {
+      "start_us": 9615000,
+      "end_us": 9720000,
+      "text": "or",
+      "probability": 0.9035609
+    },
+    {
+      "start_us": 9720000,
+      "end_us": 9940000,
+      "text": "that",
+      "probability": 0.9917487
+    },
+    {
+      "start_us": 9990000,
+      "end_us": 10265000,
+      "text": "are",
+      "probability": 0.99988365
+    },
+    {
+      "start_us": 10340000,
+      "end_us": 11050000,
+      "text": "perceiving",
+      "probability": 0.99938905
+    },
+    {
+      "start_us": 11050000,
+      "end_us": 11445000,
+      "text": "you",
+      "probability": 0.9999924
+    },
+    {
+      "start_us": 12165000,
+      "end_us": 12415000,
+      "text": "are",
+      "probability": 0.9098758
+    },
+    {
+      "start_us": 12455000,
+      "end_us": 13445000,
+      "text": "potentially",
+      "probability": 0.99213654
+    },
+    {
+      "start_us": 13655000,
+      "end_us": 14060000,
+      "text": "not",
+      "probability": 0.936731
+    },
+    {
+      "start_us": 14105000,
+      "end_us": 14880000,
+      "text": "actually",
+      "probability": 0.9975768
+    },
+    {
+      "start_us": 14930000,
+      "end_us": 15560000,
+      "text": "wondering",
+      "probability": 0.9935341
+    },
+    {
+      "start_us": 15580000,
+      "end_us": 15810000,
+      "text": "why",
+      "probability": 0.97970104
+    },
+    {
+      "start_us": 15810000,
+      "end_us": 16070000,
+      "text": "you",
+      "probability": 0.9954385
+    },
+    {
+      "start_us": 16070000,
+      "end_us": 16325000,
+      "text": "are",
+      "probability": 0.99438345
+    },
+    {
+      "start_us": 16360000,
+      "end_us": 16860000,
+      "text": "alone",
+      "probability": 0.99542713
+    },
+    {
+      "start_us": 16860000,
+      "end_us": 16890000,
+      "text": "at",
+      "probability": 0.9457107
+    },
+    {
+      "start_us": 16950000,
+      "end_us": 17280000,
+      "text": "all.",
+      "probability": 0.82157785
+    },
+    {
+      "start_us": 17280000,
+      "end_us": 17470000,
+      "text": "They're",
+      "probability": 0.97042584
+    },
+    {
+      "start_us": 17470000,
+      "end_us": 17680000,
+      "text": "not",
+      "probability": 0.9988086
+    },
+    {
+      "start_us": 17680000,
+      "end_us": 18340000,
+      "text": "wondering",
+      "probability": 0.9976967
+    },
+    {
+      "start_us": 18340000,
+      "end_us": 18495000,
+      "text": "if",
+      "probability": 0.9966107
+    },
+    {
+      "start_us": 18530000,
+      "end_us": 18750000,
+      "text": "you",
+      "probability": 0.9990582
+    },
+    {
+      "start_us": 18750000,
+      "end_us": 18940000,
+      "text": "are",
+      "probability": 0.99344885
+    },
+    {
+      "start_us": 18940000,
+      "end_us": 19420000,
+      "text": "meeting",
+      "probability": 0.99139315
+    },
+    {
+      "start_us": 19420000,
+      "end_us": 19895000,
+      "text": "someone.",
+      "probability": 0.8579143
+    },
+    {
+      "start_us": 20220000,
+      "end_us": 20390000,
+      "text": "They're",
+      "probability": 0.9902221
+    },
+    {
+      "start_us": 20390000,
+      "end_us": 20570000,
+      "text": "not",
+      "probability": 0.99921066
+    },
+    {
+      "start_us": 20570000,
+      "end_us": 21280000,
+      "text": "wondering",
+      "probability": 0.9982544
+    },
+    {
+      "start_us": 21280000,
+      "end_us": 21420000,
+      "text": "if",
+      "probability": 0.99754447
+    },
+    {
+      "start_us": 21455000,
+      "end_us": 21630000,
+      "text": "you",
+      "probability": 0.9987991
+    },
+    {
+      "start_us": 21630000,
+      "end_us": 21840000,
+      "text": "have",
+      "probability": 0.99901056
+    },
+    {
+      "start_us": 21875000,
+      "end_us": 22095000,
+      "text": "no",
+      "probability": 0.99699664
+    },
+    {
+      "start_us": 22140000,
+      "end_us": 22560000,
+      "text": "friends.",
+      "probability": 0.84678906
+    },
+    {
+      "start_us": 23010000,
+      "end_us": 23145000,
+      "text": "And",
+      "probability": 0.9920893
+    },
+    {
+      "start_us": 23155000,
+      "end_us": 23600000,
+      "text": "even",
+      "probability": 0.9904292
+    },
+    {
+      "start_us": 23600000,
+      "end_us": 23840000,
+      "text": "on",
+      "probability": 0.997164
+    },
+    {
+      "start_us": 23840000,
+      "end_us": 23965000,
+      "text": "a",
+      "probability": 0.99818206
+    },
+    {
+      "start_us": 24040000,
+      "end_us": 24540000,
+      "text": "positive",
+      "probability": 0.9992164
+    },
+    {
+      "start_us": 24580000,
+      "end_us": 24900000,
+      "text": "note,",
+      "probability": 0.8787502
+    },
+    {
+      "start_us": 25120000,
+      "end_us": 25265000,
+      "text": "they",
+      "probability": 0.7606351
+    },
+    {
+      "start_us": 25380000,
+      "end_us": 26010000,
+      "text": "probably",
+      "probability": 0.98194224
+    },
+    {
+      "start_us": 26010000,
+      "end_us": 26280000,
+      "text": "aren't",
+      "probability": 0.97198606
+    },
+    {
+      "start_us": 26340000,
+      "end_us": 26720000,
+      "text": "even",
+      "probability": 0.9637288
+    },
+    {
+      "start_us": 26720000,
+      "end_us": 27400000,
+      "text": "labeling",
+      "probability": 0.48584035
+    },
+    {
+      "start_us": 27400000,
+      "end_us": 27775000,
+      "text": "you",
+      "probability": 0.910269
+    },
+    {
+      "start_us": 27790000,
+      "end_us": 28070000,
+      "text": "as",
+      "probability": 0.66996366
+    },
+    {
+      "start_us": 28155000,
+      "end_us": 28750000,
+      "text": "confident",
+      "probability": 0.9169517
+    },
+    {
+      "start_us": 28825000,
+      "end_us": 29010000,
+      "text": "or",
+      "probability": 0.7746497
+    },
+    {
+      "start_us": 29010000,
+      "end_us": 29265000,
+      "text": "as",
+      "probability": 0.95108503
+    },
+    {
+      "start_us": 29320000,
+      "end_us": 30030000,
+      "text": "empowered.",
+      "probability": 0.7154403
+    },
+    {
+      "start_us": 30680000,
+      "end_us": 30975000,
+      "text": "Because",
+      "probability": 0.9702524
+    },
+    {
+      "start_us": 31065000,
+      "end_us": 31350000,
+      "text": "in",
+      "probability": 0.9581734
+    },
+    {
+      "start_us": 31350000,
+      "end_us": 32155000,
+      "text": "reality,",
+      "probability": 0.93858695
+    },
+    {
+      "start_us": 32620000,
+      "end_us": 32920000,
+      "text": "because",
+      "probability": 0.98650396
+    },
+    {
+      "start_us": 32920000,
+      "end_us": 33020000,
+      "text": "of",
+      "probability": 0.9966639
+    },
+    {
+      "start_us": 33080000,
+      "end_us": 33270000,
+      "text": "the",
+      "probability": 0.6258699
+    },
+    {
+      "start_us": 33270000,
+      "end_us": 33870000,
+      "text": "spotlight",
+      "probability": 0.97177106
+    },
+    {
+      "start_us": 33870000,
+      "end_us": 34360000,
+      "text": "effect,",
+      "probability": 0.93685853
+    },
+    {
+      "start_us": 35420000,
+      "end_us": 35580000,
+      "text": "they",
+      "probability": 0.6830459
+    },
+    {
+      "start_us": 35780000,
+      "end_us": 36400000,
+      "text": "probably",
+      "probability": 0.99944896
+    },
+    {
+      "start_us": 36400000,
+      "end_us": 36660000,
+      "text": "aren't",
+      "probability": 0.99928606
+    },
+    {
+      "start_us": 36660000,
+      "end_us": 37250000,
+      "text": "actually",
+      "probability": 0.9992202
+    },
+    {
+      "start_us": 37340000,
+      "end_us": 37750000,
+      "text": "thinking",
+      "probability": 0.99654794
+    },
+    {
+      "start_us": 37750000,
+      "end_us": 38170000,
+      "text": "about",
+      "probability": 0.995505
+    },
+    {
+      "start_us": 38170000,
+      "end_us": 38410000,
+      "text": "you",
+      "probability": 0.9990849
+    },
+    {
+      "start_us": 38450000,
+      "end_us": 38600000,
+      "text": "at",
+      "probability": 0.9959608
+    },
+    {
+      "start_us": 38600000,
+      "end_us": 38730000,
+      "text": "all.",
+      "probability": 0.99113035
+    },
+    {
+      "start_us": 39070000,
+      "end_us": 39200000,
+      "text": "So",
+      "probability": 0.9984429
+    },
+    {
+      "start_us": 39200000,
+      "end_us": 39360000,
+      "text": "the",
+      "probability": 0.96943474
+    },
+    {
+      "start_us": 39360000,
+      "end_us": 39870000,
+      "text": "spotlight",
+      "probability": 0.98004305
+    },
+    {
+      "start_us": 39870000,
+      "end_us": 40240000,
+      "text": "effect",
+      "probability": 0.99983215
+    },
+    {
+      "start_us": 40755000,
+      "end_us": 40920000,
+      "text": "is",
+      "probability": 0.99907726
+    },
+    {
+      "start_us": 40930000,
+      "end_us": 41105000,
+      "text": "this",
+      "probability": 0.9999924
+    },
+    {
+      "start_us": 41110000,
+      "end_us": 41560000,
+      "text": "idea",
+      "probability": 0.99998283
+    },
+    {
+      "start_us": 41560000,
+      "end_us": 41710000,
+      "text": "in",
+      "probability": 0.9993174
+    },
+    {
+      "start_us": 41710000,
+      "end_us": 42500000,
+      "text": "psychology",
+      "probability": 0.99946034
+    },
+    {
+      "start_us": 43020000,
+      "end_us": 43235000,
+      "text": "that",
+      "probability": 0.6283591
+    },
+    {
+      "start_us": 43340000,
+      "end_us": 43590000,
+      "text": "we",
+      "probability": 0.99671715
+    },
+    {
+      "start_us": 43620000,
+      "end_us": 43820000,
+      "text": "walk",
+      "probability": 0.997164
+    },
+    {
+      "start_us": 43875000,
+      "end_us": 44440000,
+      "text": "around",
+      "probability": 0.9732717
+    },
+    {
+      "start_us": 44960000,
+      "end_us": 45410000,
+      "text": "feeling",
+      "probability": 0.5966133
+    },
+    {
+      "start_us": 45410000,
+      "end_us": 45680000,
+      "text": "like",
+      "probability": 0.89596003
+    },
+    {
+      "start_us": 45800000,
+      "end_us": 46100000,
+      "text": "there",
+      "probability": 0.9171179
+    },
+    {
+      "start_us": 46100000,
+      "end_us": 46380000,
+      "text": "is",
+      "probability": 0.9626265
+    },
+    {
+      "start_us": 46485000,
+      "end_us": 46710000,
+      "text": "a",
+      "probability": 0.76930034
+    },
+    {
+      "start_us": 46710000,
+      "end_us": 47375000,
+      "text": "spotlight",
+      "probability": 0.99963194
+    },
+    {
+      "start_us": 47375000,
+      "end_us": 47840000,
+      "text": "above",
+      "probability": 0.99982643
+    },
+    {
+      "start_us": 47840000,
+      "end_us": 48075000,
+      "text": "us,",
+      "probability": 0.9752748
+    },
+    {
+      "start_us": 48120000,
+      "end_us": 48265000,
+      "text": "that",
+      "probability": 0.9997921
+    },
+    {
+      "start_us": 48340000,
+      "end_us": 49005000,
+      "text": "everyone",
+      "probability": 0.9999809
+    },
+    {
+      "start_us": 49005000,
+      "end_us": 49165000,
+      "text": "is",
+      "probability": 0.9999981
+    },
+    {
+      "start_us": 49240000,
+      "end_us": 49650000,
+      "text": "paying",
+      "probability": 0.99995804
+    },
+    {
+      "start_us": 49650000,
+      "end_us": 50310000,
+      "text": "attention",
+      "probability": 0.99998665
+    },
+    {
+      "start_us": 50310000,
+      "end_us": 50600000,
+      "text": "to",
+      "probability": 0.99995613
+    },
+    {
+      "start_us": 50600000,
+      "end_us": 50950000,
+      "text": "us,",
+      "probability": 0.8859076
+    },
+    {
+      "start_us": 51340000,
+      "end_us": 51550000,
+      "text": "when",
+      "probability": 0.82582384
+    },
+    {
+      "start_us": 51550000,
+      "end_us": 51770000,
+      "text": "in",
+      "probability": 0.9998722
+    },
+    {
+      "start_us": 51770000,
+      "end_us": 52665000,
+      "text": "reality,",
+      "probability": 0.8510107
+    },
+    {
+      "start_us": 53000000,
+      "end_us": 53220000,
+      "text": "they",
+      "probability": 0.8295147
+    },
+    {
+      "start_us": 53220000,
+      "end_us": 53385000,
+      "text": "are",
+      "probability": 0.9994337
+    },
+    {
+      "start_us": 53425000,
+      "end_us": 53740000,
+      "text": "paying",
+      "probability": 0.99939936
+    },
+    {
+      "start_us": 53740000,
+      "end_us": 54300000,
+      "text": "attention",
+      "probability": 0.9999962
+    },
+    {
+      "start_us": 54300000,
+      "end_us": 54765000,
+      "text": "to",
+      "probability": 0.9999924
+    },
+    {
+      "start_us": 54840000,
+      "end_us": 55010000,
+      "text": "their",
+      "probability": 0.9999771
+    },
+    {
+      "start_us": 55050000,
+      "end_us": 55310000,
+      "text": "own",
+      "probability": 0.9999008
+    },
+    {
+      "start_us": 55310000,
+      "end_us": 55725000,
+      "text": "lives.",
+      "probability": 0.7410892
+    },
+    {
+      "start_us": 55860000,
+      "end_us": 56010000,
+      "text": "They",
+      "probability": 0.97345924
+    },
+    {
+      "start_us": 56010000,
+      "end_us": 56240000,
+      "text": "don't",
+      "probability": 0.9999771
+    },
+    {
+      "start_us": 56240000,
+      "end_us": 56715000,
+      "text": "notice",
+      "probability": 0.9999409
+    },
+    {
+      "start_us": 56715000,
+      "end_us": 56905000,
+      "text": "as",
+      "probability": 0.9999924
+    },
+    {
+      "start_us": 56915000,
+      "end_us": 57240000,
+      "text": "much",
+      "probability": 0.99998665
+    },
+    {
+      "start_us": 57240000,
+      "end_us": 57390000,
+      "text": "of",
+      "probability": 0.9992545
+    },
+    {
+      "start_us": 57425000,
+      "end_us": 57640000,
+      "text": "our",
+      "probability": 0.9977899
+    },
+    {
+      "start_us": 57640000,
+      "end_us": 58185000,
+      "text": "actions",
+      "probability": 0.99996376
+    },
+    {
+      "start_us": 58260000,
+      "end_us": 58420000,
+      "text": "and",
+      "probability": 0.99988556
+    },
+    {
+      "start_us": 58420000,
+      "end_us": 58540000,
+      "text": "our",
+      "probability": 0.9998379
+    },
+    {
+      "start_us": 58565000,
+      "end_us": 59315000,
+      "text": "behaviours",
+      "probability": 0.81035596
+    },
+    {
+      "start_us": 59770000,
+      "end_us": 59975000,
+      "text": "as",
+      "probability": 0.998982
+    },
+    {
+      "start_us": 60020000,
+      "end_us": 60215000,
+      "text": "we",
+      "probability": 0.9999771
+    },
+    {
+      "start_us": 60260000,
+      "end_us": 60440000,
+      "text": "think",
+      "probability": 0.9999924
+    },
+    {
+      "start_us": 60520000,
+      "end_us": 60640000,
+      "text": "that",
+      "probability": 0.9999676
+    },
+    {
+      "start_us": 60660000,
+      "end_us": 60870000,
+      "text": "they",
+      "probability": 0.99991417
+    },
+    {
+      "start_us": 60900000,
+      "end_us": 61170000,
+      "text": "do.",
+      "probability": 0.965595
+    }
+  ],
+  "segments": [
+    {
+      "start_us": 340000,
+      "end_us": 11780000,
+      "text": "But the spotlight effect shows us that it's pretty likely that the people who you think are judging you or that are perceiving you"
+    },
+    {
+      "start_us": 12170000,
+      "end_us": 17190000,
+      "text": "are potentially not actually wondering why you are alone at all."
+    },
+    {
+      "start_us": 17290000,
+      "end_us": 20070000,
+      "text": "They're not wondering if you are meeting someone."
+    },
+    {
+      "start_us": 20170000,
+      "end_us": 22870000,
+      "text": "They're not wondering if you have no friends."
+    },
+    {
+      "start_us": 22970000,
+      "end_us": 29910000,
+      "text": "And even on a positive note, they probably aren't even labeling you as confident or as empowered."
+    },
+    {
+      "start_us": 30010000,
+      "end_us": 34740000,
+      "text": "Because in reality, because of the spotlight effect,"
+    },
+    {
+      "start_us": 35440000,
+      "end_us": 38730000,
+      "text": "they probably aren't actually thinking about you at all."
+    },
+    {
+      "start_us": 38880000,
+      "end_us": 42170000,
+      "text": "So the spotlight effect is this idea in psychology"
+    },
+    {
+      "start_us": 42530000,
+      "end_us": 43760000,
+      "text": "that we walk"
+    },
+    {
+      "start_us": 44200000,
+      "end_us": 46670000,
+      "text": "around feeling like there is a"
+    },
+    {
+      "start_us": 46820000,
+      "end_us": 50110000,
+      "text": "spotlight above us, that everyone is paying attention"
+    },
+    {
+      "start_us": 50470000,
+      "end_us": 53290000,
+      "text": "to us, when in reality, they are"
+    },
+    {
+      "start_us": 53500000,
+      "end_us": 55680000,
+      "text": "paying attention to their own lives."
+    },
+    {
+      "start_us": 55780000,
+      "end_us": 61340000,
+      "text": "They don't notice as much of our actions and our behaviours as we think that they do."
+    }
+  ],
+  "alignment": "wav2vec2-base-960h-f16"
+}

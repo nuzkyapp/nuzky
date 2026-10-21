@@ -1,0 +1,22 @@
+{
+  "file": "spotlight-effect.mp4",
+  "credit": {
+    "source": "youtube",
+    "id": "SfmKRW_bSHI",
+    "title": "Stop Performing and Unlock Confidence, Creativity & Calm (Solo Table Theory)",
+    "author": "Dianne Glavaš",
+    "license": "by",
+    "licenseVersion": "3.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/3.0/",
+    "url": "https://www.youtube.com/watch?v=SfmKRW_bSHI"
+  },
+  "attribution": "\"Stop Performing and Unlock Confidence, Creativity & Calm (Solo Table Theory)\" by Dianne Glavaš (https://www.youtube.com/watch?v=SfmKRW_bSHI), licensed under CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/). Cut to 2:55.40-3:56.75 of the video, scaled to 1920x1080 at 30 fps and encoded as H.264 (CRF 26) with AAC at 128 kb/s.",
+  "download": "yt-dlp -f 137+140 --merge-output-format mp4 https://www.youtube.com/watch?v=SfmKRW_bSHI",
+  "downloadSha256": "427c2f1a98ef072419f834579d2ce89e10757134e0d49e1fc33326c855639cfa",
+  "changes": "Cut to 2:55.40-3:56.75 of the video, scaled to 1920x1080 at 30 fps and encoded as H.264 (CRF 26) with AAC at 128 kb/s",
+  "durationUs": 61366667,
+  "bytes": 5684410,
+  "sha256": "8072e237ca81b3a38dd2b5f898f06c7b626d5824894c051f5a79070554c93a5d",
+  "transcript": "transcript.json",
+  "transcriptMadeBy": "Nuzky's transcribe tool: large-v3-turbo-q5_0, word times measured with wav2vec2-base-960h-f16"
+}
