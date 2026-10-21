@@ -29,8 +29,6 @@ macOS works and is where Nuzky is tested. Linux is only partly tested. Windows i
 - **Windows 10 or 11, x64**: the `-setup.exe`. The installer downloads Microsoft WebView2 if it's missing.
 - **Linux, x86_64**: the `.deb` for Ubuntu 24.04 or newer (`sudo apt install ./Nuzky_*.deb`), or the `.AppImage` for other distributions with glibc 2.39 or newer. Make the AppImage executable with `chmod +x` and run it.
 
-`SHA256SUMS` lists the checksums of the installers and the source archive.
-
 ## Opening an unsigned build
 
 - **macOS**: Apple hasn't checked this build, so macOS won't open it the first time. Close the message, open System Settings → Privacy & Security, click Open Anyway next to Nuzky and confirm.
@@ -46,4 +44,4 @@ Open an issue at https://github.com/nuzkyapp/nuzky/issues, or use Send feedback 
 
 ## Source
 
-Nuzky is GPL-3.0-or-later. `Nuzky_*_source.tar.gz` is the source code of this release. The installers include FFmpeg, ONNX Runtime and other libraries. Each `build-info-*.txt` lists their versions and where their source comes from, and their source code is attached to this release.
+Nuzky is GPL-3.0-or-later, and its source is the Source code archive below. The installers include FFmpeg, ONNX Runtime and other libraries. Their source, and what each installer was built from, is in [Third-party source for Nuzky v0.1.0-alpha](https://github.com/nuzkyapp/nuzky/releases/tag/third-party-source-0.1.0-alpha).
