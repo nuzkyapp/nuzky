@@ -3,10 +3,11 @@
 
 use anyhow::{Context, Result, ensure};
 use nuzky_engine::{
+    Project,
     edit::{TimeRange, merge_ranges},
     model::MAX_CORRECTION_CHARS,
 };
-use nuzky_mcp::transcript::{self, Hesitation, Pause};
+use nuzky_mcp::transcript::{self, Derived, Hesitation, Pause};
 use nuzky_session::{Expect, host::Host};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
@@ -108,6 +109,20 @@ fn view(host: &Host, pause_us: i64) -> Result<TranscriptView> {
     })
 }
 
+/// What "Remove retakes and pauses" cuts: what the retake analysis suggests deleting, as for agents, the
+/// `hesitations` and every pause longer than `pause_us`.
+pub(crate) fn retake_ranges(
+    project: &Project,
+    derived: &Derived,
+    pause_us: i64,
+    hesitations: &[Hesitation],
+) -> Result<Vec<TimeRange>> {
+    // An untranscribed clip could hold the attempt worth keeping.
+    ensure!(derived.untranscribed.is_empty(), "TRANSCRIPT_MISSING: transcribe every heard clip first");
+    let delete = nuzky_analysis::retakes(&derived.words, &derived.languages).suggested_delete;
+    transcript::edit_ranges(project, derived, Some(delete.as_slice()), None, Some(pause_us), hesitations)
+}
+
 /// Applies the cut as one user edit. Returns the clips to select, where the cut starts and how much it removed.
 fn cut(host: &Host, key: &str, target: Target) -> Result<(Vec<String>, i64, i64)> {
     let state = host.session.state()?;
@@ -141,12 +156,7 @@ fn cut(host: &Host, key: &str, target: Target) -> Result<(Vec<String>, i64, i64)
                     .collect(),
             )
         }
-        Target::Retakes { pause_us } => {
-            // An untranscribed clip could hold the attempt worth keeping.
-            ensure!(derived.untranscribed.is_empty(), "TRANSCRIPT_MISSING: transcribe every heard clip first");
-            let delete = nuzky_analysis::retakes(&derived.words, &derived.languages).suggested_delete;
-            transcript::edit_ranges(&state.project, &derived, Some(delete.as_slice()), None, Some(pause_us), &found)?
-        }
+        Target::Retakes { pause_us } => retake_ranges(&state.project, &derived, pause_us, &found)?,
     };
     ensure!(!ranges.is_empty(), "Nothing to cut");
     let plan = transcript::plan_cut(&state.project, &derived, ranges)?;

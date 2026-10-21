@@ -1141,6 +1141,30 @@ export type SaidHit = {
 };
 
 /**
+ * What the tour's edit did, counted as the run's card counts it.
+ */
+export type SampleRun = {
+  beforeUs: number,
+  afterUs: number,
+  /**
+   * Words cut out, those of retakes included.
+   */
+  words: number,
+  /**
+   * Earlier attempts at a sentence that were cut out.
+   */
+  retakes: number,
+  /**
+   * Cuts without a word: pauses shortened or removed.
+   */
+  pauses: number,
+  /**
+   * Captions on the timeline once it is done.
+   */
+  captions: number,
+};
+
+/**
  * The edge of a video or image layer.
  */
 export type Shape = {

@@ -15,6 +15,7 @@ mod model_question;
 mod preview_server;
 mod recap;
 mod reels;
+mod sample;
 mod sounds;
 mod stickers;
 mod store;
@@ -955,8 +956,6 @@ fn new_project(
     state.replace_project(&mut state.session.lock().unwrap(), path)
 }
 
-/// A new project with the media on its timeline in the given order, in the format of the first
-/// picture: the matching common format, or the picture's own shape.
 #[tauri::command]
 async fn new_project_from_media(app: AppHandle, paths: Vec<String>) -> CmdResult<ImportResult> {
     log::info!(target: "action", "new project from {} files", paths.len());
@@ -965,17 +964,18 @@ async fn new_project_from_media(app: AppHandle, paths: Vec<String>) -> CmdResult
         let reasons: Vec<String> = failed.iter().map(|f| f.error.clone()).collect();
         return Err(format!("None of those files could be opened: {}", reasons.join("; ")));
     }
-    let mut project = Project::new(library::UNTITLED);
-    if let Some(first) = assets.iter().find(|a| a.kind != nuzky_engine::model::AssetKind::Audio && a.width > 0) {
-        let (width, height) = canvas_for(first.width, first.height);
-        project.apply(EditCmd::SetCanvas { width, height, background: None, background_blur: None }).map_err(err)?;
-    }
+    open_new_project(&app, library::UNTITLED, assets, failed)
+}
+
+/// Opens a new project named `name` with the media on its timeline.
+fn open_new_project(
+    app: &AppHandle,
+    name: &str,
+    assets: Vec<nuzky_engine::model::Asset>,
+    failed: Vec<ImportFailure>,
+) -> CmdResult<ImportResult> {
     let added: Vec<String> = assets.iter().map(|a| a.id.clone()).collect();
-    project.apply(EditCmd::AddAssets { assets }).map_err(err)?;
-    for id in &added {
-        project.apply(EditCmd::AddClip { asset_id: id.clone(), start_us: None, track_id: None }).map_err(err)?;
-    }
-    nuzky_session::validate(&project).map_err(err)?;
+    let project = project_from_media(name, assets).map_err(err)?;
     let path = store::new_project_path();
     store::create(&path, &project).map_err(err)?;
     // The panel's agent works on the open project only; never stopped while holding the session.
@@ -983,6 +983,23 @@ async fn new_project_from_media(app: AppHandle, paths: Vec<String>) -> CmdResult
     let state = app.state::<AppState>();
     let snapshot = state.replace_project(&mut state.session.lock().unwrap(), path)?;
     Ok(ImportResult { snapshot, added, failed })
+}
+
+/// A project with the media on its timeline in the given order, in the format of the first picture: the
+/// matching common format, or the picture's own shape.
+fn project_from_media(name: &str, assets: Vec<nuzky_engine::model::Asset>) -> anyhow::Result<Project> {
+    let mut project = Project::new(name);
+    if let Some(first) = assets.iter().find(|a| a.kind != nuzky_engine::model::AssetKind::Audio && a.width > 0) {
+        let (width, height) = canvas_for(first.width, first.height);
+        project.apply(EditCmd::SetCanvas { width, height, background: None, background_blur: None })?;
+    }
+    let added: Vec<String> = assets.iter().map(|a| a.id.clone()).collect();
+    project.apply(EditCmd::AddAssets { assets })?;
+    for id in added {
+        project.apply(EditCmd::AddClip { asset_id: id, start_us: None, track_id: None })?;
+    }
+    nuzky_session::validate(&project)?;
+    Ok(project)
 }
 
 /// A new project of the CapCut draft in the folder `path`, opened at once; the draft stays as it was. The
@@ -1319,6 +1336,8 @@ pub fn run() {
             set_editor_shown,
             new_project,
             new_project_from_media,
+            sample::open_sample,
+            sample::sample_run,
             open_capcut_draft,
             open_project,
             library::library,

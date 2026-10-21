@@ -149,6 +149,7 @@ fn generate() -> String {
     types.visit::<crate::transcripts::TranscriptView>();
     types.visit::<crate::transcripts::TranscriptCut>();
     types.visit::<crate::transcripts::WordsCorrected>();
+    types.visit::<crate::sample::SampleRun>();
     types.visit::<crate::zooms::ZoomSuggestions>();
     types.visit::<crate::zooms::ZoomsApplied>();
     types.visit::<nuzky_mcp::reels::MadeReel>();
