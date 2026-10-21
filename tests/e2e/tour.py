@@ -251,3 +251,18 @@ def flow_tour(r):
     r.shot('2-stopped-1024')
     leave_editor(r)
     r.check('going home ends the tour', wait(lambda: tour(r)['step'] is None, 5), tour(r))
+
+    # Skipped while the AI edits, the panel stays a demo until its turn ends, and its own Stop ends that turn.
+    r.s.run("[...document.querySelectorAll('nav[aria-label=Collections] [data-row]')].find((b) => b.textContent.startsWith('Take the tour')).click()")
+    r.check('the tour starts once more', at_step(r, 'ask', 20), tour(r))
+    wait(lambda: tour(r)['focus'] == 'Request to the AI demo', 5)
+    press('Return')
+    press('Escape')
+    r.check('Esc ends the tour while the AI works', wait(lambda: tour(r)['step'] is None, 5), tour(r))
+    r.check('the panel stays a demo while its turn runs', agent(r)['demo'] and agent(r)['status'] == 'working', agent(r))
+    r.s.run("[...document.querySelectorAll('aside[aria-label=AI] button')].find((b) => b.textContent.trim() === 'Stop').dataset.e2e = 'stop'")
+    r.check("a real click reaches the panel's Stop", click_at(hands, '[data-e2e=stop]'))
+    a = wait(lambda: (x := agent(r))['status'] == 'idle' and x, 15) or agent(r)
+    r.check("the panel's Stop ends the turn stopped, without a reply", not any(i['kind'] == 'agent' for i in a['items'])
+            and any(i['kind'] == 'stopped' or (i['kind'] == 'run' and i['stopped']) for i in a['items']), a)
+    r.check('then the panel is the usual one again', wait(lambda: (x := agent(r))['agentMenu'] and not x['demo'], 5), agent(r))
