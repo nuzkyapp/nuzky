@@ -48,7 +48,7 @@ export function LeftPanel({ width }: { width: number }) {
       </aside>
     );
   return (
-    <aside className="pane flex shrink-0 flex-col overflow-hidden" style={{ width }}>
+    <aside data-tour="library" className="pane flex shrink-0 flex-col overflow-hidden" style={{ width }}>
       {/* Tabs size to their labels and share the leftover width, so no two labels touch at 360 px, the narrowest, also where
           WebKitGTK sets Inter a little wider than Chromium. */}
       <div className="seg-track mx-1.5 mt-1.5 flex shrink-0 rounded-[13px] p-0.5" role="tablist" aria-label="Library" onKeyDown={tabListKeys(TAB_IDS, tab, setTab)}>

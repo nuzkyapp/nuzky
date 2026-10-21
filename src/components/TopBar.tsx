@@ -186,7 +186,7 @@ export function AiRunBar() {
   const label = useEditor((s) => s.aiRun);
   if (!label) return null;
   return (
-    <div className="bar flex h-8 min-w-0 max-w-[420px] items-center gap-2 rounded-full pl-3 pr-1 text-[12px] font-medium text-fg" role="status">
+    <div data-tour="run-bar" className="bar flex h-8 min-w-0 max-w-[420px] items-center gap-2 rounded-full pl-3 pr-1 text-[12px] font-medium text-fg" role="status">
       <Sparkles size={14} className="shrink-0 text-accent" />
       <span className="truncate">
         AI is editing <span className="font-normal text-muted">· {label}</span>
@@ -317,6 +317,7 @@ export function TopBar() {
       </div>
       {!reels && (
         <Button
+          data-tour="export"
           variant="primary"
           pill
           disabled={empty}

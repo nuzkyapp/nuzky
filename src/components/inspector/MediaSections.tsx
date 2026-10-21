@@ -259,6 +259,7 @@ export function AudioSection({ clip, content }: { clip: Clip; content: Media }) 
     <Section title="Audio">
       <Slider
         label="Volume"
+        tour="volume"
         value={content.volume * 100}
         min={0}
         max={200}

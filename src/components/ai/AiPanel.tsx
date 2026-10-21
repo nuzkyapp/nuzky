@@ -62,6 +62,7 @@ import {
   type RunChange,
   type Step,
 } from "../../lib/agent";
+import { demoBlocked, sendDemo, stopDemo } from "../../lib/demo";
 import { DOCK_LABELS, TOO_NARROW, useDock, useDockLayout, type DockMode } from "../../lib/dock";
 import { api } from "../../lib/api";
 import { copyText } from "../../lib/clipboard";
@@ -437,7 +438,7 @@ function RunCard({ item, index, past }: { item: Extract<ChatItem, { kind: "run" 
   const valid = !!undo && (undo.valid?.() ?? true) && !locked;
   const label = item.undone ? `Undone: ${item.label}` : item.stopped ? `Stopped: ${item.label}` : item.label;
   return (
-    <div className="flex flex-col gap-1.5 rounded-[10px] bg-raised p-3">
+    <div data-run-card className="flex flex-col gap-1.5 rounded-[10px] bg-raised p-3">
       <div className="flex items-center gap-2">
         {item.undone ? (
           <Undo2 size={16} className="shrink-0 text-muted" />
@@ -656,6 +657,9 @@ function Empty() {
   const error = useAgent((s) => s.agentsError);
   const blocked = useEditor((s) => !!s.aiRun);
   const draft = useEditor((s) => !!s.snap?.project.imported) && about === "project";
+  // The tour's request is already in the field, and no agent runs, so nothing here asks for one.
+  const demo = useAgent((s) => s.demo) && about === "project";
+  if (demo) return <p className="mt-auto mb-2 px-2 text-[12px] text-muted">Edits show up live. One Undo takes back a whole run.</p>;
   if (error) return <div className="mt-auto"><ErrorNotice code="AGENT_FAILED" message={error} /></div>;
   if (agents === null) return <p className="mt-auto px-1 text-[12px] text-muted">Looking for your AI…</p>;
   if (agent === "chatgpt" && !chatgptReady) return <ChatGptSignIn />;
@@ -1004,7 +1008,9 @@ function Composer() {
   const plan = useChatGpt((s) => agent === "chatgpt" && planReady(s.status));
   const installed = agent !== "chatgpt" && !!agents?.find((a) => a.id === agent)?.path;
   const working = status !== "idle";
-  const blocked = working ? steerBlocked() : sendBlocked();
+  // The tour's scripted turn: its request is sent as written, by no agent, so nothing names or configures one.
+  const demo = useAgent((s) => s.demo) && about === "project";
+  const blocked = demo ? demoBlocked() : working ? steerBlocked() : sendBlocked();
 
   useLayoutEffect(() => {
     const el = field.current;
@@ -1028,6 +1034,12 @@ function Composer() {
   const submit = () => {
     const now = useAgent.getState();
     if (!now.draft.trim() && !now.thumbnail && !now.attachments.length) return;
+    if (demo) {
+      const reason = demoBlocked();
+      if (reason) setWhy(reason);
+      else void sendDemo();
+      return;
+    }
     const reason = now.attaching ? "Wait until the attachment is added" : now.status === "idle" ? sendBlocked() : steerBlocked();
     if (reason) setWhy(reason);
     else if (useAgent.getState().status === "idle") void send(undefined, about);
@@ -1055,7 +1067,7 @@ function Composer() {
     <div className="shrink-0 px-2.5 pb-2.5">
       {otherRun && <OtherRun label={otherRun} />}
       {/* A click on the model menu or its button keeps the focus there, which the menu needs to stay open. */}
-      <div onClick={(e) => !(e.target as Element).closest("[role=menu],[aria-haspopup=menu]") && field.current?.focus()} className="rounded-xl border border-white/[.08] bg-white/[.055] px-2.5 pb-1.5 pt-2 transition-colors duration-[120ms] has-[textarea:focus]:border-accent">
+      <div data-tour="ai-field" onClick={(e) => !(e.target as Element).closest("[role=menu],[aria-haspopup=menu]") && field.current?.focus()} className="rounded-xl border border-white/[.08] bg-white/[.055] px-2.5 pb-1.5 pt-2 transition-colors duration-[120ms] has-[textarea:focus]:border-accent">
         {about === "style" && (
           <div className="mb-2 flex flex-wrap gap-1.5">
             <span className="flex h-[22px] items-center gap-1.5 rounded-md bg-white/[.08] px-2 text-[12px] text-fg" title="Messages here are about your style, for all your videos">
@@ -1064,7 +1076,7 @@ function Composer() {
             </span>
           </div>
         )}
-        {(attachments.length > 0 || attaching > 0 || (about === "project" && ((selected > 0 && !dropSelection) || !dropPlayhead || frame || thumbnail))) && (
+        {!demo && (attachments.length > 0 || attaching > 0 || (about === "project" && ((selected > 0 && !dropSelection) || !dropPlayhead || frame || thumbnail))) && (
           <div className="mb-2 flex max-h-[76px] flex-wrap gap-1.5 overflow-y-auto">
             {attachments.map((a) => (
               <Chip
@@ -1154,8 +1166,9 @@ function Composer() {
           ref={field}
           rows={2}
           value={draft}
-          aria-label={`Message to ${name}`}
-          placeholder={working ? `Tell ${name} more while it works…` : blocked === "Start a new chat to send this" ? `${name} can't continue this chat` : reopened ? `Continue with ${name}` : agent === "chatgpt" && !plan ? "Sign in to ChatGPT to start" : thumbnail ? "Add a note, e.g. the hook (optional)" : about === "style" ? "What should change in how you edit?" : hasItems ? "Ask for changes…" : `Ask ${name} to edit…`}
+          readOnly={demo}
+          aria-label={demo ? "Request to the AI demo" : `Message to ${name}`}
+          placeholder={demo ? (working ? "" : "After the tour, ask your own AI here") : working ? `Tell ${name} more while it works…` : blocked === "Start a new chat to send this" ? `${name} can't continue this chat` : reopened ? `Continue with ${name}` : agent === "chatgpt" && !plan ? "Sign in to ChatGPT to start" : thumbnail ? "Add a note, e.g. the hook (optional)" : about === "style" ? "What should change in how you edit?" : hasItems ? "Ask for changes…" : `Ask ${name} to edit…`}
           onChange={(e) => useAgent.setState({ draft: e.target.value })}
           onPaste={(e) => {
             // A screenshot, or a file copied in Finder; text pastes as usual.
@@ -1178,10 +1191,12 @@ function Composer() {
           className="block max-h-40 w-full resize-none bg-transparent text-[13px] leading-[19px] text-fg outline-none placeholder:text-muted"
         />
         <div className="mt-1 flex items-center gap-2">
-          <IconButton label="Attach pictures or videos. You can also paste them into the field." onClick={() => void pickAttachments()} className="h-7 w-7">
-            <Plus size={16} />
-          </IconButton>
-          {about === "project" && (
+          {!demo && (
+            <IconButton label="Attach pictures or videos. You can also paste them into the field." onClick={() => void pickAttachments()} className="h-7 w-7">
+              <Plus size={16} />
+            </IconButton>
+          )}
+          {about === "project" && !demo && (
           <IconButton
             label={frame ? "Don't show the agent the frame at the playhead" : "Show the agent the frame at the playhead"}
             active={frame}
@@ -1193,7 +1208,7 @@ function Composer() {
           </IconButton>
           )}
           {/* Hidden while the agent answers, so its progress and the reasons have the row. */}
-          {(plan || installed) && !working && <ModelMenu />}
+          {(plan || installed) && !working && !demo && <ModelMenu />}
           <span className="flex-1" />
           {!working && why && (
             <span className="min-w-0 truncate text-[12px] text-fg/85" role="status">
@@ -1214,7 +1229,7 @@ function Composer() {
                   </>
                 )}
               </span>
-              <Button className="h-7 px-2.5 text-[12px]" disabled={status === "stopping"} title="Stop the agent. What it did so far stays, and Undo takes it back." onClick={() => void stop()}>
+              <Button className="h-7 px-2.5 text-[12px]" disabled={status === "stopping"} title="Stop the agent. What it did so far stays, and Undo takes it back." onClick={() => (demo ? stopDemo() : void stop())}>
                 <CircleStop size={13} /> Stop
               </Button>
               {(draft.trim() || attachments.length > 0) && sendButton}
@@ -1224,7 +1239,7 @@ function Composer() {
           )}
         </div>
       </div>
-      {plan && (
+      {plan && !demo && (
         <div className="mt-1.5 flex items-center gap-1.5 px-1 text-[12px] text-muted">
           <ChatGptLogo size={12} className="shrink-0" />
           Using ChatGPT plan
@@ -1353,8 +1368,10 @@ export function AiPanel({
   const left = useAgent((s) => s.jobs.some((j) => j.status === "running"));
   const kept = useAgent((s) => (s.chats === null ? null : s.chats.length));
   const projectName = useEditor((s) => s.snap?.project.name);
+  // The tour's scripted turn names no agent and keeps no chat.
+  const demo = useAgent((s) => s.demo) && about === "project";
   // Gemini answers in a terminal, so the panel shows how to reach it there instead of a conversation.
-  const gemini = useAgent((s) => s.agent === "antigravity");
+  const gemini = useAgent((s) => s.agent === "antigravity") && !demo;
   const otherRun = useEditor((s) => s.aiRun);
   const [listing, setListing] = useState(false);
   // An answer starting elsewhere, such as Make it with AI, brings the conversation back.
@@ -1392,11 +1409,15 @@ export function AiPanel({
             </IconButton>
             <h2 className="min-w-0 truncate px-1 text-[13px] font-semibold text-fg">Chats in {projectName ?? "this project"}</h2>
           </>
+        ) : demo ? (
+          <h2 className="min-w-0 truncate px-1.5 text-[13px] font-semibold text-fg" title="The tour plays a short scripted edit of the sample. No agent runs.">
+            AI demo
+          </h2>
         ) : (
           <AgentMenu />
         )}
         <span className={`flex-1 self-stretch ${about === "project" ? "cursor-grab" : ""}`} onPointerDown={about === "project" ? move : undefined} />
-        {about === "project" && !listing && (
+        {about === "project" && !listing && !demo && (
           <IconButton
             label={busy ? "Past chats: wait for the answer, or stop it" : kept === null ? "Past chats: loading…" : kept === 0 ? "Past chats: none in this project yet" : "Past chats in this project"}
             disabled={busy || !kept}
@@ -1406,7 +1427,7 @@ export function AiPanel({
             <MessagesSquare size={15} />
           </IconButton>
         )}
-        {!listing && (
+        {!listing && !demo && (
         <IconButton
           label={busy ? "New chat: wait for the answer, or stop it" : empty ? "New chat: there is nothing to clear yet" : left ? "New chat: stops what the agent is still doing" : "New chat"}
           disabled={busy || empty}

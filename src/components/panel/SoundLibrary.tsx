@@ -4,6 +4,7 @@ import { api, errorText, plainError } from "../../lib/api";
 import { addSound, answerRights, copyCredits, installYtdlp, loadBuiltIn, loadDownloaded, openLink, searchSounds, stopPreview, togglePreview, useSounds } from "../../lib/sounds";
 import { useEditor } from "../../lib/store";
 import { formatDuration } from "../../lib/time";
+import { SONG, useTour } from "../../lib/tour";
 import type { Sound, SoundKind, SoundSettings } from "../../lib/types";
 import { Button, Checkbox, IconButton, LockReason, SearchField, lockedProps, trapTab, useLockReason } from "../ui";
 
@@ -18,6 +19,8 @@ function SoundRow({ sound, inProject, showKind = true }: { sound: Sound; inProje
   const adding = useSounds((s) => s.adding.includes(sound.id));
   const progress = useSounds((s) => s.progress[sound.id] ?? 0);
   const lock = useLockReason();
+  // The tour points at this row's +, so it shows without the pointer over it.
+  const pointedAt = useTour((s) => s.step === "song") && sound.id === SONG;
   const online = sound.provider !== "Built in";
   const license = sound.license === "by" ? "CC BY" : "CC0";
   const licensed = online && sound.license !== null;
@@ -49,7 +52,9 @@ function SoundRow({ sound, inProject, showKind = true }: { sound: Sound; inProje
       </button>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="truncate text-[13px] text-fg">{sound.title}</span>
-        {(online || showKind) && <span className="truncate text-[12px] text-muted">{online ? `${sound.author} · ${sound.provider}` : sound.category}</span>}
+        {(online || showKind) && (
+          <span className="truncate text-[12px] text-muted">{online || sound.kind === "music" ? `${sound.author} · ${sound.provider}` : sound.category}</span>
+        )}
       </div>
       {licensed && (
         <button
@@ -87,7 +92,7 @@ function SoundRow({ sound, inProject, showKind = true }: { sound: Sound; inProje
             title={inProject ? "In this project. Add it again at the playhead" : "Add at playhead"}
             onClick={() => addSound(sound)}
             {...lockedProps(lock)}
-            className={`btn-prominent ${ACTION} ${inProject ? "hidden group-focus-within:flex group-hover:flex" : "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"}`}
+            className={`btn-prominent ${ACTION} ${pointedAt ? "" : inProject ? "hidden group-focus-within:flex group-hover:flex" : "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"}`}
           >
             <Plus size={16} />
           </button>
@@ -282,7 +287,8 @@ function OnlineResults({ kind, titled = kind === "effect" }: { kind: SoundKind; 
 }
 
 function Effects() {
-  const builtIn = useSounds((s) => s.builtIn);
+  const all = useSounds((s) => s.builtIn);
+  const builtIn = all.filter((s) => s.kind === "effect");
   const query = useSounds((s) => s.search.effect.query.trim().toLowerCase());
   const [category, setCategory] = useState<string | null>(null);
   const inProject = useInProject();
@@ -513,6 +519,7 @@ function Music() {
   const query = useSounds((s) => s.search.music.query);
   const linked = useSounds((s) => s.link.sound?.id);
   const downloaded = useSounds((s) => s.downloaded);
+  const builtIn = useSounds((s) => s.builtIn);
   const inProject = useInProject();
   // A song the user or an agent adds from a link joins the list with the asset.
   const assets = useEditor((s) => s.snap?.project.assets.length);
@@ -520,7 +527,9 @@ function Music() {
     loadDownloaded().catch((e) => useEditor.getState().toast({ kind: "error", text: `The songs from YouTube could not be read: ${errorText(e)}` }));
   }, [assets]);
   const words = query.trim().toLowerCase();
-  const shown = downloaded.filter((s) => s.id !== linked && (!words || [s.title, s.author].some((t) => t.toLowerCase().includes(words))));
+  const matching = (s: Sound) => !words || [s.title, s.author].some((t) => t.toLowerCase().includes(words));
+  const songs = builtIn.filter((s) => s.kind === "music" && matching(s));
+  const shown = downloaded.filter((s) => s.id !== linked && matching(s));
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2 pb-3.5">
       <LinkResult />
@@ -533,8 +542,18 @@ function Music() {
           ))}
         </div>
       )}
+      {songs.length > 0 && (
+        <section aria-label="Built in" className="flex flex-col gap-0.5">
+          <h3 className="mx-1.5 mb-1 flex items-baseline gap-1.5 text-[13px] font-semibold text-fg">
+            Built in <span className="tabular text-[12px] font-normal text-muted">{songs.length}</span>
+          </h3>
+          {songs.map((sound) => (
+            <SoundRow key={sound.id} sound={sound} inProject={inProject.has(sound.id)} />
+          ))}
+        </section>
+      )}
       {shown.length > 0 && (
-        <section aria-label="From YouTube" className="flex flex-col gap-0.5">
+        <section aria-label="From YouTube" className={`flex flex-col gap-0.5 ${songs.length > 0 ? "mt-2" : ""}`}>
           <h3 className="mx-1.5 mb-1 flex items-baseline gap-1.5 text-[13px] font-semibold text-fg">
             From YouTube <span className="tabular text-[12px] font-normal text-muted">{shown.length}</span>
           </h3>
@@ -543,7 +562,7 @@ function Music() {
           ))}
         </section>
       )}
-      {words && <OnlineResults kind="music" titled={shown.length > 0} />}
+      {words && <OnlineResults kind="music" titled={shown.length + songs.length > 0} />}
     </div>
   );
 }

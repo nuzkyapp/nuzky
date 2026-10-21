@@ -162,6 +162,10 @@ interface AgentState {
   thumbnail: boolean;
   /** Sent while the agent worked, but it could not take it in that turn: it goes as the next message once the turn ends. `stopped`: Codex stopped for it. */
   next: { text: string; context: PromptContext; stopped: boolean } | null;
+  /** The tour's sample: the panel plays a scripted edit instead of running an agent (src/lib/demo.ts). */
+  demo: boolean;
+  /** The conversation shown is the scripted one: it is never saved, and a real message starts a new chat. */
+  demoItems: boolean;
 }
 
 const AGENT_KEY = "nuzky.aiAgent";
@@ -199,6 +203,8 @@ export const useAgent = create<AgentState>(() => ({
   frame: false,
   thumbnail: false,
   next: null,
+  demo: false,
+  demoItems: false,
 }));
 
 const agentApi = {
@@ -340,7 +346,7 @@ export function newChat() {
 function endChat() {
   const { turn } = useAgent.getState();
   if (turn) void agentApi.stop(turn).catch((e) => useEditor.getState().toast({ kind: "error", text: plainError(errorText(e)) }));
-  return { chat: null, pastCount: null, items: [], jobs: [] };
+  return { chat: null, pastCount: null, items: [], jobs: [], demoItems: false };
 }
 
 /** Lists the chats the open project keeps. */
@@ -532,7 +538,7 @@ export async function send(text = useAgent.getState().draft.trim(), about: AiAbo
   useAgent.setState({
     // Earlier problems are over once a new message goes; their Try again would send this one.
     items: [
-      ...s.items.filter((i) => i.kind !== "error"),
+      ...(s.demoItems ? [] : s.items.filter((i) => i.kind !== "error")),
       { kind: "user", text: thumbnailOnly ? "Make a thumbnail" : text, context: describeContext(thumbnailOnly ? { ...context, thumbnail: false } : context), at: Date.now(), ...(attached.length ? { attachments: attached } : {}) },
     ],
     about,
@@ -542,6 +548,7 @@ export async function send(text = useAgent.getState().draft.trim(), about: AiAbo
     dropPlayhead: false,
     frame: false,
     thumbnail: false,
+    demoItems: false,
   });
   await start(text, context);
 }
@@ -756,7 +763,7 @@ useEditor.subscribe((s, prev) => {
   // What the agent did before another project opened is kept, even when it was cut short mid-answer.
   const old = useAgent.getState();
   if (old.chat) void saveChat(old.chat, old.items);
-  useAgent.setState({ chat: null, pastCount: null, chats: null, items: [], jobs: [], status: "idle", next: null });
+  useAgent.setState({ chat: null, pastCount: null, chats: null, items: [], jobs: [], status: "idle", next: null, demoItems: false });
   void loadChats().then(() => {
     const { chats, chat, items, status } = useAgent.getState();
     if (chats?.length && chat === null && !items.length && status === "idle") void openChat(chats[0].id);

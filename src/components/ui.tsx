@@ -384,6 +384,7 @@ export function Slider({
   mixed,
   title,
   narrow = false,
+  tour,
 }: {
   label: string;
   /** What screen readers call it, when the row it sits in names the rest ("Shadow blur" under Shadow). */
@@ -402,12 +403,14 @@ export function Slider({
   /** The selected clips differ; the thumb sits at the first clip's value. */
   mixed?: boolean;
   title?: string;
+  /** Names the row for the first-run tour, which points at it. */
+  tour?: string;
 }) {
   const lock = useLockReason();
   disabled = disabled || !!lock;
   return (
     // 8 px between two sliders instead of the section's 12 px, so a column of them reads as one list.
-    <div className="flex flex-col gap-0.5 [&+&]:-mt-1" title={lock ?? title}>
+    <div className="flex flex-col gap-0.5 [&+&]:-mt-1" title={lock ?? title} data-tour={tour}>
       <span className={`truncate text-[12px] leading-4 ${disabled && !lock ? "text-subtle" : "text-muted"}`}>{label}</span>
       <div className="flex items-center gap-2">
         <RangeInput

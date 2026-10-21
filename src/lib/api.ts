@@ -9,6 +9,15 @@ type Epoch = string | undefined;
 
 export type FeedbackKind = "idea" | "message";
 
+/** What the sample's scripted edit did: the length before and after, the repeated words and pauses it cut, the captions it added. */
+export interface SampleRun {
+  beforeUs: number;
+  afterUs: number;
+  words: number;
+  pauses: number;
+  captions: number;
+}
+
 export const api = {
   setUiContext: (selection: string[], playheadUs: number) => invoke<void>("set_ui_context", { selection, playheadUs: Math.round(playheadUs) }),
   resolveRecovery: (action: "keep" | "restore", epoch: Epoch) => invoke<Snapshot>("resolve_recovery", { action, expectedEpoch: epoch }),
@@ -65,6 +74,10 @@ export const api = {
   /** A new project with the media on its timeline, in the format of the first picture. */
   newProjectFromMedia: (paths: string[]) =>
     invoke<{ snapshot: Snapshot; added: string[]; failed: { path: string; error: string }[] }>("new_project_from_media", { paths }),
+  /** A new project "Sample video" with the talking head video Nuzky ships, its transcript included, as `newProjectFromMedia` opens one. */
+  openSample: () => invoke<{ snapshot: Snapshot; added: string[]; failed: { path: string; error: string }[] }>("open_sample"),
+  /** The tour's scripted AI edit of the sample: one run that cuts the retakes and long pauses, then adds captions. CANCELLED when it was stopped. */
+  sampleRun: (epoch: Epoch) => invoke<SampleRun>("sample_run", { expectedEpoch: epoch }),
   /** The CapCut draft in that folder as a new project, opened at once; the draft stays as it was. */
   openCapCutDraft: (path: string) => invoke<Snapshot>("open_capcut_draft", { path }),
   /** A PNG data URL of the picture CapCut keeps of a draft, or null. */
