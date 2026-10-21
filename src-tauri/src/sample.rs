@@ -45,7 +45,8 @@ pub struct SampleRun {
     captions: usize,
 }
 
-/// The sample's file in `data`, written only when it is missing or different, with its transcript stored.
+/// The sample's file in `data`, written only when it is missing or different, with its transcript stored
+/// unless the file has one, which the user may have made again.
 pub(crate) fn install(data: &Path, transcripts: &TranscriptStore) -> Result<Asset> {
     let path = data.join(FILE);
     if std::fs::read(&path).ok().as_deref() != Some(VIDEO) {
@@ -53,7 +54,9 @@ pub(crate) fn install(data: &Path, transcripts: &TranscriptStore) -> Result<Asse
     }
     let mut asset = nuzky_engine::media::probe(&path, new_id())?;
     asset.credit = Some(sample::manifest().credit.clone());
-    transcripts.put(&asset, &sample::transcript())?;
+    if transcripts.get(&asset)?.is_none() {
+        transcripts.put(&asset, &sample::transcript())?;
+    }
     Ok(asset)
 }
 
@@ -201,6 +204,13 @@ mod tests {
         assert_eq!(store.get(&asset).unwrap(), Some(sample::transcript()));
         assert!(sample::is_sample(&asset));
         assert_eq!(asset.credit.as_ref().unwrap().author, "Dianne Glavaš");
+        // Words the user recognised again stay, as projects of the sample read them.
+        let mut again = sample::transcript();
+        again.model = "small".into();
+        again.words[0].text = "Again".into();
+        store.put(&asset, &again).unwrap();
+        install(&dir, &store).unwrap();
+        assert_eq!(store.get(&asset).unwrap(), Some(again));
         // The file is written again only when it differs.
         let file = Path::new(&asset.path);
         let written = std::fs::metadata(file).unwrap().modified().unwrap();
