@@ -134,10 +134,6 @@ function show(step: TourStep) {
   if (useTour.getState().step === "play" && useEditor.getState().playing) void api.pause();
   // The full screen preview would cover what the other steps show.
   if (step !== "play" && usePreview.getState().full) void toggleFullPreview();
-  if (step !== "duck" && closedPanel) {
-    closedPanel = false;
-    useDock.setState({ open: true });
-  }
   const snap = useEditor.getState().snap;
   edited = step === "undo" && snap ? JSON.stringify(snap.project) : null;
   // The first caption's frame, so the still preview already shows the edit.
@@ -159,6 +155,11 @@ function show(step: TourStep) {
     if (clip) useEditor.getState().select([clip.id]);
   }
   useTour.setState({ step, stopped: false, undone: false, word: null });
+  // Once the step is set, so the panel coming back is not kept out of the inspector again.
+  if (step !== "duck" && closedPanel) {
+    closedPanel = false;
+    useDock.setState({ open: true });
+  }
   clearInspector();
 }
 
