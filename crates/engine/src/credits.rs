@@ -1,17 +1,18 @@
-//! Credits for the library sounds a video uses, as its description should carry them. CC BY asks for
-//! the title, the author, the source, the licence and what was changed; syncing a sound to a video
-//! is always a change. CC0 sounds need no credit and are listed after them as a courtesy; the sounds
-//! built into Nuzky are left out.
+//! Credits for the library sounds and the credited footage, such as the tour's sample video, that a video
+//! uses, as its description should carry them. CC BY asks for the title, the author, the source, the licence
+//! and what was changed; syncing a sound to a video is always a change, footage changes when it is cut or
+//! played otherwise. CC0 ones need no credit and are listed after them as a courtesy; the sounds built into
+//! Nuzky are left out.
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::export::heard_clips;
-use crate::model::{Asset, ClipContent, Credit, License, Project};
+use crate::model::{Asset, AssetKind, ClipContent, Credit, License, Project};
 
 /// Under this a trim is the file's own rounding, not a cut.
 const TRIM_TOLERANCE_US: i64 = 50_000;
 
-/// What the video does to one sound.
+/// What the video does to one credited file.
 #[derive(Default)]
 struct Changes {
     trimmed: bool,
@@ -33,9 +34,25 @@ impl Changes {
         .collect();
         if done.is_empty() { "Synced to video.".into() } else { format!("Synced to video; {}.", done.join(", ")) }
     }
+
+    /// For footage; nothing when it plays whole and as it is.
+    fn describe_footage(&self) -> Option<String> {
+        let done: Vec<&str> = [
+            (self.trimmed, "cut"),
+            (self.faded, "faded"),
+            (self.volume, "volume changed"),
+            (self.speed, "speed changed"),
+        ]
+        .into_iter()
+        .filter_map(|(on, what)| on.then_some(what))
+        .collect();
+        let text = done.join(", ");
+        let mut chars = text.chars();
+        Some(chars.next()?.to_uppercase().chain(chars).collect::<String>() + ".")
+    }
 }
 
-fn line(credit: &Credit, changes: &Changes) -> String {
+fn line(credit: &Credit, changes: &Changes, sound: bool) -> String {
     let mut line = format!("\"{}\"", credit.title);
     if !credit.author.is_empty() {
         line += &format!(" by {}", credit.author);
@@ -45,13 +62,16 @@ fn line(credit: &Credit, changes: &Changes) -> String {
     }
     line += &format!(", licensed under {} ({}).", credit.license_name(), credit.license_url);
     if credit.license == License::CcBy {
-        line += &format!(" {}", changes.describe());
+        match sound {
+            true => line += &format!(" {}", changes.describe()),
+            false => line.extend(changes.describe_footage().map(|changes| format!(" {changes}"))),
+        }
     }
     line
 }
 
-/// The credits of every library sound heard in the exported video, in the order they first play.
-/// None when none of them needs credit.
+/// The credits of every credited file heard or seen in the exported video, footage first, each in the order
+/// it first plays. None when none of them needs credit.
 pub fn credits(project: &Project) -> Option<String> {
     let mut order: Vec<&Asset> = Vec::new();
     let mut changes: HashMap<&str, Changes> = HashMap::new();
@@ -88,22 +108,28 @@ pub fn credits(project: &Project) -> Option<String> {
         entry.volume |= *volume != 1.0 || *duck_db != 0.0 || *normalize || *leveler > 0.0;
         entry.speed |= *speed != 1.0;
     }
-    let lines = |license: License| -> Vec<String> {
-        order
-            .iter()
-            .filter_map(|asset| Some((asset.credit.as_ref()?, &changes[asset.id.as_str()])))
-            .filter(|(credit, _)| credit.license == license)
-            .map(|(credit, changes)| line(credit, changes) + "\n")
+    let lines = |license: License, kinds: &[bool]| -> String {
+        let assets =
+            kinds.iter().flat_map(|&sound| order.iter().filter(move |a| (a.kind == AssetKind::Audio) == sound));
+        assets
+            .filter_map(|asset| Some((asset, asset.credit.as_ref()?, &changes[asset.id.as_str()])))
+            .filter(|(_, credit, _)| credit.license == license)
+            .map(|(asset, credit, changes)| line(credit, changes, asset.kind == AssetKind::Audio) + "\n")
             .collect()
     };
-    let needed = lines(License::CcBy);
-    if needed.is_empty() {
+    let sections: Vec<String> =
+        [("Video", lines(License::CcBy, &[false])), ("Music and sound effects", lines(License::CcBy, &[true]))]
+            .into_iter()
+            .filter(|(_, lines)| !lines.is_empty())
+            .map(|(heading, lines)| format!("{heading}:\n{lines}"))
+            .collect();
+    if sections.is_empty() {
         return None;
     }
-    let mut text = format!("Music and sound effects:\n{}", needed.concat());
-    let courtesy = lines(License::Cc0);
+    let mut text = sections.join("\n");
+    let courtesy = lines(License::Cc0, &[false, true]);
     if !courtesy.is_empty() {
-        text += &format!("\nAlso used, no credit required:\n{}", courtesy.concat());
+        text += &format!("\nAlso used, no credit required:\n{courtesy}");
     }
     Some(text)
 }
@@ -217,6 +243,29 @@ mod tests {
         let mut muted = self::project(vec![sound("by", License::CcBy, "openverse")]);
         muted.tracks.iter_mut().filter(|t| !t.clips.is_empty()).for_each(|t| t.muted = true);
         assert_eq!(credits(&muted), None);
+    }
+
+    #[test]
+    fn credited_footage_has_its_own_section_and_says_how_it_was_cut() {
+        let mut talk = sound("talk", License::CcBy, "youtube");
+        talk.kind = AssetKind::Video;
+        let mut footage = project(vec![talk.clone()]);
+        let uncut = "Video:\n\"Song talk\" by Ann Author (https://example.org/talk), licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/).\n";
+        assert_eq!(credits(&footage).unwrap(), uncut);
+        let clip = footage.tracks[0].clips[0].id.clone();
+        footage.apply(EditCmd::SplitClip { clip_id: clip.clone(), at_us: 4_000_000 }).unwrap();
+        footage.apply(EditCmd::DeleteClips { clip_ids: vec![clip] }).unwrap();
+        assert_eq!(credits(&footage).unwrap(), uncut.replace(").\n", "). Cut.\n"));
+
+        // With a song under it, each has its section, the footage first.
+        let mut both = project(vec![talk]);
+        both.apply(EditCmd::AddAssets { assets: vec![sound("by", License::CcBy, "openverse")] }).unwrap();
+        both.apply(EditCmd::AddClip { asset_id: "by".into(), start_us: Some(0), track_id: None }).unwrap();
+        let text = credits(&both).unwrap();
+        assert!(text.starts_with(uncut) && text.ends_with("\nMusic and sound effects:\n\"Song by\" by Ann Author (https://example.org/by), licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). Synced to video.\n"), "{text}");
+        let ClipContent::Media { speed, .. } = &mut both.tracks[0].clips[0].content else { panic!() };
+        *speed = 2.0;
+        assert!(credits(&both).unwrap().contains("4.0/). Speed changed.\n"));
     }
 
     #[test]

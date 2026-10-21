@@ -231,6 +231,10 @@ mod tests {
         let card = nuzky_session::summary::summarize(&original, &edited);
         assert!(card.iter().any(|c| c.text == format!("Added {} captions", done.captions)), "{card:?}");
         assert!(done.captions >= 20, "{done:?}");
+        // The export's credits name her as the footage, cut.
+        let credits = nuzky_engine::credits::credits(&edited).unwrap();
+        assert!(credits.starts_with("Video:\n\"Stop Performing") && credits.contains("by Dianne Glavaš"), "{credits}");
+        assert!(credits.ends_with("licensed under CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/). Cut.\n"));
 
         // Nothing is learned from the sample: neither its export nor the creator's edits after the AI's cut.
         let learns = |edited| {
