@@ -35,8 +35,11 @@ const rounded = ({ x, y, w, h, r }: Hole) =>
 
 const last = (selector: string | undefined) => (selector ? ([...document.querySelectorAll(selector)].pop() ?? null) : null);
 
-/** Where the card goes: on the step's side of the hole when it fits there, else on another side, else in the middle; always inside the window. */
-function place(hole: Hole | null, side: (typeof STEP)[TourStep]["side"], w: number, h: number) {
+/**
+ * Where the card goes: on the step's side of the hole when it fits there, else on another side, else in the middle;
+ * always inside the window, and off the video where a side lets it, so a playing video is never covered.
+ */
+function place(hole: Hole | null, side: (typeof STEP)[TourStep]["side"], w: number, h: number, video: DOMRect | null) {
   const W = window.innerWidth;
   const H = window.innerHeight;
   const clamp = (v: number, size: number, room: number) => Math.max(MARGIN, Math.min(room - MARGIN - size, v));
@@ -49,7 +52,9 @@ function place(hole: Hole | null, side: (typeof STEP)[TourStep]["side"], w: numb
     above: hole.y - GAP - h >= MARGIN && { x: across, y: hole.y - GAP - h },
     below: hole.y + hole.h + GAP + h <= H - MARGIN && { x: across, y: hole.y + hole.h + GAP },
   };
-  return spots[side] || spots.right || spots.left || spots.below || spots.above || { x: clamp((W - w) / 2, w, W), y: clamp((H - h) / 2, h, H) };
+  const fitting = [spots[side], spots.right, spots.left, spots.below, spots.above].filter((spot) => spot !== false);
+  const clear = ({ x, y }: { x: number; y: number }) => !video || x >= video.right || x + w <= video.left || y >= video.bottom || y + h <= video.top;
+  return fitting.find(clear) ?? fitting[0] ?? { x: clamp((W - w) / 2, w, W), y: clamp((H - h) / 2, h, H) };
 }
 
 const FOCUSABLE = "button, input, select, textarea, a[href], [tabindex]:not([tabindex='-1'])";
@@ -99,7 +104,8 @@ function Spotlight({ step }: { step: TourStep }) {
       const holes = [holeOf(target), holeOf(last(def.extra))];
       const box = card.current;
       if (!box || !dim.current) return;
-      const key = `${JSON.stringify(holes)} ${window.innerWidth} ${window.innerHeight} ${box.offsetWidth} ${box.offsetHeight}`;
+      const video = document.querySelector("section[aria-label=Preview] canvas")?.getBoundingClientRect() ?? null;
+      const key = `${JSON.stringify([holes, video])} ${window.innerWidth} ${window.innerHeight} ${box.offsetWidth} ${box.offsetHeight}`;
       if (key === drawn) return;
       drawn = key;
       dim.current.setAttribute("d", `M0 0H${window.innerWidth}V${window.innerHeight}H0Z${holes.map((h) => (h ? rounded(h) : "")).join("")}`);
@@ -115,7 +121,7 @@ function Spotlight({ step }: { step: TourStep }) {
         ring.setAttribute("height", String(h.h + 1));
         ring.setAttribute("rx", String(h.r + 0.5));
       });
-      const at = place(holes[0], def.side, box.offsetWidth, box.offsetHeight);
+      const at = place(holes[0], def.side, box.offsetWidth, box.offsetHeight, video);
       box.style.left = `${Math.round(at.x)}px`;
       box.style.top = `${Math.round(at.y)}px`;
     };

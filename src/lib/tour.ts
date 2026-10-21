@@ -1,12 +1,13 @@
 import { create } from "zustand";
 import { useAgent, type ChatItem } from "./agent";
+import { api } from "./api";
 import { SAMPLE_REQUEST, lastDemoOutcome } from "./demo";
 import { dockMax, useDock } from "./dock";
 import { usedBefore } from "./launch";
 import { newSampleProject, onlyPristine, pickVideosForNewProject, useLibrary } from "./library";
 import { useSetup } from "./setup";
 import { useSounds } from "./sounds";
-import { allClips, useEditor } from "./store";
+import { allClips, isCaptionTrack, useEditor } from "./store";
 import type { Project, Snapshot } from "./types";
 
 /**
@@ -108,12 +109,17 @@ function panelInInspector() {
 
 function show(step: TourStep) {
   window.clearTimeout(leaveWatch);
+  // Only Next leaves Play the result, and the video stops there, so no later card stands over it playing.
+  if (useTour.getState().step === "play" && useEditor.getState().playing) void api.pause();
   if (step !== "volume" && closedPanel) {
     closedPanel = false;
     useDock.setState({ open: true });
   }
   const snap = useEditor.getState().snap;
   edited = step === "undo" && snap ? JSON.stringify(snap.project) : null;
+  // The first caption's frame, so the still preview already shows the edit.
+  const caption = step === "play" && snap ? Math.min(...snap.project.tracks.filter(isCaptionTrack).flatMap((t) => t.clips.map((c) => c.startUs))) : Infinity;
+  if (caption !== Infinity) useEditor.getState().seek(caption);
   if (step === "transcript") useEditor.setState({ panelTab: "transcript" });
   if (step === "song") {
     useEditor.setState({ panelTab: "audio" });
@@ -214,7 +220,6 @@ useEditor.subscribe((s, prev) => {
   // Another project or the home screen ends it.
   if (s.view === "home" || s.snap?.sessionEpoch !== epoch) return endTour();
   if (step === "undo" && s.snap && s.snap !== prev.snap) followUndo(s.snap);
-  if (step === "play" && s.playing && !prev.playing) show("transcript");
   if (step === "song" && s.snap !== prev.snap && s.snap && songClip(s.snap.project)) show("volume");
 });
 
