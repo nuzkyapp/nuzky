@@ -5,6 +5,7 @@ import {
   ArrowUpDown,
   ChevronDown,
   ChevronLeft,
+  Compass,
   Copy,
   Folder,
   FolderInput,
@@ -58,6 +59,7 @@ import { FORMATS } from "../../lib/presets";
 import { openReelsToFind } from "../../lib/reels";
 import { useAgent } from "../../lib/agent";
 import { useSetup, stepsLeft } from "../../lib/setup";
+import { trySample } from "../../lib/tour";
 import { useEditor } from "../../lib/store";
 import { formatLength } from "../../lib/time";
 import type { Collection, LibraryProject, Said } from "../../lib/types";
@@ -698,9 +700,14 @@ function FirstRun() {
   return (
     <div className="mx-auto flex max-w-[748px] flex-col items-center gap-6 pt-20 text-center">
       <h2 className="text-[17px] font-semibold text-fg">Start your first video</h2>
-      <Button variant="primary" onClick={() => void pickVideosForNewProject()} className="-mt-2 h-9 px-4">
-        <Film size={16} /> Open a talking head video…
-      </Button>
+      <div className="-mt-2 flex gap-2">
+        <Button variant="primary" onClick={() => void pickVideosForNewProject()} className="h-9 px-4">
+          <Film size={16} /> Open a talking head video…
+        </Button>
+        <Button onClick={trySample} className="h-9 px-4">
+          Try the sample video
+        </Button>
+      </div>
       <ol className="grid w-full grid-cols-3 gap-6 text-left">
         {FIRST_STEPS.map(([title, line], i) => (
           <li key={title} className="flex gap-2.5">
@@ -852,6 +859,7 @@ function Sidebar({
           onClick={() => useSetup.getState().openSetup()}
           onKeyDown={rowKeys}
         />
+        <Row icon={<Compass size={16} />} label="Take the tour" count={undefined} on={false} onClick={trySample} onKeyDown={rowKeys} />
         <div className="mt-4 mb-1 flex h-7 items-center justify-between pl-2.5">
           <h2 className="text-[13px] font-semibold text-fg">Collections</h2>
           <IconButton label="New collection" onClick={() => setCreating([])} className="h-7 w-7">

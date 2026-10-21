@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Check, X } from "lucide-react";
 import { SETUP_STEPS, useSetup } from "../../lib/setup";
+import { trySample } from "../../lib/tour";
 import { Button, IconButton, trapTab } from "../ui";
 import { StepActionsSlot } from "./StepActions";
 import { STEPS } from "./steps";
@@ -116,6 +117,10 @@ export function SetupDialog() {
               </StepActionsSlot.Provider>
             </div>
             <footer className="mt-4 flex justify-end gap-2">
+              {/* Left of the step's own buttons, which the steps' focus finds by `footer button:not([data-sample])`. */}
+              <Button variant="ghost" data-sample className="mr-auto -ml-3 text-accent! hover:text-accent!" onClick={trySample}>
+                Try the sample video
+              </Button>
               <span ref={setActions} className="contents" />
               {!states[current] ? (
                 <Button pill onClick={() => skipStep(current)}>

@@ -37,7 +37,7 @@ function Step() {
   // Starting, stopping or ending the download removes the button that was pressed; the focus goes to what took its place.
   useEffect(() => {
     if (document.activeElement !== document.body) return;
-    document.querySelector<HTMLElement>(installing ? `#setup-panel button[aria-label="${STOP}"]` : "#setup-panel footer button")?.focus();
+    document.querySelector<HTMLElement>(installing ? `#setup-panel button[aria-label="${STOP}"]` : "#setup-panel footer button:not([data-sample])")?.focus();
   }, [installing, done]);
 
   return (

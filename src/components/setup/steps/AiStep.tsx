@@ -100,7 +100,7 @@ function Agents() {
   // Connect or Check again going away leaves the focus nowhere; it goes to the prominent button, never to Skip.
   useEffect(() => {
     if (document.activeElement !== document.body) return;
-    (document.querySelector<HTMLElement>("#setup-panel .btn-prominent") ?? document.querySelector<HTMLElement>("#setup-panel footer button"))?.focus();
+    (document.querySelector<HTMLElement>("#setup-panel .btn-prominent") ?? document.querySelector<HTMLElement>("#setup-panel footer button:not([data-sample])"))?.focus();
   });
 
   return (
@@ -268,7 +268,7 @@ function WithoutAi({ windows, onAgents }: { windows: boolean; onAgents: () => vo
   // Pressing Skip leaves the focus on the footer's Done that took its place; Open a video… is the way on.
   useEffect(() => {
     const focus = document.activeElement;
-    if (focus === document.body || focus?.closest("#setup-panel footer")) document.querySelector<HTMLElement>("#setup-panel footer button")?.focus();
+    if (focus === document.body || focus?.closest("#setup-panel footer")) document.querySelector<HTMLElement>("#setup-panel footer button:not([data-sample])")?.focus();
   }, []);
   const openVideo = () =>
     void pickOneVideo(() => {
