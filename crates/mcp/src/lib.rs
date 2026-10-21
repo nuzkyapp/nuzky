@@ -13,6 +13,7 @@ mod params;
 pub mod recap;
 pub mod reels;
 mod rules;
+pub mod sample;
 pub mod sounds;
 pub mod stickers;
 pub mod style;

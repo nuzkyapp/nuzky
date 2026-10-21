@@ -1342,10 +1342,11 @@ pub struct Moment {
 }
 
 /// What learning from a project the creator exported, or `edited` after an AI cut it, needs, taken
-/// now. None while an AI run is open, or for edits when no AI run was kept. It costs a look at the
-/// project's newest versions, so the slow part is left to `Moment::lesson`.
+/// now. None while an AI run is open, for a project with the tour's sample video, which is nobody's own
+/// cut, or for edits when no AI run was kept. It costs a look at the project's newest versions, so the
+/// slow part is left to `Moment::lesson`.
 pub fn moment(session: &ProjectSession, project: Project, run_open: bool, edited: bool) -> Result<Option<Moment>> {
-    if run_open {
+    if run_open || project.assets.iter().any(crate::sample::is_sample) {
         return Ok(None);
     }
     let runs = session.run_versions()?;
