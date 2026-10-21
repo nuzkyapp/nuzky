@@ -3,6 +3,7 @@
 //! timeline, that the user can stop and undo in one step like any agent's.
 
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail, ensure};
@@ -14,7 +15,7 @@ use nuzky_session::{EndAction, Expect, host::Host, transcripts::TranscriptStore}
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
-use crate::{AppState, CmdResult, ImportResult, err};
+use crate::{AppState, CmdResult, ImportResult, OpenSession, err};
 
 const VIDEO: &[u8] = include_bytes!("../../assets/sample/spotlight-effect.mp4");
 /// In Nuzky's data folder. Another sample would go in a new folder, so projects of this one keep their file.
@@ -77,13 +78,20 @@ pub async fn open_sample(app: AppHandle) -> CmdResult<ImportResult> {
 /// it then fails with CANCELLED.
 #[tauri::command]
 pub async fn sample_run(app: AppHandle, expected_epoch: Option<String>) -> CmdResult<SampleRun> {
-    let host = crate::lock_session(&app.state::<AppState>().session, expected_epoch.as_deref())?.host.clone();
-    tauri::async_runtime::spawn_blocking(move || run(&host, BREATH).map_err(err)).await.map_err(err)?
+    tauri::async_runtime::spawn_blocking(move || {
+        let (host, run_id, samples) =
+            begin(&app.state::<AppState>().session, expected_epoch.as_deref()).map_err(err)?;
+        run(&host, &run_id, &samples, BREATH).map_err(err)
+    })
+    .await
+    .map_err(err)?
 }
 
-/// What "Remove retakes and pauses" in the Transcript tab cuts with pauses of `PAUSE_US`, then after `breath`
-/// captions of what is left, as one run. The session lock is held only while each edit is applied, so the timeline shows both.
-pub(crate) fn run(host: &Host, breath: Duration) -> Result<SampleRun> {
+/// Opens the run while the app's project is still the one the caller saw, so opening another project ends the
+/// run and with it the edit.
+fn begin(session: &Mutex<OpenSession>, expected_epoch: Option<&str>) -> Result<(Arc<Host>, String, Vec<Asset>)> {
+    let current = crate::lock_session(session, expected_epoch).map_err(anyhow::Error::msg)?;
+    let host = current.host.clone();
     let state = host.session.state()?;
     ensure!(state.open_run.is_none(), "RUN_ACTIVE: stop the open run before editing");
     let samples = main_samples(&state.project)?;
@@ -93,14 +101,21 @@ pub(crate) fn run(host: &Host, breath: Duration) -> Result<SampleRun> {
         }
     }
     let run_id = host.session.begin_run(LABEL.into())?.run_id;
+    Ok((host, run_id, samples))
+}
+
+/// What "Remove retakes and pauses" in the Transcript tab cuts with pauses of `PAUSE_US`, then after `breath`
+/// captions of what is left, in the run `begin` opened. The session lock is held only while each edit is
+/// applied, so the timeline shows both.
+fn run(host: &Host, run_id: &str, samples: &[Asset], breath: Duration) -> Result<SampleRun> {
     let before = host.session.state()?.project;
-    let done = edit(host, &run_id, &samples, breath).and_then(|()| host.session.end_run(&run_id, EndAction::Keep));
+    let done = edit(host, run_id, samples, breath).and_then(|()| host.session.end_run(run_id, EndAction::Keep));
     if let Err(error) = done {
         // Stop, or another project opening, ended the run, keeping what it had done.
-        if host.session.check_run(&run_id).is_err() {
+        if host.session.check_run(run_id).is_err() {
             bail!("CANCELLED: the edit was stopped");
         }
-        host.session.end_run(&run_id, EndAction::Discard)?;
+        host.session.end_run(run_id, EndAction::Discard)?;
         return Err(error);
     }
     let after = host.session.state()?.project;
@@ -185,13 +200,46 @@ mod tests {
         (dir, store, asset)
     }
 
+    /// `host`'s project open in the app, and the test's own hold on it.
+    fn app(host: Host) -> (Mutex<OpenSession>, Arc<Host>) {
+        let path = host.session.path();
+        let host = Arc::new(host);
+        let current = OpenSession {
+            host: host.clone(),
+            #[cfg(unix)]
+            listener: None,
+            bridge_error: None,
+            path,
+            stopped: Arc::default(),
+            learn_at: Arc::default(),
+        };
+        (Mutex::new(current), host)
+    }
+
     /// The sample as `open_sample` opens it.
-    fn opened(name: &str) -> (PathBuf, Host) {
+    fn opened(name: &str) -> (PathBuf, Mutex<OpenSession>, Arc<Host>) {
         let (dir, transcripts, asset) = installed(name);
         let path = dir.join("projects/sample.nuzky");
         crate::store::create(&path, &crate::project_from_media(PROJECT, vec![asset]).unwrap()).unwrap();
         let session = ProjectSession::open(&path, Mode::Write, None).unwrap();
-        (dir.clone(), Host { session, jobs: Default::default(), transcripts, cache_dir: dir.join("cache") })
+        let (app, host) = app(Host { session, jobs: Default::default(), transcripts, cache_dir: dir.join("cache") });
+        (dir, app, host)
+    }
+
+    /// The tour's edit as `sample_run` makes it.
+    fn tour(app: &Mutex<OpenSession>, breath: Duration) -> Result<SampleRun> {
+        let (host, run_id, samples) = begin(app, None)?;
+        run(&host, &run_id, &samples, breath)
+    }
+
+    /// Closes the project as the app does, then removes its folder once nothing holds the project.
+    fn close(dir: PathBuf, app: Mutex<OpenSession>, host: Arc<Host>) {
+        drop(app);
+        while Arc::strong_count(&host) > 1 {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        drop(host);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -225,11 +273,11 @@ mod tests {
 
     #[test]
     fn the_tour_edit_cuts_and_captions_the_sample_as_one_run_that_one_undo_takes_back() {
-        let (dir, host) = opened("run");
+        let (dir, app, host) = opened("run");
         let original = host.session.state().unwrap().project;
         assert_eq!((original.name.as_str(), original.canvas.width, original.canvas.height), (PROJECT, 1920, 1080));
 
-        let done = run(&host, Duration::ZERO).unwrap();
+        let done = tour(&app, Duration::ZERO).unwrap();
         let state = host.session.state().unwrap();
         let edited = state.project;
         assert!(state.open_run.is_none());
@@ -261,16 +309,15 @@ mod tests {
         };
         host.session.edit(vec![cut], None, Expect::default()).unwrap();
         assert!(!learns(true) && !learns(false));
-        drop(host);
-        std::fs::remove_dir_all(dir).unwrap();
+        close(dir, app, host);
     }
 
     #[test]
     fn stop_ends_the_tour_edit_with_what_it_did() {
-        let (dir, host) = opened("stop");
+        let (dir, app, host) = opened("stop");
         let original = host.session.state().unwrap().project;
         std::thread::scope(|scope| {
-            let running = scope.spawn(|| run(&host, Duration::from_secs(10)));
+            let running = scope.spawn(|| tour(&app, Duration::from_secs(10)));
             // Stop in the top bar, once the cut shows and the captions wait.
             while host.session.state().unwrap().project.duration_us() == original.duration_us() {
                 std::thread::sleep(Duration::from_millis(20));
@@ -284,20 +331,36 @@ mod tests {
         assert!(!state.project.tracks.iter().any(|t| t.is_captions()));
         host.session.undo().unwrap();
         assert_eq!(host.session.state().unwrap().project, original);
-        drop(host);
-        std::fs::remove_dir_all(dir).unwrap();
+        close(dir, app, host);
+    }
+
+    #[test]
+    fn opening_another_project_stops_the_tour_edit_before_it_starts() {
+        let (dir, app, host) = opened("switch");
+        let original = host.session.state().unwrap().project;
+        let epoch = host.session.stamp().session_epoch;
+        assert!(begin(&app, Some("another")).err().unwrap().to_string().starts_with("EPOCH_CHANGED"));
+        let (worker, run_id, samples) = begin(&app, Some(&epoch)).unwrap();
+        // Another project opens before the worker edits.
+        app.lock().unwrap().prepare_switch().unwrap();
+        let error = run(&worker, &run_id, &samples, Duration::ZERO).unwrap_err().to_string();
+        assert!(error.starts_with("CANCELLED"), "{error}");
+        drop(worker);
+        assert!(host.session.state().unwrap().open_run.is_none());
+        assert_eq!(crate::store::load(&host.session.path()).unwrap(), original);
+        close(dir, app, host);
     }
 
     #[test]
     fn the_tour_edit_is_only_for_the_sample_and_never_inside_another_run() {
         let (dir, host) = crate::transcripts::tests::fixture();
-        let refused = run(&host, Duration::ZERO).unwrap_err().to_string();
+        let (app, host) = app(host);
+        let refused = tour(&app, Duration::ZERO).unwrap_err().to_string();
         assert!(refused.starts_with("NOT_SAMPLE"), "{refused}");
         let agent = host.session.begin_run("Agent".into()).unwrap().run_id;
-        let refused = run(&host, Duration::ZERO).unwrap_err().to_string();
+        let refused = tour(&app, Duration::ZERO).unwrap_err().to_string();
         assert!(refused.starts_with("RUN_ACTIVE"), "{refused}");
         host.session.end_run(&agent, EndAction::Keep).unwrap();
-        drop(host);
-        std::fs::remove_dir_all(dir).unwrap();
+        close(dir, app, host);
     }
 }
