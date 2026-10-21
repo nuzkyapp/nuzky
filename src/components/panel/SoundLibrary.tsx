@@ -609,22 +609,30 @@ export function SoundLibrary({ kind }: { kind: SoundKind }) {
 /** How many CC BY sounds play on the timeline; their credits go in the video's description. */
 export function CreditsBar() {
   const bar = useRef<HTMLDivElement>(null);
-  const count = useEditor((s) => {
+  // What needs credit, by kind, as a string, so the bar redraws only when that changes: "1 video and 2 sounds need credit".
+  const needed = useEditor((s) => {
     const project = s.snap?.project;
-    if (!project) return 0;
+    if (!project) return null;
     const used = new Set(project.tracks.flatMap((t) => t.clips.flatMap((c) => (c.content.type === "media" ? [c.content.assetId] : []))));
-    return project.assets.filter((a) => a.credit?.license === "by" && used.has(a.id)).length;
+    const credited = project.assets.filter((a) => a.credit?.license === "by" && used.has(a.id));
+    if (!credited.length) return null;
+    const parts = (["video", "image", "audio"] as const)
+      .map((kind) => [credited.filter((a) => a.kind === kind).length, { video: "video", image: "picture", audio: "sound" }[kind]] as const)
+      .filter(([n]) => n > 0)
+      .map(([n, word]) => `${n} ${word}${n === 1 ? "" : "s"}`);
+    const what = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}` : parts[0];
+    return `${what} ${credited.length === 1 ? "needs" : "need"} credit`;
   });
   // Toasts move above the bar while it shows, so they never cover Copy credits.
   useLayoutEffect(() => {
-    if (count === 0) return;
+    if (!needed) return;
     useEditor.setState({ toastLift: bar.current?.offsetHeight ?? 0 });
     return () => useEditor.setState({ toastLift: 0 });
-  }, [count]);
-  if (count === 0) return null;
+  }, [needed]);
+  if (!needed) return null;
   return (
     <div ref={bar} className="flex shrink-0 items-center gap-2 border-t border-white/[.07] px-3.5 py-2.5 text-[12px] text-muted">
-      <span className="min-w-0 flex-1">{count === 1 ? "1 sound needs credit" : `${count} sounds need credit`}</span>
+      <span className="min-w-0 flex-1">{needed}</span>
       <Button pill className="h-7 gap-1.5 text-[12px]" onClick={copyCredits} title="Copy the credits for the video's description">
         <Copy size={13} /> Copy credits
       </Button>

@@ -238,7 +238,7 @@ export async function copyCredits() {
   const { toast } = useEditor.getState();
   try {
     const text = await api.soundCredits(currentEpoch());
-    if (!text) return toast({ kind: "info", text: "No sound in the video needs credit." });
+    if (!text) return toast({ kind: "info", text: "Nothing in the video needs credit." });
     await copyText(text, "The clipboard is not available. Export the video: its credits are saved beside it.");
     toast({ kind: "success", text: "Credits copied. Paste them into the video's description." });
   } catch (e) {
