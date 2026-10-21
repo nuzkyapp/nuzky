@@ -6,7 +6,12 @@ The first alpha of Nuzky, a free, open-source video editor for your computer. It
 - **Retakes and pauses.** Transcribe a talking video and delete words straight from the text, or press Remove retakes and pauses to cut restarted sentences, filler words and silences in one step. One Undo takes it back.
 - **Export.** MP4 from 720p to 4K, with presets for Reels & TikTok, Shorts and YouTube and no watermark. The file looks exactly like the preview.
 - **Phone videos.** iPhone and Android videos open the right way up, selfies included, and every cut lands on the frame you picked.
-- **AI editing with Claude Code or Codex.** Connect agent sets up Claude Code or Codex in one click, and the AI panel chats with your own Claude Code or Codex. You watch it edit, Stop works at any time, and one Undo takes back the whole run. It runs on the Claude or ChatGPT plan you already have.
+- **AI editing with ChatGPT, Claude Code or Codex.** Sign in with ChatGPT in the AI panel, no terminal needed, or connect Claude Code or Codex in one click. You watch it edit, Stop works at any time, and one Undo takes back the whole run. It runs on the plan you already have. Gemini works from a terminal through Google's Antigravity CLI, and the AI panel shows how.
+- **Your CapCut drafts.** The home screen lists the drafts CapCut keeps on your computer. Open one and its clips, cuts, speed, volume, keyframes, texts, captions and transitions come over. A list says what didn't, and the draft itself stays as it was.
+- **Reels from a long video.** AI finds the moments that stand on their own, you trim each one by its words, and Nuzky makes a vertical project for every reel.
+- **Covers and thumbnails.** A 9:16 cover and a 16:9 thumbnail from a frame of your video, with your text behind you, saved as PNG or JPEG.
+- **Music and sound.** Paste a YouTube or YouTube Music link to add its sound, search CC0 and CC BY music and effects, or use the effects built in. Nuzky lists the credits to copy.
+- **Picture and voice.** Blur or replace the background behind a person, keep a face in frame when you change the shape, and clean up a voice recorded in a room.
 - Nuzky saves after every edit and recovers after a crash.
 
 ## Not yet
