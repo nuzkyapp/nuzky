@@ -83,7 +83,7 @@ ${list(features)}
 
 ${downloads(r)}
 
-Once it's installed, new versions download inside Nuzky in one click, and install when you restart. Checksums: ${r.checksums}
+Once it's installed, new versions download inside Nuzky in one click, and install when you restart.
 
 ## Questions
 

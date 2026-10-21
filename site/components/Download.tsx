@@ -9,7 +9,6 @@ const link = "underline decoration-white/30 underline-offset-4 transition-colors
 export function Download({ release }: { release: Release }) {
   const links = [
     ["Release notes", release.notes],
-    ["Checksums", release.checksums],
     ["All releases", releases],
     ["Build from source", buildFromSource],
     ["GPL-3.0", license],

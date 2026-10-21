@@ -23,7 +23,6 @@ const fileName: Record<FileId, (version: string) => string> = {
 export type Release = {
   version: string | null;
   notes: string;
-  checksums: string;
   files: Record<FileId, { href: string; name: string | null }>;
 };
 
@@ -45,7 +44,7 @@ export async function getRelease(): Promise<Release> {
       return [id, { href: name ? at(name) : latest, name }];
     }),
   ) as Release["files"];
-  return { version, notes: version ? `${releases}/tag/v${version}` : latest, checksums: at("SHA256SUMS"), files };
+  return { version, notes: version ? `${releases}/tag/v${version}` : latest, files };
 }
 
 export type SystemId = "mac" | "linux" | "windows";
