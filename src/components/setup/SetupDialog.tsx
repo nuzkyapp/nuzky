@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Check, X } from "lucide-react";
 import { SETUP_STEPS, useSetup } from "../../lib/setup";
-import { trySample } from "../../lib/tour";
+import { trySample, useTour } from "../../lib/tour";
 import { Button, IconButton, trapTab } from "../ui";
 import { StepActionsSlot } from "./StepActions";
 import { STEPS } from "./steps";
@@ -13,6 +13,8 @@ export function SetupDialog() {
   const { open, states, current, closeSetup, showStep, skipStep } = useSetup();
   const rail = useRef<HTMLDivElement>(null);
   const [actions, setActions] = useState<HTMLElement | null>(null);
+  // Opened by itself on the first launch, its last step goes on to the sample instead of closing.
+  const firstSetup = useTour((s) => s.firstSetup);
   useEffect(() => {
     if (!open) return;
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -26,6 +28,7 @@ export function SetupDialog() {
   const index = SETUP_STEPS.indexOf(current);
   const done = SETUP_STEPS.filter((step) => states[step] === "done").length;
   const { title, Body } = STEPS[current];
+  const toSample = firstSetup && index === LAST && !!states[current];
 
   const railKeys = (e: KeyboardEvent<HTMLDivElement>) => {
     const to = { ArrowUp: index - 1, ArrowDown: index + 1, Home: 0, End: LAST }[e.key];
@@ -118,9 +121,11 @@ export function SetupDialog() {
             </div>
             <footer className="mt-4 flex justify-end gap-2">
               {/* Left of the step's own buttons, which the steps' focus finds by `footer button:not([data-sample])`. */}
-              <Button variant="ghost" data-sample className="mr-auto -ml-3 text-accent! hover:text-accent!" onClick={trySample}>
-                Try the sample video
-              </Button>
+              {!toSample && (
+                <Button variant="ghost" data-sample className="mr-auto -ml-3 text-accent! hover:text-accent!" onClick={trySample}>
+                  Try the sample video
+                </Button>
+              )}
               <span ref={setActions} className="contents" />
               {!states[current] ? (
                 <Button pill onClick={() => skipStep(current)}>
@@ -129,6 +134,10 @@ export function SetupDialog() {
               ) : index < LAST ? (
                 <Button pill variant="primary" onClick={() => showStep(SETUP_STEPS[index + 1])}>
                   Next
+                </Button>
+              ) : toSample ? (
+                <Button pill variant="primary" onClick={trySample}>
+                  Try the sample video
                 </Button>
               ) : (
                 // A skipped step's own way on, such as Open a video…, is the prominent one.

@@ -90,9 +90,11 @@ interface TourState {
   word: string | null;
   /** Whether this launch opened Get set up by itself; null until the projects are listed. */
   firstLaunch: boolean | null;
+  /** Get set up is still open as the first launch opened it, so its last step goes on to the sample. */
+  firstSetup: boolean;
 }
 
-export const useTour = create<TourState>(() => ({ step: null, epoch: null, stopped: false, undone: false, word: null, firstLaunch: null }));
+export const useTour = create<TourState>(() => ({ step: null, epoch: null, stopped: false, undone: false, word: null, firstLaunch: null, firstSetup: false }));
 
 /** The tour closed the AI panel to show the inspector, and opens it again after. */
 let closedPanel = false;
@@ -273,6 +275,9 @@ useEditor.subscribe((s, prev) => {
 useLibrary.subscribe((s) => {
   if (useTour.getState().firstLaunch !== null || s.projects === null) return;
   const open = !usedBefore && onlyPristine(s.projects, useEditor.getState().snap);
-  useTour.setState({ firstLaunch: open });
+  useTour.setState({ firstLaunch: open, firstSetup: open });
   if (open) useSetup.getState().openSetup();
+});
+useSetup.subscribe((s, prev) => {
+  if (prev.open && !s.open) useTour.setState({ firstSetup: false });
 });
