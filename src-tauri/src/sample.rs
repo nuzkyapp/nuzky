@@ -20,9 +20,11 @@ const VIDEO: &[u8] = include_bytes!("../../assets/sample/spotlight-effect.mp4");
 /// In Nuzky's data folder. Another sample would go in a new folder, so projects of this one keep their file.
 const FILE: &str = "samples/1/The spotlight effect.mp4";
 const PROJECT: &str = "Sample video";
-const LABEL: &str = "Cut retakes and pauses";
-/// The pause length the Transcript tab starts with (`pauseUs` in src/lib/speech.ts).
-const PAUSE_US: i64 = 500_000;
+/// She speaks without retakes, so the cut finds none and only shortens pauses.
+const LABEL: &str = "Cut long pauses";
+/// An agent's pause length (edit_transcript's `shorten_pauses_us`); the Transcript tab's 0.5 s would cut 1.3 s
+/// of this minute, too little to see.
+const PAUSE_US: i64 = 300_000;
 /// Between the cut and the captions, so the timeline is seen changing twice.
 const BREATH: Duration = Duration::from_millis(800);
 
@@ -76,8 +78,8 @@ pub async fn sample_run(app: AppHandle, expected_epoch: Option<String>) -> CmdRe
     tauri::async_runtime::spawn_blocking(move || run(&host, BREATH).map_err(err)).await.map_err(err)?
 }
 
-/// What "Remove retakes and pauses" in the Transcript tab cuts, then after `breath` captions of what is left,
-/// as one run. The session lock is held only while each edit is applied, so the timeline shows both.
+/// What "Remove retakes and pauses" in the Transcript tab cuts with pauses of `PAUSE_US`, then after `breath`
+/// captions of what is left, as one run. The session lock is held only while each edit is applied, so the timeline shows both.
 pub(crate) fn run(host: &Host, breath: Duration) -> Result<SampleRun> {
     let state = host.session.state()?;
     ensure!(state.open_run.is_none(), "RUN_ACTIVE: stop the open run before editing");
@@ -222,8 +224,9 @@ mod tests {
         let edited = state.project;
         assert!(state.open_run.is_none());
         assert_eq!((done.before_us, done.after_us), (original.duration_us(), edited.duration_us()));
-        // She speaks without retakes, so the pauses go.
-        assert!(done.after_us < done.before_us - 1_000_000 && done.pauses > 0, "{done:?}");
+        // Over 3 s of pauses go, and nothing else: the run's label promises only pauses.
+        assert!(done.after_us < done.before_us - 3_000_000 && done.pauses >= 10, "{done:?}");
+        assert_eq!((done.words, done.retakes), (0, 0), "{done:?}");
         // The run's card says the same.
         let card = nuzky_session::summary::summarize(&original, &edited);
         assert!(card.iter().any(|c| c.text == format!("Added {} captions", done.captions)), "{card:?}");
