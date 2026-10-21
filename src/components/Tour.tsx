@@ -3,6 +3,7 @@ import { useAgent } from "../lib/agent";
 import { planReady, useChatGpt } from "../lib/chatgpt";
 import { usePreview } from "../lib/preview";
 import { useSetup } from "../lib/setup";
+import { useEditor } from "../lib/store";
 import { STEP, TOUR_STEPS, endTour, nextStep, openOwnVideo, useTour, type TourStep } from "../lib/tour";
 import { Button } from "./ui";
 
@@ -70,6 +71,7 @@ export function Tour() {
 function Spotlight({ step }: { step: TourStep }) {
   const def = STEP[step];
   const stopped = useTour((s) => s.stopped);
+  const undone = useTour((s) => s.undone);
   const cut = useAgent((s) => s.items.some((i) => i.kind === "run"));
   const dim = useRef<SVGPathElement>(null);
   const rings = useRef<SVGRectElement[]>([]);
@@ -130,7 +132,7 @@ function Spotlight({ step }: { step: TourStep }) {
       (box?.querySelector<HTMLElement>("[data-primary]") ?? box)?.focus();
     });
     return () => cancelAnimationFrame(frame);
-  }, [def, stopped]);
+  }, [def, stopped, undone]);
 
   // Esc ends the tour; Tab goes round the card and the target, as clicks reach only them.
   useEffect(() => {
@@ -155,7 +157,14 @@ function Spotlight({ step }: { step: TourStep }) {
   }, [def]);
 
   const index = TOUR_STEPS.indexOf(step);
-  const text = step === "watch" && stopped ? (cut ? "You stopped it. What it changed so far stays, and Undo on its card takes it back." : "You stopped it before it changed anything.") : def.text;
+  const text =
+    step === "watch" && stopped
+      ? cut
+        ? "You stopped it. What it changed so far stays, and Undo on its card takes it back."
+        : "You stopped it before it changed anything."
+      : step === "undo" && undone
+        ? "Undone. The video is back as it was. Redo, or Ctrl+Shift+Z, brings the edit back."
+        : def.text;
   const next = def.next || (step === "watch" && stopped);
   return (
     <>
@@ -191,6 +200,11 @@ function Spotlight({ step }: { step: TourStep }) {
             </Button>
           )}
           <span className="flex-1" />
+          {step === "undo" && undone && (
+            <Button pill className="h-7 px-3 text-[12px]" onClick={() => void useEditor.getState().redo()}>
+              Redo
+            </Button>
+          )}
           {next && (
             <Button variant="primary" pill data-primary className="h-7 px-3 text-[12px]" onClick={nextStep}>
               Next

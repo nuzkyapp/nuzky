@@ -287,7 +287,7 @@ Each of its eight steps points at one part of the editor: everything else lies u
 
 1. **Ask the AI to edit**, the AI panel's field: "Tell the AI what you want in your own words. Try this one: press Enter." Sending moves on.
 2. **Watch it edit**, the timeline and the AI run in the top bar: "Watch the timeline change. Stop and edit, at the top, lets you take over." It moves on 1.5 s after the edit ends, so the card can be read to the end; stopped, the card says so and offers Next.
-3. **One Undo takes it all back**, the edit's card in the AI panel. Left out when the edit changed nothing.
+3. **One Undo takes it all back**, the edit's card in the AI panel. Left out when the edit changed nothing. Once the edit is undone, by the card's Undo, `Ctrl+Z` or the timeline's Undo, the card says "Undone. The video is back as it was." and offers Redo, which, as `Ctrl+Shift+Z` does, brings the edit back, and the run's card offers Undo again. Next goes on either way.
 4. **Play the result**, the preview: playing moves on, as does Next. The card has the keyboard, so `Space` plays.
 5. **Fix anything by hand**: the Transcript tab opens, and the library shows its words.
 6. **Add a song**: Audio's Music opens on the built-in song, its + showing and focused; the song's clip on the timeline moves on.

@@ -7,7 +7,7 @@ import { newSampleProject, onlyPristine, pickVideosForNewProject, useLibrary } f
 import { useSetup } from "./setup";
 import { useSounds } from "./sounds";
 import { allClips, useEditor } from "./store";
-import type { Project } from "./types";
+import type { Project, Snapshot } from "./types";
 
 /**
  * The first-run tour on the sample video: eight steps, each pointing at one part of the editor while the rest
@@ -74,11 +74,13 @@ interface TourState {
   epoch: string | null;
   /** The AI's turn was stopped, so Watch it edit waits for Next. */
   stopped: boolean;
+  /** One Undo's edit is undone now, so the card offers Redo. */
+  undone: boolean;
   /** Whether this launch opened Get set up by itself; null until the projects are listed. */
   firstLaunch: boolean | null;
 }
 
-export const useTour = create<TourState>(() => ({ step: null, epoch: null, stopped: false, firstLaunch: null }));
+export const useTour = create<TourState>(() => ({ step: null, epoch: null, stopped: false, undone: false, firstLaunch: null }));
 
 /** The tour closed the AI panel to show the inspector, and opens it again after. */
 let closedPanel = false;
@@ -87,6 +89,8 @@ let keptDraft = "";
 /** Watch it edit stays a moment after the edit ends, so its card can be read to the end. */
 const WATCH_AFTER_MS = 1500;
 let leaveWatch = 0;
+/** The project as the AI's edit left it, while One Undo shows; Undo and Redo are told apart from other edits by it. */
+let edited: string | null = null;
 
 const runCards = (items: ChatItem[]) => items.some((i) => i.kind === "run");
 
@@ -108,6 +112,8 @@ function show(step: TourStep) {
     closedPanel = false;
     useDock.setState({ open: true });
   }
+  const snap = useEditor.getState().snap;
+  edited = step === "undo" && snap ? JSON.stringify(snap.project) : null;
   if (step === "transcript") useEditor.setState({ panelTab: "transcript" });
   if (step === "song") {
     useEditor.setState({ panelTab: "audio" });
@@ -124,7 +130,22 @@ function show(step: TourStep) {
       useDock.setState({ open: false });
     }
   }
-  useTour.setState({ step, stopped: false });
+  useTour.setState({ step, stopped: false, undone: false });
+}
+
+/**
+ * One Undo follows the project: Undo on the run's card, Ctrl+Z or the timeline's Undo undo the edit, and Redo brings it
+ * back, so the tour's card and the run's card both say which it is. Another edit leaves them as they are.
+ */
+function followUndo(snap: Snapshot) {
+  const back = JSON.stringify(snap.project) === edited;
+  if (!back && !snap.canRedo) return;
+  useTour.setState({ undone: !back });
+  const { items } = useAgent.getState();
+  const index = items.findLastIndex((it) => it.kind === "run");
+  const run = items[index];
+  // With the edit back, the run's card offers Undo again, from the project as it is now.
+  if (run?.kind === "run" && !!run.undone === back) useAgent.setState({ items: items.map((it, i) => (i === index ? { ...run, undone: !back, ...(back && { snap }) } : it)) });
 }
 
 /** Next on the card: the following step; One Undo is left out when the AI changed nothing. */
@@ -192,6 +213,7 @@ useEditor.subscribe((s, prev) => {
   if (!step) return;
   // Another project or the home screen ends it.
   if (s.view === "home" || s.snap?.sessionEpoch !== epoch) return endTour();
+  if (step === "undo" && s.snap && s.snap !== prev.snap) followUndo(s.snap);
   if (step === "play" && s.playing && !prev.playing) show("transcript");
   if (step === "song" && s.snap !== prev.snap && s.snap && songClip(s.snap.project)) show("volume");
 });
