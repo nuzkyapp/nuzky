@@ -26,7 +26,7 @@ export const SONG = "nuzky:dancing";
 export const STEP: Record<TourStep, { title: string; text: string; target: string; extra?: string; focus?: string; next: boolean; side: "left" | "right" | "above" | "below" }> = {
   ask: {
     title: "Ask the AI to edit",
-    text: "Your first request is written. Press Enter to send it.",
+    text: "Tell the AI what you want in your own words. Try this one: press Enter.",
     target: "[data-tour=ai-field]",
     focus: "[data-tour=ai-field] textarea",
     next: false,
@@ -34,7 +34,7 @@ export const STEP: Record<TourStep, { title: string; text: string; target: strin
   },
   watch: {
     title: "Watch it edit",
-    text: "The AI cuts your video right here, live. Stop in the top bar takes over at any time.",
+    text: "Watch the timeline change. Stop and edit, at the top, lets you take over.",
     target: "section[aria-label=Timeline]",
     extra: "[data-tour=run-bar]",
     next: false,
@@ -51,7 +51,7 @@ export const STEP: Record<TourStep, { title: string; text: string; target: strin
   transcript: { title: "Fix anything by hand", text: "Every word is here. Select words and press Delete to cut them.", target: "[data-tour=library]", next: true, side: "right" },
   song: {
     title: "Add a song",
-    text: "Press + to put this free song under your voice. You can also paste a YouTube link above.",
+    text: "Press + to put this free song under her voice. You can also paste a YouTube link above.",
     target: `[data-sound="${SONG}"]`,
     focus: `[data-sound="${SONG}"] button[aria-label^="Add"]`,
     next: false,
@@ -59,7 +59,7 @@ export const STEP: Record<TourStep, { title: string; text: string; target: strin
   },
   volume: {
     title: "Fine-tune what's selected",
-    text: "The song is selected. Turn its volume down so your voice stays clear.",
+    text: "The song is selected. Turn its volume down so her voice stays clear.",
     target: "[data-tour=volume]",
     focus: "[data-tour=volume] input[type=range]",
     next: true,
