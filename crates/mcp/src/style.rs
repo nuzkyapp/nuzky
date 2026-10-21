@@ -1342,11 +1342,18 @@ pub struct Moment {
 }
 
 /// What learning from a project the creator exported, or `edited` after an AI cut it, needs, taken
-/// now. None while an AI run is open, for a project with the tour's sample video, which is nobody's own
-/// cut, or for edits when no AI run was kept. It costs a look at the project's newest versions, so the
-/// slow part is left to `Moment::lesson`.
+/// now. None while an AI run is open, for a project with the tour's sample video on its timeline, which is
+/// nobody's own cut, or for edits when no AI run was kept. It costs a look at the project's newest versions,
+/// so the slow part is left to `Moment::lesson`.
 pub fn moment(session: &ProjectSession, project: Project, run_open: bool, edited: bool) -> Result<Option<Moment>> {
-    if run_open || project.assets.iter().any(crate::sample::is_sample) {
+    let on_timeline = |asset: &Asset| {
+        project
+            .tracks
+            .iter()
+            .flat_map(|t| &t.clips)
+            .any(|clip| matches!(&clip.content, ClipContent::Media { asset_id, .. } if *asset_id == asset.id))
+    };
+    if run_open || project.assets.iter().any(|asset| on_timeline(asset) && crate::sample::is_sample(asset)) {
         return Ok(None);
     }
     let runs = session.run_versions()?;
@@ -1972,6 +1979,49 @@ mod tests {
             [true, true, true, true, true, false],
             "exporting the creator's own cut does"
         );
+        drop(host);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn the_tour_sample_stops_learning_only_while_it_is_on_the_timeline() {
+        use nuzky_engine::edit::EditCmd;
+        let (dir, host) = talk();
+        host.session.edit(cut_silence(), None, Default::default()).unwrap();
+        let learns = || {
+            let state = host.session.state().unwrap();
+            moment(&host.session, state.project, false, false).unwrap().is_some()
+        };
+        assert!(learns());
+        // The creator brings the tour's sample video into their own project, then deletes its clip again.
+        let file = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/sample/spotlight-effect.mp4");
+        let sample = Asset {
+            id: "sample".into(),
+            name: "The spotlight effect.mp4".into(),
+            path: dunce::canonicalize(file).unwrap().to_string_lossy().into(),
+            kind: AssetKind::Video,
+            duration_us: 61_366_667,
+            width: 1920,
+            height: 1080,
+            fps: 30.0,
+            has_audio: true,
+            rotation: 0,
+            mirror: false,
+            credit: Some(crate::sample::manifest().credit.clone()),
+            part: None,
+        };
+        assert!(crate::sample::is_sample(&sample));
+        let add = EditCmd::AddClip { asset_id: "sample".into(), start_us: None, track_id: None };
+        host.session.edit(vec![EditCmd::AddAssets { assets: vec![sample] }, add], None, Default::default()).unwrap();
+        assert!(!learns(), "nothing from a cut of the sample");
+        let project = host.session.state().unwrap().project;
+        let clip_ids = (project.tracks.iter().flat_map(|t| &t.clips))
+            .filter(|c| matches!(&c.content, ClipContent::Media { asset_id, .. } if asset_id == "sample"))
+            .map(|c| c.id.clone())
+            .collect();
+        host.session.edit(vec![EditCmd::DeleteClips { clip_ids }], None, Default::default()).unwrap();
+        assert!(host.session.state().unwrap().project.asset("sample").is_some());
+        assert!(learns(), "the sample left only among the media stops nothing");
         drop(host);
         fs::remove_dir_all(dir).unwrap();
     }

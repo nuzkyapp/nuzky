@@ -3,11 +3,11 @@
 //! and what was changed; syncing a sound to a video is always a change, footage changes when it is cut or
 //! played otherwise. CC0 ones need no credit and are listed after them as a courtesy; the sounds built into
 //! Nuzky are left out.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::export::heard_clips;
-use crate::model::{Asset, AssetKind, ClipContent, Credit, License, Project};
+use crate::model::{Asset, AssetKind, Clip, ClipContent, Credit, License, Project, TrackKind};
 
 /// Under this a trim is the file's own rounding, not a cut.
 const TRIM_TOLERANCE_US: i64 = 50_000;
@@ -75,9 +75,21 @@ fn line(credit: &Credit, changes: &Changes, sound: bool) -> String {
 pub fn credits(project: &Project) -> Option<String> {
     let mut order: Vec<&Asset> = Vec::new();
     let mut changes: HashMap<&str, Changes> = HashMap::new();
-    let mut clips: Vec<_> = heard_clips(project).collect();
-    clips.sort_by_key(|clip| clip.start_us);
-    for clip in clips {
+    let duration = project.duration_us();
+    let heard: HashSet<&str> = heard_clips(project).map(|clip| clip.id.as_str()).collect();
+    // Footage on a muted track or without volume is still seen.
+    let mut clips: Vec<(&Clip, bool)> = Vec::new();
+    for track in &project.tracks {
+        let pictured = !track.hidden && track.kind == TrackKind::Video;
+        for clip in &track.clips {
+            let heard = heard.contains(clip.id.as_str());
+            if heard || (pictured && clip.end_us() > 0 && clip.start_us < duration) {
+                clips.push((clip, heard));
+            }
+        }
+    }
+    clips.sort_by_key(|(clip, _)| clip.start_us);
+    for (clip, heard) in clips {
         let ClipContent::Media {
             asset_id,
             source_in_us,
@@ -94,7 +106,9 @@ pub fn credits(project: &Project) -> Option<String> {
             continue;
         };
         let Some(asset) = project.asset(asset_id) else { continue };
-        if asset.credit.as_ref().is_none_or(|credit| credit.source == "nuzky") {
+        if asset.credit.as_ref().is_none_or(|credit| credit.source == "nuzky")
+            || (!heard && asset.kind == AssetKind::Audio)
+        {
             continue;
         }
         if !changes.contains_key(asset_id.as_str()) {
@@ -104,9 +118,12 @@ pub fn credits(project: &Project) -> Option<String> {
         let source_end = *source_in_us as f64 + clip.duration_us as f64 * f64::from(*speed);
         entry.trimmed |=
             *source_in_us > TRIM_TOLERANCE_US || source_end < (asset.duration_us - TRIM_TOLERANCE_US) as f64;
-        entry.faded |= *fade_in_us > 0 || *fade_out_us > 0;
-        entry.volume |= *volume != 1.0 || *duck_db != 0.0 || *normalize || *leveler > 0.0;
         entry.speed |= *speed != 1.0;
+        // Detached sound plays from another clip, so a silent picture says nothing about the sound.
+        if heard {
+            entry.faded |= *fade_in_us > 0 || *fade_out_us > 0;
+            entry.volume |= *volume != 1.0 || *duck_db != 0.0 || *normalize || *leveler > 0.0;
+        }
     }
     let lines = |license: License, kinds: &[bool]| -> String {
         let assets =
@@ -266,6 +283,27 @@ mod tests {
         let ClipContent::Media { speed, .. } = &mut both.tracks[0].clips[0].content else { panic!() };
         *speed = 2.0;
         assert!(credits(&both).unwrap().contains("4.0/). Speed changed.\n"));
+    }
+
+    #[test]
+    fn footage_is_credited_while_its_picture_is_in_the_video() {
+        let mut talk = sound("talk", License::CcBy, "youtube");
+        talk.kind = AssetKind::Video;
+        let mut both = project(vec![talk]);
+        both.apply(EditCmd::AddAssets { assets: vec![sound("by", License::CcBy, "openverse")] }).unwrap();
+        both.apply(EditCmd::AddClip { asset_id: "by".into(), start_us: Some(0), track_id: None }).unwrap();
+        let full = credits(&both).unwrap();
+        assert!(full.starts_with("Video:\n\"Song talk\""), "{full}");
+        // Muted under music, or silent by its own volume, its picture still plays.
+        both.tracks[0].muted = true;
+        assert_eq!(credits(&both).unwrap(), full);
+        both.tracks[0].muted = false;
+        let ClipContent::Media { volume, .. } = &mut both.tracks[0].clips[0].content else { panic!() };
+        *volume = 0.0;
+        assert_eq!(credits(&both).unwrap(), full);
+        // Hidden and silent, it is not in the video.
+        both.tracks[0].hidden = true;
+        assert!(credits(&both).unwrap().starts_with("Music and sound effects:\n"));
     }
 
     #[test]
