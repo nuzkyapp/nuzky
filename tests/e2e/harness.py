@@ -25,10 +25,12 @@ MACOS = sys.platform == 'darwin'
 RUN = None  # The flow in progress; on macOS its app, socket and secret.
 
 
-def flow(name, description, before=None, home=False):
-    """`home`: the flow starts on the home screen; others start in the editor of the restored project."""
+def flow(name, description, before=None, home=False, first_launch=False):
+    """`home`: the flow starts on the home screen; others start in the editor of the restored project.
+    `first_launch`: Get set up stays open when a fresh profile opens it by itself; other flows start without it."""
     def register(fn):
         fn.home = home
+        fn.first_launch = first_launch
         FLOWS[name] = (description, before, fn)
         return fn
     return register
@@ -279,6 +281,10 @@ def run_flow(name):
         r.s = Session()
         if not wait(lambda: r.s.run('return !!window.__nuzky?.store.getState().snap', retries=3), 60):
             raise RuntimeError('the app did not load a project')
+        # Decided once the projects are listed, which the home screen asks for as it opens.
+        if not body.first_launch:
+            wait(lambda: r.s.run('return window.__nuzky.tour.getState().firstLaunch !== null', retries=3), 15)
+            r.s.run('const s = window.__nuzky.setup.getState(); if (s.open) s.closeSetup();')
         if not body.home:
             r.s.run("window.__nuzky.store.setState({view: 'editor'})")
         time.sleep(1)
