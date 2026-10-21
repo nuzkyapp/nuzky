@@ -34,7 +34,7 @@ return {
     checked: l.querySelector('input').checked, lines: lines(l)})),
   text: panel.innerText, status: panel.querySelector('[role=status]')?.innerText ?? null,
   alert: panel.querySelector('[role=alert]')?.innerText ?? null,
-  buttons: [...d.querySelectorAll('footer button')].map((b) => b.textContent.trim()),
+  buttons: [...d.querySelectorAll('footer button:not([data-sample])')].map((b) => b.textContent.trim()),
   rail: [...d.querySelectorAll('[role=tablist] [role=tab]')].map(lines), count: d.querySelector('#setup-count').textContent,
   focus: f?.getAttribute('role') === 'tab' ? 'tab' : f?.tagName === 'INPUT' ? 'radio ' + f.value : f?.tagName === 'SELECT' ? 'select'
     : f?.textContent.trim() || f?.getAttribute('aria-label') || f?.tagName,
@@ -170,7 +170,9 @@ def run(r):
     r.check('the arrow keys pick Balanced, which Captions and Transcript now use', card(d, 'small')['checked']
             and r.s.run("return window.__nuzky.speech.getState().model") == 'small' and d['buttons'][0] == f'Download {balanced} MB', d)
     press('Tab')
-    r.check('Tab goes on to Download', wait(lambda: step(r)['focus'] == f'Download {balanced} MB', 3), step(r)['focus'])
+    r.check('Tab goes on to the footer, Try the sample video at its left first', wait(lambda: step(r)['focus'] == 'Try the sample video', 3), step(r)['focus'])
+    press('Tab')
+    r.check('then to Download', wait(lambda: step(r)['focus'] == f'Download {balanced} MB', 3), step(r)['focus'])
     press('Return')
     d = wait(lambda: (d := step(r)) and d['alert'] and d, 5)
     r.check(f'with {FREE_MB} MB free, Enter on Download says how much more space it needs and downloads nothing',

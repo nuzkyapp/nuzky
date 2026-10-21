@@ -17,7 +17,7 @@ return p && {text: p.innerText, status: p.querySelector('[role=status]')?.innerT
 # Every change of Get set up's footer, to catch a button shown for a moment.
 WATCH = """const box = document.querySelector(arguments[0]);
 window.__footers = [];
-new MutationObserver(() => window.__footers.push([...box.querySelectorAll('footer button')].map((b) => b.textContent.trim())))
+new MutationObserver(() => window.__footers.push([...box.querySelectorAll('footer button:not([data-sample])')].map((b) => b.textContent.trim())))
   .observe(box, {childList: true, subtree: true, characterData: true});"""
 SOUNDS = 'return window.__nuzky.sounds.getState()'
 OLD_SONG = '[data-sound="youtube:ytForbid001"]'

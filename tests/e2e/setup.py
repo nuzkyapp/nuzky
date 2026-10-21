@@ -19,7 +19,7 @@ return {
   title: d.querySelector('#setup-title').textContent, count: d.querySelector('#setup-count').textContent,
   steps: [...d.querySelectorAll('[role=tablist] [role=tab]')].map((t) => ({lines: lines(t), selected: t.getAttribute('aria-selected') === 'true'})),
   panel: d.querySelector('[role=tabpanel] h3')?.textContent ?? null,
-  buttons: [...d.querySelectorAll('footer button')].map((b) => b.textContent.trim()),
+  buttons: [...d.querySelectorAll('footer button:not([data-sample])')].map((b) => b.textContent.trim()),
   focus: focus?.getAttribute('role') === 'tab' ? 'tab: ' + lines(focus)[0] : (focus?.textContent.trim() || focus?.getAttribute('aria-label') || focus?.tagName),
 };"""
 FOCUS = "const f = document.activeElement; return f?.textContent.trim() || f?.getAttribute('aria-label') || f?.tagName"
@@ -112,6 +112,7 @@ def setup(r):
     r.check('Captions model is shown and selected', d and d['panel'] == 'Captions model' and d['steps'][0]['selected'], d)
     r.check("the focus is on the current step's row, not on Skip", d and d['focus'] == 'tab: Captions model', d)
     r.check('a step still to do offers Skip last', d and d['buttons'][-1:] == ['Skip'], d)
+    r.check('the footer starts with Try the sample video', r.s.run(f"return document.querySelector('{BOX} footer button')?.textContent.trim()") == 'Try the sample video')
 
     for key, title in (('Down', 'Face and person models'), ('Down', 'Music from YouTube'), ('Up', 'Face and person models'),
                        ('Up', 'Captions model'), ('End', 'Connect your AI'), ('Home', 'Captions model')):

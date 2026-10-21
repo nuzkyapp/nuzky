@@ -116,7 +116,7 @@ def vision_models(r):
         r.s.run("window.__nuzky.setup.getState().openSetup(); window.__nuzky.setup.getState().showStep('vision')")
         step = lambda: r.s.run(f"""const p = document.querySelector('{BOX} [role=tabpanel]');
             return p && {{title: p.querySelector('h3').textContent, text: p.innerText,
-                          buttons: [...document.querySelectorAll('{BOX} footer button')].map((b) => b.textContent.trim())}};""")
+                          buttons: [...document.querySelectorAll('{BOX} footer button:not([data-sample])')].map((b) => b.textContent.trim())}};""")
         s = wait(lambda: (s := step()) and 'MB' in s['text'] and s, 10)
         r.check('the step offers what is left, 189 MB', s and s['title'] == 'Face and person models' and s['buttons'][0] == 'Download 189 MB', s)
         time.sleep(0.4)
