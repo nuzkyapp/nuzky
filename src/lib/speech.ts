@@ -79,6 +79,9 @@ export const useSpeech = create<SpeechState>(() => ({
   stored: 0,
 }));
 
+/** A word for the transcript to select, by its start on the timeline, once it shows it; the tour picks the first word. */
+export const useWordPick = create<{ startUs: number | null }>(() => ({ startUs: null }));
+
 /** Why the timeline cannot be transcribed, or null. Same rule as the engine's `is_heard`. */
 export function speechBlocker(project: Project): string | null {
   const heard = project.tracks.some(

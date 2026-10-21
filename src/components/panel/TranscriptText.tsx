@@ -1,7 +1,7 @@
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { Trash2, ZoomIn } from "lucide-react";
 import { followPointer } from "../../lib/drag";
-import { MAX_WORD_CHARS, paragraphs, tokenAt, tokenCounts, type Token } from "../../lib/speech";
+import { MAX_WORD_CHARS, paragraphs, tokenAt, tokenCounts, useWordPick, type Token } from "../../lib/speech";
 import { aiLocked, useEditor } from "../../lib/store";
 import { formatDuration, formatTime } from "../../lib/time";
 import { Button, useLockReason } from "../ui";
@@ -210,6 +210,17 @@ export function TranscriptText({
     }
     shown.current = tokens;
   }, [tokens]);
+
+  // A word asked for elsewhere, as the tour asks for the first one: selected and played from, ready for Delete.
+  const pick = useWordPick((s) => s.startUs);
+  useEffect(() => {
+    const i = pick === null ? -1 : tokens.findIndex((t) => t.kind === "word" && t.startUs === pick);
+    if (i < 0) return;
+    useWordPick.setState({ startUs: null });
+    setSel({ anchor: i, focus: i });
+    useEditor.getState().seek(tokens[i].startUs);
+    box.current?.querySelector(`[data-t="${i}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [pick, tokens]);
 
   // An AI run that starts meanwhile closes the field without saving.
   useEffect(() => {

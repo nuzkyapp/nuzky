@@ -7,7 +7,8 @@ import { usedBefore } from "./launch";
 import { newSampleProject, onlyPristine, pickVideosForNewProject, useLibrary } from "./library";
 import { useSetup } from "./setup";
 import { useSounds } from "./sounds";
-import { allClips, isCaptionTrack, useEditor } from "./store";
+import { useSpeech, useWordPick } from "./speech";
+import { allClips, isCaptionTrack, projectDuration, useEditor } from "./store";
 import type { Project, Snapshot } from "./types";
 
 /**
@@ -49,7 +50,14 @@ export const STEP: Record<TourStep, { title: string; text: string; target: strin
     side: "left",
   },
   play: { title: "Play the result", text: "Press Space to play. What you see here is exactly what you export.", target: "section[aria-label=Preview]", next: true, side: "right" },
-  transcript: { title: "Fix anything by hand", text: "Every word is here. Select words and press Delete to cut them.", target: "[data-tour=library]", next: true, side: "right" },
+  transcript: {
+    title: "Fix anything by hand",
+    text: "Every word is here. Select words and press Delete to cut them.",
+    target: "[data-tour=library]",
+    focus: "[data-tour=library] [role=listbox][aria-label=Transcript]",
+    next: true,
+    side: "right",
+  },
   song: {
     title: "Add a song",
     text: "Press + to put this free song under her voice. You can also paste a YouTube link above.",
@@ -77,11 +85,13 @@ interface TourState {
   stopped: boolean;
   /** One Undo's edit is undone now, so the card offers Redo. */
   undone: boolean;
+  /** The transcript's first word, which Fix anything by hand selects for Delete. */
+  word: string | null;
   /** Whether this launch opened Get set up by itself; null until the projects are listed. */
   firstLaunch: boolean | null;
 }
 
-export const useTour = create<TourState>(() => ({ step: null, epoch: null, stopped: false, undone: false, firstLaunch: null }));
+export const useTour = create<TourState>(() => ({ step: null, epoch: null, stopped: false, undone: false, word: null, firstLaunch: null }));
 
 /** The tour closed the AI panel to show the inspector, and opens it again after. */
 let closedPanel = false;
@@ -120,7 +130,11 @@ function show(step: TourStep) {
   // The first caption's frame, so the still preview already shows the edit.
   const caption = step === "play" && snap ? Math.min(...snap.project.tracks.filter(isCaptionTrack).flatMap((t) => t.clips.map((c) => c.startUs))) : Infinity;
   if (caption !== Infinity) useEditor.getState().seek(caption);
-  if (step === "transcript") useEditor.setState({ panelTab: "transcript" });
+  useWordPick.setState({ startUs: null });
+  if (step === "transcript") {
+    useEditor.setState({ panelTab: "transcript" });
+    pickFirstWord();
+  }
   if (step === "song") {
     useEditor.setState({ panelTab: "audio" });
     // The built-in songs show while nothing is searched.
@@ -136,7 +150,22 @@ function show(step: TourStep) {
       useDock.setState({ open: false });
     }
   }
-  useTour.setState({ step, stopped: false, undone: false });
+  useTour.setState({ step, stopped: false, undone: false, word: null });
+}
+
+/** Selects the transcript's first word, so Delete cuts it, and names it on the card. */
+function pickFirstWord() {
+  const { epoch } = useTour.getState();
+  api.transcriptView(useSpeech.getState().pauseUs).then(
+    ({ words: [first] }) => {
+      const t = useTour.getState();
+      if (!first || t.step !== "transcript" || t.epoch !== epoch) return;
+      useTour.setState({ word: first.text });
+      useWordPick.setState({ startUs: first.startUs });
+    },
+    // Without it the card asks to select words by hand.
+    () => {},
+  );
 }
 
 /**
@@ -167,6 +196,7 @@ export function nextStep() {
 export function endTour() {
   if (!useTour.getState().step) return;
   window.clearTimeout(leaveWatch);
+  useWordPick.setState({ startUs: null });
   useTour.setState({ step: null, epoch: null, stopped: false });
   if (closedPanel) {
     closedPanel = false;
@@ -220,6 +250,8 @@ useEditor.subscribe((s, prev) => {
   // Another project or the home screen ends it.
   if (s.view === "home" || s.snap?.sessionEpoch !== epoch) return endTour();
   if (step === "undo" && s.snap && s.snap !== prev.snap) followUndo(s.snap);
+  // Cut from the transcript: the video got shorter.
+  if (step === "transcript" && s.snap && prev.snap && s.snap !== prev.snap && projectDuration(s.snap.project) < projectDuration(prev.snap.project)) show("song");
   if (step === "song" && s.snap !== prev.snap && s.snap && songClip(s.snap.project)) show("volume");
 });
 

@@ -77,6 +77,7 @@ function Spotlight({ step }: { step: TourStep }) {
   const def = STEP[step];
   const stopped = useTour((s) => s.stopped);
   const undone = useTour((s) => s.undone);
+  const word = useTour((s) => s.word);
   const ai = useRealAi();
   const cut = useAgent((s) => s.items.some((i) => i.kind === "run"));
   const dim = useRef<SVGPathElement>(null);
@@ -171,7 +172,9 @@ function Spotlight({ step }: { step: TourStep }) {
         : "You stopped it before it changed anything."
       : step === "undo" && undone
         ? "Undone. The video is back as it was. Redo, or Ctrl+Shift+Z, brings the edit back."
-        : def.text;
+        : step === "transcript" && word
+          ? `The video starts on “${word}”. Press Delete to cut it.`
+          : def.text;
   const next = def.next || (step === "watch" && stopped);
   return (
     <>
