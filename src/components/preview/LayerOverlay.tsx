@@ -78,6 +78,55 @@ function rotateAbout(p: Pt, c: Pt, deg: number): Pt {
   return [c[0] + dx * Math.cos(r) - dy * Math.sin(r), c[1] + dx * Math.sin(r) + dy * Math.cos(r)];
 }
 
+/** A point of the box along one axis and how far it moves per unit of the gesture. */
+type Feature = { at: number; rate: number };
+
+/** The box's outermost points along axis `a`, plus its centre when moving, given how far each corner moves per unit of the gesture. */
+function features(q: Pt[], vel: Pt[], a: 0 | 1, centre: boolean): Feature[] {
+  const lo = q.reduce((m, p, i) => (p[a] < q[m][a] ? i : m), 0);
+  const hi = q.reduce((m, p, i) => (p[a] > q[m][a] ? i : m), 0);
+  const ends = [
+    { at: q[lo][a], rate: vel[lo][a] },
+    { at: q[hi][a], rate: vel[hi][a] },
+  ];
+  return centre ? [...ends, { at: centreOf(q)[a], rate: (vel[0][a] + vel[2][a]) / 2 }] : ends;
+}
+
+/** The edges and middle of the frame along each axis. */
+const frameLines = (size: Pt, a: 0 | 1) => [0, size[a] / 2, size[a]];
+
+/**
+ * How far to take the gesture so a box point lands on a frame line, moving no corner more than `tol`; 0 when none is that close.
+ * The limit is on the corners, not the point: an edge near the pivot of a scale would need a large change to reach a line.
+ */
+function snapBy(q: Pt[], vel: Pt[], size: Pt, tol: number, centre: boolean) {
+  const reach = Math.max(...vel.map(([x, y]) => Math.hypot(x, y)));
+  let by = 0;
+  let best = tol;
+  for (const a of [0, 1] as const)
+    for (const f of features(q, vel, a, centre))
+      for (const line of frameLines(size, a)) {
+        const step = Math.abs(f.rate) > 1e-9 ? (line - f.at) / f.rate : Infinity;
+        if (Math.abs(step) * reach < best) {
+          best = Math.abs(step) * reach;
+          by = step;
+        }
+      }
+  return by;
+}
+
+/** The frame lines a point moved by the gesture sits on, where a guide shows. */
+function guidesOf(q: Pt[], vel: Pt[], size: Pt, centre: boolean): Guides {
+  const on = (a: 0 | 1) => frameLines(size, a).filter((line) => features(q, vel, a, centre).some((f) => f.rate !== 0 && Math.abs(f.at - line) < 0.01));
+  return { x: on(0), y: on(1) };
+}
+
+/** Frame lines in canvas pixels: `x` vertical, `y` horizontal. */
+interface Guides {
+  x: number[];
+  y: number[];
+}
+
 interface Gesture {
   mode: Mode;
   clipId: string;
@@ -123,7 +172,8 @@ export interface LayerSource {
 /**
  * Selection box over the preview frame: click selects the top-most layer under the pointer,
  * dragging moves it, corners scale it, the top handle rotates it (Shift snaps to 15°). On videos and
- * images the bars in the middle of each edge crop that edge.
+ * images the bars in the middle of each edge crop that edge. Moving, scaling and cropping snap the box to the edges
+ * and middle of the frame.
  * Draws nothing while the engine reports no layer bounds.
  *
  * `bleed` is how far the visible preview area reaches past the frame on each side. The box may
@@ -185,7 +235,7 @@ export function LayerBox({ width, height, bleed, source }: { width: number; heig
   const { canvas, bounds } = source;
   const locked = useAiLocked();
   const ref = useRef<HTMLDivElement>(null);
-  const [live, setLive] = useState<{ corners: Pt[]; frame?: Pt[]; guideX: boolean; guideY: boolean } | null>(null);
+  const [live, setLive] = useState<{ corners: Pt[]; frame?: Pt[]; guides: Guides } | null>(null);
   // Ends the running gesture's window listeners and frame request; also called on unmount.
   const stop = useRef<(() => void) | null>(null);
   // The gesture outlives renders; it reads the source as it is now.
@@ -200,36 +250,35 @@ export function LayerBox({ width, height, bleed, source }: { width: number; heig
     return [(x - r.left) / k, (y - r.top) / k];
   };
 
-  /** Changed transform fields and box for the pointer at `p` during gesture `g`. */
-  const solve = (g: Gesture, p: Pt, shift: boolean): { patch: Partial<Transform>; corners: Pt[]; guideX: boolean; guideY: boolean } => {
-    const c = centreOf(g.corners);
+  /** Changed transform fields, box and guides for the pointer at `p` during gesture `g`. */
+  const solve = (g: Gesture, p: Pt, shift: boolean): { patch: Partial<Transform>; corners: Pt[]; guides: Guides } => {
     // The layer scales and turns about the centre of the whole picture, which a crop moves off the box's centre.
     const pivot = centreOf(g.frame);
+    const size: Pt = [canvas.width, canvas.height];
+    // A click that shakes a pixel does not snap the layer away.
+    const tol = Math.hypot(p[0] - g.start[0], p[1] - g.start[1]) * k < SNAP_SCREEN_PX ? 0 : SNAP_SCREEN_PX / k;
     const t = { ...g.base };
     let corners = g.corners;
-    let guideX = false;
-    let guideY = false;
+    // How far each corner moves per unit of the gesture; a rotation does not snap.
+    const each = (v: Pt) => g.corners.map(() => v);
+    let vel = each([0, 0]);
     if (g.mode === "move") {
-      // Snap the layer centre to the canvas centre lines.
-      const tol = SNAP_SCREEN_PX / k;
+      const shifted = (dx: number, dy: number) => g.corners.map(([x, y]): Pt => [x + dx, y + dy]);
       let dx = p[0] - g.start[0];
       let dy = p[1] - g.start[1];
-      if (Math.abs(c[0] + dx - canvas.width / 2) < tol) {
-        dx = canvas.width / 2 - c[0];
-        guideX = true;
-      }
-      if (Math.abs(c[1] + dy - canvas.height / 2) < tol) {
-        dy = canvas.height / 2 - c[1];
-        guideY = true;
-      }
+      dx += snapBy(shifted(dx, dy), each([1, 0]), size, tol, true);
+      dy += snapBy(shifted(dx, dy), each([0, 1]), size, tol, true);
       t.x = g.base.x + dx / canvas.width;
       t.y = g.base.y + dy / canvas.height;
-      corners = g.corners.map(([x, y]) => [x + dx, y + dy]);
+      corners = shifted(dx, dy);
+      vel = each([1, 1]);
     } else if (g.mode === "scale") {
-      const f = Math.hypot(p[0] - pivot[0], p[1] - pivot[1]) / Math.max(1, Math.hypot(g.start[0] - pivot[0], g.start[1] - pivot[1]));
-      t.scale = Math.max(0.1, Math.min(10, g.base.scale * f));
-      const ratio = t.scale / g.base.scale;
-      corners = g.corners.map(([x, y]) => [pivot[0] + (x - pivot[0]) * ratio, pivot[1] + (y - pivot[1]) * ratio]);
+      const scaled = (ratio: number) => g.corners.map(([x, y]): Pt => [pivot[0] + (x - pivot[0]) * ratio, pivot[1] + (y - pivot[1]) * ratio]);
+      vel = g.corners.map(([x, y]): Pt => [x - pivot[0], y - pivot[1]]);
+      let ratio = Math.hypot(p[0] - pivot[0], p[1] - pivot[1]) / Math.max(1, Math.hypot(g.start[0] - pivot[0], g.start[1] - pivot[1]));
+      ratio += snapBy(scaled(ratio), vel, size, tol, false);
+      t.scale = Math.max(0.1, Math.min(10, g.base.scale * ratio));
+      corners = scaled(t.scale / g.base.scale);
     } else if (g.mode === "rotate") {
       let rot = g.base.rotation + angleOf(pivot, p) - angleOf(pivot, g.start);
       rot = ((((rot + 180) % 360) + 360) % 360) - 180;
@@ -242,11 +291,17 @@ export function LayerBox({ width, height, bleed, source }: { width: number; heig
       const [[u, v], [u0, v0]] = [alongQuad(g.frame, p), alongQuad(g.frame, g.start)];
       const crop = g.base.crop ?? NO_CROP;
       const at = { left: crop.left + u - u0, right: crop.right - u + u0, top: crop.top + v - v0, bottom: crop.bottom - v + v0 }[g.mode];
-      t.crop = withEdge(crop, g.mode, Math.round(at * 1000) / 1000);
+      const { from, to } = EDGE_CORNERS.find((e) => e.edge === g.mode)!;
+      const [a, b] = g.mode === "left" || g.mode === "right" ? [g.frame[0], g.frame[1]] : [g.frame[0], g.frame[3]];
+      const sign = g.mode === "left" || g.mode === "top" ? 1 : -1;
+      vel = g.corners.map((_, i): Pt => (i === from || i === to ? [sign * (b[0] - a[0]), sign * (b[1] - a[1])] : [0, 0]));
+      const by = snapBy(cropQuad(g.frame, { ...crop, [g.mode]: at }), vel, size, tol, false);
+      // A snapped edge keeps its exact place; otherwise the crop stays a tidy number.
+      t.crop = withEdge(crop, g.mode, by ? at + by : Math.round(at * 1000) / 1000);
       corners = cropQuad(g.frame, t.crop);
     }
     const patch = g.mode === "move" ? { x: t.x, y: t.y } : g.mode === "scale" ? { scale: t.scale } : g.mode === "rotate" ? { rotation: t.rotation } : { crop: t.crop };
-    return { patch, corners, guideX, guideY };
+    return { patch, corners, guides: guidesOf(corners, vel, size, g.mode === "move") };
   };
 
   const run = (g: Gesture, initial: { x: number; y: number; shift: boolean }) => {
@@ -257,9 +312,9 @@ export function LayerBox({ width, height, bleed, source }: { width: number; heig
     const apply = () => {
       raf = 0;
       if (!ref.current) return;
-      const { patch, corners, guideX, guideY } = solve(g, toCanvas(latest.x, latest.y), latest.shift);
+      const { patch, corners, guides } = solve(g, toCanvas(latest.x, latest.y), latest.shift);
       // While cropping, a dashed outline shows the whole layer.
-      setLive({ corners, frame: g.mode in NO_CROP ? g.frame : undefined, guideX, guideY });
+      setLive({ corners, frame: g.mode in NO_CROP ? g.frame : undefined, guides });
       lastEdit = src.current.change(g.clipId, patch, g.key);
     };
     const halt = () => {
@@ -269,6 +324,7 @@ export function LayerBox({ width, height, bleed, source }: { width: number; heig
     };
     const settle = () => {
       if (!lastEdit) return setLive(null);
+      setLive((l) => l && { ...l, guides: { x: [], y: [] } });
       // Keep the live box until the engine reports where the layer ended up, so it never jumps back.
       src.current
         .settled(lastEdit)
@@ -385,8 +441,6 @@ export function LayerBox({ width, height, bleed, source }: { width: number; heig
 
   return (
     <div ref={ref} className="absolute inset-0" style={{ cursor: selected && !locked ? "move" : "default" }} onPointerDown={onPointerDown} data-testid="layer-overlay">
-      {live?.guideX && <div className={`${guide} inset-y-0 left-1/2 w-px`} />}
-      {live?.guideY && <div className={`${guide} inset-x-0 top-1/2 h-px`} />}
       {screen && selected && !source.hidden && top && up && (
         <>
           <svg className="pointer-events-none absolute inset-0 overflow-visible" width={width} height={height}>
@@ -396,6 +450,9 @@ export function LayerBox({ width, height, bleed, source }: { width: number; heig
             <polygon points={screen.map((p) => p.join(",")).join(" ")} fill="none" stroke="var(--color-fg)" strokeWidth={1.5} />
             <line x1={top[0]} y1={top[1]} x2={up[0]} y2={up[1]} stroke="var(--color-fg)" strokeWidth={1.5} />
           </svg>
+          {/* Over the box's outline, which would hide a guide on the frame's edge. */}
+          {live?.guides.x.map((x) => <div key={`x${x}`} data-guide="x" className={`${guide} inset-y-0 w-px`} style={{ left: Math.min(width - 1, Math.max(0, x * k - 0.5)) }} />)}
+          {live?.guides.y.map((y) => <div key={`y${y}`} data-guide="y" className={`${guide} inset-x-0 h-px`} style={{ top: Math.min(height - 1, Math.max(0, y * k - 0.5)) }} />)}
           {!locked && screen.map(pin).map(([x, y], i) => (
             <div
               key={i}
