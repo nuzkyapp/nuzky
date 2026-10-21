@@ -2,8 +2,9 @@ import { create } from "zustand";
 import { useAgent, type ChatItem } from "./agent";
 import { SAMPLE_REQUEST, lastDemoOutcome } from "./demo";
 import { dockMax, useDock } from "./dock";
+import { usedBefore } from "./launch";
 import { newSampleProject, onlyPristine, pickVideosForNewProject, useLibrary } from "./library";
-import { setupSeen, useSetup } from "./setup";
+import { useSetup } from "./setup";
 import { useSounds } from "./sounds";
 import { allClips, useEditor } from "./store";
 import type { Project } from "./types";
@@ -79,8 +80,6 @@ interface TourState {
 
 export const useTour = create<TourState>(() => ({ step: null, epoch: null, stopped: false, firstLaunch: null }));
 
-const KEY = "nuzky.tour";
-
 /** The tour closed the AI panel to show the inspector, and opens it again after. */
 let closedPanel = false;
 /** What was in the AI field before the tour wrote its request there. */
@@ -154,7 +153,6 @@ export function trySample() {
   newSampleProject(() => {
     const snap = useEditor.getState().snap;
     if (!snap) return;
-    localStorage.setItem(KEY, "seen");
     const { draft } = useAgent.getState();
     if (draft !== SAMPLE_REQUEST) keptDraft = draft;
     useAgent.setState({ demo: true, draft: SAMPLE_REQUEST, thumbnail: false });
@@ -194,13 +192,12 @@ useEditor.subscribe((s, prev) => {
 });
 
 /**
- * The first launch opens Get set up by itself, once: nothing remembered of Get set up or the tour, and the projects,
- * once listed, are only the empty one Nuzky made. Someone who updates with projects never sees it.
+ * The first launch opens Get set up by itself, once: Nuzky remembered nothing here when it started, and the projects,
+ * once listed, are only the empty one Nuzky made. Someone who updates, even with no projects left, never sees it.
  */
-const fresh = !setupSeen && localStorage.getItem(KEY) === null;
 useLibrary.subscribe((s) => {
   if (useTour.getState().firstLaunch !== null || s.projects === null) return;
-  const open = fresh && onlyPristine(s.projects, useEditor.getState().snap);
+  const open = !usedBefore && onlyPristine(s.projects, useEditor.getState().snap);
   useTour.setState({ firstLaunch: open });
   if (open) useSetup.getState().openSetup();
 });

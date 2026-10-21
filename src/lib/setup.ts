@@ -19,8 +19,6 @@ type Setup = Saved & {
 
 const KEY = "nuzky.setup";
 const isStep = (v: unknown): v is SetupStep => SETUP_STEPS.includes(v as SetupStep);
-/** Read at start, before anything below writes the key: Get set up was opened or used in an earlier launch. */
-export const setupSeen = localStorage.getItem(KEY) !== null;
 
 function load(): Saved {
   try {
