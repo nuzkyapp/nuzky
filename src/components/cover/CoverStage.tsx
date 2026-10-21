@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertCircle, AlertTriangle, Loader2, MonitorPlay, Smartphone } from "lucide-react";
+import { AlertCircle, Loader2 } from "lucide-react";
 import { api, errorText, plainError } from "../../lib/api";
-import { COVER_FORMATS, frameAt, chooseFrame, coverFormat, downloadModels, draftCover, editCover, editText, mask, selectText, setSafeZones, switchFormat, thumbnailOf, useCover } from "../../lib/cover";
+import { COVER_FORMATS, frameAt, chooseFrame, coverFormat, downloadModels, draftCover, editCover, editText, mask, selectText, switchFormat, thumbnailOf, useCover } from "../../lib/cover";
 import { AI_EDITING, projectDuration, useAiLocked, useEditor } from "../../lib/store";
 import { formatTime } from "../../lib/time";
 import type { CoverView, LayerBounds, Snapshot, Thumbnail, ThumbnailFormat, Transform } from "../../lib/types";
 import { LayerBox, type LayerSource } from "../preview/LayerOverlay";
-import { Button, IconButton, Segmented } from "../ui";
+import { Button, Segmented } from "../ui";
 
 /** A text the person covers more of than this gets a warning: the hook should still read at a glance. */
 export const COVERED_TOO_MUCH = 0.3;
@@ -22,41 +22,6 @@ export function useShownCover(format: ThumbnailFormat): { cover: Thumbnail; draf
   // Recomputed per render: `models` decides whether a YouTube thumbnail of a vertical video starts blurred.
   void models;
   return { cover: draftCover(format, project, frameAt(project, timeUs)), draft: true };
-}
-
-/** What Reels, the profile grid and YouTube cover of a thumbnail, in its own pixels. */
-function SafeZones({ format }: { format: ThumbnailFormat }) {
-  const { width, height } = coverFormat(format);
-  const pct = (v: number, of: number) => `${(v / of) * 100}%`;
-  const band = "pointer-events-none absolute bg-black/45";
-  const chip = "pointer-events-none absolute rounded bg-black/60 px-1.5 text-[11px] leading-[18px] text-fg";
-  if (format === "youtube_16x9")
-    return (
-      <div className={`${band} bottom-0 right-0 flex items-center justify-center border-l border-t border-dashed border-fg/50`} style={{ width: "20%", height: "20%" }}>
-        <span className="rounded bg-black/60 px-1.5 text-[11px] leading-[18px] text-fg">Duration</span>
-      </div>
-    );
-  // Reels' safe area of a 1080 × 1920 video, as the preview's safe zone shows it, and the 3:4 middle the profile grid shows.
-  const area = { left: 60, top: 250, right: 900, bottom: 1420 };
-  const grid = (height - (width * 4) / 3) / 2;
-  return (
-    <>
-      <div className={`${band} inset-x-0 top-0`} style={{ height: pct(area.top, height) }} />
-      <div className={`${band} inset-x-0 bottom-0`} style={{ height: pct(height - area.bottom, height) }} />
-      <div className={`${band} left-0`} style={{ top: pct(area.top, height), bottom: pct(height - area.bottom, height), width: pct(area.left, width) }} />
-      <div className={`${band} right-0`} style={{ top: pct(area.top, height), bottom: pct(height - area.bottom, height), width: pct(width - area.right, width) }} />
-      <div
-        className="pointer-events-none absolute border border-dashed border-fg/50"
-        style={{ left: pct(area.left, width), top: pct(area.top, height), width: pct(area.right - area.left, width), height: pct(area.bottom - area.top, height) }}
-      />
-      <div className="pointer-events-none absolute inset-x-0 border-t border-dashed border-fg/70" style={{ top: pct(grid, height) }} />
-      <div className="pointer-events-none absolute inset-x-0 border-t border-dashed border-fg/70" style={{ top: pct(height - grid, height) }} />
-      {/* Under the grid's lower line, in the band Reels covers anyway, clear of where the hook goes. */}
-      <span className={`${chip} left-1`} style={{ top: `calc(${pct(height - grid, height)} + 4px)` }}>
-        Profile grid
-      </span>
-    </>
-  );
 }
 
 /** Asks the engine for the cover one request at a time; a change while one renders asks again once it is done. */
@@ -137,8 +102,6 @@ export function CoverStage({ format, box }: { format: ThumbnailFormat; box: { w:
   const width = Math.max(16, Math.min(tw, Math.ceil((fit.w * dpr) / 32) * 32));
   const { canvas, view, error, shownFrom, drawnFrom } = useCoverView(format, width, shown?.draft ? shown.cover : null);
   const selected = useCover((s) => s.selected);
-  const safeZones = useCover((s) => s.safeZones);
-  const k = fit.w / tw;
 
   const layers: LayerBounds[] = view
     ? [
@@ -178,7 +141,6 @@ export function CoverStage({ format, box }: { format: ThumbnailFormat; box: { w:
     return (
       <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-[13px] text-muted">Add a video to the timeline to make a cover.</div>
     );
-  const covered = view && !view.maskMissing ? view.bounds.map((b, i) => (b && view.hidden[i] > COVERED_TOO_MUCH ? b : null)) : [];
   return (
     <div className="absolute inset-0 flex items-center justify-center">
       <div
@@ -192,7 +154,6 @@ export function CoverStage({ format, box }: { format: ThumbnailFormat; box: { w:
         {/* Square corners and only a hairline, as the video's frame. */}
         <div className="absolute inset-0 overflow-hidden bg-black shadow-[0_0_0_1px_rgb(255_255_255/.07)]">
           <canvas ref={canvas} className="h-full w-full" aria-label={`${coverFormat(format).label} as it exports`} data-testid="cover-canvas" />
-          {safeZones && <SafeZones format={format} />}
           {!view && !error && <div className="skeleton absolute inset-0 opacity-60" aria-label="Drawing the cover" />}
           {error && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/80 p-6 text-center" role="alert">
@@ -201,23 +162,6 @@ export function CoverStage({ format, box }: { format: ThumbnailFormat; box: { w:
             </div>
           )}
         </div>
-        {covered.map(
-          (b, i) =>
-            b && (
-              <span
-                key={i}
-                // Just outside the text's top right corner, clear of the selection box's handle there, and inside the cover.
-                className="pointer-events-none absolute flex h-4 w-4 items-center justify-center"
-                style={{
-                  left: Math.min(fit.w - 20, Math.max(...b.map((p) => p[0])) * k + 6),
-                  top: Math.max(4, Math.min(...b.map((p) => p[1])) * k - 22),
-                }}
-                title="The person covers too much of this text"
-              >
-                <AlertTriangle size={16} className="text-warn drop-shadow-[0_0_1px_rgb(0_0_0)]" fill="rgb(0 0 0 / .55)" />
-              </span>
-            ),
-        )}
         {view && <LayerBox width={fit.w} height={fit.h} bleed={{ x: (box.w - fit.w) / 2, y: (box.h - fit.h) / 2 }} source={source} />}
         <StatusChip view={view} />
       </div>
@@ -303,7 +247,7 @@ function StatusChip({ view }: { view: CoverView | null }) {
   );
 }
 
-/** In place of the transport: the frame's time, or the image the cover is made from, the format and the safe zones. */
+/** In place of the transport: the frame's time, or the image the cover is made from, and the format. */
 export function CoverBar({ format }: { format: ThumbnailFormat }) {
   const time = useEditor((s) => thumbnailOf(s.snap?.project, format)?.timeUs ?? s.timeUs);
   const image = useEditor((s) => {
@@ -311,7 +255,6 @@ export function CoverBar({ format }: { format: ThumbnailFormat }) {
     return id ? (s.snap?.project.assets.find((a) => a.id === id)?.name ?? null) : null;
   });
   const locked = useAiLocked();
-  const safeZones = useCover((s) => s.safeZones);
   return (
     <div className="bar grid h-11 w-full max-w-[620px] grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-full pl-[18px] pr-1.5" data-testid="cover-bar">
       {image ? (
@@ -341,16 +284,6 @@ export function CoverBar({ format }: { format: ThumbnailFormat }) {
           onChange={switchFormat}
           options={COVER_FORMATS.map((f) => ({ id: f.id, label: <><span className="@max-[460px]:hidden">{f.label}</span><span className="hidden @max-[460px]:inline">{f.short}</span></>, title: `${f.width}×${f.height}` }))}
         />
-      </div>
-      <div className="flex items-center justify-end gap-1">
-        <IconButton
-          round
-          label={`${safeZones ? "Hide" : "Show"} ${format === "cover_9x16" ? "what Reels and the profile grid cover" : "where YouTube shows the length"}`}
-          active={safeZones}
-          onClick={() => setSafeZones(!safeZones)}
-        >
-          {format === "cover_9x16" ? <Smartphone size={16} /> : <MonitorPlay size={16} />}
-        </IconButton>
       </div>
     </div>
   );

@@ -5,7 +5,7 @@ editor draws and the exported files. The face and person models are linked from 
 import json, os, shutil, subprocess, time
 from pathlib import Path
 
-from e2e.harness import CLI, FIXTURES, MODELS, flow, wait, webdriver
+from e2e.harness import CLI, FIXTURES, MODELS, changed_share, flow, wait, webdriver
 
 FAKE = Path(__file__).resolve().parent / 'fake_agent'
 VISION = ('yunet-2026may.onnx', 'face-landmarks-v2.onnx', 'face-blendshapes-v2.onnx', 'selfie-segmenter.onnx',
@@ -322,6 +322,20 @@ def thumbnail(r):
         r.check('the exported cover has the hook behind the person, as the editor shows it',
                 redone and front and abs(green - redone['green']) < 0.01 and green < front['green'] * 0.95,
                 {'export': green, 'editor': redone, 'front': front})
+        # The cover in the editor is how it will look on the profile: nothing is drawn over it.
+        click(r, '9:16 Cover')
+        r.s.run("window.__nuzky.cover.setState({selected: null})")
+        wait(lambda: (v := shown(r)) and v['revision'] == v['now'] and not v['waiting'], 10)
+        time.sleep(0.5)
+        rect = r.s.run("""const b = document.querySelector('[data-testid=cover-canvas]').getBoundingClientRect();
+            return [b.left, b.top, b.right, b.bottom, window.innerWidth];""")
+        r.shot('cover-as-exported')
+        screen = Image.open(r.work / 'cover-as-exported.png').convert('RGB')
+        on_screen = screen.crop(tuple(round(v * screen.width / rect[4]) for v in rect[:4]))
+        # At half size the editor's and Pillow's resampling of the same detailed frame stay apart from an overlay.
+        half = (on_screen.width // 2, on_screen.height // 2)
+        differs = changed_share(on_screen.resize(half, Image.BOX), image.resize(half, Image.BOX))
+        r.check('the cover on screen is the exported cover, with nothing drawn over it', differs < 0.03, differs)
     stamp = png.read_bytes()
     refused = export('cover_9x16', png, False)
     r.check('an existing file is not replaced without asking', not refused['ok'] and 'DESTINATION_EXISTS' in refused['error']

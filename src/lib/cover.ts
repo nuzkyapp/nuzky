@@ -50,10 +50,7 @@ interface CoverState {
   models: VisionModels | null;
   /** What to do once the cover models the user asked for are downloaded, e.g. let the AI make the cover. */
   afterModels: (() => void) | null;
-  safeZones: boolean;
 }
-
-const SAFE_ZONES_KEY = "nuzky.coverSafeZones";
 
 export const useCover = create<CoverState>(() => ({
   open: null,
@@ -72,7 +69,6 @@ export const useCover = create<CoverState>(() => ({
   hidden: [],
   models: null,
   afterModels: null,
-  safeZones: localStorage.getItem(SAFE_ZONES_KEY) !== "0",
 }));
 
 export function thumbnailOf(project: Project | undefined, format: ThumbnailFormat): Thumbnail | undefined {
@@ -80,11 +76,6 @@ export function thumbnailOf(project: Project | undefined, format: ThumbnailForma
 }
 
 const otherFormat = (format: ThumbnailFormat): ThumbnailFormat => (format === "cover_9x16" ? "youtube_16x9" : "cover_9x16");
-
-export function setSafeZones(on: boolean) {
-  localStorage.setItem(SAFE_ZONES_KEY, on ? "1" : "0");
-  useCover.setState({ safeZones: on });
-}
 
 /** Asks again whether the cover models can run here and what is left to download. */
 export async function loadModels() {
