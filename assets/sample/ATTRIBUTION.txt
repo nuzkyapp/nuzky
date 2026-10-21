@@ -1,0 +1,5 @@
+The sample video built into Nuzky, which its tour for new users opens:
+
+"Stop Performing and Unlock Confidence, Creativity & Calm (Solo Table Theory)" by Dianne Glavaš (https://www.youtube.com/watch?v=SfmKRW_bSHI), licensed under CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/). Cut to 2:55.40-3:56.75 of the video, scaled to 1920x1080 at 30 fps and encoded as H.264 (CRF 26) with AAC at 128 kb/s.
+
+The licence's legal code is CC-BY-3.0.txt beside this file.

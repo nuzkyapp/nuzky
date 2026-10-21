@@ -4,8 +4,8 @@
 The tour for new users opens it as a project. yt-dlp downloads the source once: video format 137 (1080p H.264)
 and audio format 140 (AAC), merged into one MP4, which is checked against its pinned SHA-256 and kept in
 ~/.cache/nuzky/deps/sample. FFmpeg then cuts out the minute the tour uses and encodes it smaller. manifest.json
-records the source, author, licence, the attribution line and what was changed. The output is committed; run
-this only after changing the source or the cut.
+records the source, author, licence, the attribution line and what was changed, and ATTRIBUTION.txt holds that
+line for the installers. The output is committed; run this only after changing the source or the cut.
 
 transcript.json is what Nuzky's own transcribe tool recognised in exactly these bytes (large-v3-turbo, word times
 measured with wav2vec2), so the tour cuts and captions without a speech model. It needs the models to be made, so
@@ -94,6 +94,10 @@ def main():
         'transcriptMadeBy': "Nuzky's transcribe tool: large-v3-turbo-q5_0, word times measured with wav2vec2-base-960h-f16",
     }
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + '\n')
+    # The installers carry it with the licence (scripts/build-bundles.mjs), as CC BY asks of every copy.
+    (OUT / 'ATTRIBUTION.txt').write_text(
+        f'The sample video built into Nuzky, which its tour for new users opens:\n\n{manifest["attribution"]}\n\n'
+        'The licence\'s legal code is CC-BY-3.0.txt beside this file.\n')
     print(f'{out.relative_to(ROOT)}: {manifest["bytes"] / 1e6:.2f} MB, SHA-256 {manifest["sha256"]}')
     if before and before != manifest['sha256']:
         sys.exit('The video changed, so transcript.json no longer belongs to it. Make it again with the transcribe '
