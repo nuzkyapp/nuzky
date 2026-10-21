@@ -152,7 +152,11 @@ def click(r, label):
 
 
 def open_dialog(r):
-    if not r.s.run('return !!document.querySelector("aside[aria-label=AI]")'):
+    # After a restart the editor renders a moment after the home screen, and Ctrl+J before it would close the panel
+    # it restores, so the AI button's state decides.
+    ai_button = "document.querySelector('header button[title*=\"AI (Ctrl+J)\"]')"
+    require(wait(lambda: r.s.run(f'return !!{ai_button}'), 10), 'the editor is ready')
+    if r.s.run(f"return {ai_button}.getAttribute('aria-pressed')") != 'true':
         r.s.run('document.activeElement?.blur()')
         r.key('j', ctrlKey=True)
     require(wait(lambda: r.s.run('return !!document.querySelector("aside[aria-label=AI]")'), 5), 'AI panel opens')
