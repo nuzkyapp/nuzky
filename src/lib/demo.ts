@@ -7,10 +7,10 @@ import type { Project } from "./types";
  * The AI turn of the tour, on the sample video: no agent runs. Nuzky itself makes the edit as one real run
  * (`sample_run`), so the project changes live, the editor locks, Stop works and the run card's Undo takes it all back.
  */
-export const SAMPLE_REQUEST = "Cut the retakes and long pauses, then add captions.";
+export const SAMPLE_REQUEST = "Cut the long pauses, then add captions.";
 
 const READ = { id: "demo-read", title: "Read the transcript" };
-const CUT = { id: "demo-cut", title: "Cutting retakes and pauses" };
+const CUT = { id: "demo-cut", title: "Cutting long pauses" };
 const CAPTIONS = { id: "demo-captions", title: "Adding captions" };
 
 /** How long reading the transcript seems to take: long enough to see the step, short enough not to wait for it. */
@@ -25,9 +25,9 @@ export const lastDemoOutcome = () => outcome;
 
 const count = (n: number, word: string) => (n === 0 ? "" : `${n} ${word}${n === 1 ? "" : "s"}`);
 
-/** The reply, from what the edit really did. */
+/** The reply, from what the edit really did; it names only what it cut. */
 export function demoReply(r: SampleRun): string {
-  const cut = [count(r.words, "repeated word"), count(r.pauses, "long pause")].filter(Boolean);
+  const cut = [count(r.retakes, "retake"), count(r.pauses, "long pause")].filter(Boolean);
   const captions = r.captions > 0 ? `added ${count(r.captions, "caption")}` : "";
   if (!cut.length) return captions ? `Done. I found nothing to cut and ${captions}.` : "Done. I found nothing to cut.";
   const shorter = ((r.beforeUs - r.afterUs) / 1_000_000).toFixed(1);
