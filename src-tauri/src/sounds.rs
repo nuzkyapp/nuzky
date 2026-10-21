@@ -199,7 +199,7 @@ pub async fn sound_add(
     Ok(snap)
 }
 
-/// The credits the video's description needs, as export writes them beside it; none without CC BY sounds.
+/// The credits the video's description needs, as export writes them beside it; none without CC BY sounds or footage.
 #[tauri::command]
 pub fn sound_credits(state: State<'_, AppState>, expected_epoch: Option<String>) -> CmdResult<Option<String>> {
     let project = lock_session(&state.session, expected_epoch.as_deref())?.host.session.state().map_err(err)?.project;
