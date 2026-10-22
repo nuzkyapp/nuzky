@@ -203,4 +203,16 @@ def timeline_move(r):
 
     r.key('z', ctrlKey=True)
     r.check('one undo puts the three back on the captions track', wait(lambda: captions() == moved, 5), captions())
+
+    # With only the main-track clip selected beside it, a caption dragged up past the tracks still moves in time only.
+    click(ids['Four'], {})
+    click(video['id'], {'shiftKey': True})
+    pair = sorted([ids['Four'], video['id']])
+    wait(lambda: sorted(r.s.run(SELECTION)) == pair, 5)
+    x, y = middle(ids['Four'])
+    r.s.run(PRESS, x, y, {}, [(x + 10, y), (x + 30, y - 80)])
+    r.s.run(RELEASE, x + 30, y - 80, {})
+    r.check('a caption selected with the main-track clip moves 0.3 s on its own track',
+            wait(lambda: captions()['Four'] == (track, 4_300_000), 5), captions())
+    r.check('and both stay selected', sorted(r.s.run(SELECTION)) == pair, r.s.run(SELECTION))
     r.check('nothing in the app failed', not r.errors(), r.errors())

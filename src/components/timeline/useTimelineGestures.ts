@@ -34,8 +34,9 @@ export interface Drag {
   /** A fade drag: the sound fade at that end when it started, and the longest it may get. */
   fadeUs: number;
   maxFadeUs: number;
-  /** The other selected clips a move takes along by the same time, each on its own track. */
-  group: Clip[];
+  /** Set when a selected clip moves the selection: the other selected clips it takes along by the same time. The
+   * move stays on the tracks, and selected main-track clips stay, as they sit back to back. */
+  group: Clip[] | null;
 }
 
 /**
@@ -150,8 +151,7 @@ export function useTimelineGestures({
           }
         }
       }
-      // A group stays on its tracks, and its earliest clip stops at the start.
-      if (d.group.length > 0) {
+      if (d.group) {
         const floor = -Math.min(d.clip.startUs, ...d.group.map((c) => c.startUs));
         if (dxUs < floor) [dxUs, snapUs] = [floor, null];
         return { ...d, moved: true, dxUs: Math.round(dxUs), snapUs };
@@ -192,7 +192,7 @@ export function useTimelineGestures({
       return;
     }
     const r = dragResult(d, live.current.minUs);
-    if (d.group.length > 0) {
+    if (d.group) {
       if (r.startUs !== d.clip.startUs) edit({ type: "moveClips", clipIds: [d.clip.id, ...d.group.map((c) => c.id)], offsetUs: r.startUs - d.clip.startUs });
       return;
     }
@@ -229,14 +229,13 @@ export function useTimelineGestures({
       const sourceInUs = media && asset?.kind !== "image" ? media.sourceInUs : null;
       // The right edge stops where the source ends, at this clip's speed (floored like the engine).
       const maxDurUs = sourceInUs !== null && asset && media ? Math.floor((asset.durationUs - sourceInUs) / media.speed) : null;
-      // A selected clip takes the rest of the selection along, but not the main track's clips, which sit back to back.
       const selection = useEditor.getState().selection;
       const group =
-        mode === "move" && track.id !== MAIN_TRACK && selection.includes(clip.id)
+        mode === "move" && track.id !== MAIN_TRACK && selection.length > 1 && selection.includes(clip.id)
           ? project.tracks.flatMap((t) => (t.id === MAIN_TRACK ? [] : t.clips.filter((c) => c.id !== clip.id && selection.includes(c.id))))
-          : [];
+          : null;
       const candidates = [0, useEditor.getState().timeUs];
-      for (const c of allClips(project)) if (c.id !== clip.id && !group.includes(c)) candidates.push(c.startUs, c.startUs + c.durationUs);
+      for (const c of allClips(project)) if (c.id !== clip.id && !group?.includes(c)) candidates.push(c.startUs, c.startUs + c.durationUs);
       // While the AI edits, pressing a clip only selects it.
       const locked = !!useEditor.getState().aiRun;
       let d: Drag = { clip, trackId: track.id, mode, startX: e.clientX, startY: e.clientY, moved: false, toggle: e.shiftKey || (MAC ? e.metaKey : e.ctrlKey), dxUs: 0, target: undefined, snapUs: null, candidates, maxDurUs, sourceInUs, speed: media?.speed ?? 1, fadeUs: (mode === "fadeIn" ? media?.fadeInUs : media?.fadeOutUs) ?? 0, maxFadeUs: maxFadeUs(clip.durationUs), group };

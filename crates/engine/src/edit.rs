@@ -1276,8 +1276,11 @@ impl Project {
                     let target = if clips.iter().all(|c| self.is_free(i, c.start_us, c.end_us(), None)) {
                         i
                     } else {
-                        let (kind, keep) = (self.tracks[i].kind, self.tracks[i].keep_in_place);
-                        self.insert_track(i + 1, kind, keep)
+                        let Track { kind, keep_in_place, muted, hidden, .. } = self.tracks[i];
+                        let t = self.insert_track(i + 1, kind, keep_in_place);
+                        // The group only steps aside, so it stays hidden or muted with its own track.
+                        (self.tracks[t].muted, self.tracks[t].hidden) = (muted, hidden);
+                        t
                     };
                     self.tracks[target].clips.extend(clips);
                 }
@@ -2992,8 +2995,16 @@ mod tests {
                 assert_eq!((&p.tracks[ti].id, clip.start_us), (&tracks[track], start_s * 1_000_000));
             }
         }
+        let hide = EditCmd::UpdateTrack {
+            track_id: tracks[0].clone(),
+            muted: Some(true),
+            hidden: Some(true),
+            keep_in_place: None,
+        };
+        p.apply(hide).unwrap();
         p.apply(EditCmd::MoveClips { clip_ids: moving, offset_us: 16_000_000 }).unwrap();
         assert_eq!(p.tracks.len(), 4);
+        assert_eq!((p.tracks[2].hidden, p.tracks[2].muted), (true, true), "the new track stays hidden like its own");
         assert_eq!(p.tracks[1].id, tracks[0]);
         assert_eq!(p.tracks[1].clips.len(), 1);
         assert_eq!((&p.tracks[1].clips[0].id, p.tracks[1].clips[0].start_us), (&ids[2], 22_000_000));
