@@ -226,4 +226,11 @@ def timeline_move(r):
               'Four': (track, 4_300_000)}
     r.check('Alt+→ moves every selected caption a frame on its track', wait(lambda: captions() == nudged, 5), captions())
     r.check('and they stay selected', sorted(r.s.run(SELECTION)) == trio, r.s.run(SELECTION))
+
+    # Alone, a caption stops at its neighbour: a second to the right takes Three only up to Four.
+    r.s.call('window.__nuzky.store.getState().select(arguments[0])', [ids['Three']])
+    r.s.run("document.querySelector(`[data-clip-id='${arguments[0]}']`).focus()", ids['Three'])
+    r.key('ArrowRight', altKey=True, shiftKey=True)
+    r.check('Alt+Shift+→ on one caption stops it where Four starts',
+            wait(lambda: captions()['Three'] == (track, 3_700_000), 5), captions())
     r.check('nothing in the app failed', not r.errors(), r.errors())
