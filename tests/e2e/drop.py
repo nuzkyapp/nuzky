@@ -68,7 +68,8 @@ def drop_flow(r):
 
 
 @flow('insert', 'Media dropped on the cut between two clips of the main track goes in there and pushes the captions and '
-      'titles after it along, so they stay over their picture; the captions before it stay, and one undo takes it back')
+      'titles after it along, so they stay over their picture; the captions before it stay, one undo takes it back, and a '
+      'text duplicated with the clip it ends on stays right after itself')
 def insert_flow(r):
     Image.new('RGB', (1280, 720), (230, 30, 30)).save(r.work / 'red.png')
     r.import_media(FIXTURES / 'talk.mp4', FIXTURES / 'wide.mp4', r.work / 'red.png')
@@ -105,4 +106,17 @@ def insert_flow(r):
     r.shot('inserted')
     r.s.call('window.__nuzky.store.getState().undo()')
     r.check('one undo takes the picture out and puts the texts back', wait(lambda: len(r.track()) == 2 and texts() == before, 10), texts())
+
+    # Duplicating a text that ends where the first clip ends, selected before that clip: the copy of the text goes right
+    # after it, over the copy of the clip, and the clip's copy does not push it on past itself.
+    r.s.call("window.__nuzky.store.getState().edit({type: 'addText', startUs: arguments[0], text: 'Outro',"
+             " style: {fontSize: 80, color: '#ffffff'}})", talk['durationUs'] - 3_000_000)
+    outro = wait(lambda: next((c['id'] for t in r.state()['tracks'] for c in t['clips'] if c['text'] == 'Outro'), None), 5)
+    r.s.run('window.__nuzky.store.getState().select(arguments[0])', [outro, talk['id']])
+    r.key('d', ctrlKey=True)
+    wait(lambda: len(r.track()) == 3, 10)
+    outros = lambda: sorted(c['startUs'] for t in r.state()['tracks'] for c in t['clips'] if c['text'] == 'Outro')
+    r.check('a text duplicated with the clip it ends on stays right after itself, over the copy of the clip',
+            wait(lambda: outros() == [talk['durationUs'] - 3_000_000, talk['durationUs']], 5)
+            and r.track()[1]['startUs'] == talk['durationUs'], (outros(), r.track()))
     r.check('no error toast', not r.errors(), r.errors())

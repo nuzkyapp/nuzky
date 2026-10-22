@@ -780,8 +780,12 @@ export async function splitAtPlayhead() {
 export async function duplicateSelection() {
   const { selection, edit } = useEditor.getState();
   if (selection.length === 0) return;
-  // One batch: one undo step, and the snapshot selects every copy.
-  await edit(selection.map((id): EditCmd => ({ type: "duplicateClip", clipId: id })));
+  // One batch: one undo step, and the snapshot selects every copy. Main-track copies go first, as each pushes what
+  // follows it on the other tracks along, which must not take a copy made before it.
+  await edit((project) => {
+    const onMain = (id: string) => mainClips(project).some((c) => c.id === id);
+    return [...selection.filter(onMain), ...selection.filter((id) => !onMain(id))].map((id): EditCmd => ({ type: "duplicateClip", clipId: id }));
+  });
 }
 
 /** The clips in `ids` as copied, with their tracks, earliest first. */
