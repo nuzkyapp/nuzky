@@ -132,11 +132,21 @@ function nudge(clipId: string, dir: -1 | 1, second: boolean) {
       const selection = useEditor.getState().selection;
       const group = selection.length > 1 && selection.includes(c.id);
       const moving = group ? project.tracks.filter((t) => t.id !== MAIN_TRACK).flatMap((t) => t.clips.filter((o) => selection.includes(o.id)).map((o) => [o, t] as const)) : [[c, track] as const];
+      const ids = new Set(moving.map(([m]) => m.id));
       let [lo, hi] = [-Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER];
-      for (const [m, t] of moving) {
-        const others = t.clips.filter((o) => !moving.some(([x]) => x.id === o.id));
-        lo = Math.max(lo, Math.max(0, ...others.filter((o) => o.startUs + o.durationUs <= m.startUs).map((o) => o.startUs + o.durationUs)) - m.startUs);
-        hi = Math.min(hi, Math.min(Number.MAX_SAFE_INTEGER, ...others.filter((o) => o.startUs >= m.startUs + m.durationUs).map((o) => o.startUs)) - m.durationUs - m.startUs);
+      for (const t of new Set(moving.map(([, t]) => t))) {
+        // Each moved clip stops at the nearest clip of its track that stays, so walk the track in time order.
+        const clips = [...t.clips].sort((a, b) => a.startUs - b.startUs);
+        let end = 0;
+        for (const o of clips) {
+          if (ids.has(o.id)) lo = Math.max(lo, end - o.startUs);
+          else end = Math.max(end, o.startUs + o.durationUs);
+        }
+        let start = Number.MAX_SAFE_INTEGER;
+        for (const o of clips.reverse()) {
+          if (ids.has(o.id)) hi = Math.min(hi, start - o.startUs - o.durationUs);
+          else start = Math.min(start, o.startUs);
+        }
       }
       const step = second ? US : US / project.canvas.fps;
       const offsetUs = Math.round(Math.max(lo, Math.min(hi, dir * step)));
