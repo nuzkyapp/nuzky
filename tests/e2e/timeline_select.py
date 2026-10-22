@@ -142,3 +142,65 @@ def timeline_select(r):
     r.s.run(RELEASE, a[0] + 300, a[1] + 10, {})
     r.s.run('window.__nuzky.store.getState().togglePlay()')
     r.check('nothing in the app failed', not r.errors(), r.errors())
+
+
+@flow('timeline_move', 'Dragging one of several selected captions moves them all by the same time as one undo step and keeps '
+      'them selected; when one would land on another caption they all go onto one new track right above, and a selected '
+      'main-track clip stays in its place')
+def timeline_move(r):
+    r.import_media(FIXTURES / 'talk.mp4')
+    r.add_clip('talk.mp4')
+    segment = lambda start, text: {'startUs': start, 'endUs': start + 600_000, 'text': text, 'words': []}
+    r.s.call("window.__nuzky.store.getState().edit({type: 'addCaptions', segments: arguments[0],"
+             " style: {fontSize: 60, color: '#ffffff'}})",
+             [segment(1_000_000, 'One'), segment(1_600_000, 'Two'), segment(2_200_000, 'Three'), segment(4_000_000, 'Four')])
+    captions = lambda: {c['text']: (t['id'], c['startUs']) for t in r.state()['tracks'] if t['kind'] == 'text' for c in t['clips']}
+    wait(lambda: len(captions()) == 4, 5)
+    ids = {c['text']: c['id'] for t in r.state()['tracks'] if t['kind'] == 'text' for c in t['clips']}
+    track = captions()['One'][0]
+    video = r.track()[0]
+    r.s.run('window.__nuzky.store.getState().setZoom(100)')
+    r.s.run("document.querySelector('[aria-label=\"Snapping on\"]').click()")
+    r.check('snapping turns off', wait(lambda: r.s.run("return !!document.querySelector('[aria-label=\"Snapping off\"]')"), 5))
+    clock.sleep(0.5)
+    middle = lambda clip: (lambda b: ((b[0] + b[2]) / 2, (b[1] + b[3]) / 2))(r.s.run(RECT, clip))
+    click = lambda clip, keys: (r.s.run(PRESS, *middle(clip), keys, []), r.s.run(RELEASE, *middle(clip), keys))
+
+    click(ids['One'], {})
+    click(ids['Two'], {'shiftKey': True})
+    click(ids['Three'], {'shiftKey': True})
+    picked = sorted(ids[t] for t in ('One', 'Two', 'Three'))
+    r.check('Shift-clicks select three captions', wait(lambda: sorted(r.s.run(SELECTION)) == picked, 5), r.s.run(SELECTION))
+
+    # Grabbing the middle one and moving it 50 px, half a second at this zoom, takes the other two along.
+    x, y = middle(ids['Two'])
+    r.s.run(PRESS, x, y, {}, [(x + 10, y), (x + 50, y)])
+    clock.sleep(0.3)
+    r.shot('group-move')
+    r.s.run(RELEASE, x + 50, y, {})
+    moved = {'One': (track, 1_500_000), 'Two': (track, 2_100_000), 'Three': (track, 2_700_000), 'Four': (track, 4_000_000)}
+    r.check('every selected caption moves half a second on its track, the one not selected stays',
+            wait(lambda: captions() == moved, 5), captions())
+    r.check('the three captions stay selected', sorted(r.s.run(SELECTION)) == picked, r.s.run(SELECTION))
+
+    # With the video selected too, a drag a second on would put Three over Four: the three go onto one new track
+    # right above the captions, keeping their offsets, and the magnetic main track stays as it was.
+    click(video['id'], {'shiftKey': True})
+    wait(lambda: video['id'] in r.s.run(SELECTION), 5)
+    x, y = middle(ids['Three'])
+    r.s.run(PRESS, x, y, {}, [(x + 10, y), (x + 100, y)])
+    r.s.run(RELEASE, x + 100, y, {})
+    wait(lambda: captions()['One'][1] == 2_500_000, 5)
+    tracks = [t['id'] for t in r.state()['tracks']]
+    now = captions()
+    r.check('a group that would overlap a caption goes together onto a new track right above, a second later',
+            [now[t][1] for t in ('One', 'Two', 'Three')] == [2_500_000, 3_100_000, 3_700_000]
+            and len({now[t][0] for t in ('One', 'Two', 'Three')}) == 1
+            and tracks.index(now['One'][0]) == tracks.index(track) + 1 and now['Four'] == (track, 4_000_000), (now, tracks))
+    r.check('the selected main-track clip stays where it was', r.track()[0]['startUs'] == video['startUs'] and len(r.track()) == 1,
+            r.track())
+    r.check('and everything stays selected', sorted(r.s.run(SELECTION)) == sorted(picked + [video['id']]), r.s.run(SELECTION))
+
+    r.key('z', ctrlKey=True)
+    r.check('one undo puts the three back on the captions track', wait(lambda: captions() == moved, 5), captions())
+    r.check('nothing in the app failed', not r.errors(), r.errors())

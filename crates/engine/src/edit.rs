@@ -139,6 +139,13 @@ pub enum EditCmd {
         #[serde(default)]
         new_track: Option<TrackSide>,
     },
+    /// Moves clips by the same time, each on its own track, with the earliest stopping at zero. When one of a
+    /// track's clips would overlap a clip there, they all go on a new track right above it, as when pasting.
+    /// Not for main-track clips, which sit back to back: move one of them with moveClip.
+    MoveClips {
+        clip_ids: Vec<String>,
+        offset_us: i64,
+    },
     /// On the main track the other tracks, except audio kept in place, gain or lose the same time at the moved edge.
     TrimClip {
         clip_id: String,
@@ -924,6 +931,7 @@ impl Project {
             | EditCmd::DetachAudio { .. }
             | EditCmd::ReplaceClip { .. } => self.apply_media(cmd, &mut out, &mut moved)?,
             EditCmd::MoveClip { .. }
+            | EditCmd::MoveClips { .. }
             | EditCmd::TrimClip { .. }
             | EditCmd::SplitClip { .. }
             | EditCmd::DeleteClips { .. }
@@ -1242,6 +1250,37 @@ impl Project {
                 };
                 out.select.push(clip.id.clone());
                 self.tracks[target].clips.push(clip);
+            }
+            EditCmd::MoveClips { clip_ids, offset_us } => {
+                let mut groups: Vec<(String, Vec<Clip>)> = Vec::new();
+                for id in &clip_ids {
+                    let (ti, ci) = self.find_clip(id).ok_or_else(|| anyhow!("Unknown clip"))?;
+                    ensure!(
+                        self.tracks[ti].id != MAIN_TRACK,
+                        "Main-track clips sit back to back; move one with moveClip"
+                    );
+                    let clip = self.tracks[ti].clips.remove(ci);
+                    let track = &self.tracks[ti].id;
+                    match groups.iter_mut().find(|g| &g.0 == track) {
+                        Some(group) => group.1.push(clip),
+                        None => groups.push((track.clone(), vec![clip])),
+                    }
+                }
+                let earliest = groups.iter().flat_map(|g| &g.1).map(|c| c.start_us).min().unwrap_or(0);
+                let offset = offset_us.max(-earliest);
+                for (track_id, mut clips) in groups {
+                    for c in &mut clips {
+                        c.start_us += offset;
+                    }
+                    let i = self.track_index(&track_id).ok_or_else(|| anyhow!("Unknown track"))?;
+                    let target = if clips.iter().all(|c| self.is_free(i, c.start_us, c.end_us(), None)) {
+                        i
+                    } else {
+                        let (kind, keep) = (self.tracks[i].kind, self.tracks[i].keep_in_place);
+                        self.insert_track(i + 1, kind, keep)
+                    };
+                    self.tracks[target].clips.extend(clips);
+                }
             }
             EditCmd::TrimClip { clip_id, start_us, duration_us, source_in_us } => {
                 let (ti, ci) = self.find_clip(&clip_id).ok_or_else(|| anyhow!("Unknown clip"))?;
@@ -2925,6 +2964,50 @@ mod tests {
         p.apply(move_to(&high, Some(low_track.clone()), TrackSide::Above)).unwrap();
         assert_eq!(layers(&p)[1..], [Some(low.clone()), Some(high.clone())]);
         assert!(p.apply(move_to(&high, Some(MAIN_TRACK.into()), TrackSide::Below)).is_err());
+    }
+
+    #[test]
+    fn moving_clips_keeps_the_group_together_and_rejects_main_track() {
+        let mut p = project();
+        let main = p.apply(EditCmd::AddClip { asset_id: "a".into(), start_us: None, track_id: None }).unwrap().select
+            [0]
+        .clone();
+        let style: TextStyle =
+            serde_json::from_value(serde_json::json!({"fontSize": 60.0, "color": "#ffffff"})).unwrap();
+        let mut ids = Vec::new();
+        for start_us in [4_000_000, 10_000_000, 22_000_000, 10_000_000] {
+            ids.push(
+                p.apply(EditCmd::AddText { start_us, text: "Hi".into(), style: style.clone() }).unwrap().select[0]
+                    .clone(),
+            );
+        }
+        let tracks = [p.tracks[1].id.clone(), p.tracks[2].id.clone()];
+        let moving = vec![ids[0].clone(), ids[1].clone(), ids[3].clone()];
+        for (offset_us, starts) in [(1_000_000, [5, 11, 11]), (-20_000_000, [0, 6, 6])] {
+            p.apply(EditCmd::MoveClips { clip_ids: moving.clone(), offset_us }).unwrap();
+            assert_eq!(p.tracks.len(), 3);
+            for (id, track, start_s) in [(&ids[0], 0, starts[0]), (&ids[1], 0, starts[1]), (&ids[3], 1, starts[2])] {
+                let (ti, ci) = p.find_clip(id).unwrap();
+                let clip = &p.tracks[ti].clips[ci];
+                assert_eq!((&p.tracks[ti].id, clip.start_us), (&tracks[track], start_s * 1_000_000));
+            }
+        }
+        p.apply(EditCmd::MoveClips { clip_ids: moving, offset_us: 16_000_000 }).unwrap();
+        assert_eq!(p.tracks.len(), 4);
+        assert_eq!(p.tracks[1].id, tracks[0]);
+        assert_eq!(p.tracks[1].clips.len(), 1);
+        assert_eq!((&p.tracks[1].clips[0].id, p.tracks[1].clips[0].start_us), (&ids[2], 22_000_000));
+        assert_eq!(
+            p.tracks[2].clips.iter().map(|c| (&c.id, c.start_us)).collect::<Vec<_>>(),
+            vec![(&ids[0], 16_000_000), (&ids[1], 22_000_000)]
+        );
+        assert_eq!(p.tracks[3].id, tracks[1]);
+        assert_eq!((&p.tracks[3].clips[0].id, p.tracks[3].clips[0].start_us), (&ids[3], 22_000_000));
+        let before = p.clone();
+        let mut editor = Editor::new(p);
+        let refused = EditCmd::MoveClips { clip_ids: vec![ids[0].clone(), main], offset_us: 1_000_000 };
+        assert!(editor.apply(refused, None).is_err());
+        assert_eq!(editor.project, before);
     }
 
     #[test]

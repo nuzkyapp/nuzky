@@ -246,6 +246,7 @@ pub(crate) fn label(cmds: &[EditCmd]) -> &'static str {
         EditCmd::AddText { .. } => "Add text",
         EditCmd::AddPictureInPicture { .. } => "Picture in picture",
         EditCmd::MoveClip { .. } => "Move clip",
+        EditCmd::MoveClips { .. } => "Move clips",
         EditCmd::TrimClip { .. } => "Trim clip",
         EditCmd::SplitClip { .. } => "Split",
         EditCmd::DeleteClips { .. } => "Delete",

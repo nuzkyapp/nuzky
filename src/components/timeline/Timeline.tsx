@@ -701,7 +701,7 @@ export function Timeline({ height }: { height: number }) {
                       </div>
                     )}
                     {track.clips.map((clip) => {
-                      if (drag?.moved && drag.clip.id === clip.id) {
+                      if (drag?.moved && (drag.clip.id === clip.id || drag.group.some((c) => c.id === clip.id))) {
                         // Where the main track's layout places the clip, its old spot goes; otherwise it stays outlined.
                         if (isMain && layout) return null;
                         return (
@@ -748,6 +748,24 @@ export function Timeline({ height }: { height: number }) {
                     {drag?.moved && ghostTiming && ghostTrackId === track.id && (
                       <ClipView clip={drag.clip} track={track} project={project} zoom={zoom} height={h} visible={visible} selected ghost timing={ghostTiming} />
                     )}
+                    {drag?.moved &&
+                      ghostTiming &&
+                      track.clips
+                        .filter((clip) => drag.group.some((c) => c.id === clip.id))
+                        .map((clip) => (
+                          <ClipView
+                            key={`ghost-${clip.id}`}
+                            clip={clip}
+                            track={track}
+                            project={project}
+                            zoom={zoom}
+                            height={h}
+                            visible={visible}
+                            selected
+                            ghost
+                            timing={{ startUs: clip.startUs + ghostTiming.startUs - drag.clip.startUs, durationUs: clip.durationUs }}
+                          />
+                        ))}
                   </div>
                   {gapBelow === track.id && ghostTiming && (
                     <div

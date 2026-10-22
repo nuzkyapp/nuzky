@@ -541,6 +541,10 @@ export type EditCmd = {
   startUs: number,
   newTrack?: TrackSide | null,
 } | {
+  "type": "moveClips",
+  clipIds: Array<string>,
+  offsetUs: number,
+} | {
   "type": "trimClip",
   clipId: string,
   startUs: number,

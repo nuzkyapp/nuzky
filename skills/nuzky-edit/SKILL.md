@@ -100,6 +100,8 @@ All timeline times are integer microseconds; time ranges are half-open [start,en
 
 A higher video or text track covers a lower one, and the main track is the lowest. To put a picture under or over another one that overlaps it, apply `{"type":"moveClip","clipId":…,"trackId":<the other one's track>,"startUs":<its own start>,"newTrack":"below"}` (or `"above"`): the clip goes on a new track right there. Nothing goes below the main track.
 
+To move several clips by the same time, such as captions that come late, apply `{"type":"moveClips","clipIds":[…],"offsetUs":…}` instead of a moveClip per clip: each stays on its track, and when one would overlap a clip there, those of its track go together onto a new track right above it. Main-track clips are refused, as they sit back to back.
+
 A transform places a clip's centre: `x` and `y` are its offset from the canvas centre as fractions of the canvas width and height, positive x to the right and positive y DOWN, so y 0.25 is halfway from the middle to the bottom edge. `scale` 1 fits a video or image inside the canvas and draws text at its style's sizes; `rotation` is degrees clockwise; `opacity` runs 0–1. A text style's `fontSize`, `strokeWidth` and `maxWidth` are canvas pixels before the scale, so fontSize 60 at scale 1.5 draws as large as fontSize 90 at scale 1. The inspector shows x, y and scale × 100 as percentages.
 
 Text in a font this computer does not have is drawn in Inter. apply_edits, build_captions and make_reels say so in `warnings`, once per font, when they give text such a font, and get_state's `missing_fonts` lists every such font of the project. Font names match exactly, so check the spelling; otherwise tell the user to install the font or pick one that is installed.
