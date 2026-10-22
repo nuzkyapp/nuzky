@@ -114,8 +114,9 @@ function neighbour(tracks: Track[], track: Track, from: Clip, key: string): Clip
 
 /**
  * Alt+←/→ moves a clip by a frame (Shift: a second), stopping at its neighbours so it never jumps to
- * a new track; on the magnetic main track it trades places with the clip beside it. A burst of
- * presses is one undo step.
+ * a new track; on the magnetic main track it trades places with the clip beside it. A selected clip
+ * takes the rest of the selection off the main track along, as a drag does. A burst of presses is
+ * one undo step.
  */
 function nudge(clipId: string, dir: -1 | 1, second: boolean) {
   editClip(
@@ -128,12 +129,19 @@ function nudge(clipId: string, dir: -1 | 1, second: boolean) {
         // The engine puts a moved clip before the first other clip whose middle is later.
         return { type: "moveClip", clipId: c.id, trackId: MAIN_TRACK, startUs: dir < 0 ? other.startUs : Math.round(other.startUs + other.durationUs / 2) };
       }
-      const others = track.clips.filter((o) => o.id !== c.id);
-      const lo = Math.max(0, ...others.filter((o) => o.startUs + o.durationUs <= c.startUs).map((o) => o.startUs + o.durationUs));
-      const hi = Math.min(Number.MAX_SAFE_INTEGER, ...others.filter((o) => o.startUs >= c.startUs + c.durationUs).map((o) => o.startUs)) - c.durationUs;
+      const selection = useEditor.getState().selection;
+      const group = selection.length > 1 && selection.includes(c.id);
+      const moving = group ? project.tracks.filter((t) => t.id !== MAIN_TRACK).flatMap((t) => t.clips.filter((o) => selection.includes(o.id)).map((o) => [o, t] as const)) : [[c, track] as const];
+      let [lo, hi] = [-Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER];
+      for (const [m, t] of moving) {
+        const others = t.clips.filter((o) => !moving.some(([x]) => x.id === o.id));
+        lo = Math.max(lo, Math.max(0, ...others.filter((o) => o.startUs + o.durationUs <= m.startUs).map((o) => o.startUs + o.durationUs)) - m.startUs);
+        hi = Math.min(hi, Math.min(Number.MAX_SAFE_INTEGER, ...others.filter((o) => o.startUs >= m.startUs + m.durationUs).map((o) => o.startUs)) - m.durationUs - m.startUs);
+      }
       const step = second ? US : US / project.canvas.fps;
-      const startUs = Math.round(Math.max(lo, Math.min(hi, c.startUs + dir * step)));
-      return startUs === c.startUs ? null : { type: "moveClip", clipId: c.id, trackId: track.id, startUs };
+      const offsetUs = Math.round(Math.max(lo, Math.min(hi, dir * step)));
+      if (offsetUs === 0) return null;
+      return group ? { type: "moveClips", clipIds: moving.map(([m]) => m.id), offsetUs } : { type: "moveClip", clipId: c.id, trackId: track.id, startUs: c.startUs + offsetUs };
     },
     `nudge:${clipId}`,
   );
@@ -367,6 +375,7 @@ export function Timeline({ height }: { height: number }) {
 
   // A fade drag changes only the clip's fades; the ghost, the slot and the snap guide belong to moves and trims.
   const drag = gesture && !isFade(gesture.mode) ? gesture : null;
+  const groupIds = useMemo(() => new Set(drag?.group?.map((c) => c.id)), [drag?.group]);
   const fading = gesture?.moved && isFade(gesture.mode) ? gesture : null;
 
   // When the focused clip is deleted, focus and select the clip that followed it on its track, else
@@ -701,7 +710,7 @@ export function Timeline({ height }: { height: number }) {
                       </div>
                     )}
                     {track.clips.map((clip) => {
-                      if (drag?.moved && (drag.clip.id === clip.id || drag.group?.some((c) => c.id === clip.id))) {
+                      if (drag?.moved && (drag.clip.id === clip.id || groupIds.has(clip.id))) {
                         // Where the main track's layout places the clip, its old spot goes; otherwise it stays outlined.
                         if (isMain && layout) return null;
                         return (
@@ -748,24 +757,16 @@ export function Timeline({ height }: { height: number }) {
                     {drag?.moved && ghostTiming && ghostTrackId === track.id && (
                       <ClipView clip={drag.clip} track={track} project={project} zoom={zoom} height={h} visible={visible} selected ghost timing={ghostTiming} />
                     )}
-                    {drag?.moved &&
-                      ghostTiming &&
-                      track.clips
-                        .filter((clip) => drag.group?.some((c) => c.id === clip.id))
-                        .map((clip) => (
-                          <ClipView
-                            key={`ghost-${clip.id}`}
-                            clip={clip}
-                            track={track}
-                            project={project}
-                            zoom={zoom}
-                            height={h}
-                            visible={visible}
-                            selected
-                            ghost
-                            timing={{ startUs: clip.startUs + ghostTiming.startUs - drag.clip.startUs, durationUs: clip.durationUs }}
-                          />
-                        ))}
+                    {/* The group's ghosts keep their own times and shift together, so they do not re-render as the pointer moves. */}
+                    {drag?.moved && ghostTiming && drag.group && (
+                      <div className="pointer-events-none absolute inset-0 z-30" style={{ transform: `translateX(${((ghostTiming.startUs - drag.clip.startUs) / US) * zoom}px)` }}>
+                        {track.clips
+                          .filter((clip) => groupIds.has(clip.id))
+                          .map((clip) => (
+                            <ClipView key={clip.id} clip={clip} track={track} project={project} zoom={zoom} height={h} visible={visible} selected ghost />
+                          ))}
+                      </div>
+                    )}
                   </div>
                   {gapBelow === track.id && ghostTiming && (
                     <div

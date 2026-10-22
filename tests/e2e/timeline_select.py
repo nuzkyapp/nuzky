@@ -215,4 +215,15 @@ def timeline_move(r):
     r.check('a caption selected with the main-track clip moves 0.3 s on its own track',
             wait(lambda: captions()['Four'] == (track, 4_300_000), 5), captions())
     r.check('and both stay selected', sorted(r.s.run(SELECTION)) == pair, r.s.run(SELECTION))
+
+    # Alt+→ on one of several selected captions moves them all a frame, as a drag does.
+    trio = sorted(ids[t] for t in ('One', 'Two', 'Three'))
+    r.s.call('window.__nuzky.store.getState().select(arguments[0])', trio)
+    r.s.run("document.querySelector(`[data-clip-id='${arguments[0]}']`).focus()", ids['Two'])
+    frame = round(1_000_000 / r.s.run(FPS))
+    r.key('ArrowRight', altKey=True)
+    nudged = {'One': (track, 1_500_000 + frame), 'Two': (track, 2_100_000 + frame), 'Three': (track, 2_700_000 + frame),
+              'Four': (track, 4_300_000)}
+    r.check('Alt+→ moves every selected caption a frame on its track', wait(lambda: captions() == nudged, 5), captions())
+    r.check('and they stay selected', sorted(r.s.run(SELECTION)) == trio, r.s.run(SELECTION))
     r.check('nothing in the app failed', not r.errors(), r.errors())
