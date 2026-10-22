@@ -913,8 +913,7 @@ impl Project {
     pub fn apply(&mut self, cmd: EditCmd) -> Result<EditOutcome> {
         let mut out = EditOutcome::default();
         let mut moved: Option<(String, i64)> = None;
-        let along_main = matches!(&cmd, EditCmd::MoveClip { clip_id, .. }
-            if self.find_clip(clip_id).is_some_and(|(ti, _)| self.tracks[ti].id == MAIN_TRACK));
+        let moving = matches!(cmd, EditCmd::MoveClip { .. });
         match cmd {
             EditCmd::AddAssets { .. }
             | EditCmd::RemoveAsset { .. }
@@ -969,10 +968,11 @@ impl Project {
                 self.reel_candidates.sort_by_key(|c| c.start_us);
             }
         }
-        // A clip that comes onto the main track pushes the clips after it along, so the other tracks open the same
-        // time there and captions and overlays stay over their picture, as when pasting. Moving one along it does not.
+        // A clip added in between main-track clips pushes the clips after it along, so the other tracks open the same
+        // time there and captions and overlays stay over their picture, as when pasting. A moved clip does not: what
+        // sits at its old time on the other tracks, such as its detached sound, can be its own.
         if let Some((at, duration)) = self.pack_main(moved.as_ref().map(|(id, s)| (id.as_str(), *s)))
-            && !along_main
+            && !moving
         {
             self.ripple_others(at, duration, min_duration(self));
         }
@@ -2477,11 +2477,14 @@ mod tests {
         // A duplicate goes in right after its original, now 3 to 8 s.
         p.apply(EditCmd::DuplicateClip { clip_id: first }).unwrap();
         assert_eq!((starts(&p), end_start(&p)), ([14_000_000, 0], 19_000_000));
-        // A picture in picture dragged down to the start of the main track pushes everything by its 3 s.
+        // A picture in picture dragged down onto the main track keeps its detached sound under it.
         let pip = add(&mut p, EditCmd::AddPictureInPicture { asset_id: "b".into(), start_us: 0, duration_us: None });
+        let sound = add(&mut p, EditCmd::DetachAudio { clip_id: pip.clone() });
         let down = EditCmd::MoveClip { clip_id: pip, track_id: Some(MAIN_TRACK.into()), start_us: 0, new_track: None };
         p.apply(down).unwrap();
-        assert_eq!((starts(&p), end_start(&p)), ([17_000_000, 0], 22_000_000));
+        let sound_start = p.find_clip(&sound).map(|(ti, ci)| p.tracks[ti].clips[ci].start_us).unwrap();
+        assert_eq!((p.tracks[0].clips[0].duration_us, sound_start), (3_000_000, 0));
+        assert_eq!((starts(&p), end_start(&p)), ([14_000_000, 0], 19_000_000));
     }
 
     #[test]
