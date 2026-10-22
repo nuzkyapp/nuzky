@@ -205,7 +205,6 @@ function Dialog() {
             onPaste={(e) => {
               const pasted = e.clipboardData.getData("text").trim();
               const input = e.currentTarget;
-              // Into an empty field or over all of it: a new link, looked up at once.
               if (!pasted || input.selectionStart !== 0 || input.selectionEnd !== input.value.length) return;
               e.preventDefault();
               setText(pasted);
@@ -390,7 +389,6 @@ function Chooser({ url, video, preview, onImport, onCancel }: { url: string; vid
   const whole = part.startUs === 0 && part.endUs === duration;
   const locked = useAiLocked();
   const root = useRef<HTMLDivElement>(null);
-  // The handle the arrow keys move, so the key hints can say so.
   const [nudging, setNudging] = useState<string | null>(null);
   const focusRoot = () => root.current?.focus({ preventScroll: true });
 
@@ -556,8 +554,12 @@ function Chooser({ url, video, preview, onImport, onCancel }: { url: string; vid
           type="button"
           aria-label={playing ? "Pause (Space)" : "Play (Space)"}
           title={playing ? "Pause (Space)" : "Play (Space)"}
-          // A click leaves the keys with the chooser, so Enter still imports; Tab and Enter press it like any button.
-          onMouseDown={(e) => e.preventDefault()}
+          // A click hands the keys to the chooser, so Enter still imports, and leaving a time field takes what was
+          // typed there before it plays; Tab and Enter press it like any button.
+          onMouseDown={(e) => {
+            e.preventDefault();
+            focusRoot();
+          }}
           onClick={play}
           className="flex h-7 w-7 items-center justify-center rounded-full bg-fg text-black transition-transform duration-[120ms] ease-out active:scale-95"
         >

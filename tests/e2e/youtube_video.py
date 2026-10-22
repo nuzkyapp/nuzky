@@ -72,8 +72,9 @@ def value(r, label):
 
 
 def in_chooser(r):
-    """Focus rests in the chooser itself, where Space, I, O and Enter act, rather than on the page, a field or a button."""
-    return r.s.run("const a = document.activeElement; return document.querySelector(arguments[0]).contains(a) && a.tagName === 'DIV'", DIALOG)
+    """Focus rests in the chooser itself, where Space, I, O and Enter act, rather than on the page, the dialog, a field or a button."""
+    return r.s.run("""const a = document.activeElement;
+return document.querySelector(arguments[0]).contains(a) && a.tagName === 'DIV' && a.tabIndex === -1 && a.getAttribute('role') !== 'dialog'""", DIALOG)
 
 
 def rect(r, selector):
@@ -190,10 +191,11 @@ def youtube_video(r):
             held and abs(moved - 30 * FRAME) <= 2 * FRAME, moved / FRAME)
     r.check('letting go shows the whole video again', wait(lambda: not zoomed(r), 2))
     press('space')
+    # Until the preview reports it plays, its seek to the part's start reports it paused, so a second Space then plays again.
     r.check('Space plays and hands the arrows back to the playhead',
-            wait(lambda: playing(r), 2) and in_chooser(r) and 'Move end' not in text(r), text(r))
+            wait(lambda: playing(r) and frame_time(r) > 300_000, 3) and in_chooser(r) and 'Move end' not in text(r), text(r))
     press('space')
-    wait(lambda: not playing(r), 2)
+    r.check('Space again pauses', wait(lambda: not playing(r), 2) and (time.sleep(0.5) or not playing(r)))
 
     pointer(r, 'pointerdown', '[data-strip]', on_strip(60 / 90)(r))
     pointer(r, 'pointerup', '[data-strip]', on_strip(60 / 90)(r))
@@ -225,8 +227,9 @@ return b.getBoundingClientRect().bottom <= window.innerHeight && document.queryS
     r.shot('part-small')
     resize(r, 1440, 900)
 
-    r.check('a click on Play leaves the keys with the chooser',
-            Hands(r).click(f'{DIALOG} button[aria-label="Play (Space)"]') and wait(lambda: in_chooser(r), 1))
+    type_time(r, 'Start of the part', '0:30', blur=False)
+    r.check('a click on Play takes a time still being typed and leaves the keys with the chooser',
+            Hands(r).click(f'{DIALOG} button[aria-label="Play (Space)"]') and wait(lambda: in_chooser(r) and 'Import 4.0 s' in text(r), 2), text(r))
     press('Return')
     r.check('Enter imports: the dialog closes at once', wait(lambda: not is_open(r), 3))
     added = wait(lambda: videos(r), 30)
@@ -234,11 +237,11 @@ return b.getBoundingClientRect().bottom <= window.innerHeight && document.queryS
     asset = added[0]
     part = asset.get('part') or {}
     length = part.get('endUs', 0) - part.get('startUs', 0)
-    r.check('the asset keeps the 3 s part and footage around it, starting on a keyframe',
-            abs(length - 3_000_000) < 40_000 and part['startUs'] >= 3_000_000 and asset['durationUs'] >= length + 5_900_000, asset)
+    r.check('the asset keeps the 4 s part and footage around it, starting on a keyframe',
+            abs(length - 4_000_000) < 40_000 and part['startUs'] >= 3_000_000 and asset['durationUs'] >= length + 5_900_000, asset)
     path = Path(asset['path'])
     r.check('the file is in Nuzky\'s own folder', path.parent == (r.work / 'data/nuzky/videos').resolve() and path.exists(), asset['path'])
-    r.check('the tile shows the part\'s length', wait(lambda: r.s.run('return document.body.innerText.includes("3.0 s")'), 5))
+    r.check('the tile shows the part\'s length', wait(lambda: r.s.run('return document.body.innerText.includes("4.0 s")'), 5))
     time.sleep(1)
     r.shot('imported')
 
@@ -248,7 +251,7 @@ return b.getBoundingClientRect().bottom <= window.innerHeight && document.queryS
             clip['content']['sourceInUs'] == part['startUs'] and abs(clip['durationUs'] - length) < 40_000, clip)
     r.s.run('window.__nuzky.store.getState().select([arguments[0]])', clip['id'])
     detail = wait(lambda: r.s.run('return [...document.querySelectorAll("div")].filter((e) => e.children.length === 0).map((e) => e.textContent).find((t) => /· from .* of /.test(t ?? "")) ?? ""'), 5)
-    r.check('the inspector counts within the part, so nothing shows there is more', detail and detail.endswith('from 0.0 s of 3.0 s'), detail)
+    r.check('the inspector counts within the part, so nothing shows there is more', detail and detail.endswith('from 0.0 s of 4.0 s'), detail)
     trimmed = r.s.call("""window.__nuzky.store.getState().edit({type: 'trimClip', clipId: arguments[0], sourceInUs: 0,
         startUs: arguments[1], durationUs: arguments[2]})""", clip['id'], clip['startUs'], clip['durationUs'] + part['startUs'])
     r.check('the clip\'s edge drags out over the hidden footage', trimmed['ok'] and clip_of(r, asset['id'])['content']['sourceInUs'] == 0, trimmed)
