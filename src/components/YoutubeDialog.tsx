@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { AlertCircle, Link2, Pause, Play, WifiOff, X, ZoomIn, ZoomOut } from "lucide-react";
+import { AlertCircle, Link2, Pause, Play, WifiOff, X } from "lucide-react";
 import { api, errorText, plainError } from "../lib/api";
 import { AI_EDITING, useAiLocked, useEditor } from "../lib/store";
 import { formatLength, US } from "../lib/time";
@@ -19,10 +19,6 @@ type Step =
   | { kind: "ready"; url: string; video: YoutubeVideo; preview: VideoPreview }
   | { kind: "error"; url: string; error: string };
 
-/** Videos longer than this get the overview and the zoom; shorter ones show whole in the strip. */
-const LONG_US = 60 * US;
-const VIEW_US = 30 * US;
-const MIN_VIEW_US = 4 * US;
 const STRIP_HEIGHT = 52;
 
 /** 6:21.4, or 1:02:03.5 past an hour. */
@@ -41,6 +37,12 @@ function parseClock(text: string) {
   return parts.reduce((total, p) => total * 60 + Number(p), 0) * US;
 }
 
+/** Where a link's t= points, as YouTube's Share writes it (83, 83s, 1m23s); 0 without one. */
+function linkTime(url: string) {
+  const t = /[?&#]t=(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s?)?(?:[&#]|$)/.exec(url);
+  return t ? ((Number(t[1] ?? 0) * 60 + Number(t[2] ?? 0)) * 60 + Number(t[3] ?? 0)) * US : 0;
+}
+
 /** What a failed lookup or download means here, where the link is to a video rather than a song. */
 function problem(error: string) {
   if (error.startsWith("INVALID_LINK")) return "That isn't a link to a YouTube video. Copy the link from the video's Share button.";
@@ -49,8 +51,8 @@ function problem(error: string) {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-/** 4.0 s under a minute, 1:30 from there. */
-const lengthText = (us: number) => (us < 60 * US ? `${(us / US).toFixed(1)} s` : formatLength(us));
+/** 0.03 s under a second, 4.0 s under a minute, 1:30 from there. */
+const lengthText = (us: number) => (us < 60 * US ? `${(us / US).toFixed(us < US ? 2 : 1)} s` : formatLength(us));
 
 const isTyping = (el: EventTarget | null) => el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
 
@@ -155,7 +157,8 @@ function Dialog() {
 
   const video = "video" in step ? step.video : null;
   return (
-    <div data-scrim className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/45" onPointerDown={(e) => e.target === e.currentTarget && close()}>
+    // Once a video downloads, a press that misses the dialog would throw away the download and the chosen part.
+    <div data-scrim className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/45" onPointerDown={(e) => e.target === e.currentTarget && !video && close()}>
       <div
         ref={dialog}
         role="dialog"
@@ -201,7 +204,9 @@ function Dialog() {
             onChange={(e) => setText(e.target.value)}
             onPaste={(e) => {
               const pasted = e.clipboardData.getData("text").trim();
-              if (!pasted || e.currentTarget.value) return;
+              const input = e.currentTarget;
+              // Into an empty field or over all of it: a new link, looked up at once.
+              if (!pasted || input.selectionStart !== 0 || input.selectionEnd !== input.value.length) return;
               e.preventDefault();
               setText(pasted);
               go(pasted);
@@ -277,7 +282,7 @@ function Dialog() {
               {step.error.startsWith("OFFLINE") ? <WifiOff size={14} className="mt-px shrink-0" /> : <AlertCircle size={14} className="mt-px shrink-0 text-warn" />}
               <span className="min-w-0 flex-1 select-text">{problem(step.error)}</span>
               {!["INVALID_LINK", "PLAYLIST", "SOUND_UNAVAILABLE"].some((code) => step.error.startsWith(code)) && (
-                <Button className="h-7 shrink-0 text-[12px]" onClick={() => go(step.url)}>
+                <Button className="h-7 shrink-0 text-[12px]" onClick={() => go(text)}>
                   Try again
                 </Button>
               )}
@@ -285,7 +290,7 @@ function Dialog() {
           ))}
 
         {(step.kind === "download" || step.kind === "stopped") && (
-          <div className="mt-3 flex h-[clamp(160px,calc(100vh-480px),288px)] flex-col items-center justify-center gap-3 bg-black shadow-[0_0_0_1px_rgb(255_255_255/.07)]">
+          <div className="mt-3 flex h-[clamp(160px,calc(100vh-458px),360px)] flex-col items-center justify-center gap-3 bg-black shadow-[0_0_0_1px_rgb(255_255_255/.07)]">
             {step.kind === "stopped" ? (
               <>
                 <p className="text-[13px] text-muted">The download stopped.</p>
@@ -374,11 +379,9 @@ const Key = ({ children }: { children: string }) => (
 function Chooser({ url, video, preview, onImport, onCancel }: { url: string; video: YoutubeVideo; preview: VideoPreview; onImport: () => void; onCancel: () => void }) {
   const duration = preview.durationUs;
   const frame = Math.round(US / (preview.fps > 0 ? preview.fps : 30));
-  const long = duration > LONG_US;
   const [part, setPart] = useState<Part>({ startUs: 0, endUs: duration });
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [view, setView] = useState({ startUs: 0, lengthUs: long ? VIEW_US : duration });
   const canvas = useRef<HTMLCanvasElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
@@ -386,9 +389,10 @@ function Chooser({ url, video, preview, onImport, onCancel }: { url: string; vid
   const stopAt = useRef<number | null>(null);
   const whole = part.startUs === 0 && part.endUs === duration;
   const locked = useAiLocked();
-  const playButton = useRef<HTMLButtonElement>(null);
-  // Space, I, O and Enter work from the start, rather than typing into the link field.
-  useEffect(() => playButton.current?.focus(), []);
+  const root = useRef<HTMLDivElement>(null);
+  // The handle the arrow keys move, so the key hints can say so.
+  const [nudging, setNudging] = useState<string | null>(null);
+  const focusRoot = () => root.current?.focus({ preventScroll: true });
 
   const seek = (t: number) => {
     t = Math.max(0, Math.min(duration, Math.round(t)));
@@ -397,6 +401,8 @@ function Chooser({ url, video, preview, onImport, onCancel }: { url: string; vid
     api.youtubePreviewSeek(t);
   };
   const play = () => {
+    // The arrows step the playhead again, rather than moving a handle grabbed before.
+    if (document.activeElement?.getAttribute("role") === "slider") focusRoot();
     if (playing) return api.youtubePreviewPause();
     let from = time;
     if (!whole && from >= part.endUs - frame && from <= part.endUs + frame) {
@@ -409,6 +415,20 @@ function Chooser({ url, video, preview, onImport, onCancel }: { url: string; vid
   };
   const setStart = (t: number) => setPart((p) => ({ ...p, startUs: Math.max(0, Math.min(p.endUs - frame, Math.round(t))) }));
   const setEnd = (t: number) => setPart((p) => ({ ...p, endUs: Math.min(duration, Math.max(p.startUs + frame, Math.round(t))) }));
+  // I, O and typed times past the other edge begin a new part there, as in Final Cut, rather than squeezing it to a frame.
+  const markStart = (t: number) =>
+    setPart((p) => (t <= p.endUs - frame ? { ...p, startUs: Math.max(0, Math.round(t)) } : { startUs: Math.min(duration - frame, Math.round(t)), endUs: duration }));
+  const markEnd = (t: number) => setPart((p) => (t >= p.startUs + frame ? { ...p, endUs: Math.min(duration, Math.round(t)) } : { startUs: 0, endUs: Math.max(frame, Math.round(t)) }));
+
+  // Space, I, O and Enter work from the start, rather than typing into the link field, and a link's t= opens
+  // where it points, as on YouTube.
+  useEffect(() => {
+    focusRoot();
+    const at = Math.min(duration, linkTime(url));
+    if (at > 0) seek(at);
+    // Runs once per video; the chooser is keyed by it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useFrameStream(preview.url, canvas, (t, framePlaying) => {
     if (!framePlaying) return;
@@ -455,17 +475,6 @@ function Chooser({ url, video, preview, onImport, onCancel }: { url: string; vid
     };
   }, []);
 
-  // The strip keeps the playhead in view, as playing or a typed time can move it out.
-  useEffect(() => {
-    setView((v) => (time >= v.startUs && time <= v.startUs + v.lengthUs ? v : { ...v, startUs: clampView(time - v.lengthUs * 0.1, v.lengthUs, duration) }));
-  }, [time, duration]);
-
-  const zoom = (by: number) =>
-    setView((v) => {
-      const lengthUs = Math.max(MIN_VIEW_US, Math.min(duration, v.lengthUs * by));
-      return { lengthUs, startUs: clampView(time - (time - v.startUs) * (lengthUs / v.lengthUs), lengthUs, duration) };
-    });
-
   const add = () => {
     if (locked) return;
     onImport();
@@ -482,10 +491,10 @@ function Chooser({ url, video, preview, onImport, onCancel }: { url: string; vid
           play();
           return true;
         case "i":
-          setStart(time);
+          markStart(time);
           return true;
         case "o":
-          setEnd(time);
+          markEnd(time);
           return true;
         case "ArrowLeft":
         case "ArrowRight":
@@ -519,8 +528,19 @@ function Chooser({ url, video, preview, onImport, onCancel }: { url: string; vid
   const length = part.endUs - part.startUs;
 
   return (
-    <div onKeyDown={onKeyDown} className="flex min-h-0 flex-col">
-      <div ref={stage} className="relative mt-3 flex h-[clamp(160px,calc(100vh-480px),288px)] items-center justify-center bg-black shadow-[0_0_0_1px_rgb(255_255_255/.07)]">
+    <div
+      ref={root}
+      tabIndex={-1}
+      onKeyDown={onKeyDown}
+      onFocus={(e) => setNudging((e.target as HTMLElement).dataset.edge ?? null)}
+      onBlur={(e) => {
+        setNudging(null);
+        // Enter or Esc in a time field, or a click on plain text, drops focus to the page, where these keys do nothing.
+        if (!e.relatedTarget) requestAnimationFrame(() => document.activeElement === document.body && focusRoot());
+      }}
+      className="flex min-h-0 flex-col outline-none"
+    >
+      <div ref={stage} className="relative mt-3 flex h-[clamp(160px,calc(100vh-458px),360px)] items-center justify-center bg-black shadow-[0_0_0_1px_rgb(255_255_255/.07)]">
         {/* Square corners and no blurred shadow, as the editor's preview: WebKitGTK would otherwise mask or blank the canvas. */}
         <canvas ref={canvas} style={{ width: fit.w, height: fit.h }} aria-label={`Preview of ${video.title}`} />
         {previewError && (
@@ -533,10 +553,11 @@ function Chooser({ url, video, preview, onImport, onCancel }: { url: string; vid
 
       <div className="mt-3 flex h-8 items-center gap-2.5">
         <button
-          ref={playButton}
           type="button"
           aria-label={playing ? "Pause (Space)" : "Play (Space)"}
           title={playing ? "Pause (Space)" : "Play (Space)"}
+          // A click leaves the keys with the chooser, so Enter still imports; Tab and Enter press it like any button.
+          onMouseDown={(e) => e.preventDefault()}
           onClick={play}
           className="flex h-7 w-7 items-center justify-center rounded-full bg-fg text-black transition-transform duration-[120ms] ease-out active:scale-95"
         >
@@ -546,33 +567,30 @@ function Chooser({ url, video, preview, onImport, onCancel }: { url: string; vid
           <span className="font-medium text-fg">{clock(time)}</span>
           <span className="text-muted"> / {clock(duration)}</span>
         </span>
-        {long && (
-          <div className="ml-auto flex items-center gap-0.5">
-            <IconButton label="Zoom out" round disabled={view.lengthUs >= duration} onClick={() => zoom(2)}>
-              <ZoomOut size={15} />
-            </IconButton>
-            <IconButton label="Zoom in" round disabled={view.lengthUs <= MIN_VIEW_US} onClick={() => zoom(0.5)}>
-              <ZoomIn size={15} />
-            </IconButton>
-          </div>
-        )}
       </div>
 
-      {long && <Overview duration={duration} view={view} part={whole ? null : part} time={time} onView={(startUs) => setView((v) => ({ ...v, startUs: clampView(startUs, v.lengthUs, duration) }))} />}
-      <Strip duration={duration} frame={frame} view={view} part={part} time={time} onSeek={seek} onStart={setStart} onEnd={setEnd} />
+      <Strip duration={duration} frame={frame} aspect={aspect} part={part} time={time} onSeek={seek} onStart={setStart} onEnd={setEnd} onGrab={focusRoot} />
 
       <div className="mt-3 flex min-h-7 flex-wrap items-center gap-x-2.5 gap-y-2 text-[12px] text-muted">
         <label className="flex items-center gap-1.5">
           Start
-          <NumberInput label="Start of the part" value={part.startUs} min={0} max={part.endUs - frame} step={100_000} format={clock} parse={parseClock} onChange={(v) => { setStart(v); seek(v); }} className="w-[76px]" />
+          <NumberInput label="Start of the part" value={part.startUs} min={0} max={duration - frame} step={100_000} format={clock} parse={parseClock} onChange={(v) => { markStart(v); seek(v); }} className="w-[76px]" />
         </label>
         <label className="flex items-center gap-1.5">
           End
-          <NumberInput label="End of the part" value={part.endUs} min={part.startUs + frame} max={duration} step={100_000} format={clock} parse={parseClock} onChange={(v) => { setEnd(v); seek(v); }} className="w-[76px]" />
+          <NumberInput label="End of the part" value={part.endUs} min={frame} max={duration} step={100_000} format={clock} parse={parseClock} onChange={(v) => { markEnd(v); seek(v); }} className="w-[76px]" />
         </label>
         <span className="tabular text-fg">{lengthText(length)}</span>
         {!whole && (
-          <Button pill className="ml-auto h-7 text-[12px]" onClick={() => setPart({ startUs: 0, endUs: duration })}>
+          <Button
+            pill
+            className="ml-auto h-7 text-[12px]"
+            onClick={() => {
+              setPart({ startUs: 0, endUs: duration });
+              // The button goes with the part; the keys stay with the chooser.
+              focusRoot();
+            }}
+          >
             Use whole video
           </Button>
         )}
@@ -589,7 +607,7 @@ function Chooser({ url, video, preview, onImport, onCancel }: { url: string; vid
           </span>
           <span className="flex items-center gap-1">
             <Key>←</Key>
-            <Key>→</Key> Step
+            <Key>→</Key> {nudging === "start" ? "Move start" : nudging === "end" ? "Move end" : "Step"}
           </span>
         </div>
         <Button pill onClick={onCancel}>
@@ -603,63 +621,46 @@ function Chooser({ url, video, preview, onImport, onCancel }: { url: string; vid
   );
 }
 
-const clampView = (startUs: number, lengthUs: number, duration: number) => Math.max(0, Math.min(duration - lengthUs, startUs));
-
-/** The whole of a long video as a thin track: the zoomed stretch as a box, the part in accent and the playhead. */
-function Overview({ duration, view, part, time, onView }: { duration: number; view: { startUs: number; lengthUs: number }; part: Part | null; time: number; onView: (startUs: number) => void }) {
-  const at = (us: number) => `${(us / duration) * 100}%`;
-  const drag = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const move = (x: number) => onView(((x - rect.left) / rect.width) * duration - view.lengthUs / 2);
-    move(e.clientX);
-    const onMove = (ev: PointerEvent) => move(ev.clientX);
-    const up = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", up);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", up);
-  };
-  return (
-    <div className="relative mt-1.5 mb-0.5 h-3.5 cursor-pointer" onPointerDown={drag} title="Drag to move the zoomed stretch">
-      <div className="absolute inset-x-0 top-[5px] h-1 rounded-full bg-white/[.13]" />
-      {part && <div className="absolute top-1 h-1.5 min-w-[3px] rounded-[2px] bg-accent" style={{ left: at(part.startUs), width: at(part.endUs - part.startUs) }} />}
-      <div className="absolute top-0 h-3.5 min-w-2.5 rounded-[4px] bg-white/[.08] shadow-[inset_0_0_0_1px_rgb(255_255_255/.38)]" style={{ left: at(view.startUs), width: at(view.lengthUs) }} />
-      <div className="absolute top-px -ml-px h-3 w-0.5 rounded-[1px] bg-fg" style={{ left: at(time) }} />
-    </div>
-  );
-}
-
 /** Ruler steps that leave room for a label: 1, 2, 5, 10, 15, 30 s, then minutes. */
 const STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800].map((s) => s * US);
 
+/** A pressed handle that rests this long zooms the strip in around it, as on iPhone. */
+const HOLD_MS = 400;
+
+type View = { startUs: number; lengthUs: number };
+
 /**
- * The zoomed stretch as a filmstrip with a ruler, the part between two handles and the playhead.
- * Dragging the strip scrubs; dragging a handle moves that edge, showing the frame there.
+ * The whole video as a filmstrip with a ruler, the part between two handles and the playhead.
+ * Dragging the strip scrubs; dragging a handle moves that edge, showing the frame there, and leaves it focused
+ * so the arrow keys fine-tune it. Holding a handle still zooms in to about a frame a pixel until it is let go.
  */
 function Strip({
   duration,
   frame,
-  view,
+  aspect,
   part,
   time,
   onSeek,
   onStart,
   onEnd,
+  onGrab,
 }: {
   duration: number;
   frame: number;
-  view: { startUs: number; lengthUs: number };
+  aspect: number;
   part: Part;
   time: number;
   onSeek: (t: number) => void;
   onStart: (t: number) => void;
   onEnd: (t: number) => void;
+  onGrab: () => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
-  const [strip, setStrip] = useState<{ fromUs: number; film: Filmstrip } | null>(null);
+  const [zoom, setZoom] = useState<View | null>(null);
+  const view = zoom ?? { startUs: 0, lengthUs: duration };
+  const [whole, setWhole] = useState<Filmstrip | null>(null);
+  const [zoomed, setZoomed] = useState<{ view: View; film: Filmstrip } | null>(null);
 
   useEffect(() => {
     const el = box.current;
@@ -669,16 +670,16 @@ function Strip({
     return () => ro.disconnect();
   }, []);
 
-  // Frames for the stretch in view; the old ones stay, placed by their own times, until the new ones arrive.
+  // As many frames as fit side by side at the video's own shape, but no more than thumbs::filmstrip_size gives
+  // (one each half second, 40 in all), which would leave the rest of the strip without frames.
+  const count = Math.max(1, Math.min(Math.ceil(width / (STRIP_HEIGHT * aspect)), Math.floor(duration / 500_000), 40));
   useEffect(() => {
     if (width === 0) return;
     let stale = false;
     const timer = window.setTimeout(async () => {
-      const frameWidth = (STRIP_HEIGHT * 16) / 9;
-      const count = Math.max(1, Math.ceil(width / frameWidth));
       try {
-        const film = await api.youtubeFilmstrip(view.startUs, view.lengthUs / count, count);
-        if (!stale) setStrip({ fromUs: view.startUs, film });
+        const film = await api.youtubeFilmstrip(0, duration / count, count);
+        if (!stale) setWhole(film);
       } catch {
         // The preview closed meanwhile; nothing to show.
       }
@@ -687,32 +688,70 @@ function Strip({
       stale = true;
       window.clearTimeout(timer);
     };
-  }, [view.startUs, view.lengthUs, width]);
+  }, [duration, width, count]);
+  // The whole video's frames stay, placed by their own times, until the zoom's arrive.
+  useEffect(() => {
+    if (!zoom) return;
+    let stale = false;
+    api.youtubeFilmstrip(zoom.startUs, zoom.lengthUs / count, count).then(
+      (film) => !stale && setZoomed({ view: zoom, film }),
+      () => {},
+    );
+    return () => {
+      stale = true;
+    };
+  }, [zoom, count]);
 
   const x = (us: number) => ((us - view.startUs) / view.lengthUs) * width;
-  const timeAt = (clientX: number) => {
-    const rect = box.current!.getBoundingClientRect();
-    return view.startUs + ((clientX - rect.left) / rect.width) * view.lengthUs;
-  };
-  const follow = (e: React.PointerEvent, to: (t: number) => void) => {
+  const follow = (e: React.PointerEvent, to: (t: number) => void, edgeUs?: number) => {
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
+    const rect = box.current!.getBoundingClientRect();
+    let v = view;
+    const timeAt = (px: number) => v.startUs + (px / rect.width) * v.lengthUs;
+    const pxAt = (us: number) => ((us - v.startUs) / v.lengthUs) * rect.width;
+    let px = e.clientX - rect.left;
+    // A handle moves as far as the pointer does, wherever on it the pointer caught it.
+    let grip = edgeUs === undefined ? 0 : pxAt(edgeUs) - px;
+    let t = 0;
     let raf = 0;
-    let last = e.clientX;
+    let hold = 0;
+    let restAt = px;
     const apply = () => {
       raf = 0;
-      // Inside the stretch in view: past its edge the view would move under the pointer and run away.
-      const t = Math.max(view.startUs, Math.min(view.startUs + view.lengthUs, timeAt(last)));
+      t = Math.max(v.startUs, Math.min(v.startUs + v.lengthUs, timeAt(px + grip)));
       to(t);
     };
+    const zoomIn = () => {
+      const lengthUs = rect.width * frame;
+      if (v.lengthUs < duration || duration < lengthUs * 2) return;
+      v = { lengthUs, startUs: Math.max(0, Math.min(duration - lengthUs, t - ((px + grip) / rect.width) * lengthUs)) };
+      grip = pxAt(t) - px;
+      setZoom(v);
+    };
+    const rest = () => {
+      window.clearTimeout(hold);
+      if (edgeUs !== undefined) hold = window.setTimeout(zoomIn, HOLD_MS);
+    };
     apply();
+    rest();
     const onMove = (ev: PointerEvent) => {
-      last = ev.clientX;
+      px = ev.clientX - rect.left;
+      if (Math.abs(px - restAt) > 3) {
+        restAt = px;
+        rest();
+      }
       if (!raf) raf = requestAnimationFrame(apply);
     };
     const up = () => {
-      cancelAnimationFrame(raf);
+      window.clearTimeout(hold);
+      // Where the pointer let go, also when that was within the frame it last moved in.
+      if (raf) {
+        cancelAnimationFrame(raf);
+        apply();
+      }
+      setZoom(null);
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", up);
     };
@@ -722,6 +761,10 @@ function Strip({
   const edge = (to: (t: number) => void) => (t: number) => {
     to(t);
     onSeek(t);
+  };
+  const grabEdge = (to: (t: number) => void, value: number) => (e: React.PointerEvent<HTMLDivElement>) => {
+    e.currentTarget.focus({ preventScroll: true });
+    follow(e, edge(to), value);
   };
   const handleKeys = (to: (t: number) => void, value: number) => (e: React.KeyboardEvent) => {
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
@@ -733,15 +776,27 @@ function Strip({
   const step = STEPS.find((s) => (s / view.lengthUs) * width >= 64) ?? STEPS[STEPS.length - 1];
   const ticks: number[] = [];
   for (let t = Math.ceil(view.startUs / step) * step; t <= view.startUs + view.lengthUs; t += step) ticks.push(t);
+  const strip = zoom && zoomed?.view === zoom ? zoomed : whole && { view: { startUs: 0, lengthUs: duration }, film: whole };
   const film = strip?.film;
-  const from = strip?.fromUs ?? 0;
-  const shown = film ? { w: (film.frameWidth * STRIP_HEIGHT) / film.frameHeight, slot: (film.intervalUs / view.lengthUs) * width } : null;
-  const left = Math.max(0, x(part.startUs));
-  const right = Math.min(width, x(part.endUs));
-  const handle = "absolute top-[-2px] bottom-[-2px] z-10 flex w-2 cursor-ew-resize items-center justify-center bg-accent outline-offset-2 after:h-3.5 after:w-0.5 after:rounded-[1px] after:bg-black/55 focus-visible:outline-2 focus-visible:outline-accent";
+  // Frames at their own width side by side, each the one at its time, so a short video repeats some in order.
+  const tileWidth = strip ? (strip.film.frameWidth * STRIP_HEIGHT) / strip.film.frameHeight : 0;
+  const tiles = strip
+    ? Array.from({ length: Math.ceil(width / tileWidth) }, (_, tile) => {
+        const t = view.startUs + (((tile + 0.5) * tileWidth) / width) * view.lengthUs;
+        return Math.max(0, Math.min(strip.film.count - 1, Math.floor((t - strip.view.startUs) / strip.film.intervalUs)));
+      })
+    : [];
+  const inView = (us: number) => us >= view.startUs && us <= view.startUs + view.lengthUs;
+  const left = Math.max(0, Math.min(width, x(part.startUs)));
+  const right = Math.max(0, Math.min(width, x(part.endUs)));
+  // The visible handle is the timeline's 8 px; its ::before widens what the pointer can catch outwards. One out of
+  // the zoomed stretch hides but stays, so it keeps the focus.
+  const handle =
+    "absolute top-4 z-10 flex h-14 w-2 cursor-ew-resize items-center justify-center bg-accent outline-offset-2 before:absolute before:inset-y-0 after:h-3.5 after:w-0.5 after:rounded-[1px] after:bg-black/55 focus:outline-2 focus:outline-accent";
+  const hidden = (us: number) => (inView(us) ? undefined : { opacity: 0, pointerEvents: "none" as const });
 
   return (
-    <div ref={box} className="relative mt-1 select-none">
+    <div ref={box} data-zoomed={zoom ? "" : undefined} className="relative mt-1 select-none">
       <div className="relative h-[18px]" aria-hidden>
         {ticks.filter((t) => x(t) >= 14 && x(t) <= width - 14).map((t) => (
           <span key={t} className="tabular absolute bottom-1.5 -translate-x-1/2 text-[11px] leading-[11px] text-muted" style={{ left: x(t) }}>
@@ -752,60 +807,60 @@ function Strip({
       <div
         data-strip={film ? "ready" : "loading"}
         className={`relative h-[52px] cursor-pointer overflow-hidden rounded-md bg-white/[.04] shadow-[inset_0_0_0_1px_rgb(255_255_255/.06)] ${film ? "" : "skeleton"}`}
-        onPointerDown={(e) => follow(e, onSeek)}
+        onPointerDown={(e) => {
+          onGrab();
+          follow(e, onSeek);
+        }}
       >
-        {film &&
-          shown &&
-          Array.from({ length: film.count }, (_, i) => (
+        {strip &&
+          tiles.map((frame, tile) => (
             <div
-              key={i}
+              key={tile}
               className="absolute top-0 h-full"
               style={{
-                left: x(from + i * film.intervalUs),
-                width: shown.slot + 1,
-                backgroundImage: `url(${film.url})`,
-                backgroundSize: `${shown.w * film.count}px ${STRIP_HEIGHT}px`,
-                backgroundPosition: `${-(i * shown.w) + (shown.slot - shown.w) / 2}px 0`,
+                left: tile * tileWidth,
+                width: tileWidth,
+                backgroundImage: `url(${strip.film.url})`,
+                backgroundSize: `${tileWidth * strip.film.count}px ${STRIP_HEIGHT}px`,
+                backgroundPosition: `${-frame * tileWidth}px 0`,
               }}
             />
           ))}
         <div className="absolute inset-y-0 left-0 bg-black/60" style={{ width: left }} />
-        <div className="absolute inset-y-0 right-0 bg-black/60" style={{ width: Math.max(0, width - right) }} />
+        <div className="absolute inset-y-0 right-0 bg-black/60" style={{ width: width - right }} />
       </div>
-      {right > 0 && left < width && (
-        <div className="pointer-events-none absolute top-[18px] h-[52px] border-y-2 border-accent" style={{ left, width: Math.max(0, right - left) }} />
-      )}
-      {x(part.startUs) >= -4 && x(part.startUs) <= width && (
-        <div
-          role="slider"
-          tabIndex={0}
-          aria-label="Start of the part"
-          aria-valuemin={0}
-          aria-valuemax={part.endUs}
-          aria-valuenow={part.startUs}
-          aria-valuetext={clock(part.startUs)}
-          className={`${handle} rounded-l-[5px]`}
-          style={{ left: x(part.startUs) - 8, top: 16, bottom: "auto", height: 56 }}
-          onPointerDown={(e) => follow(e, edge(onStart))}
-          onKeyDown={handleKeys(onStart, part.startUs)}
-        />
-      )}
-      {x(part.endUs) >= 0 && x(part.endUs) <= width + 4 && (
-        <div
-          role="slider"
-          tabIndex={0}
-          aria-label="End of the part"
-          aria-valuemin={part.startUs}
-          aria-valuemax={duration}
-          aria-valuenow={part.endUs}
-          aria-valuetext={clock(part.endUs)}
-          className={`${handle} rounded-r-[5px]`}
-          style={{ left: x(part.endUs), top: 16, bottom: "auto", height: 56 }}
-          onPointerDown={(e) => follow(e, edge(onEnd))}
-          onKeyDown={handleKeys(onEnd, part.endUs)}
-        />
-      )}
-      {time >= view.startUs && time <= view.startUs + view.lengthUs && (
+      <div className="pointer-events-none absolute top-[18px] h-[52px] border-y-2 border-accent" style={{ left, width: right - left }} />
+      <div
+        role="slider"
+        tabIndex={0}
+        data-edge="start"
+        aria-label="Start of the part"
+        aria-valuemin={0}
+        aria-valuemax={part.endUs}
+        aria-valuenow={part.startUs}
+        aria-valuetext={clock(part.startUs)}
+        title="Drag to move the start; hold still to zoom in"
+        className={`${handle} rounded-l-[5px] before:-left-2.5 before:right-0`}
+        style={{ left: left - 8, ...hidden(part.startUs) }}
+        onPointerDown={grabEdge(onStart, part.startUs)}
+        onKeyDown={handleKeys(onStart, part.startUs)}
+      />
+      <div
+        role="slider"
+        tabIndex={0}
+        data-edge="end"
+        aria-label="End of the part"
+        aria-valuemin={part.startUs}
+        aria-valuemax={duration}
+        aria-valuenow={part.endUs}
+        aria-valuetext={clock(part.endUs)}
+        title="Drag to move the end; hold still to zoom in"
+        className={`${handle} rounded-r-[5px] before:left-0 before:-right-2.5`}
+        style={{ left: right, ...hidden(part.endUs) }}
+        onPointerDown={grabEdge(onEnd, part.endUs)}
+        onKeyDown={handleKeys(onEnd, part.endUs)}
+      />
+      {inView(time) && (
         // Whole pixels and no transform: WebKitGTK left slivers of the knob behind where it moved from.
         <div className="pointer-events-none absolute top-1 z-20 h-[66px] w-0.5 bg-fg" style={{ left: Math.round(x(time)) - 1 }}>
           <div className="absolute -top-0.5 -left-1 h-3 w-2.5 rounded-[3px_3px_5px_5px] bg-fg" />
