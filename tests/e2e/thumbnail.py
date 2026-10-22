@@ -26,6 +26,10 @@ for (let i = 0; i < d.length; i += 4) if (d[i + 1] > 180 && d[i] < 110 && d[i + 
 const cover = window.__nuzky.cover.getState();
 return {green: n / (d.length / 4), width: c.width, height: c.height, time: Number(stage.dataset.time), waiting: stage.dataset.mask === 'missing',
         hidden: cover.hidden, revision: Number(stage.dataset.revision), now: window.__nuzky.store.getState().snap.revision};"""
+# What is drawn over the cover besides the selection box, however small.
+OVER_COVER = """const stage = document.querySelector('[data-testid=cover-stage]'); const c = stage.querySelector('[data-testid=cover-canvas]');
+return [...stage.querySelectorAll('*')].filter((e) => !e.contains(c) && !e.closest('[data-testid=layer-overlay]') && e.getClientRects().length > 0)
+  .map((e) => e.outerHTML.slice(0, 120));"""
 # Sets a field as typing does: WebKitWebDriver cannot send keys to it.
 TYPE = """const t = document.querySelector(arguments[0]); t.focus();
 const proto = t instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
@@ -258,6 +262,7 @@ def thumbnail(r):
     wide_shown = wait(lambda: (v := shown(r)) and not v['waiting'] and v['revision'] == v['now'] and (v['hidden'] or [0])[0] > 0 and v, 120)
     r.check('the YouTube thumbnail on screen is 16:9 with the hook partly behind the person',
             wide_shown and wide_shown['green'] > 0.002 and 0 < (wide_shown['hidden'] or [0])[0] < 0.95, wide_shown)
+    r.check('nothing but the selection box is drawn over the YouTube thumbnail', not (over := r.s.run(OVER_COVER)), over)
     r.shot('youtube-behind')
 
     # The smallest window keeps the cover, its bar and the frames usable.
@@ -322,11 +327,11 @@ def thumbnail(r):
         r.check('the exported cover has the hook behind the person, as the editor shows it',
                 redone and front and abs(green - redone['green']) < 0.01 and green < front['green'] * 0.95,
                 {'export': green, 'editor': redone, 'front': front})
-        # The cover in the editor is how it will look on the profile: nothing is drawn over it.
         click(r, '9:16 Cover')
         r.s.run("window.__nuzky.cover.setState({selected: null})")
         wait(lambda: (v := shown(r)) and v['revision'] == v['now'] and not v['waiting'], 10)
         time.sleep(0.5)
+        r.check('nothing is drawn over the cover', not (over := r.s.run(OVER_COVER)), over)
         rect = r.s.run("""const b = document.querySelector('[data-testid=cover-canvas]').getBoundingClientRect();
             return [b.left, b.top, b.right, b.bottom, window.innerWidth];""")
         r.shot('cover-as-exported')
@@ -335,7 +340,7 @@ def thumbnail(r):
         # At half size the editor's and Pillow's resampling of the same detailed frame stay apart from an overlay.
         half = (on_screen.width // 2, on_screen.height // 2)
         differs = changed_share(on_screen.resize(half, Image.BOX), image.resize(half, Image.BOX))
-        r.check('the cover on screen is the exported cover, with nothing drawn over it', differs < 0.03, differs)
+        r.check('the cover on screen is the exported cover', differs < 0.03, differs)
     stamp = png.read_bytes()
     refused = export('cover_9x16', png, False)
     r.check('an existing file is not replaced without asking', not refused['ok'] and 'DESTINATION_EXISTS' in refused['error']
