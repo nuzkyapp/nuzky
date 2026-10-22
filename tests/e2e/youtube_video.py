@@ -191,9 +191,10 @@ def youtube_video(r):
             held and abs(moved - 30 * FRAME) <= 2 * FRAME, moved / FRAME)
     r.check('letting go shows the whole video again', wait(lambda: not zoomed(r), 2))
     press('space')
-    # Until the preview reports it plays, its seek to the part's start reports it paused, so a second Space then plays again.
+    # It plays the part from its start. Until the preview shows it playing there, the seek to the start reports it
+    # paused, so a second Space at once would play again.
     r.check('Space plays and hands the arrows back to the playhead',
-            wait(lambda: playing(r) and frame_time(r) > 300_000, 3) and in_chooser(r) and 'Move end' not in text(r), text(r))
+            wait(lambda: playing(r) and 300_000 < frame_time(r) < 10_000_000, 3) and in_chooser(r) and 'Move end' not in text(r), text(r))
     press('space')
     r.check('Space again pauses', wait(lambda: not playing(r), 2) and (time.sleep(0.5) or not playing(r)))
 
