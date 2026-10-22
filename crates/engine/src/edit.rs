@@ -715,13 +715,16 @@ impl Project {
 
     /// Lays out main-track clips back to back. Existing clips keep their order; a clip
     /// that was moved or added goes before the first clip whose middle is past `start`.
-    fn pack_main(&mut self, moved: Option<(&str, i64)>) {
-        let Some(main) = self.track_index(MAIN_TRACK) else { return };
+    /// Returns where that clip starts and how long it is when clips follow it.
+    fn pack_main(&mut self, moved: Option<(&str, i64)>) -> Option<(i64, i64)> {
+        let main = self.track_index(MAIN_TRACK)?;
         let clips = &mut self.tracks[main].clips;
         let moved_clip = moved.and_then(|(id, _)| clips.iter().position(|c| c.id == id)).map(|i| clips.remove(i));
         clips.sort_by_key(|c| c.start_us);
+        let mut followed = None;
         if let (Some(clip), Some((_, start))) = (moved_clip, moved) {
             let at = clips.iter().position(|c| c.start_us + c.duration_us / 2 > start).unwrap_or(clips.len());
+            followed = (at < clips.len()).then_some(at);
             clips.insert(at, clip);
         }
         let mut t = 0;
@@ -729,6 +732,7 @@ impl Project {
             c.start_us = t;
             t += c.duration_us;
         }
+        followed.map(|i| (clips[i].start_us, clips[i].duration_us))
     }
 
     /// Splits a clip at `at_us` (strictly inside it) and returns the index of the second half.
@@ -909,6 +913,8 @@ impl Project {
     pub fn apply(&mut self, cmd: EditCmd) -> Result<EditOutcome> {
         let mut out = EditOutcome::default();
         let mut moved: Option<(String, i64)> = None;
+        let along_main = matches!(&cmd, EditCmd::MoveClip { clip_id, .. }
+            if self.find_clip(clip_id).is_some_and(|(ti, _)| self.tracks[ti].id == MAIN_TRACK));
         match cmd {
             EditCmd::AddAssets { .. }
             | EditCmd::RemoveAsset { .. }
@@ -963,7 +969,13 @@ impl Project {
                 self.reel_candidates.sort_by_key(|c| c.start_us);
             }
         }
-        self.pack_main(moved.as_ref().map(|(id, s)| (id.as_str(), *s)));
+        // A clip that comes onto the main track pushes the clips after it along, so the other tracks open the same
+        // time there and captions and overlays stay over their picture, as when pasting. Moving one along it does not.
+        if let Some((at, duration)) = self.pack_main(moved.as_ref().map(|(id, s)| (id.as_str(), *s)))
+            && !along_main
+        {
+            self.ripple_others(at, duration, min_duration(self));
+        }
         self.tidy();
         self.clamp_timing_windows();
         Ok(out)
@@ -2431,6 +2443,45 @@ mod tests {
         })
         .unwrap();
         p
+    }
+
+    #[test]
+    fn a_clip_put_between_main_track_clips_opens_its_time_on_the_other_tracks() {
+        let mut p = project();
+        let add = |p: &mut Project, cmd| p.apply(cmd).unwrap().select[0].clone();
+        let first = add(&mut p, EditCmd::AddClip { asset_id: "a".into(), start_us: None, track_id: None });
+        add(&mut p, EditCmd::AddClip { asset_id: "a".into(), start_us: None, track_id: None });
+        let music = add(&mut p, EditCmd::AddClip { asset_id: "m".into(), start_us: Some(0), track_id: None });
+        let style: TextStyle =
+            serde_json::from_value(serde_json::json!({"fontSize": 60.0, "color": "#ffffff"})).unwrap();
+        let text = |start_us| EditCmd::AddText { start_us, text: "Hi".into(), style: style.clone() };
+        let title = add(&mut p, text(6_000_000));
+        let starts = |p: &Project| {
+            [&title, &music].map(|id| p.find_clip(id).map(|(ti, ci)| p.tracks[ti].clips[ci].start_us).unwrap())
+        };
+        // 3 s of b between the two 5 s clips: the second one and the title over it move on, the music stays.
+        p.apply(EditCmd::AddClip { asset_id: "b".into(), start_us: Some(5_000_000), track_id: None }).unwrap();
+        assert_eq!((p.tracks[0].clips[2].start_us, starts(&p)), (8_000_000, [9_000_000, 0]));
+        // Appended at the end or moved along the main track, nothing else moves, also text after the end.
+        let end = add(&mut p, text(14_000_000));
+        let end_start = |p: &Project| p.find_clip(&end).map(|(ti, ci)| p.tracks[ti].clips[ci].start_us).unwrap();
+        p.apply(EditCmd::AddClip { asset_id: "b".into(), start_us: None, track_id: None }).unwrap();
+        let along = EditCmd::MoveClip {
+            clip_id: first.clone(),
+            track_id: Some(MAIN_TRACK.into()),
+            start_us: 9_000_000,
+            new_track: None,
+        };
+        p.apply(along).unwrap();
+        assert_eq!((starts(&p), end_start(&p)), ([9_000_000, 0], 14_000_000));
+        // A duplicate goes in right after its original, now 3 to 8 s.
+        p.apply(EditCmd::DuplicateClip { clip_id: first }).unwrap();
+        assert_eq!((starts(&p), end_start(&p)), ([14_000_000, 0], 19_000_000));
+        // A picture in picture dragged down to the start of the main track pushes everything by its 3 s.
+        let pip = add(&mut p, EditCmd::AddPictureInPicture { asset_id: "b".into(), start_us: 0, duration_us: None });
+        let down = EditCmd::MoveClip { clip_id: pip, track_id: Some(MAIN_TRACK.into()), start_us: 0, new_track: None };
+        p.apply(down).unwrap();
+        assert_eq!((starts(&p), end_start(&p)), ([17_000_000, 0], 22_000_000));
     }
 
     #[test]

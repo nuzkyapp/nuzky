@@ -65,3 +65,44 @@ def drop_flow(r):
     r.check('with snapping off the line follows the pointer', line is not None and abs(line - end - 5) < 2, [line, end])
     r.check('and the clip lands under the pointer', start is not None and abs(start - (PIP_US + 5 / ZOOM * 1e6)) < 20_000, start)
     r.check('no error toast', not r.errors(), r.errors())
+
+
+@flow('insert', 'Media dropped on the cut between two clips of the main track goes in there and pushes the captions and '
+      'titles after it along, so they stay over their picture; the captions before it stay, and one undo takes it back')
+def insert_flow(r):
+    Image.new('RGB', (1280, 720), (230, 30, 30)).save(r.work / 'red.png')
+    r.import_media(FIXTURES / 'talk.mp4', FIXTURES / 'wide.mp4', r.work / 'red.png')
+    r.add_clip('talk.mp4')
+    r.add_clip('wide.mp4')
+    talk, wide = r.track()
+    segment = lambda clip, text: {'startUs': clip['startUs'] + 200_000, 'endUs': clip['startUs'] + 900_000, 'text': text, 'words': []}
+    r.s.call("window.__nuzky.store.getState().edit({type: 'addCaptions', segments: arguments[0],"
+             " style: {fontSize: 60, color: '#ffffff'}})", [segment(talk, 'Talk'), segment(wide, 'Wide')])
+    r.s.call("window.__nuzky.store.getState().edit({type: 'addText', startUs: arguments[0], text: 'Title',"
+             " style: {fontSize: 80, color: '#ffffff'}})", wide['startUs'] + 500_000)
+    texts = lambda: {c['text']: c['startUs'] for t in r.state()['tracks'] if t['kind'] == 'text' for c in t['clips']}
+    r.check('a caption over each clip and a title over the second',
+            wait(lambda: texts() == {'Talk': talk['startUs'] + 200_000, 'Wide': wide['startUs'] + 200_000,
+                                     'Title': wide['startUs'] + 500_000}, 5), texts())
+    before = texts()
+    r.s.run('const st = window.__nuzky.store.getState(); st.select([]); st.seek(0); st.setZoom(arguments[0])', ZOOM)
+    clock.sleep(0.5)
+
+    _, top, right, bottom = r.s.run(RECT, talk['id'])
+    r.s.run(DRAG_TILE, 'red.png', right, (top + bottom) / 2)
+    clock.sleep(0.5)
+    r.shot('over-cut')
+    r.s.run(RELEASE, right, (top + bottom) / 2)
+    wait(lambda: len(r.track()) == 3, 10)
+    main = r.track()
+    names = {a['id']: a['name'] for a in r.state()['assets']}
+    r.check('the picture goes in between the two clips', [names[c['assetId']] for c in main] == ['talk.mp4', 'red.png', 'wide.mp4'],
+            main)
+    pushed = main[1]['durationUs']
+    r.check('the caption and the title over the second clip move with it, the caption over the first stays',
+            texts() == {'Talk': before['Talk'], 'Wide': main[2]['startUs'] + 200_000, 'Title': main[2]['startUs'] + 500_000}
+            and main[2]['startUs'] == wide['startUs'] + pushed, (texts(), main))
+    r.shot('inserted')
+    r.s.call('window.__nuzky.store.getState().undo()')
+    r.check('one undo takes the picture out and puts the texts back', wait(lambda: len(r.track()) == 2 and texts() == before, 10), texts())
+    r.check('no error toast', not r.errors(), r.errors())
