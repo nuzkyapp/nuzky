@@ -400,6 +400,35 @@ def home(r):
     unexpected = [e for e in r.errors() if 'so it was not moved to the Trash' not in e]
     r.check('no other error toast', not unexpected, unexpected)
 
+    # A cover made just before going home: the list shown at once has the project as it was, before its save lands.
+    # The card shows the cover once it is saved, without a focus event or a restart, and nothing is listed after that.
+    save_state = 'return window.__nuzky.store.getState().saveState'
+    wait(lambda: r.s.run(save_state) == 'saved', 10)
+    r.s.run("const api = window.__nuzky.api; window.__list = api.library; window.__listed = 0; api.library = () => (window.__listed++, window.__list());")
+    plain = {'x': 0, 'y': 0, 'scale': 1, 'rotation': 0, 'opacity': 1}
+    hook = {'text': 'NEW', 'behind': False, 'transform': plain, 'style': {'fontSize': 400, 'color': '#ffffff', 'bold': True,
+            'strokeWidth': 0, 'strokeColor': '#000000', 'background': '#ffffff'}}
+    cover = {'format': 'cover_9x16', 'timeUs': 1_000_000, 'frame': plain, 'texts': [hook],
+             'background': {'picture': True, 'blur': 0, 'dim': 0, 'color': '#000000'}}
+    edited = r.s.call("window.__nuzky.store.getState().edit({type: 'setThumbnail', thumbnail: arguments[0]}).then((s) => s?.revision)", cover)
+    saving = r.s.run(save_state)
+    close_window()
+    home_state = wait(lambda: view(r)['view'] == 'home' and r.s.run(save_state), 5)
+    r.check('closing the window right after the cover changed goes home while the project is still saving',
+            edited['ok'] and edited['value'] and saving == 'saving' and home_state == 'saving', (edited, saving, home_state))
+    WHITE = (255, 255, 255)
+    shown = wait(lambda: (p := r.s.run(PICTURE, talk, WHITE)) and p['share'] > 0.05 and upright(p) and p, 20)
+    r.check('once the save lands, the card shows the new cover', shown and r.s.run(save_state) == 'saved',
+            {'card': r.s.run(PICTURE, talk, WHITE), 'saved': r.s.run(save_state)})
+    listed = r.s.run('return window.__listed')
+    # The editor's state changes without a save, as with a toast or the progress of an export.
+    r.s.run("window.__nuzky.store.getState().toast({kind: 'info', text: 'Nothing saved'})")
+    time.sleep(3)
+    r.check('then nothing is listed again while nothing is saved', listed and r.s.run('return window.__listed') == listed,
+            (listed, r.s.run('return window.__listed')))
+    r.s.run('window.__nuzky.api.library = window.__list')
+    r.shot('home-after-cover')
+
     # Collections that cannot be read are never written over.
     index = r.work / 'data/nuzky/library.json'
     before, mode = index.read_bytes(), index.stat().st_mode & 0o777
