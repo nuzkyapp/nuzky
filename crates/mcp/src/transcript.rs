@@ -506,35 +506,17 @@ fn speech_cut(
             })
             .collect();
     }
-    Ok((without_slivers(&joins(project), &bounds, &unnumbered, ranges), speech))
+    Ok((without_slivers(project, &bounds, &unnumbered, ranges), speech))
 }
 
-/// `ranges` of `edit_ranges` moved off the slivers of shots that cuts inside the picture, at `cuts` on the
-/// timeline, would leave, as they are moved off the joins of clips.
-pub fn without_shot_slivers(
-    project: &Project,
-    derived: &Derived,
-    ranges: Vec<TimeRange>,
-    cuts: &[i64],
-) -> Vec<TimeRange> {
-    let (bounds, unnumbered, _) = editing_bounds(project, derived);
-    without_slivers(cuts, &bounds, &unnumbered, ranges)
-}
-
-/// Where one heard clip meets the next on the timeline.
-fn joins(project: &Project) -> Vec<i64> {
-    project
-        .tracks
+/// Where the first heard piece of a word starts on the timeline and where the last one ends.
+pub fn heard_span(project: &Project, derived: &Derived) -> Option<(i64, i64)> {
+    let (words, fragments, _) = editing_bounds(project, derived);
+    words
         .iter()
-        .flat_map(|track| {
-            let heard: Vec<_> = track.clips.iter().filter(|c| is_heard(project, track, c)).collect();
-            heard
-                .windows(2)
-                .filter(|pair| pair[0].end_us() == pair[1].start_us)
-                .map(|pair| pair[1].start_us)
-                .collect::<Vec<_>>()
-        })
-        .collect()
+        .map(|w| (w.start_us, w.end_us))
+        .chain(fragments.iter().map(|f| (f.start_us, f.end_us)))
+        .reduce(|a, b| (a.0.min(b.0), a.1.max(b.1)))
 }
 
 /// A kept stretch shorter than this between a cut and a join shows as a sliver of a clip or shot.
@@ -546,11 +528,23 @@ pub const SLIVER_US: i64 = 400_000;
 /// the takes meet at one cut; when the cut also removes words there, the sliver just goes. The
 /// same holds the other way round, for a take that ends speaking at once.
 fn without_slivers(
-    joins: &[i64],
+    project: &Project,
     words: &[TimelineWord],
     fragments: &[TimeRange],
     mut ranges: Vec<TimeRange>,
 ) -> Vec<TimeRange> {
+    let joins: Vec<i64> = project
+        .tracks
+        .iter()
+        .flat_map(|track| {
+            let heard: Vec<_> = track.clips.iter().filter(|c| is_heard(project, track, c)).collect();
+            heard
+                .windows(2)
+                .filter(|pair| pair[0].end_us() == pair[1].start_us)
+                .map(|pair| pair[1].start_us)
+                .collect::<Vec<_>>()
+        })
+        .collect();
     // Kept fragments of words count as speech like numbered words.
     let silent = |from: i64, to: i64| {
         words.iter().all(|w| w.end_us <= from || w.start_us >= to)

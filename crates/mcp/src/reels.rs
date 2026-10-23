@@ -89,24 +89,7 @@ fn cut(
     pause_us: i64,
     shots: Option<&dyn Fn() -> bool>,
 ) -> Result<transcript::Cut> {
-    let mut ranges = transcript::edit_ranges(project, derived, None, Some(&[[from, to]]), Some(pause_us), &[])?;
-    if let Some(cancelled) = shots {
-        let (first, last) = (derived.words[from].start_us, derived.words[to].end_us);
-        let edges: Vec<_> = ranges
-            .iter()
-            .filter_map(|r| {
-                if r.end_us <= first {
-                    Some(TimeRange { start_us: r.end_us + 1, end_us: r.end_us + transcript::SLIVER_US })
-                } else if r.start_us >= last {
-                    Some(TimeRange { start_us: r.start_us - transcript::SLIVER_US, end_us: r.start_us })
-                } else {
-                    None
-                }
-            })
-            .collect();
-        let cuts = picture_cuts(project, &edges, cancelled)?;
-        ranges = transcript::without_shot_slivers(project, derived, ranges, &cuts);
-    }
+    let ranges = transcript::edit_ranges(project, derived, None, Some(&[[from, to]]), Some(pause_us), &[])?;
     let cut = transcript::plan_cut(project, derived, ranges)?;
     let preview = &cut.preview;
     // A clip playing any part of a word, so a word split across two clips keeps both pieces.
@@ -121,10 +104,21 @@ fn cut(
             words.iter().any(|w| (w.start_us as f64) < end && w.end_us > *source_in_us)
         })
         .collect();
-    let (Some(start), Some(end)) = (speech.iter().map(|c| c.start_us).min(), speech.iter().map(|c| c.end_us()).max())
+    let (Some(mut start), Some(mut end)) =
+        (speech.iter().map(|c| c.start_us).min(), speech.iter().map(|c| c.end_us()).max())
     else {
         return Ok(cut);
     };
+    let reel = || Derived { sources: derived.sources.clone(), words: cut.words.clone(), ..Derived::default() };
+    if let Some(cancelled) = shots
+        && let Some((first, last)) = transcript::heard_span(preview, &reel())
+    {
+        let opening = TimeRange { start_us: start + 1, end_us: (start + transcript::SLIVER_US).min(first + 1) };
+        let closing = TimeRange { start_us: (end - transcript::SLIVER_US).max(last), end_us: end };
+        let cuts = picture_cuts(preview, &[opening, closing], cancelled)?;
+        start = cuts.iter().copied().filter(|&c| c <= first).fold(start, i64::max);
+        end = cuts.iter().copied().filter(|&c| c >= last).fold(end, i64::min);
+    }
     let edges: Vec<_> = [(0, start), (end, preview.duration_us())]
         .into_iter()
         .filter(|(start_us, end_us)| end_us > start_us)
@@ -133,8 +127,7 @@ fn cut(
     if edges.is_empty() {
         return Ok(cut);
     }
-    let reel = Derived { sources: derived.sources.clone(), words: cut.words.clone(), ..Derived::default() };
-    transcript::plan_cut(preview, &reel, edges)
+    transcript::plan_cut(preview, &reel(), edges)
 }
 
 /// Where the picture of the main track's videos jumps to another shot inside `windows`, in timeline order. A video
@@ -289,8 +282,8 @@ pub fn plan(
 
 /// Writes a project beside `source` for each candidate in `ids`: only its words, cut as edit_transcript keep
 /// cuts with the pause length the candidate was measured with, starting and ending without a silent sliver of a
-/// shot at an original cut of the picture, on a 9:16 canvas filled as `framing` says. Returns them with the edits that mark them made in
-/// the source, which the caller applies; see [`forget`] when that fails.
+/// shot at an original cut of the picture, on a 9:16 canvas filled as `framing` says. Returns them with the edits
+/// that mark them made in the source, which the caller applies; see [`forget`] when that fails.
 pub fn make(
     source: &Path,
     project: &Project,

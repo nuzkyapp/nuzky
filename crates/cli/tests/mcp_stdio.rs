@@ -3353,8 +3353,8 @@ fn transcript_sentences_and_pages_preserve_long_talk_over_stdio() {
 }
 
 /// A long video with its own hard cuts: a proposed reel whose first word is said in the last moment of a shot starts
-/// after the cut, a made reel drops the silent frames of the next shot at its end, and a shot that changes while a
-/// word is said stays, so no word is cut.
+/// after the cut, a made reel drops the silent frames of the next shot at its end and of the video's first shot at
+/// its start, and a shot that changes while a word is said stays, so no word is cut.
 #[test]
 fn reels_start_and_end_on_the_videos_own_cuts_over_stdio() {
     use nuzky_engine::{edit::MAIN_TRACK, model::ClipContent};
@@ -3362,7 +3362,8 @@ fn reels_start_and_end_on_the_videos_own_cuts_over_stdio() {
     let mut c = Client::start(true, None, Some(None));
     let video = c.dir.join("shots.mp4");
     let mut filter = "color=c=red:s=192x108:r=30:d=40".to_owned();
-    for (frame, color) in [(309, "blue"), (598, "lime"), (807, "yellow"), (834, "magenta"), (900, "white")] {
+    for (frame, color) in [(3, "cyan"), (309, "blue"), (598, "lime"), (807, "yellow"), (834, "magenta"), (900, "white")]
+    {
         filter.push_str(&format!(",drawbox=color={color}:t=fill:enable='gte(n,{frame})'"));
     }
     let output = Command::new("ffmpeg")
@@ -3383,8 +3384,8 @@ fn reels_start_and_end_on_the_videos_own_cuts_over_stdio() {
     );
     c.call("end_run", json!({"run_id": run, "action": "keep"}));
     let words: Vec<_> = [
-        (1_000_000, 1_300_000, " Hello"),
-        (1_400_000, 1_800_000, " there."),
+        (200_000, 500_000, " Hello"),
+        (600_000, 1_000_000, " there."),
         (10_000_000, 10_250_000, " Money"),
         (10_400_000, 10_600_000, " is"),
         (10_700_000, 10_900_000, " not"),
@@ -3427,7 +3428,7 @@ fn reels_start_and_end_on_the_videos_own_cuts_over_stdio() {
         .unwrap();
     let key = c.call("get_transcript", json!({}))["transcript_key"].clone();
     let run = c.call("begin_run", json!({"label": "Reels at picture cuts"}))["run_id"].clone();
-    let candidates: Vec<_> = [(2, 8, "A"), (11, 14, "B"), (16, 19, "C")]
+    let candidates: Vec<_> = [(2, 8, "A"), (11, 14, "B"), (16, 19, "C"), (0, 1, "D")]
         .into_iter()
         .map(|(from, to, title)| json!({"from": from, "to": to, "title": title, "why": "One idea.", "score": 0.9}))
         .collect();
@@ -3438,7 +3439,7 @@ fn reels_start_and_end_on_the_videos_own_cuts_over_stdio() {
     c.call("end_run", json!({"run_id": run, "action": "keep"}));
     let state = c.call("get_state", json!({}));
     let made = made["reels"].as_array().unwrap();
-    assert_eq!((proposed.len(), made.len()), (3, 3));
+    assert_eq!((proposed.len(), made.len()), (4, 4));
     let projects: Vec<Project> = made
         .iter()
         .map(|r| serde_json::from_slice(&std::fs::read(r["path"].as_str().unwrap()).unwrap()).unwrap())
@@ -3474,6 +3475,8 @@ fn reels_start_and_end_on_the_videos_own_cuts_over_stdio() {
     assert!((source_end(clips[1].last().unwrap()) - 19_933_333).abs() <= 1_000, "{:?}", clips[1]);
     assert_eq!(duration(2), proposed[2]["durationUs"].as_i64().unwrap());
     assert_eq!(source_end(clips[2].last().unwrap()), 28_120_000);
+    assert_eq!((proposed[3]["from"].as_i64(), clips[3][0].1), (Some(0), 100_000));
+    assert_eq!(duration(3), proposed[3]["durationUs"].as_i64().unwrap() - 100_000);
     let frame = |i: usize, time_us: i64, expected: [u8; 3]| {
         let out = c.dir.join(format!("reel-{i}-{time_us}.png"));
         let output = Command::new(env!("CARGO_BIN_EXE_nuzky"))
@@ -3502,6 +3505,7 @@ fn reels_start_and_end_on_the_videos_own_cuts_over_stdio() {
     frame(0, 0, [0, 0, 255]);
     frame(1, duration(1) - 10_000, [0, 0, 255]);
     frame(2, duration(2) - 10_000, [255, 0, 255]);
+    frame(3, 0, [0, 255, 255]);
     c.finish();
 }
 
