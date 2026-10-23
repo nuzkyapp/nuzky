@@ -5,10 +5,10 @@ next start says it closed unexpectedly and Report a bug… opens the report, whi
 crash; after a normal quit it says nothing. A bug while drawing the window shows Reload instead of an empty window, and
 Report a bug… there saves the report and opens the bug form. Nothing leaves the computer: the flow records the pages and folders the app would open, and the
 clipboard is the page's own, never the system's."""
-import os, re, signal, subprocess, time, urllib.parse
+import re, subprocess, time, urllib.parse
 from pathlib import Path
 
-from e2e.harness import MACOS, WINDOWS, Session, close_window, leave_editor, flow, wait, win32
+from e2e.harness import MACOS, WINDOWS, close_window, deny, flow, kill_hard, leave_editor, Session, wait, win32
 
 # The page's clipboard keeps what is copied, so the flow neither reads nor overwrites the person's own.
 CLIPBOARD = """window.__copied = [];
@@ -87,7 +87,7 @@ def diagnostics(r):
 
     locked = r.work / 'locked'
     locked.mkdir()
-    locked.chmod(0o500)
+    allow = deny(locked, 0o500)
     target = locked / 'out.mp4'
     # Started as Export… does after the save panel, which cannot be driven, with the dialog open on it.
     options = {'resolution': 720, 'fps': 30, 'quality': 'small'}
@@ -109,7 +109,7 @@ def diagnostics(r):
     r.check('Open logs folder opens the logs folder in the data folder',
             wait(lambda: opened(r), 5) and Path(opened(r)[-1]).resolve() == (r.work / 'data/nuzky/logs').resolve(), opened(r))
 
-    locked.chmod(0o700)
+    allow()
     again = r.s.call(START_EXPORT, str(target), options, r.state()['epoch'], False)
     r.s.run('window.__nuzky.store.setState({exportJobId: arguments[0]})', again.get('value'))
     done = wait(lambda: 'Saved to' in (r.s.run("return document.querySelector('[role=dialog]')?.textContent ?? ''") or ''), 120)
@@ -119,7 +119,7 @@ def diagnostics(r):
     # A speech model download that fails at once: Nuzky may not write to its models folder, so nothing goes online.
     models = r.work / 'data/nuzky/models'
     models.mkdir(parents=True, exist_ok=True)
-    models.chmod(0o500)
+    allow = deny(models, 0o500)
     r.s.run("[...document.querySelectorAll('[role=tab]')].find((t) => t.textContent.trim() === 'Transcript').click()")
     wait(lambda: r.s.run(CLICK, 'body', 'Transcribe timeline'), 5)
     failed = 'Transcript failed: The speech model could not be downloaded. Check the internet connection and free disk space, then try again.'
@@ -132,7 +132,7 @@ def diagnostics(r):
     jobs = lambda: [j for j in r.state()['jobs'] if j['kind'] == 'transcript']
     r.s.run(CLICK, '[data-toast]', 'Try again')
     r.check('Try again runs the transcript again', wait(lambda: len(jobs()) == 2 and all(j['status'] == 'failed' for j in jobs()), 30), jobs())
-    models.chmod(0o700)
+    allow()
     r.s.run("window.__nuzky.store.setState({toasts: []})")
 
     # An error that names a private folder, a caption and a secret, as the interface would report one.
@@ -170,7 +170,7 @@ def diagnostics(r):
             wait(lambda: any(t['text'] == 'Diagnostics copied. Paste them into your bug report.' for t in r.s.run(TOASTS)), 3), r.s.run(TOASTS))
 
     # Killed like a crash: the next start says so and offers to report it.
-    os.kill(app_pid(r), signal.SIGKILL)
+    kill_hard(app_pid(r))
     restart(r)
     notice = wait(lambda: next((t for t in r.s.run(TOASTS) if t['text'] == CRASHED), None), 10)
     r.check('after a crash the next start says Nuzky closed unexpectedly, with Report a bug…',

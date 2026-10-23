@@ -3,8 +3,8 @@ changes with it; generating the captions again, reopening the app and undo all k
 together. Then an agent does the same over MCP."""
 import difflib, json, time
 
-from e2e.harness import (FIXTURES, LINUX, MODELS, Bridge, Session, close_window, leave_editor, flow, link_models, pointer, press,
-                         preview_crop, preview_rect, preview_redraw, wait)
+from e2e.harness import (FIXTURES, LINUX, MODELS, WINDOWS, Bridge, Session, actions, close_window, leave_editor, flow, link_models,
+                         pointer, press, preview_crop, preview_rect, preview_redraw, wait)
 from e2e.reel import phrases, words as plain
 
 TAKE = FIXTURES / 'reel-2.mp4'
@@ -134,6 +134,13 @@ class Hands:
             self.calibrate()
             if not self.over(css, x, y):
                 return False
+        if WINDOWS:
+            # One request, so the webview counts the clicks as a person's double-click.
+            press_release = [{'type': 'pointerDown', 'button': 0}, {'type': 'pause', 'duration': 30}, {'type': 'pointerUp', 'button': 0}]
+            actions({'type': 'pointer', 'id': 'mouse', 'parameters': {'pointerType': 'mouse'}, 'actions': [
+                {'type': 'pointerMove', 'duration': 0, 'origin': 'viewport', 'x': round(self.at[0]), 'y': round(self.at[1])},
+                *press_release * times]})
+            return True
         for clicks in range(1, times + 1):
             if not LINUX:
                 pointer('down', *self.at, clicks)

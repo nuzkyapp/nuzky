@@ -4,7 +4,7 @@ import json, subprocess, time
 from pathlib import Path
 
 from e2e.corrections import Hands
-from e2e.harness import flow, press, wait
+from e2e.harness import flow, press, program, wait
 from e2e.layout import resize
 
 LONG = 'ytVideo0001'
@@ -29,7 +29,7 @@ def prepare(r):
                         '-c:a', 'aac', str(videos / f'{video}.m4a')], check=True)
     r.log = r.work / 'ytdlp.jsonl'
     r.log.touch()
-    r.env.update(NUZKY_YTDLP=str(Path(__file__).with_name('fake_ytdlp')), NUZKY_FAKE_YTDLP_VIDEOS=str(videos),
+    r.env.update(NUZKY_YTDLP=str(program(r, Path(__file__).with_name('fake_ytdlp'))), NUZKY_FAKE_YTDLP_VIDEOS=str(videos),
                  NUZKY_FAKE_YTDLP_AUDIO=str(videos / f'{SHORT}.m4a'), NUZKY_FAKE_YTDLP_LOG=str(r.log))
 
 

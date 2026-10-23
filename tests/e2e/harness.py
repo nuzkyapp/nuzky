@@ -815,6 +815,47 @@ class Bridge:
             stop(self.process)
 
 
+def deny(path, mode, access='W'):
+    """Takes away the right to write `path` (or with access 'R', to read it) until the returned function gives it back:
+    `mode` on Unix, and on Windows, which ignores a folder's read-only flag, a deny entry for the user in its access list."""
+    if WINDOWS:
+        user = os.environ['USERNAME']
+        subprocess.run(['icacls', str(path), '/deny', f'{user}:({access})'], check=True, capture_output=True)
+        return lambda: subprocess.run(['icacls', str(path), '/remove:d', user], check=True, capture_output=True)
+    before = path.stat().st_mode & 0o777
+    os.chmod(path, mode)
+    return lambda: os.chmod(path, before)
+
+
+@functools.cache
+def _launcher():
+    """tests/e2e/launcher.rs, built once per run of the flows."""
+    built = TARGET / 'e2e/launcher.exe'
+    built.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(['rustc', '--edition', '2024', '-O', '-o', str(built), str(ROOT / 'tests/e2e/launcher.rs')],
+                   env=dict(os.environ, NUZKY_PYTHON=sys.executable), check=True, capture_output=True)
+    return built
+
+
+def program(r, script, name=None):
+    """A path the app can run as the fake program `script` (a Python file in tests/e2e), called `name` or as the file
+    is. Unix runs the script itself; Windows runs a copy of tests/e2e/launcher.rs named for it, in this run's folder,
+    since the app looks for yt-dlp and keeps its own copy only as an .exe."""
+    name = name or script.name
+    if not WINDOWS:
+        return script
+    exe = r.work / 'bin' / f'{name}.exe'
+    exe.parent.mkdir(exist_ok=True)
+    shutil.copy(_launcher(), exe)
+    r.env[f"NUZKY_FAKE_{name.upper().replace('-', '_')}"] = str(script)
+    return exe
+
+
+def kill_hard(pid):
+    """Ends a process at once, as a crash does; Windows has no SIGKILL, and its TerminateProcess is the same."""
+    os.kill(pid, getattr(signal, 'SIGKILL', signal.SIGTERM))
+
+
 def comma_locale(r):
     """Starts the app with numbers written with a decimal comma, as on a Czech system, when such a locale is installed;
     the person model once saw nobody under one. Returns the locale, or None. Windows programs do not take theirs

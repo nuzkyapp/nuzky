@@ -5,7 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from e2e.ducking import CHECKBOX, SOURCE, TONE, WINDOW, RATE, decode, speech_levels, tone_levels
-from e2e.harness import Bridge, flow, export, press, wait
+from e2e.harness import WINDOWS, Bridge, flow, export, press, program, wait
 from e2e.layout import resize
 
 SONG = 'yt_Song0001'
@@ -23,15 +23,15 @@ def prepare(r):
                     f'sine=frequency={TONE}:sample_rate={RATE}:duration=20', '-c:a', 'aac', str(audio)], check=True)
     r.log = r.work / 'ytdlp.jsonl'
     r.log.touch()
-    r.env.update(NUZKY_YTDLP=str(Path(__file__).with_name('fake_ytdlp')),
+    r.env.update(NUZKY_YTDLP=str(program(r, Path(__file__).with_name('fake_ytdlp'))),
                  NUZKY_FAKE_YTDLP_AUDIO=str(audio), NUZKY_FAKE_YTDLP_LOG=str(r.log))
 
 
 def missing(r):
     prepare(r)
     r.env['NUZKY_YTDLP'] = str(r.work / 'not-installed')
-    r.release = 'yt-dlp_macos' if platform.system() == 'Darwin' else 'yt-dlp_linux'
-    r.tool = Path(__file__).with_name('fake_ytdlp').read_bytes()
+    r.release = {'Darwin': 'yt-dlp_macos', 'Windows': 'yt-dlp.exe'}.get(platform.system(), 'yt-dlp_linux')
+    r.tool = program(r, Path(__file__).with_name('fake_ytdlp'), 'yt-dlp').read_bytes()
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -350,7 +350,7 @@ def youtube_missing(r):
         r.check('the download fetched the release and its file from the local release server',
                 r.releases.requests == ['/latest', '/' + r.release], r.releases.requests.copy())
         r.check('the installed tool is executable, matches the release bytes and has a checked stamp',
-                own.exists() and own.read_bytes() == r.tool and own.stat().st_mode & 0o777 == 0o755
+                own.exists() and own.read_bytes() == r.tool and (WINDOWS or own.stat().st_mode & 0o777 == 0o755)
                 and (tools / 'yt-dlp.checked').is_file())
         r.check('automatic lookup runs the downloaded tool despite the missing override and adds nothing',
                 len(invocations(r)) == 1 and '--skip-download' in invocations(r)[0] and r.s.run(PROJECT) == project,
@@ -381,7 +381,7 @@ def youtube_missing(r):
 
 def outdated(r):
     missing(r)
-    r.env['NUZKY_YTDLP'] = str(Path(__file__).with_name('fake_ytdlp'))
+    r.env['NUZKY_YTDLP'] = str(program(r, Path(__file__).with_name('fake_ytdlp')))
     r.releases.correct = True
 
 

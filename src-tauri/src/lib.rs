@@ -1206,12 +1206,14 @@ pub fn run() {
     #[cfg(all(windows, debug_assertions))]
     let mut context = context;
     // Edge WebDriver opens the webview's debugging port through this variable, which the arguments wry always
-    // sets would otherwise override; these are wry's own, with the variable's added. Only for the UI flows.
+    // sets would otherwise override; these are wry's own, with the variable's added. Only for the UI flows, whose
+    // pixels are the page's at any display scale, as under gamescope on Linux and test_bridge.rs on macOS.
     #[cfg(all(windows, debug_assertions))]
     if let Ok(added) = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") {
         for window in &mut context.config_mut().app.windows {
             window.additional_browser_args = Some(format!(
-                "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required {added}"
+                "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required \
+                 --force-device-scale-factor=1 {added}"
             ));
         }
     }

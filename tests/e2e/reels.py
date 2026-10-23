@@ -6,7 +6,7 @@ step, that a reel whose words moved fails with advice, and that Export… opens 
 import json, subprocess, time
 from pathlib import Path
 
-from e2e.harness import AI_EDITING, CLI, FIXTURES, Bridge, flow, link_models, wait, webdriver
+from e2e.harness import AI_EDITING, CLI, FIXTURES, Bridge, deny, flow, link_models, wait, webdriver
 from e2e.reel import MODEL, poll
 
 FAKE = Path(__file__).resolve().parent / 'fake_agent'
@@ -213,7 +213,7 @@ def failure(r):
     # The folder the reels go into cannot be written to, as on a full or locked disk.
     folder = Path(r.s.run('return window.__nuzky.store.getState().snap.path')).parent
     before = sorted(folder.iterdir())
-    folder.chmod(0o555)
+    allow = deny(folder, 0o555)
     try:
         r.s.run(CLICK, 'Make 1 reel', LIST)
         said = wait(lambda: text(r, f'{LIST} [role=alert]'), 20)
@@ -223,7 +223,7 @@ def failure(r):
         time.sleep(0.3)
         r.shot('failed')
     finally:
-        folder.chmod(0o755)
+        allow()
 
 
 def moved(r):

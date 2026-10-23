@@ -83,7 +83,7 @@ def main():
                           'duration': 20, 'ext': 'm4a', 'filesize': total,
                           'filesize_approx': total, 'live_status': 'not_live'}), flush=True)
         return
-    if video == 'ytForbid001' and Path(__file__).parent.name != 'tools':
+    if video == 'ytForbid001' and Path(os.environ.get('NUZKY_FAKE_AS') or __file__).parent.name != 'tools':
         fail('unable to download video data: HTTP Error 403: Forbidden')
     if total > limit:
         return

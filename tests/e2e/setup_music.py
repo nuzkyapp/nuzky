@@ -5,7 +5,7 @@ failed in Music waits for its own Play or +, a failure Music shows under its lin
 then adds with Nuzky's copy and no further download."""
 import time
 
-from e2e.harness import FIXTURES, flow, press, wait
+from e2e.harness import FIXTURES, WINDOWS, flow, press, wait
 from e2e.home import focus_card, make, resize, wait_library
 from e2e.setup import BOX, CLICK, FOCUS_TEXT, dialog, rail, relaunch, row
 from e2e.youtube import PREVIEW, PROJECT, alert, answer, invocations, music, outdated, paste
@@ -163,7 +163,7 @@ document.querySelector('{BOX} button[aria-label=Close]').click();""")
     press('Return')
     d = wait(lambda: (x := dialog(r)) and rail(x)[2] == ['Music from YouTube', 'Done'] and x, 15)
     r.check('Try again downloads Nuzky\'s own yt-dlp, the release\'s file, executable, and the step is done',
-            d and d['count'] == '1 of 4 done' and own.exists() and own.read_bytes() == r.tool and own.stat().st_mode & 0o777 == 0o755
+            d and d['count'] == '1 of 4 done' and own.exists() and own.read_bytes() == r.tool and (WINDOWS or own.stat().st_mode & 0o777 == 0o755)
             and r.releases.requests == ['/latest', '/' + r.release], {'dialog': dialog(r), 'requests': r.releases.requests.copy()})
     r.check('the focus goes to Next', wait(lambda: (dialog(r) or {}).get('focus') == 'Next', 3), dialog(r))
     seen = r.s.run('return window.__footers') or []

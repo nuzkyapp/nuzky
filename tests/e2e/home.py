@@ -5,7 +5,7 @@ same way. Opening another project while an agent edits asks whether to keep or u
 import json, os, subprocess, time
 from pathlib import Path
 
-from e2e.harness import CLI, FIXTURES, LINUX, Bridge, close_window, flow, link_models, wait, webdriver
+from e2e.harness import CLI, FIXTURES, LINUX, Bridge, close_window, deny, flow, link_models, wait, webdriver
 
 DAY = 86_400
 CARDS = """return [...document.querySelectorAll('[role=listbox][aria-label=Projects] [role=option][data-path]')].map((c) => ({
@@ -275,12 +275,12 @@ def home(r):
 
     # Collections that cannot be read are never written over.
     index = r.work / 'data/nuzky/library.json'
-    before, mode = index.read_bytes(), index.stat().st_mode & 0o777
-    os.chmod(index, 0)
+    before = index.read_bytes()
+    allow = deny(index, 0, 'R,W')
     try:
         made = r.s.call("window.__nuzky.api.createCollection('Lost')")
     finally:
-        os.chmod(index, mode)
+        allow()
     r.check('a new collection is refused while the collections cannot be read, and they stay as they were',
             not made['ok'] and index.read_bytes() == before, made)
 
@@ -398,13 +398,12 @@ def launcher(r):
         r.s.run("window.__nuzky.store.setState({toasts: []})")
         r.s.call('window.__nuzky.newProjectFromMedia(arguments[0])', [str(r.work / 'missing.mp4')])
         wait(lambda: r.s.run("return document.getElementById('switch-title')?.textContent"), 5)
-        mode = projects_dir(r).stat().st_mode & 0o777
-        os.chmod(projects_dir(r), 0o555)
+        allow = deny(projects_dir(r), 0o555)
         try:
             click(r, 'Undo changes and start')
             refused = wait(lambda: r.errors(), 10)
         finally:
-            os.chmod(projects_dir(r), mode)
+            allow()
         r.check('Undo changes that cannot be saved says so and leaves the run open', refused and view(r)['aiRun'], refused)
         click(r, 'Stop and edit')
         more = """return [...document.querySelectorAll('[data-toast]')].filter((t) => t.textContent.includes('Split once more'))
