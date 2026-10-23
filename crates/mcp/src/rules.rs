@@ -41,6 +41,7 @@ pub(crate) const TOOLS: &[Rules] = &[
     rules("search_sounds", Always, false, true, false),
     rules("add_sound", Never, false, false, false),
     rules("add_youtube_video", Never, false, false, false),
+    rules("import_web_image", Never, false, false, false),
     rules("add_sticker", Never, false, false, false),
     // Only renders; a missing person outline behind a clip's background is made as a job into the cache.
     rules("inspect_frames", Always, false, true, true),
@@ -97,7 +98,7 @@ pub(crate) const TOOLS: &[Rules] = &[
 ];
 
 /// Tools that reach the internet.
-pub(crate) const ONLINE: &[&str] = &["search_sounds", "add_sound", "add_youtube_video"];
+pub(crate) const ONLINE: &[&str] = &["search_sounds", "add_sound", "add_youtube_video", "import_web_image"];
 
 pub(crate) fn find(name: &str) -> Option<&'static Rules> {
     TOOLS.iter().find(|rules| rules.name == name)

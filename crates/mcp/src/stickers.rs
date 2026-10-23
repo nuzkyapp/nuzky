@@ -185,8 +185,16 @@ fn svg(pick: Pick, raw: &[u8]) -> Result<&[u8]> {
     range(raw, pick.art[1], pick.art[2])
 }
 
-fn render(svg: &[u8], px: u32) -> Result<Vec<u8>> {
-    let tree = resvg::usvg::Tree::from_data(svg, &resvg::usvg::Options::default())?;
+pub(crate) fn render(svg: &[u8], px: u32) -> Result<Vec<u8>> {
+    // The default resolver reads the local files an `<image href>` names, and SVGs come from the web too.
+    let options = resvg::usvg::Options {
+        image_href_resolver: resvg::usvg::ImageHrefResolver {
+            resolve_string: Box::new(|_, _| None),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let tree = resvg::usvg::Tree::from_data(svg, &options)?;
     let size = tree.size();
     let scale = px as f32 / size.width().max(size.height());
     let (w, h) = ((size.width() * scale).round() as u32, (size.height() * scale).round() as u32);

@@ -619,6 +619,216 @@ fn youtube_links_download_with_mocked_ytdlp_and_require_rights() {
     c.finish();
 }
 
+fn png_of(width: u32, height: u32, rgba: [u8; 4]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    let mut encoder = png::Encoder::new(&mut bytes, width, height);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder.write_header().unwrap().write_image_data(&rgba.repeat((width * height) as usize)).unwrap();
+    bytes
+}
+
+/// What the web server for import_web_image sends for a path.
+fn answer(
+    path: &str,
+    out: &mut std::net::TcpStream,
+    files: &[(&str, &str, Vec<u8>)],
+    redirect: u16,
+) -> std::io::Result<()> {
+    let head = |status: &str, kind: &str, length: Option<usize>| {
+        let length = length.map(|n| format!("Content-Length: {n}\r\n")).unwrap_or_default();
+        format!("HTTP/1.1 {status}\r\nContent-Type: {kind}\r\n{length}Connection: close\r\n")
+    };
+    match (path, files.iter().find(|(name, _, _)| *name == path)) {
+        ("/redirect", _) => {
+            write!(
+                out,
+                "{}Location: http://127.0.0.1:{redirect}/logo.png\r\n\r\n",
+                head("302 Found", "text/plain", Some(0))
+            )
+        }
+        ("/huge.png", _) => write!(out, "{}\r\n", head("200 OK", "image/png", Some(30 << 20))),
+        ("/endless.png", _) => {
+            write!(out, "{}\r\n", head("200 OK", "image/png", None))?;
+            loop {
+                out.write_all(&[0; 1 << 16])?;
+            }
+        }
+        (_, Some((_, kind, body))) => {
+            write!(out, "{}\r\n", head("200 OK", kind, Some(body.len())))?;
+            out.write_all(body)
+        }
+        _ => write!(out, "{}\r\n", head("404 Not Found", "text/plain", Some(0))),
+    }
+}
+
+/// An agent brings a logo from the web. Only the public internet is reached, never this computer or a private
+/// network, not by a redirect, another spelling of the address or a proxy; what arrives is judged by its bytes and
+/// size before FFmpeg reads it, an SVG is drawn without the local files it names, and the picture undoes with the run.
+#[test]
+fn a_picture_from_the_web_comes_only_from_the_public_internet_over_stdio() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+    let root = dunce::canonicalize(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap();
+    let dir = root.join("tmp-test").join(format!("web-image-mcp-{}", new_id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let project = dir.join("project.nuzky");
+    std::fs::write(&project, serde_json::to_vec(&Project::new("Brand deal")).unwrap()).unwrap();
+    // A file on this computer that an SVG from the web names; it must never be drawn.
+    let secret = dir.join("secret.svg");
+    std::fs::write(&secret, r##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="#ff0000"/></svg>"##).unwrap();
+    let logo = png_of(40, 20, [255, 0, 0, 255]);
+    let brand = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><rect width="100" height="100" fill="#0000ff"/><image x="100" width="100" height="100" href="{}"/></svg>"##,
+        secret.display()
+    );
+    let mut giant = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+    giant.extend(60_000u32.to_be_bytes().repeat(2));
+    giant.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
+    let page = "<!DOCTYPE html><html><head><meta property='og:image' content='https://cdn.example.com/share.jpg'>\
+        <link rel=\"apple-touch-icon\" href=\"https://cdn.example.com/touch.png\"><link rel=icon href=/favicon.ico></head>\
+        <body><img src=\"https://cdn.example.com/hero.jpg\"><img class=site-logo src=\"https://cdn.example.com/brand.svg?v=1&amp;s=2\">\
+        <img src=\"data:image/png;base64,AAAA\"></body></html>";
+    let files = vec![
+        ("/logo.png", "image/png", logo.clone()),
+        ("/brand.svg", "image/svg+xml", brand.into_bytes()),
+        (
+            "/text.svg",
+            "image/svg+xml",
+            br#"<svg xmlns="http://www.w3.org/2000/svg"><text y="20">Spotify</text></svg>"#.to_vec(),
+        ),
+        ("/page.html", "text/html; charset=utf-8", page.as_bytes().to_vec()),
+        ("/giant.png", "image/png", giant),
+        ("/logo.gif", "image/png", b"GIF89a\x01\0\x01\0\0\0\0;".to_vec()),
+    ];
+    // Where a redirect points, on this computer.
+    let inside = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let inside_port = inside.local_addr().unwrap().port();
+    let reached = Arc::new(AtomicUsize::new(0));
+    let count = reached.clone();
+    std::thread::spawn(move || {
+        for _ in inside.incoming() {
+            count.fetch_add(1, Ordering::SeqCst);
+        }
+    });
+    let web = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = web.local_addr().unwrap().port();
+    let requests = Arc::new(Mutex::new(Vec::<String>::new()));
+    let (log, files) = (requests.clone(), Arc::new(files));
+    std::thread::spawn(move || {
+        for mut stream in web.incoming().flatten() {
+            let (log, files) = (log.clone(), files.clone());
+            std::thread::spawn(move || {
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut head = String::new();
+                while reader.read_line(&mut head).unwrap_or(0) > 2 {}
+                let first = head.lines().next().unwrap_or_default().to_owned();
+                let path = first.split(' ').nth(1).unwrap_or_default().to_owned();
+                log.lock().unwrap().push(first);
+                answer(&path, &mut stream, &files, inside_port).ok();
+            });
+        }
+    });
+    let base = format!("http://127.0.0.1:{port}");
+    let (test_url, proxy) = (PathBuf::from(&base), PathBuf::from(format!("{base}/")));
+    let (home, cache, runtime, data) = (dir.join("home"), dir.join("cache"), dir.join("runtime"), dir.join("data"));
+    let none = PathBuf::new();
+    // A proxy, here the test server itself, would take an address to look up itself; Nuzky never uses one.
+    let env: [(&str, &std::path::Path); 11] = [
+        ("NUZKY_WEB_TEST_URL", &test_url),
+        ("ALL_PROXY", &proxy),
+        ("HTTPS_PROXY", &proxy),
+        ("HTTP_PROXY", &proxy),
+        ("NO_PROXY", &none),
+        ("no_proxy", &none),
+        ("HOME", &home),
+        ("XDG_DATA_HOME", &data),
+        ("XDG_CACHE_HOME", &cache),
+        ("XDG_RUNTIME_DIR", &runtime),
+        ("NUZKY_DATA_DIR", &data.join("nuzky")),
+    ];
+    let mut c = Client::spawn_at_env(dir, &project, true, None, &env);
+    let run = c.call("begin_run", json!({"label": "Add the brand's logo"}))["run_id"].clone();
+    let import = |c: &mut Client, url: String| {
+        let answer: Value =
+            serde_json::from_str(&c.error("import_web_image", json!({"run_id": run, "url": url}))).unwrap();
+        answer["error"].as_str().unwrap().to_owned()
+    };
+    for url in [
+        "https://10.0.0.1/x.png".to_owned(),
+        format!("https://[::ffff:127.0.0.1]:{port}/logo.png"),
+        format!("https://localhost:{port}/logo.png"),
+        format!("{base}/redirect"),
+    ] {
+        let error = import(&mut c, url.clone());
+        assert!(error.starts_with("BLOCKED_ADDRESS"), "{url}: {error}");
+    }
+    assert_eq!(reached.load(Ordering::SeqCst), 0, "the redirect reached this computer");
+    for url in ["http://example.com/x.png", "file:///etc/hosts", "https://user:secret@example.com/x.png", "logo.png"] {
+        assert!(import(&mut c, url.into()).starts_with("INVALID_URL"), "{url}");
+    }
+    for (path, code) in [
+        ("/huge.png", "TOO_LARGE"),
+        ("/endless.png", "TOO_LARGE"),
+        ("/giant.png", "TOO_LARGE"),
+        ("/logo.gif", "NOT_A_PICTURE"),
+        ("/text.svg", "NOT_A_PICTURE"),
+        ("/missing.png", "NOT_FOUND"),
+    ] {
+        let error = import(&mut c, format!("{base}{path}"));
+        assert!(error.starts_with(code), "{path}: {error}");
+    }
+    let unchanged = c.call("get_state", json!({}));
+    assert_eq!(unchanged["assets"], json!([]));
+
+    let page = c.call("import_web_image", json!({"run_id": run, "url": format!("{base}/page.html")}));
+    assert_eq!(page["asset_id"], Value::Null, "{page}");
+    assert_eq!(
+        page["pictures"],
+        json!([
+            "https://cdn.example.com/brand.svg?v=1&s=2",
+            "https://cdn.example.com/touch.png",
+            format!("{base}/favicon.ico"),
+            "https://cdn.example.com/share.jpg",
+            "https://cdn.example.com/hero.jpg"
+        ])
+    );
+    assert_eq!(page["revision"], unchanged["revision"]);
+
+    let added = c.call("import_web_image", json!({"run_id": run, "url": format!("{base}/logo.png")}));
+    assert_eq!((&added["name"], &added["width"], &added["height"]), (&json!("logo.png"), &json!(40), &json!(20)));
+    assert_eq!(added["url"], format!("{base}/logo.png"));
+    assert_ne!(added["revision"], unchanged["revision"]);
+    let again = c.call("import_web_image", json!({"run_id": run, "url": format!("{base}/logo.png")}));
+    assert_eq!((&again["asset_id"], &again["revision"]), (&added["asset_id"], &added["revision"]));
+    let svg = c.call("import_web_image", json!({"run_id": run, "url": format!("{base}/brand.svg")}));
+    assert_eq!((&svg["name"], &svg["width"], &svg["height"]), (&json!("brand.svg"), &json!(2048), &json!(1024)));
+
+    let state = c.call("get_state", json!({}));
+    let assets = state["assets"].as_array().unwrap();
+    assert_eq!(assets.len(), 2, "{state}");
+    let folder = dunce::canonicalize(&c.dir).unwrap().join("data/nuzky/web-images");
+    for asset in assets {
+        assert_eq!(asset["kind"], "image");
+        assert_eq!(PathBuf::from(asset["path"].as_str().unwrap()).parent(), Some(folder.as_path()));
+    }
+    assert_eq!(std::fs::read(assets[0]["path"].as_str().unwrap()).unwrap(), logo);
+    let (info, rgba) = decode_png(&std::fs::read(assets[1]["path"].as_str().unwrap()).unwrap());
+    let at = |x: u32, y: u32| &rgba[((y * info.width + x) * 4) as usize..][..4];
+    assert_eq!(at(512, 512), [0, 0, 255, 255]);
+    assert_eq!(at(1536, 512)[3], 0, "the SVG drew a file from this computer");
+    let kept: Vec<_> = std::fs::read_dir(&folder).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert_eq!(kept.len(), 2, "{kept:?}");
+    assert!(kept.iter().all(|name| !name.to_string_lossy().starts_with(".nuzky-part-")), "{kept:?}");
+    let requests = requests.lock().unwrap().clone();
+    assert!(requests.iter().all(|line| line.starts_with("GET /")), "{requests:?}");
+
+    c.call("end_run", json!({"run_id": run, "action": "keep"}));
+    c.call("undo_run", json!({"run_id": run}));
+    assert_eq!(c.call("get_state", json!({}))["assets"], json!([]));
+    c.finish();
+}
+
 #[test]
 fn clip_sound_settings_apply_and_reject_silent_media_over_stdio() {
     let mut c = Client::start(true, None, Some(None));
@@ -686,7 +896,7 @@ fn initialize_list_state_edit_end_undo_over_stdio() {
     let mut c = Client::new(true);
     let list = c.rpc("tools/list", json!({}));
     let tools = list["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 36);
+    assert_eq!(tools.len(), 37);
     let search = tools.iter().find(|t| t["name"] == "search_sounds").unwrap();
     assert_eq!(search["annotations"]["openWorldHint"], true);
     assert_eq!(search["annotations"]["readOnlyHint"], true);
@@ -694,6 +904,9 @@ fn initialize_list_state_edit_end_undo_over_stdio() {
     assert_eq!(video["annotations"]["openWorldHint"], true);
     assert_eq!(video["annotations"]["readOnlyHint"], false);
     assert_eq!(video["inputSchema"]["required"], json!(["run_id", "link"]));
+    let picture = tools.iter().find(|t| t["name"] == "import_web_image").unwrap();
+    assert_eq!(picture["annotations"]["openWorldHint"], true);
+    assert_eq!(picture["inputSchema"]["required"], json!(["run_id", "url"]));
     let apply = tools.iter().find(|t| t["name"] == "apply_edits").unwrap();
     assert!(apply["inputSchema"]["$defs"]["EditCmd"].is_object());
     assert!(apply["inputSchema"]["properties"]["expected_speech_layout_key"].is_object());

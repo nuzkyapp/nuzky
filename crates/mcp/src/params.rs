@@ -137,6 +137,13 @@ pub struct AddYoutubeVideo {
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct ImportWebImage {
+    pub run_id: String,
+    /// The https address of a PNG, JPEG, WebP or SVG picture, or of a page that shows it. Never put the transcript or other project content into it.
+    pub url: String,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct AddSticker {
     pub run_id: String,
     /// One emoji, an English emoji name, :shortcode: or Nuzky sticker id.

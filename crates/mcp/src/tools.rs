@@ -288,6 +288,7 @@ impl Backend {
             "search_sounds" => search_sounds(parse(arguments)?),
             "add_sound" => self.add_sound(parse(arguments)?, state),
             "add_youtube_video" => self.add_youtube_video(parse(arguments)?, state),
+            "import_web_image" => self.import_web_image(parse(arguments)?, state),
             "add_sticker" => self.add_sticker(parse(arguments)?, state),
             "activity" => self.activity(parse(arguments)?, state),
             "analyze" => self.analyze(parse(arguments)?, state),
@@ -679,6 +680,33 @@ impl Backend {
             "start_us": clip.map(|c| c.clip.start_us),
             "duration_us": clip.map_or(asset.duration_us, |c| c.clip.duration_us),
         }))
+    }
+
+    /// Downloads the picture, then adds it as one edit of the run unless the project has that file already.
+    fn import_web_image(&self, args: ImportWebImage, state: &SessionState) -> Result<Value> {
+        owns_run(state, &args.run_id)?;
+        // Stop in the app ends the run, and with it the download.
+        let stopped = || self.closed.load(Ordering::Acquire) || self.host.session.check_run(&args.run_id).is_err();
+        let (asset, url) = match crate::web_image::fetch(&args.url, stopped)? {
+            crate::web_image::Found::Picture(asset, url) => (*asset, url),
+            crate::web_image::Found::Page(pictures) => return Ok(json!({"asset_id": null, "pictures": pictures})),
+        };
+        let answer = |stamp: &nuzky_session::Stamp, asset: &nuzky_engine::model::Asset| {
+            json!({
+                "revision": stamp.revision, "session_epoch": stamp.session_epoch, "asset_id": asset.id,
+                "name": asset.name, "width": asset.width, "height": asset.height, "url": url,
+            })
+        };
+        if let Some(existing) = state.project.assets.iter().find(|a| Path::new(&a.path) == Path::new(&asset.path)) {
+            return Ok(answer(&state.stamp, existing));
+        }
+        let result = self.host.session.apply_edits(
+            &args.run_id,
+            &new_id(),
+            vec![EditCmd::AddAssets { assets: vec![asset.clone()] }],
+            Expect { revision: Some(state.stamp.revision), speech_layout_key: None },
+        )?;
+        Ok(answer(&result.stamp, &asset))
     }
 
     fn add_sticker(&self, args: AddSticker, state: &SessionState) -> Result<Value> {
