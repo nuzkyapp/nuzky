@@ -118,6 +118,10 @@ class Session:
             caps = {'capabilities': {'alwaysMatch': {'browserName': 'wry',
                                                      'webkitgtk:browserOptions': {'binary': str(APP), 'args': RUN.args}}}}
         self.path = '/session/' + webdriver('POST', '/session', caps)['sessionId']
+        if WINDOWS:
+            # The page as large as under gamescope, whatever the display's scale; Windows would fit the window to
+            # the screen in fractions of a page pixel.
+            webdriver('POST', self.path + '/window/rect', {'width': 1440, 'height': 900})
 
     def run(self, script, *args, retries=0):
         return webdriver('POST', self.path + '/execute/sync', {'script': script, 'args': list(args)}, retries)
