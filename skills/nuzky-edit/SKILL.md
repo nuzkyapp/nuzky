@@ -86,6 +86,17 @@ When the user wants a picture from the web, such as the logo of a brand they tal
 
 To point at something or add a reaction, put an emoji or one of Nuzky's stickers over the video with `add_sticker(run_id, sticker, at_us)`, passing the emoji itself ("🔥", "👍🏽") rather than its name when you can; it lands centred for 3 s on a track of its own, and its `transform` moves it next to what it points at.
 
+## A brand's logo and its colours
+
+For a brand deal ("put in the logo of the company I talk about, and captions in its colours"):
+
+1. Take the brand from the user's words, or from get_transcript when they only say "the company I talk about"; when two brands could be meant, ask with `suggest_options`. A logo the user attached or imported comes first.
+2. Otherwise search the web for "<brand> logo svg" and prefer the brand's own site, its press kit or Wikimedia Commons. When no picture file turns up, pass the brand's home page to `import_web_image` and pick from its `pictures`. An SVG or a PNG with transparency beats a photo, a mock-up or a favicon. Never draw or generate a brand's logo; when you find none, ask the user for the file.
+3. Inside a run, `import_web_image`, then `inspect_image(asset_id)`: check that it is the brand's current logo, whole, with nothing else around it.
+4. Place it while the brand is talked about: apply_edits `{"type":"addSticker","assetId":…,"startUs":…,"durationUs":…,"transform":{"x":0.15,"y":-0.3,"scale":0.25,"rotation":0,"opacity":1}}`, inside the safe area and away from the face and the captions. A logo whose `colors` mark a white `background` shows as a white card: prefer a transparent one, or use `addPictureInPicture`.
+5. The brand's colour is the largest of `colors` without `background` that is not near white, black or grey; for a logo in only black or only white, it is that colour. Use the hex as it is, never one read off the picture. Build captions as usual when there are none, then recolour all of them in one edit: `{"type":"restyleTrack","trackId":<the Captions track's id>,"style":{"color":<brand>,"strokeColor":"#000000"}}`, a black stroke under a light colour and `"#ffffff"` under a dark one. When that does not read over the footage, put white text on `"background":"<brand>e6"` instead. A second brand colour can be the `highlight`.
+6. `inspect_frames(times_us, safe_area: true)` where the logo shows, `end_run` keep, and tell the user which site the logo came from.
+
 ## Music and sound effects
 
 When the user asks for music or a sound effect (a whoosh on a cut, a pop on a caption), find it with `search_sounds(query, kind: "music" | "effect")`: short English words such as "whoosh", "upbeat" or "cinematic". Online results are only CC0 and CC BY, so they are fine in a monetized video. Both kinds start with the sounds built into Nuzky, which work offline: the effects, and for music the CC0 song Dancing (`nuzky:dancing`), which an empty music query lists; online results follow. Inside a run, `add_sound(run_id, id, at_us)` downloads the sound when needed and places it on an audio track at that time. Put a whoosh slightly before a cut and music from 0, then duck it under speech. When `needs_credit` is true, tell the user the video's description must credit it: the Audio panel's Copy credits and the `.credits.txt` written beside the export have the text. Offline, online_error says so; use the built-in sounds or tell the user.
