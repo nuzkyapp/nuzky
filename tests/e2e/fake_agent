@@ -2,13 +2,14 @@
 """A stand-in for `claude -p` and `codex exec` in the AI panel flows, so they never spend anyone's subscription.
 
 It takes the same arguments, refuses to run unless Nuzky passed every flag that keeps the agent to
-Nuzky's tools, and answers in Claude Code's stream-json or Codex's JSON lines. It is a real MCP client
+Nuzky's tools and its own web search, and answers in Claude Code's stream-json or Codex's JSON lines. It is a real MCP client
 of the bridge from --mcp-config or -c, so its edits go through Nuzky like a real agent's. Claude reads
 stream-json user messages from stdin while it works; Codex reads one prompt up to EOF. The message picks what it does:
   "cut"      reads the project and its activity, says a message before and after opening its run, cuts 1-3 s out,
              adds two captions and answers
   "retakes"  transcribes, retries a declined model three times, or cuts the first two words in one run
   "options"  offers two takes with suggest_options
+  "search the web"  searches the web twice with the agent's own search, in its own format, and answers
   "numbered list"  answers with loose Markdown lists: numbered from 1, numbered on from 4, and bullets
   "work as reels"  (Find reels) proposes four reels of at least 15 s from the transcript
   "slow"     opens a run, splits the clip and keeps working until stopped
@@ -156,15 +157,19 @@ def emit(obj):
     print(json.dumps(obj, ensure_ascii=False), flush=True)
 
 
-# The flags that keep the agent to Nuzky's tools; without any of them this is a bug in Nuzky.
-REQUIRED = {'-p': None, '--input-format': 'stream-json', '--output-format': 'stream-json', '--tools': '', '--strict-mcp-config': None,
-            '--permission-mode': 'dontAsk', '--allowedTools': 'mcp__nuzky', '--setting-sources': 'user',
+# What "search the web" searches for; tests/e2e/ai_panel.py looks for these.
+SEARCHES = ['Spotify logo svg', 'Spotify brand colors']
+
+
+# The flags that keep the agent to Nuzky's tools and its own web search; without any of them this is a bug in Nuzky.
+REQUIRED = {'-p': None, '--input-format': 'stream-json', '--output-format': 'stream-json', '--tools': 'WebSearch', '--strict-mcp-config': None,
+            '--permission-mode': 'dontAsk', '--allowedTools': 'mcp__nuzky,WebSearch', '--setting-sources': 'user',
             '--disable-slash-commands': None}
 if CODEX:
     settings = dict(a.split('=', 1) for i, a in enumerate(args) if i and args[i - 1] == '-c')
     required = {'default_permissions': '"nuzky"', 'permissions.nuzky.filesystem': '{":minimal"="read"}', 'approval_policy': '"never"', 'features.shell_tool': 'false',
                 'features.code_mode.direct_only_tool_namespaces': '["mcp__nuzky"]', 'features.image_generation': 'true',
-                'mcp_servers.nuzky.default_tools_approval_mode': '"approve"'}
+                'web_search': '"cached"', 'mcp_servers.nuzky.default_tools_approval_mode': '"approve"'}
     missing = [f for f in ('--json', '--ignore-user-config') if f not in args]
     missing += [f'-c {k}={v}' for k, v in required.items() if settings.get(k) != v]
     if args[:1] != ['exec'] or args[-1:] != ['-']:
@@ -273,7 +278,7 @@ if CODEX:
     emit({'type': 'thread.started', 'thread_id': session})
     emit({'type': 'turn.started'})
 else:
-    emit({'type': 'system', 'subtype': 'init', 'session_id': session, 'tools': tools, 'output_style': style,
+    emit({'type': 'system', 'subtype': 'init', 'session_id': session, 'tools': ['WebSearch', *tools], 'output_style': style,
           'mcp_servers': [{'name': 'nuzky', 'status': 'connected'}], 'claude_code_version': '2.1.292'})
 calls = 0
 items = 0
@@ -324,6 +329,28 @@ def call(tool, arguments):
     if result.get('isError'):
         raise RuntimeError(result['content'][0]['text'])
     return result.get('structuredContent', {})
+
+
+def search(query):
+    """The agent's own web search, which runs on its provider's servers, in the shape each one reports it."""
+    global calls
+    calls += 1
+    if CODEX:
+        # codex-rs 0.164.0 flattens the search's own id after the item's, so its JSON names `id` twice.
+        tid, sid = item_id(), f'ws_{os.getpid()}_{calls}'
+        for kind, fields in (('item.started', '"query":"","action":{"type":"other"}'),
+                             ('item.completed', f'"query":{json.dumps(query)},"action":'
+                                                f'{json.dumps({"type": "search", "query": query, "queries": [query]})}')):
+            print(f'{{"type":"{kind}","item":{{"id":"{tid}","type":"web_search","id":"{sid}",{fields}}}}}', flush=True)
+        return
+    # As Claude Code 2.1.309 reports it with --tools WebSearch.
+    tid, block = f'toolu_{os.getpid()}_{calls}', {'type': 'tool_use', 'name': 'WebSearch', 'caller': {'type': 'direct'}}
+    emit({'type': 'stream_event', 'parent_tool_use_id': None, 'event': {'type': 'message_start'}})
+    emit({'type': 'stream_event', 'parent_tool_use_id': None, 'event': {'type': 'content_block_start', 'content_block': dict(block, id=tid, input={})}})
+    emit({'type': 'assistant', 'parent_tool_use_id': None, 'message': {'content': [dict(block, id=tid, input={'query': query})]}})
+    results = json.dumps([{'title': 'File:Spotify logo.svg', 'url': 'https://commons.wikimedia.org/wiki/File:Spotify_logo.svg'}])
+    emit({'type': 'user', 'parent_tool_use_id': None, 'message': {'content': [
+        {'tool_use_id': tid, 'type': 'tool_result', 'content': f'Web search results for query: "{query}"\n\nLinks: {results}'}]}})
 
 
 def finish(error=False, text=''):
@@ -420,6 +447,12 @@ elif thumbnail:
                 time.sleep(0.5)
     call('end_run', {'run_id': run, 'action': 'keep'})
     say(f'Hotovo: cover i náhledovka pro YouTube mají hook „{hook}“ za hlavou.')
+elif 'search the web' in message:
+    for query in SEARCHES:
+        search(query)
+    # Long enough for the flow to see the searches while it works.
+    time.sleep(1.5)
+    say('Logo Spotify je zelené, #1ED760.')
 elif 'work as reels' in message:
     transcript = call('get_transcript', {})
     words = transcript['words']

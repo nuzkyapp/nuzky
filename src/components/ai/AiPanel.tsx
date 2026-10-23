@@ -48,6 +48,7 @@ import {
   makeThumbnail,
   newChat,
   openChat,
+  SEARCHING,
   send,
   sendBlocked,
   steer,
@@ -332,7 +333,9 @@ function grouped(steps: Step[]): (Step & { times: number })[] {
   const rows: (Step & { times: number })[] = [];
   for (const s of steps) {
     const last = rows[rows.length - 1];
-    if (last && last.title === s.title && last.status !== "failed" && s.status !== "failed") {
+    // Every search shows what it searched for, so only a repeat of the same search joins its row.
+    const searches = s.title === SEARCHING && last?.detail !== s.detail;
+    if (last && last.title === s.title && last.status !== "failed" && s.status !== "failed" && !searches) {
       // Calls can run side by side, so the row runs until every one of them is done.
       const status = [last.status, s.status].includes("running") ? "running" : [last.status, s.status].includes("stopped") ? "stopped" : [last.status, s.status].includes("interrupted") ? "interrupted" : s.status;
       rows[rows.length - 1] = { ...s, id: last.id, status, times: last.times + 1 };

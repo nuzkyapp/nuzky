@@ -227,6 +227,8 @@ const toolName = (raw: string) => raw.replace(/^mcp__nuzky__/, "").replace(/^nuz
 const HIDDEN = new Set(["begin_run", "end_run", "job"]);
 /** The tool an agent offers choices with; the panel shows them as buttons, not as a step. */
 const OFFER = "suggest_options";
+/** The step of the agent's own web search; each search keeps its own row. */
+export const SEARCHING = "Searching the web";
 
 const TITLES: Record<string, string> = {
   get_state: "Read the project",
@@ -244,6 +246,9 @@ const TITLES: Record<string, string> = {
   add_sticker: "Adding a sticker",
   export_video: "Exporting",
   undo_run: "Undoing its changes",
+  web_search: SEARCHING,
+  import_web_image: "Getting a picture from the web",
+  inspect_image: "Looking at a picture",
 };
 
 const ANALYSES: Record<string, string> = {
@@ -282,10 +287,20 @@ function stepTitle(raw: string, input?: unknown): string {
   return TITLES[name] ?? name;
 }
 
-/** The detail worth showing next to a step: which frames, which file. */
+const host = (url: unknown): string | null => {
+  try {
+    return new URL(String(url)).host || null;
+  } catch {
+    return null;
+  }
+};
+
+/** The detail worth showing next to a step: which frames, which file, what it searched for. */
 function stepDetail(raw: string, input?: unknown): string | null {
   const args = obj(input);
   const name = toolName(raw);
+  if (name === "web_search") return typeof args.query === "string" ? args.query : host(args.url);
+  if (name === "import_web_image") return host(args.url);
   if (name === "inspect_frames" && Array.isArray(args.times_us)) return args.times_us.slice(0, 4).map((t) => formatTime(Number(t), false)).join(" · ") + (args.times_us.length > 4 ? " …" : "");
   if (name === "export_video" && typeof args.path === "string") return args.path.split(/[\\/]/).pop() ?? null;
   if (name === "apply_edits" && Array.isArray(args.edits)) return args.edits.length === 1 ? "1 change" : `${args.edits.length} changes`;

@@ -29,8 +29,8 @@ pub(crate) fn command(req: &TurnRequest) -> Command {
     // The user's login, model and gateway stay; the folder's settings, hooks and MCP servers do not.
     .args(["--setting-sources", "user", "--settings", &settings().to_string()])
     .args(["--strict-mcp-config", "--mcp-config", &mcp.to_string()])
-    // No shell, files or web: only Nuzky's tools, allowed without asking.
-    .args(["--tools", "", "--allowedTools", "mcp__nuzky", "--permission-mode", "dontAsk"])
+    // No shell, files or page fetching: only Nuzky's tools and Claude's own web search, allowed without asking.
+    .args(["--tools", "WebSearch", "--allowedTools", "mcp__nuzky,WebSearch", "--permission-mode", "dontAsk"])
     .args(["--disable-slash-commands", "--append-system-prompt", SYSTEM])
     .args([if req.resume { "--resume" } else { "--session-id" }, &req.session]);
     if let Some(model) = &req.model {
@@ -74,6 +74,11 @@ fn tool(id: &str, name: &str, status: ToolStatus, input: Option<Value>) -> Step 
     Step::Event(AgentEvent::Tool { id: id.to_owned(), name: name.to_owned(), status, input })
 }
 
+/// The tools Nuzky gives Claude: its own, and Claude's web search, which runs on Anthropic's servers.
+fn allowed(name: &str) -> bool {
+    name.starts_with("mcp__nuzky__") || name == "WebSearch"
+}
+
 impl Parser {
     pub(crate) fn line(&mut self, line: &str) -> Vec<Step> {
         let Ok(v) = serde_json::from_str::<Value>(line) else { return Vec::new() };
@@ -91,12 +96,7 @@ impl Parser {
                         Vec::new()
                     }
                     Some("content_block_start") if e["content_block"]["type"] == "tool_use" => {
-                        let (id, name) = (
-                            e["content_block"]["id"].as_str().unwrap_or(""),
-                            e["content_block"]["name"].as_str().unwrap_or(""),
-                        );
-                        self.tools.insert(id.to_owned(), name.to_owned());
-                        vec![tool(id, name, ToolStatus::Running, None)]
+                        vec![self.tool_use(&e["content_block"], None)]
                     }
                     Some("content_block_delta") if e["delta"]["type"] == "text_delta" => {
                         self.streamed = true;
@@ -120,11 +120,7 @@ impl Parser {
                 let mut out = Vec::new();
                 for c in content.as_array().into_iter().flatten() {
                     match c["type"].as_str() {
-                        Some("tool_use") => {
-                            let (id, name) = (c["id"].as_str().unwrap_or(""), c["name"].as_str().unwrap_or(""));
-                            self.tools.insert(id.to_owned(), name.to_owned());
-                            out.push(tool(id, name, ToolStatus::Running, Some(c["input"].clone())));
-                        }
+                        Some("tool_use") => out.push(self.tool_use(c, Some(c["input"].clone()))),
                         Some("text") if !self.streamed => out
                             .push(Step::Event(AgentEvent::Text { text: c["text"].as_str().unwrap_or("").to_owned() })),
                         _ => {}
@@ -154,12 +150,31 @@ impl Parser {
             _ => Vec::new(),
         }
     }
+
+    /// A call that starts; a tool Nuzky did not give Claude stops the turn.
+    fn tool_use(&mut self, block: &Value, input: Option<Value>) -> Step {
+        let (id, name) = (block["id"].as_str().unwrap_or(""), block["name"].as_str().unwrap_or(""));
+        if !allowed(name) {
+            return Step::Fail(
+                ErrorCode::AgentFailed,
+                format!(
+                    "Claude Code used a tool Nuzky did not give it ({name}), so Nuzky stopped it. Update Claude Code and Nuzky."
+                ),
+            );
+        }
+        let (name, input) = if name == "WebSearch" {
+            ("web_search", input.map(|i| json!({"query": i["query"]})))
+        } else {
+            (name, input)
+        };
+        self.tools.insert(id.to_owned(), name.to_owned());
+        tool(id, name, ToolStatus::Running, input)
+    }
 }
 
-/// Fails closed unless Claude runs with Nuzky's settings and nothing but Nuzky's tools.
+/// Fails closed unless Claude runs with Nuzky's settings and nothing but Nuzky's tools and its web search.
 fn init(v: &Value) -> Option<Step> {
-    let foreign =
-        v["tools"].as_array().into_iter().flatten().filter_map(Value::as_str).find(|t| !t.starts_with("mcp__nuzky__"));
+    let foreign = v["tools"].as_array().into_iter().flatten().filter_map(Value::as_str).find(|t| !allowed(t));
     if let Some(tool) = foreign {
         return Some(Step::Fail(
             ErrorCode::AgentFailed,
@@ -250,5 +265,42 @@ mod tests {
         assert_eq!(events(&[logged_out]), [Err((ErrorCode::NotSignedIn, "Not logged in · Please run /login".into()))]);
         let limit = json!({"type":"assistant","error":"rate_limit","parent_tool_use_id":null,"message":{"content":[{"type":"text","text":"You've hit your limit · resets 9pm"}]}});
         assert_eq!(events(&[limit]), [Err((ErrorCode::UsageLimit, "You've hit your limit · resets 9pm".into()))]);
+    }
+
+    // Shapes from a real claude 2.1.309 turn with Nuzky's flags.
+    #[test]
+    fn a_web_search_is_a_step_with_its_query() {
+        let lines = [
+            init_line(&["WebSearch", "mcp__nuzky__get_state"], "default"),
+            json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_start","content_block":{"type":"tool_use","id":"toolu_01VH","name":"WebSearch","input":{},"caller":{"type":"direct"}}}}),
+            json!({"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"tool_use","id":"toolu_01VH","name":"WebSearch","input":{"query":"Spotify logo svg wikimedia commons"},"caller":{"type":"direct"}}]}}),
+            json!({"type":"user","parent_tool_use_id":null,"message":{"content":[{"tool_use_id":"toolu_01VH","type":"tool_result","content":"Web search results for query: \"Spotify logo svg wikimedia commons\"\n\nLinks: [{\"title\":\"File:Spotify logo.svg\",\"url\":\"https://commons.wikimedia.org/wiki/File:Spotify_logo.svg\"}]"}]}}),
+        ];
+        let search =
+            |status, input| Ok(AgentEvent::Tool { id: "toolu_01VH".into(), name: "web_search".into(), status, input });
+        assert_eq!(
+            events(&lines),
+            [
+                search(ToolStatus::Running, None),
+                search(ToolStatus::Running, Some(json!({"query": "Spotify logo svg wikimedia commons"}))),
+                search(ToolStatus::Done, None),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_tool_nuzky_did_not_give_fails_the_turn_when_offered_or_used() {
+        let offered = events(&[init_line(&["WebSearch", "WebFetch", "mcp__nuzky__get_state"], "default")]);
+        assert!(offered[0].as_ref().unwrap_err().1.contains("(WebFetch)"), "{offered:?}");
+        for name in ["Bash", "WebFetch"] {
+            let started = json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_start","content_block":{"type":"tool_use","id":"t1","name":name,"input":{}}}});
+            let used = json!({"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"tool_use","id":"t1","name":name,"input":{"url":"http://192.168.1.1/"}}]}});
+            for line in [started, used] {
+                let message = format!(
+                    "Claude Code used a tool Nuzky did not give it ({name}), so Nuzky stopped it. Update Claude Code and Nuzky."
+                );
+                assert_eq!(events(&[line]), [Err((ErrorCode::AgentFailed, message))]);
+            }
+        }
     }
 }

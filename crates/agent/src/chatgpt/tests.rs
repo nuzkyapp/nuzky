@@ -308,7 +308,7 @@ fn text_stream_and_request_contract() {
     let tools = json!([{"type": "namespace", "name": "nuzky", "description": "Nuzky's tools for editing the project open in the app.", "tools": [{
         "type": "function", "name": "cut", "description": "Cut a clip", "strict": false,
         "parameters": {"type": "object", "properties": {"at": {"type": "number"}}, "required": ["at"]}
-    }]}]);
+    }]}, {"type": "web_search", "external_web_access": false}]);
     assert_eq!(body["tools"], tools);
     let unsupported = "background conversation max_output_tokens max_tool_calls metadata moderation multi_agent prompt \
         prompt_cache_retention safety_identifier temperature top_logprobs top_p truncation user previous_response_id";
@@ -361,6 +361,52 @@ fn tools_reasoning_images_and_failures_round_trip() {
         let mut kept = input;
         kept.push(message());
         assert_eq!(*f.history.lock().unwrap(), kept);
+    }
+}
+
+#[test]
+fn a_web_search_shows_as_a_step_and_goes_back_without_its_id() {
+    let started = json!({"type": "web_search_call", "id": "ws-1", "status": "in_progress"});
+    let searched = json!({"type": "web_search_call", "id": "ws-1", "status": "completed",
+        "action": {"type": "search", "query": "Spotify logo svg"}});
+    let added = json!({"type": "response.output_item.added", "item": started});
+    let server = Server::new(vec![sse(vec![added, item(searched.clone()), item(call()), completed()]), answer()]);
+    let f = Fixture::start(&server, tool_reply(), None, None, vec![]);
+    let search = |status, input| AgentEvent::Tool { id: "ws-1".into(), name: "web_search".into(), status, input };
+    let mut expected = vec![
+        search(ToolStatus::Running, None),
+        search(ToolStatus::Done, Some(json!({"query": "Spotify logo svg"}))),
+        AgentEvent::Tool {
+            id: "call-1".into(),
+            name: "cut".into(),
+            status: ToolStatus::Running,
+            input: Some(json!({"at": 2})),
+        },
+        AgentEvent::Tool { id: "call-1".into(), name: "cut".into(), status: ToolStatus::Done, input: None },
+    ];
+    expected.extend(text_events());
+    assert_eq!(f.finish(), expected);
+    let mut input_search = searched;
+    input_search.as_object_mut().unwrap().remove("id");
+    let mut input_call = call();
+    input_call.as_object_mut().unwrap().remove("id");
+    let result = json!({"type": "function_call_output", "call_id": "call-1", "output": "Edited"});
+    let requests = server.requests.lock().unwrap();
+    assert_eq!(requests[1]["input"], json!([user(), input_search, input_call, result]));
+}
+
+#[test]
+fn another_hosted_tool_ends_the_turn() {
+    for kind in ["image_generation_call", "code_interpreter_call"] {
+        let server = Server::new(vec![sse(vec![
+            item(json!({"type": kind, "id": "hosted-1", "status": "completed"})),
+            completed(),
+        ])]);
+        let f = Fixture::start(&server, tool_reply(), None, None, vec![]);
+        let events = f.finish();
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert!(error(&events[0], ErrorCode::AgentFailed).contains(kind));
+        assert_eq!(server.requests.lock().unwrap().len(), 1);
     }
 }
 

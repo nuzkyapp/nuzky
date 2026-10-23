@@ -141,14 +141,15 @@ fn converse(
 ) -> (AgentEvent, bool) {
     let http = http();
     let instructions = format!("{SYSTEM}\n\n{HERE}\n\n{}", req.guide);
-    let tools = namespace(&req.tools);
+    // OpenAI's web search of its own index, as Codex sends it: no live page fetch.
+    let tools = [namespace(&req.tools), json!({"type": "web_search", "external_web_access": false})];
     let mut answered = false;
     for _ in 0..MAX_ROUNDS {
         let mut body = json!({
             "model": req.model,
             "instructions": instructions,
             "input": items,
-            "tools": [tools],
+            "tools": tools,
             "store": false,
             "stream": true,
             // Nothing is stored, so the model's reasoning goes back to it with the history.
@@ -162,14 +163,14 @@ fn converse(
             Err(end) => return (end, answered),
         };
         answered = true;
-        if let Some(other) =
-            output.iter().find(|item| !matches!(item["type"].as_str(), Some("message" | "reasoning" | "function_call")))
-        {
+        if let Some(other) = output.iter().find(|item| {
+            !matches!(item["type"].as_str(), Some("message" | "reasoning" | "function_call" | "web_search_call"))
+        }) {
             let what = other["type"].as_str().unwrap_or("unknown");
             return (
                 failure(
                     ErrorCode::AgentFailed,
-                    &format!("ChatGPT tried to use something other than Nuzky's tools ({what}), so Nuzky stopped it."),
+                    &format!("ChatGPT tried to use a tool Nuzky did not give it ({what}), so Nuzky stopped it."),
                 ),
                 true,
             );
@@ -267,7 +268,18 @@ fn respond(
                     emit(AgentEvent::Text { text: text.to_owned() });
                 }
             }
-            "response.output_item.done" => output.push(event["item"].clone()),
+            // ChatGPT searches the web on OpenAI's servers within the answer; the panel shows each search.
+            "response.output_item.added" if event["item"]["type"] == "web_search_call" => {
+                emit(search(&event["item"], ToolStatus::Running));
+            }
+            "response.output_item.done" => {
+                let item = &event["item"];
+                if item["type"] == "web_search_call" {
+                    let failed = item["status"] == "failed";
+                    emit(search(item, if failed { ToolStatus::Failed } else { ToolStatus::Done }));
+                }
+                output.push(item.clone());
+            }
             "response.completed" => return Ok(output),
             // A usage limit can come this way after the answer began.
             "response.failed" => return Err(problem(None, &event["response"]["error"], id)),
@@ -281,6 +293,22 @@ fn respond(
             }
             _ => {}
         }
+    }
+}
+
+/// A web search ChatGPT made, as a step with what it searched for or the page it opened.
+fn search(item: &Value, status: ToolStatus) -> AgentEvent {
+    let action = &item["action"];
+    let input = match (action["query"].as_str(), action["url"].as_str()) {
+        (Some(query), _) => Some(json!({"query": query})),
+        (None, Some(url)) => Some(json!({"url": url})),
+        (None, None) => None,
+    };
+    AgentEvent::Tool {
+        id: item["id"].as_str().unwrap_or_default().to_owned(),
+        name: "web_search".into(),
+        status,
+        input,
     }
 }
 
