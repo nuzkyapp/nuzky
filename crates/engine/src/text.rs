@@ -12,7 +12,7 @@ use cosmic_text::{
 };
 
 use crate::gpu::Image;
-use crate::model::{LETTER_SPACING, LINE_SPACING, LetterCase, TextStyle, max_stroke_width, parse_color};
+use crate::model::{LETTER_SPACING, LINE_SPACING, LetterCase, TextAlign, TextStyle, max_stroke_width, parse_color};
 
 // Physical raster limits also bound legacy files, zoomed text, many lines and cache retention.
 const MAX_GLYPH_PX: f32 = 2048.0;
@@ -285,7 +285,12 @@ impl TextRenderer {
         }
         let text = if text.trim().is_empty() { " " } else { text };
         let (text, shown_to_typed) = cased(text, style.letter_case);
-        buffer.set_text(&text, &attrs, Shaping::Advanced, Some(Align::Center));
+        let align = match style.align {
+            TextAlign::Left => Align::Left,
+            TextAlign::Center => Align::Center,
+            TextAlign::Right => Align::Right,
+        };
+        buffer.set_text(&text, &attrs, Shaping::Advanced, Some(align));
         buffer.shape_until_scroll(&mut self.fonts, false);
 
         let mut line_w: f32 = 0.0;
@@ -299,14 +304,19 @@ impl TextRenderer {
             }
             text_h = text_h.max(run.line_top + size * 1.2);
         }
-        // Glyphs are centred inside `wrap`, so crop to the widest line. Every line ends in the letter spacing
+        // Glyphs line up inside `wrap`, so crop to the widest line. Every line ends in the letter spacing
         // after its last letter, which is not drawn. Pulled closer than their own width, letters reach past the
         // line, so the crop follows the letters. Line spacing goes only between lines: cosmic-text centres each
         // line in its height, so the glyphs move up by half the spacing and the last line ends as without.
         let (x0, line_w) = if letter_spacing < 0.0 && left <= right {
             (left, right - left)
         } else {
-            ((wrap - line_w) / 2.0, (line_w - letter_spacing * size).max(0.0))
+            let start = match style.align {
+                TextAlign::Left => 0.0,
+                TextAlign::Center => (wrap - line_w) / 2.0,
+                TextAlign::Right => wrap - line_w,
+            };
+            (start, (line_w - letter_spacing * size).max(0.0))
         };
         let x0 = x0.floor() as i32;
         let canvas_w = (line_w.ceil() + 2.0 * pad as f32).max(1.0);
@@ -353,7 +363,10 @@ impl TextRenderer {
             box_blur(&mut mask, w, h, blur * scale);
             mask
         });
-        Layout { w, h, scale, radius: size * scale * 0.25, inset: room * scale, fill, outline, shadow, glyphs }
+        let inset = room * scale;
+        let radius =
+            (finite_clamp(style.box_radius, 0.0, 1.0) * size * scale).min((w.min(h) as f32 - 2.0 * inset) / 2.0);
+        Layout { w, h, scale, radius: radius.max(0.0), inset, fill, outline, shadow, glyphs }
     }
 
     /// Colours a layout: box, outline, then the fill, with the key words' coverage in the keyword colour and
@@ -603,7 +616,7 @@ fn rounded_rect_coverage(x: f32, y: f32, w: f32, h: f32, r: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::TextShadow;
+    use crate::model::{BOX_RADIUS, TextShadow};
     use cosmic_text::skrifa::{FontRef, MetadataProvider};
 
     const CZECH: &str = "Příliš žluťoučký kůň ěščřžýáíéúůťďň ĚŠČŘŽÝÁÍÉÚŮŤĎŇ";
@@ -635,6 +648,8 @@ mod tests {
             letter_case: Default::default(),
             letter_spacing: 0.0,
             line_spacing: 0.0,
+            align: TextAlign::Center,
+            box_radius: BOX_RADIUS,
         }
     }
 
@@ -885,6 +900,68 @@ mod tests {
         assert!((apart.1 - lines.1 - 0.5 * 95.0).abs() <= 1.0, "{lines:?} -> {apart:?}");
         // One line has no line to keep apart from.
         assert_eq!(size(&mut renderer, "A", &look), line);
+    }
+
+    /// The leftmost and rightmost drawn column of each band of rows that has ink, top to bottom.
+    fn line_edges(text: &TextImage) -> Vec<(usize, usize)> {
+        let (w, h) = (text.image.width as usize, text.image.height as usize);
+        let ink = |x: usize, y: usize| text.image.data[(y * w + x) * 4 + 3] > 128;
+        let mut lines = Vec::new();
+        let mut current: Option<(usize, usize)> = None;
+        for y in 0..h {
+            let row = (0..w).filter(|&x| ink(x, y));
+            match (row.clone().min().zip(row.max()), &mut current) {
+                (Some((l, r)), Some((cl, cr))) => (*cl, *cr) = ((*cl).min(l), (*cr).max(r)),
+                (Some(edges), None) => current = Some(edges),
+                (None, Some(_)) => lines.extend(current.take()),
+                (None, None) => {}
+            }
+        }
+        lines.extend(current);
+        lines
+    }
+
+    #[test]
+    fn alignment_lines_the_shorter_line_up_with_the_longer_one() {
+        let mut renderer = bundled_renderer();
+        let text = "Hi\nHello world";
+        let edges = |renderer: &mut TextRenderer, align| {
+            let look = TextStyle { align, ..style("Inter") };
+            line_edges(&renderer.render(text, &look, 1.0, 4000.0))
+        };
+        let [short, long] = edges(&mut renderer, TextAlign::Left)[..] else { panic!("two lines") };
+        assert!(short.0.abs_diff(long.0) <= 6 && long.1 - short.1 > 200, "left: {short:?} {long:?}");
+        let [short, long] = edges(&mut renderer, TextAlign::Right)[..] else { panic!("two lines") };
+        assert!(short.1.abs_diff(long.1) <= 6 && short.0 - long.0 > 200, "right: {short:?} {long:?}");
+        let [short, long] = edges(&mut renderer, TextAlign::Center)[..] else { panic!("two lines") };
+        let middle = |(l, r): (usize, usize)| (l + r) as f32 / 2.0;
+        assert!((middle(short) - middle(long)).abs() <= 6.0, "centre: {short:?} {long:?}");
+        // The widest line sets the image, so alignment never changes its size.
+        let size = |renderer: &mut TextRenderer, align| {
+            let image = renderer.render(text, &TextStyle { align, ..style("Inter") }, 1.0, 4000.0).image;
+            (image.width, image.height)
+        };
+        assert_eq!(size(&mut renderer, TextAlign::Left), size(&mut renderer, TextAlign::Center));
+        assert_eq!(size(&mut renderer, TextAlign::Right), size(&mut renderer, TextAlign::Center));
+    }
+
+    #[test]
+    fn box_corners_go_from_square_to_fully_round() {
+        let mut renderer = bundled_renderer();
+        let boxed = |radius| TextStyle { background: Some("#0000ffff".into()), box_radius: radius, ..style("Inter") };
+        let corner = |renderer: &mut TextRenderer, radius| {
+            let image = renderer.render("Ahoj", &boxed(radius), 1.0, 4000.0).image;
+            // Alpha of the top left pixel and of one a quarter of the box's height in along its top edge.
+            let in_from_corner = image.height as usize / 4;
+            (image.data[3], image.data[in_from_corner * 4 + 3], image.width, image.height)
+        };
+        let square = corner(&mut renderer, 0.0);
+        let usual = corner(&mut renderer, BOX_RADIUS);
+        let round = corner(&mut renderer, 1.0);
+        assert_eq!((square.0, square.1), (255, 255), "a square box fills its corner");
+        assert!(usual.0 < 64 && usual.1 == 255, "the usual radius rounds only the corner: {usual:?}");
+        assert!(round.0 == 0 && round.1 < 128, "a full radius rounds a line's box into a pill: {round:?}");
+        assert_eq!((square.2, square.3), (round.2, round.3), "corners never change the box's size");
     }
 
     #[test]

@@ -22,8 +22,8 @@ use crate::gpu::{Draw, Image, Layer, Mask};
 use crate::loudness::{Limiter, db_to_gain};
 use crate::media::{Transfer, init};
 use crate::model::{
-    Adjust, Asset, Background, CHANNELS, Canvas, Clip, ClipContent, Project, TextStyle, Track, TrackKind, Transform,
-    parse_color,
+    Adjust, Asset, BOX_RADIUS, Background, CHANNELS, Canvas, Clip, ClipContent, Project, TextAlign, TextStyle, Track,
+    TrackKind, Transform, parse_color,
 };
 use crate::render::{Pending, Renderer, WHOLE, Wait};
 
@@ -469,6 +469,8 @@ fn style(size: f32, color: &str, bold: bool, stroke: f32) -> TextStyle {
         letter_case: Default::default(),
         letter_spacing: 0.0,
         line_spacing: 0.0,
+        align: TextAlign::Center,
+        box_radius: BOX_RADIUS,
     }
 }
 

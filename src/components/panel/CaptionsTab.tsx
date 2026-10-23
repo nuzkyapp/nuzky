@@ -1,12 +1,12 @@
 import { Captions, Check, Ellipsis, Plus } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { api, errorText, plainError } from "../../lib/api";
-import { CAPTION_STYLES, KEYWORD_COLOR, KEYWORD_PICKS, isLook } from "../../lib/presets";
+import { CAPTION_STYLES, isLook } from "../../lib/presets";
 import { type CaptionLook, speechBlocker, startSpeech, useSpeech } from "../../lib/speech";
-import { applyCaptionLook, isCaptionTrack, restyleCaptions, useEditor } from "../../lib/store";
-import type { CaptionPreset, KeywordPick, TextStyle } from "../../lib/types";
-import { FontPicker } from "../FontPicker";
-import { Button, ColorInput, IconButton, LockReason, Menu, Segmented, TextSwatch, lockedProps, useLockReason } from "../ui";
+import { applyCaptionLook, isCaptionTrack, patched, presetOver, restyleCaptions, useEditor } from "../../lib/store";
+import type { CaptionPreset, Clip } from "../../lib/types";
+import { CaptionPosition, HighlightRows, KeywordRows, MainStyle, MoreStyleFold, type SetStyle } from "../inspector/TextSection";
+import { Button, IconButton, LockReason, Menu, Segmented, TextSwatch, lockedProps, useLockReason } from "../ui";
 import { JobError, SpeechFields, SpeechJobCard, useSpeechJobs } from "./SpeechControls";
 
 const WORDS = [
@@ -19,14 +19,16 @@ const WORDS = [
 const BUSY = "Wait for speech recognition to finish";
 const GRID = "grid grid-cols-[repeat(auto-fill,minmax(72px,1fr))] gap-2";
 
-/** The look of the captions on the timeline (the selected caption's, else the first one's), or null without captions. */
-function useCaptionLook(): CaptionLook | null {
-  const clip = useEditor((s) => {
-    const clips = s.snap?.project.tracks.find(isCaptionTrack)?.clips;
-    return clips?.find((c) => s.selection.includes(c.id)) ?? clips?.[0] ?? null;
-  });
-  if (clip?.content.type !== "text") return null;
-  return { style: clip.content.style, animIn: clip.animIn ?? null, animOut: clip.animOut ?? null };
+/**
+ * The captions on the timeline and the look the controls show: the selected caption's, else the first one's.
+ * Null without captions.
+ */
+function useCaptions(): { clips: Clip[]; look: CaptionLook } | null {
+  const clips = useEditor((s) => s.snap?.project.tracks.find(isCaptionTrack)?.clips);
+  const selected = useEditor((s) => clips?.find((c) => s.selection.includes(c.id)));
+  const clip = selected ?? clips?.[0];
+  if (!clips || clip?.content.type !== "text") return null;
+  return { clips, look: { style: clip.content.style, animIn: clip.animIn ?? null, animOut: clip.animOut ?? null } };
 }
 
 /** The user's own caption styles, read once per visit to the tab. */
@@ -59,7 +61,8 @@ export function CaptionsTab() {
   const lock = useLockReason();
   const captionWords = useSpeech((s) => s.captionWords);
   const pending = useSpeech((s) => s.captionLook);
-  const onTimeline = useCaptionLook();
+  const captions = useCaptions();
+  const onTimeline = captions?.look ?? null;
   const { running, last } = useSpeechJobs("captions");
   const blocker = useEditor((s) => (s.snap ? speechBlocker(s.snap.project) : null));
   const hasCaptions = onTimeline !== null;
@@ -73,16 +76,24 @@ export function CaptionsTab() {
   const start = () => startSpeech(look);
   const apply = (preset: CaptionPreset) => {
     const next: CaptionLook = { style: preset.style, animIn: preset.animIn ?? null, animOut: preset.animOut ?? null };
-    // Captions on the timeline each keep their own font when the style brings none.
+    // Captions keep their font and case when the style brings none, each caption its own.
     if (hasCaptions) applyCaptionLook(next);
-    else useSpeech.setState({ captionLook: { ...next, style: { ...preset.style, fontFamily: preset.style.fontFamily ?? font } } });
+    else useSpeech.setState({ captionLook: { ...next, style: presetOver(preset.style, pending.style) } });
   };
-  const restyle = (patch: Partial<TextStyle>) => (hasCaptions ? restyleCaptions(patch) : useSpeech.setState({ captionLook: { ...pending, style: { ...pending.style, ...patch } } }));
-  const pick = look.style.keywords?.pick ?? "off";
-  const setPick = (id: KeywordPick | "off") => restyle({ keywords: id === "off" ? null : { color: look.style.keywords?.color ?? KEYWORD_COLOR, pick: id } });
+  // Every caption at once, or the look waiting for Generate, read when the change goes out so quick changes both stick.
+  const setStyle: SetStyle = captions
+    ? (patch, key) => restyleCaptions(patch, `captions:style:${key}`)
+    : (patch) => {
+        const waiting = useSpeech.getState().captionLook;
+        useSpeech.setState({ captionLook: { ...waiting, style: patched(waiting.style, patch) } });
+      };
+  const styles = captions?.clips.flatMap((c) => (c.content.type === "text" ? [c.content.style] : []));
 
   const tile: Tile = (preset, own) => {
-    const current = isLook(preset, look.style, look.animIn, look.animOut);
+    // Checked when every caption has the look.
+    const current = captions
+      ? captions.clips.every((c) => c.content.type === "text" && isLook(preset, c.content.style, c.animIn, c.animOut))
+      : isLook(preset, look.style, look.animIn, look.animOut);
     const disabled = busy || !!lock;
     // The user's own styles are not the project: recognition running leaves renaming and deleting them alone.
     const openMenu = (at: { x: number; y: number }, keyboard: boolean) => !lock && own?.menu(at, keyboard);
@@ -154,22 +165,20 @@ export function CaptionsTab() {
           <div className={GRID}>{CAPTION_STYLES.map((s) => tile(s))}</div>
         </div>
         <MyStyles look={look} mine={mine} tile={tile} />
-        <div className="flex flex-col gap-1.5">
-          <span className="text-[12px] text-muted">Key words</span>
-          <Segmented label="Key words" value={pick} onChange={setPick} options={KEYWORD_PICKS} disabled={busy} disabledReason={BUSY} />
-          {look.style.keywords && (
-            <LockReason.Provider value={lock ?? (busy ? BUSY : null)}>
-              <ColorInput label="Key word color" value={look.style.keywords.color} onChange={(color) => restyle({ keywords: { ...look.style.keywords!, color } })} />
-            </LockReason.Provider>
-          )}
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <span className="text-[12px] text-muted">Font</span>
-          {/* A row, so the picker's flex-1 fills the width instead of collapsing the column. */}
-          <div className="flex">
-            <FontPicker value={font} onChange={(fontFamily) => restyle({ fontFamily })} disabled={busy} disabledReason={BUSY} />
+        <LockReason.Provider value={lock ?? (busy ? BUSY : null)}>
+          <div className="flex flex-col gap-3">
+            <MainStyle style={look.style} styles={styles} setStyle={setStyle} />
+            <HighlightRows style={look.style} styles={styles} setStyle={setStyle} />
           </div>
-        </div>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[12px] text-muted">Key words</span>
+            <KeywordRows style={look.style} styles={styles} setStyle={setStyle} />
+          </div>
+          <div className="flex flex-col">
+            <MoreStyleFold style={look.style} styles={styles} setStyle={setStyle} flush />
+            {captions && <CaptionPosition clips={captions.clips} flush />}
+          </div>
+        </LockReason.Provider>
       </div>
       {/* Below the choices, in view however many styles there are. */}
       <div className="flex shrink-0 flex-col gap-2 border-t border-white/[.07] p-3.5">

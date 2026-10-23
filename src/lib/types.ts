@@ -1535,6 +1535,11 @@ export type Suggestion = {
 };
 
 /**
+ * Where the lines of a text line up.
+ */
+export type TextAlign = "left" | "center" | "right";
+
+/**
  * A drop shadow under text, in CapCut's numbers. Blur and distance follow the font size, so the shadow grows
  * and shrinks with the text.
  */
@@ -1616,6 +1621,14 @@ export type TextStyle = {
    * Extra space between lines, as a share of the font size, on top of the usual 1.2 line height.
    */
   lineSpacing?: number,
+  /**
+   * Where the lines of a text with several lines line up; the layer stays where it is.
+   */
+  align?: TextAlign,
+  /**
+   * Corner radius of the background box, as a share of the font size; 1 rounds a box of one line fully.
+   */
+  boxRadius?: number,
 };
 
 /**
@@ -1636,6 +1649,8 @@ export type TextStylePatch = {
   letterCase?: LetterCase,
   letterSpacing?: number,
   lineSpacing?: number,
+  align?: TextAlign,
+  boxRadius?: number,
 };
 
 /**

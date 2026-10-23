@@ -1277,8 +1277,9 @@ impl Backend {
             nuzky_analysis::prepared_word_energy(&project, &derived.words, &derived.sources, &self.host.cache_dir)?;
         let keys = nuzky_analysis::key_words(&derived.words, &energy);
         let (mut edit, _) = transcript::caption_edit(&derived.words, &keys, &state.project, look, grouping)?;
+        // Without a place of their own, captions made again stay where the ones they replace were.
         if let EditCmd::AddCaptions { transform, .. } | EditCmd::ReplaceCaptions { transform, .. } = &mut edit {
-            *transform = args.transform;
+            *transform = args.transform.or(*transform);
         }
         let warnings = crate::fonts::warnings(crate::fonts::edit_families(&edit));
         let result = self.host.session.apply_edits(
@@ -2065,6 +2066,8 @@ mod tests {
             letter_case: Default::default(),
             letter_spacing: 0.0,
             line_spacing: 0.0,
+            align: nuzky_engine::model::TextAlign::Center,
+            box_radius: nuzky_engine::model::BOX_RADIUS,
         };
         project
             .apply(EditCmd::AddText { start_us: 0, text: "A very long unrelated title".into(), style: style.clone() })

@@ -47,7 +47,13 @@ export const CAPTION_STYLES = captionStyles as CaptionPreset[];
 
 const lower = (c: string | null | undefined) => (c ?? "").toLowerCase();
 
-/** Same look apart from the font; a karaoke highlight and key words count, so Karaoke is not Reel. */
+/** The background box's corner radius, as a share of the font size, of a text that never changed it. */
+export const BOX_RADIUS = 0.25;
+
+/**
+ * Whether `b` has the look of preset `a`, whatever font it has and, when `a` sets none, its case; a karaoke
+ * highlight and key words count, so Karaoke is not Reel.
+ */
 export function sameStyle(a: TextStyle, b: TextStyle) {
   return (
     a.fontSize === b.fontSize &&
@@ -59,7 +65,9 @@ export function sameStyle(a: TextStyle, b: TextStyle) {
     lower(a.highlight) === lower(b.highlight) &&
     lower(a.keywords?.color) === lower(b.keywords?.color) &&
     (a.keywords?.pick ?? null) === (b.keywords?.pick ?? null) &&
-    (a.letterCase ?? "none") === (b.letterCase ?? "none") &&
+    (!a.letterCase || a.letterCase === (b.letterCase ?? "none")) &&
+    (a.align ?? "center") === (b.align ?? "center") &&
+    (a.boxRadius ?? BOX_RADIUS) === (b.boxRadius ?? BOX_RADIUS) &&
     (a.letterSpacing ?? 0) === (b.letterSpacing ?? 0) &&
     (a.lineSpacing ?? 0) === (b.lineSpacing ?? 0) &&
     sameShadow(a.shadow, b.shadow)

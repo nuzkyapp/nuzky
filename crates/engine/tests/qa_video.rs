@@ -941,6 +941,8 @@ fn captions_in_a_small_preview_match_the_export_scaled_down_by_ffmpeg() {
         letter_case: Default::default(),
         letter_spacing: 0.0,
         line_spacing: 0.0,
+        align: TextAlign::Center,
+        box_radius: BOX_RADIUS,
     };
     let error = caption_preview_error("preview-captions", style, 1.0);
     assert!(error < 4.0, "caption pixel MAE={error}");
@@ -972,6 +974,8 @@ fn a_shadowed_caption_in_a_small_preview_matches_the_export_scaled_down_by_ffmpe
             letter_case: LetterCase::Upper,
             letter_spacing: 0.05,
             line_spacing: 0.1,
+            align: TextAlign::Center,
+            box_radius: BOX_RADIUS,
         };
         let error = caption_preview_error(name, style, 1.52);
         assert!(error < 4.0, "{name}: caption pixel MAE={error}");

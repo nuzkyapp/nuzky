@@ -21,6 +21,7 @@ SCALE = """window.__nuzky.store.getState().edit((p) => {
   return {type: 'updateClip', clipId: c.id, transform: {...c.content.transform, scale: 1.52}};
 })"""
 CASE = f"document.querySelector('{SECTION} [role=group][aria-label=Case]')"
+MORE = f"[...document.querySelectorAll('{SECTION} button[aria-expanded]')].find((b) => b.textContent.startsWith('More style'))"
 # CapCut's own shadow, as turning it on starts it, and the creator's.
 SHADOW_ON = {'color': '#000000', 'opacity': 0.9, 'blur': 15, 'distance': 5, 'angle': -45}
 LOOK = {'color': '#000000', 'opacity': 0.41, 'blur': 23, 'distance': 5, 'angle': -45}
@@ -115,7 +116,7 @@ def look(r, name):
             r.shot(f'{name}-{part}{suffix}')
 
 
-SHADOW_VIEW = f"{CASE}.closest('section').querySelector('input[aria-label=\"Shadow angle value\"]').scrollIntoView({{block: 'end'}})"
+SHADOW_VIEW = f"{MORE}.closest('section').querySelector('input[aria-label=\"Shadow angle value\"]').scrollIntoView({{block: 'end'}})"
 TEXTS = """return window.__nuzky.store.getState().snap.project.tracks.flatMap((t) => t.clips)
   .filter((c) => c.content.type === 'text').map((c) => ({id: c.id, shadow: c.content.style.shadow ?? null}));"""
 PLACE = """window.__nuzky.store.getState().edit((p) => {
@@ -154,7 +155,12 @@ def text_style(r):
     text = wait(lambda: r.s.run(STYLE), 5)
     r.check('at 152 %', r.s.call(SCALE, text['id'])['ok'])
     r.focus_clip(text['id'])
-    if not r.check('the inspector has Case, Letter spacing, Line spacing and Shadow',
+    r.check('Case is in view and the rest of the style waits folded under More style',
+            wait(lambda: r.s.run(f"return !!{CASE} && {MORE}?.getAttribute('aria-expanded') === 'false' && "
+                                 f"!document.querySelector('{SECTION} input[aria-label=\"Letter spacing value\"]')"), 10))
+    r.s.run(f'{MORE}.focus()')
+    press('Return')
+    if not r.check('Enter opens More style, with Letter spacing, Line spacing and Shadow',
                    wait(lambda: r.s.run(f"return !!{CASE} && ['Letter spacing value', 'Line spacing value'].every((l) => "
                                         f"document.querySelector(`{SECTION} input[aria-label=\"${{l}}\"]`)) && "
                                         f"[...document.querySelectorAll('{SECTION} label')].some((l) => l.textContent.trim() === 'Shadow')"), 10)):
@@ -190,7 +196,7 @@ def text_style(r):
     r.check('Space turns the shadow on as CapCut starts one: black at 90 %, Blur 15 %, Distance 5, -45°',
             wait(lambda: same(shadow(r), SHADOW_ON), 5), shadow(r))
     r.check('its rows read Opacity, Blur, Distance and Angle, and screen readers hear Shadow before each',
-            r.s.run(f"""const s = {CASE}.closest('section');
+            r.s.run(f"""const s = {MORE}.closest('section');
                 return ['Opacity', 'Blur', 'Distance', 'Angle'].every((l, i) => [...s.querySelectorAll('span')].some((e) => e.textContent === l)
                   && s.querySelector(`input[type=range][aria-label="Shadow ${{l.toLowerCase()}}"]`))"""))
     r.s.run(QUICK)
@@ -255,7 +261,7 @@ def text_style(r):
         run = bridge.call('begin_run', {'label': 'Restyle captions'})
         r.check('the UI knows an agent is editing', wait(lambda: r.state()['aiRun'], 10))
         locked = r.s.run(f"""const b = {CASE}.querySelector('button');
-            const s = {CASE}.closest('section');
+            const s = {MORE}.closest('section');
             const box = [...s.querySelectorAll('label')].find((l) => l.textContent.trim() === 'Shadow');
             return {{caseLocked: b.getAttribute('aria-disabled') === 'true' || b.disabled, why: b.title,
                      shadowLocked: box.querySelector('input').disabled,

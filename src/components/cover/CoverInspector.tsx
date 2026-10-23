@@ -2,10 +2,10 @@ import { useState } from "react";
 import { AlertTriangle, Copy, Download, Image as ImageIcon, Plus, RotateCcw, Trash2, Type } from "lucide-react";
 import { COVER_PRESETS, addText, coverFormat, deleteText, downloadModels, editCover, editText, presetText, selectText, thumbnailOf, useCover } from "../../lib/cover";
 import { DEFAULT_TRANSFORM, sameStyle } from "../../lib/presets";
-import { undoAction, useEditor } from "../../lib/store";
+import { patched, undoAction, useEditor, type StylePatch } from "../../lib/store";
 import type { Thumbnail, ThumbnailFormat } from "../../lib/types";
 import { InspectorHeader } from "../inspector/Header";
-import { MainStyle, MoreStyle, patched, type StylePatch } from "../inspector/TextSection";
+import { MainStyle, MoreStyleFold } from "../inspector/TextSection";
 import { AiLock, Button, ColorInput, Disclosure, IconButton, PresetTile, Section, Segmented, Slider, Switch, TextSwatch, useLockReason } from "../ui";
 import { COVERED_TOO_MUCH, useShownCover } from "./CoverStage";
 
@@ -172,7 +172,6 @@ function useCoverHidden(): number[] {
 }
 
 function TextInspector({ format, index }: { format: ThumbnailFormat; index: number }) {
-  const [more, setMore] = useState(false);
   const [position, setPosition] = useState(false);
   const text = useEditor((s) => thumbnailOf(s.snap?.project, format)?.texts[index]);
   const hidden = useCoverHidden()[index] ?? 0;
@@ -211,8 +210,8 @@ function TextInspector({ format, index }: { format: ThumbnailFormat; index: numb
                   label={p.name}
                   selected={sameStyle(look, text.style)}
                   title={`Apply the ${p.name} look`}
-                  // A look keeps the text's font and where it wraps, as text presets do.
-                  onClick={() => void editText(format, index, (x) => ({ ...x, style: { ...look, fontFamily: x.style.fontFamily, maxWidth: x.style.maxWidth } }))}
+                  // A look keeps the text's font, case and where it wraps, as text presets do.
+                  onClick={() => void editText(format, index, (x) => ({ ...x, style: { ...look, fontFamily: x.style.fontFamily, letterCase: look.letterCase ?? x.style.letterCase, maxWidth: x.style.maxWidth } }))}
                 >
                   <PresetLook preset={p} />
                 </PresetTile>
@@ -230,9 +229,7 @@ function TextInspector({ format, index }: { format: ThumbnailFormat; index: numb
         <Section>
           <MainStyle style={text.style} setStyle={setStyle} maxSize={format === "cover_9x16" ? 400 : 300} />
         </Section>
-        <Disclosure title="More style" summary="Bold, case, spacing, outline, box, shadow" open={more} onToggle={() => setMore(!more)}>
-          <MoreStyle style={text.style} setStyle={setStyle} />
-        </Disclosure>
+        <MoreStyleFold style={text.style} setStyle={setStyle} />
         <Disclosure title="Position" summary="Scale, rotation, opacity" open={position} onToggle={() => setPosition(!position)}>
           <Slider label="Scale" value={t.scale * 100} min={10} max={400} step={1} unit="%" format={(v) => String(Math.round(v))} onChange={(v) => setTransform({ scale: v / 100 }, "scale")} />
           <Slider label="Position X" value={t.x * 100} min={-100} max={100} step={0.5} unit="%" format={(v) => v.toFixed(1)} onChange={(v) => setTransform({ x: v / 100 }, "x")} />

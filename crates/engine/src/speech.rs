@@ -94,7 +94,7 @@ pub fn speech_layout_key(project: &Project) -> String {
 mod tests {
     use super::*;
     use crate::edit::{EditCmd, TimeRange};
-    use crate::model::{Asset, TextStyle, Transform};
+    use crate::model::{Asset, BOX_RADIUS, TextAlign, TextStyle, Transform};
 
     const S: i64 = 1_000_000;
 
@@ -243,6 +243,8 @@ mod tests {
             letter_case: Default::default(),
             letter_spacing: 0.0,
             line_spacing: 0.0,
+            align: TextAlign::Center,
+            box_radius: BOX_RADIUS,
         };
         p.apply(EditCmd::AddText { start_us: 0, text: "Title".into(), style }).unwrap();
         let video = main_id(&p, 0);

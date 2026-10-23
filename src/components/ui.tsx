@@ -445,10 +445,13 @@ export function Section({ title, children, actions }: { title?: string; children
   );
 }
 
-/** A section folded to its title and a summary of what is inside, for settings that are seldom needed. */
-export function Disclosure({ title, summary, open, onToggle, children }: { title: string; summary: string; open: boolean; onToggle: () => void; children: ReactNode }) {
+/**
+ * A section folded to its title and a summary of what is inside, for settings that are seldom needed. `flush` drops
+ * the section's own padding and line, for a fold inside a padded column such as the library's.
+ */
+export function Disclosure({ title, summary, open, onToggle, flush = false, children }: { title: string; summary: string; open: boolean; onToggle: () => void; flush?: boolean; children: ReactNode }) {
   return (
-    <section className="flex flex-col gap-3 border-b border-white/[.07] px-4 py-2 last:border-b-0">
+    <section className={`flex flex-col gap-3 ${flush ? "" : "border-b border-white/[.07] px-4 py-2 last:border-b-0"}`}>
       <button
         type="button"
         aria-expanded={open}
@@ -459,7 +462,7 @@ export function Disclosure({ title, summary, open, onToggle, children }: { title
         <span className="shrink-0">{title}</span>
         {!open && <span className="truncate text-[12px] font-normal text-muted">{summary}</span>}
       </button>
-      {open && <div className="flex flex-col gap-3 pb-2">{children}</div>}
+      {open && <div className={`flex flex-col gap-3 ${flush ? "" : "pb-2"}`}>{children}</div>}
     </section>
   );
 }

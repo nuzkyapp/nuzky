@@ -8,7 +8,7 @@ use nuzky_engine::{
     Project,
     audio::{Mixer, Pcm, pcm_path, samples_to_us, us_to_samples},
     gpu::Image,
-    model::{Asset, CHANNELS, Clip, ClipContent, TextStyle},
+    model::{Asset, BOX_RADIUS, CHANNELS, Clip, ClipContent, TextAlign, TextStyle},
     speech::{Word, is_heard},
     text::TextRenderer,
 };
@@ -200,6 +200,8 @@ pub fn draw(
             letter_case: Default::default(),
             letter_spacing: 0.0,
             line_spacing: 0.0,
+            align: TextAlign::Center,
+            box_radius: BOX_RADIUS,
         };
         let image = fonts.render(span.text.trim(), &style, 1.0, 10_000.0).image;
         rows[row] = x0 + f64::from(image.width) + 2.0;

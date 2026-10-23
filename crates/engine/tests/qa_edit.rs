@@ -207,6 +207,8 @@ fn equal_start_captions_do_not_overlap() {
         letter_case: Default::default(),
         letter_spacing: 0.0,
         line_spacing: 0.0,
+        align: TextAlign::Center,
+        box_radius: BOX_RADIUS,
     };
     let _ = e.apply(
         EditCmd::AddCaptions {

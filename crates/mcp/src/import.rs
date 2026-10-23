@@ -11,8 +11,8 @@ use anyhow::{Context, Result};
 use nuzky_engine::edit::{EditCmd, MAX_SPEED, MAX_TRANSITION_US, MIN_SPEED, new_id};
 use nuzky_engine::media::probe;
 use nuzky_engine::model::{
-    Asset, AssetKind, CAPTIONS_TRACK, Clip, ClipContent, Imported, Keyframe, MAX_LEFT_OUT, Project, TextStyle, Track,
-    TrackKind, Transform, Transition, TransitionKind,
+    Asset, AssetKind, BOX_RADIUS, CAPTIONS_TRACK, Clip, ClipContent, Imported, Keyframe, MAX_LEFT_OUT, Project,
+    TextAlign, TextStyle, Track, TrackKind, Transform, Transition, TransitionKind,
 };
 use nuzky_interchange::{self as timeline, MediaClip, Read, TextClip};
 
@@ -343,6 +343,8 @@ fn text(clip: &TextClip, project: &Project, fonts: &[String], left: &mut Left) -
             letter_case: Default::default(),
             letter_spacing: s.letter_spacing,
             line_spacing: s.line_spacing,
+            align: TextAlign::Center,
+            box_radius: BOX_RADIUS,
         },
         None => crate::params::reel().style,
     };

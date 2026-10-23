@@ -2,13 +2,13 @@ import { useShallow } from "zustand/react/shallow";
 import { Copy, Layers, RotateCcw, Trash2 } from "lucide-react";
 import { LIMITS } from "../../lib/limits";
 import { ADJUST_ROWS, DEFAULT_TRANSFORM, NO_ADJUST, sameAdjust } from "../../lib/presets";
-import { deleteSelection, duplicateSelection, editClips, findClip, isCaptionTrack, readoutTime, transformAtPlayhead, useEditor } from "../../lib/store";
+import { deleteSelection, duplicateSelection, editClips, findClip, isCaptionTrack, patched, readoutTime, transformAtPlayhead, useEditor, type StylePatch } from "../../lib/store";
 import type { Adjust, Clip, EditCmd, Project, Track, Transform } from "../../lib/types";
 import { Button, IconButton, Section, Slider } from "../ui";
 import { InspectorHeader, QUIET } from "./Header";
 import { BackgroundSection } from "./BackgroundSection";
 import { DuckingRow, VoiceSection } from "./MediaSections";
-import { StyleSection, patched, type StylePatch } from "./TextSection";
+import { StyleSection } from "./TextSection";
 
 type Found = { clip: Clip; track: Track };
 

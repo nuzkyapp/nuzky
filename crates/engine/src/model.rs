@@ -855,6 +855,41 @@ pub struct TextStyle {
     /// Extra space between lines, as a share of the font size, on top of the usual 1.2 line height.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub line_spacing: f32,
+    /// Where the lines of a text with several lines line up; the layer stays where it is.
+    #[serde(default, skip_serializing_if = "TextAlign::is_center")]
+    pub align: TextAlign,
+    /// Corner radius of the background box, as a share of the font size; 1 rounds a box of one line fully.
+    #[serde(default = "box_radius", skip_serializing_if = "is_box_radius")]
+    pub box_radius: f32,
+}
+
+/// Where the lines of a text line up.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+pub enum TextAlign {
+    Left,
+    #[default]
+    Center,
+    Right,
+}
+
+impl TextAlign {
+    pub fn is_center(&self) -> bool {
+        *self == TextAlign::Center
+    }
+}
+
+/// The background box's corner radius every text had before it could be changed.
+pub const BOX_RADIUS: f32 = 0.25;
+
+fn box_radius() -> f32 {
+    BOX_RADIUS
+}
+
+fn is_box_radius(value: &f32) -> bool {
+    *value == BOX_RADIUS
 }
 
 /// A drop shadow under text, in CapCut's numbers. Blur and distance follow the font size, so the shadow grows
@@ -973,6 +1008,7 @@ impl TextStyle {
         });
         style.letter_spacing = finite(style.letter_spacing, 0.0).clamp(*LETTER_SPACING.start(), *LETTER_SPACING.end());
         style.line_spacing = finite(style.line_spacing, 0.0).clamp(*LINE_SPACING.start(), *LINE_SPACING.end());
+        style.box_radius = finite(style.box_radius, BOX_RADIUS).clamp(0.0, 1.0);
         if let Some(shadow) = &mut style.shadow {
             shadow.opacity = finite(shadow.opacity, 0.0).clamp(0.0, 1.0);
             shadow.blur = finite(shadow.blur, 0.0).clamp(0.0, MAX_SHADOW);
@@ -1094,6 +1130,8 @@ mod tests {
                     letter_case: Default::default(),
                     letter_spacing: 0.0,
                     line_spacing: 0.0,
+                    align: TextAlign::Center,
+                    box_radius: BOX_RADIUS,
                 },
                 transform: Transform::default(),
                 words: vec![
@@ -1117,6 +1155,7 @@ mod tests {
         // Text saved before shadows, case and spacing draws without them.
         assert!(style.shadow.is_none() && style.letter_case == LetterCase::None);
         assert_eq!((style.letter_spacing, style.line_spacing), (0.0, 0.0));
+        assert_eq!((style.align, style.box_radius), (TextAlign::Center, BOX_RADIUS));
         assert_eq!(serde_json::to_string(&content).unwrap(), old);
     }
 

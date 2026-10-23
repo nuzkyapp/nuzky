@@ -9,9 +9,9 @@ use nuzky_analysis::{AudioSource, CaptionGrouping, HESITATION_US, group_words};
 use nuzky_engine::{
     Project,
     audio::prepared_peaks,
-    edit::{CaptionPreset, EditCmd, TimeRange, merge_ranges},
+    edit::{CaptionPreset, EditCmd, TimeRange, TransformPatch, merge_ranges},
     effects::source_time,
-    model::{Asset, Clip, ClipContent, MAX_CORRECTION_CHARS, WordCorrection},
+    model::{Asset, Clip, ClipContent, MAX_CORRECTION_CHARS, Track, WordCorrection},
     speech::{TimelineWord, Word, is_heard, map_words},
 };
 use nuzky_session::{
@@ -1174,12 +1174,32 @@ pub fn caption_edit(
     ensure!(tracks.len() <= 1, "AMBIGUOUS_CAPTIONS: multiple caption tracks; use explicit replaceCaptions");
     let CaptionPreset { style, anim_in, anim_out, .. } = look;
     let edit = match tracks.first() {
-        Some(track) => {
-            EditCmd::ReplaceCaptions { track_id: track.id.clone(), segments, style, anim_in, anim_out, transform: None }
-        }
+        Some(track) => EditCmd::ReplaceCaptions {
+            track_id: track.id.clone(),
+            segments,
+            style,
+            anim_in,
+            anim_out,
+            transform: placement(track),
+        },
         None => EditCmd::AddCaptions { segments, style, anim_in, anim_out, transform: None },
     };
     Ok((edit, count))
+}
+
+/// Where the captions of `track` sit, so captions made again land there: the place of its first caption that
+/// keyframes do not move.
+fn placement(track: &Track) -> Option<TransformPatch> {
+    track.clips.iter().filter(|c| c.keyframes.is_empty()).find_map(|c| match &c.content {
+        ClipContent::Text { transform: t, .. } => Some(TransformPatch {
+            x: Some(t.x),
+            y: Some(t.y),
+            scale: Some(t.scale),
+            rotation: Some(t.rotation),
+            opacity: Some(t.opacity),
+        }),
+        ClipContent::Media { .. } => None,
+    })
 }
 
 #[cfg(test)]
@@ -1604,6 +1624,23 @@ pub(crate) mod tests {
         project.apply(edit).unwrap();
         let caption = &project.tracks.iter().find(|t| t.name == "Captions").unwrap().clips[0];
         assert_eq!(caption.end_us(), 5_000_000);
+    }
+
+    #[test]
+    fn captions_made_again_stay_where_the_captions_they_replace_were() {
+        let (mut project, sources) = fixture();
+        let words = map_words(&project, &sources);
+        let make = |project: &Project| {
+            caption_edit(&words, &[], project, crate::params::reel(), CaptionGrouping::default()).unwrap().0
+        };
+        project.apply(make(&project)).unwrap();
+        let track = project.tracks.iter().find(|t| t.is_captions()).unwrap().id.clone();
+        let moved = TransformPatch { y: Some(-0.2), scale: Some(1.3), ..Default::default() };
+        project.apply(EditCmd::RestyleTrack { track_id: track, style: None, transform: Some(moved) }).unwrap();
+        project.apply(make(&project)).unwrap();
+        let captions = &project.tracks.iter().find(|t| t.is_captions()).unwrap().clips;
+        let ClipContent::Text { transform, .. } = &captions[0].content else { panic!() };
+        assert_eq!((transform.y, transform.scale), (-0.2, 1.3));
     }
 
     #[test]

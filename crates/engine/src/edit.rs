@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::{
     Adjust, Animation, Asset, AssetKind, Background, CAPTIONS_TRACK, Canvas, CaptionWord, Clip, ClipContent, Ease,
-    Keyframe, Keywords, LetterCase, Project, ReelCandidate, Shape, TextShadow, TextStyle, Thumbnail, ThumbnailFormat,
-    Track, TrackKind, Transform, Transition, WordCorrection,
+    Keyframe, Keywords, LetterCase, Project, ReelCandidate, Shape, TextAlign, TextShadow, TextStyle, Thumbnail,
+    ThumbnailFormat, Track, TrackKind, Transform, Transition, WordCorrection,
 };
 
 pub const MAIN_TRACK: &str = "main";
@@ -411,6 +411,10 @@ pub struct TextStylePatch {
     pub letter_spacing: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line_spacing: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub align: Option<TextAlign>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub box_radius: Option<f32>,
 }
 
 /// The `Transform` fields to change.
@@ -466,6 +470,8 @@ impl TextStylePatch {
         set(&mut style.letter_case, &self.letter_case);
         set(&mut style.letter_spacing, &self.letter_spacing);
         set(&mut style.line_spacing, &self.line_spacing);
+        set(&mut style.align, &self.align);
+        set(&mut style.box_radius, &self.box_radius);
     }
 }
 
@@ -2429,6 +2435,7 @@ impl Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::BOX_RADIUS;
 
     fn asset(id: &str, kind: AssetKind, secs: i64) -> Asset {
         Asset {
@@ -2768,6 +2775,8 @@ mod tests {
             letter_case: Default::default(),
             letter_spacing: 0.0,
             line_spacing: 0.0,
+            align: TextAlign::Center,
+            box_radius: BOX_RADIUS,
         };
         let seg =
             |start_us, end_us, text: &str| CaptionSegment { start_us, end_us, text: text.into(), words: Vec::new() };
@@ -3654,6 +3663,8 @@ mod tests {
             letter_case: Default::default(),
             letter_spacing: 0.0,
             line_spacing: 0.0,
+            align: TextAlign::Center,
+            box_radius: BOX_RADIUS,
         };
         let seg = |s, e, t: &str| CaptionSegment { start_us: s, end_us: e, text: t.into(), words: Vec::new() };
         p.apply(EditCmd::AddCaptions {
@@ -3755,6 +3766,8 @@ mod tests {
             letter_case: Default::default(),
             letter_spacing: 0.0,
             line_spacing: 0.0,
+            align: TextAlign::Center,
+            box_radius: BOX_RADIUS,
         };
         let seg = |s, e, t: &str| CaptionSegment { start_us: s, end_us: e, text: t.into(), words: Vec::new() };
         let clips = caption_clips(
@@ -3805,6 +3818,8 @@ mod tests {
             letter_case: Default::default(),
             letter_spacing: 0.0,
             line_spacing: 0.0,
+            align: TextAlign::Center,
+            box_radius: BOX_RADIUS,
         };
         p.apply(EditCmd::AddText { start_us: 2_000_000, text: "hi".into(), style }).unwrap();
         let music = p.tracks.iter().find(|t| t.kind == TrackKind::Audio).unwrap().id.clone();
@@ -3854,6 +3869,8 @@ mod tests {
             letter_case: Default::default(),
             letter_spacing: 0.0,
             line_spacing: 0.0,
+            align: TextAlign::Center,
+            box_radius: BOX_RADIUS,
         };
         let seg = CaptionSegment { start_us: 1_000_000, end_us: 3_000_000, text: "jsem se".into(), words: Vec::new() };
         p.apply(EditCmd::AddCaptions { segments: vec![seg], style, anim_in: None, anim_out: None, transform: None })
@@ -3898,6 +3915,8 @@ mod tests {
                 letter_case: Default::default(),
                 letter_spacing: 0.0,
                 line_spacing: 0.0,
+                align: TextAlign::Center,
+                box_radius: BOX_RADIUS,
             };
             p.apply(EditCmd::AddCaptions {
                 segments: vec![CaptionSegment {
@@ -4271,6 +4290,8 @@ mod tests {
             letter_case: Default::default(),
             letter_spacing: 0.0,
             line_spacing: 0.0,
+            align: TextAlign::Center,
+            box_radius: BOX_RADIUS,
         };
         p.apply(EditCmd::AddText { start_us: 500_000, text: "Title".into(), style }).unwrap();
         let first = p.tracks[0].clips[0].id.clone();

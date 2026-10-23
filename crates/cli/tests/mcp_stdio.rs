@@ -958,13 +958,16 @@ fn restyle_track_changes_every_caption_in_place_over_stdio() {
     assert_eq!(new[0]["content"]["text"], "Keep 450");
     // A CapCut look: a shadow, capitals and spacing on every caption, the words as typed.
     let shadow = json!({"color": "#000000", "opacity": 0.5, "blur": 7.0, "distance": 3.0, "angle": -45.0});
-    let look = json!({"shadow": shadow, "letterCase": "upper", "letterSpacing": 0.25, "lineSpacing": 0.5});
+    let look = json!({"shadow": shadow, "letterCase": "upper", "letterSpacing": 0.25, "lineSpacing": 0.5, "align": "left", "boxRadius": 1.0});
     c.call("apply_edits", restyle("capcut", &before["id"], look, Value::Null));
     for clip in captions(&mut c)["clips"].as_array().unwrap() {
         let style = &clip["content"]["style"];
         assert_eq!((&style["shadow"], &style["letterCase"]), (&shadow, &json!("upper")), "{style}");
         assert_eq!((&style["letterSpacing"], &style["lineSpacing"]), (&json!(0.25), &json!(0.5)), "{style}");
+        assert_eq!((&style["align"], &style["boxRadius"]), (&json!("left"), &json!(1.0)), "{style}");
     }
+    let rounder = c.error("apply_edits", restyle("rounder", &before["id"], json!({"boxRadius": 2.0}), Value::Null));
+    assert!(rounder.contains("corner radius"), "{rounder}");
     assert_eq!(captions(&mut c)["clips"][0]["content"]["text"], "Keep 450");
     let glaring = json!({"shadow": {"color": "#000000", "opacity": 2.0, "blur": 0.0, "distance": 0.0, "angle": 0.0}});
     let glaring = c.error("apply_edits", restyle("glaring", &before["id"], glaring, Value::Null));

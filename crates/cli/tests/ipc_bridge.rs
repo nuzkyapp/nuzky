@@ -52,6 +52,8 @@ impl App {
                     letter_case: Default::default(),
                     letter_spacing: 0.0,
                     line_spacing: 0.0,
+                    align: nuzky_engine::model::TextAlign::Center,
+                    box_radius: nuzky_engine::model::BOX_RADIUS,
                 },
             })
             .unwrap();

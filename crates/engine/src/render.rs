@@ -872,7 +872,7 @@ pub(crate) fn quad(t: &Transform, size: (f32, f32), cw: f32, ch: f32, k: f32) ->
 mod tests {
     use super::*;
     use crate::edit::{CaptionSegment, EditCmd};
-    use crate::model::{TextStyle, Track};
+    use crate::model::{BOX_RADIUS, TextAlign, TextStyle, Track};
 
     #[test]
     fn background_averages_pixels_and_preserves_alpha() {
@@ -914,6 +914,8 @@ mod tests {
             letter_case: Default::default(),
             letter_spacing: 0.0,
             line_spacing: 0.0,
+            align: TextAlign::Center,
+            box_radius: BOX_RADIUS,
         };
         for (id, start) in [("out", 0), ("in", 1_000_000)] {
             let mut clip = Clip::new(
@@ -990,6 +992,8 @@ mod tests {
             letter_case: Default::default(),
             letter_spacing: 0.0,
             line_spacing: 0.0,
+            align: TextAlign::Center,
+            box_radius: BOX_RADIUS,
         };
         let mut text = TextRenderer::new();
         // One line hits the glyph limit at 2160p, two lines the bitmap pixel limit.
@@ -1086,6 +1090,8 @@ mod tests {
             letter_case: Default::default(),
             letter_spacing: 0.0,
             line_spacing: 0.0,
+            align: TextAlign::Center,
+            box_radius: BOX_RADIUS,
         };
         // The longest reel caption, 15 characters, is wider than the safe area at 95 px and wraps.
         let segment =
@@ -1132,6 +1138,8 @@ mod tests {
             letter_case: Default::default(),
             letter_spacing: 0.0,
             line_spacing: 0.0,
+            align: TextAlign::Center,
+            box_radius: BOX_RADIUS,
         };
         // Rasterised at 2x and drawn at 1.3x, so every glyph edge is filtered down.
         let transform = Transform { scale: 1.3, rotation: 7.0, ..Transform::default() };
@@ -1165,6 +1173,8 @@ mod tests {
             letter_case: Default::default(),
             letter_spacing: 0.0,
             line_spacing: 0.0,
+            align: TextAlign::Center,
+            box_radius: BOX_RADIUS,
         };
         let image = text.render("Ahoj světe", &style, 1.0, 972.0).image;
         let clip = Clip::new(
@@ -1232,6 +1242,8 @@ mod tests {
             letter_case: Default::default(),
             letter_spacing: 0.0,
             line_spacing: 0.0,
+            align: TextAlign::Center,
+            box_radius: BOX_RADIUS,
         };
         let word = |text: &str, start: i64, end: i64| CaptionWord {
             text: text.into(),

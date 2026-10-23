@@ -222,6 +222,10 @@ pub fn text_style(style: &TextStyle, (width, height): (u32, u32)) -> Result<()> 
         LINE_SPACING.start(),
         LINE_SPACING.end()
     );
+    ensure!(
+        (0.0..=1.0).contains(&style.box_radius),
+        "INVALID_PROJECT: a text box's corner radius goes from 0 to 1 of the font size"
+    );
     if let Some(shadow) = &style.shadow {
         let most = MAX_SHADOW;
         ensure!(
