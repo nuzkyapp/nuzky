@@ -1019,11 +1019,14 @@ export function presetOver(preset: TextStyle, style: TextStyle): TextStyle {
   return { ...preset, fontFamily: preset.fontFamily ?? style.fontFamily, letterCase: preset.letterCase ?? style.letterCase, maxWidth: style.maxWidth };
 }
 
+/** The captions track `trackId`, or the first one. */
+const captionTrack = (project: Project, trackId?: string) => (trackId ? project.tracks.find((t) => t.id === trackId) : project.tracks.find(isCaptionTrack));
+
 /** Gives every caption the look, its style as `presetOver` puts it and its animations, as one undo step. */
-export function applyCaptionLook(look: CaptionLook) {
+export function applyCaptionLook(look: CaptionLook, trackId?: string) {
   return useEditor.getState().edit(
     (project) =>
-      project.tracks.find(isCaptionTrack)?.clips.flatMap((c): EditCmd[] => {
+      captionTrack(project, trackId)?.clips.flatMap((c): EditCmd[] => {
         if (c.content.type !== "text") return [];
         return [
           { type: "updateClip", clipId: c.id, style: presetOver(look.style, c.content.style) },
@@ -1038,9 +1041,9 @@ export function applyCaptionLook(look: CaptionLook) {
  * Changes part of every caption's style, keeping the rest of each, as one undo step. A patch worked out from
  * the style is worked out for each caption, so one shadow setting leaves the rest of each caption's shadow.
  */
-export function restyleCaptions(patch: StylePatch, coalesce?: string) {
+export function restyleCaptions(patch: StylePatch, coalesce?: string, trackId?: string) {
   return useEditor.getState().edit((project): EditCmd | EditCmd[] | null => {
-    const track = project.tracks.find(isCaptionTrack);
+    const track = captionTrack(project, trackId);
     if (!track) return null;
     if (typeof patch !== "function") return { type: "restyleTrack", trackId: track.id, style: patch };
     return track.clips.flatMap((c): EditCmd[] => (c.content.type === "text" ? [{ type: "updateClip", clipId: c.id, style: patched(c.content.style, patch) }] : []));
@@ -1048,9 +1051,9 @@ export function restyleCaptions(patch: StylePatch, coalesce?: string) {
 }
 
 /** Moves, scales, turns or fades every caption the same way, as one undo step; captions with keyframes keep theirs. */
-export function placeCaptions(transform: Partial<Omit<Transform, "crop">>, coalesce?: string) {
+export function placeCaptions(transform: Partial<Omit<Transform, "crop">>, coalesce?: string, trackId?: string) {
   return useEditor.getState().edit((project) => {
-    const track = project.tracks.find(isCaptionTrack);
+    const track = captionTrack(project, trackId);
     return track ? { type: "restyleTrack", trackId: track.id, transform } : null;
   }, coalesce);
 }

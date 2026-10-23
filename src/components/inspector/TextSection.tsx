@@ -3,7 +3,7 @@ import { create } from "zustand";
 import { AlignCenter, AlignLeft, AlignRight, Ban, RotateCcw } from "lucide-react";
 import { LIMITS } from "../../lib/limits";
 import { BOX_RADIUS, CAPTION_STYLES, KEYWORD_COLOR, KEYWORD_PICKS, TEXT_PRESETS, isLook, sameStyle } from "../../lib/presets";
-import { applyCaptionLook, editClip, isCaptionTrack, patched, placeCaptions, presetOver, restyleCaptions, useEditor, type StylePatch } from "../../lib/store";
+import { applyCaptionLook, editClip, patched, placeCaptions, presetOver, restyleCaptions, useEditor, type StylePatch } from "../../lib/store";
 import type { Animation, CaptionPreset, Clip, EditCmd, LetterCase, TextAlign, TextShadow, TextStyle, Transform } from "../../lib/types";
 import { FontPicker } from "../FontPicker";
 import { Button, Checkbox, ColorInput, Disclosure, LockReason, PresetTile, Section, Segmented, Slider, TextSwatch, parseNumber, useLockReason } from "../ui";
@@ -86,11 +86,12 @@ const textStyles = (clips: Clip[]) => clips.flatMap((c) => (c.content.type === "
 export function TextSection({ clip, text, style, caption }: { clip: Clip; text: string; style: TextStyle; caption: boolean }) {
   const edit = useEditor((s) => s.edit);
   const all = useStyleUi((s) => s.allCaptions) && caption;
-  const captions = useEditor((s) => (all ? s.snap?.project.tracks.find(isCaptionTrack)?.clips : undefined));
-  const everyCaption = all && captions ? captions : null;
+  // The captions of this caption's track, which an agent may have made beside another captions track.
+  const track = useEditor((s) => (all ? s.snap?.project.tracks.find((t) => t.clips.some((c) => c.id === clip.id)) : undefined));
+  const everyCaption = all && track ? track.clips : null;
   // Built from the latest confirmed style, so two quick changes to different properties both stick.
   const setStyle: SetStyle = everyCaption
-    ? (patch, key) => restyleCaptions(patch, `captions:style:${key}`)
+    ? (patch, key) => restyleCaptions(patch, `captions:style:${key}`, track?.id)
     : (patch, key) =>
         editClip(clip.id, (c) => (c.content.type === "text" ? { type: "updateClip", clipId: c.id, style: patched(c.content.style, patch) } : null), `${clip.id}:style:${key}`);
   const styles = everyCaption ? textStyles(everyCaption) : undefined;
@@ -101,7 +102,7 @@ export function TextSection({ clip, text, style, caption }: { clip: Clip; text: 
   };
   const apply = (p: (typeof presets)[number]) => {
     const look = p as CaptionPreset;
-    if (everyCaption) return void applyCaptionLook({ style: look.style, animIn: look.animIn ?? null, animOut: look.animOut ?? null });
+    if (everyCaption) return void applyCaptionLook({ style: look.style, animIn: look.animIn ?? null, animOut: look.animOut ?? null }, track?.id);
     const restyle: EditCmd = { type: "updateClip", clipId: clip.id, style: presetOver(p.style, style) };
     // A caption style brings its animations too.
     const animate = (slot: "in" | "out", animation: Animation | null | undefined): EditCmd => ({ type: "setAnimation", clipId: clip.id, slot, animation: animation ?? null });
@@ -139,7 +140,7 @@ export function TextSection({ clip, text, style, caption }: { clip: Clip; text: 
         </Section>
       )}
       <MoreStyleFold style={style} styles={styles} setStyle={setStyle} />
-      {everyCaption && <CaptionPosition clips={everyCaption} title="Position of all captions" />}
+      {everyCaption && <CaptionPosition clips={everyCaption} trackId={track?.id} title="Position of all captions" />}
     </>
   );
 }
@@ -335,7 +336,7 @@ const PLACE = ["x", "y", "scale", "rotation", "opacity"] as const;
  * Where every caption sits, folded until someone opens it. A caption with keyframes keeps its own motion, as
  * the engine leaves it; the values shown are those of the captions without.
  */
-export function CaptionPosition({ clips, title = "Position", flush }: { clips: Clip[]; title?: string; flush?: boolean }) {
+export function CaptionPosition({ clips, trackId, title = "Position", flush }: { clips: Clip[]; trackId?: string; title?: string; flush?: boolean }) {
   const open = useStyleUi((s) => s.position);
   const free = clips.filter((c) => c.keyframes.length === 0);
   const keyed = clips.length - free.length;
@@ -343,7 +344,7 @@ export function CaptionPosition({ clips, title = "Position", flush }: { clips: C
     const values = free.map((c) => c.content.transform[k]);
     return { value: values[0] ?? 0, mixed: values.some((v) => Math.abs(v - values[0]) > 1e-4) };
   };
-  const set = (patch: Partial<Omit<Transform, "crop">>, key: string) => placeCaptions(patch, `captions:place:${key}`);
+  const set = (patch: Partial<Omit<Transform, "crop">>, key: string) => placeCaptions(patch, `captions:place:${key}`, trackId);
   const none = free.length === 0;
   const why = none ? "Every caption has keyframes, which decide where it is" : undefined;
   const [x, y, scale, rotation, opacity] = PLACE.map(field);

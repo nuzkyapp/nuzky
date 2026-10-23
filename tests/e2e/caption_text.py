@@ -196,6 +196,20 @@ def caption_text(r):
                 wait(lambda: swatch() == {'radius': '11px', 'align': 'right'}, 5), swatch())
     views(r, 'captions-tab', reveal(f"[...document.querySelectorAll('{LIBRARY} span')].find((s) => s.textContent === 'Font')"))
 
+    # An agent can add a second captions track; a caption there styles the captions of its own track only.
+    tracks = lambda: r.s.run("""return window.__nuzky.store.getState().snap.project.tracks.filter((t) => t.kind === 'text' && t.name === 'Captions')
+        .map((t) => t.clips.map((c) => ({id: c.id, text: c.content.text, case: c.content.style.letterCase ?? 'none'})))""")
+    added = r.s.call(ADD, REEL, ['druhá', 'stopa'])['ok'] and wait(lambda: len(tracks()) == 2, 5)
+    if r.check('an agent\'s second captions track is there', added, tracks()):
+        other = next(t for t in tracks() if [c['text'] for c in t] == ['druhá', 'stopa'])
+        r.focus_clip(other[0]['id'])
+        wait(lambda: r.s.run(f"return !!{group(SECTION, 'Case')}"), 5)
+        r.s.run(f'{segment(SECTION, "Case", "ab")}.click()')
+        cases = lambda: {c['text']: c['case'] for t in tracks() for c in t}
+        r.check('small letters go on every caption of that track, and the first track keeps its capitals',
+                wait(lambda: cases() == {'no a pak': 'upper', 'tohle je fakt': 'upper', 'ne?': 'upper', 'druhá': 'lower', 'stopa': 'lower'}, 5), cases())
+        r.focus_clip(second)
+
     # An AI run locks the style, while Apply to only chooses what the controls edit.
     r.focus_clip(second)
     bridge = Bridge(r, r.saved_project())

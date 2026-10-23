@@ -1187,25 +1187,34 @@ pub fn caption_edit(
     Ok((edit, count))
 }
 
-/// Where the captions of `track` sit, so captions made again land there: the place of its first caption that
-/// keyframes do not move.
+/// Where the captions of `track` sit, so captions made again land there: the place most of its captions without
+/// keyframes share, the earliest on a tie, so one caption moved or faded out alone does not move or hide them all.
 fn placement(track: &Track) -> Option<TransformPatch> {
-    track.clips.iter().filter(|c| c.keyframes.is_empty()).find_map(|c| match &c.content {
-        ClipContent::Text { transform: t, .. } => Some(TransformPatch {
-            x: Some(t.x),
-            y: Some(t.y),
-            scale: Some(t.scale),
-            rotation: Some(t.rotation),
-            opacity: Some(t.opacity),
-        }),
-        ClipContent::Media { .. } => None,
+    let places: Vec<[f32; 5]> = track
+        .clips
+        .iter()
+        .filter(|c| c.keyframes.is_empty())
+        .filter_map(|c| match &c.content {
+            ClipContent::Text { transform: t, .. } => Some([t.x, t.y, t.scale, t.rotation, t.opacity]),
+            ClipContent::Media { .. } => None,
+        })
+        .collect();
+    let shared = |place: &[f32; 5]| places.iter().filter(|other| *other == place).count();
+    // The last of equal maxima comes first backwards.
+    let [x, y, scale, rotation, opacity] = *places.iter().rev().max_by_key(|place| shared(place))?;
+    Some(TransformPatch {
+        x: Some(x),
+        y: Some(y),
+        scale: Some(scale),
+        rotation: Some(rotation),
+        opacity: Some(opacity),
     })
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use nuzky_engine::model::{Asset, AssetKind, TrackKind};
+    use nuzky_engine::model::{Asset, AssetKind, TrackKind, Transform};
 
     pub fn fixture() -> (Project, HashMap<String, Vec<Word>>) {
         let mut project = Project::new("speech test");
@@ -1636,11 +1645,22 @@ pub(crate) mod tests {
         project.apply(make(&project)).unwrap();
         let track = project.tracks.iter().find(|t| t.is_captions()).unwrap().id.clone();
         let moved = TransformPatch { y: Some(-0.2), scale: Some(1.3), ..Default::default() };
-        project.apply(EditCmd::RestyleTrack { track_id: track, style: None, transform: Some(moved) }).unwrap();
+        project.apply(EditCmd::RestyleTrack { track_id: track.clone(), style: None, transform: Some(moved) }).unwrap();
+        // One caption faded out on its own does not hide the captions made again.
+        let first = project.tracks.iter().find(|t| t.is_captions()).unwrap().clips[0].id.clone();
+        let faded = |p: &Project| {
+            let clip = p.tracks.iter().flat_map(|t| &t.clips).find(|c| c.id == first).unwrap();
+            let ClipContent::Text { transform, .. } = &clip.content else { panic!() };
+            Transform { opacity: 0.0, ..*transform }
+        };
+        let fade = serde_json::json!({"type": "updateClip", "clipId": first, "transform": faded(&project)});
+        project.apply(serde_json::from_value(fade).unwrap()).unwrap();
         project.apply(make(&project)).unwrap();
         let captions = &project.tracks.iter().find(|t| t.is_captions()).unwrap().clips;
-        let ClipContent::Text { transform, .. } = &captions[0].content else { panic!() };
-        assert_eq!((transform.y, transform.scale), (-0.2, 1.3));
+        for caption in captions {
+            let ClipContent::Text { transform, .. } = &caption.content else { panic!() };
+            assert_eq!((transform.y, transform.scale, transform.opacity), (-0.2, 1.3, 1.0));
+        }
     }
 
     #[test]
