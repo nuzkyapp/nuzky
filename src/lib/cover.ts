@@ -77,7 +77,6 @@ export function thumbnailOf(project: Project | undefined, format: ThumbnailForma
 
 const otherFormat = (format: ThumbnailFormat): ThumbnailFormat => (format === "cover_9x16" ? "youtube_16x9" : "cover_9x16");
 
-/** The index of the image on the cover that is selected, if one is. */
 export const selectedOverlay = (selected: CoverState["selected"]) => (typeof selected === "string" && selected.startsWith("overlay:") ? Number(selected.slice(8)) : null);
 
 /** Asks again whether the cover models can run here and what is left to download. */
@@ -243,7 +242,7 @@ export function draftCover(format: ThumbnailFormat, project: Project, timeUs: nu
       const asset = project.assets.find((a) => a.id === o.assetId);
       if (!asset) return [];
       const scale = (o.transform.scale * sideScale(format, asset)) / sideScale(from.format, asset);
-      return [{ ...o, transform: { ...overlayPlace(format, asset, scale), rotation: o.transform.rotation, opacity: o.transform.opacity } }];
+      return [{ ...o, transform: { ...overlayPlace(format, asset, scale), rotation: o.transform.rotation, opacity: o.transform.opacity, crop: o.transform.crop } }];
     }),
     texts: from.texts.map((t) => ({
       ...t,

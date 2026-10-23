@@ -113,11 +113,15 @@ export function CoverStage({ format, box }: { format: ThumbnailFormat; box: { w:
   const { canvas, view, error, shownFrom, drawnFrom } = useCoverView(format, width, shown?.draft ? shown.cover : null);
   const selected = useCover((s) => s.selected);
 
+  // In the order the cover is drawn, so a click takes what is on top: texts behind the person, then images, then the rest.
+  const behind = (i: number) => !view?.maskMissing && !!shown?.cover.texts[i]?.behind;
+  const texts = (under: boolean) => view?.bounds.flatMap((b, i) => (b && behind(i) === under ? [{ clipId: String(i), corners: b, frame: b }] : [])) ?? [];
   const layers: LayerBounds[] = view
     ? [
         ...(shown && !shown.draft ? [{ clipId: "frame", corners: view.frame[0], frame: view.frame[1] }] : []),
+        ...texts(true),
         ...view.overlays.flatMap((b, i) => (b ? [{ clipId: `${OVERLAY}${i}`, corners: b[0], frame: b[1] }] : [])),
-        ...view.bounds.flatMap((b, i) => (b ? [{ clipId: String(i), corners: b, frame: b }] : [])),
+        ...texts(false),
       ]
     : [];
   const latest = useRef(layers);

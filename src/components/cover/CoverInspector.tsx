@@ -81,7 +81,6 @@ export function CoverInspector({ format }: { format: ThumbnailFormat }) {
   );
 }
 
-/** Imports an image file the user picks and puts it on the cover. */
 async function importOverlay(format: ThumbnailFormat) {
   if (aiLocked()) return;
   const picked = await open({ multiple: false, filters: [{ name: "Images", extensions: IMAGE_EXTENSIONS }] });
@@ -90,7 +89,7 @@ async function importOverlay(format: ThumbnailFormat) {
   if (assetId) await addOverlay(format, assetId);
 }
 
-/** Add image: the project's images in a menu with Import image… after them, or straight to the file dialog without any. */
+/** Add image: Import image… and the project's images in a menu, or straight to the file dialog without any. */
 function AddImage({ format, count }: { format: ThumbnailFormat; count: number }) {
   const assets = useEditor((s) => s.snap?.project.assets);
   const images = assets?.filter((a) => a.kind === "image") ?? [];
@@ -251,7 +250,6 @@ function CoverSettings({ format, cover, draft }: { format: ThumbnailFormat; cove
   );
 }
 
-/** The images on the cover by name, as the texts are listed. */
 function OverlayList({ format, cover }: { format: ThumbnailFormat; cover: Thumbnail }) {
   const assets = useEditor((s) => s.snap?.project.assets);
   return (
@@ -295,8 +293,8 @@ function OverlayInspector({ format, index }: { format: ThumbnailFormat; index: n
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <Section>
-          {/* 100 % is as large as fits on the cover. */}
-          <Slider label="Size" value={t.scale * 100} min={2} max={200} step={1} unit="%" format={(v) => String(Math.round(v))} onChange={(v) => set({ scale: v / 100 }, "scale")} />
+          {/* 100 % is as large as fits on the cover; dragging a corner goes no smaller than 10 % either. */}
+          <Slider label="Size" value={t.scale * 100} min={10} max={200} step={1} unit="%" format={(v) => String(Math.round(v))} onChange={(v) => set({ scale: v / 100 }, "scale")} />
           <Slider label="Position X" value={t.x * 100} min={-100} max={100} step={0.5} unit="%" format={(v) => v.toFixed(1)} onChange={(v) => set({ x: v / 100 }, "x")} />
           <Slider label="Position Y" value={t.y * 100} min={-100} max={100} step={0.5} unit="%" format={(v) => v.toFixed(1)} onChange={(v) => set({ y: v / 100 }, "y")} />
           <Slider label="Rotation" value={t.rotation} min={-180} max={180} step={1} unit="°" format={(v) => String(Math.round(v))} onChange={(v) => set({ rotation: v }, "rot")} />

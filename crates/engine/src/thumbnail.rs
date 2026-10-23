@@ -168,6 +168,7 @@ impl Renderer {
             texts.push(Some(layer(image.image, corners, t.opacity, Crop::visible(t.crop))));
         }
 
+        self.keep_pictures(project);
         let mut overlays = Vec::with_capacity(thumbnail.overlays.len());
         let mut overlay_bounds = Vec::with_capacity(thumbnail.overlays.len());
         for overlay in &thumbnail.overlays {
@@ -301,7 +302,7 @@ fn layer(image: Image, corners: Quad, opacity: f32, rect: [f32; 4]) -> Layer {
 
 /// Averages `step` × `step` blocks; the GPU's bilinear filter then only has to shrink by less than two. Colour is
 /// weighted by alpha, so the transparent pixels around a logo do not darken its edge; opaque blocks average as plainly.
-fn shrink(image: &Image, step: usize) -> Image {
+pub(crate) fn shrink(image: &Image, step: usize) -> Image {
     if step <= 1 {
         return image.clone();
     }

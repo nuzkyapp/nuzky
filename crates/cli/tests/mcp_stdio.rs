@@ -3082,6 +3082,24 @@ fn a_logo_goes_on_a_cover_over_stdio_and_the_cli() {
     assert!(state["thumbnails"][0].get("overlays").is_none(), "{state}");
     let (_, frame, rgba) = inspect_thumbnail(&mut c, json!({"format":"cover_9x16","width":270}));
     assert_eq!(pixel(&rgba, frame.width, 192, 96), [128, 128, 128], "the logo left the cover with its asset");
+
+    // An image larger than Nuzky decodes it, white lines a pixel wide between transparent ones: shrunk, half of each
+    // pixel is white, never a grey that hides them.
+    let lines = c.dir.join("lines.png");
+    let rgba: Vec<u8> = (0..64 * 4096).flat_map(|i| if i % 2 == 0 { [255; 4] } else { [0; 4] }).collect();
+    let mut bytes = Vec::new();
+    let mut encoder = png::Encoder::new(&mut bytes, 4096, 64);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.write_header().unwrap().write_image_data(&rgba).unwrap();
+    std::fs::write(&lines, bytes).unwrap();
+    let id = c.call("import_media", json!({"run_id":run,"paths":[lines]}))["asset_ids"][0].clone();
+    let wide = json!([{"type":"setThumbnail","thumbnail":{"format":"cover_9x16","timeUs":0,
+        "overlays":[{"assetId":id,"transform":{"x":0,"y":0,"scale":1,"rotation":0,"opacity":1}}]}}]);
+    c.call("apply_edits", json!({"run_id":run,"request_id":"lines","edits":wide}));
+    let (_, frame, rgba) = inspect_thumbnail(&mut c, json!({"format":"cover_9x16","width":1080}));
+    let row: Vec<u32> = (100..980).map(|x| pixel(&rgba, frame.width, x, 960)[1] as u32).collect();
+    let mean = row.iter().sum::<u32>() as f64 / row.len() as f64;
+    assert!((mean - 191.5).abs() < 8.0, "the lines over the grey frame average {mean}, not about 191");
     c.call("end_run", json!({"run_id":run,"action":"keep"}));
     c.finish();
 }
