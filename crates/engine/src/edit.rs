@@ -595,7 +595,7 @@ fn min_duration(project: &Project) -> i64 {
 }
 
 /// Music and sound files keep playing across cuts of the main track; everything else follows them.
-fn stays_in_place(track: &Track) -> bool {
+pub fn stays_in_place(track: &Track) -> bool {
     track.keep_in_place && track.kind == TrackKind::Audio
 }
 

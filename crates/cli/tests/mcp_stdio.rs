@@ -3506,6 +3506,26 @@ fn reels_start_and_end_on_the_videos_own_cuts_over_stdio() {
     frame(1, duration(1) - 10_000, [0, 0, 255]);
     frame(2, duration(2) - 10_000, [255, 0, 255]);
     frame(3, 0, [0, 255, 255]);
+    // Speech on a track kept in place does not move with the picture, so no cut of the picture moves the reel.
+    let tracks = |c: &mut Client| c.call("get_state", json!({}))["tracks"].as_array().unwrap().clone();
+    let clip = tracks(&mut c).iter().find(|t| t["id"] == MAIN_TRACK).unwrap()["clips"][0]["id"].clone();
+    let run = c.call("begin_run", json!({"label": "Speech in place"}))["run_id"].clone();
+    let edit = |c: &mut Client, edit: Value| {
+        c.call("apply_edits", json!({"run_id": run, "request_id": edit["type"], "edits": [edit]}));
+    };
+    edit(&mut c, json!({"type": "detachAudio", "clipId": clip}));
+    let sound = tracks(&mut c).iter().find(|t| t["kind"] == "audio").unwrap()["id"].clone();
+    edit(&mut c, json!({"type": "updateTrack", "trackId": sound, "keepInPlace": true}));
+    let key = c.call("get_transcript", json!({}))["transcript_key"].clone();
+    let whole = json!([{"from": 0, "to": 20, "title": "E", "why": "All of it.", "score": 0.9}]);
+    let proposed = c.call("propose_reels", json!({"run_id": run, "transcript_key": key, "candidates": whole}));
+    let made = c.call("make_reels", json!({"run_id": run, "ids": [proposed["candidates"][0]["id"]]}));
+    c.call("end_run", json!({"run_id": run, "action": "keep"}));
+    let reel: Project =
+        serde_json::from_slice(&std::fs::read(made["reels"][0]["path"].as_str().unwrap()).unwrap()).unwrap();
+    let main = reel.tracks.iter().find(|t| t.id == MAIN_TRACK).unwrap();
+    let ClipContent::Media { source_in_us, .. } = main.clips[0].content else { panic!("expected video") };
+    assert_eq!(source_in_us, 0);
     c.finish();
 }
 

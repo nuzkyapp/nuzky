@@ -8,7 +8,7 @@ use anyhow::{Context, Result, bail, ensure};
 use nuzky_analysis::{Range, SceneParams, scene_cuts_in};
 use nuzky_engine::{
     Project,
-    edit::{EditCmd, MAIN_TRACK, TimeRange, new_id},
+    edit::{EditCmd, MAIN_TRACK, TimeRange, new_id, stays_in_place},
     effects::source_time,
     model::{AssetKind, ClipContent, MAX_REEL_HOOK_CHARS, ReelCandidate, ReelStatus},
     speech::{TimelineWord, is_heard},
@@ -96,8 +96,10 @@ fn cut(
     let speech: Vec<_> = preview
         .tracks
         .iter()
-        .flat_map(|track| track.clips.iter().filter(move |clip| is_heard(preview, track, clip)))
-        .filter(|clip| {
+        .flat_map(|track| {
+            track.clips.iter().filter(move |clip| is_heard(preview, track, clip)).map(move |c| (track, c))
+        })
+        .filter(|(_, clip)| {
             let ClipContent::Media { asset_id, source_in_us, speed, .. } = &clip.content else { return false };
             let end = *source_in_us as f64 + clip.duration_us as f64 * f64::from(*speed);
             let words = derived.sources.get(asset_id).map_or(&[][..], Vec::as_slice);
@@ -105,12 +107,14 @@ fn cut(
         })
         .collect();
     let (Some(mut start), Some(mut end)) =
-        (speech.iter().map(|c| c.start_us).min(), speech.iter().map(|c| c.end_us()).max())
+        (speech.iter().map(|(_, c)| c.start_us).min(), speech.iter().map(|(_, c)| c.end_us()).max())
     else {
         return Ok(cut);
     };
     let reel = || Derived { sources: derived.sources.clone(), words: cut.words.clone(), ..Derived::default() };
+    // Speech on a track that keeps its place would drift from the picture cut under it.
     if let Some(cancelled) = shots
+        && !speech.iter().any(|(track, _)| stays_in_place(track))
         && let Some((first, last)) = transcript::heard_span(preview, &reel())
     {
         let opening = TimeRange { start_us: start + 1, end_us: (start + transcript::SLIVER_US).min(first + 1) };
