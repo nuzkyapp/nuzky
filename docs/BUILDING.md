@@ -147,11 +147,13 @@ hdiutil detach /Volumes/Nuzky
 
 ## Windows x64
 
-Install Rust with the MSVC toolchain, Node 22, Visual Studio 2022 Build Tools with **Desktop development with C++** and the Windows SDK. Install LLVM x64 and CMake if missing:
+Install Rust with the MSVC toolchain, Node 22, Visual Studio 2022 Build Tools with **Desktop development with C++** and the Windows SDK. Install LLVM x64 and CMake if missing, FFmpeg's command-line tools, which the tests and UI flows run, and OpenSSL, whose command makes the RSA key the ChatGPT sign-in tests sign with; put `C:\Program Files\OpenSSL-Win64\bin` on your `PATH` if its installer did not:
 
 ```powershell
 winget install LLVM.LLVM
 winget install Kitware.CMake
+winget install Gyan.FFmpeg
+winget install ShiningLight.OpenSSL.Light
 ```
 
 Open a fresh PowerShell terminal at the repository root:
@@ -163,7 +165,9 @@ cargo test --workspace --locked
 npm run tauri dev
 ```
 
-GitHub's Windows 2022 image already provides LLVM, CMake and MSVC. The setup script verifies LLVM/CMake, downloads the [BtbN month-end GPL shared build](https://github.com/BtbN/FFmpeg-Builds/releases/tag/autobuild-2026-09-30-13-08), verifies its pinned SHA-256, and sets `FFMPEG_DIR`, `LIBCLANG_PATH` and `PATH`. It includes headers and MSVC import libraries. BtbN retains month-end assets for two years; renew this pin before September 2028. Do not replace it with a floating `latest` URL.
+Every PowerShell that builds or runs Nuzky needs the variables the setup script sets, so run it again in a new terminal. GitHub's Windows 2022 image already provides LLVM, CMake and MSVC. The setup script verifies LLVM/CMake, downloads the [BtbN month-end GPL shared build](https://github.com/BtbN/FFmpeg-Builds/releases/tag/autobuild-2026-09-30-13-08), verifies its pinned SHA-256, and sets `FFMPEG_DIR`, `LIBCLANG_PATH` and `PATH`. It includes headers and MSVC import libraries. Outside CI it also fetches the Microsoft Edge WebDriver of the installed WebView2 version into the build dependencies and checks Microsoft's signature on it.
+
+The UI flows run on Windows too, with Python 3, `python -m pip install pillow numpy` and the media from `scripts/fixtures.sh` (run it in Git Bash, or copy `tmp-test` from another machine): `python scripts/repro.py <flow>` in the PowerShell where the setup script ran. Edge WebDriver drives the app's WebView2, and the app's window opens on the desktop, so run them where nobody works. Each flow gives the app its own home folder (`USERPROFILE`) with its own `AppData`, so its data, cache and webview storage are never yours. BtbN retains month-end assets for two years; renew this pin before September 2028. Do not replace it with a floating `latest` URL.
 
 ```powershell
 node scripts/build-bundles.mjs

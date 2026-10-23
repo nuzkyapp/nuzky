@@ -22,7 +22,16 @@ The rules for code changes are in [AGENTS.md](AGENTS.md), for people and coding 
    npm run tauri dev
    ```
 
-   This works on Linux. macOS and Windows ignore these variables and keep Nuzky's data in `~/Library` and `AppData`, so there develop under a user account that does not hold your own Nuzky projects.
+   This works on Linux. macOS ignores these variables and keeps Nuzky's data in `~/Library`, so there develop under a user account that does not hold your own Nuzky projects. On Windows, give the app its own home folder, whose `AppData` Windows then uses for Nuzky's data, cache and webview storage:
+
+   ```powershell
+   $env:CARGO_HOME = "$env:USERPROFILE\.cargo"; $env:RUSTUP_HOME = "$env:USERPROFILE\.rustup"
+   $env:USERPROFILE = "$PWD\tmp-test\dev\home"
+   New-Item -ItemType Directory -Force "$env:USERPROFILE\AppData\Local", "$env:USERPROFILE\AppData\Roaming" | Out-Null
+   npm run tauri dev
+   ```
+
+   The first line keeps Rust's own folders where they are, since they follow the home folder too.
 
 The first build compiles FFmpeg bindings, wgpu and whisper.cpp; compiling the tests in a clean checkout takes about 7 minutes.
 
