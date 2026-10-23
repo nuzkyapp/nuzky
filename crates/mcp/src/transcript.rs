@@ -1188,33 +1188,39 @@ pub fn caption_edit(
 }
 
 /// Where the captions of `track` sit, so captions made again land there: the place most of its captions without
-/// keyframes share, the earliest on a tie, so one caption moved or faded out alone does not move or hide them all.
+/// keyframes share, so one caption moved alone does not move them all. Hidden captions have no say in the
+/// opacity, so one hidden on its own, even where it ties or is the only one without keyframes, hides none.
 fn placement(track: &Track) -> Option<TransformPatch> {
-    let places: Vec<[f32; 5]> = track
+    let transforms: Vec<_> = track
         .clips
         .iter()
         .filter(|c| c.keyframes.is_empty())
         .filter_map(|c| match &c.content {
-            ClipContent::Text { transform: t, .. } => Some([t.x, t.y, t.scale, t.rotation, t.opacity]),
+            ClipContent::Text { transform, .. } => Some(transform),
             ClipContent::Media { .. } => None,
         })
         .collect();
-    let shared = |place: &[f32; 5]| places.iter().filter(|other| *other == place).count();
-    // The last of equal maxima comes first backwards.
-    let [x, y, scale, rotation, opacity] = *places.iter().rev().max_by_key(|place| shared(place))?;
+    let [x, y, scale, rotation] = most_common(transforms.iter().map(|t| [t.x, t.y, t.scale, t.rotation]))?;
     Some(TransformPatch {
         x: Some(x),
         y: Some(y),
         scale: Some(scale),
         rotation: Some(rotation),
-        opacity: Some(opacity),
+        opacity: most_common(transforms.iter().map(|t| t.opacity).filter(|&opacity| opacity > 0.0)),
     })
+}
+
+/// The value most of `values` share, the earliest on a tie.
+fn most_common<T: PartialEq + Copy>(values: impl Iterator<Item = T>) -> Option<T> {
+    let values: Vec<T> = values.collect();
+    // The last of equal maxima comes first backwards.
+    values.iter().rev().max_by_key(|value| values.iter().filter(|other| other == value).count()).copied()
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use nuzky_engine::model::{Asset, AssetKind, TrackKind, Transform};
+    use nuzky_engine::model::{Asset, AssetKind, Keyframe, TrackKind, Transform};
 
     pub fn fixture() -> (Project, HashMap<String, Vec<Word>>) {
         let mut project = Project::new("speech test");
@@ -1660,6 +1666,32 @@ pub(crate) mod tests {
         for caption in captions {
             let ClipContent::Text { transform, .. } = &caption.content else { panic!() };
             assert_eq!((transform.y, transform.scale, transform.opacity), (-0.2, 1.3, 1.0));
+        }
+    }
+
+    #[test]
+    fn a_caption_hidden_alone_does_not_hide_the_captions_made_again() {
+        let (mut project, sources) = fixture();
+        let words = map_words(&project, &sources);
+        let make = |project: &Project| {
+            caption_edit(&words, &[], project, crate::params::reel(), CaptionGrouping::default()).unwrap().0
+        };
+        project.apply(make(&project)).unwrap();
+        let captions = project.tracks.iter().position(|t| t.is_captions()).unwrap();
+        let ClipContent::Text { transform, .. } = &mut project.tracks[captions].clips[0].content else { panic!() };
+        transform.opacity = 0.0;
+        // As many captions hidden as shown, and the hidden one the only one without keyframes.
+        let mut tied = project.clone();
+        tied.tracks[captions].clips.truncate(2);
+        let mut keyed = project.clone();
+        let key = Keyframe { t_us: 0, transform: Transform::default(), ease: Default::default() };
+        keyed.tracks[captions].clips[1..].iter_mut().for_each(|clip| clip.keyframes = vec![key]);
+        for mut project in [tied, keyed] {
+            project.apply(make(&project)).unwrap();
+            for caption in &project.tracks[captions].clips {
+                let ClipContent::Text { transform, .. } = &caption.content else { panic!() };
+                assert_eq!(transform.opacity, 1.0);
+            }
         }
     }
 
