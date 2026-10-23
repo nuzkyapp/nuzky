@@ -2,19 +2,22 @@ import { useEffect } from "react";
 import { CircleAlert, Film, Lock, Sparkles, TriangleAlert } from "lucide-react";
 import { loadPoster, useLibrary } from "../../lib/library";
 import { formatLength } from "../../lib/time";
-import type { LibraryProject } from "../../lib/types";
+import type { LibraryProject, ThumbnailFormat } from "../../lib/types";
 
-/** The frame's size inside a box of `box` width over height, keeping the canvas shape. */
+const COVER_RATIO: Record<ThumbnailFormat, number> = { cover_9x16: 9 / 16, youtube_16x9: 16 / 9 };
+
+/** The picture's size inside a box of `box` width over height, in the shape of its cover or else its canvas. */
 function frameStyle(p: LibraryProject, box: number) {
-  const ratio = p.width > 0 && p.height > 0 ? p.width / p.height : 9 / 16;
+  const canvas = p.width > 0 && p.height > 0 ? p.width / p.height : 9 / 16;
+  const ratio = p.cover ? COVER_RATIO[p.cover] : canvas;
   return ratio < box ? { height: "100%", aspectRatio: `${ratio}` } : { width: "100%", aspectRatio: `${ratio}` };
 }
 
 const chip = "flex items-center gap-1 rounded-[5px] bg-black/60 px-1.5 py-[3px] text-[11px] font-medium leading-none text-fg";
 
 /**
- * The project's picture in its own shape, centred in a dark box like the preview stage: rendered by
- * the same renderer as the export. While it loads, the frame is an empty shape of the right size.
+ * The project's picture, its cover or else a frame, in its own shape, centred in a dark box like the preview
+ * stage: rendered by the same renderer as the export. While it loads, the frame is an empty shape of the right size.
  */
 export function Poster({ p, box, ai = false, compact = false }: { p: LibraryProject; /** Width over height of the box. */ box: number; ai?: boolean; compact?: boolean }) {
   const poster = useLibrary((s) => s.posters[p.path]);

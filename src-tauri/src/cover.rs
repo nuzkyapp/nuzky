@@ -168,25 +168,7 @@ impl Covers {
         if refresh_mask && frame.mask.is_none() {
             frame.mask = nuzky_vision::cached_alpha(&frame.image.data, (frame.image.width, frame.image.height), cache);
         }
-        let mask_missing = thumbnail.needs_mask() && frame.mask.is_none();
-        let rendered = if mask_missing {
-            // Until the mask is made, the whole frame stands in for the person.
-            let draft = Thumbnail {
-                texts: thumbnail
-                    .texts
-                    .iter()
-                    .map(|t| nuzky_engine::model::ThumbnailText { behind: false, ..t.clone() })
-                    .collect(),
-                outline: None,
-                ..thumbnail.clone()
-            };
-            let whole = vec![255; (frame.image.width * frame.image.height) as usize];
-            renderer.render_thumbnail(project, &draft, &frame.image, Some(&whole), width)?
-        } else {
-            // The mask only where the export uses it too, so the two never differ.
-            let mask = if thumbnail.needs_mask() { frame.mask.as_deref() } else { None };
-            renderer.render_thumbnail(project, thumbnail, &frame.image, mask, width)?
-        };
+        let (rendered, mask_missing) = draw(renderer, project, thumbnail, &frame.image, frame.mask.as_deref(), width)?;
         let view = CoverView {
             width: rendered.width,
             height: rendered.height,
@@ -205,13 +187,42 @@ impl Covers {
     }
 }
 
+/// The cover `width` pixels wide from its frame, as the export draws it with the person's `mask`. When it needs a
+/// mask that is not made yet, the whole frame stands in for the person: its texts in front and no outline. True
+/// when it was drawn so.
+pub fn draw(
+    renderer: &mut Renderer,
+    project: &Project,
+    thumbnail: &Thumbnail,
+    frame: &Image,
+    mask: Option<&[u8]>,
+    width: u32,
+) -> anyhow::Result<(RenderedThumbnail, bool)> {
+    if thumbnail.needs_mask() && mask.is_none() {
+        let draft = Thumbnail {
+            texts: thumbnail
+                .texts
+                .iter()
+                .map(|t| nuzky_engine::model::ThumbnailText { behind: false, ..t.clone() })
+                .collect(),
+            outline: None,
+            ..thumbnail.clone()
+        };
+        let whole = vec![255; (frame.width * frame.height) as usize];
+        return Ok((renderer.render_thumbnail(project, &draft, frame, Some(&whole), width)?, true));
+    }
+    // The mask only where the export uses it too, so the two never differ.
+    let mask = if thumbnail.needs_mask() { mask } else { None };
+    Ok((renderer.render_thumbnail(project, thumbnail, frame, mask, width)?, false))
+}
+
 /// Names of the missing files of the pictures shown at `t_us`.
 fn missing_at(project: &Project, t_us: i64) -> Vec<String> {
     missing(project, Some(t_us))
 }
 
 /// Names of the missing files a cover is drawn from: its image, or the pictures at its frame, and the images on it.
-fn cover_missing(project: &Project, thumbnail: &Thumbnail) -> Vec<String> {
+pub fn cover_missing(project: &Project, thumbnail: &Thumbnail) -> Vec<String> {
     let mut names = match thumbnail.image.as_deref().and_then(|id| project.asset(id)) {
         Some(image) => (!Path::new(&image.path).is_file()).then(|| image.name.clone()).into_iter().collect(),
         None => missing_at(project, thumbnail.time_us),

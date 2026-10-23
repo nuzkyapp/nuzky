@@ -32,8 +32,8 @@ interface LibraryState {
   sort: Sort;
   /** Paths of the selected projects on the home screen. */
   selection: string[];
-  /** The poster of each project, by path, with the file version it shows. */
-  posters: Record<string, { version: number; url: string | null }>;
+  /** The poster of each project, by path, with the poster key it was drawn for; null for a draft cover, asked for again. */
+  posters: Record<string, { version: string | null; url: string | null }>;
   pendingSwitch: PendingSwitch | null;
   /** A card to focus once it is listed, e.g. a duplicate. */
   focusPath: string | null;
@@ -135,14 +135,20 @@ export function undoLastToast(): boolean {
 // --- Posters ------------------------------------------------------------------------------------
 
 const posterQueue: LibraryProject[] = [];
-const requested = new Map<string, number>();
+const requested = new Map<string, string>();
+/** The data URL of each draft cover shown, so the same draft coming back leaves the card's image as it is. */
+const drafts = new Map<string, string>();
 let postersLoading = 0;
 
-/** Asks for the project's poster once per file version; two render at a time. */
+/** The poster changes with the project file and when its cover can or can no longer be drawn. */
+const posterKey = (p: LibraryProject) => `${p.modifiedMs}:${p.cover ?? ""}`;
+
+/** Asks for the project's poster once per poster key, a draft cover again at each list; two render at a time. */
 export function loadPoster(p: LibraryProject) {
   if (p.state === "broken" || p.state === "empty") return;
-  if (useLibrary.getState().posters[p.path]?.version === p.modifiedMs || requested.get(p.path) === p.modifiedMs) return;
-  requested.set(p.path, p.modifiedMs);
+  const key = posterKey(p);
+  if (useLibrary.getState().posters[p.path]?.version === key || requested.get(p.path) === key) return;
+  requested.set(p.path, key);
   posterQueue.push(p);
   pumpPosters();
 }
@@ -154,10 +160,15 @@ function pumpPosters() {
     api
       .projectPoster(p.path)
       .catch(() => null)
-      .then((url) => {
+      .then((poster) => {
+        if (poster?.provisional) requested.delete(p.path);
+        if (poster?.provisional && drafts.get(p.path) === poster.url) return;
+        if (poster?.provisional) drafts.set(p.path, poster.url);
+        else drafts.delete(p.path);
         const old = useLibrary.getState().posters[p.path]?.url;
         if (old?.startsWith("blob:")) URL.revokeObjectURL(old);
-        useLibrary.setState((s) => ({ posters: { ...s.posters, [p.path]: { version: p.modifiedMs, url: url ? blobUrl(url) : null } } }));
+        const version = poster?.provisional ? null : posterKey(p);
+        useLibrary.setState((s) => ({ posters: { ...s.posters, [p.path]: { version, url: poster ? blobUrl(poster.url) : null } } }));
       })
       .finally(() => {
         postersLoading--;
