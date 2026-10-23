@@ -1545,7 +1545,9 @@ impl Backend {
             overlay_bounds: Vec::new(),
         };
         let png = nuzky_engine::thumbnail::encode(&rendered, ImageKind::Png)?;
-        let info = json!({"asset_id": asset.id, "name": asset.name, "width": width, "height": height});
+        let (visible, colors) = media::image_colors(Path::new(&asset.path))?;
+        let info = json!({"asset_id": asset.id, "name": asset.name, "width": width, "height": height,
+            "visible": visible, "colors": colors});
         Ok(CallToolResult::success(vec![
             ContentBlock::text(info.to_string()),
             ContentBlock::image(BASE64_STANDARD.encode(png), "image/png"),

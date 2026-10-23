@@ -227,7 +227,7 @@ fn catalog() -> Result<Vec<Tool>> {
         )?,
         tool::<params::InspectImage>(
             "inspect_image",
-            "Show an image of the project (get_state assets of kind image) as ONE PNG, size pixels on its long side (768 by default), as Nuzky draws it, turned as the file says; transparency shows black. Use it to look at a logo or a picture the user imported, also when it is not on the timeline, for example before handing it to an image generator as a reference. Only reads. UNKNOWN_ASSET: the id is not an image of this project. MEDIA_MISSING: the file is gone; ask the user to put it back.",
+            "Show an image of the project (get_state assets of kind image) as ONE PNG, size pixels on its long side (768 by default), as Nuzky draws it, turned as the file says; transparency shows black. Its text also gives visible, the share of the image that is not transparent (0..1), and colors, up to six groups of alike colours in the file itself without its transparent parts, largest first: hex is the group's most common exact colour, share its part of the visible pixels, and background: true marks the plain backdrop along the edges, not the logo. For a brand's colours use these hex values as they are, for example as caption colours, instead of reading them off the picture. Use it to look at a logo or a picture the user imported, also when it is not on the timeline, for example before handing it to an image generator as a reference. Only reads. UNKNOWN_ASSET: the id is not an image of this project. MEDIA_MISSING: the file is gone; ask the user to put it back.",
         )?,
         tool::<params::ExportThumbnail>(
             "export_thumbnail",

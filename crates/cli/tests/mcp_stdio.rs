@@ -3104,6 +3104,58 @@ fn a_logo_goes_on_a_cover_over_stdio_and_the_cli() {
     c.finish();
 }
 
+/// inspect_image names a logo's exact colour from the file with its transparency, which the picture shows black,
+/// and marks the white it sits on as the backdrop.
+#[test]
+fn inspect_image_names_a_logos_colours_over_stdio() {
+    use base64::Engine as _;
+    let mut c = Client::new(true);
+    let logo = |name: &str, around: [u8; 4]| {
+        let (w, h) = (400, 200);
+        let mut rgba = Vec::with_capacity(w * h * 4);
+        for y in 0..h {
+            for x in 0..w {
+                let shape = (60..240).contains(&x) && (50..150).contains(&y);
+                rgba.extend(if shape { [0xe5, 0x09, 0x14, 255] } else { around });
+            }
+        }
+        let mut bytes = Vec::new();
+        let mut encoder = png::Encoder::new(&mut bytes, w as u32, h as u32);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.write_header().unwrap().write_image_data(&rgba).unwrap();
+        let path = c.dir.join(name);
+        std::fs::write(&path, bytes).unwrap();
+        path
+    };
+    let paths = [logo("logo.png", [0; 4]), logo("card.png", [255; 4])];
+    let run = c.call("begin_run", json!({"label":"brand"}))["run_id"].clone();
+    let ids = c.call("import_media", json!({"run_id":run,"paths":paths}))["asset_ids"].clone();
+    let mut inspect = |id: &Value| {
+        let shown = c.rpc("tools/call", json!({"name":"inspect_image","arguments":{"asset_id":id}}));
+        let content = &shown["result"]["content"];
+        let info: Value = serde_json::from_str(content[0]["text"].as_str().unwrap()).unwrap();
+        let png = base64::prelude::BASE64_STANDARD.decode(content[1]["data"].as_str().unwrap()).unwrap();
+        (info, decode_png(&png))
+    };
+
+    let (info, (image, rgba)) = inspect(&ids[0]);
+    assert_eq!((&info["width"], &info["height"]), (&json!(400), &json!(200)), "{info}");
+    assert_eq!((pixel(&rgba, image.width, 5, 5), pixel(&rgba, image.width, 150, 100)), ([0; 3], [0xe5, 0x09, 0x14]));
+    // Only the logo's red: no black from the transparency and no darker shades of its edges.
+    assert_eq!(info["colors"], json!([{"hex": "#e50914", "share": 1.0}]), "{info}");
+    assert_eq!(info["visible"], 0.23, "the transparency does not show: {info}");
+
+    let (info, _) = inspect(&ids[1]);
+    assert_eq!(info["visible"], 1.0, "{info}");
+    let (white, red) = (&info["colors"][0], &info["colors"][1]);
+    assert_eq!((&white["hex"], &white["background"]), (&json!("#ffffff"), &json!(true)), "{info}");
+    assert!((0.72..0.8).contains(&white["share"].as_f64().unwrap()), "{info}");
+    assert_eq!(red["hex"], "#e50914", "{info}");
+    assert!(red.get("background").is_none(), "{info}");
+    c.call("end_run", json!({"run_id":run,"action":"keep"}));
+    c.finish();
+}
+
 /// A project saved before thumbnails opens, takes an edit and its undo, and is saved exactly as it was.
 #[test]
 fn a_project_from_before_thumbnails_saves_unchanged_over_stdio() {
