@@ -14,8 +14,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-// Turns do not run on Windows yet.
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests;
 
 /// Answers with tool calls one message may take. Counting its steps, the longest flow the guide
@@ -70,9 +69,6 @@ pub struct ChatGptRequest {
 impl Turn {
     /// Starts a ChatGPT turn; `emit` gets its events from the turn's thread, ending with `Done` or `Error`.
     pub fn chatgpt(req: ChatGptRequest, mut emit: impl FnMut(AgentEvent) + Send + 'static) -> Result<Turn> {
-        if cfg!(windows) {
-            anyhow::bail!("The AI panel is not available on Windows yet. Connect your agent in a terminal instead.");
-        }
         let (stopping, finished) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
         let inbox = Arc::new(Mutex::new(Some(Vec::new())));
         let (stop, done, waiting) = (stopping.clone(), finished.clone(), inbox.clone());

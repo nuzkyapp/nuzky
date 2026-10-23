@@ -13,5 +13,7 @@ mod turn;
 
 pub use chatgpt::{ChatGptRequest, Tools};
 pub use discover::{AgentId, AgentInfo, SignIn, find, run, run_with_input, signed_in};
+#[cfg(windows)]
+pub use discover::{kill_tree, no_window};
 pub use event::{AgentEvent, ErrorCode, ToolStatus};
 pub use turn::{McpServer, Message, Turn, TurnRequest};

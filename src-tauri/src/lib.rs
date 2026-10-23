@@ -159,7 +159,6 @@ fn err(e: impl std::fmt::Display) -> String {
 
 struct OpenSession {
     host: Arc<Host>,
-    #[cfg(unix)]
     listener: Option<nuzky_mcp::ipc::Listener>,
     bridge_error: Option<String>,
     path: PathBuf,
@@ -202,7 +201,6 @@ impl OpenSession {
         HOSTS.lock().unwrap().push((host.session.locked_path()?, Arc::downgrade(&host)));
         let mut session = Self {
             host,
-            #[cfg(unix)]
             listener: None,
             bridge_error: None,
             path,
@@ -215,7 +213,6 @@ impl OpenSession {
 
     /// The project stays open for editing when the live agent bridge cannot start.
     fn start_bridge(&mut self) {
-        #[cfg(unix)]
         match nuzky_mcp::ipc::Listener::start(self.host.clone(), connect::access_flag()) {
             Ok(listener) => {
                 self.listener = Some(listener);
@@ -229,7 +226,6 @@ impl OpenSession {
     }
 
     fn close_ipc(&mut self) {
-        #[cfg(unix)]
         self.listener.take();
     }
 
@@ -1629,7 +1625,6 @@ mod ipc_lifecycle_tests {
     use super::*;
     use std::time::{Duration, Instant};
 
-    #[cfg(unix)]
     #[test]
     fn refused_switch_restores_ipc_after_save_failure() {
         let _children = crate::CHILD_SPAWN.lock().unwrap_or_else(|poisoned| poisoned.into_inner());

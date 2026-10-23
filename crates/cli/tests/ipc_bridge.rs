@@ -1,7 +1,7 @@
-#![cfg(unix)]
 use std::io::{BufRead, BufReader, Write};
+#[cfg(unix)]
 use std::os::unix::{fs::PermissionsExt, net::UnixStream};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
@@ -14,6 +14,8 @@ use nuzky_engine::{
 use nuzky_mcp::ipc::Listener;
 use nuzky_session::{Mode, ProjectSession, host::Host};
 use serde_json::{Value, json};
+#[cfg(windows)]
+use uds_windows::UnixStream;
 
 struct App {
     listener: Option<Listener>,
@@ -29,8 +31,7 @@ struct App {
 impl App {
     fn new() -> Self {
         let dir = std::env::temp_dir().join(format!("ipc-{}", new_id()));
-        std::fs::create_dir_all(dir.join("nuzky")).unwrap();
-        std::fs::set_permissions(dir.join("nuzky"), std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("project.nuzky");
         let mut project = Project::new("Before");
         project
@@ -194,7 +195,8 @@ fn wait(mut predicate: impl FnMut() -> bool) {
         std::thread::sleep(Duration::from_millis(10));
     }
 }
-fn permissions(path: &Path) -> u32 {
+#[cfg(unix)]
+fn permissions(path: &std::path::Path) -> u32 {
     std::fs::metadata(path).unwrap().permissions().mode() & 0o777
 }
 
@@ -204,9 +206,12 @@ fn real_bridge_shares_app_and_preserves_access_runs_images_and_disconnect() {
     let token_path = app.socket.with_extension("token");
     let token = std::fs::read_to_string(&token_path).unwrap();
     assert_eq!(token.len(), 64);
-    assert_eq!(permissions(app.socket.parent().unwrap()), 0o700);
-    assert_eq!(permissions(&app.socket), 0o600);
-    assert_eq!(permissions(&token_path), 0o600);
+    #[cfg(unix)]
+    {
+        assert_eq!(permissions(app.socket.parent().unwrap()), 0o700);
+        assert_eq!(permissions(&app.socket), 0o600);
+        assert_eq!(permissions(&token_path), 0o600);
+    }
     assert!(app.hello("wrong", 1)["error"].as_str().unwrap().starts_with("UNAUTHORIZED"));
     assert!(app.hello(&token, 2)["error"].as_str().unwrap().starts_with("PROTOCOL_MISMATCH"));
     let mut writer = Bridge::new(&app, true);
@@ -298,6 +303,7 @@ fn current_attaches_while_agent_access_is_on_and_never_headless() {
     let mut app = App::new();
     let current = app.dir.join("nuzky/current");
     assert_eq!(std::fs::read_to_string(&current).unwrap(), dunce::canonicalize(&app.path).unwrap().to_string_lossy());
+    #[cfg(unix)]
     assert_eq!(std::fs::metadata(&current).unwrap().permissions().mode() & 0o777, 0o600);
     app.access.store(false, Ordering::Release);
     let mut bridge = Bridge::with(&app, &["--current", "--allow-write"]);

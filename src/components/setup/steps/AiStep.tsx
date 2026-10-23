@@ -21,9 +21,7 @@ const SIGN_IN: Partial<Record<AgentKind, string[]>> = { claudeCode: ["claude"], 
 export function AiStep() {
   const skipped = useSetup((s) => s.states.ai === "skipped");
   const [again, setAgain] = useState(false);
-  // Evaluated here, not once, so a test can stand in for Windows.
-  const windows = navigator.userAgent.includes("Windows");
-  return windows || (skipped && !again) ? <WithoutAi windows={windows} onAgents={() => setAgain(true)} /> : <Agents />;
+  return skipped && !again ? <WithoutAi onAgents={() => setAgain(true)} /> : <Agents />;
 }
 
 function Agents() {
@@ -234,7 +232,7 @@ function AgentCard({
             {gemini && MAC
               ? "To install Google's Antigravity CLI, open Terminal (press ⌘ Space, type Terminal and press Return), paste this and press Return."
               : gemini
-                ? `To install Google's Antigravity CLI, open a terminal, ${PASTE} and press Enter.`
+                ? `To install Google's Antigravity CLI, open ${TERMINAL}, ${PASTE} and press Enter.`
                 : `To install, paste this into ${TERMINAL} and press ${RETURN}.`}
           </p>
           <Command parts={INSTALL[agent]} />
@@ -264,8 +262,8 @@ function AgentCard({
   );
 }
 
-/** Skipped, or on Windows: the way to cut by hand in the transcript, and the video to start with. */
-function WithoutAi({ windows, onAgents }: { windows: boolean; onAgents: () => void }) {
+/** Skipped: the way to cut by hand in the transcript, and the video to start with. */
+function WithoutAi({ onAgents }: { onAgents: () => void }) {
   // Pressing Skip leaves the focus on the footer's Done that took its place; the prominent button is the way on: Open a
   // video…, or on the first launch Try the sample video.
   const firstSetup = useTour((s) => s.firstSetup);
@@ -281,11 +279,6 @@ function WithoutAi({ windows, onAgents }: { windows: boolean; onAgents: () => vo
     });
   return (
     <div className="flex flex-col gap-3 pt-3">
-      {windows && (
-        <p className="text-[13px] leading-[18px] text-fg">
-          AI editing isn't available on Windows yet. <span className="text-muted">Claude Code, Codex and Gemini edit in Nuzky on macOS and Linux.</span>
-        </p>
-      )}
       <div>
         <p className="text-[13px] font-semibold leading-4 text-fg">Cut without AI</p>
         <p className="mt-1 text-[13px] leading-[18px] text-muted">Nuzky writes out what's said. Cutting words from the text cuts them from the video.</p>
@@ -298,11 +291,9 @@ function WithoutAi({ windows, onAgents }: { windows: boolean; onAgents: () => vo
           </li>
         ))}
       </ol>
-      {!windows && (
-        <button type="button" onClick={onAgents} className="self-start text-[12px] font-medium text-accent hover:underline">
-          Set up Claude Code, Codex or Gemini instead
-        </button>
-      )}
+      <button type="button" onClick={onAgents} className="self-start text-[12px] font-medium text-accent hover:underline">
+        Set up Claude Code, Codex or Gemini instead
+      </button>
       <StepActions>
         <Button pill variant={firstSetup && ended ? "secondary" : "primary"} onClick={openVideo}>
           Open a video…

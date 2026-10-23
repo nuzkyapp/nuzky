@@ -686,12 +686,9 @@ function Empty({ icon, title, children }: { icon: ReactNode; title: string; chil
   );
 }
 
-/** The AI panel refuses to run on Windows and `nuzky mcp --current` cannot attach there. */
-const WINDOWS = navigator.userAgent.includes("Windows");
-
 const FIRST_STEPS = [
   ["Captions in your language", "Pick the language in Captions. Nuzky starts with your computer's, or detects it."],
-  ["Cut pauses and retakes", WINDOWS ? "In the transcript. AI agents can't edit in Nuzky on Windows yet." : "In the transcript, or let an AI agent cut them."],
+  ["Cut pauses and retakes", "In the transcript, or let an AI agent cut them."],
   ["Export for Reels & TikTok", "1080p in 9:16. Switch Ratio first for any other shape."],
 ];
 
@@ -720,19 +717,17 @@ function FirstRun() {
         ))}
       </ol>
       <div className="flex flex-col items-center gap-2 text-[13px] text-muted">
-        {!WINDOWS && (
-          <p>
-            Want AI to do the cutting?{" "}
-            <button type="button" onClick={() => useSetup.getState().openSetup()} className="text-accent hover:underline">
-              Get set up
-            </button>{" "}
-            or{" "}
-            <button type="button" onClick={() => useEditor.setState({ connectOpen: true })} className="text-accent hover:underline">
-              connect an agent
-            </button>{" "}
-            you already use, like Claude Code, Codex or Gemini.
-          </p>
-        )}
+        <p>
+          Want AI to do the cutting?{" "}
+          <button type="button" onClick={() => useSetup.getState().openSetup()} className="text-accent hover:underline">
+            Get set up
+          </button>{" "}
+          or{" "}
+          <button type="button" onClick={() => useEditor.setState({ connectOpen: true })} className="text-accent hover:underline">
+            connect an agent
+          </button>{" "}
+          you already use, like Claude Code, Codex or Gemini.
+        </p>
         <p>Or drop videos from your phone anywhere in this window.</p>
         <div className="flex items-center gap-1">
           Or start empty:

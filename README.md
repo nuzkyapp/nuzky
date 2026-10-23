@@ -14,7 +14,7 @@
 
 Cut a talking video by deleting words from its transcript, caption it with speech recognition that runs on your own machine, and let an AI agent do the tedious parts while you watch. Nuzky is licensed under GPLv3 and has a native Rust engine.
 
-**Nuzky is in alpha.** It is early, so expect rough edges. Nuzky never changes or deletes your original videos. macOS works and is where Nuzky is tested. Linux is only partly tested. Windows isn't tested at all: the installer builds, but nobody has tried it on a Windows PC yet, and the AI panel is off there.
+**Nuzky is in alpha.** It is early, so expect rough edges. Nuzky never changes or deletes your original videos. macOS works and is where Nuzky is tested. Linux is only partly tested. Windows isn't tested at all: the installer builds, but nobody has tried it on a Windows PC yet.
 
 ## What you can do
 
@@ -31,7 +31,7 @@ Nuzky itself sends nothing you edit anywhere. It goes online only to download mo
 
 ## What the alpha doesn't do yet
 
-- AI editing doesn't work on Windows, and speech recognition there runs on the CPU, so captions take longer than on Linux and macOS.
+- On Windows, speech recognition runs on the CPU, so captions take longer than on Linux and macOS.
 - Intel Macs, Linux on ARM and Windows on ARM aren't supported.
 - Export makes MP4 only. There is no template library and no phone app.
 

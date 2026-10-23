@@ -74,7 +74,6 @@ pub struct Access {
 }
 
 /// What the app's agent listener reads.
-#[cfg(unix)]
 pub fn access_flag() -> Arc<AtomicBool> {
     ACCESS.clone()
 }
@@ -198,7 +197,7 @@ pub struct Connection {
 }
 
 impl Connection {
-    /// Paths in the home folder as `~/…`, as people read them.
+    /// Paths in the home folder as `~/…`, as people read them, with this system's separators.
     pub fn shown_from(mut self, home: &Path) -> Self {
         self.path = tilde(&self.path, home);
         self.backups = self.backups.iter().map(|backup| tilde(backup, home)).collect();
@@ -208,7 +207,8 @@ impl Connection {
 
 pub fn tilde(path: &str, home: &Path) -> String {
     match Path::new(path).strip_prefix(home) {
-        Ok(rest) => format!("~/{}", rest.display()),
+        // The config paths are joined with `/`, which Windows also takes.
+        Ok(rest) => Path::new("~").join(rest.components().collect::<PathBuf>()).display().to_string(),
         Err(_) => path.to_string(),
     }
 }
@@ -219,7 +219,6 @@ const RUNTIME_DIR: &str = "XDG_RUNTIME_DIR";
 
 /// What Nuzky's server said when it failed, for a person: without its code, and its agent-facing "no project is
 /// open" as what it means here.
-#[cfg(unix)]
 fn server_issue(said: &str) -> String {
     match said.split_once(": ") {
         _ if said.is_empty() => String::new(),
@@ -231,20 +230,17 @@ fn server_issue(said: &str) -> String {
     }
 }
 
-#[cfg(unix)]
 fn claude_fields(text: &str) -> (&str, &str, &str) {
     let field = |name| text.lines().find_map(|line| line.trim().strip_prefix(name)).unwrap_or_default().trim();
     (field("Status:"), field("Scope:"), field("Issue:"))
 }
 
-#[cfg(unix)]
 #[derive(Debug, Deserialize)]
 struct CodexServer {
     enabled: bool,
     transport: CodexTransport,
 }
 
-#[cfg(unix)]
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 enum CodexTransport {
@@ -253,7 +249,6 @@ enum CodexTransport {
     Other,
 }
 
-#[cfg(unix)]
 #[derive(Debug, Deserialize)]
 struct CodexStdio {
     command: String,
@@ -263,7 +258,6 @@ struct CodexStdio {
     cwd: Option<PathBuf>,
 }
 
-#[cfg(unix)]
 fn codex_server(text: &[u8]) -> std::result::Result<CodexStdio, String> {
     let server: CodexServer =
         serde_json::from_slice(text).map_err(|_| "Codex couldn't read its Nuzky settings. Press Connect again.")?;
@@ -278,7 +272,6 @@ fn codex_server(text: &[u8]) -> std::result::Result<CodexStdio, String> {
     }
 }
 
-#[cfg(unix)]
 pub fn verify(agent: Agent, program: &Path, home: &Path) -> std::result::Result<(), String> {
     use std::io::Read;
     use std::process::Stdio;
@@ -361,8 +354,35 @@ pub fn verify(agent: Agent, program: &Path, home: &Path) -> std::result::Result<
         }
         let CodexStdio { command, args, env, env_vars, cwd } = codex_server(&output.stdout)?;
         // Mirrors the default environment variables Codex passes to its stdio servers.
+        #[cfg(unix)]
         const DEFAULT_ENV: &[&str] =
             &["HOME", "LANG", "LOGNAME", "PATH", "SHELL", "TMPDIR", "USER", "__CF_USER_TEXT_ENCODING"];
+        #[cfg(windows)]
+        const DEFAULT_ENV: &[&str] = &[
+            "PATH",
+            "PATHEXT",
+            "SHELL",
+            "COMSPEC",
+            "SYSTEMROOT",
+            "WINDIR",
+            "SYSTEMDRIVE",
+            "USERNAME",
+            "USERDOMAIN",
+            "USERPROFILE",
+            "HOMEDRIVE",
+            "HOMEPATH",
+            "PROGRAMFILES",
+            "PROGRAMFILES(X86)",
+            "PROGRAMW6432",
+            "PROGRAMDATA",
+            "LOCALAPPDATA",
+            "APPDATA",
+            "TEMP",
+            "TMP",
+            "TMPDIR",
+            "POWERSHELL",
+            "PWSH",
+        ];
         let mut command = std::process::Command::new(command);
         command.args(args).env_clear().current_dir(cwd.as_deref().unwrap_or(home));
         for name in
@@ -377,7 +397,10 @@ pub fn verify(agent: Agent, program: &Path, home: &Path) -> std::result::Result<
     };
     command.env(nuzky_mcp::bridge::VERIFY_VAR, &nonce);
     command.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped());
+    #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    #[cfg(windows)]
+    nuzky_agent::no_window(&mut command);
     let stopped = format!("Nuzky's server for {} stopped before it reached Nuzky", agent.name());
     let mut child = command.spawn().map_err(|error| format!("{stopped}: {error}. Try again."))?;
     let mut stderr = child.stderr.take().unwrap();
@@ -399,7 +422,12 @@ pub fn verify(agent: Agent, program: &Path, home: &Path) -> std::result::Result<
         }
         std::thread::sleep(Duration::from_millis(50));
     };
-    unsafe { libc::kill(-(child.id() as i32), libc::SIGKILL) };
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(-(child.id() as i32), libc::SIGKILL)
+    };
+    #[cfg(windows)]
+    nuzky_agent::kill_tree(child.id());
     let _ = child.kill();
     let _ = child.wait();
     let stderr = reader.join().unwrap_or_default();
@@ -413,11 +441,6 @@ pub fn verify(agent: Agent, program: &Path, home: &Path) -> std::result::Result<
             Err(format!("Nuzky's server for {} didn't reach Nuzky within 15 seconds. Try again.", agent.name()))
         }
     }
-}
-
-#[cfg(not(unix))]
-pub fn verify(_agent: Agent, _program: &Path, _home: &Path) -> std::result::Result<(), String> {
-    Err("AI editing isn't available on Windows yet.".into())
 }
 
 pub fn status(agent: Agent, path: &Path, command: &Command) -> Connection {
@@ -720,7 +743,6 @@ fn with_codex_entry(text: Option<&str>, command: &Command) -> Result<String> {
 mod tests {
     use super::*;
 
-    #[cfg(unix)]
     #[test]
     fn claude_verification_fields_keep_status_scope_and_issue() {
         for status in [
@@ -745,7 +767,6 @@ mod tests {
         assert_eq!(claude_fields("  Status: ✓ Connected\n"), ("✓ Connected", "", ""));
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_failed_server_is_explained_without_its_code() {
         assert_eq!(
@@ -757,7 +778,6 @@ mod tests {
         assert_eq!(server_issue(""), "");
     }
 
-    #[cfg(unix)]
     #[test]
     fn codex_verification_reads_stdio_and_rejects_disabled_or_other_transports() {
         let text = br#"{"enabled":true,"transport":{"type":"stdio","command":"/opt/Nuzky/nuzky-app","args":["mcp","--current"],"env":{"A":"b"},"env_vars":["XDG_RUNTIME_DIR"],"cwd":"/home/me"}}"#;
@@ -846,7 +866,8 @@ mod tests {
         let allowed = original.replace("\"read /my files\"]", "\"read /my files\", \"mcp(nuzky/*)\"]");
         assert_eq!(std::fs::read_to_string(&settings).unwrap(), allowed);
         let shown = done.shown_from(&dir);
-        assert_eq!(shown.backups, ["~/mcp_config.json.nuzky-backup-7", "~/settings.json.nuzky-backup-7"]);
+        let backups = ["~/mcp_config.json.nuzky-backup-7", "~/settings.json.nuzky-backup-7"];
+        assert_eq!(shown.backups, backups.map(|b| b.replace('/', std::path::MAIN_SEPARATOR_STR)));
         let modified = std::fs::metadata(&settings).unwrap().modified().unwrap();
         let again = connect(Agent::Antigravity, &path, Some(&settings), &command(), 8).unwrap();
         assert!(again.backups.is_empty());

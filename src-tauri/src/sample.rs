@@ -210,7 +210,6 @@ mod tests {
         let host = Arc::new(host);
         let current = OpenSession {
             host: host.clone(),
-            #[cfg(unix)]
             listener: None,
             bridge_error: None,
             path,

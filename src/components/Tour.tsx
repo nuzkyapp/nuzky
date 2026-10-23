@@ -228,7 +228,7 @@ function Spotlight({ step }: { step: TourStep }) {
           )}
           {step === "export" && (
             <>
-              {ai === null && !WINDOWS ? (
+              {ai === null ? (
                 <Button pill className="h-7 px-3 text-[12px]" onClick={connectAi}>
                   Connect your AI
                 </Button>
@@ -260,14 +260,12 @@ function useRealAi() {
   return id && agentName(id, agents);
 }
 
-const WINDOWS = navigator.userAgent.includes("Windows");
-
 /** The last step always says the tour's AI was a demo, and what a real one does here. */
 function DemoNote({ ai }: { ai: string | null | undefined }) {
   return (
     <p className="text-[12px] leading-4 text-muted">
       The AI in this tour was a demo.
-      {WINDOWS ? " AI editing isn't available on Windows yet." : ai ? ` ${ai} does it for real on your videos. Next time, type what you want in the AI panel.` : ""}
+      {ai ? ` ${ai} does it for real on your videos. Next time, type what you want in the AI panel.` : ""}
     </p>
   );
 }

@@ -1,5 +1,4 @@
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixStream;
 use std::time::Instant;
 
 use anyhow::{Context, Result, ensure};
@@ -8,6 +7,7 @@ use serde::{
     de::{DeserializeOwned, IgnoredAny, MapAccess, Visitor},
 };
 
+use super::UnixStream;
 use crate::limits::MAX_LINE_BYTES;
 
 pub(super) fn send(stream: &mut UnixStream, value: &impl Serialize) -> Result<()> {
@@ -33,7 +33,7 @@ pub(super) fn line(reader: &mut BufReader<UnixStream>, limit: usize, deadline: O
             let remaining =
                 deadline.checked_duration_since(Instant::now()).context("IPC_UNTRUSTED: hello deadline exceeded")?;
             // macOS refuses socket options once the peer has hung up; what it sent is still readable and reading
-            // cannot block then, so the deadline is not needed.
+            // cannot block then, so the deadline is not needed. Windows takes them.
             if let Err(error) = reader.get_ref().set_read_timeout(Some(remaining))
                 && error.raw_os_error() != Some(libc::EINVAL)
             {

@@ -7,22 +7,30 @@ import type { AgentKind } from "../../lib/types";
 import { IconButton } from "../ui";
 
 export const MAC = navigator.userAgent.includes("Mac");
-export const TERMINAL = MAC ? "Terminal" : "a terminal";
+const WINDOWS = navigator.userAgent.includes("Windows");
+/** On Windows the commands below are PowerShell's. */
+export const TERMINAL = MAC ? "Terminal" : WINDOWS ? "PowerShell" : "a terminal";
 export const RETURN = MAC ? "Return" : "Enter";
 /** A terminal on Linux pastes with Ctrl+Shift+V, which someone new to it would not guess. */
-export const PASTE = MAC ? "paste this" : "paste this (Ctrl+Shift+V)";
+export const PASTE = MAC ? "paste this" : WINDOWS ? "paste this (Ctrl+V)" : "paste this (Ctrl+Shift+V)";
 
 export const GUIDE: Record<AgentKind, string> = {
   claudeCode: "https://code.claude.com/docs/en/setup",
   codex: "https://learn.chatgpt.com/docs/codex/cli",
   antigravity: "https://antigravity.google/docs/getting-started",
 };
-/** The official commands for macOS and Linux, in the parts a narrow column may wrap between. */
-export const INSTALL: Record<AgentKind, string[]> = {
-  claudeCode: ["curl -fsSL", "https://claude.ai/install.sh", "| bash"],
-  codex: ["curl -fsSL", "https://chatgpt.com/codex/install.sh | sh"],
-  antigravity: ["curl -fsSL", "https://antigravity.google", "/cli/install.sh", "| bash"],
-};
+/** The official commands for macOS and Linux, and for PowerShell on Windows, in the parts a narrow column may wrap between. */
+export const INSTALL: Record<AgentKind, string[]> = WINDOWS
+  ? {
+      claudeCode: ["irm", "https://claude.ai/install.ps1", "| iex"],
+      codex: ["npm install -g", "@openai/codex"],
+      antigravity: ["irm", "https://antigravity.google", "/cli/install.ps1", "| iex"],
+    }
+  : {
+      claudeCode: ["curl -fsSL", "https://claude.ai/install.sh", "| bash"],
+      codex: ["curl -fsSL", "https://chatgpt.com/codex/install.sh | sh"],
+      antigravity: ["curl -fsSL", "https://antigravity.google", "/cli/install.sh", "| bash"],
+    };
 
 /** A Connect (`wrote` once Nuzky is in the agent's settings), or the check of an agent connected before. */
 export type Run = { phase: "writing" | "checking" | "connected" | "failed"; fresh: boolean; wrote: boolean; backups?: string[]; error?: string; started: number; took?: number };
@@ -141,8 +149,10 @@ export function GeminiWhy() {
 
 const EXAMPLE = "Cut the pauses and retakes in the video open in Nuzky, then add captions";
 
-/** The path as one argument to paste into a shell; `~/` stays outside the quotes, where the shell expands it. */
+/** The path as one argument to paste into a shell; `~/` stays outside the quotes, where the shell expands it. PowerShell
+ * runs a path in quotes only after `&`. */
 function shellPath(path: string) {
+  if (WINDOWS) return /\s/.test(path) ? `& '${path.replaceAll("'", "''")}'` : path;
   if (/^[\w@%+=:,./~-]+$/.test(path)) return path;
   const home = path.startsWith("~/") ? "~/" : "";
   return `${home}'${path.slice(home.length).replaceAll("'", "'\\''")}'`;

@@ -26,3 +26,6 @@ nuzky-analysis = { workspace = true, features = ["gpu"] }
 
 [dev-dependencies]
 base64 = "0.23.1"
+
+[target.'cfg(windows)'.dev-dependencies]
+uds_windows = "1.2.1"

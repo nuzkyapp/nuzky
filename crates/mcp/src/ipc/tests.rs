@@ -1,7 +1,11 @@
 use super::*;
 use nuzky_engine::Project;
 use nuzky_session::{Mode, ProjectSession};
+use std::io::Read;
+#[cfg(unix)]
 use std::os::unix::fs::symlink;
+#[cfg(windows)]
+use std::os::windows::fs::symlink_file as symlink;
 
 struct Fixture {
     dir: PathBuf,
@@ -19,8 +23,7 @@ impl Drop for Cleanup {
 impl Fixture {
     fn new() -> Self {
         let dir = std::env::temp_dir().join(format!("ipc-hardening-{}", new_id()));
-        fs::create_dir(&dir).unwrap();
-        fs::set_permissions(&dir, Permissions::from_mode(0o700)).unwrap();
+        private_directory(&dir).unwrap();
         let path = dir.join("project.nuzky");
         fs::write(&path, serde_json::to_vec(&Project::new("fixture")).unwrap()).unwrap();
         let host =
@@ -52,6 +55,7 @@ fn prepared_endpoint_cannot_exfiltrate_a_symlinked_token() {
     let fake = UnixListener::bind(&f.socket).unwrap();
     let secret = f.dir.join("private-key");
     fs::write(&secret, "a".repeat(security::TOKEN_LEN)).unwrap();
+    #[cfg(unix)]
     fs::set_permissions(&secret, Permissions::from_mode(0o600)).unwrap();
     symlink(&secret, f.socket.with_extension("token")).unwrap();
     let error = Remote::at(&f.socket, false, false).err().unwrap();
@@ -62,10 +66,30 @@ fn prepared_endpoint_cannot_exfiltrate_a_symlinked_token() {
     let mut sent = Vec::new();
     peer.read_to_end(&mut sent).unwrap();
     assert!(sent.is_empty(), "no hello or token may be sent");
+    #[cfg(unix)]
     fs::set_permissions(&f.dir, Permissions::from_mode(0o755)).unwrap();
+    #[cfg(windows)]
+    let acl = || std::process::Command::new("icacls").arg(&f.dir).output().unwrap().stdout;
+    #[cfg(windows)]
+    let shared = {
+        // Everyone may read it, as 0755 lets every user in on Unix.
+        assert!(
+            std::process::Command::new("icacls")
+                .arg(&f.dir)
+                .args(["/grant", "*S-1-1-0:(RX)"])
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+        acl()
+    };
     assert!(Remote::at(&f.socket, false, false).is_err());
     assert!(Listener::at(f.host.clone(), f.socket.clone(), Arc::new(AtomicBool::new(true))).is_err());
+    #[cfg(unix)]
     assert_eq!(fs::metadata(&f.dir).unwrap().permissions().mode() & 0o777, 0o755);
+    #[cfg(windows)]
+    assert_eq!(acl(), shared);
 }
 
 #[test]
@@ -161,6 +185,18 @@ fn oversized_inspection_is_a_tool_error_and_connection_survives() {
     assert!(serde_json::to_string(&result).unwrap().contains("RESULT_TOO_LARGE"));
     let error = remote.call("get_state".into(), json!({"payload":"x".repeat(MAX_LINE_BYTES)})).unwrap_err();
     assert!(error.to_string().starts_with("REQUEST_TOO_LARGE"));
+    assert_ne!(remote.call("get_state".into(), json!({})).unwrap().is_error, Some(true));
+    drop(remote);
+    drop(listener);
+}
+
+#[test]
+fn a_connection_stays_open_longer_than_its_hello_deadline() {
+    let f = Fixture::new();
+    let listener = f.listener();
+    let remote = Remote::at(&f.socket, false, false).unwrap().unwrap();
+    // An agent thinks between calls, and a job wait takes seconds; Windows once dropped the connection then.
+    std::thread::sleep(HELLO_TIMEOUT + Duration::from_secs(1));
     assert_ne!(remote.call("get_state".into(), json!({})).unwrap().is_error, Some(true));
     drop(remote);
     drop(listener);

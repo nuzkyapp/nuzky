@@ -232,7 +232,6 @@ function AgentMenu() {
   const busy = useAgent((s) => s.status !== "idle");
   const chatgpt = useChatGpt((s) => s.status);
   const gemini = useAgent((s) => s.gemini);
-  const windows = navigator.userAgent.includes("Windows");
   const name = agentName(agent, agents);
   return (
     <Menu
@@ -285,15 +284,15 @@ function AgentMenu() {
           </MenuItem>
           <MenuItem
             checked={agent === "antigravity"}
-            disabled={windows || busy}
-            reason={windows ? "AI editing isn't available on Windows yet" : "Wait for the answer, or stop it"}
+            disabled={busy}
+            reason="Wait for the answer, or stop it"
             onClick={() => {
               chooseAgent("antigravity");
               close();
             }}
           >
             <span className="flex-1">Gemini</span>
-            <span className="text-[12px] text-muted">{windows ? "Not on Windows" : !gemini ? "" : !gemini.installed ? "Not installed" : gemini.connection.state === "connected" ? "Connected" : "Not connected"}</span>
+            <span className="text-[12px] text-muted">{!gemini ? "" : !gemini.installed ? "Not installed" : gemini.connection.state === "connected" ? "Connected" : "Not connected"}</span>
           </MenuItem>
           <div className="mx-1.5 my-1 h-px bg-white/[.08]" />
           <MenuItem

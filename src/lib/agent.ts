@@ -317,9 +317,8 @@ export async function loadAgents() {
 }
 
 let geminiLooks = 0;
-/** Looks for Antigravity CLI and reads its settings again; Windows has no AI editing, so there is nothing to find. Only the latest look counts. */
+/** Looks for Antigravity CLI and reads its settings again. Only the latest look counts. */
 export async function loadGemini() {
-  if (navigator.userAgent.includes("Windows")) return;
   const look = ++geminiLooks;
   try {
     const gemini = await api.agentStatus("antigravity");

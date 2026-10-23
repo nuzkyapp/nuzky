@@ -216,22 +216,6 @@ def skip_to_transcript(r):
     r.s.run("window.__nuzky.setup.setState({states: {}, current: 'ai'}); window.__nuzky.setup.getState().openSetup()")
     wait(lambda: card_says(r, 'Codex', 'Not installed'), 10)
 
-    # On Windows, where agents cannot attach to Nuzky yet, the step says so first and shows only the way by hand.
-    r.s.run("Object.defineProperty(navigator, 'userAgent', {value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)', configurable: true})")
-    press('Home')
-    press('End')
-    d = wait(lambda: (x := dialog(r)) and x['panel'] == 'Connect your AI' and x, 5)
-    text = r.s.run("return document.querySelector('#setup-panel').innerText") or ''
-    r.check("on Windows the step says at once that AI editing isn't available there yet, with no agents to set up",
-            [line for line in text.split('\n') if line.strip()][1].startswith("AI editing isn't available on Windows yet")
-            and 'Claude Code, Codex and Gemini edit in Nuzky on macOS and Linux' in text
-            and 'Cut without AI' in text and not cards(r) and 'Set up Claude Code, Codex or Gemini instead' not in text, text)
-    r.check('and offers Open a video… before Skip', d and d['buttons'] == ['Open a video…', 'Skip'], d)
-    r.shot('setup-ai-windows')
-    r.s.run("delete navigator.userAgent")
-    press('Home')
-    press('End')
-    wait(lambda: card_says(r, 'Codex', 'Not installed'), 10)
     r.check('Skip', press_button(r, 'Skip'))
     d = wait(lambda: (x := dialog(r)) and x['steps'][3]['lines'] == ['Connect your AI', 'Skipped'] and x, 5)
     text = r.s.run("return document.querySelector('#setup-panel').innerText") or ''

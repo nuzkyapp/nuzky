@@ -4,7 +4,6 @@ pub mod bridge;
 pub mod caption_styles;
 mod fonts;
 pub mod import;
-#[cfg(unix)]
 pub mod ipc;
 mod limits;
 mod media;

@@ -121,7 +121,7 @@ pub(crate) enum Inbox {
 
 /// One message to the agent: an installed CLI running as its own process group, or ChatGPT running in Nuzky.
 pub struct Turn {
-    /// The CLI's process group; None for ChatGPT, whose turn ends itself once it sees `stopping`.
+    /// The CLI's process group, on Windows its process tree; None for ChatGPT, whose turn ends itself once it sees `stopping`.
     pub(crate) pid: Option<u32>,
     pub(crate) stopping: Arc<AtomicBool>,
     pub(crate) finished: Arc<AtomicBool>,
@@ -151,9 +151,6 @@ fn failure_code(resume: bool, message: &str) -> ErrorCode {
 impl Turn {
     /// Starts the turn; `emit` gets its events from a reader thread, ending with `Done` or `Error`.
     pub fn start(req: TurnRequest, mut emit: impl FnMut(AgentEvent) + Send + 'static) -> Result<Turn> {
-        if cfg!(windows) {
-            bail!("The AI panel is not available on Windows yet. Connect your agent in a terminal instead.");
-        }
         std::fs::create_dir_all(&req.cwd).context("Creating the AI panel's folder")?;
         // Codex reads its pictures from files itself.
         let first = if req.agent == AgentId::Claude { claude::message(&req.prompt)? } else { req.prompt.text.clone() };
@@ -177,6 +174,8 @@ impl Turn {
         }
         #[cfg(unix)]
         std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
+        #[cfg(windows)]
+        crate::discover::no_window(&mut cmd);
         let mut child = cmd.spawn().with_context(|| format!("NOT_INSTALLED: could not start {}", req.exe.display()))?;
         let pid = child.id();
         let stopping = Arc::new(AtomicBool::new(false));
@@ -332,14 +331,18 @@ impl Drop for Turn {
 }
 
 /// SIGINT lets the agent record the interrupted turn so the next one can resume; SIGKILL is the fallback.
-/// The whole process group gets it, so the MCP bridge the agent started goes too.
+/// The whole process group gets it, so the MCP bridge the agent started goes too. Windows has no SIGINT for a
+/// child without a console window, so there the agent and everything it started end at once. Like a signal, that
+/// happens a moment later: Stop and edit ends the agent's run itself first, before its bridge goes.
 fn signal(pid: u32, kill: bool) {
     #[cfg(unix)]
     unsafe {
         libc::kill(-(pid as i32), if kill { libc::SIGKILL } else { libc::SIGINT });
     }
-    #[cfg(not(unix))]
-    let _ = (pid, kill);
+    #[cfg(windows)]
+    if !kill {
+        std::thread::spawn(move || crate::discover::kill_tree(pid));
+    }
 }
 
 #[cfg(test)]

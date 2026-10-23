@@ -142,7 +142,7 @@ export function GeminiGuide() {
             {!installed && (
               <>
                 <p className="text-[12px] leading-[18px] text-muted">
-                  {MAC ? "Open Terminal: press ⌘ Space, type Terminal and press Return. Paste this there and press Return." : `Open a terminal, ${PASTE} and press Enter.`}
+                  {MAC ? "Open Terminal: press ⌘ Space, type Terminal and press Return. Paste this there and press Return." : `Open ${TERMINAL}, ${PASTE} and press Enter.`}
                 </p>
                 <Command parts={INSTALL.antigravity} />
                 <Button className={`mt-2.5 ${small}`} onClick={() => void look()}>

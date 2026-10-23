@@ -1,10 +1,15 @@
-//! Private, project-scoped Unix transport. The listener owns its Host until all clients drain.
+//! Private, project-scoped local socket (AF_UNIX, which Windows has too). The listener owns its Host until all
+//! clients drain.
 use std::collections::HashMap;
-use std::fs::{self, DirBuilder, File, Permissions};
-use std::io::{BufReader, Read, Write};
+use std::fs;
+#[cfg(unix)]
+use std::fs::{DirBuilder, File, Permissions};
+#[cfg(unix)]
+use std::io::Read;
+use std::io::{BufReader, Write};
 use std::net::Shutdown;
+#[cfg(unix)]
 use std::os::unix::{
-    ffi::OsStrExt,
     fs::{DirBuilderExt, PermissionsExt},
     net::{UnixListener, UnixStream},
 };
@@ -29,10 +34,11 @@ use serde_json::{Value, json};
 
 use crate::limits::MAX_LINE_BYTES;
 use crate::tools::{Access, Backend, Client, tool_error};
+#[cfg(windows)]
+use uds_windows::{UnixListener, UnixStream};
 mod security;
 mod wire;
 mod workers;
-use security::uid;
 use wire::{receive, send};
 use workers::Workers;
 #[cfg(test)]
@@ -48,16 +54,21 @@ pub const ACCESS_OFF: &str = "AGENT_ACCESS_OFF: Agent access is off in Nuzky, so
 
 /// Where the app's private endpoints live.
 fn endpoint_directory() -> PathBuf {
+    #[cfg(unix)]
+    let private = format!("nuzky-{}", security::uid());
+    // Windows' temp folder is already the user's own.
+    #[cfg(windows)]
+    let private = "nuzky-ipc";
     std::env::var_os("XDG_RUNTIME_DIR")
         .filter(|v| !v.is_empty())
         .map(|p| PathBuf::from(p).join("nuzky"))
-        .unwrap_or_else(|| std::env::temp_dir().join(format!("nuzky-{}", uid())))
+        .unwrap_or_else(|| std::env::temp_dir().join(private))
 }
 
 pub fn socket_path(project: &Path) -> Result<PathBuf> {
     let canonical = dunce::canonicalize(project).context("PROJECT_MISSING: resolving IPC path")?;
     let mut hash = FNV_OFFSET;
-    hash_bytes(&mut hash, canonical.as_os_str().as_bytes());
+    hash_bytes(&mut hash, canonical.as_os_str().as_encoded_bytes());
     Ok(endpoint_directory().join(format!("{hash:016x}.sock")))
 }
 
@@ -81,7 +92,9 @@ pub fn current_project() -> Result<Option<PathBuf>> {
 fn write_current(directory: &Path, project: &Path) -> Result<()> {
     let part = directory.join(format!(".{CURRENT}-{}", new_id()));
     let result = security::create_token(&part)
-        .and_then(|mut file| file.write_all(project.as_os_str().as_bytes()).context("IPC_UNAVAILABLE: naming project"))
+        .and_then(|mut file| {
+            file.write_all(project.as_os_str().as_encoded_bytes()).context("IPC_UNAVAILABLE: naming project")
+        })
         .and_then(|()| fs::rename(&part, directory.join(CURRENT)).context("IPC_UNAVAILABLE: naming project"));
     if result.is_err() {
         let _ = fs::remove_file(&part);
@@ -90,7 +103,11 @@ fn write_current(directory: &Path, project: &Path) -> Result<()> {
 }
 
 fn private_directory(path: &Path) -> Result<()> {
-    match DirBuilder::new().mode(0o700).create(path) {
+    #[cfg(unix)]
+    let created = DirBuilder::new().mode(0o700).create(path);
+    #[cfg(windows)]
+    let created = security::create_directory(path);
+    match created {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
         Err(e) => return Err(e).context("IPC_UNAVAILABLE: creating private directory"),
@@ -175,12 +192,17 @@ impl Listener {
             worker: None,
         };
         let mut random = [0u8; 32];
+        #[cfg(unix)]
         File::open("/dev/urandom")?.read_exact(&mut random)?;
+        #[cfg(windows)]
+        getrandom::fill(&mut random).context("IPC_UNAVAILABLE: making a token")?;
         let token = random.iter().map(|b| format!("{b:02x}")).collect::<String>();
         // A client that finds the socket must also find its token.
         let mut token_file = security::create_token(&owner.path.with_extension("token"))?;
         token_file.write_all(token.as_bytes())?;
         let listener = UnixListener::bind(&owner.path).context("IPC_UNAVAILABLE: binding socket")?;
+        // On Windows the socket takes the private folder's access list.
+        #[cfg(unix)]
         fs::set_permissions(&owner.path, Permissions::from_mode(0o600))?;
         if let Some(directory) = owner.path.parent() {
             // Agents still attach by project path when the name cannot be written.
@@ -325,7 +347,8 @@ fn connection(
     let id = hello.conversation.filter(|id| host.jobs.in_conversation(id)).unwrap_or_else(new_id);
     let backend = Arc::new(Backend::shared(host, project, Client { id, access: hello.access })?);
     send(&mut stream, &json!({"ok":true,"session_epoch":backend.host.session.stamp().session_epoch}))?;
-    stream.set_read_timeout(None)?;
+    // On the copy that reads: on Windows each copy of a socket keeps its own timeout.
+    reader.get_ref().set_read_timeout(None)?;
     serve_requests(&mut reader, backend, Arc::new(Mutex::new(stream)), MAX_LINE_BYTES)
 }
 
@@ -445,7 +468,7 @@ impl Remote {
         let access = if allow_write { Access::Write } else { Access::ReadOnly };
         let Some((stream, mut reader, hello)) = handshake(path, access, current, None)? else { return Ok(None) };
         ensure!(hello["session_epoch"].is_string(), "PROTOCOL_MISMATCH: missing session epoch");
-        stream.set_read_timeout(None)?;
+        reader.get_ref().set_read_timeout(None)?;
         let pending: Pending = Arc::default();
         let closed = Arc::new(AtomicBool::new(false));
         let (requests, ended) = (pending.clone(), closed.clone());
@@ -459,6 +482,8 @@ impl Remote {
                 }
                 ended.store(true, Ordering::Release);
                 requests.lock().unwrap().clear();
+                // Hanging up here too ends the app's side: on Windows the app's own shutdown does not wake its read.
+                let _ = reader.get_ref().shutdown(Shutdown::Both);
             })
             .context("IPC_UNAVAILABLE: starting response reader")?;
         Ok(Some(Self {
