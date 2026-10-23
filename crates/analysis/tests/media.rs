@@ -78,6 +78,21 @@ fn hard_cuts_detected_and_slow_fade_ignored() -> Result<()> {
     Ok(())
 }
 
+/// A camera that starts moving fast at once, as a whip pan, changes every following frame a little: one cut where
+/// it starts, not one after every gap while it moves.
+#[test]
+fn motion_that_sets_in_at_once_is_one_cut() -> Result<()> {
+    let dir = directory("onset")?;
+    let path = dir.join("onset.mp4");
+    let filter = "color=gray:s=160x90:r=25:d=3,format=yuv420p,\
+                  geq=lum='if(lt(N,25),40,40+16*abs(mod(N-25,22)-11))':cb=128:cr=128";
+    ffmpeg(&["-f", "lavfi", "-i", filter, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-threads", "1"], &path)?;
+    let asset = probe(&path, "onset".into())?;
+    let cuts = scene_cuts(&asset, SceneParams { threshold: 0.05, ..Default::default() })?;
+    assert_eq!(cuts.iter().map(|c| c.time_us).collect::<Vec<_>>(), [1_000_000]);
+    Ok(())
+}
+
 #[test]
 fn rotation_and_variable_frame_pts_are_preserved() -> Result<()> {
     let dir = directory("vfr")?;

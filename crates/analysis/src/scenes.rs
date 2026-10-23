@@ -116,9 +116,9 @@ impl Detector {
             let abrupt = score >= self.params.threshold.max(self.motion * 3.0 + 0.02);
             if increasing && time_us >= 0 && separated && abrupt {
                 self.cuts.push(SceneCut { time_us, score });
-            }
-            // A cut should not raise the motion baseline and hide the following cut.
-            if !abrupt {
+            } else {
+                // A cut should not raise the motion baseline and hide the following cut, but motion that sets in at
+                // once must, or it would end every gap with another cut.
                 self.motion = 0.8 * self.motion + 0.2 * score;
             }
         }
