@@ -124,10 +124,9 @@ impl Vault {
 
     pub(crate) fn load(&self, host_id: &str) -> Result<Option<Tokens>> {
         let text = match self {
-            Vault::Keychain => match entry(host_id)?.get_password() {
-                Ok(text) => text,
-                Err(keyring::Error::NoEntry) => return Ok(None),
-                Err(error) => return Err(unavailable(&error)),
+            Vault::Keychain => match read_keychain(host_id)? {
+                Some(text) => text,
+                None => return Ok(None),
             },
             Vault::File(path) => match fs::read_to_string(path) {
                 Ok(text) => text,
@@ -144,17 +143,14 @@ impl Vault {
     pub(crate) fn save(&self, host_id: &str, tokens: &Tokens) -> Result<()> {
         let text = serde_json::to_string(tokens)?;
         match self {
-            Vault::Keychain => entry(host_id)?.set_password(&text).map_err(|error| unavailable(&error)),
+            Vault::Keychain => write_keychain(host_id, &text),
             Vault::File(path) => write_private(path, text.as_bytes()),
         }
     }
 
     pub(crate) fn delete(&self, host_id: &str) -> Result<()> {
         match self {
-            Vault::Keychain => match entry(host_id)?.delete_credential() {
-                Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-                Err(error) => Err(unavailable(&error)),
-            },
+            Vault::Keychain => delete_keychain(host_id),
             Vault::File(path) => match fs::remove_file(path) {
                 Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error.into()),
                 _ => Ok(()),
@@ -166,6 +162,83 @@ impl Vault {
 /// One entry per data folder, so a test or a second data folder never reads another's tokens.
 fn entry(host_id: &str) -> Result<keyring::Entry> {
     keyring::Entry::new(KEYCHAIN_SERVICE, &format!("ChatGPT {host_id}")).map_err(|error| unavailable(&error))
+}
+
+#[cfg(not(windows))]
+fn read_keychain(host_id: &str) -> Result<Option<String>> {
+    match entry(host_id)?.get_password() {
+        Ok(text) => Ok(Some(text)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(error) => Err(unavailable(&error)),
+    }
+}
+
+#[cfg(not(windows))]
+fn write_keychain(host_id: &str, text: &str) -> Result<()> {
+    entry(host_id)?.set_password(text).map_err(|error| unavailable(&error))
+}
+
+#[cfg(not(windows))]
+fn delete_keychain(host_id: &str) -> Result<()> {
+    match entry(host_id)?.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(error) => Err(unavailable(&error)),
+    }
+}
+
+/// Credential Manager keeps at most 2560 bytes in an entry, fewer than the tokens take, so on Windows they are
+/// split over the entry and numbered ones after it.
+#[cfg(windows)]
+const PART_BYTES: usize = 2560;
+
+#[cfg(windows)]
+fn part(host_id: &str, index: usize) -> Result<keyring::Entry> {
+    match index {
+        0 => entry(host_id),
+        _ => keyring::Entry::new(KEYCHAIN_SERVICE, &format!("ChatGPT {host_id} part {}", index + 1))
+            .map_err(|error| unavailable(&error)),
+    }
+}
+
+#[cfg(windows)]
+fn read_keychain(host_id: &str) -> Result<Option<String>> {
+    let mut bytes = Vec::new();
+    for index in 0.. {
+        match part(host_id, index)?.get_secret() {
+            Ok(chunk) => bytes.extend(chunk),
+            Err(keyring::Error::NoEntry) if index == 0 => return Ok(None),
+            Err(keyring::Error::NoEntry) => break,
+            Err(error) => return Err(unavailable(&error)),
+        }
+    }
+    Ok(Some(String::from_utf8_lossy(&bytes).into_owned()))
+}
+
+#[cfg(windows)]
+fn write_keychain(host_id: &str, text: &str) -> Result<()> {
+    let parts: Vec<&[u8]> = text.as_bytes().chunks(PART_BYTES).collect();
+    for (index, bytes) in parts.iter().enumerate() {
+        part(host_id, index)?.set_secret(bytes).map_err(|error| unavailable(&error))?;
+    }
+    // Parts a longer sign-in left behind would read as the end of this one.
+    delete_parts(host_id, parts.len())
+}
+
+#[cfg(windows)]
+fn delete_keychain(host_id: &str) -> Result<()> {
+    delete_parts(host_id, 0)
+}
+
+#[cfg(windows)]
+fn delete_parts(host_id: &str, from: usize) -> Result<()> {
+    for index in from.. {
+        match part(host_id, index)?.delete_credential() {
+            Ok(()) => {}
+            Err(keyring::Error::NoEntry) => break,
+            Err(error) => return Err(unavailable(&error)),
+        }
+    }
+    Ok(())
 }
 
 fn unavailable(error: &keyring::Error) -> anyhow::Error {
@@ -199,4 +272,23 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
         let _ = fs::remove_file(&tmp);
     }
     result.with_context(|| format!("Saving {}", path.display()))
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn credential_manager_keeps_a_sign_in_longer_than_one_entry() {
+        let host = format!("test-{}", uuid::Uuid::new_v4().simple());
+        let long = format!("{{\"tokens\":\"{}\"}}", "x".repeat(6000));
+        write_keychain(&host, &long).unwrap();
+        let read = read_keychain(&host);
+        let shorter = r#"{"tokens":"short"}"#;
+        let replaced = write_keychain(&host, shorter).and_then(|()| read_keychain(&host));
+        let deleted = delete_keychain(&host).and_then(|()| read_keychain(&host));
+        assert_eq!(read.unwrap().as_deref(), Some(long.as_str()));
+        assert_eq!(replaced.unwrap().as_deref(), Some(shorter));
+        assert_eq!(deleted.unwrap(), None);
+    }
 }
