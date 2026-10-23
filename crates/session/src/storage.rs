@@ -30,13 +30,31 @@ pub(crate) fn save_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
             .with_context(|| format!("Creating {}", tmp.display()))?;
         file.write_all(bytes).context("Writing project state")?;
         file.sync_all().context("Syncing project state")?;
-        fs::rename(&tmp, path).with_context(|| format!("Saving {}", path.display()))?;
+        replace(&tmp, path).with_context(|| format!("Saving {}", path.display()))?;
         Ok(())
     })();
     if result.is_err() {
         let _ = fs::remove_file(&tmp);
     }
     result
+}
+
+/// Windows refuses to replace a file another program holds open without sharing its deletion, as a virus scan,
+/// a backup or a file preview does for a moment, so the save waits a second for it to let go.
+fn replace(from: &Path, to: &Path) -> std::io::Result<()> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    loop {
+        match fs::rename(from, to) {
+            Err(error)
+                if cfg!(windows)
+                    && error.kind() == std::io::ErrorKind::PermissionDenied
+                    && std::time::Instant::now() < deadline =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            result => return result,
+        }
+    }
 }
 
 /// Writes a new project file without ever replacing one, also one created since the caller looked.

@@ -43,3 +43,23 @@ if ($LASTEXITCODE -ne 0) { throw 'FFmpeg could not start.' }
 # ONNX Runtime, which debug builds load from the same build-deps directory when covers run.
 node "$PSScriptRoot/fetch-onnxruntime.mjs"
 if ($LASTEXITCODE -ne 0) { throw 'ONNX Runtime could not be fetched.' }
+# Microsoft Edge WebDriver drives the app's WebView2 in the UI flows (scripts/repro.py). It must match the installed
+# WebView2, which updates itself, so no checksum can be pinned; Microsoft's signature on it is checked instead.
+$runtime = 'SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+$webview = (Get-ItemProperty "HKLM:\$runtime", "HKCU:\$runtime" -ErrorAction SilentlyContinue | Select-Object -First 1).pv
+if ($webview -and !$env:GITHUB_ENV) {
+    $driver = Join-Path $deps "msedgedriver-$webview/msedgedriver.exe"
+    if (!(Test-Path $driver)) {
+        $zip = Join-Path $deps "edgedriver-$webview.zip"
+        # Windows PowerShell's progress bar slows the download down to minutes.
+        $ProgressPreference = 'SilentlyContinue'
+        Invoke-WebRequest "https://msedgedriver.microsoft.com/$webview/edgedriver_win64.zip" -OutFile $zip -TimeoutSec 300
+        Expand-Archive $zip -DestinationPath (Split-Path $driver) -Force
+        Remove-Item $zip
+    }
+    $signature = Get-AuthenticodeSignature $driver
+    if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+        Remove-Item -Recurse (Split-Path $driver)
+        throw 'The Edge WebDriver downloaded is not signed by Microsoft; run this script again.'
+    }
+}

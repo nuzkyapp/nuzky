@@ -149,7 +149,13 @@ class Session:
 def wait(fn, timeout=30, step=0.2):
     end = time.time() + timeout
     while True:
-        value = fn()
+        try:
+            value = fn()
+        except PermissionError:
+            # Windows refuses to open a file for a moment while the app replaces it.
+            if not WINDOWS:
+                raise
+            value = None
         if value or time.time() > end:
             return value
         time.sleep(step)

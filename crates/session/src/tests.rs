@@ -1234,3 +1234,21 @@ fn peek_names_the_step_undo_and_redo_would_take_back() {
     assert_eq!((redo.label.as_str(), redo.ai, redo.project.name.as_str()), ("Tighten", true, "Run 2"));
     assert_eq!(s.peek(false).unwrap().project.name, "Typed", "undo now reaches the typing burst");
 }
+
+#[cfg(windows)]
+#[test]
+fn a_save_waits_for_another_program_holding_the_project_open() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let f = Fixture::new();
+    // Shared for reading only, as Python, many editors and file previews open a file: Windows then refuses to
+    // replace it until that program lets go.
+    const FILE_SHARE_READ: u32 = 1;
+    let held = fs::OpenOptions::new().read(true).share_mode(FILE_SHARE_READ).open(&f.0).unwrap();
+    let release = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(300));
+        drop(held);
+    });
+    storage::save(&f.0, &Project::new("Saved")).unwrap();
+    release.join().unwrap();
+    assert_eq!(f.disk().name, "Saved");
+}
