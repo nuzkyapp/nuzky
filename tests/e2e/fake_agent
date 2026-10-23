@@ -29,9 +29,10 @@ stream-json user messages from stdin while it works; Codex reads one prompt up t
   "signin"   is not signed in;  "limit" has hit its usage limit
   a message with pictures or a video attached says how many it got, with the size of each picture
   anything else is echoed back.
-Each start is logged to $NUZKY_FAKE_AGENT_LOG/runs.jsonl (argv, pid, session, the pictures' sizes), and each message
-Claude got while working to steered.jsonl; sessions live there too.
-With $NUZKY_FAKE_AGENT_LOG/vanish, `--version` takes this executable's execute bit away, so the turn cannot start.
+Each start is logged to $NUZKY_FAKE_AGENT_LOG/runs.jsonl (argv, pid, session, the pictures' sizes), the bridge it starts to
+bridges.jsonl, and each message Claude got while working to steered.jsonl; sessions live there too.
+With $NUZKY_FAKE_AGENT_LOG/vanish, `--version` takes this executable's execute bit away (on Windows its .cmd), so the
+turn cannot start.
 `auth status` (Claude) and `login status` (Codex) answer as the real ones, signed out with FAKE_AGENT_SIGNED_OUT=1.
 As `fake_agy` (or a link named `agy`), `--version` reports Antigravity CLI; Nuzky runs no other agy commands.
 With FAKE_AGENT_OLD=1, Claude is a version that does not know `--no-session-persistence`, so it names no models.
@@ -41,13 +42,19 @@ reports whether it answered; with FAKE_AGENT_MCP=broken it starts it in an empty
 import base64, json, os, signal, struct, subprocess, sys, threading, queue, tempfile, time, tomllib, uuid
 from pathlib import Path
 
-CODEX = Path(sys.argv[0]).name == 'fake_codex'
+# On Windows the .cmd that runs this names it (windows_stand_in in tests/e2e/harness.py).
+NAME = os.environ.get('FAKE_AGENT_AS') or Path(sys.argv[0]).name
+CODEX = NAME == 'fake_codex'
 if len(sys.argv) > 1 and sys.argv[1] == '--version':
     if (Path(os.environ.get('NUZKY_FAKE_AGENT_LOG', '/tmp/fake-agent')) / 'vanish').exists():
-        # Found, then gone before it starts, slower than the panel's polling.
+        # Found, then gone before it starts, slower than the panel's polling. Windows runs any file, so there its
+        # .cmd goes.
         time.sleep(1.5)
-        os.chmod(sys.argv[0], 0o644)
-    print('1.4.3' if Path(sys.argv[0]).name in ('fake_agy', 'agy') else 'codex-cli 0.162.1' if CODEX else '2.1.292 (Claude Code)')
+        if os.name == 'nt':
+            os.remove(os.environ['FAKE_AGENT_LAUNCHER'])
+        else:
+            os.chmod(sys.argv[0], 0o644)
+    print('1.4.3' if NAME in ('fake_agy', 'agy') else 'codex-cli 0.162.1' if CODEX else '2.1.292 (Claude Code)')
     sys.exit(0)
 
 args = sys.argv[1:]
@@ -241,6 +248,8 @@ class Mcp:
         env = dict(os.environ, **server.get('env', {}))
         self.p = subprocess.Popen([server['command'], *server['args']], env=env, stdin=subprocess.PIPE,
                                   stdout=subprocess.PIPE, stderr=open(LOG / 'bridge.log', 'a'), text=True)
+        with open(LOG / 'bridges.jsonl', 'a') as f:
+            f.write(json.dumps({'pid': os.getpid(), 'bridge': self.p.pid}) + '\n')
         self.lines, self.id = queue.Queue(), 0
         threading.Thread(target=lambda: [self.lines.put(l) for l in self.p.stdout], daemon=True).start()
         self.rpc('initialize', {'protocolVersion': '2025-03-26', 'capabilities': {}, 'clientInfo': {'name': 'fake-agent', 'version': '1'}})

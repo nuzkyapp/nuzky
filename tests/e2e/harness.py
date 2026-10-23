@@ -233,6 +233,20 @@ class Run:
             # Without them Windows names none of the app's folders and Tauri falls back to its own.
             for folder in ('AppData/Local', 'AppData/Roaming'):
                 (Path(env['HOME']) / folder).mkdir(parents=True, exist_ok=True)
+            for variable in ('NUZKY_AGENT_CLAUDE', 'NUZKY_AGENT_CODEX', 'NUZKY_AGENT_AGY'):
+                path = Path(env[variable])
+                if path.suffix:
+                    continue
+                if path.parent == STAND_INS.parent and path.name in ('fake_agent', 'fake_codex', 'fake_agy'):
+                    path = windows_stand_in(self.work / 'stand-ins' / path.name, path.name)
+                elif path.is_file():
+                    # A flow's copy of the stand-in, which it may take away.
+                    path = windows_stand_in(path, path.name, script=path)
+                # A stand-in a flow installs later goes here.
+                env[variable] = str(path.with_suffix('.cmd'))
+            if 'NUZKY_TEST_BROWSER' in env:
+                browser = Path(env['NUZKY_TEST_BROWSER'])
+                env['NUZKY_TEST_BROWSER'] = str(windows_stand_in(self.work / 'stand-ins' / browser.name, browser.name, script=browser))
         return env
 
     def check(self, name, ok, detail=None):
@@ -280,6 +294,21 @@ class Run:
 
     def saved_project(self):
         return next((self.work / 'data/nuzky/projects').glob('*.nuzky'))
+
+
+STAND_INS = ROOT / 'tests/e2e/fake_agent'
+
+
+def windows_stand_in(path, name, script=STAND_INS, **env):
+    """The stand-in program `name`, such as fake_codex or fake_browser, at `path` on Windows, which runs neither a
+    shebang nor git's links: a .cmd that runs the Python `script` as `name`, as npm's .cmd runs Codex with Node.
+    Returns its path. `env`: how it answers, such as FAKE_AGENT_SIGNED_OUT."""
+    launcher = path.with_suffix('.cmd')
+    launcher.parent.mkdir(parents=True, exist_ok=True)
+    lines = ['@echo off', f'set FAKE_AGENT_AS={name}', 'set FAKE_AGENT_LAUNCHER=%~f0', *(f'set {k}={v}' for k, v in env.items()),
+             f'"{sys.executable}" -X utf8 "{script}" %*']
+    launcher.write_text('\r\n'.join(lines) + '\r\n')
+    return launcher
 
 
 def start(command, log, env=None):
@@ -755,6 +784,19 @@ class win32:
         """The app of this run: Edge WebDriver starts it, and one run at a time uses this build."""
         app = str(APP.resolve()).lower()
         return next((pid for pid, (_, path) in win32.processes().items() if path and path.lower() == app), None)
+
+    @staticmethod
+    def alive(pid):
+        """Whether the process still runs."""
+        ctypes, wintypes, _, kernel32 = win32._api()
+        process = kernel32.OpenProcess(0x1000, False, pid)
+        if not process:
+            return False
+        try:
+            code = wintypes.DWORD()
+            return bool(kernel32.GetExitCodeProcess(wintypes.HANDLE(process), ctypes.byref(code))) and code.value == 259
+        finally:
+            kernel32.CloseHandle(process)
 
     @staticmethod
     def memory_mb(pid):

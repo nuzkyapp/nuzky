@@ -6,7 +6,8 @@ import json, time
 from pathlib import Path
 
 from e2e.connect import MCP, SETTINGS
-from e2e.harness import MACOS, Bridge, flow, press, wait, webdriver
+from e2e.setup_ai import INSTALL
+from e2e.harness import MACOS, WINDOWS, Bridge, flow, press, wait, webdriver, windows_stand_in
 
 HERE = Path(__file__).parent
 GUIDE = """const a = document.querySelector('aside[aria-label=AI]');
@@ -20,7 +21,7 @@ MENU = """return [...document.querySelectorAll('[role=menu] [role^=menuitem]')].
 
 
 # The guide names the terminal the way the system does (src/components/setup/agentConnect.tsx).
-TITLE = 'Use Gemini from Terminal' if MACOS else 'Use Gemini from a terminal'
+TITLE = 'Use Gemini from Terminal' if MACOS else 'Use Gemini from PowerShell' if WINDOWS else 'Use Gemini from a terminal'
 
 def before(r):
     """agy's settings live in a home folder of this run; the agy Nuzky finds is a stand-in, not installed at first."""
@@ -72,7 +73,7 @@ def gemini(r):
             g and "Google doesn't let other apps run Gemini on your Google account" in g['text'] and 'edits the video open in Nuzky, live' in g['text'], g)
     r.check('the focus is on the title, not on a button a stray Enter would press', g and g['focus'] == TITLE, g)
     r.check('step 1, not installed, shows the official install command', g and 'Not installed' in g['steps'][0]['text']
-            and g['steps'][0]['commands'] == ['curl -fsSL https://antigravity.google/cli/install.sh | bash']
+            and g['steps'][0]['commands'] == [INSTALL[2]]
             and g['steps'][0]['buttons'] == ['Install guide', 'Copy the command', 'Check again'], g)
     r.check('steps 2 and 3 wait', g and g['steps'][1]['buttons'] == [] and g['steps'][2]['commands'] == [], g)
     click(r, 'Details')
@@ -84,7 +85,10 @@ def gemini(r):
 
     # Installed in a terminal: coming back to Nuzky's window is enough.
     agy = r.work / 'bin/agy'
-    agy.symlink_to(HERE / 'fake_agy')
+    if WINDOWS:
+        agy = windows_stand_in(agy, 'fake_agy')
+    else:
+        agy.symlink_to(HERE / 'fake_agy')
     r.s.run("window.dispatchEvent(new Event('focus'))")
     g = wait(lambda: (x := guide(r)) and 'Installed · 1.4.3' in x['steps'][0]['text'] and x, 10)
     r.check('back in Nuzky, step 1 is done with the version agy reports', g, guide(r))
@@ -98,7 +102,7 @@ def gemini(r):
     r.check('Connect', click(r, 'Connect'))
     g = wait(lambda: (x := guide(r)) and x['steps'][2]['commands'] and x, 30)
     r.check('Connect backs up both settings files, adds Nuzky, allows its tools and checks that the server reaches Nuzky',
-            g and all(line in g['steps'][1]['text'] for line in ('\nGemini sees Nuzky', 'Backed up ~/.gemini/config/mcp_config.json', 'Backed up ~/.gemini/antigravity-cli/settings.json',
+            g and all(line in g['steps'][1]['text'] for line in ('\nGemini sees Nuzky', f'Backed up {Path("~/.gemini/config/mcp_config.json")}', f'Backed up {Path("~/.gemini/antigravity-cli/settings.json")}',
                                                                   'Added Nuzky and turned on Agent access', "Let Gemini use Nuzky's tools without asking")), guide(r))
     r.check('step 3 says how to ask in a terminal, with the agy Nuzky found and an example',
             g and g['steps'][2]['commands'] == [str(agy), 'Cut the pauses and retakes in the video open in Nuzky, then add captions']
