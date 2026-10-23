@@ -22,11 +22,12 @@ fn make(
     ids: &[String],
     framing: Framing,
     step: &mut dyn FnMut(usize) -> Result<()>,
+    cancelled: &dyn Fn() -> bool,
     apply: impl FnOnce(Vec<EditCmd>, Expect) -> Result<()>,
 ) -> Result<Vec<MadeReel>> {
     anyhow::ensure!(state.open_run.is_none(), "RUN_ACTIVE: stop the open run before editing");
     let derived = transcript::derive(&state.project, &host.transcripts)?;
-    let (made, edits) = reels::make(&host.session.path(), &state.project, &derived, ids, framing, step)?;
+    let (made, edits) = reels::make(&host.session.path(), &state.project, &derived, ids, framing, step, cancelled)?;
     let expect = Expect { revision: Some(state.stamp.revision), speech_layout_key: None };
     if let Err(error) = apply(edits, expect) {
         reels::forget(&made, &host.session.state()?.project);
@@ -77,6 +78,7 @@ pub fn start_make_reels(
                     rep.progress(i as f32 / ids.len() as f32, Some(&format!("Making reel {} of {}", i + 1, ids.len())));
                     Ok(())
                 },
+                &|| cancel.load(Ordering::Relaxed),
                 |edits, expect| {
                     check_cancelled(&cancel)?;
                     let state = worker.state::<AppState>();
@@ -127,7 +129,8 @@ mod tests {
         let reel = dunce::canonicalize(&dir).unwrap().join("project-reel-1.nuzky");
 
         let make = || {
-            super::make(&host, &host.session.state().unwrap(), &ids, Framing::Crop, &mut |_| Ok(()), |edits, expect| {
+            let state = host.session.state().unwrap();
+            super::make(&host, &state, &ids, Framing::Crop, &mut |_| Ok(()), &|| false, |edits, expect| {
                 host.session.edit(edits, None, expect).map(|_| ())
             })
         };

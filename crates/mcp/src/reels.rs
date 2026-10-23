@@ -5,9 +5,11 @@ use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail, ensure};
+use nuzky_analysis::{Range, SceneParams, scene_cuts_in};
 use nuzky_engine::{
     Project,
     edit::{EditCmd, MAIN_TRACK, TimeRange, new_id},
+    effects::source_time,
     model::{AssetKind, ClipContent, MAX_REEL_HOOK_CHARS, ReelCandidate, ReelStatus},
     speech::{TimelineWord, is_heard},
 };
@@ -21,6 +23,9 @@ const WIDTH: u32 = 1080;
 const HEIGHT: u32 = 1920;
 /// The blur the inspector's Canvas: Blur starts with.
 const BLUR: f32 = 0.5;
+/// A shot this short that opens a reel, with words said in it before an original cut of the picture, reads as a
+/// flash of another shot.
+const OPENING_SLIVER_US: i64 = 600_000;
 
 /// How a reel fills its 9:16 frame from a wider video.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -72,9 +77,36 @@ fn ends_sentence(words: &[TimelineWord], i: usize) -> bool {
 
 /// The cut that keeps only the words `from` to `to` as edit_transcript keep does, with pauses shortened to
 /// `pause_us`. That cut leaves clips without speech alone, so those before and after the clips that play the kept
-/// words go too.
-fn cut(project: &Project, derived: &Derived, from: usize, to: usize, pause_us: i64) -> Result<transcript::Cut> {
-    let ranges = transcript::edit_ranges(project, derived, None, Some(&[[from, to]]), Some(pause_us), &[])?;
+/// words go too. With `shots`, which says when to stop, it also looks at the picture where the reel starts and
+/// ends and keeps no silent sliver of a shot before or after an original cut there. The pauses it shortens are
+/// not looked at: reading the picture around each of them decoded about the whole reel, 25 s for a minute of 4K
+/// HEVC.
+fn cut(
+    project: &Project,
+    derived: &Derived,
+    from: usize,
+    to: usize,
+    pause_us: i64,
+    shots: Option<&dyn Fn() -> bool>,
+) -> Result<transcript::Cut> {
+    let mut ranges = transcript::edit_ranges(project, derived, None, Some(&[[from, to]]), Some(pause_us), &[])?;
+    if let Some(cancelled) = shots {
+        let (first, last) = (derived.words[from].start_us, derived.words[to].end_us);
+        let edges: Vec<_> = ranges
+            .iter()
+            .filter_map(|r| {
+                if r.end_us <= first {
+                    Some(TimeRange { start_us: r.end_us + 1, end_us: r.end_us + transcript::SLIVER_US })
+                } else if r.start_us >= last {
+                    Some(TimeRange { start_us: r.start_us - transcript::SLIVER_US, end_us: r.start_us })
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let cuts = picture_cuts(project, &edges, cancelled)?;
+        ranges = transcript::without_shot_slivers(project, derived, ranges, &cuts);
+    }
     let cut = transcript::plan_cut(project, derived, ranges)?;
     let preview = &cut.preview;
     // A clip playing any part of a word, so a word split across two clips keeps both pieces.
@@ -103,6 +135,48 @@ fn cut(project: &Project, derived: &Derived, from: usize, to: usize, pause_us: i
     }
     let reel = Derived { sources: derived.sources.clone(), words: cut.words.clone(), ..Derived::default() };
     transcript::plan_cut(preview, &reel, edges)
+}
+
+/// Where the picture of the main track's videos jumps to another shot inside `windows`, in timeline order. A video
+/// FFmpeg cannot read has none, so the reel's edges stay where its words put them.
+fn picture_cuts(project: &Project, windows: &[TimeRange], cancelled: &dyn Fn() -> bool) -> Result<Vec<i64>> {
+    let mut cuts = Vec::new();
+    for clip in project.tracks.iter().filter(|t| t.id == MAIN_TRACK).flat_map(|t| &t.clips) {
+        let ClipContent::Media { asset_id, source_in_us, speed, .. } = &clip.content else { continue };
+        let Some(asset) = project.assets.iter().find(|a| &a.id == asset_id && a.kind == AssetKind::Video) else {
+            continue;
+        };
+        let inside: Vec<_> = windows
+            .iter()
+            .map(|w| (w.start_us.max(clip.start_us), w.end_us.min(clip.end_us())))
+            .filter(|(start, end)| start < end)
+            .map(|(start, end)| Range { start_us: source_time(clip, start), end_us: source_time(clip, end) })
+            .collect();
+        if inside.is_empty() {
+            continue;
+        }
+        match scene_cuts_in(asset, &inside, SceneParams::default(), cancelled) {
+            Ok(found) => {
+                cuts.extend(found.iter().map(|cut| {
+                    clip.start_us + ((cut.time_us - source_in_us) as f64 / f64::from(*speed)).round() as i64
+                }))
+            }
+            Err(error) if cancelled() => return Err(error),
+            Err(error) => log::warn!("Reel edges stay at the words, the picture is not readable: {error:#}"),
+        }
+    }
+    cuts.sort_unstable();
+    Ok(cuts)
+}
+
+/// The first word said after an original cut of the picture in the first `OPENING_SLIVER_US` of the reel from
+/// `from` to `to`; `from` when no word is said before such a cut.
+fn past_opening_cut(project: &Project, derived: &Derived, from: usize, to: usize) -> Result<usize> {
+    let words = &derived.words;
+    let start = words[from].start_us - transcript::BEFORE_WORD_US;
+    let opening = TimeRange { start_us: start + 1, end_us: start + OPENING_SLIVER_US };
+    let Some(cut) = picture_cuts(project, &[opening], &|| false)?.pop() else { return Ok(from) };
+    Ok((from..=to).find(|&i| words[i].start_us >= cut).unwrap_or(from))
 }
 
 /// The pause length a candidate was measured with.
@@ -144,13 +218,14 @@ fn hook_and_duration(
     let words = &derived.words;
     let end = (from..=to).find(|&i| ends_sentence(words, i)).unwrap_or(to);
     let hook = words[from..=end].iter().map(|w| w.text.trim()).collect::<Vec<_>>().join(" ");
-    let duration_us = cut(project, derived, from, to, pause_us)?.preview.duration_us();
+    let duration_us = cut(project, derived, from, to, pause_us, None)?.preview.duration_us();
     Ok((hook.chars().take(MAX_REEL_HOOK_CHARS).collect(), duration_us))
 }
 
 /// Candidates for `proposals`, each inside the transcript, from the start of a sentence to the end of one, apart
-/// from each other, and at most `max_duration_us` long once made with pauses shortened to `pause_us`. Made reels
-/// do not count: their words may have moved since.
+/// from each other, and at most `max_duration_us` long once made with pauses shortened to `pause_us`. A candidate
+/// whose words run on into an original cut of the picture in its first moments starts at the cut instead, with the
+/// first word said after it. Made reels do not count: their words may have moved since.
 pub fn plan(
     project: &Project,
     derived: &Derived,
@@ -172,6 +247,7 @@ pub fn plan(
         );
         ensure!(from == 0 || ends_sentence(words, from - 1), "REEL_BOUNDARY: word {from} does not start a sentence");
         ensure!(ends_sentence(words, to), "REEL_BOUNDARY: word {to} {:?} does not end a sentence", words[to].text);
+        let from = past_opening_cut(project, derived, from, to)?;
         let (hook, duration_us) = hook_and_duration(project, derived, from, to, pause_us)?;
         ensure!(
             duration_us <= max_duration_us,
@@ -212,8 +288,9 @@ pub fn plan(
 }
 
 /// Writes a project beside `source` for each candidate in `ids`: only its words, cut as edit_transcript keep
-/// cuts with the pause length the candidate was measured with, on a 9:16 canvas filled as `framing` says. Returns
-/// them with the edits that mark them made in the source, which the caller applies; see [`forget`] when that fails.
+/// cuts with the pause length the candidate was measured with, starting and ending without a silent sliver of a
+/// shot at an original cut of the picture, on a 9:16 canvas filled as `framing` says. Returns them with the edits that mark them made in
+/// the source, which the caller applies; see [`forget`] when that fails.
 pub fn make(
     source: &Path,
     project: &Project,
@@ -221,6 +298,7 @@ pub fn make(
     ids: &[String],
     framing: Framing,
     step: &mut dyn FnMut(usize) -> Result<()>,
+    cancelled: &dyn Fn() -> bool,
 ) -> Result<(Vec<MadeReel>, Vec<EditCmd>)> {
     ensure!(!ids.is_empty(), "INVALID_ARGUMENTS: give the ids of the reels to make");
     ensure!(derived.untranscribed.is_empty(), "TRANSCRIPT_MISSING: transcribe all heard assets before making reels");
@@ -239,18 +317,12 @@ pub fn make(
                 && words.get(candidate.to).is_some_and(|w| w.end_us == candidate.end_us),
             "SPEECH_CHANGED: the video changed since reel {id} was proposed; propose it again"
         );
-        let mut reel = cut(project, derived, candidate.from, candidate.to, pause_of(candidate))?.preview;
+        let reel = cut(project, derived, candidate.from, candidate.to, pause_of(candidate), None)?.preview;
         ensure!(
             reel.duration_us() == candidate.duration_us,
             "SPEECH_CHANGED: the video changed since reel {id} was proposed; propose it again"
         );
-        reel.name = candidate.title.clone();
-        reel.reel_candidates.clear();
-        reel.thumbnails.clear();
-        reel.imported = None;
-        frame(&mut reel, framing)?;
-        nuzky_session::validate(&reel)?;
-        planned.push((candidate, reel));
+        planned.push(candidate);
     }
     let dir = source.parent().context("INVALID_PROJECT: the project has no directory")?;
     let stem = source.file_stem().context("INVALID_PROJECT: the project has no name")?.to_string_lossy();
@@ -258,11 +330,14 @@ pub fn make(
     let named: HashSet<&str> = project.reel_candidates.iter().filter_map(|c| c.project_path.as_deref()).collect();
     let mut made = Vec::new();
     let mut n = 1;
-    for (i, (candidate, reel)) in planned.iter().enumerate() {
-        if let Err(error) = step(i) {
-            forget(&made, project);
-            return Err(error);
-        }
+    for (i, candidate) in planned.iter().enumerate() {
+        let reel = match step(i).and_then(|()| reel_project(project, derived, candidate, framing, cancelled)) {
+            Ok(reel) => reel,
+            Err(error) => {
+                forget(&made, project);
+                return Err(error);
+            }
+        };
         let path = loop {
             let path = dir.join(format!("{stem}-reel-{n}.nuzky"));
             n += 1;
@@ -270,7 +345,7 @@ pub fn make(
                 break path;
             }
         };
-        if let Err(error) = nuzky_session::publish_new(&path, reel) {
+        if let Err(error) = nuzky_session::publish_new(&path, &reel) {
             forget(&made, project);
             return Err(error);
         }
@@ -278,21 +353,39 @@ pub fn make(
             id: candidate.id.clone(),
             path,
             duration_us: reel.duration_us(),
-            fonts: crate::fonts::families(reel).map(str::to_owned).collect(),
+            fonts: crate::fonts::families(&reel).map(str::to_owned).collect(),
         });
     }
     let edits = planned
         .iter()
         .zip(&made)
-        .map(|((candidate, _), made)| EditCmd::UpdateReelCandidate {
+        .map(|(candidate, made)| EditCmd::UpdateReelCandidate {
             candidate: ReelCandidate {
                 status: ReelStatus::Made,
                 project_path: Some(made.path.to_string_lossy().into_owned()),
+                duration_us: made.duration_us,
                 ..(*candidate).clone()
             },
         })
         .collect();
     Ok((made, edits))
+}
+
+fn reel_project(
+    project: &Project,
+    derived: &Derived,
+    candidate: &ReelCandidate,
+    framing: Framing,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Project> {
+    let mut reel = cut(project, derived, candidate.from, candidate.to, pause_of(candidate), Some(cancelled))?.preview;
+    reel.name = candidate.title.clone();
+    reel.reel_candidates.clear();
+    reel.thumbnails.clear();
+    reel.imported = None;
+    frame(&mut reel, framing)?;
+    nuzky_session::validate(&reel)?;
+    Ok(reel)
 }
 
 /// Removes the reels `make` wrote unless `source` names them: a failed save keeps the live edit, so its
@@ -359,7 +452,7 @@ mod tests {
         let trimmed = bounds(&project, &derived, &original.id, 1, 1).unwrap();
         assert_eq!((trimmed.from, trimmed.to, trimmed.start_us, trimmed.end_us), (1, 1, 1_000_000, 1_400_000));
         assert_eq!(trimmed.hook, "word1");
-        assert_eq!(trimmed.duration_us, cut(&project, &derived, 1, 1, PAUSE).unwrap().preview.duration_us());
+        assert_eq!(trimmed.duration_us, cut(&project, &derived, 1, 1, PAUSE, None).unwrap().preview.duration_us());
         assert_eq!(
             (trimmed.title, trimmed.why, trimmed.score),
             (original.title.clone(), original.why.clone(), original.score)
@@ -380,13 +473,21 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("reels-stop-{}", new_id()));
         std::fs::create_dir_all(&dir).unwrap();
         let ids = project.reel_candidates.iter().map(|c| c.id.clone()).collect::<Vec<_>>();
-        let result = make(&dir.join("source.nuzky"), &project, &derived, &ids, Framing::Crop, &mut |i| {
-            if i == 1 {
-                assert!(dir.join("source-reel-1.nuzky").is_file());
-                bail!("CANCELLED: stopped");
-            }
-            Ok(())
-        });
+        let result = make(
+            &dir.join("source.nuzky"),
+            &project,
+            &derived,
+            &ids,
+            Framing::Crop,
+            &mut |i| {
+                if i == 1 {
+                    assert!(dir.join("source-reel-1.nuzky").is_file());
+                    bail!("CANCELLED: stopped");
+                }
+                Ok(())
+            },
+            &|| false,
+        );
         assert!(result.unwrap_err().to_string().starts_with("CANCELLED"));
         assert_eq!(serde_json::to_value(&project).unwrap(), before);
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
@@ -414,7 +515,7 @@ mod tests {
         let take = project.tracks[0].clips[1].id.clone();
         project.apply(EditCmd::SplitClip { clip_id: take, at_us: 9_600_000 }).unwrap();
         let derived = Derived::new(&project, sources, vec![]);
-        let reel = cut(&project, &derived, 3, 5, PAUSE).unwrap().preview;
+        let reel = cut(&project, &derived, 3, 5, PAUSE, None).unwrap().preview;
         let assets: Vec<_> = reel.tracks[0]
             .clips
             .iter()

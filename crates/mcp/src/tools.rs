@@ -1385,7 +1385,7 @@ impl Backend {
         let derived = transcript::derive(&self.media_project(&state.project), &self.host.transcripts)?;
         let framing = args.canvas.unwrap_or_default();
         let (made, edits) =
-            reels::make(&self.project_path, &state.project, &derived, &args.ids, framing, &mut |_| Ok(()))?;
+            reels::make(&self.project_path, &state.project, &derived, &args.ids, framing, &mut |_| Ok(()), &|| false)?;
         let prepared = requests.entry(key.clone()).or_insert(PreparedTranscriptEdit {
             arguments,
             edits,

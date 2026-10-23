@@ -3352,6 +3352,159 @@ fn transcript_sentences_and_pages_preserve_long_talk_over_stdio() {
     assert!(c.error("get_transcript", json!({"cursor": "370.stale"})).contains("SPEECH_CHANGED"));
 }
 
+/// A long video with its own hard cuts: a proposed reel whose first word is said in the last moment of a shot starts
+/// after the cut, a made reel drops the silent frames of the next shot at its end, and a shot that changes while a
+/// word is said stays, so no word is cut.
+#[test]
+fn reels_start_and_end_on_the_videos_own_cuts_over_stdio() {
+    use nuzky_engine::{edit::MAIN_TRACK, model::ClipContent};
+    use nuzky_session::transcripts::{Record, TranscriptStore, VERSION};
+    let mut c = Client::start(true, None, Some(None));
+    let video = c.dir.join("shots.mp4");
+    let mut filter = "color=c=red:s=192x108:r=30:d=40".to_owned();
+    for (frame, color) in [(309, "blue"), (598, "lime"), (807, "yellow"), (834, "magenta"), (900, "white")] {
+        filter.push_str(&format!(",drawbox=color={color}:t=fill:enable='gte(n,{frame})'"));
+    }
+    let output = Command::new("ffmpeg")
+        .args(["-v", "error", "-f", "lavfi", "-i", &filter])
+        .args(["-f", "lavfi", "-i", "anullsrc=r=8000:cl=stereo", "-t", "40"])
+        .args(["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p"])
+        .args(["-g", "250", "-sc_threshold", "0", "-c:a", "aac"])
+        .arg(&video)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let run = c.call("begin_run", json!({"label": "Place talk"}))["run_id"].clone();
+    let ids = c.call("import_media", json!({"run_id": run, "paths": [video]}))["asset_ids"].clone();
+    c.call(
+        "apply_edits",
+        json!({"run_id": run, "request_id": "place",
+        "edits": [{"type": "addClip", "assetId": ids[0]}]}),
+    );
+    c.call("end_run", json!({"run_id": run, "action": "keep"}));
+    let words: Vec<_> = [
+        (1_000_000, 1_300_000, " Hello"),
+        (1_400_000, 1_800_000, " there."),
+        (10_000_000, 10_250_000, " Money"),
+        (10_400_000, 10_600_000, " is"),
+        (10_700_000, 10_900_000, " not"),
+        (11_000_000, 11_500_000, " everything."),
+        (12_000_000, 12_200_000, " It"),
+        (12_300_000, 12_600_000, " buys"),
+        (12_700_000, 13_000_000, " time."),
+        (15_000_000, 15_400_000, " Later"),
+        (15_500_000, 16_000_000, " on."),
+        (18_000_000, 18_300_000, " Fear"),
+        (18_400_000, 18_600_000, " is"),
+        (18_700_000, 18_800_000, " a"),
+        (19_500_000, 19_920_000, " liar."),
+        (22_000_000, 22_500_000, " Anyway."),
+        (25_000_000, 25_300_000, " Habits"),
+        (25_400_000, 26_000_000, " stick."),
+        (27_000_000, 27_300_000, " Small"),
+        (27_400_000, 28_000_000, " wins."),
+        (31_000_000, 31_500_000, " Bye."),
+    ]
+    .into_iter()
+    .map(|(start, end, text)| json!({"start_us": start, "end_us": end, "text": text, "probability": 0.9}))
+    .collect();
+    let asset = serde_json::from_value(c.call("get_state", json!({}))["assets"][0].clone()).unwrap();
+    let store = TranscriptStore::at(c.dir.join("data/nuzky/transcripts")).unwrap();
+    store
+        .put(
+            &asset,
+            &Record {
+                version: VERSION,
+                fingerprint: store.fingerprint(&asset).unwrap(),
+                duration_us: asset.duration_us,
+                model: "fixture".into(),
+                language: "en".into(),
+                words: serde_json::from_value(json!(words)).unwrap(),
+                segments: vec![],
+                alignment: None,
+            },
+        )
+        .unwrap();
+    let key = c.call("get_transcript", json!({}))["transcript_key"].clone();
+    let run = c.call("begin_run", json!({"label": "Reels at picture cuts"}))["run_id"].clone();
+    let candidates: Vec<_> = [(2, 8, "A"), (11, 14, "B"), (16, 19, "C")]
+        .into_iter()
+        .map(|(from, to, title)| json!({"from": from, "to": to, "title": title, "why": "One idea.", "score": 0.9}))
+        .collect();
+    let proposed = c.call("propose_reels", json!({"run_id": run, "transcript_key": key, "candidates": candidates}));
+    let proposed = proposed["candidates"].as_array().unwrap();
+    let ids: Vec<_> = proposed.iter().map(|p| p["id"].clone()).collect();
+    let made = c.call("make_reels", json!({"run_id": run, "ids": ids}));
+    c.call("end_run", json!({"run_id": run, "action": "keep"}));
+    let state = c.call("get_state", json!({}));
+    let made = made["reels"].as_array().unwrap();
+    assert_eq!((proposed.len(), made.len()), (3, 3));
+    let projects: Vec<Project> = made
+        .iter()
+        .map(|r| serde_json::from_slice(&std::fs::read(r["path"].as_str().unwrap()).unwrap()).unwrap())
+        .collect();
+    let clips: Vec<Vec<_>> = projects
+        .iter()
+        .map(|p| {
+            p.tracks
+                .iter()
+                .find(|t| t.id == MAIN_TRACK)
+                .unwrap()
+                .clips
+                .iter()
+                .map(|clip| {
+                    let ClipContent::Media { source_in_us, speed, .. } = clip.content else { panic!("expected video") };
+                    (clip.start_us, source_in_us, clip.duration_us, speed)
+                })
+                .collect()
+        })
+        .collect();
+    let source_end = |clip: &(i64, i64, i64, f32)| clip.1 + (clip.2 as f64 * f64::from(clip.3)).round() as i64;
+    assert_eq!(proposed[0]["from"], 3);
+    assert_eq!(proposed[0]["startUs"], 10_400_000);
+    assert_eq!(proposed[0]["hook"], "is not everything.");
+    let duration = |i: usize| projects[i].duration_us();
+    for (i, reel) in made.iter().enumerate() {
+        assert_eq!(reel["durationUs"], duration(i));
+    }
+    let shorter = proposed[1]["durationUs"].as_i64().unwrap() - duration(1);
+    assert!((shorter - 106_667).abs() <= 2_000, "B shortened by {shorter} us");
+    let saved = state["reel_candidates"].as_array().unwrap().iter().find(|r| r["id"] == ids[1]).unwrap();
+    assert_eq!(saved["durationUs"], duration(1));
+    assert!((source_end(clips[1].last().unwrap()) - 19_933_333).abs() <= 1_000, "{:?}", clips[1]);
+    assert_eq!(duration(2), proposed[2]["durationUs"].as_i64().unwrap());
+    assert_eq!(source_end(clips[2].last().unwrap()), 28_120_000);
+    let frame = |i: usize, time_us: i64, expected: [u8; 3]| {
+        let out = c.dir.join(format!("reel-{i}-{time_us}.png"));
+        let output = Command::new(env!("CARGO_BIN_EXE_nuzky"))
+            .arg("frame")
+            .arg(made[i]["path"].as_str().unwrap())
+            .arg((time_us as f64 / 1_000_000.0).to_string())
+            .arg(&out)
+            .arg("270")
+            .env("NUZKY_DATA_DIR", c.dir.join("data/nuzky"))
+            .env("HOME", c.dir.join("home"))
+            .env("XDG_DATA_HOME", c.dir.join("data"))
+            .env("XDG_CACHE_HOME", c.dir.join("cache"))
+            .env("XDG_RUNTIME_DIR", c.dir.join("runtime"))
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let (info, rgba) = decode_png(&std::fs::read(out).unwrap());
+        assert_eq!((info.width, info.height), (270, 480));
+        let at = ((info.height / 2 * info.width + info.width / 2) * 4) as usize;
+        let actual = &rgba[at..at + 3];
+        assert!(
+            actual.iter().zip(expected).all(|(a, e)| a.abs_diff(e) <= 30),
+            "reel {i} at {time_us} us: {actual:?} != {expected:?}"
+        );
+    };
+    frame(0, 0, [0, 0, 255]);
+    frame(1, duration(1) - 10_000, [0, 0, 255]);
+    frame(2, duration(2) - 10_000, [255, 0, 255]);
+    c.finish();
+}
+
 /// A long talk becomes reels: proposals out of bounds are refused, three picked ones become projects beside it
 /// with only their words on a 9:16 canvas, the talk and its video stay as they were, and undo takes it all back.
 #[test]

@@ -506,22 +506,24 @@ fn speech_cut(
             })
             .collect();
     }
-    Ok((without_slivers(project, &bounds, &unnumbered, ranges), speech))
+    Ok((without_slivers(&joins(project), &bounds, &unnumbered, ranges), speech))
 }
 
-/// Where a take starts speaking at once, the silence a cut keeps before its first word lies at
-/// the end of the take before it, cut off from that take's last word: a sliver of a clip on the
-/// timeline. That silence moves next to the last word instead, so the pause keeps its length and
-/// the takes meet at one cut; when the cut also removes words there, the sliver just goes. The
-/// same holds the other way round, for a take that ends speaking at once.
-fn without_slivers(
+/// `ranges` of `edit_ranges` moved off the slivers of shots that cuts inside the picture, at `cuts` on the
+/// timeline, would leave, as they are moved off the joins of clips.
+pub fn without_shot_slivers(
     project: &Project,
-    words: &[TimelineWord],
-    fragments: &[TimeRange],
-    mut ranges: Vec<TimeRange>,
+    derived: &Derived,
+    ranges: Vec<TimeRange>,
+    cuts: &[i64],
 ) -> Vec<TimeRange> {
-    const SLIVER_US: i64 = 400_000;
-    let joins: Vec<i64> = project
+    let (bounds, unnumbered, _) = editing_bounds(project, derived);
+    without_slivers(cuts, &bounds, &unnumbered, ranges)
+}
+
+/// Where one heard clip meets the next on the timeline.
+fn joins(project: &Project) -> Vec<i64> {
+    project
         .tracks
         .iter()
         .flat_map(|track| {
@@ -532,7 +534,23 @@ fn without_slivers(
                 .map(|pair| pair[1].start_us)
                 .collect::<Vec<_>>()
         })
-        .collect();
+        .collect()
+}
+
+/// A kept stretch shorter than this between a cut and a join shows as a sliver of a clip or shot.
+pub const SLIVER_US: i64 = 400_000;
+
+/// Where a take starts speaking at once, the silence a cut keeps before its first word lies at
+/// the end of the take before it, cut off from that take's last word: a sliver of a clip on the
+/// timeline. That silence moves next to the last word instead, so the pause keeps its length and
+/// the takes meet at one cut; when the cut also removes words there, the sliver just goes. The
+/// same holds the other way round, for a take that ends speaking at once.
+fn without_slivers(
+    joins: &[i64],
+    words: &[TimelineWord],
+    fragments: &[TimeRange],
+    mut ranges: Vec<TimeRange>,
+) -> Vec<TimeRange> {
     // Kept fragments of words count as speech like numbered words.
     let silent = |from: i64, to: i64| {
         words.iter().all(|w| w.end_us <= from || w.start_us >= to)
