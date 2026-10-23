@@ -26,6 +26,9 @@ const BLUR: f32 = 0.5;
 /// A shot this short that opens a reel, with words said in it before an original cut of the picture, reads as a
 /// flash of another shot.
 const OPENING_SLIVER_US: i64 = 600_000;
+/// A cut to another framing of the same camera, as in an edited podcast, changes the picture by 0.07 to 0.17, below
+/// the scene detector's default, while a talking head moves by at most about 0.03 between frames.
+const CUT_THRESHOLD: f32 = 0.05;
 
 /// How a reel fills its 9:16 frame from a wider video.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -152,7 +155,8 @@ fn picture_cuts(project: &Project, windows: &[TimeRange], cancelled: &dyn Fn() -
         if inside.is_empty() {
             continue;
         }
-        match scene_cuts_in(asset, &inside, SceneParams::default(), cancelled) {
+        let params = SceneParams { threshold: CUT_THRESHOLD, ..SceneParams::default() };
+        match scene_cuts_in(asset, &inside, params, cancelled) {
             Ok(found) => {
                 cuts.extend(found.iter().map(|cut| {
                     clip.start_us + ((cut.time_us - source_in_us) as f64 / f64::from(*speed)).round() as i64

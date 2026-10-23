@@ -3353,8 +3353,9 @@ fn transcript_sentences_and_pages_preserve_long_talk_over_stdio() {
 }
 
 /// A long video with its own hard cuts: a proposed reel whose first word is said in the last moment of a shot starts
-/// after the cut, a made reel drops the silent frames of the next shot at its end and of the video's first shot at
-/// its start, and a shot that changes while a word is said stays, so no word is cut.
+/// after the cut, also when the next shot differs as little as another framing of one camera, a made reel drops the
+/// silent frames of the next shot at its end and of the video's first shot at its start, and a shot that changes
+/// while a word is said stays, so no word is cut.
 #[test]
 fn reels_start_and_end_on_the_videos_own_cuts_over_stdio() {
     use nuzky_engine::{edit::MAIN_TRACK, model::ClipContent};
@@ -3362,7 +3363,8 @@ fn reels_start_and_end_on_the_videos_own_cuts_over_stdio() {
     let mut c = Client::start(true, None, Some(None));
     let video = c.dir.join("shots.mp4");
     let mut filter = "color=c=red:s=192x108:r=30:d=40".to_owned();
-    for (frame, color) in [(3, "cyan"), (309, "blue"), (598, "lime"), (807, "yellow"), (834, "magenta"), (900, "white")]
+    for (frame, color) in
+        [(3, "0x0055ff"), (309, "blue"), (598, "lime"), (807, "yellow"), (834, "magenta"), (900, "white")]
     {
         filter.push_str(&format!(",drawbox=color={color}:t=fill:enable='gte(n,{frame})'"));
     }
@@ -3505,7 +3507,7 @@ fn reels_start_and_end_on_the_videos_own_cuts_over_stdio() {
     frame(0, 0, [0, 0, 255]);
     frame(1, duration(1) - 10_000, [0, 0, 255]);
     frame(2, duration(2) - 10_000, [255, 0, 255]);
-    frame(3, 0, [0, 255, 255]);
+    frame(3, 0, [0, 85, 255]);
     // Speech on a track kept in place does not move with the picture, so no cut of the picture moves the reel.
     let tracks = |c: &mut Client| c.call("get_state", json!({}))["tracks"].as_array().unwrap().clone();
     let clip = tracks(&mut c).iter().find(|t| t["id"] == MAIN_TRACK).unwrap()["clips"][0]["id"].clone();
