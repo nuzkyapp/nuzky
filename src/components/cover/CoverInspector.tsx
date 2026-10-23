@@ -1,12 +1,33 @@
-import { useState } from "react";
-import { AlertTriangle, Copy, Download, Image as ImageIcon, Plus, RotateCcw, Trash2, Type } from "lucide-react";
-import { COVER_PRESETS, addText, coverFormat, deleteText, downloadModels, editCover, editText, presetText, selectText, thumbnailOf, useCover } from "../../lib/cover";
+import { useRef, useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { AlertTriangle, Copy, Download, Image as ImageIcon, ImagePlus, Plus, RotateCcw, Trash2, Type } from "lucide-react";
+import {
+  COVER_PRESETS,
+  MAX_OVERLAYS,
+  addOverlay,
+  addText,
+  coverFormat,
+  deleteOverlay,
+  deleteText,
+  downloadModels,
+  editCover,
+  editOverlay,
+  editText,
+  overlayPlace,
+  presetText,
+  selectOverlay,
+  selectText,
+  selectedOverlay,
+  thumbnailOf,
+  useCover,
+} from "../../lib/cover";
 import { DEFAULT_TRANSFORM, sameStyle } from "../../lib/presets";
-import { patched, undoAction, useEditor, type StylePatch } from "../../lib/store";
+import { aiLocked, patched, undoAction, useEditor, type StylePatch } from "../../lib/store";
 import type { Thumbnail, ThumbnailFormat } from "../../lib/types";
 import { InspectorHeader } from "../inspector/Header";
 import { MainStyle, MoreStyleFold } from "../inspector/TextSection";
-import { AiLock, Button, ColorInput, Disclosure, IconButton, PresetTile, Section, Segmented, Slider, Switch, TextSwatch, useLockReason } from "../ui";
+import { IMAGE_EXTENSIONS, importPaths } from "../panel/assets";
+import { AiLock, Button, ColorInput, Disclosure, IconButton, Menu, PresetTile, Section, Segmented, Slider, Switch, TextSwatch, useLockReason } from "../ui";
 import { COVERED_TOO_MUCH, useShownCover } from "./CoverStage";
 
 const CANNOT_CUT_OUT = "Cutting out the person doesn't work on this computer";
@@ -40,13 +61,73 @@ function PersonSwitch({ label, checked, onChange }: { label: string; checked: bo
   );
 }
 
-/** The inspector in the cover editor: the selected text, or the cover's own settings. */
+/** The inspector in the cover editor: the selected text or image, or the cover's own settings. */
 export function CoverInspector({ format }: { format: ThumbnailFormat }) {
   const selected = useCover((s) => s.selected);
   const shown = useShownCover(format);
   if (!shown) return null;
   const text = typeof selected === "number" ? shown.cover.texts[selected] : undefined;
-  return <AiLock>{text && !shown.draft && typeof selected === "number" ? <TextInspector format={format} index={selected} /> : <CoverSettings format={format} cover={shown.cover} draft={shown.draft} />}</AiLock>;
+  const overlay = selectedOverlay(selected);
+  return (
+    <AiLock>
+      {text && !shown.draft && typeof selected === "number" ? (
+        <TextInspector format={format} index={selected} />
+      ) : overlay !== null && shown.cover.overlays?.[overlay] && !shown.draft ? (
+        <OverlayInspector format={format} index={overlay} />
+      ) : (
+        <CoverSettings format={format} cover={shown.cover} draft={shown.draft} />
+      )}
+    </AiLock>
+  );
+}
+
+/** Imports an image file the user picks and puts it on the cover. */
+async function importOverlay(format: ThumbnailFormat) {
+  if (aiLocked()) return;
+  const picked = await open({ multiple: false, filters: [{ name: "Images", extensions: IMAGE_EXTENSIONS }] });
+  if (typeof picked !== "string") return;
+  const [assetId] = await importPaths([picked]);
+  if (assetId) await addOverlay(format, assetId);
+}
+
+/** Add image: the project's images in a menu with Import image… after them, or straight to the file dialog without any. */
+function AddImage({ format, count }: { format: ThumbnailFormat; count: number }) {
+  const assets = useEditor((s) => s.snap?.project.assets);
+  const images = assets?.filter((a) => a.kind === "image") ?? [];
+  const [menu, setMenu] = useState<{ x: number; y: number; keyboard: boolean } | null>(null);
+  const button = useRef<HTMLButtonElement | null>(null);
+  return (
+    <>
+      <Button
+        className="w-full"
+        disabled={count >= MAX_OVERLAYS}
+        disabledReason={`A cover takes up to ${MAX_OVERLAYS} images`}
+        aria-haspopup={images.length > 0 ? "menu" : undefined}
+        aria-expanded={images.length > 0 ? !!menu : undefined}
+        onClick={(e) => {
+          if (images.length === 0) return void importOverlay(format);
+          button.current = e.currentTarget;
+          const r = e.currentTarget.getBoundingClientRect();
+          setMenu({ x: r.right, y: r.bottom + 4, keyboard: e.detail === 0 });
+        }}
+      >
+        <ImagePlus size={15} /> Add image
+      </Button>
+      {menu && (
+        <Menu
+          label="Add image"
+          at={{ x: menu.x, y: menu.y, align: "end" }}
+          keyboard={menu.keyboard}
+          onClose={() => {
+            setMenu(null);
+            requestAnimationFrame(() => button.current?.focus());
+          }}
+          // Import image… first, so it stays in reach however many images the project has.
+          items={[{ label: "Import image…", run: () => void importOverlay(format) }, "separator", ...images.map((a) => ({ label: a.name, run: () => void addOverlay(format, a.id) }))]}
+        />
+      )}
+    </>
+  );
 }
 
 /** What is behind the person: the frame as filmed or blurred, or a colour. Blurred and Color need the person cut out. */
@@ -84,9 +165,12 @@ function CoverSettings({ format, cover, draft }: { format: ThumbnailFormat; cove
       <InspectorHeader icon={ImageIcon} title={title} detail={`${f.width}×${f.height}`} />
       <div className="min-h-0 flex-1 overflow-y-auto">
         <Section>
-          <Button className="w-full" onClick={() => void addText(format)}>
-            <Plus size={15} /> Add text
-          </Button>
+          <div className="grid grid-cols-2 gap-2">
+            <Button className="w-full" onClick={() => void addText(format)}>
+              <Plus size={15} /> Add text
+            </Button>
+            <AddImage format={format} count={cover.overlays?.length ?? 0} />
+          </div>
           {cover.texts.length > 0 && (
             <ul className="-mx-2 flex flex-col" aria-label="Texts on the cover">
               {cover.texts.map((t, i) => (
@@ -106,6 +190,7 @@ function CoverSettings({ format, cover, draft }: { format: ThumbnailFormat; cove
               ))}
             </ul>
           )}
+          {!!cover.overlays?.length && <OverlayList format={format} cover={cover} />}
         </Section>
         <Section title="Background">
           <Segmented
@@ -161,6 +246,67 @@ function CoverSettings({ format, cover, draft }: { format: ThumbnailFormat; cove
             </Button>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/** The images on the cover by name, as the texts are listed. */
+function OverlayList({ format, cover }: { format: ThumbnailFormat; cover: Thumbnail }) {
+  const assets = useEditor((s) => s.snap?.project.assets);
+  return (
+    <ul className="-mx-2 flex flex-col" aria-label="Images on the cover">
+      {cover.overlays!.map((o, i) => {
+        const asset = assets?.find((a) => a.id === o.assetId);
+        return (
+          <li key={i}>
+            <button
+              type="button"
+              onClick={() => void selectOverlay(format, i)}
+              className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] text-fg hover:bg-white/[.08]"
+              title="Select this image"
+            >
+              <ImageIcon size={14} className="shrink-0 text-muted" />
+              <span className="min-w-0 flex-1 truncate">{asset?.name ?? "Missing image"}</span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** A selected image on the cover: its size, place, rotation and opacity, and Reset to its corner. */
+function OverlayInspector({ format, index }: { format: ThumbnailFormat; index: number }) {
+  const overlay = useEditor((s) => thumbnailOf(s.snap?.project, format)?.overlays?.[index]);
+  const asset = useEditor((s) => s.snap?.project.assets.find((a) => a.id === overlay?.assetId));
+  if (!overlay) return null;
+  const set = (patch: Partial<Thumbnail["frame"]>, key: string) => void editOverlay(format, index, (o) => ({ ...o, transform: { ...o.transform, ...patch } }), `transform:${key}`);
+  const t = overlay.transform;
+  return (
+    <div className="flex min-h-0 flex-1 flex-col" data-testid="cover-image-inspector">
+      <div className="flex items-start justify-between pr-2">
+        <InspectorHeader icon={ImageIcon} title="Image" detail={asset?.name ?? "Missing image"} />
+        <div className="flex items-center gap-0.5 pt-3">
+          <IconButton label="Delete image (Delete)" onClick={() => void deleteOverlay(format, index)}>
+            <Trash2 size={15} />
+          </IconButton>
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <Section>
+          {/* 100 % is as large as fits on the cover. */}
+          <Slider label="Size" value={t.scale * 100} min={2} max={200} step={1} unit="%" format={(v) => String(Math.round(v))} onChange={(v) => set({ scale: v / 100 }, "scale")} />
+          <Slider label="Position X" value={t.x * 100} min={-100} max={100} step={0.5} unit="%" format={(v) => v.toFixed(1)} onChange={(v) => set({ x: v / 100 }, "x")} />
+          <Slider label="Position Y" value={t.y * 100} min={-100} max={100} step={0.5} unit="%" format={(v) => v.toFixed(1)} onChange={(v) => set({ y: v / 100 }, "y")} />
+          <Slider label="Rotation" value={t.rotation} min={-180} max={180} step={1} unit="°" format={(v) => String(Math.round(v))} onChange={(v) => set({ rotation: v }, "rot")} />
+          <Slider label="Opacity" value={t.opacity * 100} min={0} max={100} step={1} unit="%" format={(v) => String(Math.round(v))} onChange={(v) => set({ opacity: v / 100 }, "opacity")} />
+          {asset && (
+            <Button variant="ghost" className="h-7 self-start px-2 text-[12px]" onClick={() => set(overlayPlace(format, asset), "reset")}>
+              <RotateCcw size={13} /> Reset
+            </Button>
+          )}
+        </Section>
       </div>
     </div>
   );

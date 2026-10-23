@@ -364,6 +364,165 @@ def thumbnail(r):
     r.check('no error toast', not r.errors(), r.errors())
 
 
+# Where the logo's pure magenta is on the cover canvas, as shares of its width and height.
+LOGO = """const c = document.querySelector('[data-testid=cover-canvas]'); const stage = document.querySelector('[data-testid=cover-stage]');
+if (!c || !c.width || c.width === 300) return null;
+const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0, sx = 0, sy = 0;
+for (let i = 0; i < d.length; i += 4) if (d[i] > 230 && d[i + 1] < 40 && d[i + 2] > 230) { const p = i / 4; n++; sx += p % c.width + 0.5; sy += Math.floor(p / c.width) + 0.5; }
+return {share: n / (d.length / 4), x: n ? sx / n / c.width : null, y: n ? sy / n / c.height : null, aspect: c.width / c.height,
+        revision: Number(stage.dataset.revision), now: window.__nuzky.store.getState().snap.revision,
+        alert: stage.querySelector('[role=alert]')?.innerText ?? null};"""
+
+
+def logo_setup(r):
+    """A plain grey 9:16 video, so only the logo is magenta, and a logo: a magenta square in the middle half of a
+    transparent 400 px PNG."""
+    from PIL import Image
+    video = r.work / 'grey.mp4'
+    subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=0x808080:s=540x960:d=4:r=30', '-pix_fmt', 'yuv420p',
+                    str(video)], check=True)
+    project = r.work / 'data/nuzky/projects/logo.nuzky'
+    subprocess.run([str(CLI), 'new', str(project), str(video)], env=r.env, check=True, capture_output=True)
+    logo = Image.new('RGBA', (400, 400), (0, 0, 0, 0))
+    logo.paste((255, 0, 255, 255), (100, 100, 300, 300))
+    logo.save(r.work / 'logo.png')
+
+
+@flow('cover_images', 'A logo on the cover: Add image, drag, size, Delete with Undo, the YouTube draft, export and a missing file',
+      before=logo_setup)
+def cover_images(r):
+    from e2e.setup_ai import ANSWER_FILE_DIALOG
+    from PIL import Image
+    webdriver('POST', r.s.path + '/window/rect', {'width': 1440, 'height': 900})
+    time.sleep(1)
+    click(r, 'Make a cover')
+    wait(lambda: r.s.run("return !!document.querySelector('[data-testid=cover-stage]')"), 5)
+    logo = r.work / 'logo.png'
+    r.s.run(ANSWER_FILE_DIALOG, str(logo))
+    click(r, 'Add image')
+    added = wait(lambda: (c := cover(r)) and c.get('overlays') and c, 10)
+    assets = r.s.run("return window.__nuzky.store.getState().snap.project.assets")
+    place = added['overlays'][0]['transform'] if added else {}
+    asset = next((a for a in assets if added and a['id'] == added['overlays'][0]['assetId']), {})
+    # Its longer side a fifth of 1080 px, its top right corner 24 px inside the Reels safe area: right 876, top 274.
+    r.check('Add image, with no image in the project, imports the picked file and puts it in the top right corner of a new cover, selected',
+            added and asset.get('path', '').endswith('logo.png') and abs(place['scale'] - 0.2) < 1e-6
+            and abs(place['x'] - (876 - 108) / 1080 + 0.5) < 1e-3 and abs(place['y'] - (274 + 108) / 1920 + 0.5) < 1e-3
+            and r.s.run("return window.__nuzky.cover.getState().selected") == 'overlay:0'
+            and r.s.run("return document.querySelector('[data-testid=cover-image-inspector]')?.innerText.includes('logo.png') ?? false"),
+            {'cover': added, 'asset': asset})
+    seen = wait(lambda: (v := r.s.run(LOGO)) and v['revision'] == v['now'] and v['share'] > 0 and v, 10)
+    r.check('the cover on screen shows the logo there, over the frame', seen and abs(seen['x'] - (0.5 + place['x'])) < 0.01
+            and abs(seen['y'] - (0.5 + place['y'])) < 0.01, seen)
+    time.sleep(0.5)
+    r.shot('cover-logo')
+
+    r.s.run(DRAG, place['x'], place['y'], 60)
+    moved = wait(lambda: (t := cover(r)['overlays'][0]['transform'])['y'] > place['y'] + 0.02 and t, 5)
+    r.check('dragging the logo on the cover moves it', moved, cover(r)['overlays'])
+    r.key('z', ctrlKey=True)
+    r.check('Undo puts it back in one step', wait(lambda: cover(r)['overlays'][0]['transform'] == place, 5), cover(r)['overlays'])
+    r.s.run(TYPE + "t.blur();", 'input[aria-label="Size value"]', '40')
+    r.check('Size makes it larger', wait(lambda: abs(cover(r)['overlays'][0]['transform']['scale'] - 0.4) < 1e-6, 5), cover(r)['overlays'])
+    bigger = cover(r)['overlays']
+
+    r.key('Delete')
+    gone = wait(lambda: not cover(r).get('overlays'), 5)
+    undo = r.s.run("""const t = window.__nuzky.store.getState().toasts.find((t) => t.text === 'Image removed from the cover');
+        if (!t?.action) return false; t.action.run(); return true;""")
+    r.check('Delete takes the selected logo off the cover and the toast brings it back with Undo',
+            gone and undo and wait(lambda: cover(r).get('overlays') == bigger, 5), cover(r))
+
+    # With an image in the project, Add image offers Import image… and then it.
+    r.s.run("window.__nuzky.store.setState({toasts: []})")
+    click(r, 'Add image')
+    items = wait(lambda: r.s.run("return [...document.querySelectorAll('[role=menu] [role=menuitem]')].map((i) => i.textContent.trim())"), 5)
+    r.shot('cover-add-image-menu')
+    r.s.run("[...document.querySelectorAll('[role=menu] [role=menuitem]')].find((i) => i.textContent.trim() === 'logo.png')?.click()")
+    two = wait(lambda: len(cover(r).get('overlays', [])) == 2, 5)
+    focused = wait(lambda: r.s.run("return document.activeElement?.closest('[data-testid=cover-image-inspector]') ? document.activeElement.getAttribute('aria-label') : null"), 5)
+    r.check('with an image in the project, Add image lists Import image… and then it, adds the one chosen and puts the focus on its Size',
+            items and items[0] == 'Import image…' and items[-1] == 'logo.png' and two and focused == 'Size'
+            and r.s.run("return window.__nuzky.cover.getState().selected") == 'overlay:1', {'items': items, 'focus': focused, 'cover': cover(r)})
+    click(r, 'Delete image (Delete)', '[data-testid=cover-image-inspector]')
+    r.check("the image's own Delete takes it off the cover", wait(lambda: cover(r).get('overlays') == bigger, 5), cover(r))
+    rows = r.s.run("return [...document.querySelectorAll('[aria-label=\"Images on the cover\"] button')].map((b) => b.textContent.trim())")
+    r.check('the cover lists its image by name', rows == ['logo.png'], rows)
+    r.s.run("window.__nuzky.store.setState({toasts: []})")
+    time.sleep(0.5)
+    r.shot('cover-logo-settings')
+
+    # The YouTube thumbnail not made yet starts from the cover, with the logo as large for its size in its top right corner.
+    click(r, '16:9 YouTube', '[aria-label="Cover format"]')
+    wide = wait(lambda: (v := r.s.run(LOGO)) and abs(v['aspect'] - 16 / 9) < 0.01 and v['share'] > 0 and v['revision'] == v['now'] and v, 10)
+    r.check('the YouTube draft shows the logo in its top right corner and saves nothing', wide and wide['x'] > 0.8 and wide['y'] < 0.3
+            and cover(r, 'youtube_16x9') is None, wide)
+    r.shot('youtube-logo')
+    click(r, '9:16 Cover', '[aria-label="Cover format"]')
+    r.s.run("window.__nuzky.cover.setState({selected: null})")
+    on_screen = wait(lambda: (v := r.s.run(LOGO)) and abs(v['aspect'] - 9 / 16) < 0.01 and v['share'] > 0 and v['revision'] == v['now'] and v, 10)
+
+    png = r.work / 'cover.png'
+    started = r.s.call('window.__nuzky.api.startCoverExport(arguments[0], arguments[1], arguments[2], arguments[3])',
+                       'cover_9x16', str(png), False, r.state()['epoch'])
+    done = started['ok'] and wait(lambda: (j := r.s.run('return window.__nuzky.store.getState().jobs[arguments[0]] ?? null', started['value']))
+                                  and j['status'] != 'running' and j, 60)
+    exported = None
+    if png.exists():
+        import numpy
+        pixels = numpy.asarray(Image.open(png).convert('RGB'), dtype=int)
+        ys, xs = numpy.nonzero((pixels[..., 0] > 230) & (pixels[..., 1] < 40) & (pixels[..., 2] > 230))
+        exported = {'x': (xs.mean() + 0.5) / 1080, 'y': (ys.mean() + 0.5) / 1920} if len(xs) else None
+    r.check('the exported cover has the logo where the editor shows it', done and done['status'] == 'done' and exported and on_screen
+            and abs(exported['x'] - on_screen['x']) < 0.005 and abs(exported['y'] - on_screen['y']) < 0.005,
+            {'job': done, 'export': exported, 'editor': on_screen})
+    time.sleep(0.5)
+    rect = r.s.run("""const b = document.querySelector('[data-testid=cover-canvas]').getBoundingClientRect();
+        return [b.left, b.top, b.right, b.bottom, window.innerWidth];""")
+    r.shot('cover-logo-as-exported')
+    if png.exists():
+        screen = Image.open(r.work / 'cover-logo-as-exported.png').convert('RGB')
+        shown_cover = screen.crop(tuple(round(v * screen.width / rect[4]) for v in rect[:4]))
+        half = (shown_cover.width // 2, shown_cover.height // 2)
+        differs = changed_share(shown_cover.resize(half, Image.BOX), Image.open(png).convert('RGB').resize(half, Image.BOX))
+        r.check('the cover on screen is the exported cover, logo included', differs < 0.03, differs)
+    # The file keeps the shortest form of each number, the app the longer one of the same value.
+    same = lambda a, b: a and b and len(a) == len(b) and all(x['assetId'] == y['assetId'] and all(
+        abs(x['transform'][k] - y['transform'][k]) < 1e-6 for k in ('x', 'y', 'scale', 'rotation', 'opacity')) for x, y in zip(a, b))
+    saved = wait(lambda: (c := next((t for t in json.loads(r.saved_project().read_text()).get('thumbnails', []) if t['format'] == 'cover_9x16'), None))
+                 and same(c.get('overlays'), bigger) and c, 5)
+    r.check('the saved project keeps the logo on the cover', saved, saved)
+
+    # The file goes away: the cover says which and to put it back; back, it draws again.
+    away = r.work / 'logo-moved.png'
+    logo.rename(away)
+    click(r, '16:9 YouTube', '[aria-label="Cover format"]')
+    click(r, '9:16 Cover', '[aria-label="Cover format"]')
+    missing = wait(lambda: (v := r.s.run(LOGO)) and v['alert'] and v, 10)
+    r.check('a missing logo file says which, to put it back or to take it off the cover', missing
+            and 'logo.png is missing. Put the file back where it was, or take the image off the cover.' in missing['alert'], missing)
+    r.shot('cover-logo-missing')
+    away.rename(logo)
+    click(r, '16:9 YouTube', '[aria-label="Cover format"]')
+    click(r, '9:16 Cover', '[aria-label="Cover format"]')
+    r.check('put back, the logo draws again', wait(lambda: (v := r.s.run(LOGO)) and not v['alert'] and v['share'] > 0, 10))
+
+    # Removing the image from the project takes it off the cover; Undo brings both back.
+    r.s.call("window.__nuzky.store.getState().edit({type: 'removeAsset', assetId: arguments[0]})", asset.get('id'))
+    off = wait(lambda: (c := cover(r)) and not c.get('overlays') and (v := r.s.run(LOGO)) and v['revision'] == v['now'] and v['share'] == 0, 10)
+    r.key('z', ctrlKey=True)
+    r.check('removing the image from the project takes it off the cover, and Undo puts it back',
+            off and wait(lambda: cover(r).get('overlays') == bigger, 5), cover(r))
+
+    webdriver('POST', r.s.path + '/window/rect', {'width': 1024, 'height': 640})
+    wait(lambda: r.s.run('return window.innerWidth') == 1024, 5)
+    r.s.run("[...document.querySelectorAll('[aria-label=\"Images on the cover\"] button')][0]?.click()")
+    wait(lambda: r.s.run("return !!document.querySelector('[data-testid=cover-image-inspector]')"), 5)
+    time.sleep(1)
+    r.shot('cover-logo-1024')
+    r.check('no error toast', not r.errors(), r.errors())
+
+
 def states(r):
     """A test pattern without a face, copied so the flow can take it away, and the face detector damaged:
     the size of the real one, so it counts as installed until it is loaded."""

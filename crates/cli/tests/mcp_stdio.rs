@@ -2920,6 +2920,7 @@ fn thumbnails_are_set_drawn_exported_and_undone_over_stdio() {
     c.call("end_run", json!({"run_id":run,"action":"keep"}));
     let saved: Value = serde_json::from_slice(&std::fs::read(c.dir.join("project.nuzky")).unwrap()).unwrap();
     assert_eq!(saved["thumbnails"].as_array().unwrap().len(), 2);
+    assert!(saved["thumbnails"][0].get("overlays").is_none(), "a cover without images saves no overlays");
     c.call("undo_run", json!({"run_id":run}));
     let state = c.call("get_state", json!({}));
     assert_eq!((state["thumbnails"].clone(), state["tracks"][0]["clips"].clone()), (json!([]), json!([])));
@@ -2977,6 +2978,110 @@ fn a_cover_is_made_from_an_image_over_stdio() {
     let (info, frame, rgba) = inspect_thumbnail(&mut c, json!({"format":"cover_9x16","width":270}));
     assert!(info["image"].is_null(), "{info}");
     assert_eq!(pixel(&rgba, frame.width, 135, 240), [128, 128, 128], "the cover is the frame again");
+    c.call("end_run", json!({"run_id":run,"action":"keep"}));
+    c.finish();
+}
+
+/// A logo with transparency goes on a cover made from a frame: the frame shows around it, its soft edge is never
+/// darker than what is behind it, and the look, the export and the CLI draw it in the same place. A missing logo file
+/// says so, and the logo leaves the cover with its asset.
+#[test]
+fn a_logo_goes_on_a_cover_over_stdio_and_the_cli() {
+    let mut c = Client::new(true);
+    // Grey in the cover's shape, so it fills the cover.
+    let grey = c.dir.join("grey.ppm");
+    let mut ppm = b"P6\n54 96\n255\n".to_vec();
+    ppm.extend([128u8; 54 * 96 * 3]);
+    std::fs::write(&grey, ppm).unwrap();
+    // A transparent 400 px image with a magenta square in its middle half and, above it, thin magenta lines a pixel
+    // wide, whose edges a shrink that ignores transparency would darken.
+    let logo = c.dir.join("logo.png");
+    let mut rgba = vec![0u8; 400 * 400 * 4];
+    for y in 20..300 {
+        for x in (100..300).filter(|x| y >= 100 || x % 4 == 0) {
+            rgba[(y * 400 + x) * 4..][..4].copy_from_slice(&[255, 0, 255, 255]);
+        }
+    }
+    let mut bytes = Vec::new();
+    let mut encoder = png::Encoder::new(&mut bytes, 400, 400);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.write_header().unwrap().write_image_data(&rgba).unwrap();
+    std::fs::write(&logo, bytes).unwrap();
+
+    let run = c.call("begin_run", json!({"label":"logo"}))["run_id"].clone();
+    let ids = c.call("import_media", json!({"run_id":run,"paths":[grey, logo]}))["asset_ids"].clone();
+    c.call("apply_edits", json!({"run_id":run,"request_id":"place","edits":[{"type":"addClip","assetId":ids[0]}]}));
+    let cover = |asset: &Value| {
+        json!([{"type":"setThumbnail","thumbnail":{"format":"cover_9x16","timeUs":0,
+            "overlays":[{"assetId":asset,"transform":{"x":0.21,"y":-0.3,"scale":0.2,"rotation":0,"opacity":1}}]}}])
+    };
+    let bad = c.error("apply_edits", json!({"run_id":run,"request_id":"bad","edits":cover(&json!("nope"))}));
+    assert!(bad.contains("INVALID_PROJECT") && bad.contains("image on a thumbnail"), "{bad}");
+    c.call("apply_edits", json!({"run_id":run,"request_id":"cover","edits":cover(&ids[1])}));
+
+    // The logo is 216 px with its square 108 px across, centred at 0.71 and 0.2 of the cover.
+    let check = |rgba: &[u8], width: u32, what: &str| {
+        let k = width as f64 / 1080.0;
+        let (cx, cy) = (0.71 * 1080.0 * k, 0.2 * 1920.0 * k);
+        let height = width * 16 / 9;
+        let mut magenta = (0usize, 0.0, 0.0);
+        for y in 0..height {
+            for x in 0..width {
+                let [r, g, b] = pixel(rgba, width, x, y);
+                // The square's rows but its edge ones, which the lines above it reach.
+                if r > 240 && g < 15 && b > 240 && (y as f64 + 0.5 - cy).abs() < 54.0 * k - 1.0 {
+                    magenta = (magenta.0 + 1, magenta.1 + x as f64 + 0.5, magenta.2 + y as f64 + 0.5);
+                }
+                // Over the grey frame a transparent edge only lightens red and blue.
+                assert!(r >= 126 && b >= 126, "{what}: {r},{g},{b} at {x},{y} is darker than the frame");
+            }
+        }
+        let side = 108.0 * k;
+        let (n, x, y) = (magenta.0 as f64, magenta.1 / magenta.0 as f64, magenta.2 / magenta.0 as f64);
+        assert!((n - side * (side - 2.0)).abs() < side * 4.0, "{what}: {n} magenta pixels, {side} px across");
+        assert!((x - cx).abs() < 1.5 && (y - cy).abs() < 1.5, "{what}: centred at {x},{y}, not {cx},{cy}");
+        let margin = ((cx - side * 0.75) as u32, cy as u32);
+        assert_eq!(
+            pixel(rgba, width, margin.0, margin.1),
+            [128, 128, 128],
+            "{what}: the frame shows around the square"
+        );
+    };
+    let (_, frame, look) = inspect_thumbnail(&mut c, json!({"format":"cover_9x16","width":270}));
+    check(&look, frame.width, "the look");
+    let job = c.call("export_thumbnail", json!({"format":"cover_9x16","path":"cover.png"}));
+    assert_eq!(wait_job(&mut c, &job, Duration::from_secs(30), |_| false)["status"], "done");
+    let (_, exported) = decode_png(&std::fs::read(c.dir.join("cover.png")).unwrap());
+    check(&exported, 1080, "the export");
+    c.call("end_run", json!({"run_id":run,"action":"keep"}));
+
+    let out = c.dir.join("cli.png");
+    let cli = Command::new(env!("CARGO_BIN_EXE_nuzky"))
+        .args(["thumbnail".as_ref(), c.dir.join("project.nuzky").as_os_str(), "cover_9x16".as_ref(), out.as_os_str()])
+        .output()
+        .unwrap();
+    assert!(cli.status.success(), "{}", String::from_utf8_lossy(&cli.stderr));
+    let (_, drawn) = decode_png(&std::fs::read(&out).unwrap());
+    let off = drawn.iter().zip(&exported).filter(|(a, b)| a.abs_diff(**b) > 2).count();
+    assert!(off < 1080 * 1920 / 1000, "{off} values differ between the CLI and MCP");
+
+    let away = c.dir.join("away.png");
+    std::fs::rename(&logo, &away).unwrap();
+    let missing = c.error("inspect_thumbnail", json!({"format":"cover_9x16"}));
+    assert!(missing.contains("MEDIA_MISSING") && missing.contains("logo.png"), "{missing}");
+    let missing = c.error("export_thumbnail", json!({"format":"cover_9x16","path":"again.png"}));
+    assert!(missing.contains("MEDIA_MISSING") && missing.contains("logo.png"), "{missing}");
+    std::fs::rename(&away, &logo).unwrap();
+
+    let run = c.call("begin_run", json!({"label":"no logo"}))["run_id"].clone();
+    c.call(
+        "apply_edits",
+        json!({"run_id":run,"request_id":"remove","edits":[{"type":"removeAsset","assetId":ids[1]}]}),
+    );
+    let state = c.call("get_state", json!({}));
+    assert!(state["thumbnails"][0].get("overlays").is_none(), "{state}");
+    let (_, frame, rgba) = inspect_thumbnail(&mut c, json!({"format":"cover_9x16","width":270}));
+    assert_eq!(pixel(&rgba, frame.width, 192, 96), [128, 128, 128], "the logo left the cover with its asset");
     c.call("end_run", json!({"run_id":run,"action":"keep"}));
     c.finish();
 }

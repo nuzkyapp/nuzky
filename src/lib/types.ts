@@ -436,6 +436,10 @@ export type CoverView = {
    */
   frame: [[[number, number], [number, number], [number, number], [number, number]], [[number, number], [number, number], [number, number], [number, number]]],
   /**
+   * The same for each image on the cover; null for one that is not drawn.
+   */
+  overlays: Array<[[[number, number], [number, number], [number, number], [number, number]], [[number, number], [number, number], [number, number], [number, number]]] | null>,
+  /**
    * The cover cuts the person out of the frame and their mask is not made yet, so it is drawn
    * without: text behind the person in front of them and no outline.
    */
@@ -1679,6 +1683,11 @@ export type Thumbnail = {
    */
   texts: Array<ThumbnailText>,
   outline?: ThumbnailOutline | null,
+  /**
+   * Images of the project drawn over the cover, such as a logo, bottom to top: in front of the person and their
+   * outline, behind the texts in front.
+   */
+  overlays?: Array<ThumbnailOverlay>,
 };
 
 export type ThumbnailBackground = {
@@ -1715,6 +1724,18 @@ export type ThumbnailOutline = {
    * Thumbnail pixels, up to 100.
    */
   width: number,
+};
+
+/**
+ * An image on a thumbnail, its transparency kept.
+ */
+export type ThumbnailOverlay = {
+  assetId: string,
+  /**
+   * As for the frame: scale 1 fits the whole image inside the thumbnail, x and y move its centre by fractions of
+   * the thumbnail.
+   */
+  transform: Transform,
 };
 
 export type ThumbnailText = {

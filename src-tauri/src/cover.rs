@@ -60,6 +60,8 @@ pub struct CoverView {
     pub hidden: Vec<f32>,
     /// Where the frame is drawn, as for a clip: the corners of its visible part and of the whole frame.
     pub frame: [[[f32; 2]; 4]; 2],
+    /// The same for each image on the cover; null for one that is not drawn.
+    pub overlays: Vec<Option<[[[f32; 2]; 4]; 2]>>,
     /// The cover cuts the person out of the frame and their mask is not made yet, so it is drawn
     /// without: text behind the person in front of them and no outline.
     pub mask_missing: bool,
@@ -179,11 +181,11 @@ impl Covers {
                 ..thumbnail.clone()
             };
             let whole = vec![255; (frame.image.width * frame.image.height) as usize];
-            renderer.render_thumbnail(&draft, &frame.image, Some(&whole), width)?
+            renderer.render_thumbnail(project, &draft, &frame.image, Some(&whole), width)?
         } else {
             // The mask only where the export uses it too, so the two never differ.
             let mask = if thumbnail.needs_mask() { frame.mask.as_deref() } else { None };
-            renderer.render_thumbnail(thumbnail, &frame.image, mask, width)?
+            renderer.render_thumbnail(project, thumbnail, &frame.image, mask, width)?
         };
         let view = CoverView {
             width: rendered.width,
@@ -192,6 +194,7 @@ impl Covers {
             bounds: rendered.bounds,
             hidden: if mask_missing { vec![0.0; thumbnail.texts.len()] } else { rendered.hidden },
             frame: rendered.frame_bounds,
+            overlays: rendered.overlay_bounds,
             mask_missing,
             source: match &frame.still {
                 Some((id, _, version)) => format!("{id}:{version}"),
@@ -207,12 +210,18 @@ fn missing_at(project: &Project, t_us: i64) -> Vec<String> {
     missing(project, Some(t_us))
 }
 
-/// Names of the missing files a cover is drawn from: its image, or the pictures at its frame.
+/// Names of the missing files a cover is drawn from: its image, or the pictures at its frame, and the images on it.
 fn cover_missing(project: &Project, thumbnail: &Thumbnail) -> Vec<String> {
-    match thumbnail.image.as_deref().and_then(|id| project.asset(id)) {
+    let mut names = match thumbnail.image.as_deref().and_then(|id| project.asset(id)) {
         Some(image) => (!Path::new(&image.path).is_file()).then(|| image.name.clone()).into_iter().collect(),
         None => missing_at(project, thumbnail.time_us),
+    };
+    for image in thumbnail.overlays.iter().filter_map(|o| project.asset(&o.asset_id)) {
+        if !Path::new(&image.path).is_file() && !names.contains(&image.name) {
+            names.push(image.name.clone());
+        }
     }
+    names
 }
 
 /// Names of the missing files of the pictures, at `at` or anywhere on the timeline.
@@ -412,6 +421,7 @@ fn jpeg_url(width: u32, height: u32, rgba: Vec<u8>) -> anyhow::Result<String> {
         hidden: Vec::new(),
         bounds: Vec::new(),
         frame_bounds: [[[0.0; 2]; 4]; 2],
+        overlay_bounds: Vec::new(),
     };
     let bytes = nuzky_engine::thumbnail::encode(&rendered, ImageKind::Jpeg)?;
     Ok(format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)))
@@ -510,7 +520,7 @@ pub fn start_cover_export(
         };
         check_cancelled(cancel)?;
         rep.progress(0.9, Some("Rendering"));
-        let rendered = renderer.render_thumbnail(&thumbnail, &frame, mask.as_deref(), format.size().0)?;
+        let rendered = renderer.render_thumbnail(&project, &thumbnail, &frame, mask.as_deref(), format.size().0)?;
         let bytes = nuzky_engine::thumbnail::encode(&rendered, kind)?;
         nuzky_engine::thumbnail::save(&out, &bytes, replace_existing, cancel)?;
         Ok(Some(out.to_string_lossy().into_owned()))

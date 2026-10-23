@@ -48,6 +48,8 @@ pub struct RenderedThumbnail {
     pub bounds: Vec<Option<[[f32; 2]; 4]>>,
     /// Where the frame is drawn in thumbnail pixels: its visible part, and the whole frame before its crop.
     pub frame_bounds: [[[f32; 2]; 4]; 2],
+    /// The same for each overlay; none for one that is not drawn.
+    pub overlay_bounds: Vec<Option<[[[f32; 2]; 4]; 2]>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -110,10 +112,11 @@ impl Renderer {
         Ok(Image { width, height, data: Arc::new(rgba) })
     }
 
-    /// Draws the thumbnail `width` pixels wide from its frame and, when it needs one, the person's mask: 8-bit
-    /// alpha over the frame's pixels.
+    /// Draws the thumbnail of `project` `width` pixels wide from its frame and, when it needs one, the person's mask:
+    /// 8-bit alpha over the frame's pixels.
     pub fn render_thumbnail(
         &mut self,
+        project: &Project,
         thumbnail: &Thumbnail,
         frame: &Image,
         mask: Option<&[u8]>,
@@ -140,15 +143,11 @@ impl Renderer {
             background_blur: 0.0,
         };
 
-        // The frame fits the thumbnail at scale 1, like media on the canvas.
         let t = thumbnail.frame;
-        let fit = (tw as f32 / frame.width as f32).min(th as f32 / frame.height as f32);
-        let frame_size = (frame.width as f32 * fit * t.scale * k, frame.height as f32 * fit * t.scale * k);
-        let corners = quad(&t, frame_size, tw as f32, th as f32, k);
+        let (frame_size, corners) = placed(frame, &t, (tw, th), k);
         let rect = Crop::visible(t.crop);
-        // Shrunk on the CPU first, so a frame drawn much smaller than it is does not alias.
-        let step = (frame.width as f32 / frame_size.0).floor().max(1.0) as usize;
-        let picture = shrink(frame, step);
+        let frame_step = step(frame, frame_size);
+        let picture = shrink(frame, frame_step);
 
         let mut texts = Vec::with_capacity(thumbnail.texts.len());
         let mut bounds = Vec::with_capacity(thumbnail.texts.len());
@@ -167,6 +166,27 @@ impl Renderer {
             let corners = quad(&t, (size.0 * t.scale * k, size.1 * t.scale * k), tw as f32, th as f32, k);
             bounds.push(Some(corners.map(|[x, y]| [x / k, y / k])));
             texts.push(Some(layer(image.image, corners, t.opacity, Crop::visible(t.crop))));
+        }
+
+        let mut overlays = Vec::with_capacity(thumbnail.overlays.len());
+        let mut overlay_bounds = Vec::with_capacity(thumbnail.overlays.len());
+        for overlay in &thumbnail.overlays {
+            let t = overlay.transform;
+            if t.opacity <= 0.0 || t.scale <= 0.0 {
+                overlay_bounds.push(None);
+                continue;
+            }
+            let asset = project
+                .asset(&overlay.asset_id)
+                .filter(|a| a.kind == AssetKind::Image)
+                .ok_or_else(|| anyhow!("INVALID_PROJECT: an image on the thumbnail is not an image of this project"))?;
+            let image =
+                self.picture(asset).ok_or_else(|| anyhow!("Cannot decode {}, an image on the cover", asset.name))?;
+            let (size, corners) = placed(&image, &t, (tw, th), k);
+            let rect = Crop::visible(t.crop);
+            overlay_bounds
+                .push(Some([crate::render::sub_quad(&corners, rect), corners].map(|q| q.map(|[x, y]| [x / k, y / k]))));
+            overlays.push(layer(shrink(&image, step(&image, size)), corners, t.opacity, rect));
         }
 
         let mut draws = Vec::new();
@@ -197,7 +217,7 @@ impl Renderer {
         let mut hidden = vec![0.0; thumbnail.texts.len()];
         match mask {
             Some(mask) => {
-                let person = cut_out(&picture, &shrink_alpha(mask, frame.width, frame.height, step));
+                let person = cut_out(&picture, &shrink_alpha(mask, frame.width, frame.height, frame_step));
                 draws.push(Draw::Layer(layer(person, corners, t.opacity, rect)));
                 let coverage = (thumbnail.outline.is_some() || thumbnail.texts.iter().any(|t| t.behind))
                     .then(|| coverage(mask, (frame.width, frame.height), &corners, rect, (width, height)));
@@ -215,11 +235,12 @@ impl Renderer {
             }
             None => draws.push(Draw::Layer(layer(picture, corners, t.opacity, rect))),
         }
+        draws.extend(overlays.into_iter().map(Draw::Layer));
         draws.extend(behind(false).filter_map(|(_, layer)| layer.clone().map(Draw::Layer)));
         let rgba = self.gpu.render(width, height, parse_color(&background.color), &draws)?;
         let unscaled = |q: Quad| q.map(|[x, y]| [x / k, y / k]);
         let frame_bounds = [unscaled(crate::render::sub_quad(&corners, rect)), unscaled(corners)];
-        Ok(RenderedThumbnail { width, height, rgba, hidden, bounds, frame_bounds })
+        Ok(RenderedThumbnail { width, height, rgba, hidden, bounds, frame_bounds, overlay_bounds })
     }
 }
 
@@ -236,6 +257,21 @@ fn cover_scale(centre: [f32; 2], size: (f32, f32), rotation: f32, (w, h): (f32, 
         })
         .fold(1.0, f32::max);
     if need.is_finite() { need.min(1e4) } else { 1.0 }
+}
+
+/// The size and corners in output pixels of an image placed as media on the canvas: scale 1 fits it inside the
+/// `tw` × `th` thumbnail, drawn `k` output pixels per thumbnail pixel.
+fn placed(image: &Image, t: &Transform, (tw, th): (u32, u32), k: f32) -> ((f32, f32), Quad) {
+    let (tw, th) = (tw as f32, th as f32);
+    let fit = (tw / image.width as f32).min(th / image.height as f32);
+    let size = (image.width as f32 * fit * t.scale * k, image.height as f32 * fit * t.scale * k);
+    (size, quad(t, size, tw, th, k))
+}
+
+/// How many pixels of `image` the CPU averages into one before an image drawn `size` output pixels large reaches
+/// the GPU, so one drawn much smaller than it is does not alias.
+fn step(image: &Image, size: (f32, f32)) -> usize {
+    (image.width as f32 / size.0).floor().max(1.0) as usize
 }
 
 /// An image drawn on `corners`, showing the part `rect` (left, top, right and bottom in 0..1) of it.
@@ -263,7 +299,8 @@ fn layer(image: Image, corners: Quad, opacity: f32, rect: [f32; 4]) -> Layer {
     }
 }
 
-/// Averages `step` × `step` blocks; the GPU's bilinear filter then only has to shrink by less than two.
+/// Averages `step` × `step` blocks; the GPU's bilinear filter then only has to shrink by less than two. Colour is
+/// weighted by alpha, so the transparent pixels around a logo do not darken its edge; opaque blocks average as plainly.
 fn shrink(image: &Image, step: usize) -> Image {
     if step <= 1 {
         return image.clone();
@@ -274,18 +311,21 @@ fn shrink(image: &Image, step: usize) -> Image {
     for y in 0..h {
         for x in 0..w {
             // A whole 7680 px frame shrunk to one pixel adds up to more than a u32 holds.
-            let mut sum = [0u64; 4];
+            let (mut rgb, mut alpha) = ([0u64; 3], 0u64);
             let mut count = 0;
             for sy in y * step..((y + 1) * step).min(sh) {
                 for sx in x * step..((x + 1) * step).min(sw) {
                     let i = (sy * sw + sx) * 4;
-                    for (sum, &value) in sum.iter_mut().zip(&image.data[i..i + 4]) {
-                        *sum += value as u64;
+                    let a = image.data[i + 3] as u64;
+                    for (sum, &value) in rgb.iter_mut().zip(&image.data[i..i + 3]) {
+                        *sum += value as u64 * a;
                     }
+                    alpha += a;
                     count += 1;
                 }
             }
-            data.extend(sum.map(|s| ((s + count / 2) / count) as u8));
+            let colour = rgb.map(|s| (s + alpha / 2).checked_div(alpha).unwrap_or(0) as u8);
+            data.extend([colour[0], colour[1], colour[2], ((alpha + count / 2) / count) as u8]);
         }
     }
     Image { width: w as u32, height: h as u32, data: Arc::new(data) }

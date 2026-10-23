@@ -30,7 +30,7 @@ import { checkForUpdates, startUpdates, useUpdates } from "./lib/updates";
 import { useSounds } from "./lib/sounds";
 import { useStickers } from "./lib/stickers";
 import { addProjects, findDrafts, listenStyle, loadStyle, useStyle } from "./lib/style";
-import { closeCover, closeExport, deleteText, exportCover, loadModels as loadVisionModels, onCoverJob, useCover } from "./lib/cover";
+import { closeCover, closeExport, deleteOverlay, deleteText, exportCover, loadModels as loadVisionModels, onCoverJob, selectedOverlay, useCover } from "./lib/cover";
 import { candidateOf, closeReels, onReelsJob, openReelsToFind, playEnding, toggleReelPlay, useReels } from "./lib/reels";
 import { appWindow, toggleFullPreview, toggleMuted, usePreview } from "./lib/preview";
 
@@ -101,6 +101,12 @@ function useShortcuts() {
         if ((key === "delete" || key === "backspace") && typeof cover.selected === "number") {
           e.preventDefault();
           void deleteText(cover.open, cover.selected);
+          return;
+        }
+        const overlay = selectedOverlay(cover.selected);
+        if ((key === "delete" || key === "backspace") && overlay !== null) {
+          e.preventDefault();
+          void deleteOverlay(cover.open, overlay);
           return;
         }
         if (key === " " || (!mod && (key === "s" || key === "q" || key === "w")) || (mod && key === "d") || clipboardKey || key === "delete" || key === "backspace") {

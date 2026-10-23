@@ -113,6 +113,7 @@ pub fn model_image(path: &Path) -> anyhow::Result<PathBuf> {
         hidden: Vec::new(),
         bounds: Vec::new(),
         frame_bounds: [[[0.0; 2]; 4]; 2],
+        overlay_bounds: Vec::new(),
     };
     let bytes = nuzky_engine::thumbnail::encode(&rendered, ImageKind::Jpeg)?;
     std::fs::create_dir_all(out.parent().unwrap())?;

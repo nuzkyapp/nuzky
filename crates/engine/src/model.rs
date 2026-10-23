@@ -154,6 +154,22 @@ pub struct Thumbnail {
     pub texts: Vec<ThumbnailText>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outline: Option<ThumbnailOutline>,
+    /// Images of the project drawn over the cover, such as a logo, bottom to top: in front of the person and their
+    /// outline, behind the texts in front.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overlays: Vec<ThumbnailOverlay>,
+}
+
+/// An image on a thumbnail, its transparency kept.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ThumbnailOverlay {
+    pub asset_id: String,
+    /// As for the frame: scale 1 fits the whole image inside the thumbnail, x and y move its centre by fractions of
+    /// the thumbnail.
+    pub transform: Transform,
 }
 
 impl Thumbnail {

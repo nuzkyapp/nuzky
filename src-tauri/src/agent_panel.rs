@@ -257,12 +257,27 @@ fn prompt(text: &str, context: &PromptContext, project: &nuzky_engine::Project) 
                     cover.time_us
                 ),
             });
+            let overlays: Vec<_> = cover
+                .overlays
+                .iter()
+                .filter_map(|o| project.asset(&o.asset_id))
+                .map(|a| format!("{} ({})", a.name, a.id))
+                .collect();
+            if !overlays.is_empty() {
+                lines.push(format!(
+                    "[Nuzky] The project's {name} has the images {} over it: keep them unless the user's wishes say otherwise.",
+                    overlays.join(", ")
+                ));
+            }
         }
     }
     for attached in &context.attachments {
         lines.push(match attached.kind {
             AttachmentKind::Image => {
-                format!("[Nuzky] The user attached the picture {}; you see it with this message.", attached.path)
+                format!(
+                    "[Nuzky] The user attached the picture {}; you see it with this message. To put it in the video or on a cover, add it to the project with import_media.",
+                    attached.path
+                )
             }
             AttachmentKind::Video => format!(
                 "[Nuzky] The user attached the video {}. To see or use it, add it to the project with import_media.",
@@ -954,7 +969,7 @@ mod tests {
         };
         let text = prompt("", &attached, &project);
         assert!(
-            text.contains("picture /a/shot.png; you see it")
+            text.contains("picture /a/shot.png; you see it with this message. To put it in the video or on a cover")
                 && text.contains("video /a/clip.mov. To see or use it, add it to the project with import_media"),
             "{text}"
         );
@@ -988,6 +1003,20 @@ mod tests {
         let text = prompt("", &thumbnail, &covered);
         assert!(
             text.contains("[Nuzky] The project's cover_9x16 already uses the frame at 00:10.62 (10620000 µs)"),
+            "{text}"
+        );
+        covered.assets.push(
+            serde_json::from_value(serde_json::json!({"id": "logo", "kind": "image", "path": "/a/logo.png",
+            "name": "logo.png", "durationUs": 0, "width": 400, "height": 400, "fps": 0.0, "hasAudio": false}))
+            .unwrap(),
+        );
+        covered.thumbnails[0].overlays = vec![nuzky_engine::model::ThumbnailOverlay {
+            asset_id: "logo".into(),
+            transform: nuzky_engine::model::Transform::default(),
+        }];
+        let text = prompt("", &thumbnail, &covered);
+        assert!(
+            text.contains("[Nuzky] The project's cover_9x16 has the images logo.png (logo) over it: keep them"),
             "{text}"
         );
     }

@@ -1509,7 +1509,7 @@ impl Backend {
                 }
             }
         };
-        let mut rendered = renderer.render_thumbnail(thumbnail, &frame, mask.as_deref(), width)?;
+        let mut rendered = renderer.render_thumbnail(&project, thumbnail, &frame, mask.as_deref(), width)?;
         if args.safe_zones {
             media::shade_thumbnail_zones(&mut rendered.rgba, rendered.width, rendered.height, args.format);
         }
@@ -1542,6 +1542,7 @@ impl Backend {
             hidden: Vec::new(),
             bounds: Vec::new(),
             frame_bounds: [[[0.0; 2]; 4]; 2],
+            overlay_bounds: Vec::new(),
         };
         let png = nuzky_engine::thumbnail::encode(&rendered, ImageKind::Png)?;
         let info = json!({"asset_id": asset.id, "name": asset.name, "width": width, "height": height});
@@ -1612,7 +1613,8 @@ impl Backend {
                 };
                 check_cancel(&cancel)?;
                 progress.set("rendering", None);
-                let rendered = renderer.render_thumbnail(&thumbnail, &frame, mask.as_deref(), args.format.size().0)?;
+                let rendered =
+                    renderer.render_thumbnail(&project, &thumbnail, &frame, mask.as_deref(), args.format.size().0)?;
                 let bytes = nuzky_engine::thumbnail::encode(&rendered, kind)?;
                 nuzky_engine::thumbnail::save(&out, &bytes, false, &cancel)?;
                 Ok(json!({"path": out, "format": args.format, "width": rendered.width, "height": rendered.height,
@@ -1717,11 +1719,14 @@ fn check_new_assets(edits: &[EditCmd]) -> Result<()> {
     Ok(())
 }
 
-/// The files a cover's picture is drawn from are there: its image, or the timeline's media.
+/// The files a cover is drawn from are there: its image, or the timeline's media, and the images on it.
 fn cover_media(project: &Project, thumbnail: &Thumbnail) -> Result<()> {
     match thumbnail.image.as_deref().and_then(|id| project.asset(id)) {
         Some(image) => ensure!(Path::new(&image.path).is_file(), "MEDIA_MISSING: {}", image.path),
         None => media::check_media(project)?,
+    }
+    for image in thumbnail.overlays.iter().filter_map(|o| project.asset(&o.asset_id)) {
+        ensure!(Path::new(&image.path).is_file(), "MEDIA_MISSING: {}", image.path);
     }
     Ok(())
 }

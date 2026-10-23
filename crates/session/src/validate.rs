@@ -244,6 +244,8 @@ pub fn text_style(style: &TextStyle, (width, height): (u32, u32)) -> Result<()> 
 /// More text layers than any thumbnail needs, and more characters than one shows.
 const MAX_THUMBNAIL_TEXTS: usize = 20;
 const MAX_THUMBNAIL_CHARS: usize = 500;
+/// More images than a cover needs; each is decoded up to 2048 px for every cover drawn.
+const MAX_THUMBNAIL_OVERLAYS: usize = 10;
 
 /// A thumbnail's frame may lie past the end of the video after later edits; the renderer says so then.
 fn thumbnails(project: &Project) -> Result<()> {
@@ -254,6 +256,12 @@ fn thumbnails(project: &Project) -> Result<()> {
             ensure!(
                 project.asset(id).is_some_and(|a| a.kind == AssetKind::Image),
                 "INVALID_PROJECT: a thumbnail's image must be an image of the project"
+            );
+        }
+        for overlay in &thumbnail.overlays {
+            ensure!(
+                project.asset(&overlay.asset_id).is_some_and(|a| a.kind == AssetKind::Image),
+                "INVALID_PROJECT: an image on a thumbnail must be an image of the project"
             );
         }
         self::thumbnail(thumbnail)?;
@@ -281,6 +289,13 @@ fn thumbnail(thumbnail: &Thumbnail) -> Result<()> {
         );
         text_style(&text.style, thumbnail.format.size())?;
         transform(&text.transform)?;
+    }
+    ensure!(
+        thumbnail.overlays.len() <= MAX_THUMBNAIL_OVERLAYS,
+        "INVALID_PROJECT: a thumbnail has at most {MAX_THUMBNAIL_OVERLAYS} images"
+    );
+    for overlay in &thumbnail.overlays {
+        transform(&overlay.transform)?;
     }
     if let Some(outline) = &thumbnail.outline {
         ensure!(

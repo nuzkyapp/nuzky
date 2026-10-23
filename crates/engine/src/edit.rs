@@ -1038,6 +1038,7 @@ impl Project {
                     if t.image.as_deref() == Some(asset_id.as_str()) {
                         t.image = None;
                     }
+                    t.overlays.retain(|o| o.asset_id != asset_id);
                 }
             }
             EditCmd::AddClip { asset_id, start_us, track_id } => {
@@ -2549,6 +2550,7 @@ mod tests {
                 background: Default::default(),
                 texts: Vec::new(),
                 outline: None,
+                overlays: Vec::new(),
             },
         };
         p.apply(thumbnail(ThumbnailFormat::Youtube16x9, 1_000_000)).unwrap();

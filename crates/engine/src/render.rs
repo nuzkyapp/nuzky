@@ -352,16 +352,14 @@ impl Renderer {
         let mut draws = Vec::new();
         let mut blur_used = Vec::new();
         if !self.pictures.is_empty() {
-            let shown: HashSet<String> = project
-                .tracks
-                .iter()
-                .flat_map(|t| &t.clips)
-                .filter_map(|c| match &c.content {
-                    ClipContent::Media { background: Background::Image { asset_id }, .. } => project.asset(asset_id),
-                    _ => None,
-                })
-                .map(|a| file_key(&a.path))
-                .collect();
+            let backgrounds = project.tracks.iter().flat_map(|t| &t.clips).filter_map(|c| match &c.content {
+                ClipContent::Media { background: Background::Image { asset_id }, .. } => Some(asset_id),
+                _ => None,
+            });
+            // So choosing another frame for a cover does not decode the images on it again.
+            let overlays = project.thumbnails.iter().flat_map(|t| &t.overlays).map(|o| &o.asset_id);
+            let shown: HashSet<String> =
+                backgrounds.chain(overlays).filter_map(|id| project.asset(id)).map(|a| file_key(&a.path)).collect();
             self.pictures.retain(|key, _| shown.contains(key));
         }
         for track in &project.tracks {
@@ -656,8 +654,9 @@ impl Renderer {
         Ok(Some(Box::new(Matte { alpha: Image { width: SIDE, height: SIDE, data: alpha }, fill })))
     }
 
-    /// A background image, upright, at most `PICTURE_MAX_SIDE` pixels on its longer side; decoded once.
-    fn picture(&mut self, asset: &Asset) -> Option<Image> {
+    /// A background image or one on a cover, upright, at most `PICTURE_MAX_SIDE` pixels on its longer side, its
+    /// transparency kept; decoded once.
+    pub(crate) fn picture(&mut self, asset: &Asset) -> Option<Image> {
         let key = file_key(&asset.path);
         if let Some(image) = self.pictures.get(&key) {
             return Some(image.clone());
@@ -677,7 +676,7 @@ impl Renderer {
                 Some(image)
             }
             Err(error) => {
-                log::warn!("Cannot decode the background image {}: {error:#}", asset.path);
+                log::warn!("Cannot decode the image {}: {error:#}", asset.path);
                 None
             }
         }

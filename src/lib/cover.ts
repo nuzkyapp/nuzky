@@ -7,7 +7,7 @@ import { DEFAULT_TRANSFORM } from "./presets";
 import { useSetup } from "./setup";
 import { aiLocked, currentEpoch, openExport, projectDuration, undoAction, useEditor } from "./store";
 import { US } from "./time";
-import type { CoverCandidate, CoverPick, JobEvent, Project, TextStyle, Thumbnail, ThumbnailFormat, ThumbnailText, Transform, VisionModels } from "./types";
+import type { Asset, CoverCandidate, CoverPick, JobEvent, Project, TextStyle, Thumbnail, ThumbnailFormat, ThumbnailOverlay, ThumbnailText, Transform, VisionModels } from "./types";
 
 export const COVER_FORMATS: { id: ThumbnailFormat; label: string; short: string; noun: string; width: number; height: number }[] = [
   { id: "cover_9x16", label: "9:16 Cover", short: "9:16", noun: "cover", width: 1080, height: 1920 },
@@ -23,8 +23,8 @@ const OUTLINED = COVER_PRESETS.find((p) => p.name === "Outlined")!;
 interface CoverState {
   /** The cover editor shows this format in place of the video; null shows the video. */
   open: ThumbnailFormat | null;
-  /** What is selected on the open cover: a text by its index, or the frame. */
-  selected: number | "frame" | null;
+  /** What is selected on the open cover: a text by its index, an image on it by `overlay:<index>`, or the frame. */
+  selected: number | "frame" | `overlay:${number}` | null;
   /** The playhead and clip selection from before the cover editor opened, given back when it closes. */
   before: { timeUs: number; selection: string[] } | null;
   /** What Pick for me found last, for either format, in the session it was picked in. */
@@ -76,6 +76,9 @@ export function thumbnailOf(project: Project | undefined, format: ThumbnailForma
 }
 
 const otherFormat = (format: ThumbnailFormat): ThumbnailFormat => (format === "cover_9x16" ? "youtube_16x9" : "cover_9x16");
+
+/** The index of the image on the cover that is selected, if one is. */
+export const selectedOverlay = (selected: CoverState["selected"]) => (typeof selected === "string" && selected.startsWith("overlay:") ? Number(selected.slice(8)) : null);
 
 /** Asks again whether the cover models can run here and what is left to download. */
 export async function loadModels() {
@@ -235,6 +238,13 @@ export function draftCover(format: ThumbnailFormat, project: Project, timeUs: nu
   return {
     ...base,
     outline: base.outline ?? from.outline,
+    // In this format's corner, as large for its size as they were.
+    overlays: from.overlays?.flatMap((o) => {
+      const asset = project.assets.find((a) => a.id === o.assetId);
+      if (!asset) return [];
+      const scale = (o.transform.scale * sideScale(format, asset)) / sideScale(from.format, asset);
+      return [{ ...o, transform: { ...overlayPlace(format, asset, scale), rotation: o.transform.rotation, opacity: o.transform.opacity } }];
+    }),
     texts: from.texts.map((t) => ({
       ...t,
       // Beside the person on a YouTube thumbnail, where nothing covers it; where it was on a cover.
@@ -291,6 +301,76 @@ export async function addText(format: ThumbnailFormat) {
   // The inspector shows the new text's field only now.
   window.setTimeout(() => document.querySelector<HTMLTextAreaElement>("[data-cover-text]")?.select(), 0);
   return snap;
+}
+
+/** The scale at which an image's longer side is as long as the thumbnail's shorter side; scale 1 fits it inside the thumbnail. */
+function sideScale(format: ThumbnailFormat, { width, height }: Asset) {
+  const f = coverFormat(format);
+  return Math.min(f.width, f.height) / (Math.max(width, height) * Math.min(f.width / width, f.height / height));
+}
+
+/**
+ * Where an image goes on a cover: in the top right corner, on a 9:16 cover inside the Reels safe area, clear of the top
+ * bar and the like and comment rail. By default it covers as much as a square a fifth of the thumbnail's shorter side,
+ * so a wide logo stays readable, but is no longer than two fifths of it.
+ */
+export function overlayPlace(format: ThumbnailFormat, asset: Asset, scale?: number): Transform {
+  const f = coverFormat(format);
+  const pixels = Math.min(f.width / asset.width, f.height / asset.height);
+  const side = Math.min(f.width, f.height);
+  scale ??= Math.min((0.2 * side) / (Math.sqrt(asset.width * asset.height) * pixels), 0.4 * sideScale(format, asset));
+  const fit = pixels * scale;
+  const [right, top] = format === "cover_9x16" ? [876, 274] : [f.width - 32, 32];
+  return { ...DEFAULT_TRANSFORM, scale, x: (right - (asset.width * fit) / 2) / f.width - 0.5, y: (top + (asset.height * fit) / 2) / f.height - 0.5 };
+}
+
+/** The most images a cover takes, as the engine allows. */
+export const MAX_OVERLAYS = 10;
+
+/** Puts an image of the project on the cover in its corner and selects it, as one undo step; without a cover yet, it makes the one the editor shows. */
+export async function addOverlay(format: ThumbnailFormat, assetId: string) {
+  const timeUs = useEditor.getState().timeUs;
+  const snap = await editCover(format, (current, project) => {
+    const asset = project.assets.find((a) => a.id === assetId);
+    if (!asset) return null;
+    const cover = current ?? draftCover(format, project, frameAt(project, timeUs));
+    return { ...cover, overlays: [...(cover.overlays ?? []), { assetId, transform: overlayPlace(format, asset) }] };
+  });
+  const count = thumbnailOf(snap?.project, format)?.overlays?.length ?? 0;
+  if (!snap || count === 0) return snap;
+  useCover.setState({ selected: `overlay:${count - 1}` });
+  // The inspector shows the new image's controls only now.
+  window.setTimeout(() => document.querySelector<HTMLInputElement>("[data-testid=cover-image-inspector] input[type=range]")?.focus(), 0);
+  return snap;
+}
+
+/** Changes one image on the cover, built from its latest confirmed state; an image of the cover not made yet makes it. */
+export function editOverlay(format: ThumbnailFormat, index: number, change: (overlay: ThumbnailOverlay) => ThumbnailOverlay | null, coalesce?: string) {
+  const timeUs = useEditor.getState().timeUs;
+  return editCover(
+    format,
+    (current, project) => {
+      const cover = current ?? draftCover(format, project, frameAt(project, timeUs));
+      const overlay = cover.overlays?.[index];
+      const next = overlay && change(overlay);
+      return next ? { ...cover, overlays: cover.overlays!.map((o, i) => (i === index ? next : o)) } : null;
+    },
+    coalesce && `overlay:${index}:${coalesce}`,
+  );
+}
+
+/** Selects an image on the cover; one on the cover not made yet makes it first, so the inspector can edit it. */
+export async function selectOverlay(format: ThumbnailFormat, index: number) {
+  if (!thumbnailOf(useEditor.getState().snap?.project, format)) await chooseFrame(format, useEditor.getState().timeUs);
+  useCover.setState({ selected: `overlay:${index}` });
+}
+
+/** Takes an image off the cover, with Undo in a toast; it stays in the project. */
+export async function deleteOverlay(format: ThumbnailFormat, index: number) {
+  const snap = await editCover(format, (c) => (c?.overlays?.[index] ? { ...c, overlays: c.overlays.filter((_, i) => i !== index) } : null));
+  if (!snap) return;
+  useCover.setState({ selected: null });
+  useEditor.getState().toast({ kind: "info", text: "Image removed from the cover", action: undoAction(snap) });
 }
 
 /** Export in the cover editor: a cover not made yet is made as the editor shows it, as one undo step, then the dialog opens on it. */

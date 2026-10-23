@@ -79,7 +79,7 @@ def ai_attachments(r):
             run['pictures'] == [[200, 400], [1568, 784]], run['pictures'])
     r.check('the message names each attachment, the video by its path to import with import_media',
             f'[Nuzky] The user attached the video {video}. To see or use it, add it to the project with import_media.' in run['prompt']
-            and f'[Nuzky] The user attached the picture {photo}; you see it with this message.' in run['prompt']
+            and f'[Nuzky] The user attached the picture {photo}; you see it with this message. To put it in the video or on a cover, add it to the project with import_media.' in run['prompt']
             and f'/nuzky/attachments/{kept[0].name}; you see it' in run['prompt'], run['prompt'])
     text = panel(r)['text']
     r.check("the agent's answer comes back", 'I see 2 pictures (200×400, 1568×784) and 1 videos.' in text, text)

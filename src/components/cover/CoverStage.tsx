@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { api, errorText, plainError } from "../../lib/api";
-import { COVER_FORMATS, frameAt, chooseFrame, coverFormat, downloadModels, draftCover, editCover, editText, mask, selectText, switchFormat, thumbnailOf, useCover } from "../../lib/cover";
+import { COVER_FORMATS, frameAt, chooseFrame, coverFormat, downloadModels, draftCover, editCover, editOverlay, editText, mask, selectOverlay, selectText, switchFormat, thumbnailOf, useCover } from "../../lib/cover";
 import { AI_EDITING, projectDuration, useAiLocked, useEditor } from "../../lib/store";
 import { formatTime } from "../../lib/time";
 import type { CoverView, LayerBounds, Snapshot, Thumbnail, ThumbnailFormat, Transform } from "../../lib/types";
@@ -22,6 +22,14 @@ export function useShownCover(format: ThumbnailFormat): { cover: Thumbnail; draf
   // Recomputed per render: `models` decides whether a YouTube thumbnail of a vertical video starts blurred.
   void models;
   return { cover: draftCover(format, project, frameAt(project, timeUs)), draft: true };
+}
+
+/** Why the cover cannot be drawn; a missing image on it can also be taken off. */
+function coverError(text: string, format: ThumbnailFormat) {
+  const name = text.startsWith("MEDIA_MISSING: ") ? text.slice("MEDIA_MISSING: ".length).split(/[\\/]/).pop() : null;
+  const project = useEditor.getState().snap?.project;
+  const onCover = thumbnailOf(project, format)?.overlays?.some((o) => project?.assets.find((a) => a.id === o.assetId)?.name === name);
+  return name && onCover ? `${name} is missing. Put the file back where it was, or take the image off the cover.` : plainError(text);
 }
 
 /** Asks the engine for the cover one request at a time; a change while one renders asks again once it is done. */
@@ -72,7 +80,7 @@ function useCoverView(format: ThumbnailFormat, width: number, draft: Thumbnail |
           setError(null);
           useCover.setState({ hidden: view.maskMissing ? [] : view.hidden });
         })
-        .catch((e) => mounted.current && setError(plainError(errorText(e))))
+        .catch((e) => mounted.current && setError(coverError(errorText(e), a.format)))
         .finally(() => {
           s.busy = false;
           s.shown = a.revision;
@@ -91,7 +99,9 @@ function useCoverView(format: ThumbnailFormat, width: number, draft: Thumbnail |
   return { canvas, view, error, shownFrom, drawnFrom };
 }
 
-/** The cover in place of the video: drawn by the engine as the export draws it, with its texts and frame to drag. */
+const OVERLAY = "overlay:";
+
+/** The cover in place of the video: drawn by the engine as the export draws it, with its frame, images and texts to drag. */
 export function CoverStage({ format, box }: { format: ThumbnailFormat; box: { w: number; h: number } }) {
   const { width: tw, height: th } = coverFormat(format);
   const aspect = tw / th;
@@ -106,6 +116,7 @@ export function CoverStage({ format, box }: { format: ThumbnailFormat; box: { w:
   const layers: LayerBounds[] = view
     ? [
         ...(shown && !shown.draft ? [{ clipId: "frame", corners: view.frame[0], frame: view.frame[1] }] : []),
+        ...view.overlays.flatMap((b, i) => (b ? [{ clipId: `${OVERLAY}${i}`, corners: b[0], frame: b[1] }] : [])),
         ...view.bounds.flatMap((b, i) => (b ? [{ clipId: String(i), corners: b, frame: b }] : [])),
       ]
     : [];
@@ -124,13 +135,23 @@ export function CoverStage({ format, box }: { format: ThumbnailFormat; box: { w:
     onBounds: () => {},
     selected: selected === null ? null : String(selected),
     isOnlySelected: (id) => String(useCover.getState().selected) === id,
-    select: (id) => (id === null || id === "frame" ? useCover.setState({ selected: id }) : void selectText(format, Number(id))),
+    select: (id) =>
+      id === null || id === "frame"
+        ? useCover.setState({ selected: id })
+        : id.startsWith(OVERLAY)
+          ? void selectOverlay(format, Number(id.slice(OVERLAY.length)))
+          : void selectText(format, Number(id)),
     transform: (id) => {
       const c = cover();
+      if (id.startsWith(OVERLAY)) return c?.overlays?.[Number(id.slice(OVERLAY.length))]?.transform ?? null;
       return (id === "frame" ? c?.frame : c?.texts[Number(id)]?.transform) ?? null;
     },
     change: (id, patch: Partial<Transform>, key) =>
-      id === "frame" ? editCover(format, (c) => (c ? { ...c, frame: { ...c.frame, ...patch } } : null), key) : editText(format, Number(id), (t) => ({ ...t, transform: { ...t.transform, ...patch } }), key),
+      id === "frame"
+        ? editCover(format, (c) => (c ? { ...c, frame: { ...c.frame, ...patch } } : null), key)
+        : id.startsWith(OVERLAY)
+          ? editOverlay(format, Number(id.slice(OVERLAY.length)), (o) => ({ ...o, transform: { ...o.transform, ...patch } }), key)
+          : editText(format, Number(id), (t) => ({ ...t, transform: { ...t.transform, ...patch } }), key),
     croppable: () => false,
     radius: () => 0,
     locked: () => !!useEditor.getState().aiRun,

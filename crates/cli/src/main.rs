@@ -445,7 +445,7 @@ fn main() -> Result<()> {
             } else {
                 None
             };
-            let rendered = renderer.render_thumbnail(thumbnail, &frame, mask.as_deref(), format.size().0)?;
+            let rendered = renderer.render_thumbnail(&project, thumbnail, &frame, mask.as_deref(), format.size().0)?;
             let bytes = nuzky_engine::thumbnail::encode(&rendered, kind)?;
             // The output path was typed on purpose, as with any command-line tool.
             nuzky_engine::thumbnail::save(Path::new(out), &bytes, true, &cancel)?;
