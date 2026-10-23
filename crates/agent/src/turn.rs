@@ -1,6 +1,6 @@
 use crate::discover::AgentId;
 use crate::event::{AgentEvent, ErrorCode};
-use crate::{claude, codex};
+use crate::{claude, codex, opencode};
 use anyhow::{Context, Result, bail};
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -88,10 +88,12 @@ pub(crate) enum Step {
     Answered,
 }
 
+/// Claude keeps the conversation under Nuzky's id once a turn ends without an error.
 enum Parser {
-    /// Claude keeps the conversation under Nuzky's id once a turn ends without an error.
+    /// Claude Code keeps the conversation under Nuzky's id once a turn ends without an error.
     Claude(claude::Parser, String),
     Codex(codex::Parser),
+    OpenCode(opencode::Parser),
 }
 
 impl Parser {
@@ -99,6 +101,7 @@ impl Parser {
         match self {
             Parser::Claude(p, _) => p.line(line),
             Parser::Codex(p) => p.line(line),
+            Parser::OpenCode(p) => p.line(line),
         }
     }
 
@@ -106,6 +109,7 @@ impl Parser {
         match self {
             Parser::Claude(_, id) => matches!(end, AgentEvent::Done { .. }).then(|| id.clone()),
             Parser::Codex(p) => p.session(),
+            Parser::OpenCode(p) => p.session(),
         }
     }
 }
@@ -144,7 +148,8 @@ fn parent_session_var(name: &str) -> bool {
 fn failure_code(resume: bool, message: &str) -> ErrorCode {
     if resume
         && (message.contains("No conversation found with session ID")
-            || message.contains("no rollout found for thread id"))
+            || message.contains("no rollout found for thread id")
+            || message.contains("Session not found"))
     {
         ErrorCode::SessionGone
     } else {
@@ -159,7 +164,6 @@ impl Turn {
             bail!("The AI panel is not available on Windows yet. Connect your agent in a terminal instead.");
         }
         std::fs::create_dir_all(&req.cwd).context("Creating the AI panel's folder")?;
-        // Codex reads its pictures from files itself.
         let first = if req.agent == AgentId::Claude { claude::message(&req.prompt)? } else { req.prompt.text.clone() };
         #[cfg(unix)]
         {
@@ -169,6 +173,7 @@ impl Turn {
         }
         let mut cmd = match req.agent {
             AgentId::Claude => claude::command(&req),
+            AgentId::Opencode => opencode::command(&req)?,
             AgentId::Codex => codex::command(&req),
             AgentId::ChatGpt => bail!("ChatGPT runs in Nuzky, not as a process"),
             AgentId::Antigravity => bail!("Run Antigravity CLI in your terminal and connect it to Nuzky."),
@@ -217,6 +222,7 @@ impl Turn {
         let (stop_flag, done_flag) = (stopping.clone(), finished.clone());
         let mut parser = match req.agent {
             AgentId::Claude => Parser::Claude(claude::Parser::default(), req.session),
+            AgentId::Opencode => Parser::OpenCode(opencode::Parser::new()),
             AgentId::Codex => Parser::Codex(codex::Parser::new(pid)),
             AgentId::ChatGpt | AgentId::Antigravity => unreachable!("refused above"),
         };
@@ -246,9 +252,11 @@ impl Turn {
                         _ => {}
                     }
                 }
-                if let Parser::Codex(p) = &parser
-                    && p.session().is_some()
-                {
+                let kept_session = match &parser {
+                    Parser::Codex(p) | Parser::OpenCode(p) => p.session().is_some(),
+                    Parser::Claude(..) => false,
+                };
+                if kept_session {
                     kept_now.store(true, Ordering::Release);
                 }
             }
@@ -369,6 +377,7 @@ mod tests {
                         };
                         let command = match agent {
                             AgentId::Claude => claude::command(&req),
+                            AgentId::Opencode => opencode::command(&req).unwrap(),
                             AgentId::Codex => codex::command(&req),
                             AgentId::ChatGpt | AgentId::Antigravity => unreachable!(),
                         };

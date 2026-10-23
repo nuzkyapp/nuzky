@@ -320,9 +320,11 @@ fn new_id() -> String {
 
 #[tauri::command]
 pub async fn agent_list() -> CmdResult<Vec<AgentInfo>> {
-    tauri::async_runtime::spawn_blocking(|| [AgentId::Claude, AgentId::Codex].map(nuzky_agent::find).to_vec())
-        .await
-        .map_err(err)
+    tauri::async_runtime::spawn_blocking(|| {
+        [AgentId::Claude, AgentId::Codex, AgentId::Opencode].map(nuzky_agent::find).to_vec()
+    })
+    .await
+    .map_err(err)
 }
 
 #[tauri::command]
@@ -458,6 +460,36 @@ pub async fn agent_models(agent: AgentId) -> CmdResult<Vec<AgentModel>> {
                 return Err(failed.into());
             }
             codex_models(&output.stdout).map_err(|_| failed.into())
+        }
+        // OpenCode lists its models as "provider/model" lines; no reasoning efforts.
+        AgentId::Opencode => {
+            let failed = "MODELS_FAILED: Couldn't list OpenCode's models. Try again.";
+            let path = nuzky_agent::find(agent).path.ok_or(failed)?;
+            let output = nuzky_agent::run(&path, &["models"], &[], None, std::time::Duration::from_secs(15))
+                .map_err(|_| failed)?
+                .ok_or(failed)?;
+            if !output.status.success() {
+                return Err(failed.into());
+            }
+            let models: Vec<AgentModel> = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty() && !line.starts_with('#'))
+                .map(|line| {
+                    let (slug, name) = line.split_once(|c| c == ' ' || c == '\t').unwrap_or((line, ""));
+                    let name = name.trim();
+                    AgentModel {
+                        slug: slug.trim().into(),
+                        display_name: if name.is_empty() { slug.trim().into() } else { name.into() },
+                        efforts: Vec::new(),
+                        default_effort: None,
+                    }
+                })
+                .collect();
+            if models.is_empty() {
+                return Err(failed.into());
+            }
+            Ok(models)
         }
         AgentId::ChatGpt => chatgpt::chatgpt().models().map_err(err),
         AgentId::Antigravity => Err("Run Antigravity CLI in your terminal and connect it to Nuzky.".into()),

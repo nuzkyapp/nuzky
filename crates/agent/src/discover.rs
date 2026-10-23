@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 #[serde(rename_all = "camelCase")]
 pub enum AgentId {
     Claude,
+    Opencode,
     Codex,
     Antigravity,
     /// Runs in Nuzky on the user's ChatGPT sign-in, so there is nothing to install or find.
@@ -21,6 +22,7 @@ impl AgentId {
     pub fn name(self) -> &'static str {
         match self {
             AgentId::Claude => "Claude Code",
+            AgentId::Opencode => "OpenCode",
             AgentId::Codex => "Codex",
             AgentId::Antigravity => "Antigravity CLI",
             AgentId::ChatGpt => "ChatGPT",
@@ -31,6 +33,7 @@ impl AgentId {
     fn program(self) -> Option<(&'static str, &'static str)> {
         match self {
             AgentId::Claude => Some(("claude", "NUZKY_AGENT_CLAUDE")),
+            AgentId::Opencode => Some(("opencode", "NUZKY_AGENT_OPENCODE")),
             AgentId::Codex => Some(("codex", "NUZKY_AGENT_CODEX")),
             AgentId::Antigravity => Some(("agy", "NUZKY_AGENT_AGY")),
             AgentId::ChatGpt => None,
@@ -225,7 +228,7 @@ pub fn signed_in(id: AgentId, path: &Path) -> SignIn {
     let args: &[&str] = match id {
         AgentId::Claude => &["auth", "status", "--json"],
         AgentId::Codex => &["login", "status"],
-        AgentId::ChatGpt | AgentId::Antigravity => return SignIn::Unknown,
+        AgentId::Opencode | AgentId::ChatGpt | AgentId::Antigravity => return SignIn::Unknown,
     };
     let Ok(Some(output)) = run(path, args, &[], None, Duration::from_secs(5)) else { return SignIn::Unknown };
     let logged_in = match id {
@@ -237,7 +240,7 @@ pub fn signed_in(id: AgentId, path: &Path) -> SignIn {
             Some(1) => Some(false),
             _ => None,
         },
-        AgentId::ChatGpt | AgentId::Antigravity => None,
+        AgentId::ChatGpt | AgentId::Antigravity | AgentId::Opencode => None,
     };
     match logged_in {
         Some(true) => SignIn::SignedIn,

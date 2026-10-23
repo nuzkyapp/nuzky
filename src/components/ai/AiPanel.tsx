@@ -86,8 +86,9 @@ import { GeminiGuide } from "./GeminiGuide";
 const INSTALL: Record<CliAgentId, string> = {
   claude: "https://docs.claude.com/en/docs/claude-code/setup",
   codex: "https://developers.openai.com/codex/cli",
+  opencode: "https://opencode.ai/docs",
 };
-const COMMAND: Record<CliAgentId, string> = { claude: "claude", codex: "codex" };
+const COMMAND: Record<CliAgentId, string> = { claude: "claude", codex: "codex", opencode: "opencode" };
 
 /** A small menu under a trigger (`up`: above it): ↑/↓ move, Esc closes back to the trigger, no key reaches the editor. */
 function Menu({

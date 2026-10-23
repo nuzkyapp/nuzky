@@ -137,23 +137,45 @@ fn app_image(exe: &Path, dir: Option<PathBuf>, image: Option<PathBuf>) -> Option
 pub enum Setup {
     Claude,
     Cursor,
+    /// OpenCode keeps local servers under `mcp` in its own `opencode.json`, in a different shape.
+    Opencode,
     Other,
 }
 
-/// The `nuzky` server in the `mcpServers` form Claude, Cursor and most agents read, between where
-/// it goes and what to tell the agent first.
+/// The `nuzky` server in the shape the agent reads, between where it goes and what to tell the agent
+/// first.
 pub fn setup(setup: Setup, command: &Command) -> Result<String> {
-    let server = serde_json::json!({"mcpServers": {NAME: {"command": command.program, "args": command.args}}});
-    let (place, agent) = match setup {
-        Setup::Claude => {
-            ("the Claude Desktop config (Settings, Developer, Edit Config), then restart Claude", "Claude")
-        }
-        Setup::Cursor => ("Cursor's MCP settings (~/.cursor/mcp.json)", "Cursor"),
-        Setup::Other => ("your agent's MCP settings", "the agent"),
+    let (server, (place, agent)) = match setup {
+        Setup::Claude => (
+            serde_json::json!({"mcpServers": {NAME: {"command": command.program, "args": command.args}}}),
+            ("the Claude Desktop config (Settings, Developer, Edit Config), then restart Claude", "Claude"),
+        ),
+        Setup::Cursor => (
+            serde_json::json!({"mcpServers": {NAME: {"command": command.program, "args": command.args}}}),
+            ("Cursor's MCP settings (~/.cursor/mcp.json)", "Cursor"),
+        ),
+        // OpenCode's `mcp` entries name the program and arguments as one `command` array.
+        Setup::Opencode => (
+            serde_json::json!({"mcp": {NAME: {
+                "type": "local",
+                "command": [command.program.clone()].into_iter().chain(command.args.iter().cloned()).collect::<Vec<_>>(),
+                "enabled": true,
+                "environment": {},
+            }}}),
+            (
+                "OpenCode's config file (opencode.json next to your project, or the global one — see opencode.ai/docs/config)",
+                "OpenCode",
+            ),
+        ),
+        Setup::Other => (
+            serde_json::json!({"mcpServers": {NAME: {"command": command.program, "args": command.args}}}),
+            ("your agent's MCP settings", "the agent"),
+        ),
     };
+    let entry = if setup == Setup::Opencode { "\"mcp\"" } else { "\"mcpServers\"" };
     Ok(format!(
         "Nuzky's MCP server lets an agent edit the video open in Nuzky, live.\n\n\
-         1. Add it to {place}. If the file already has \"mcpServers\", add only the \"nuzky\" entry:\n\n{}\n\n\
+         1. Add it to {place}. If the file already has {entry}, add only the \"{NAME}\" entry:\n\n{}\n\n\
          2. Then tell {agent}:\n\n\
          Nuzky is the video editor open on this computer, and its MCP server nuzky edits the project open in it. \
          Start by reading the resource nuzky://guide and follow it. Change the video only through Nuzky's tools, \
@@ -719,6 +741,31 @@ fn with_codex_entry(text: Option<&str>, command: &Command) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_setup_text_names_where_the_entry_goes_in_the_agents_shape() {
+        let text = setup(Setup::Opencode, &command()).unwrap();
+        assert!(text.starts_with("Nuzky's MCP server lets an agent edit the video open in Nuzky, live."), "{text}");
+        let json = text
+            .split_once(":\n\n{")
+            .map(|(_, rest)| rest)
+            .and_then(|rest| rest.rsplit_once("\n\n2."))
+            .map(|(json, _)| json);
+        let json: Value = serde_json::from_str(&format!("{{{}", json.unwrap().trim())).unwrap();
+        assert_eq!(
+            json["mcp"][NAME],
+            serde_json::json!({
+                "type": "local",
+                "command": [command().program, "mcp", "--current", "--allow-write"],
+                "enabled": true,
+                "environment": {},
+            })
+        );
+        assert!(text.contains("Then tell OpenCode:\n\nNuzky is the video editor"), "{text}");
+        // The other agents keep the `mcpServers` shape.
+        let sha = setup(Setup::Other, &command()).unwrap();
+        assert!(sha.contains(r#""mcpServers""#) && !sha.contains(r#""mcp""#), "{sha}");
+    }
 
     #[cfg(unix)]
     #[test]

@@ -15,7 +15,7 @@ import type { AgentStatus, Snapshot } from "./types";
  * Gemini (`antigravity`) never runs here: Google lets no other app run it, so the panel shows how to use it from a terminal.
  */
 export type AgentId = CliAgentId | "chatgpt" | "antigravity";
-export type CliAgentId = "claude" | "codex";
+export type CliAgentId = "claude" | "codex" | "opencode";
 export interface AgentInfo {
   id: CliAgentId;
   name: string;
@@ -170,12 +170,12 @@ interface AgentState {
 
 const AGENT_KEY = "nuzky.aiAgent";
 
-const AGENTS: AgentId[] = ["claude", "codex", "chatgpt", "antigravity"];
+const AGENTS: AgentId[] = ["claude", "codex", "opencode", "chatgpt", "antigravity"];
 const usable = (a: AgentInfo) => !!a.path;
 
 export function agentName(id: AgentId, agents = useAgent.getState().agents): string {
   if (id === "antigravity") return "Gemini";
-  return id === "chatgpt" ? "ChatGPT" : (agents?.find((a) => a.id === id)?.name ?? (id === "codex" ? "Codex" : "Claude Code"));
+  return id === "chatgpt" ? "ChatGPT" : (agents?.find((a) => a.id === id)?.name ?? (id === "codex" ? "Codex" : (id === "opencode" ? "OpenCode" : "Claude Code")));
 }
 
 /** Whether any agent can answer: an installed one, or ChatGPT signed in with its plan allowed. */

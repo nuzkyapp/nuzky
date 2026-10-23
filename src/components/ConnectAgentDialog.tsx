@@ -16,6 +16,7 @@ const STATE_TEXT: Record<AgentConnection["state"], string> = {
 const COPIES: { setup: AgentSetup; label: string; name: string }[] = [
   { setup: "claude", label: "Copy for Claude", name: "Claude Desktop" },
   { setup: "cursor", label: "Copy for Cursor", name: "Cursor" },
+  { setup: "opencode", label: "Copy for OpenCode", name: "OpenCode" },
   { setup: "other", label: "Copy MCP config", name: "your agent" },
 ];
 
