@@ -903,6 +903,9 @@ export function TextSwatch({ style, label, size = 15, lines = 1 }: { style: Text
         color: style.color,
         fontWeight: style.bold ? 700 : 400,
         background: style.background ?? undefined,
+        // As the engine rounds the box and lines up a label of two lines; without either, the usual look.
+        borderRadius: style.boxRadius !== undefined ? `${style.boxRadius * size}px` : undefined,
+        textAlign: style.align && style.align !== "center" ? style.align : undefined,
         WebkitTextStroke: style.strokeWidth > 0 ? `${Math.min(2, style.strokeWidth / 4)}px ${style.strokeColor}` : undefined,
         paintOrder: "stroke fill",
         textShadow: style.shadow ? swatchShadow(style.shadow, size) : undefined,

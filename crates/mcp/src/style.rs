@@ -1283,6 +1283,8 @@ fn project_picture(project: &Project, clips: &[&nuzky_engine::model::Clip]) -> P
             highlight: style.highlight.clone(),
             keywords: style.keywords.clone(),
             letter_case: style.letter_case,
+            align: style.align,
+            box_radius: style.box_radius,
         });
     }
     captions.sort_by_key(|c| c.start_us);

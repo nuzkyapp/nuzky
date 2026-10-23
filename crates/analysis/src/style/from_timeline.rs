@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use nuzky_engine::model::{LetterCase, TextShadow};
+use nuzky_engine::model::{BOX_RADIUS, LetterCase, TextAlign, TextShadow};
 use nuzky_interchange::{ImportedTimeline, MediaClip, TextClip, TrackKind, Transform};
 
 use super::picture::{EDGE_US, MIN_ZOOM, SAMPLE_US};
@@ -225,6 +225,8 @@ fn look(timeline: &ImportedTimeline, texts: &[&TextClip]) -> Option<CaptionLook>
             highlight: None,
             keywords: None,
             letter_case: LetterCase::None,
+            align: TextAlign::Center,
+            box_radius: BOX_RADIUS,
         })
     }))
 }

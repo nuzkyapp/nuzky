@@ -5,7 +5,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, ensure};
 use nuzky_engine::media::{VideoDecoder, orient};
-use nuzky_engine::model::{Asset, AssetKind, Keywords, LetterCase, TextShadow};
+use nuzky_engine::model::{Asset, AssetKind, BOX_RADIUS, Keywords, LetterCase, TextAlign, TextShadow};
 use serde::{Deserialize, Serialize};
 
 use super::{Alignment, Piece};
@@ -86,6 +86,19 @@ pub struct CaptionLook {
     pub keywords: Option<Keywords>,
     #[serde(default, skip_serializing_if = "LetterCase::is_none")]
     pub letter_case: LetterCase,
+    #[serde(default, skip_serializing_if = "TextAlign::is_center")]
+    pub align: TextAlign,
+    /// Corner radius of the box, a share of the size.
+    #[serde(default = "usual_radius", skip_serializing_if = "is_usual_radius")]
+    pub box_radius: f32,
+}
+
+fn usual_radius() -> f32 {
+    BOX_RADIUS
+}
+
+fn is_usual_radius(radius: &f32) -> bool {
+    *radius == BOX_RADIUS
 }
 
 impl CaptionLook {

@@ -4,7 +4,7 @@
 use std::cmp::Ordering;
 use std::fmt::Write as _;
 
-use nuzky_engine::model::{KeywordPick, LetterCase};
+use nuzky_engine::model::{BOX_RADIUS, KeywordPick, LetterCase, TextAlign};
 use serde::{Deserialize, Serialize};
 
 use crate::Word;
@@ -1086,7 +1086,20 @@ fn captions(edits: &[Edit], say: &dyn Fn(&[Example]) -> String) -> Option<Rule> 
             LetterCase::Lower => " in small letters",
             LetterCase::Title => " with each word capitalised",
         };
-        let background = look.background.as_ref().map_or(String::new(), |b| format!(", on a {b} box"));
+        let aligned = match look.align {
+            TextAlign::Left => " lined up left",
+            TextAlign::Center => "",
+            TextAlign::Right => " lined up right",
+        };
+        let background = look.background.as_ref().map_or(String::new(), |b| {
+            let corners = hundredths(look.box_radius);
+            let round = if look.box_radius == BOX_RADIUS {
+                String::new()
+            } else {
+                format!(" with corners {:.0} % of the size", corners * 100.0)
+            };
+            format!(", on a {b} box{round}")
+        });
         let highlight = look.highlight.as_ref().map_or(String::new(), |h| format!(", the word being said in {h}"));
         let keywords = look.keywords.as_ref().map_or(String::new(), |k| {
             let which = match k.pick {
@@ -1104,7 +1117,7 @@ fn captions(edits: &[Edit], say: &dyn Fn(&[Example]) -> String) -> Option<Rule> 
             .collect();
         let wide = width.map_or(String::new(), |w| format!(" {w} pixels wide"));
         let said = format!(
-            "{font}{weight}{case}, {} pixels, {}{outline}{wide}{shadow}{background}{highlight}{keywords}{spacing}",
+            "{font}{weight}{case}{aligned}, {} pixels, {}{outline}{wide}{shadow}{background}{highlight}{keywords}{spacing}",
             look.size, look.color
         );
         let at = out.find("Times in the examples").unwrap_or(out.len());
@@ -1139,6 +1152,12 @@ fn captions(edits: &[Edit], say: &dyn Fn(&[Example]) -> String) -> Option<Rule> 
         if !look.letter_case.is_none() {
             style["letterCase"] = serde_json::json!(look.letter_case);
         }
+        if !look.align.is_center() {
+            style["align"] = serde_json::json!(look.align);
+        }
+        if look.background.is_some() && look.box_radius != BOX_RADIUS {
+            style["boxRadius"] = hundredths(look.box_radius).into();
+        }
         settings.push(("build_captions style".into(), style.to_string()));
         // Sizes move a little from video to video; only a real change of size or outline is a new choice.
         choices.push(Choice::number("Caption size", format!("{} pixels", look.size), look.size.into(), 2.0));
@@ -1146,7 +1165,10 @@ fn captions(edits: &[Edit], say: &dyn Fn(&[Example]) -> String) -> Option<Rule> 
         choices.push(Choice::number("Outline", drawn, width.unwrap_or(0.0).into(), 1.0));
         choices.push(Choice::text(
             "Look",
-            format!("{font}{weight}{case}, {}{outline}{shadow}{background}{highlight}{keywords}{spacing}", look.color),
+            format!(
+                "{font}{weight}{case}{aligned}, {}{outline}{shadow}{background}{highlight}{keywords}{spacing}",
+                look.color
+            ),
         ));
     }
     Some(Rule {
@@ -1808,6 +1830,8 @@ mod tests {
             highlight: None,
             keywords: None,
             letter_case: LetterCase::None,
+            align: TextAlign::Center,
+            box_radius: BOX_RADIUS,
         };
         let accepted = captions(reel.clone()).choices;
         let same = |look: CaptionLook| Rule::same(&accepted, &captions(look).choices);
@@ -1822,6 +1846,26 @@ mod tests {
             spaced.text.contains("letter spacing 5 % of the size, line spacing 20 % of the size"),
             "{}",
             spaced.text
+        );
+        let boxed = CaptionLook {
+            background: Some("#000000b3".into()),
+            align: TextAlign::Left,
+            box_radius: 0.0,
+            ..reel.clone()
+        };
+        let boxed = captions(boxed);
+        assert!(!Rule::same(&accepted, &boxed.choices), "a box lined up left is a change");
+        assert!(
+            boxed.text.contains("lined up left") && boxed.text.contains("box with corners 0 % of the size"),
+            "{}",
+            boxed.text
+        );
+        let (_, style) = boxed.settings.iter().find(|(key, _)| key == "build_captions style").unwrap();
+        let style: serde_json::Value = serde_json::from_str(style).unwrap();
+        assert_eq!(
+            (&style["align"], &style["boxRadius"]),
+            (&serde_json::json!("left"), &serde_json::json!(0.0)),
+            "{style}"
         );
     }
 

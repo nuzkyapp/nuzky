@@ -182,6 +182,18 @@ def caption_text(r):
         press(key)
     press('Return')
     r.check('Size 120 in the Captions tab goes on every caption', every(r, lambda c: c['style']['fontSize'] == 120), [c['style']['fontSize'] for c in captions(r)])
+    # My styles keeps the look, and its tile shows the box as round and the label lined up as the captions are.
+    r.s.run(f"document.querySelector('{LIBRARY} button[aria-label=\"Save the current look as a style\"]').click()")
+    name = f"document.querySelector('{LIBRARY} input[aria-label=\"Style name\"]')"
+    if r.check('saving asks for a name in place', wait(lambda: r.s.run(f'return !!{name}'), 5)):
+        r.s.run(f"const f = {name}; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(f, 'Round box');"
+                "f.dispatchEvent(new Event('input', {bubbles: true}));"
+                "f.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));")
+        swatch = lambda: r.s.run(f"""const t = [...document.querySelectorAll('{LIBRARY} button[aria-pressed]')].find((b) => b.textContent.trim() === 'Round box');
+            const s = t && getComputedStyle(t.querySelector('span'));
+            return s ? {{radius: s.borderTopLeftRadius, align: s.textAlign}} : null""")
+        r.check('the saved style\'s tile draws a fully round box and lines its name up right',
+                wait(lambda: swatch() == {'radius': '11px', 'align': 'right'}, 5), swatch())
     views(r, 'captions-tab', reveal(f"[...document.querySelectorAll('{LIBRARY} span')].find((s) => s.textContent === 'Font')"))
 
     # An AI run locks the style, while Apply to only chooses what the controls edit.
