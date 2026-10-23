@@ -6,7 +6,7 @@ built in."""
 import time
 
 from e2e.corrections import Hands
-from e2e.harness import MACOS, flow, leave_editor, pointer, press, wait
+from e2e.harness import LINUX, flow, leave_editor, pointer, press, wait
 from e2e.home import resize
 from e2e.setup import relaunch
 
@@ -74,7 +74,7 @@ def click_at(hands, css):
     """A real click in the middle of the element, whatever lies over it there. Returns whether the element was the one on
     top, as a person's click would reach it."""
     on_top = hands.over(css)
-    if MACOS:
+    if not LINUX:
         pointer('down', *hands.at, 1)
         time.sleep(0.03)
         pointer('up', *hands.at, 1)

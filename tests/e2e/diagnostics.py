@@ -8,7 +8,7 @@ clipboard is the page's own, never the system's."""
 import os, re, signal, subprocess, time, urllib.parse
 from pathlib import Path
 
-from e2e.harness import MACOS, Session, close_window, leave_editor, flow, wait
+from e2e.harness import MACOS, WINDOWS, Session, close_window, leave_editor, flow, wait, win32
 
 # The page's clipboard keeps what is copied, so the flow neither reads nor overwrites the person's own.
 CLIPBOARD = """window.__copied = [];
@@ -48,6 +48,8 @@ def app_pid(r):
     """The app of this run. On Linux WebKitWebDriver starts it, so it is the nuzky-app with this run's data folder."""
     if MACOS:
         return r.app.pid
+    if WINDOWS:
+        return win32.app_pid()
     for proc in Path('/proc').iterdir():
         try:
             if proc.name.isdigit() and (proc / 'exe').resolve().name == 'nuzky-app' and \

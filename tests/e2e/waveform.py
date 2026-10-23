@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-from e2e.harness import APP, FIXTURES, MACOS, flow, wait, webdriver
+from e2e.harness import APP, FIXTURES, MACOS, WINDOWS, flow, wait, webdriver, win32
 
 SOURCE = FIXTURES / 'hour.m4a'
 RATE, PER_SECOND = 48_000, 50
@@ -105,6 +105,13 @@ class Memory(threading.Thread):
     def processes(self):
         if MACOS:
             return {self.r.app.pid: 'app', webdriver('GET', self.r.s.path + '/nuzky/web-process'): 'WebContent'}
+        if WINDOWS:
+            # WebView2's browser process descends from the app and its renderers from that.
+            everyone, app = win32.processes(), win32.app_pid()
+            family = {app}
+            while added := {pid for pid, (parent, _) in everyone.items() if parent in family} - family:
+                family |= added
+            return {app: 'app'} | {pid: Path(everyone[pid][1] or 'unknown').stem for pid in family - {app}}
         found = {}
         for proc in Path('/proc').iterdir():
             try:
@@ -118,6 +125,8 @@ class Memory(threading.Thread):
 
     @staticmethod
     def rss_mb(pid):
+        if WINDOWS:
+            return win32.memory_mb(pid)
         if MACOS:
             kb = subprocess.run(['ps', '-o', 'rss=', '-p', str(pid)], capture_output=True, text=True).stdout.strip()
             return int(kb) / 1024 if kb else None

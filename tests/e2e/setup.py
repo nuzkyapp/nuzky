@@ -5,7 +5,7 @@ import os, signal, subprocess, time
 
 from e2e.corrections import Hands
 from e2e.diagnostics import CRASHED, TOASTS, app_pid
-from e2e.harness import FIXTURES, MACOS, Session, close_window, leave_editor, flow, press, start_driver, stop, wait
+from e2e.harness import FIXTURES, MACOS, WINDOWS, Session, close_window, leave_editor, flow, press, start_driver, stop, wait
 from e2e.home import FIRST_RUN_TEXT, OPEN_VIDEO, make, resize
 
 TITLES = ['Captions model', 'Face and person models', 'Music from YouTube', 'Connect your AI']
@@ -77,6 +77,14 @@ def relaunch(r):
         close_window()
         r.check('the window closes and Nuzky quits', wait(lambda: r.app.poll() is not None, 15))
         r.s.close()
+    elif WINDOWS:
+        # Closing the window on the home screen quits as a person does; Edge WebDriver then starts the app again.
+        leave_editor(r)
+        close_window()
+        r.check('the window closes and Nuzky quits', wait(lambda: app_pid(r) is None, 15))
+        r.s.close()
+        stop(r.driver)
+        start_driver(r)
     else:
         # Ending the session would make WebKitWebDriver kill the app, which leaves the crash marker; a SIGTERM ends it
         # as logging out does. A new WebKitWebDriver starts the app with r.env as it is now.

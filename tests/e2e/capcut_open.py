@@ -6,10 +6,11 @@ import hashlib, json, subprocess, time
 from pathlib import Path
 
 from e2e.ai_panel import FAKE, runs
-from e2e.harness import MACOS, flow, preview_crop, preview_rect, wait
+from e2e.harness import MACOS, WINDOWS, flow, preview_crop, preview_rect, wait
 from e2e.home import projects_dir, resize, toast_texts, view
 
-DRAFTS = 'Movies/CapCut/User Data/Projects/com.lveditor.draft'
+# Where Nuzky looks for CapCut's drafts in the home folder (crates/interchange/src/capcut.rs).
+DRAFTS = ('AppData/Local' if WINDOWS else 'Movies') + '/CapCut/User Data/Projects/com.lveditor.draft'
 # A colour for every second of the recording, so a pixel says which second of it plays.
 PALETTE = ['FF0000', '00FF00', '0000FF', 'FFFF00', '00FFFF', 'FF00FF', '800000', '008000', '000080', '808000', '008080', '800080']
 # Grey, which every colour matrix draws the same.

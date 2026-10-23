@@ -1,9 +1,9 @@
 """Connect your agent: one click puts Nuzky into Claude Code's, Codex's and Gemini's own settings, after a backup and without
 touching anything else there, a copy gives any other agent the same server and a first message, and Agent access
 decides whether an agent attached to the open project may edit it, without restarting the agent."""
-import json, subprocess, time
+import json, time
 
-from e2e.harness import AI_EDITING, MACOS, Bridge, clipboard, flow, press, wait, webdriver
+from e2e.harness import AI_EDITING, LINUX, Bridge, clipboard, flow, press, set_clipboard, wait, webdriver
 
 CLAUDE = '{\n  "numStartups": 12,\n  "projects": {\n    "/home/me/site": {\n      "allowedTools": []\n    }\n  },\n  "mcpServers": {\n    "other": {\n      "type": "stdio",\n      "command": "other-server"\n    }\n  }\n}\n'
 CODEX = '# my Codex settings\nmodel = "gpt-6.1-sol" # keep this\n\n[mcp_servers.other]\ncommand = "other"\n\n[profiles.fast]\nmodel_reasoning_effort = "low"\n'
@@ -63,7 +63,7 @@ def server_of(text):
 def connect(r):
     folder = r.work / 'home'
     # On macOS the copies land on the person's own clipboard; their text goes back at the end.
-    theirs = clipboard() if MACOS else None
+    theirs = clipboard() if not LINUX else None
     agent = None
     try:
         # Connect agent lives in the AI panel's agent menu: AI in the top bar, the agent's name, then the item.
@@ -169,7 +169,7 @@ def connect(r):
         if agent:
             agent.close()
         if theirs is not None:
-            subprocess.run(['pbcopy'], input=theirs, text=True, check=True)
+            set_clipboard(theirs)
 
     claude = (folder / '.claude.json').read_text()
     config = json.loads(claude)

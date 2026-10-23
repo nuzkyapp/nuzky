@@ -3,12 +3,12 @@ in and connected to Nuzky. A missing agent shows its official install command wi
 Check again finds it once installed; a signed-out one says how to sign in; Connect puts Nuzky into the agent's own
 settings and checks that the agent's own command reaches this Nuzky, and when it does not, says why and offers Try
 again. Skip leads to cutting by hand in the transcript, which works without any agent."""
-import json, subprocess, time
+import json, time
 from pathlib import Path
 
 from e2e.connect import MCP, SETTINGS
 from e2e.corrections import Hands
-from e2e.harness import FIXTURES, MACOS, clipboard, flow, link_models, press, wait
+from e2e.harness import FIXTURES, LINUX, clipboard, flow, link_models, press, set_clipboard, wait
 from e2e.setup import BOX, FOCUS, dialog, rail
 
 HERE = Path(__file__).parent
@@ -76,13 +76,13 @@ def press_button(r, label, scope=BOX):
       'again, Connect and a check that the agent reaches Nuzky, a failed connection with its reason, and Skip to cutting '
       'by hand in the transcript', before=before, home=True)
 def setup_ai(r):
-    theirs = clipboard() if MACOS else None
+    theirs = clipboard() if not LINUX else None
     try:
         agents(r, Path(r.env['HOME']))
         skip_to_transcript(r)
     finally:
         if theirs is not None:
-            subprocess.run(['pbcopy'], input=theirs, text=True, check=True)
+            set_clipboard(theirs)
 
 
 def agents(r, home):

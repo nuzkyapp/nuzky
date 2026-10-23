@@ -912,12 +912,19 @@ pub fn set_collection(state: State<'_, AppState>, paths: Vec<String>, collection
     state.library.set_collection(&paths, collection.as_deref()).map_err(err)
 }
 
-/// The system Trash. The UI flows on macOS use the Trash of their own home, since Finder would put their projects
-/// in the person's own Trash.
+/// The system Trash. The UI flows on macOS and Windows use the Trash of their own home, since Finder and the
+/// Recycle Bin would put their projects in the person's own.
 fn to_trash(path: &Path) -> Result<()> {
     #[cfg(all(target_os = "macos", debug_assertions))]
     if let Some(moved) = crate::test_bridge::trash(path) {
         return moved;
+    }
+    // Edge WebDriver drives only the UI flows' app.
+    #[cfg(all(windows, debug_assertions))]
+    if std::env::var_os("TAURI_WEBVIEW_AUTOMATION").is_some() {
+        let trash = std::env::home_dir().context("no home folder")?.join(".Trash");
+        std::fs::create_dir_all(&trash)?;
+        return Ok(std::fs::rename(path, trash.join(path.file_name().context("the path has no file name")?))?);
     }
     Ok(trash::delete(path)?)
 }

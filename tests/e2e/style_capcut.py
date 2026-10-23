@@ -6,11 +6,12 @@ import json, re, subprocess, time
 
 from pathlib import Path
 
-from e2e.harness import CLI, MACOS, MODELS, flow, link_models, wait
+from e2e.harness import CLI, MACOS, MODELS, WINDOWS, flow, link_models, wait
 from e2e.home import CLICK_TEXT, resize
 from e2e.style import DIALOG, PAGE, edit_md, record, view
 
-DRAFTS = 'Movies/CapCut/User Data/Projects/com.lveditor.draft'
+# Where Nuzky looks for CapCut's drafts in the home folder (crates/interchange/src/capcut.rs).
+DRAFTS = ('AppData/Local' if WINDOWS else 'Movies') + '/CapCut/User Data/Projects/com.lveditor.draft'
 STATE = """const s = window.__nuzky.style.getState(); return {drafts: s.capcutDrafts, chosen: s.capcut};"""
 JOB = """const l = window.__nuzky.style.getState().projectsLearning; if (!l) return null;
 const j = window.__nuzky.store.getState().jobs[l.jobId];

@@ -2,7 +2,7 @@ import json, os, shutil, subprocess, threading, time, uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from e2e.harness import CLI, FIXTURES, MACOS, Session, clipboard, close_window, leave_editor, flow, preview_crop, preview_rect, press, wait, webdriver
+from e2e.harness import CLI, FIXTURES, LINUX, clipboard, close_window, flow, leave_editor, press, preview_crop, preview_rect, Session, set_clipboard, wait, webdriver
 from e2e.history import alive as window_alive
 
 FAKE = Path(__file__).resolve().parent / 'fake_agent'
@@ -900,7 +900,7 @@ def ai_panel(r):
     r.shot('run-done')
     # A real key press, as the clipboard takes text only from something the user did. On macOS it is the person's
     # own clipboard, so their text goes back right after.
-    theirs = clipboard() if MACOS else None
+    theirs = clipboard() if not LINUX else None
     found = r.s.run("""const b = document.querySelector('aside[aria-label=AI] button[aria-label="Copy message"]');
         b?.focus(); return !!b;""")
     try:
@@ -919,7 +919,7 @@ def ai_panel(r):
         r.shot('reply-copied')
     finally:
         if theirs is not None:
-            subprocess.run(['pbcopy'], input=theirs, text=True, check=True)
+            set_clipboard(theirs)
     r.check('Copy beside my message puts exactly what I sent on the clipboard and says it is copied',
             found and copied and shown, {'button': found, 'clipboard': got, 'copied shown': shown})
     r.check("Copy under the agent's reply puts exactly its text on the clipboard and says it is copied",

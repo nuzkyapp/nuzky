@@ -491,9 +491,17 @@ def press(key):
     d.close()
 
 
+def set_clipboard(text):
+    """Puts the person's own text back on the system clipboard of macOS or Windows after a flow copied to it."""
+    if MACOS:
+        subprocess.run(['pbcopy'], input=text, text=True, check=True)
+    else:
+        win32.set_clipboard(text)
+
+
 def clipboard():
-    """The text the app put on the clipboard: on macOS the system's (a flow that copies puts the person's text back
-    afterwards), on Linux the one of gamescope's own X server, asked for as UTF-8 like any app would."""
+    """The text the app put on the clipboard: on macOS and Windows the system's (a flow that copies puts the person's
+    text back afterwards), on Linux the one of gamescope's own X server, asked for as UTF-8 like any app would."""
     if MACOS:
         return subprocess.run(['pbpaste'], capture_output=True, text=True, check=True).stdout
     if WINDOWS:
@@ -685,6 +693,23 @@ class win32:
                 return ctypes.wstring_at(kernel32.GlobalLock(handle))
             finally:
                 kernel32.GlobalUnlock(handle)
+        finally:
+            user32.CloseClipboard()
+
+    @staticmethod
+    def set_clipboard(text):
+        ctypes, _, user32, kernel32 = win32._api()
+        data = (text + '\0').encode('utf-16-le')
+        kernel32.GlobalAlloc.restype = ctypes.c_void_p
+        handle = kernel32.GlobalAlloc(0x0002, len(data))
+        ctypes.memmove(kernel32.GlobalLock(ctypes.c_void_p(handle)), data, len(data))
+        kernel32.GlobalUnlock(ctypes.c_void_p(handle))
+        if not wait(lambda: user32.OpenClipboard(None), 2, 0.05):
+            raise RuntimeError('the clipboard stayed busy')
+        try:
+            user32.EmptyClipboard()
+            user32.SetClipboardData.argtypes = [ctypes.c_uint, ctypes.c_void_p]
+            user32.SetClipboardData(13, handle)
         finally:
             user32.CloseClipboard()
 

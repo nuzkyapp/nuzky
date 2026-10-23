@@ -3,7 +3,7 @@ changes with it; generating the captions again, reopening the app and undo all k
 together. Then an agent does the same over MCP."""
 import difflib, json, time
 
-from e2e.harness import (FIXTURES, MACOS, MODELS, Bridge, Session, close_window, leave_editor, flow, link_models, pointer, press,
+from e2e.harness import (FIXTURES, LINUX, MODELS, Bridge, Session, close_window, leave_editor, flow, link_models, pointer, press,
                          preview_crop, preview_rect, preview_redraw, wait)
 from e2e.reel import phrases, words as plain
 
@@ -77,7 +77,7 @@ class Hands:
 
     def __init__(self, r):
         self.r, self.at = r, (0, 0)
-        if MACOS:
+        if not LINUX:
             # Clicks land at page coordinates, and WebKit ignores pointer moves made off screen: nothing to calibrate.
             self.origin, self.scale = (0, 0), 1
             return
@@ -115,7 +115,7 @@ class Hands:
         left, top = self.r.s.run('const b = document.querySelector(arguments[0]).getBoundingClientRect();'
                                  'return [b.left + b.width * arguments[1], b.top + b.height * arguments[2]];', css, x, y)
         self.at = (round(self.origin[0] + left * self.scale), round(self.origin[1] + top * self.scale))
-        if MACOS:
+        if not LINUX:
             return self.r.s.run('return !!document.elementFromPoint(arguments[0], arguments[1])?.closest(arguments[2]);',
                                 *self.at, css)
         self.read(*self.at)
@@ -129,13 +129,13 @@ class Hands:
         """`times` clicks on the element, at the point `over` takes, within the double-click time; false when the
         pointer missed it."""
         if not self.over(css, x, y):
-            if MACOS:
+            if not LINUX:
                 return False
             self.calibrate()
             if not self.over(css, x, y):
                 return False
         for clicks in range(1, times + 1):
-            if MACOS:
+            if not LINUX:
                 pointer('down', *self.at, clicks)
                 time.sleep(0.03)
                 pointer('up', *self.at, clicks)
@@ -148,7 +148,7 @@ class Hands:
         return True
 
     def type(self, text):
-        if MACOS:
+        if not LINUX:
             for c in text:
                 press({'\n': 'Return'}.get(c, c))
                 time.sleep(0.02)
