@@ -31,6 +31,9 @@ const BEHIND_MAX_RADIUS: f32 = 12.0;
 const BEHIND_SAMPLES: usize = 2;
 /// A background image is decoded once, at most this many pixels on its longer side.
 const PICTURE_MAX_SIDE: u32 = 2048;
+/// The largest transparent picture converted at its full size to be shrunk by alpha, a 4096 px square logo; a larger
+/// one is scaled like an opaque one, which bounds the memory it takes.
+const ALPHA_SHRINK_MAX_PIXELS: u64 = 4096 * 4096;
 pub(crate) const MAX_TEXT_SCALE: f32 = 8.0;
 const PREFETCH_US: i64 = 1_000_000;
 const IDLE_WORKER: Duration = Duration::from_secs(5);
@@ -675,7 +678,8 @@ impl Renderer {
                 .format()
                 .descriptor()
                 .is_some_and(|d| unsafe { (*d.as_ptr()).flags } & ffmpeg_next::ffi::AV_PIX_FMT_FLAG_ALPHA as u64 != 0);
-            let frame = if alpha && long > PICTURE_MAX_SIDE {
+            let pixels = f.width() as u64 * f.height() as u64;
+            let frame = if alpha && long > PICTURE_MAX_SIDE && pixels <= ALPHA_SHRINK_MAX_PIXELS {
                 // Scaled as straight colour, a transparent edge would turn dark; averaged by alpha, as covers shrink.
                 let full = decoder.convert(&f, t, f.width(), f.height())?;
                 let full = Image { width: full.width, height: full.height, data: full.data };
