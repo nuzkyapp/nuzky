@@ -52,7 +52,10 @@ def system():
             return f'Linux ({name})'
         except (OSError, KeyError):
             return 'Linux'
-    return platform.system()
+    import winreg
+    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Microsoft\Windows NT\CurrentVersion') as key:
+        build, version = (winreg.QueryValueEx(key, name)[0] for name in ('CurrentBuild', 'DisplayVersion'))
+    return f"Windows {11 if int(build) >= 22000 else 10} {version} ({build})"
 
 
 def choose(r, opener, item):
@@ -75,7 +78,7 @@ def issue(url):
       before=record_opened, home=True)
 def feedback(r):
     version = r.s.run('return window.__nuzky.updates.getState().version')
-    this_system = f'{system()} · {platform.machine().replace("arm64", "aarch64")}'
+    this_system = f'{system()} · {platform.machine().replace("arm64", "aarch64").replace("AMD64", "x86_64")}'
     form = 'https://github.com/nuzkyapp/nuzky/issues/new'
 
     r.check('the foot of the home sidebar offers Send feedback, above the version',

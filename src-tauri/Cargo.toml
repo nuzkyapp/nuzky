@@ -73,3 +73,7 @@ nuzky-analysis = { workspace = true, features = ["gpu"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.190"
+
+# Free disk space, memory and the Windows version, which std does not tell. Already in the build through wry.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem", "Win32_System_Registry", "Win32_System_SystemInformation"] }

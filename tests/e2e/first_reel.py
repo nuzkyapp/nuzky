@@ -9,7 +9,7 @@ saved once Reels & TikTok was picked."""
 import difflib, json, subprocess, time
 
 from e2e.corrections import Hands
-from e2e.harness import FIXTURES, MODELS, flow, link_models, preview_crop, preview_rect, press, wait
+from e2e.harness import FIXTURES, MODELS, WINDOWS, flow, link_models, preview_crop, preview_rect, press, wait
 from e2e.layout import resize
 from e2e.reel import (MODEL, RATE, check_captions, check_cut, check_file, check_words, db, heard, pcm, phrases, played,
                       recognise, truth, words)
@@ -211,6 +211,10 @@ def first_reel(r):
     # Captions as a new user makes them: Czech, the default accuracy, Generate.
     tab(r, 'captions')
     r.s.run(CHOOSE, 'cs')
+    if WINDOWS:
+        # Windows recognises on the processor, where Nuzky suggests a quicker model; the checks below are for the one a
+        # GPU gets, which a person picks as Most accurate.
+        r.s.run("window.__nuzky.speech.setState({model: 'large-v3-turbo-q5_0'})")
     r.s.run(f'{FIND}.click()', 'Generate captions')
     job = wait(lambda: next((j for j in r.state()['jobs'] if j['kind'] == 'captions' and j['status'] != 'running'), None), 600, 1)
     r.check('Czech captions finish', job and job['status'] == 'done', job)

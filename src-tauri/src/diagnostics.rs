@@ -235,9 +235,13 @@ fn memory_gb() -> Option<u64> {
     (pages > 0 && size > 0).then(|| (pages as u64 * size as u64).div_ceil(1 << 30))
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
 fn memory_gb() -> Option<u64> {
-    None
+    use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+    // SAFETY: an all-zero MEMORYSTATUSEX is valid, and GlobalMemoryStatusEx fills it once its length is set.
+    let mut status: MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
+    status.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+    (unsafe { GlobalMemoryStatusEx(&mut status) } != 0).then(|| status.ullTotalPhys.div_ceil(1 << 30))
 }
 
 /// The open project's shape, then a line for each of its files: what they are, never what they are called.

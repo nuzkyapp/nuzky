@@ -588,10 +588,43 @@ pub(crate) fn system() -> String {
                 Some(format!("macOS {}", version.trim()))
             })
             .unwrap_or_else(|| "macOS".into()),
-        "windows" => "Windows".into(),
+        #[cfg(windows)]
+        "windows" => windows_version().unwrap_or_else(|| "Windows".into()),
         os => os.into(),
     };
     format!("{name} · {}", std::env::consts::ARCH)
+}
+
+/// "Windows 11 24H2 (26100)". Windows 11 still names itself Windows 10 in the registry, so its build tells them apart.
+#[cfg(windows)]
+fn windows_version() -> Option<String> {
+    use windows_sys::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW};
+    let wide = |text: &str| text.encode_utf16().chain([0]).collect::<Vec<u16>>();
+    let key = wide("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion");
+    let read = |name: &str| {
+        let mut buffer = [0u16; 64];
+        let mut size = std::mem::size_of_val(&buffer) as u32;
+        // SAFETY: both names are NUL-terminated, and size is the buffer's length in bytes.
+        let status = unsafe {
+            RegGetValueW(
+                HKEY_LOCAL_MACHINE,
+                key.as_ptr(),
+                wide(name).as_ptr(),
+                RRF_RT_REG_SZ,
+                std::ptr::null_mut(),
+                buffer.as_mut_ptr().cast(),
+                &mut size,
+            )
+        };
+        // The size counts the closing NUL.
+        (status == 0).then(|| String::from_utf16_lossy(&buffer[..(size as usize / 2).saturating_sub(1)]))
+    };
+    let build: u32 = read("CurrentBuild")?.parse().ok()?;
+    let release = if build >= 22000 { 11 } else { 10 };
+    Some(match read("DisplayVersion") {
+        Some(version) => format!("Windows {release} {version} ({build})"),
+        None => format!("Windows {release} ({build})"),
+    })
 }
 
 /// Opens a web page or a folder. In debug builds with `NUZKY_OPENED_URLS` set it only writes down what it would open,

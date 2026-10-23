@@ -644,10 +644,22 @@ fn free_bytes(path: &Path) -> Option<u64> {
         #[allow(clippy::unnecessary_cast, reason = "statvfs field widths differ between Unix targets")]
         Some(stats.f_bavail as u64 * stats.f_frsize as u64)
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     {
-        let _ = path;
-        None
+        use std::os::windows::ffi::OsStrExt;
+        let existing = path.ancestors().find(|ancestor| ancestor.exists())?;
+        let wide: Vec<u16> = existing.as_os_str().encode_wide().chain([0]).collect();
+        let mut available = 0u64;
+        // SAFETY: wide is NUL-terminated, available is writable, and the two totals may be null.
+        let ok = unsafe {
+            windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW(
+                wide.as_ptr(),
+                &mut available,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        (ok != 0).then_some(available)
     }
 }
 
@@ -1340,6 +1352,20 @@ pub(crate) fn crashed(p: &Box<dyn std::any::Any + Send>) -> anyhow::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn free_space_matches_what_windows_reports() {
+        let dir = std::env::current_dir().unwrap();
+        let drive = dir.components().next().unwrap().as_os_str().to_string_lossy().trim_end_matches(':').to_owned();
+        let output = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", &format!("(Get-PSDrive {drive}).Free")])
+            .output()
+            .unwrap();
+        let reported: u64 = String::from_utf8(output.stdout).unwrap().trim().parse().unwrap();
+        let measured = free_bytes(&dir.join("missing-model-directory").join("models")).unwrap();
+        assert!(measured.abs_diff(reported) <= 64 * 1_048_576, "measured {measured} bytes, Windows reports {reported}");
+    }
 
     #[cfg(unix)]
     #[test]
