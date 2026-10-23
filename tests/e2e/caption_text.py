@@ -94,12 +94,12 @@ def caption_text(r):
     second = captions(r)[1]['id']
     r.focus_clip(second)
     if not r.check('a caption\'s inspector offers Apply to, set to All captions',
-                   wait(lambda: r.s.run(f"return !!{group(SECTION, 'Apply to')}") and pressed(r, SECTION, 'Apply to') == 'All captions', 10)):
+                   wait(lambda: r.s.run(f"return !!{group(SECTION, 'Apply style to')}") and pressed(r, SECTION, 'Apply style to') == 'All captions', 10)):
         r.shot('apply-to-missing')
         return
     folded = r.s.run(f"""return {{case: !!{group(SECTION, 'Case')},
         more: {FOLD.format(SECTION, 'More style')}?.getAttribute('aria-expanded'),
-        position: {FOLD.format(SECTION, 'Position')}?.getAttribute('aria-expanded'),
+        position: {FOLD.format(SECTION, 'Position of all captions')}?.getAttribute('aria-expanded'),
         spacing: !!document.querySelector('{SECTION} input[aria-label="Letter spacing value"]'),
         shadow: !!{checkbox(SECTION, 'Shadow')}}}""")
     r.check('Case is in view, while spacing, the shadow and Position wait folded under More style and Position',
@@ -120,16 +120,18 @@ def caption_text(r):
     r.check('its tile is checked', wait(lambda: r.s.run(f"return document.querySelector('{SECTION} button[title=\"Apply Outline to all captions\"]').getAttribute('aria-pressed')") == 'true', 5))
 
     # This caption: a colour for the selected caption only.
-    r.s.run(f'{segment(SECTION, "Apply to", "This caption")}.click()')
-    r.check('Apply to switches to This caption', wait(lambda: pressed(r, SECTION, 'Apply to') == 'This caption', 5))
+    r.s.run(f'{segment(SECTION, "Apply style to", "This caption")}.click()')
+    r.check('Apply to switches to This caption', wait(lambda: pressed(r, SECTION, 'Apply style to') == 'This caption', 5))
     r.s.run(f"""const input = document.querySelector('{SECTION} input[type=color][aria-label="Color"]');
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, '#ffe14d');
         input.dispatchEvent(new Event('input', {{bubbles: true}}));""")
     colours = lambda: [c['style']['color'] for c in captions(r)]
     r.check('a colour picked for This caption goes on the selected caption only',
             wait(lambda: colours() == ['#ffffff', '#ffe14d', '#ffffff'], 5), colours())
-    r.s.run(f'{segment(SECTION, "Apply to", "All captions")}.click()')
-    r.check('and Apply to goes back to All captions', wait(lambda: pressed(r, SECTION, 'Apply to') == 'All captions', 5))
+    r.seek(1_500_000)
+    views(r, 'inspector-this-caption', reveal(f"document.querySelector('{SECTION} textarea[aria-label=Text]')"))
+    r.s.run(f'{segment(SECTION, "Apply style to", "All captions")}.click()')
+    r.check('and Apply to goes back to All captions', wait(lambda: pressed(r, SECTION, 'Apply style to') == 'All captions', 5))
     r.check('where the colours differ, Color shows a dash',
             wait(lambda: r.s.run(f"return [...document.querySelectorAll('{SECTION} label')].find((l) => l.querySelector('input[aria-label=\"Color\"]'))?.querySelector('span.tabular')?.textContent") == '—', 5))
 
@@ -147,14 +149,14 @@ def caption_text(r):
     views(r, 'inspector-more-style', reveal(FOLD.format(SECTION, 'More style')))
 
     # Position: every caption up at once, and one undo takes it back.
-    if not r.check('Enter opens Position', open_fold(r, SECTION, 'Position')):
+    if not r.check('Enter opens Position', open_fold(r, SECTION, 'Position of all captions')):
         return
     type_value(r, 'Position Y', -20)
     r.check('Position Y -20 % moves every caption up there', every(r, lambda c: abs(c['y'] + 0.2) < 1e-6), [c['y'] for c in captions(r)])
     shown = lambda: r.s.run(f"""return Object.fromEntries(['Scale', 'Position X', 'Position Y', 'Rotation', 'Opacity'].map((l) =>
         [l, document.querySelector(`{SECTION} input[aria-label="${{l}} value"]`)?.value]))""")
     r.check('each Position row shows its own value', wait(lambda: shown() == {'Scale': '100', 'Position X': '0.0', 'Position Y': '-20.0', 'Rotation': '0', 'Opacity': '100'}, 5), shown())
-    views(r, 'inspector-position', reveal(FOLD.format(SECTION, 'Position')))
+    views(r, 'inspector-position', reveal(FOLD.format(SECTION, 'Position of all captions')))
     r.s.run('document.activeElement?.blur()')
     r.key('z', ctrlKey=True)
     r.check('one Ctrl+Z puts every caption back where captions start and keeps their look',
@@ -188,7 +190,7 @@ def caption_text(r):
     try:
         run = bridge.call('begin_run', {'label': 'Restyle captions'})
         r.check('the UI knows an agent is editing', wait(lambda: r.state()['aiRun'], 10))
-        locked = r.s.run(f"""const scope = [...{group(SECTION, 'Apply to')}.querySelectorAll('button')];
+        locked = r.s.run(f"""const scope = [...{group(SECTION, 'Apply style to')}.querySelectorAll('button')];
             const c = {group(SECTION, 'Case')}.querySelector('button');
             return {{applyTo: scope.every((b) => !b.disabled && b.getAttribute('aria-disabled') !== 'true'),
                      case: c.getAttribute('aria-disabled') === 'true', why: c.title}}""")

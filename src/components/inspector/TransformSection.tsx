@@ -70,7 +70,8 @@ function atPlayhead(clip: Clip, timeUs: number, fps: number): AtPlayhead {
   };
 }
 
-export function TransformSection({ clip, asset }: { clip: Clip; asset?: Asset }) {
+/** `caption`: says that this moves the one caption, since its style can go to every caption. */
+export function TransformSection({ clip, asset, caption = false }: { clip: Clip; asset?: Asset; caption?: boolean }) {
   const canvas = useEditor((s) => s.snap!.project.canvas);
   // Plain values, so playback re-renders the section only when a keyframed value moves or a keyframe is passed.
   const at = useEditor(useShallow((s) => atPlayhead(clip, readoutTime(s), canvas.fps)));
@@ -113,6 +114,7 @@ export function TransformSection({ clip, asset }: { clip: Clip; asset?: Asset })
         </>
       }
     >
+      {caption && <p className="-mt-1 text-[12px] text-muted">Moves this caption only. Position in the Captions tab moves every caption.</p>}
       {keyed && (
         <p className="tabular -mt-1 text-[12px] text-muted">
           {clip.keyframes.length} keyframe{clip.keyframes.length === 1 ? "" : "s"} · edits {atIndex >= 0 ? "update this keyframe" : "add a keyframe here"}

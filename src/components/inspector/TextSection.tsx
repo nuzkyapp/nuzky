@@ -67,10 +67,10 @@ const SCOPES = [
 function ApplyTo() {
   const all = useStyleUi((s) => s.allCaptions);
   return (
-    <FieldRow label="Apply to">
+    <FieldRow label="Apply style to">
       <div className="min-w-0 flex-1">
         <LockReason.Provider value={null}>
-          <Segmented label="Apply to" value={all ? "all" : "this"} onChange={(id) => useStyleUi.setState({ allCaptions: id === "all" })} options={[...SCOPES]} />
+          <Segmented label="Apply style to" value={all ? "all" : "this"} onChange={(id) => useStyleUi.setState({ allCaptions: id === "all" })} options={[...SCOPES]} />
         </LockReason.Provider>
       </div>
     </FieldRow>
@@ -112,6 +112,10 @@ export function TextSection({ clip, text, style, caption }: { clip: Clip; text: 
       <Section title="Text">
         <TextField clipId={clip.id} text={text} />
         {caption && <ApplyTo />}
+      </Section>
+      {/* Font, size, colour and case first, so they are in view without scrolling past every style. */}
+      <Section title="Style">
+        <MainStyle style={style} styles={styles} setStyle={setStyle} />
         <div className="grid grid-cols-3 gap-2">
           {presets.map((p) => (
             <PresetTile key={p.name} label={p.name} selected={selected(p)} title={everyCaption ? `Apply ${p.name} to all captions` : `Apply ${p.name} style`} onClick={() => apply(p)}>
@@ -121,9 +125,6 @@ export function TextSection({ clip, text, style, caption }: { clip: Clip; text: 
             </PresetTile>
           ))}
         </div>
-      </Section>
-      <Section title="Style">
-        <MainStyle style={style} styles={styles} setStyle={setStyle} />
       </Section>
       {caption && (
         <Section title="Karaoke">
@@ -138,7 +139,7 @@ export function TextSection({ clip, text, style, caption }: { clip: Clip; text: 
         </Section>
       )}
       <MoreStyleFold style={style} styles={styles} setStyle={setStyle} />
-      {everyCaption && <CaptionPosition clips={everyCaption} />}
+      {everyCaption && <CaptionPosition clips={everyCaption} title="Position of all captions" />}
     </>
   );
 }
@@ -238,7 +239,7 @@ export function KeywordRows({ style, styles, setStyle }: StyleProps) {
 export function MoreStyleFold({ flush, ...props }: StyleProps & { flush?: boolean }) {
   const open = useStyleUi((s) => s.more);
   return (
-    <Disclosure title="More style" summary="Bold, spacing, alignment, outline, box, shadow" open={open} onToggle={() => useStyleUi.setState({ more: !open })} flush={flush}>
+    <Disclosure title="More style" summary="Outline, box, shadow, spacing, alignment, bold" open={open} onToggle={() => useStyleUi.setState({ more: !open })} flush={flush}>
       <MoreStyle {...props} />
     </Disclosure>
   );
@@ -295,7 +296,7 @@ export function MoreStyle({ style, styles, setStyle }: StyleProps) {
           <ColorInput label="Box color" mixed={differ((s) => s.background?.slice(0, 7))} value={box} onChange={(v) => setStyle((s) => ({ background: v.slice(0, 7) + (s.background ?? "").slice(7) }), "bgColor")} />
           <div className="grid grid-cols-2 gap-2">
             <div className="min-w-0">
-              <Slider label="Opacity" name="Box opacity" narrow mixed={differ((s) => s.background && Math.round(boxOpacity(s.background) * 100))} value={boxOpacity(box) * 100} min={0} max={100} step={1} unit="%" format={percent} onChange={(v) => setStyle((s) => (s.background ? { background: withOpacity(s.background, v / 100) } : {}), "bgOpacity")} />
+              <Slider label="Box opacity" narrow mixed={differ((s) => s.background && Math.round(boxOpacity(s.background) * 100))} value={boxOpacity(box) * 100} min={0} max={100} step={1} unit="%" format={percent} onChange={(v) => setStyle((s) => (s.background ? { background: withOpacity(s.background, v / 100) } : {}), "bgOpacity")} />
             </div>
             <div className="min-w-0">
               <Slider label="Corners" name="Box corners" narrow mixed={differ((s) => s.boxRadius ?? BOX_RADIUS)} value={(style.boxRadius ?? BOX_RADIUS) * 100} min={0} max={100} step={1} unit="%" format={percent} onChange={(v) => setStyle({ boxRadius: v / 100 }, "boxRadius")} />
@@ -334,7 +335,7 @@ const PLACE = ["x", "y", "scale", "rotation", "opacity"] as const;
  * Where every caption sits, folded until someone opens it. A caption with keyframes keeps its own motion, as
  * the engine leaves it; the values shown are those of the captions without.
  */
-export function CaptionPosition({ clips, flush }: { clips: Clip[]; flush?: boolean }) {
+export function CaptionPosition({ clips, title = "Position", flush }: { clips: Clip[]; title?: string; flush?: boolean }) {
   const open = useStyleUi((s) => s.position);
   const free = clips.filter((c) => c.keyframes.length === 0);
   const keyed = clips.length - free.length;
@@ -348,7 +349,7 @@ export function CaptionPosition({ clips, flush }: { clips: Clip[]; flush?: boole
   const [x, y, scale, rotation, opacity] = PLACE.map(field);
   return (
     <Disclosure
-      title="Position"
+      title={title}
       summary="Scale, position, rotation, opacity"
       open={open}
       onToggle={() => useStyleUi.setState({ position: !open })}

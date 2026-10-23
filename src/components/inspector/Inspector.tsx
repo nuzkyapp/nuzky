@@ -65,7 +65,7 @@ function ClipInspector({ clip, kind, asset, chosen, onChoose }: { clip: Clip; ki
       <TabBar group="clip" label="Clip settings" tabs={tabs} value={tab} onChange={(id) => onChoose({ ...chosen, [kind]: id })} />
       <TabPanel group="clip" id={tab} className="min-h-0 flex-1 overflow-y-auto">
         <AiLock>
-          {(tab === "video" || tab === "transform") && <TransformSection clip={clip} asset={asset} />}
+          {(tab === "video" || tab === "transform") && <TransformSection clip={clip} asset={asset} caption={kind === "caption"} />}
           {tab === "video" && c.type === "media" && (
             <>
               <ShapeSection clip={clip} content={c} asset={asset} />
