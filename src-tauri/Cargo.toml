@@ -41,7 +41,6 @@ rtrb = "0.4"
 semver = "1.0.28"
 png = "0.18"
 base64 = "0.23"
-dirs = "6"
 dunce = "1.0.5"
 uuid = { version = "1", features = ["v4"] }
 percent-encoding = "2.3.2"

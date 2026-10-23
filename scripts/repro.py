@@ -10,19 +10,21 @@ A new flow is a file in tests/e2e/ with a function decorated with @flow; this sc
 Each flow gets fresh data, cache and runtime directories, so the app never opens the user's projects or
 joins their running Nuzky. On Linux it runs inside headless gamescope with D-Bus switched off, so no window,
 dialog or notification reaches the desktop. On macOS the app keeps its window off every screen and never
-becomes the active app (src-tauri/src/test_bridge.rs). Media and models come from scripts/fixtures.sh.
+becomes the active app (src-tauri/src/test_bridge.rs). On Windows its window opens on the desktop, so run it
+where nobody works; input goes to the webview, not the screen. Media and models come from scripts/fixtures.sh.
 
-Needs Pillow and numpy, and on Linux gamescope, WebKitWebDriver and python-xlib. Vite takes port 1420 (the app's
-dev URL) and on Linux WebKitWebDriver 4444. Runs on one machine take turns: a second one waits for the first. A port that something
-else holds, such as a dev server, stops the run instead of touching it.
+Needs Pillow and numpy, on Linux gamescope, WebKitWebDriver and python-xlib, and on Windows the Edge WebDriver
+and FFmpeg that scripts/setup-windows-deps.ps1 sets up in the same PowerShell. Vite takes port 1420 (the app's
+dev URL) and the WebDriver 4444. Runs on one machine take turns: a second one waits for the first. A port that
+something else holds, such as a dev server, stops the run instead of touching it.
 """
-import fcntl, importlib, json, os, shutil, signal, subprocess, sys
+import importlib, json, os, shutil, signal, subprocess, sys, time
 from pathlib import Path
 
 sys.dont_write_bytecode = True
 TESTS = Path(__file__).resolve().parent.parent / 'tests'
 sys.path.insert(0, str(TESTS))
-from e2e.harness import FIXTURES, FLOWS, MACOS, MODELS, OUT, ROOT, WEBKIT_DRIVER, port_busy, run_flow, start, started, stop  # noqa: E402
+from e2e.harness import DRIVER, FIXTURES, FLOWS, LINUX, MACOS, MODELS, OUT, ROOT, WINDOWS, port_busy, run_flow, start, started, stop  # noqa: E402
 
 for module in sorted(p.stem for p in (TESTS / 'e2e').glob('*.py') if p.stem != 'harness'):
     importlib.import_module(f'e2e.{module}')
@@ -30,11 +32,29 @@ for module in sorted(p.stem for p in (TESTS / 'e2e').glob('*.py') if p.stem != '
 
 # --- Entry point ------------------------------------------------------------------------------------------
 
+def take_turn(lock, wait):
+    """The machine's one UI run at a time: an exclusive lock on `lock` for as long as this process lives."""
+    while True:
+        try:
+            if WINDOWS:
+                import msvcrt
+                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except OSError:
+            if not wait:
+                return False
+            time.sleep(1)
+
+
 def preflight(names):
-    tools = ('ffmpeg', 'npx') if MACOS else ('gamescope', 'ffmpeg', 'npx')
+    tools = ('gamescope', 'ffmpeg', 'npx') if LINUX else ('ffmpeg', 'npx')
     problems = [f'{tool} is missing' for tool in tools if not shutil.which(tool)]
-    problems += [] if MACOS else [f'{path} is missing' for path in (WEBKIT_DRIVER,) if not Path(path).exists()]
-    packages = (('PIL', 'Pillow'), ('numpy', 'numpy')) + (() if MACOS else (('Xlib', 'python-xlib'),))
+    problems += [] if MACOS else [f'{path} is missing' for path in (DRIVER,) if not Path(path).exists()]
+    problems += ['FFMPEG_DIR is not set: run scripts/setup-windows-deps.ps1 in this PowerShell'] if WINDOWS and not os.environ.get('FFMPEG_DIR') else []
+    packages = (('PIL', 'Pillow'), ('numpy', 'numpy')) + ((('Xlib', 'python-xlib'),) if LINUX else ())
     for module, package in packages:
         try:
             __import__(module)
@@ -71,7 +91,7 @@ def main(args):
         if port_busy(1420):
             print('port 1420 is in use by another session', file=sys.stderr)
             return 1
-        vite = start(['npx', 'vite', '--port', '1420', '--strictPort'], OUT / 'vite.log')
+        vite = start([shutil.which('npx'), 'vite', '--port', '1420', '--strictPort'], OUT / 'vite.log')
         try:
             if not started(vite, 1420, 30):
                 print('Vite did not start, see tmp-test/repro/vite.log', file=sys.stderr)
@@ -86,11 +106,9 @@ def main(args):
     locks = Path.home() / '.cache/nuzky/deps'
     locks.mkdir(parents=True, exist_ok=True)
     turn = open(locks / 'repro.lock', 'w')
-    try:
-        fcntl.flock(turn, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
+    if not take_turn(turn, wait=False):
         print('Another UI run uses the app on this machine; this one starts when it ends.', flush=True)
-        fcntl.flock(turn, fcntl.LOCK_EX)
+        take_turn(turn, wait=True)
     problems = preflight(names)
     if problems:
         print('repro cannot run:\n  ' + '\n  '.join(problems), file=sys.stderr)
@@ -110,13 +128,13 @@ def main(args):
     for name in names:
         (OUT / name / 'result.json').unlink(missing_ok=True)
     OUT.mkdir(parents=True, exist_ok=True)
-    where, log_name = ('off screen', 'flows.log') if MACOS else ('in headless gamescope', 'gamescope.log')
+    where, log_name = ('in headless gamescope', 'gamescope.log') if LINUX else ('off screen' if MACOS else 'on the desktop', 'flows.log')
     print(f'Running {", ".join(names)} {where}; its output goes to tmp-test/repro/{log_name}', flush=True)
     inner = [sys.executable, __file__, *names]
+    group = {'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP} if WINDOWS else {'start_new_session': True}
     with open(OUT / log_name, 'w') as log:
-        runner = subprocess.Popen(inner if MACOS else ['gamescope', '--backend', 'headless', '-W', '1440', '-H', '900', '--', *inner],
-                                  cwd=ROOT, env=dict(os.environ, NUZKY_REPRO_INNER='1'), stdout=log, stderr=subprocess.STDOUT,
-                                  start_new_session=True)
+        runner = subprocess.Popen(['gamescope', '--backend', 'headless', '-W', '1440', '-H', '900', '--', *inner] if LINUX else inner,
+                                  cwd=ROOT, env=dict(os.environ, NUZKY_REPRO_INNER='1'), stdout=log, stderr=subprocess.STDOUT, **group)
         try:
             runner.wait()
         finally:

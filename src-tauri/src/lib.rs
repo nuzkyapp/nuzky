@@ -824,7 +824,7 @@ fn list_projects() -> Vec<ProjectSummary> {
 async fn agent_connections() -> CmdResult<Vec<connect::Connection>> {
     tauri::async_runtime::spawn_blocking(|| {
         let command = connect::Command::this_app().map_err(err)?;
-        let home = dirs::home_dir().ok_or("No home folder")?;
+        let home = std::env::home_dir().ok_or("No home folder")?;
         Ok(connect::Agent::ALL
             .map(|agent| connect::status(agent, &agent.config(&home), &command).shown_from(&home))
             .to_vec())
@@ -850,7 +850,7 @@ pub struct AgentStatus {
 async fn agent_status(agent: connect::Agent) -> CmdResult<AgentStatus> {
     tauri::async_runtime::spawn_blocking(move || {
         let info = nuzky_agent::find(agent.id());
-        let home = dirs::home_dir().ok_or("No home folder")?;
+        let home = std::env::home_dir().ok_or("No home folder")?;
         let command = connect::Command::this_app().map_err(err)?;
         Ok(AgentStatus {
             installed: info.path.is_some(),
@@ -869,7 +869,7 @@ async fn verify_agent(agent: connect::Agent) -> CmdResult<()> {
     tauri::async_runtime::spawn_blocking(move || {
         let info = nuzky_agent::find(agent.id());
         let program = info.path.ok_or_else(|| format!("Install {} first.", info.name))?;
-        let home = dirs::home_dir().ok_or("No home folder")?;
+        let home = std::env::home_dir().ok_or("No home folder")?;
         connect::verify(agent, &program, &home)?;
         if !connect::access().on {
             return Err(format!("Agent access is off, so {} can't edit your video. Try again turns it on.", info.name));
@@ -886,7 +886,7 @@ async fn verify_agent(agent: connect::Agent) -> CmdResult<()> {
 async fn connect_agent(agent: connect::Agent) -> CmdResult<connect::Connection> {
     tauri::async_runtime::spawn_blocking(move || {
         let command = connect::Command::this_app().map_err(err)?;
-        let home = dirs::home_dir().ok_or("No home folder")?;
+        let home = std::env::home_dir().ok_or("No home folder")?;
         let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
         let connection =
             connect::connect(agent, &agent.config(&home), agent.settings(&home).as_deref(), &command, stamp)

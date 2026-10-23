@@ -73,7 +73,7 @@ pub fn watch_url(id: &str) -> String {
 /// Where installers put yt-dlp when the app was started without the user's shell `PATH`, as from the
 /// Dock, Finder or a desktop launcher.
 fn known_dirs() -> Vec<PathBuf> {
-    let home = dirs::home_dir();
+    let home = std::env::home_dir();
     // pipx puts yt-dlp in ~/.local/bin on every system; deno's own installer, in ~/.deno/bin.
     let user = [".local", ".deno"].map(|dir| home.as_ref().map(|h| h.join(dir).join("bin")));
     if cfg!(windows) {
