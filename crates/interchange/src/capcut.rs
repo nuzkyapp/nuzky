@@ -32,13 +32,9 @@ pub const ENCRYPTED: &str = "JianYing encrypts its drafts, so Nuzky cannot read 
 pub const ENCRYPTED_OPEN: &str = "JianYing encrypts its drafts, so Nuzky cannot open this one. Export the video from JianYing and start a project from it instead.";
 
 /// Where CapCut keeps its drafts on this computer: under the local app data on Windows, under Movies
-/// in the home folder elsewhere. The environment names both, so the UI flows can give the app their own.
+/// in the home folder elsewhere.
 pub fn default_folder() -> Option<PathBuf> {
-    let base = if cfg!(windows) {
-        std::env::var_os("LOCALAPPDATA").filter(|dir| !dir.is_empty()).map(PathBuf::from).or_else(dirs::data_local_dir)
-    } else {
-        std::env::home_dir().map(|h| h.join("Movies"))
-    };
+    let base = if cfg!(windows) { dirs::data_local_dir() } else { dirs::home_dir().map(|h| h.join("Movies")) };
     base.map(|b| b.join("CapCut").join("User Data").join("Projects").join("com.lveditor.draft"))
 }
 

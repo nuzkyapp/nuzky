@@ -1203,6 +1203,18 @@ pub fn run() {
     let (builder, context) = (tauri::Builder::default(), tauri::generate_context!());
     #[cfg(all(target_os = "macos", debug_assertions))]
     let (builder, context) = test_bridge::prepare(builder, context);
+    #[cfg(all(windows, debug_assertions))]
+    let mut context = context;
+    // Edge WebDriver opens the webview's debugging port through this variable, which the arguments wry always
+    // sets would otherwise override; these are wry's own, with the variable's added. Only for the UI flows.
+    #[cfg(all(windows, debug_assertions))]
+    if let Ok(added) = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") {
+        for window in &mut context.config_mut().app.windows {
+            window.additional_browser_args = Some(format!(
+                "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required {added}"
+            ));
+        }
+    }
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())

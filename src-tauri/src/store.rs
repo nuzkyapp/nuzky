@@ -27,7 +27,7 @@ pub fn projects_dir() -> PathBuf {
 }
 
 pub fn cache_dir() -> PathBuf {
-    nuzky_engine::cache_dir()
+    dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("nuzky")
 }
 
 #[cfg_attr(test, derive(ts_rs::TS))]

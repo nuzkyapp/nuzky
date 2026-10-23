@@ -71,7 +71,7 @@ fn render_options(rest: &[&str]) -> Result<ExportOptions> {
 }
 
 fn cache_dir() -> PathBuf {
-    nuzky_engine::cache_dir()
+    dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("nuzky")
 }
 
 fn load(path: &str) -> Result<Project> {

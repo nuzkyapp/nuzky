@@ -36,11 +36,3 @@ pub fn data_dir() -> Option<std::path::PathBuf> {
         _ => dirs::data_dir().map(|dir| dir.join("nuzky")),
     }
 }
-
-/// Nuzky's cache: decoded sound, proxies, mattes and thumbnails. `NUZKY_CACHE_DIR` moves it, for the same reason.
-pub fn cache_dir() -> std::path::PathBuf {
-    match std::env::var_os("NUZKY_CACHE_DIR") {
-        Some(dir) if !dir.is_empty() => dir.into(),
-        _ => dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("nuzky"),
-    }
-}

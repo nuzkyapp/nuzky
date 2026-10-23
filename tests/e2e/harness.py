@@ -199,17 +199,24 @@ class Run:
             self.env.update(HOME=str(home), CFFIXED_USER_HOME=str(home))
             self.socket, self.token = Path(runtime) / 'nuzky/webdriver.sock', secrets.token_hex(32)
         if WINDOWS:
-            # No variable moves Windows' own folders, so Nuzky's data and cache, the home folder and the webview's
-            # storage are each moved by their own.
-            (self.work / 'home').mkdir()
-            self.env.update(NUZKY_DATA_DIR=str(self.work / 'data/nuzky'), NUZKY_CACHE_DIR=str(self.work / 'cache/nuzky'),
-                            HOME=str(self.work / 'home'), WEBVIEW2_USER_DATA_FOLDER=str(self.work / 'webview'))
+            # Windows names a user's folders under USERPROFILE, so the app gets a home of its own as on macOS: its
+            # cache, the webview's storage and CapCut's drafts live in this run's AppData, with the cache joined to
+            # this run's folder. NUZKY_DATA_DIR moves the data folder, which roams elsewhere.
+            home = self.work / 'home'
+            for folder in (home / 'AppData/Local', home / 'AppData/Roaming', self.work / 'cache/nuzky'):
+                folder.mkdir(parents=True)
+            subprocess.run(['cmd', '/c', 'mklink', '/J', str(home / 'AppData/Local/nuzky'), str(self.work / 'cache/nuzky')],
+                           check=True, capture_output=True)
+            self.env.update(HOME=str(home), NUZKY_DATA_DIR=str(self.work / 'data/nuzky'))
 
     def launch_env(self, **extra):
         """r.env for a process this run starts; on Windows the home a flow set in HOME is the one apps read."""
         env = dict(self.env, **extra)
         if WINDOWS:
             env['USERPROFILE'] = env['HOME']
+            # Without them Windows names none of the app's folders and Tauri falls back to its own.
+            for folder in ('AppData/Local', 'AppData/Roaming'):
+                (Path(env['HOME']) / folder).mkdir(parents=True, exist_ok=True)
         return env
 
     def check(self, name, ok, detail=None):
