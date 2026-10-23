@@ -21,6 +21,10 @@ something else holds, such as a dev server, stops the run instead of touching it
 import importlib, json, os, shutil, signal, subprocess, sys, time
 from pathlib import Path
 
+if sys.platform == 'win32' and not sys.flags.utf8_mode:
+    # Windows' code page, such as cp1250 on a Czech system, can neither print the flows' text nor read the app's
+    # UTF-8 files.
+    sys.exit(subprocess.run([sys.executable, '-X', 'utf8', *sys.argv]).returncode)
 sys.dont_write_bytecode = True
 TESTS = Path(__file__).resolve().parent.parent / 'tests'
 sys.path.insert(0, str(TESTS))
@@ -130,7 +134,7 @@ def main(args):
     OUT.mkdir(parents=True, exist_ok=True)
     where, log_name = ('in headless gamescope', 'gamescope.log') if LINUX else ('off screen' if MACOS else 'on the desktop', 'flows.log')
     print(f'Running {", ".join(names)} {where}; its output goes to tmp-test/repro/{log_name}', flush=True)
-    inner = [sys.executable, __file__, *names]
+    inner = [sys.executable, '-X', 'utf8', __file__, *names]
     group = {'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP} if WINDOWS else {'start_new_session': True}
     with open(OUT / log_name, 'w') as log:
         runner = subprocess.Popen(['gamescope', '--backend', 'headless', '-W', '1440', '-H', '900', '--', *inner] if LINUX else inner,
