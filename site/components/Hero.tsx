@@ -272,11 +272,11 @@ export function Hero({ release }: { release: Release }) {
           <span data-show="unknown mac intel linux arm phone">Your</span> own ChatGPT or Claude cuts while you watch, and one undo takes it all back.
         </p>
 
-        <div className="mt-10 w-full sm:mt-11">
+        <LaunchVideo className="mt-10 sm:mt-12" />
+
+        <div className="mt-10 w-full sm:mt-12">
           <HeroDownload release={release} />
         </div>
-
-        <LaunchVideo className="mt-12 sm:mt-16" />
 
         <div data-waves="swell" className="mt-14 flex w-full justify-center sm:mt-20">
           <Fit width={WIDE} height={330} className="hidden lg:block">

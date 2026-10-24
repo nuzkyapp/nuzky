@@ -37,7 +37,8 @@ async function preferAv1(cut: (typeof cuts)["wide"]) {
   return !!info?.supported && info.powerEfficient;
 }
 
-// Plays muted while at least a quarter of it is on screen, and the visitor turns the sound on with a click.
+// Plays muted while at least a tenth of it is on screen, and the visitor turns the sound on with a click. A tenth
+// because on a 1366 × 768 laptop the first screen shows only a fifth of it under the headline.
 // Nothing downloads until the page has loaded and the video comes on screen. With reduced motion, or where the
 // browser refuses to start a video by itself (Low Power Mode on an iPhone), it waits on a still from the video
 // until the visitor plays it, and the still stays when the file cannot load at all.
@@ -50,7 +51,7 @@ export function LaunchVideo({ className = "" }: { className?: string }) {
   const [failed, setFailed] = useState(false);
   const [ready, setReady] = useState(false);
   const [paused, setPaused] = useState(true);
-  const { shown, still } = useView(box, 0.25);
+  const { shown, still } = useView(box, 0.1);
   const playing = shown && (sound || !still);
 
   // The breakpoint is the one that switches the box between 9:16 and 16:9; both cuts run on the same timeline, so
