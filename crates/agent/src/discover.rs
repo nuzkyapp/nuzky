@@ -242,7 +242,9 @@ pub fn no_window(command: &mut Command) {
 /// Ends the process and everything it starts once dropped, as killing its process group does on Unix, also after the
 /// process itself has exited and its helpers hold on to its output.
 #[cfg(windows)]
-struct Job(std::os::windows::io::OwnedHandle);
+struct Job {
+    _handle: std::os::windows::io::OwnedHandle,
+}
 
 #[cfg(windows)]
 impl Job {
@@ -257,7 +259,7 @@ impl Job {
         if handle.is_null() {
             return None;
         }
-        let job = Job(unsafe { OwnedHandle::from_raw_handle(handle) });
+        let job = Job { _handle: unsafe { OwnedHandle::from_raw_handle(handle) } };
         let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
         limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
         // SAFETY: limits is the structure this information class names, and both handles are open.
