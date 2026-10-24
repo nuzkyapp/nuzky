@@ -45,6 +45,7 @@ if (!(Test-Path "$env:VULKAN_SDK/.ready")) {
     New-Item -ItemType File "$env:VULKAN_SDK/.ready" | Out-Null
     Remove-Item $installer
 }
+$env:CMAKE_PROJECT_INCLUDE = (Join-Path $PSScriptRoot 'whisper-paths.cmake') -replace '\\', '/'
 $env:LIBCLANG_PATH = 'C:\Program Files\LLVM\bin'
 if (!(Test-Path "$env:LIBCLANG_PATH/libclang.dll")) {
     throw 'Install LLVM x64 (winget install LLVM.LLVM), then rerun this script.'
@@ -57,6 +58,7 @@ if ($env:GITHUB_ENV) {
     "FFMPEG_DIR=$env:FFMPEG_DIR" >> $env:GITHUB_ENV
     "FFMPEG_BTBN_TAG=$tag" >> $env:GITHUB_ENV
     "VULKAN_SDK=$env:VULKAN_SDK" >> $env:GITHUB_ENV
+    "CMAKE_PROJECT_INCLUDE=$env:CMAKE_PROJECT_INCLUDE" >> $env:GITHUB_ENV
     "LIBCLANG_PATH=$env:LIBCLANG_PATH" >> $env:GITHUB_ENV
     "$env:FFMPEG_DIR\bin" >> $env:GITHUB_PATH
     $env:LIBCLANG_PATH >> $env:GITHUB_PATH
