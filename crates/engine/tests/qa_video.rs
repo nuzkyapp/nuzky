@@ -397,6 +397,17 @@ fn saturated_png_colours_match_ffmpeg_in_preview_thumbnails_and_export() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+/// The levels tests' patches: greys from black to white, skin, sky, grass and colours inside the gamut.
+#[rustfmt::skip]
+const LEVEL_RGB: [[f64; 3]; 32] = [
+    [0.0; 3], [8.0; 3], [24.0; 3], [48.0; 3], [72.0; 3], [96.0; 3], [118.0; 3], [140.0; 3],
+    [164.0; 3], [188.0; 3], [210.0; 3], [232.0; 3], [245.0; 3], [255.0; 3], [128.0; 3], [64.0; 3],
+    [224.0, 172.0, 140.0], [198.0, 134.0, 98.0], [141.0, 85.0, 36.0], [255.0, 219.0, 172.0],
+    [90.0, 140.0, 210.0], [135.0, 206.0, 235.0], [60.0, 120.0, 40.0], [120.0, 180.0, 60.0],
+    [200.0, 40.0, 40.0], [40.0, 160.0, 80.0], [50.0, 60.0, 180.0], [230.0, 200.0, 40.0],
+    [30.0, 30.0, 40.0], [250.0, 240.0, 230.0], [170.0, 90.0, 160.0], [20.0, 200.0, 200.0],
+];
+
 /// The levels test's frame: 8 x 4 flat patches over 1920 x 1080.
 const LEVEL_PATCHES: (usize, usize) = (8, 4);
 const LEVEL_FRAME: (usize, usize) = (1920, 1080);
@@ -416,8 +427,25 @@ fn bt709_yuv([r, g, b]: [f64; 3], full: bool) -> [f64; 3] {
     [offset + ky * y, 128.0 + kc * (b / 255.0 - y) / 1.8556, 128.0 + kc * (r / 255.0 - y) / 1.5748]
 }
 
+/// RGB in 0..255 of 10-bit limited range BT.2020 Y'CbCr, still in the HDR signal's own curve.
+fn bt2020_rgb([y, u, v]: [f64; 3]) -> [f64; 3] {
+    let (y, pb, pr) = ((y - 64.0) / 876.0, (u - 512.0) / 896.0, (v - 512.0) / 896.0);
+    let (r, b) = (y + 1.4746 * pr, y + 1.8814 * pb);
+    let g = (y - 0.2627 * r - 0.0593 * b) / 0.678;
+    [r, g, b].map(|c| (c * 255.0).clamp(0.0, 255.0))
+}
+
+fn bt2020_yuv([r, g, b]: [f64; 3]) -> [f64; 3] {
+    let y = (0.2627 * r + 0.678 * g + 0.0593 * b) / 255.0;
+    [64.0 + 876.0 * y, 512.0 + 896.0 * (b / 255.0 - y) / 1.8814, 512.0 + 896.0 * (r / 255.0 - y) / 1.4746]
+}
+
 fn yuv_at(f: &ffmpeg_next::frame::Video, x: usize, y: usize) -> [f64; 3] {
-    let at = |plane: usize, x: usize, y: usize| f64::from(f.data(plane)[y * f.stride(plane) + x]);
+    let wide = f.format() == ffmpeg_next::format::Pixel::YUV420P10LE;
+    let at = |plane: usize, x: usize, y: usize| {
+        let row = &f.data(plane)[y * f.stride(plane)..];
+        if wide { f64::from(u16::from_le_bytes([row[2 * x], row[2 * x + 1]])) } else { f64::from(row[x]) }
+    };
     [at(0, x, y), at(1, x / 2, y / 2), at(2, x / 2, y / 2)]
 }
 
@@ -453,16 +481,6 @@ fn sdr_bt709_matches_an_exact_conversion_at_every_size() {
     if !available() {
         return;
     }
-    // Greys from black to white, skin, sky, grass and colours inside the gamut.
-    #[rustfmt::skip]
-    const RGB: [[f64; 3]; 32] = [
-        [0.0; 3], [8.0; 3], [24.0; 3], [48.0; 3], [72.0; 3], [96.0; 3], [118.0; 3], [140.0; 3],
-        [164.0; 3], [188.0; 3], [210.0; 3], [232.0; 3], [245.0; 3], [255.0; 3], [128.0; 3], [64.0; 3],
-        [224.0, 172.0, 140.0], [198.0, 134.0, 98.0], [141.0, 85.0, 36.0], [255.0, 219.0, 172.0],
-        [90.0, 140.0, 210.0], [135.0, 206.0, 235.0], [60.0, 120.0, 40.0], [120.0, 180.0, 60.0],
-        [200.0, 40.0, 40.0], [40.0, 160.0, 80.0], [50.0, 60.0, 180.0], [230.0, 200.0, 40.0],
-        [30.0, 30.0, 40.0], [250.0, 240.0, 230.0], [170.0, 90.0, 160.0], [20.0, 200.0, 200.0],
-    ];
     let ((cols, rows), (fw, fh)) = (LEVEL_PATCHES, LEVEL_FRAME);
     let encoders =
         String::from_utf8_lossy(&run(Command::new("ffmpeg").args(["-hide_banner", "-encoders"])).stdout).into_owned();
@@ -490,7 +508,7 @@ fn sdr_bt709_matches_an_exact_conversion_at_every_size() {
         for (plane, step) in [(0, 1), (1, 2), (2, 2)] {
             for y in (0..fh).step_by(step) {
                 for x in (0..fw).step_by(step) {
-                    yuv.push(bt709_yuv(RGB[y * rows / fh * cols + x * cols / fw], full)[plane].round() as u8);
+                    yuv.push(bt709_yuv(LEVEL_RGB[y * rows / fh * cols + x * cols / fw], full)[plane].round() as u8);
                 }
             }
         }
@@ -544,6 +562,72 @@ fn sdr_bt709_matches_an_exact_conversion_at_every_size() {
             let rgba = decoder.convert(&f, t, 1280, 720).unwrap();
             check(format!("{name} from its proxy"), &rgba.data, (1280, 720), &want);
         }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+// HDR from phones is 10-bit, which swscale's default RGB output drew about 1.6 levels of 255 darker than BT.2020 at
+// the file's own size, and its 8-bit proxy darker still. The tone mapping starts from these values, so here they are
+// compared with BT.2020 of the decoded Y'CbCr, worked out by hand.
+#[test]
+fn hdr_bt2020_matches_an_exact_conversion_at_every_size() {
+    if !available() {
+        return;
+    }
+    let encoders =
+        String::from_utf8_lossy(&run(Command::new("ffmpeg").args(["-hide_banner", "-encoders"])).stdout).into_owned();
+    if !encoders.contains("libx265") {
+        eprintln!("SKIP: ffmpeg without libx265");
+        return;
+    }
+    let ((cols, rows), (fw, fh)) = (LEVEL_PATCHES, LEVEL_FRAME);
+    let d = dir("hdr-levels");
+    let mut failures = Vec::new();
+    let mut check = |what: String, rgba: &[u8], size: (usize, usize), want: &[[f64; 3]]| {
+        let (mean, abs) = patch_error(rgba, size, want);
+        eprintln!("QA HDR levels {what} at {}x{}: mean {mean:+.2}, mean absolute {abs:.2}", size.0, size.1);
+        if mean.abs() > 0.5 || abs > 1.0 {
+            failures.push(format!("{what} at {}x{}: off by {mean:+.2} on average, {abs:.2} absolute", size.0, size.1));
+        }
+    };
+    let mut yuv = Vec::new();
+    for (plane, step) in [(0, 1), (1, 2), (2, 2)] {
+        for y in (0..fh).step_by(step) {
+            for x in (0..fw).step_by(step) {
+                let value = bt2020_yuv(LEVEL_RGB[y * rows / fh * cols + x * cols / fw])[plane].round() as u16;
+                yuv.extend(value.to_le_bytes());
+            }
+        }
+    }
+    let raw = d.join("patches.yuv");
+    std::fs::write(&raw, yuv).unwrap();
+    // As an iPhone records HDR (HLG) and Android phones HDR10 (PQ): 10-bit HEVC tagged hvc1 in a QuickTime file.
+    for transfer in ["arib-std-b67", "smpte2084"] {
+        let path = d.join(format!("{transfer}.mov"));
+        let tags =
+            ["-color_range", "tv", "-colorspace", "bt2020nc", "-color_primaries", "bt2020", "-color_trc", transfer];
+        let input = ["-f", "rawvideo", "-pix_fmt", "yuv420p10le", "-s", "1920x1080", "-r", "30", "-stream_loop", "2"];
+        let x265 =
+            ["-c:v", "libx265", "-x265-params", "log-level=error:pools=1:frame-threads=1:crf=4", "-tag:v", "hvc1"];
+        let output = ["-pix_fmt", "yuv420p10le", "-frames:v", "3"];
+        ff(&[&input[..], &tags, &["-i", raw.to_str().unwrap()], &x265, &output, &tags].concat(), &path);
+
+        let mut decoder = VideoDecoder::open_for_seeking(&path).unwrap();
+        let (t, f) = decoder.next_frame().unwrap().unwrap();
+        assert_eq!(f.format(), ffmpeg_next::format::Pixel::YUV420P10LE, "{transfer}");
+        let centre = |i: usize| ((2 * (i % cols) + 1) * fw / cols / 2, (2 * (i / cols) + 1) * fh / rows / 2);
+        let want: Vec<_> = (0..cols * rows).map(|i| bt2020_rgb(yuv_at(&f, centre(i).0, centre(i).1))).collect();
+        for (w, h) in [(fw, fh), (1280, 720), (960, 540), (214, 120)] {
+            let rgba = decoder.convert(&f, t, w as u32, h as u32).unwrap();
+            assert_ne!(rgba.transfer, nuzky_engine::media::Transfer::Sdr, "{transfer}");
+            check(format!("{transfer} decoded"), &rgba.data, (w, h), &want);
+        }
+        // The preview shows a phone video from its 8-bit proxy, made on the GPU's decoder where there is one.
+        let proxy = nuzky_engine::proxy::ensure_proxy(&d.join("cache"), &path, |_| Ok(())).unwrap();
+        let mut decoder = VideoDecoder::open_proxy(&proxy).unwrap();
+        let (t, f) = decoder.next_frame().unwrap().unwrap();
+        let rgba = decoder.convert(&f, t, 1280, 720).unwrap();
+        check(format!("{transfer} from its proxy"), &rgba.data, (1280, 720), &want);
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
