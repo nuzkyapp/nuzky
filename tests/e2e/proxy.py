@@ -61,8 +61,10 @@ def proxy(r):
     magenta = r.work / 'magenta.mp4'
     subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=magenta:s=192x108:r=30:d=4', '-c:v',
                     'libx264', str(magenta)], check=True)
-    magenta.replace(copies(r)[0])
-    # The preview lets a decoder go after 5 s unused, so the next frame opens the swapped copy.
+    # The preview lets a decoder go after 5 s unused, so the next frame opens the swapped copy. Windows refuses to
+    # replace a file a decoder holds open, so there the copy is swapped once it lets go.
+    if not wait(lambda: magenta.replace(copies(r)[0]) or True, 10):
+        raise RuntimeError('the preview kept its copy open')
     time.sleep(6)
     r.seek(2_000_000)
     time.sleep(1.5)

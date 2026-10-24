@@ -158,7 +158,7 @@ def wait(fn, timeout=30, step=0.2):
         try:
             value = fn()
         except PermissionError:
-            # Windows refuses to open a file for a moment while the app replaces it.
+            # Windows refuses to open a file while the app replaces it, and to replace one the app holds open.
             if not WINDOWS:
                 raise
             value = None
