@@ -20,6 +20,27 @@ const GAP: usize = RATE / 5;
 /// Audio Whisper encodes in one pass.
 const WINDOW: usize = 30 * RATE;
 
+/// Keeps Vulkan on FP32: FP16 moves Whisper word times by up to 330 ms, and FP32 is as fast. ggml reads
+/// `GGML_VK_DISABLE_F16` when its backend starts, so a binary calls this first in `main`.
+///
+/// # Safety
+/// No other thread may read or write the environment meanwhile.
+pub unsafe fn keep_vulkan_fp32() {
+    if std::env::var_os("GGML_VK_DISABLE_F16").is_some() {
+        return;
+    }
+    unsafe { std::env::set_var("GGML_VK_DISABLE_F16", "1") };
+    // ggml reads it with getenv, which on Windows sees the C runtime's own copy of the environment, not the one
+    // set_var changes.
+    #[cfg(windows)]
+    {
+        unsafe extern "C" {
+            fn _putenv_s(name: *const std::ffi::c_char, value: *const std::ffi::c_char) -> i32;
+        }
+        unsafe { _putenv_s(c"GGML_VK_DISABLE_F16".as_ptr(), c"1".as_ptr()) };
+    }
+}
+
 /// Vulkan where the `gpu` feature is on and ggml found a graphics card, Metal on a Mac that has a Metal device.
 /// whisper.cpp lists a Metal device even without one and then crashes allocating the model there, before the CPU
 /// retry.
