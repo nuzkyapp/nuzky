@@ -2,11 +2,13 @@ import subprocess, time
 
 from e2e.harness import CLI, FIXTURES, flow, preview_crop, wait, webdriver
 
+# Nulls while the editor is still drawing after a reload.
 SIZES = """const width = (e) => e ? Math.round(e.getBoundingClientRect().width) : null;
-return {library: width(document.querySelector('[role=tablist][aria-label=Library]').closest('aside')),
+const timeline = document.querySelector('section[aria-label=Timeline]');
+return {library: width(document.querySelector('[role=tablist][aria-label=Library]')?.closest('aside')),
         inspector: width(document.querySelector('aside[aria-label=Inspector]')),
         preview: width(document.querySelector('section[aria-label=Preview]')),
-        timeline: Math.round(document.querySelector('section[aria-label=Timeline]').getBoundingClientRect().height),
+        timeline: timeline ? Math.round(timeline.getBoundingClientRect().height) : null,
         window: [window.innerWidth, window.innerHeight]};"""
 GAP = "document.querySelector(`[role=separator][aria-label='Resize ${arguments[0]}']`)"
 DRAG = GAP + """; const b = s.getBoundingClientRect();
