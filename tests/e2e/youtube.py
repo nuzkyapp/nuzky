@@ -311,7 +311,7 @@ def youtube_missing(r):
                 and r.s.run(label, button) == 'Download yt-dlp'
                 and not any(text in offer for text in ('brew', 'winget', 'pipx', 'YTDLP_MISSING:')), offer)
         tools = r.work / 'data/nuzky/tools'
-        own = tools / 'yt-dlp'
+        own = tools / ('yt-dlp.exe' if WINDOWS else 'yt-dlp')
         project = r.s.run(PROJECT)
         r.check('the offer downloads nothing and adds no asset or clip',
                 list(tools.glob('*')) == [] and r.releases.requests == [] and invocations(r) == []
@@ -425,7 +425,7 @@ row.dispatchEvent(new MouseEvent('dblclick', {bubbles: true, detail: 2}));""", f
         r.check('after Download yt-dlp the double-clicked song is added by itself, once, where it was asked',
                 added and len(placed) == 1 and asset['kind'] == 'audio' and placed[0]['startUs'] == 1_000_000
                 and Path(asset['path']).read_bytes() == (r.work / 'tone.m4a').read_bytes(), placed)
-        own = r.work / 'data/nuzky/tools/yt-dlp'
+        own = r.work / 'data/nuzky/tools' / ('yt-dlp.exe' if WINDOWS else 'yt-dlp')
         downloads = [args for args in invocations(r) if '-o' in args]
         r.check("Nuzky's own copy came from the release server and did the second download",
                 r.releases.requests == ['/latest', '/' + r.release] and own.read_bytes() == r.tool and len(downloads) >= 2,

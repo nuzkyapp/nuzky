@@ -25,7 +25,7 @@ def project(r):
 
 def stickers(r):
     """The project's assets drawn from the sticker library, by name."""
-    return {a['name']: a for a in project(r)['assets'] if '/nuzky/stickers/' in a['path']}
+    return {a['name']: a for a in project(r)['assets'] if '/nuzky/stickers/' in a['path'].replace('\\', '/')}
 
 
 def clips_of(r, asset_id):

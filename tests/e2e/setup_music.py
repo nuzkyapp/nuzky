@@ -63,7 +63,7 @@ def setup_music(r):
 
 def run(r):
     tools = r.work / 'data/nuzky/tools'
-    own = tools / 'yt-dlp'
+    own = tools / ('yt-dlp.exe' if WINDOWS else 'yt-dlp')
     wait_library(r)
     r.s.run(CLICK, 'Get set up', 'nav[aria-label=Collections]')
     wait(lambda: dialog(r), 5)

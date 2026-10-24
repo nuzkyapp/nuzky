@@ -8,7 +8,10 @@ flow reloads the page where a release would restart."""
 import gzip, json, os, re, subprocess, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from e2e.harness import FIXTURES, ROOT, Bridge, close_window, flow, press, wait, webdriver
+from e2e.harness import FIXTURES, ROOT, WINDOWS, Bridge, close_window, flow, press, wait, webdriver
+
+# npm puts a .cmd beside the script on Windows, which runs no script by its first line.
+TAURI = str(ROOT / 'node_modules/.bin' / ('tauri.cmd' if WINDOWS else 'tauri'))
 
 ROW = """const b = document.querySelector('[data-version]');
 return b && {text: b.textContent, focused: document.activeElement === b};"""
@@ -143,7 +146,7 @@ class Server:
 
 def sign(r, path, version):
     """Signs `path` as the release job does, with the flow's throwaway key; returns the signature for latest.json."""
-    subprocess.run([str(ROOT / 'node_modules/.bin/tauri'), 'signer', 'sign', '-f', str(r.signing_key), '-p', '', '--app-version', version, str(path)],
+    subprocess.run([TAURI, 'signer', 'sign', '-f', str(r.signing_key), '-p', '', '--app-version', version, str(path)],
                    check=True, capture_output=True)
     return path.with_name(path.name + '.sig').read_text()
 
@@ -156,7 +159,7 @@ def serve_releases(r):
     keys = r.work / 'update-key'
     keys.mkdir()
     r.signing_key = keys / 'test.key'
-    subprocess.run([str(ROOT / 'node_modules/.bin/tauri'), 'signer', 'generate', '--ci', '-p', '', '-w', str(r.signing_key)], check=True, capture_output=True)
+    subprocess.run([TAURI, 'signer', 'generate', '--ci', '-p', '', '-w', str(r.signing_key)], check=True, capture_output=True)
     r.env['NUZKY_UPDATE_PUBKEY'] = (keys / 'test.key.pub').read_text().strip()
     r.updates.package = os.urandom(3 * 1024 * 1024)
     (keys / 'package').write_bytes(r.updates.package)

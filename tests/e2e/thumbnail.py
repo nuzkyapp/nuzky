@@ -566,7 +566,8 @@ def cover_states(r):
     r.shot('cover-no-face')
 
     # The file goes away; the cover says which and what to do.
-    (r.work / 'pattern.mp4').rename(r.work / 'pattern-moved.mp4')
+    # Windows refuses to move a file the app holds open; the preview lets it go a few seconds after its last frame.
+    wait(lambda: (r.work / 'pattern.mp4').rename(r.work / 'pattern-moved.mp4') or True, 15)
     r.key('Escape')
     click(r, 'Edit the cover')
     missing = wait(lambda: r.s.run("return document.querySelector('[data-testid=cover-stage] [role=alert]')?.innerText ?? null"), 10)
@@ -574,4 +575,4 @@ def cover_states(r):
     r.shot('cover-media-missing')
     refused = r.s.call("window.__nuzky.api.startCoverPick('cover_9x16', arguments[0])", r.state()['epoch'])
     r.check('Pick for me refuses with the same reason', not refused['ok'] and 'MEDIA_MISSING' in refused['error'], refused)
-    (r.work / 'pattern-moved.mp4').rename(r.work / 'pattern.mp4')
+    wait(lambda: (r.work / 'pattern-moved.mp4').rename(r.work / 'pattern.mp4') or True, 15)
