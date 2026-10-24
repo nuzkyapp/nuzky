@@ -1,7 +1,9 @@
 //! A picture from the web for an agent, such as the logo of a brand the user talks about, found with the agent's
 //! own web search. Only over https, never through a proxy, and only from addresses on the public internet, checked
-//! again on every redirect. What arrives is judged by its bytes, never by its name or headers, and its size is
-//! checked before FFmpeg reads it. Pictures stay in Nuzky's own folder, named by the hash of what was downloaded.
+//! again on every redirect. What arrives is judged by its bytes, never by its name or headers. Its size is read from
+//! its header, then FFmpeg decodes it under the same limit and refuses a larger frame before making room for it, so
+//! a header that lies cannot fill memory. Pictures stay in Nuzky's own folder, named by the hash of what was
+//! downloaded.
 use std::io::Read;
 use std::net::IpAddr;
 use std::path::Path;
@@ -24,6 +26,9 @@ const MAX_URL_CHARS: usize = 2048;
 const MAX_BYTES: usize = 20 << 20;
 const MAX_SIDE: usize = 8192;
 const MAX_PIXELS: usize = 25_000_000;
+/// FFmpeg counts a frame's pixels with its width rounded up to a multiple of as much as 64, so a picture within the
+/// limits can count a little more.
+const DECODE_PIXELS: usize = MAX_PIXELS + 64 * MAX_SIDE;
 /// The long side an SVG is drawn at.
 const SVG_PX: u32 = 2048;
 const MAX_PICTURES: usize = 12;
@@ -34,8 +39,9 @@ const ACCEPT: &str = "image/png,image/jpeg,image/webp,image/svg+xml,text/html;q=
 /// for exactly that address and port, so tests can show that every other one is refused.
 const TEST_SERVER: &str = "http://127.0.0.1:";
 const FIND_THE_FILE: &str = "Find the address of the picture file itself; for a Wikimedia \"File:\" page that is …/wiki/Special:FilePath/<file name>.";
+const UNREADABLE: &str = "NOT_A_PICTURE: Nuzky cannot read the picture at this address. Find a PNG of it.";
+const SVG_NS: &str = "http://www.w3.org/2000/svg";
 
-/// What an address gave.
 pub enum Found {
     /// A picture in Nuzky's folder as a new asset, and the address it came from after redirects.
     Picture(Box<Asset>, String),
@@ -93,14 +99,21 @@ fn fetch_here(url: &Url, dir: &Path, stop: &AtomicBool) -> Result<Found> {
     if fresh {
         crate::sounds::publish(&path, |file| Ok(std::io::Write::write_all(file, &picture)?))?;
     }
-    let probed = nuzky_engine::media::probe(&path, new_id());
-    let mut asset = match probed {
-        Ok(asset) if asset.kind == AssetKind::Image => asset,
-        _ => {
+    // Measured before `probe`, which decodes without a limit.
+    let checked = nuzky_engine::media::picture_size(&path, DECODE_PIXELS, || stop.load(Ordering::Relaxed))
+        .map_err(|_| anyhow!(UNREADABLE))
+        .and_then(|(width, height)| fits(width as usize, height as usize))
+        .and_then(|()| match nuzky_engine::media::probe(&path, new_id()) {
+            Ok(asset) if asset.kind == AssetKind::Image => Ok(asset),
+            _ => Err(anyhow!(UNREADABLE)),
+        });
+    let mut asset = match checked {
+        Ok(asset) => asset,
+        Err(error) => {
             if fresh {
                 std::fs::remove_file(&path).ok();
             }
-            bail!("NOT_A_PICTURE: Nuzky cannot read the picture at this address. Find a PNG of it.");
+            return Err(error);
         }
     };
     asset.name = name(url);
@@ -281,14 +294,8 @@ fn sniff(bytes: &[u8], page: bool) -> Result<Sniffed> {
         _ => None,
     };
     if let Some(ext) = raster {
-        let size = imagesize::blob_size(bytes)
-            .map_err(|_| anyhow!("NOT_A_PICTURE: Nuzky cannot read the picture at this address. Find a PNG of it."))?;
-        let (width, height) =
-            frames(bytes, ext).into_iter().fold((size.width, size.height), |(w, h), (fw, fh)| (w.max(fw), h.max(fh)));
-        ensure!(
-            width <= MAX_SIDE && height <= MAX_SIDE && width * height <= MAX_PIXELS,
-            "TOO_LARGE: this picture is {width}×{height} px, more than Nuzky takes ({MAX_SIDE} px a side, 25 megapixels). Find a smaller one."
-        );
+        let size = imagesize::blob_size(bytes).map_err(|_| anyhow!(UNREADABLE))?;
+        fits(size.width, size.height)?;
         return Ok(Sniffed::Raster(ext));
     }
     let head = String::from_utf8_lossy(&bytes[..bytes.len().min(1024)]).to_ascii_lowercase();
@@ -303,54 +310,31 @@ fn sniff(bytes: &[u8], page: bool) -> Result<Sniffed> {
     Ok(Sniffed::Page)
 }
 
-/// The sizes of the frames FFmpeg can decode beside the one `imagesize` reads: a WebP's frames inside a smaller
-/// canvas, and every JPEG frame header, since FFmpeg takes a later one over the first. FFmpeg finds a JPEG's markers
-/// by scanning, so this scans too, for headers whose length fits their components as FFmpeg requires.
-fn frames(bytes: &[u8], ext: &str) -> Vec<(usize, usize)> {
-    let be = |b: &[u8]| usize::from(u16::from_be_bytes([b[0], b[1]]));
-    let mut sizes = Vec::new();
-    match ext {
-        "jpg" => sizes.extend(
-            bytes
-                .windows(10)
-                .filter(|w| w[0] == 0xff && w[1] & 0xf0 == 0xc0 && ![0xc4, 0xc8, 0xcc].contains(&w[1]))
-                .filter(|w| be(&w[2..]) == 8 + 3 * usize::from(w[9]))
-                .map(|w| (be(&w[7..]), be(&w[5..]))),
-        ),
-        "webp" => webp_frames(bytes.get(12..).unwrap_or_default(), true, &mut sizes),
-        _ => {}
-    }
-    sizes
-}
-
-fn webp_frames(mut chunks: &[u8], top: bool, sizes: &mut Vec<(usize, usize)>) {
-    let le = |b: &[u8]| b.iter().rev().fold(0, |n, &b| n << 8 | usize::from(b));
-    while chunks.len() >= 8 {
-        let size = le(&chunks[4..8]);
-        let data = &chunks[8..][..size.min(chunks.len() - 8)];
-        match &chunks[..4] {
-            b"VP8 " if data.len() >= 10 => sizes.push((le(&data[6..8]) & 0x3fff, le(&data[8..10]) & 0x3fff)),
-            b"VP8L" if data.len() >= 5 => {
-                let bits = le(&data[1..5]);
-                sizes.push(((bits & 0x3fff) + 1, (bits >> 14 & 0x3fff) + 1));
-            }
-            // A frame holds no frames, so a file nesting them cannot run the stack out.
-            b"ANMF" if top && data.len() >= 16 => webp_frames(&data[16..], false, sizes),
-            _ => {}
-        }
-        chunks = chunks.get(8 + size + size % 2..).unwrap_or_default();
-    }
+fn fits(width: usize, height: usize) -> Result<()> {
+    ensure!(
+        width <= MAX_SIDE && height <= MAX_SIDE && width * height <= MAX_PIXELS,
+        "TOO_LARGE: this picture is {width}×{height} px, more than Nuzky takes ({MAX_SIDE} px a side, 25 megapixels). Find a smaller one."
+    );
+    Ok(())
 }
 
 fn rasterize(svg: &[u8]) -> Result<Vec<u8>> {
     let find_png = "Find a PNG of it.";
+    let cannot_draw = || anyhow!("NOT_A_PICTURE: Nuzky cannot draw this SVG. {find_png}");
+    // As usvg reads it, which also takes an element without a namespace for SVG.
+    let options = roxmltree::ParsingOptions { allow_dtd: true, ..Default::default() };
+    let document = std::str::from_utf8(svg)
+        .ok()
+        .and_then(|text| roxmltree::Document::parse_with_options(text, options).ok())
+        .ok_or_else(cannot_draw)?;
     // This resvg build draws no text, so its letters would quietly be missing.
     ensure!(
-        !svg.windows(5).any(|w| w == b"<text"),
+        !document.descendants().any(|node| node.is_element()
+            && node.tag_name().name() == "text"
+            && matches!(node.tag_name().namespace(), None | Some(SVG_NS))),
         "NOT_A_PICTURE: this SVG has text, which Nuzky cannot draw. {find_png}"
     );
-    let png = crate::stickers::render(svg, SVG_PX)
-        .map_err(|_| anyhow!("NOT_A_PICTURE: Nuzky cannot draw this SVG. {find_png}"))?;
+    let png = crate::stickers::render(svg, SVG_PX).map_err(|_| cannot_draw())?;
     let mut reader = png::Decoder::new(std::io::Cursor::new(&png)).read_info()?;
     let mut rgba = vec![0; reader.output_buffer_size().unwrap_or_default()];
     reader.next_frame(&mut rgba)?;
@@ -396,16 +380,20 @@ fn pictures(html: &str, base: &Url) -> Vec<String> {
             }
             _ => continue,
         };
-        if let Some(address) = address {
-            groups[group].push(address);
+        // No group needs more than the answer holds, so a page of countless pictures takes no longer than reading it.
+        let kept = &mut groups[group];
+        let Some(url) = address.filter(|_| kept.len() < MAX_PICTURES).and_then(|a| base.join(a.trim()).ok()) else {
+            continue;
+        };
+        let test = url.scheme() == "http" && test_server(url.host_str().unwrap_or_default(), url.port());
+        let url = url.to_string();
+        if (url.starts_with("https://") || test) && url.len() <= MAX_PICTURE_CHARS && !kept.contains(&url) {
+            kept.push(url);
         }
     }
     let mut found: Vec<String> = Vec::new();
-    for address in groups.into_iter().flatten() {
-        let Ok(url) = base.join(address.trim()) else { continue };
-        let test = url.scheme() == "http" && test_server(url.host_str().unwrap_or_default(), url.port());
-        let url = url.to_string();
-        if (url.starts_with("https://") || test) && url.len() <= MAX_PICTURE_CHARS && !found.contains(&url) {
+    for url in groups.into_iter().flatten() {
+        if !found.contains(&url) {
             found.push(url);
         }
     }
@@ -544,25 +532,16 @@ mod tests {
     }
 
     #[test]
-    fn a_picture_is_as_large_as_the_frame_ffmpeg_draws() {
-        let riff = |chunks: &[u8]| [b"RIFF", &(4 + chunks.len() as u32).to_le_bytes()[..], b"WEBP", chunks].concat();
-        let canvas = [&b"VP8X"[..], &10u32.to_le_bytes(), &[0; 10]].concat();
-        let vp8 = |w: u16, h: u16| {
-            [&b"VP8 "[..], &10u32.to_le_bytes(), &[0, 0, 0, 0x9d, 0x01, 0x2a], &w.to_le_bytes(), &h.to_le_bytes()]
-                .concat()
-        };
-        let sof = |w: u16, h: u16| {
-            [&[0xff, 0xc0, 0, 17, 8][..], &h.to_be_bytes(), &w.to_be_bytes(), &[3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1]]
-                .concat()
-        };
-        let jpeg = |frames: &[Vec<u8>]| [vec![0xff, 0xd8], frames.concat()].concat();
-        let too_large =
-            |bytes: &[u8]| sniff(bytes, false).is_err_and(|error| error.to_string().starts_with("TOO_LARGE"));
-        // The canvas and the first frame header say 1x1.
-        assert!(too_large(&riff(&[canvas.clone(), vp8(6000, 5000)].concat())));
-        assert!(too_large(&jpeg(&[sof(1, 1), sof(6000, 5000)])));
-        assert!(matches!(sniff(&riff(&[canvas, vp8(64, 64)].concat()), false), Ok(Sniffed::Raster("webp"))));
-        assert!(matches!(sniff(&jpeg(&[sof(64, 64)]), false), Ok(Sniffed::Raster("jpg"))));
+    fn a_page_of_countless_pictures_answers_at_once() {
+        let base = Url::parse("https://brand.example/").unwrap();
+        let mut html: String = (0..100_000).map(|i| format!("<img src=/{i}.png>")).collect();
+        html.push_str("<link rel=icon href=/favicon.ico><img class=logo src=/logo.svg>");
+        let started = std::time::Instant::now();
+        let found = pictures(&html, &base);
+        assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+        let expected =
+            ["logo.svg".to_owned(), "favicon.ico".to_owned()].into_iter().chain((0..10).map(|i| format!("{i}.png")));
+        assert_eq!(found, expected.map(|file| format!("https://brand.example/{file}")).collect::<Vec<_>>());
     }
 
     #[test]

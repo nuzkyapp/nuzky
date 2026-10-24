@@ -682,7 +682,8 @@ impl Backend {
         }))
     }
 
-    /// Downloads the picture, then adds it as one edit of the run unless the project has that file already.
+    /// A picture the project has already goes through the edit as well, which changes nothing but saves, so a save
+    /// that failed the first time is retried.
     fn import_web_image(&self, args: ImportWebImage, state: &SessionState) -> Result<Value> {
         owns_run(state, &args.run_id)?;
         // Stop in the app ends the run, and with it the download.
@@ -691,22 +692,20 @@ impl Backend {
             crate::web_image::Found::Picture(asset, url) => (*asset, url),
             crate::web_image::Found::Page(pictures) => return Ok(json!({"asset_id": null, "pictures": pictures})),
         };
-        let answer = |stamp: &nuzky_session::Stamp, asset: &nuzky_engine::model::Asset| {
-            json!({
-                "revision": stamp.revision, "session_epoch": stamp.session_epoch, "asset_id": asset.id,
-                "name": asset.name, "width": asset.width, "height": asset.height, "url": url,
-            })
+        let asset = match state.project.assets.iter().find(|a| Path::new(&a.path) == Path::new(&asset.path)) {
+            Some(existing) => existing.clone(),
+            None => asset,
         };
-        if let Some(existing) = state.project.assets.iter().find(|a| Path::new(&a.path) == Path::new(&asset.path)) {
-            return Ok(answer(&state.stamp, existing));
-        }
         let result = self.host.session.apply_edits(
             &args.run_id,
             &new_id(),
             vec![EditCmd::AddAssets { assets: vec![asset.clone()] }],
             Expect { revision: Some(state.stamp.revision), speech_layout_key: None },
         )?;
-        Ok(answer(&result.stamp, &asset))
+        Ok(json!({
+            "revision": result.stamp.revision, "session_epoch": result.stamp.session_epoch, "asset_id": asset.id,
+            "name": asset.name, "width": asset.width, "height": asset.height, "url": url,
+        }))
     }
 
     fn add_sticker(&self, args: AddSticker, state: &SessionState) -> Result<Value> {

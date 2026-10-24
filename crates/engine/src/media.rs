@@ -50,14 +50,18 @@ fn format_whitelist() -> &'static str {
     })
 }
 
-/// Opens local media only: no network protocols, also for files a container refers to,
-/// and no playlists or scripts that pull in other sources.
-pub(crate) fn open_input(path: &Path) -> Result<ff::format::context::Input> {
-    init();
+/// Local media only: no network protocols, also for files a container refers to, and no playlists or scripts that
+/// pull in other sources.
+fn input_options() -> ff::Dictionary<'static> {
     let mut options = ff::Dictionary::new();
     options.set("protocol_whitelist", "file");
     options.set("format_whitelist", format_whitelist());
-    ff::format::input_with_dictionary(path, options).with_context(|| format!("Cannot open {}", path.display()))
+    options
+}
+
+pub(crate) fn open_input(path: &Path) -> Result<ff::format::context::Input> {
+    init();
+    ff::format::input_with_dictionary(path, input_options()).with_context(|| format!("Cannot open {}", path.display()))
 }
 
 pub(crate) fn origin_us(input: &ff::format::context::Input) -> i64 {
@@ -478,6 +482,55 @@ pub fn probe(path: &Path, id: String) -> Result<Asset> {
         (asset.rotation, asset.mirror) = (rotation, mirror);
     }
     Ok(asset)
+}
+
+/// The size of a picture's first frame as FFmpeg decodes it, where FFmpeg refuses every frame of more than
+/// `max_pixels` before making room for it. Run it on a picture from outside before `probe` or a decoder opens it:
+/// their `avformat_find_stream_info` decodes frames of any size, and FFmpeg finds frames that a file's header does not
+/// admit to. Errs when the file is not a picture, any frame fails, there is none, or `cancelled` says so.
+pub fn picture_size(path: &Path, max_pixels: usize, cancelled: impl Fn() -> bool) -> Result<(u32, u32)> {
+    init();
+    let cannot = || format!("Cannot read {} as a picture", path.display());
+    let url = std::ffi::CString::new(path.to_str().with_context(cannot)?).with_context(cannot)?;
+    // Without `avformat_find_stream_info`, which ffmpeg-next's `input_with_dictionary` runs.
+    let mut input = unsafe {
+        let (mut context, mut options) = (std::ptr::null_mut(), input_options().disown());
+        let opened = ff::ffi::avformat_open_input(&mut context, url.as_ptr(), std::ptr::null_mut(), &mut options);
+        ff::Dictionary::own(options);
+        if opened < 0 {
+            return Err(ff::Error::from(opened)).with_context(cannot);
+        }
+        ff::format::context::Input::wrap(context)
+    };
+    // A picture's demuxer makes its one stream as it opens, so no stream comes later.
+    if !is_image_format(&input) || input.streams().count() != 1 {
+        bail!("{} is not a picture", path.display());
+    }
+    let mut context = ff::codec::context::Context::from_parameters(input.stream(0).with_context(cannot)?.parameters())?;
+    unsafe { (*context.as_mut_ptr()).max_pixels = i64::try_from(max_pixels).unwrap_or(i64::MAX) };
+    let mut decoder = context.decoder().video().with_context(cannot)?;
+    let (mut frame, mut size) = (frame::Video::empty(), None);
+    loop {
+        if cancelled() {
+            bail!("CANCELLED: measuring {} stopped", path.display());
+        }
+        let mut packet = ff::Packet::empty();
+        match packet.read(&mut input) {
+            Ok(()) if packet.stream() == 0 => decoder.send_packet(&packet),
+            Ok(()) => continue,
+            Err(ff::Error::Eof) => decoder.send_eof(),
+            Err(error) => Err(error),
+        }
+        .with_context(cannot)?;
+        loop {
+            match decoder.receive_frame(&mut frame) {
+                Ok(()) => _ = size.get_or_insert((frame.width(), frame.height())),
+                Err(ff::Error::Other { errno }) if errno == ff::error::EAGAIN => break,
+                Err(ff::Error::Eof) => return size.with_context(|| format!("{} has no picture", path.display())),
+                Err(error) => return Err(error).with_context(cannot),
+            }
+        }
+    }
 }
 
 /// One decoded frame converted to tightly packed RGBA, in source orientation.
@@ -1594,6 +1647,43 @@ mod tests {
         }
         drop(decoder);
         std::fs::remove_file(path).unwrap();
+    }
+
+    /// A JPEG whose first frame header says 1x1 still decodes to the 6000x5000 frame after it, plain or JPEG-LS.
+    #[test]
+    fn a_picture_measures_as_ffmpeg_decodes_it_and_never_past_the_limit() {
+        let dir = std::env::temp_dir().join(format!("nuzky-picture-size-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let make = |name: &str, codec: &str, size: &str| {
+            let path = dir.join(name);
+            let out = std::process::Command::new("ffmpeg")
+                .args(["-v", "error", "-f", "lavfi", "-i", &format!("color=c=red:s={size}"), "-frames:v", "1"])
+                .args(["-c:v", codec])
+                .arg(&path)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+            path
+        };
+        let tiny_first = |name: &str, real: &Path| {
+            let sof = [0xff, 0xc0, 0, 17, 8, 0, 1, 0, 1, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1];
+            let path = dir.join(name);
+            std::fs::write(&path, [&[0xff, 0xd8][..], &sof, &std::fs::read(real).unwrap()[2..]].concat()).unwrap();
+            path
+        };
+        let (limit, room) = (25_000_000, 32_000_000);
+        let small = make("small.png", "png", "64x48");
+        assert_eq!(picture_size(&small, limit, || false).unwrap(), (64, 48));
+        let big = make("big.png", "png", "6000x5000");
+        assert!(picture_size(&big, limit, || false).is_err());
+        assert_eq!(picture_size(&big, room, || false).unwrap(), (6000, 5000));
+        for (name, codec) in [("lying.jpg", "mjpeg"), ("lying-ls.jpg", "jpegls")] {
+            let lying = tiny_first(name, &make(&format!("real-{name}"), codec, "6000x5000"));
+            assert!(picture_size(&lying, limit, || false).is_err(), "{name}");
+            assert_eq!(picture_size(&lying, room, || false).unwrap(), (6000, 5000), "{name}");
+        }
+        assert!(picture_size(&small, limit, || true).unwrap_err().to_string().starts_with("CANCELLED"));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

@@ -663,8 +663,9 @@ fn answer(
 }
 
 /// An agent brings a logo from the web. Only the public internet is reached, never this computer or a private
-/// network, not by a redirect, another spelling of the address or a proxy; what arrives is judged by its bytes and
-/// size before FFmpeg reads it, an SVG is drawn without the local files it names, and the picture undoes with the run.
+/// network, not by a redirect, another spelling of the address or a proxy; what arrives is judged by its bytes and by
+/// the frames FFmpeg decodes from it within the size limit, whatever its header says, an SVG is drawn without the local
+/// files it names and never without its text, a save that failed is retried, and the picture undoes with the run.
 #[test]
 fn a_picture_from_the_web_comes_only_from_the_public_internet_over_stdio() {
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -685,6 +686,37 @@ fn a_picture_from_the_web_comes_only_from_the_public_internet_over_stdio() {
     let mut giant = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
     giant.extend(60_000u32.to_be_bytes().repeat(2));
     giant.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
+    // 6000×5000 px, with its pHYs before its IHDR: read where an IHDR belongs, the size is 1×1.
+    let lying = {
+        let mut bytes = Vec::new();
+        let mut encoder = png::Encoder::new(&mut bytes, 6000, 5000);
+        encoder.set_color(png::ColorType::Grayscale);
+        encoder.set_depth(png::BitDepth::One);
+        encoder.set_pixel_dims(Some(png::PixelDimensions { xppu: 1, yppu: 1, unit: png::Unit::Unspecified }));
+        encoder.write_header().unwrap().write_image_data(&vec![0; 750 * 5000]).unwrap();
+        let mut chunks = Vec::new();
+        let mut at = 8;
+        while at < bytes.len() {
+            let end = at + 12 + u32::from_be_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
+            chunks.push(&bytes[at..end]);
+            at = end;
+        }
+        let phys = chunks.iter().position(|chunk| &chunk[4..8] == b"pHYs").unwrap();
+        let phys = chunks.remove(phys);
+        [&bytes[..8], phys, &chunks.concat()[..]].concat()
+    };
+    // An animated 1×1 WebP, which the FFmpeg Nuzky links does not decode.
+    let chunk =
+        |name: &[u8], data: &[u8]| [name, &(data.len() as u32).to_le_bytes(), data, &[0][..data.len() % 2]].concat();
+    let frame = chunk(b"VP8L", &[0x2f, 0, 0, 0, 0x10, 0x07, 0x10, 0x11, 0x11, 0x88, 0x88, 0xfe, 0x07]);
+    let webp = [
+        chunk(b"VP8X", &[0x12, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+        chunk(b"ANIM", &[255, 255, 255, 255, 0, 0]),
+        chunk(b"ANMF", &[&[0; 12][..], &[100, 0, 0, 0], &frame[..]].concat()),
+    ]
+    .concat();
+    let animated = [&b"RIFF"[..], &(4 + webp.len() as u32).to_le_bytes(), b"WEBP", &webp[..]].concat();
+    let mark = png_of(30, 30, [0, 255, 0, 255]);
     let page = "<!DOCTYPE html><html><head><meta property='og:image' content='https://cdn.example.com/share.jpg'>\
         <link rel=\"apple-touch-icon\" href=\"https://cdn.example.com/touch.png\"><link rel=icon href=/favicon.ico></head>\
         <body><img src=\"https://cdn.example.com/hero.jpg\"><img class=site-logo src=\"https://cdn.example.com/brand.svg?v=1&amp;s=2\">\
@@ -698,8 +730,16 @@ fn a_picture_from_the_web_comes_only_from_the_public_internet_over_stdio() {
             br#"<svg xmlns="http://www.w3.org/2000/svg"><text y="20">Spotify</text></svg>"#.to_vec(),
         ),
         ("/page.html", "text/html; charset=utf-8", page.as_bytes().to_vec()),
+        (
+            "/prefixed-text.svg",
+            "image/svg+xml",
+            br##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:s="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="#0000ff"/><s:text y="8">Spotify</s:text></svg>"##.to_vec(),
+        ),
         ("/giant.png", "image/png", giant),
+        ("/lying.png", "image/png", lying),
+        ("/animated.webp", "image/webp", animated),
         ("/logo.gif", "image/png", b"GIF89a\x01\0\x01\0\0\0\0;".to_vec()),
+        ("/mark.png", "image/png", mark.clone()),
     ];
     // Where a redirect points, on this computer.
     let inside = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -771,8 +811,11 @@ fn a_picture_from_the_web_comes_only_from_the_public_internet_over_stdio() {
         ("/huge.png", "TOO_LARGE"),
         ("/endless.png", "TOO_LARGE"),
         ("/giant.png", "TOO_LARGE"),
+        ("/lying.png", "NOT_A_PICTURE"),
+        ("/animated.webp", "NOT_A_PICTURE"),
         ("/logo.gif", "NOT_A_PICTURE"),
         ("/text.svg", "NOT_A_PICTURE"),
+        ("/prefixed-text.svg", "NOT_A_PICTURE"),
         ("/missing.png", "NOT_FOUND"),
     ] {
         let error = import(&mut c, format!("{base}{path}"));
@@ -804,9 +847,18 @@ fn a_picture_from_the_web_comes_only_from_the_public_internet_over_stdio() {
     let svg = c.call("import_web_image", json!({"run_id": run, "url": format!("{base}/brand.svg")}));
     assert_eq!((&svg["name"], &svg["width"], &svg["height"]), (&json!("brand.svg"), &json!(2048), &json!(1024)));
 
+    // The picture stays in the run when the project cannot be saved; asking again saves it.
+    std::fs::remove_file(&project).unwrap();
+    std::fs::create_dir(&project).unwrap();
+    assert!(import(&mut c, format!("{base}/mark.png")).starts_with("SAVE_FAILED"));
+    std::fs::remove_dir(&project).unwrap();
+    let saved = c.call("import_web_image", json!({"run_id": run, "url": format!("{base}/mark.png")}));
+    let disk: Project = serde_json::from_slice(&std::fs::read(&project).unwrap()).unwrap();
+    assert!(disk.assets.iter().any(|asset| json!(asset.id) == saved["asset_id"]), "{saved}");
+
     let state = c.call("get_state", json!({}));
     let assets = state["assets"].as_array().unwrap();
-    assert_eq!(assets.len(), 2, "{state}");
+    assert_eq!(assets.len(), 3, "{state}");
     let folder = dunce::canonicalize(&c.dir).unwrap().join("data/nuzky/web-images");
     for asset in assets {
         assert_eq!(asset["kind"], "image");
@@ -817,8 +869,9 @@ fn a_picture_from_the_web_comes_only_from_the_public_internet_over_stdio() {
     let at = |x: u32, y: u32| &rgba[((y * info.width + x) * 4) as usize..][..4];
     assert_eq!(at(512, 512), [0, 0, 255, 255]);
     assert_eq!(at(1536, 512)[3], 0, "the SVG drew a file from this computer");
+    assert_eq!(std::fs::read(assets[2]["path"].as_str().unwrap()).unwrap(), mark);
     let kept: Vec<_> = std::fs::read_dir(&folder).unwrap().map(|e| e.unwrap().file_name()).collect();
-    assert_eq!(kept.len(), 2, "{kept:?}");
+    assert_eq!(kept.len(), 3, "{kept:?}");
     assert!(kept.iter().all(|name| !name.to_string_lossy().starts_with(".nuzky-part-")), "{kept:?}");
     let requests = requests.lock().unwrap().clone();
     assert!(requests.iter().all(|line| line.starts_with("GET /")), "{requests:?}");
