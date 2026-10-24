@@ -6,7 +6,7 @@ step, that a reel whose words moved fails with advice, and that Export… opens 
 import json, subprocess, time
 from pathlib import Path
 
-from e2e.harness import AI_EDITING, CLI, FIXTURES, Bridge, deny, flow, link_models, wait, webdriver
+from e2e.harness import AI_EDITING, CLI, FIXTURES, WINDOWS, Bridge, deny, flow, link_models, wait, webdriver
 from e2e.reel import MODEL, poll
 
 FAKE = Path(__file__).resolve().parent / 'fake_agent'
@@ -244,7 +244,11 @@ def moved(r):
 
 def missing(r):
     video = r.work / 'long-talk.mp4'
-    video.rename(r.work / 'moved.mp4')
+    if WINDOWS:
+        if not move_while_away(r, video):
+            return
+    else:
+        video.rename(r.work / 'moved.mp4')
     try:
         r.s.call('window.__nuzky.refreshLibrary()')
         said = wait(lambda: 'missing' in (text(r, f'{LIST} [role=status]') or '') and text(r, f'{LIST} [role=status]'), 10)
@@ -256,6 +260,28 @@ def missing(r):
     finally:
         (r.work / 'moved.mp4').rename(video)
         r.s.call('window.__nuzky.refreshLibrary()')
+
+
+def move_while_away(r, video):
+    """Windows does not let Explorer move a video Nuzky has open, so there the user moves it while another project is
+    open and comes back to the reels of the talk."""
+    source = r.s.run('return window.__nuzky.store.getState().snap.path')
+    r.s.run("window.__nuzky.store.setState({view: 'home'})")
+    r.s.run("[...document.querySelectorAll('button')].find((b) => b.textContent.trim().startsWith('New project')).click()")
+    wait(lambda: r.s.run("const i = [...document.querySelectorAll('[role=menuitem]')].find((i) => i.textContent.startsWith('Empty 16:9'));"
+                         "i?.click(); return !!i"), 5)
+    if not r.check('an empty project opens in place of the talk',
+                   wait(lambda: r.s.run('return window.__nuzky.store.getState().snap.path') not in (None, source), 20)):
+        return False
+    # Drawing posters on Home keeps the video open for up to 20 s more.
+    if not r.check('then the video can be moved', wait(lambda: video.rename(r.work / 'moved.mp4'), 30)):
+        return False
+    r.s.run('window.__nuzky.openProject({path: arguments[0], name: "long-talk"})', source)
+    r.check('the talk opens again', wait(lambda: r.s.run('return window.__nuzky.store.getState().snap.path') == source, 20))
+    r.s.run("window.__nuzky.store.setState({panelTab: 'transcript'})")
+    wait(lambda: r.s.run(CLICK, 'Reels…', 'aside') == 'false', 10)
+    r.check('with its reels', wait(lambda: r.s.run('return window.__nuzky.reels.getState().open'), 10))
+    return True
 
 
 def export(r, source):
