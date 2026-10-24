@@ -67,3 +67,21 @@ for fingerprint in "$from/.fingerprint"/*; do
 done
 left=$(own target/debug/.fingerprint)
 [ -z "$left" ] || { echo "seed-target: a workspace fingerprint was copied: $left" >&2; rm -rf $left; exit 1; }
+# Cargo moves the paths in a build script's `output` along with the build, but not those in files the script
+# wrote, such as Tauri's lists of permission files. Those would name the build they were made in, and this one
+# would stop building once that is deleted. The copies name this build instead and keep the times cargo compares.
+for run in target/debug/build/*/root-output; do
+  old=$(cat "$run")
+  old=${old%/debug/build/*}/
+  [ "$old" = "$here/target/" ] && continue
+  files=$(grep -rlIF -- "$old" "${run%/*}") || continue
+  OLD=$old NEW=$here/target/ python3 -c '
+import os, sys
+for path in sys.stdin.read().splitlines():
+    times = os.stat(path)
+    with open(path, "rb") as f:
+        text = f.read()
+    with open(path, "wb") as f:
+        f.write(text.replace(os.environb[b"OLD"], os.environb[b"NEW"]))
+    os.utime(path, ns=(times.st_atime_ns, times.st_mtime_ns))' <<<"$files"
+done
