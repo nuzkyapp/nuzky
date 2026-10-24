@@ -112,8 +112,9 @@ class Session:
         elif WINDOWS:
             # Started here too: Edge WebDriver would give the webview a new profile for each session, so nothing the
             # page keeps would outlive a restart. It attaches to the webview's debugging port instead.
+            webview = ' '.join(filter(None, [RUN.env.get('WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS'), f'--remote-debugging-port={DEBUG_PORT}']))
             RUN.app = start([str(APP), *RUN.args], RUN.work / 'app.log', RUN.launch_env(
-                TAURI_WEBVIEW_AUTOMATION='true', WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=f'--remote-debugging-port={DEBUG_PORT}'))
+                TAURI_WEBVIEW_AUTOMATION='true', WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=webview))
             if not started(RUN.app, DEBUG_PORT, 60):
                 raise RuntimeError('the app did not start, see app.log')
             caps = {'capabilities': {'alwaysMatch': {'browserName': 'webview2', 'ms:edgeOptions': {

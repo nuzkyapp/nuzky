@@ -62,6 +62,9 @@ def before(r):
                  LANGUAGE='cs', LANG='cs_CZ.UTF-8')
     if MACOS:
         r.args = ['-AppleLanguages', '(cs)']
+    if WINDOWS:
+        # WebView2 otherwise takes the display language of Windows.
+        r.env['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS'] = '--lang=cs'
 
 
 def step(r):
@@ -120,16 +123,7 @@ def run(r):
                    and [c['lines'][0] for c in d['cards']] == ['Fast', 'Balanced', 'Most accurate'], d):
         return
     r.check('opening puts the focus on the step in the rail, not on Download or Skip', d['focus'] == 'tab', d['focus'])
-    system = 'cs'
-    if WINDOWS:
-        # WebView2 takes the display language of Windows, which no variable of one process changes.
-        import ctypes, locale
-        system = locale.windows_locale[ctypes.windll.kernel32.GetUserDefaultUILanguage()][:2]
-    r.check(f'the spoken language starts as the system language, {"Czech" if system == "cs" else system}',
-            d['language'] == system, d['language'])
-    if d['language'] != 'cs':
-        r.s.run(SET_LANGUAGE, 'cs')
-        d = wait(lambda: (d := step(r)) and d['language'] == 'cs' and d, 5)
+    r.check('the spoken language starts as the system language, Czech', d['language'] == 'cs', d['language'])
     sizes = [next((l for l in c['lines'] if l.endswith(' MB')), None) for c in d['cards']]
     r.check('each model shows the size of its file and that it is not downloaded', sizes == ['141 MB', f'{mb(SMALL)} MB', f'{mb(TURBO)} MB']
             and all('Not downloaded' in c['lines'] for c in d['cards']), d['cards'])
