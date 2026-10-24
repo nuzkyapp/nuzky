@@ -190,15 +190,17 @@ pub fn image_colors(path: &Path) -> Result<(f64, Vec<Value>)> {
     Ok(colors(&sample, sw as u32, sh as u32))
 }
 
-/// The share of pixels that show (alpha at least 128) and up to six groups of alike colours among them, largest
-/// first. Each group is named by its most common exact colour, so a flat colour comes out exactly even with JPEG
-/// noise or blended edges around it. The group most of a mostly opaque border falls in is the backdrop.
+/// The share of pixels that show (at least half as opaque as the image's most opaque one, so a faint watermark
+/// still has colours) and up to six groups of alike colours among them, largest first. Each group is named by its
+/// most common exact colour, so a flat colour comes out exactly even with JPEG noise or blended edges around it.
+/// The group most of a mostly opaque border falls in is the backdrop.
 pub fn colors(rgba: &[u8], width: u32, height: u32) -> (f64, Vec<Value>) {
     const NEAR: u32 = 24 * 24;
     let round = |share: f64| (share * 100.0).round() / 100.0;
     let pixels = rgba.as_chunks::<4>().0;
+    let half = pixels.iter().map(|p| p[3]).max().unwrap_or(0).div_ceil(2).max(1);
     let mut counts = HashMap::<[u8; 3], u32>::new();
-    for p in pixels.iter().filter(|p| p[3] >= 128) {
+    for p in pixels.iter().filter(|p| p[3] >= half) {
         *counts.entry([p[0], p[1], p[2]]).or_default() += 1;
     }
     let visible: u32 = counts.values().sum();
@@ -208,14 +210,10 @@ pub fn colors(rgba: &[u8], width: u32, height: u32) -> (f64, Vec<Value>) {
     let mut groups: Vec<([u8; 3], u32)> = Vec::new();
     let mut group_of = HashMap::new();
     for (rgb, count) in exact {
-        let group = match groups.iter().position(|(seed, _)| distance(*seed, rgb) <= NEAR) {
-            Some(group) => group,
-            None if groups.len() < 32 => {
-                groups.push((rgb, 0));
-                groups.len() - 1
-            }
-            None => continue,
-        };
+        let group = groups.iter().position(|(seed, _)| distance(*seed, rgb) <= NEAR).unwrap_or_else(|| {
+            groups.push((rgb, 0));
+            groups.len() - 1
+        });
         groups[group].1 += count;
         group_of.insert(rgb, group);
     }
@@ -225,7 +223,7 @@ pub fn colors(rgba: &[u8], width: u32, height: u32) -> (f64, Vec<Value>) {
     let (mut edge, mut shown, mut on_edge) = (0, 0, vec![0; groups.len()]);
     for p in border.map(|i| pixels[i]) {
         edge += 1;
-        if p[3] >= 128 {
+        if p[3] >= half {
             shown += 1;
             if let Some(&group) = group_of.get(&[p[0], p[1], p[2]]) {
                 on_edge[group] += 1;
@@ -332,5 +330,29 @@ mod tests {
         let (_, torn) = super::colors(&torn, 40, 40);
         assert!(torn.iter().all(|c| c.get("background").is_none()), "{torn:?}");
         assert_eq!(torn[0]["hex"], "#ffffff");
+    }
+
+    #[test]
+    fn colors_of_a_faint_watermark() {
+        let faint = image(40, 40, |x, y| match square(x, y, [0; 4]) {
+            [r, g, b, 255] => [r, g, b, 96],
+            outside => outside,
+        });
+        assert_eq!(colors(&faint, 40, 40), (0.25, vec![json!({"hex": "#e50914", "share": 1.0})]));
+    }
+
+    #[test]
+    fn colors_count_a_sky_of_unique_shades_beside_many_flat_colours() {
+        // The top half is 2048 blues that each occur once, the bottom half 32 flat colours a row each.
+        let photo = image(64, 64, |x, y| {
+            let (k, i) = (y * 64 + x, y.saturating_sub(32));
+            let [r, g, b] = if y < 32 {
+                [k % 16, k / 16 % 16, 200 + k / 256]
+            } else {
+                [100 + 50 * (i % 4), 100 + 50 * (i / 4 % 4), 60 * (i / 16)]
+            };
+            [r as u8, g as u8, b as u8, 255]
+        });
+        assert_eq!(colors(&photo, 64, 64).1[0], json!({"hex": "#0000c8", "share": 0.5}));
     }
 }
