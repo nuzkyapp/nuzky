@@ -64,12 +64,13 @@ function Slider({
 }) {
   const [drag, setDrag] = useState<number>();
   const shown = drag ?? value;
-  // The knob's centre stays 6 px inside each end, so the knob never pokes past the line.
+  // The knob's centre stays 6 px inside each end, so the knob never pokes past the line, and a press maps back the
+  // same way, so grabbing the knob does not move it.
   const pos = `calc(${max > 0 ? Math.min(shown, max) / max : 0} * (100% - 12px) + 6px)`;
   const set = (v: number) => onChange(Math.min(max, Math.max(0, v)));
   const follow = (e: PointerEvent<HTMLDivElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
-    const v = (Math.min(Math.max(e.clientX - r.left, 0), r.width) / r.width) * max;
+    const v = (Math.min(Math.max(e.clientX - r.left - 6, 0), r.width - 12) / (r.width - 12)) * max;
     setDrag(v);
     set(v);
   };
@@ -191,12 +192,11 @@ export function LaunchVideo({ className = "" }: { className?: string }) {
 
   useEffect(() => () => clearTimeout(sleep.current), []);
 
-  // Like a video player's bar: it stays while the video is paused or the pointer rests on a control, and otherwise
-  // shows for a moment after the pointer moves over the video or a tap.
+  // Only a mouse resting on a control keeps the bar: Safari leaves :hover on whatever a finger tapped last.
   const wake = () => {
     setAwake(true);
     clearTimeout(sleep.current);
-    sleep.current = setTimeout(() => (controls.current?.matches(":hover") ? wake() : setAwake(false)), 2500);
+    sleep.current = setTimeout(() => (!touch.current && controls.current?.matches(":hover") ? wake() : setAwake(false)), 2500);
   };
 
   // Sound turned on at volume 0 would stay silent, so it comes back at full volume.
@@ -215,6 +215,7 @@ export function LaunchVideo({ className = "" }: { className?: string }) {
     v.play().catch(() => {});
     setSound(withSound);
     setChoice("play");
+    wake();
   };
   const pause = () => {
     video.current?.pause();
@@ -251,7 +252,12 @@ export function LaunchVideo({ className = "" }: { className?: string }) {
   return (
     <div
       ref={box}
-      onPointerMove={(e) => e.pointerType === "mouse" && wake()}
+      onPointerDown={(e) => (touch.current = e.pointerType !== "mouse")}
+      onPointerMove={(e) => {
+        if (e.pointerType !== "mouse") return;
+        touch.current = false;
+        wake();
+      }}
       onPointerLeave={(e) => e.pointerType === "mouse" && setAwake(false)}
       onKeyDown={(e) => {
         const key = e.key.toLowerCase();
@@ -288,7 +294,6 @@ export function LaunchVideo({ className = "" }: { className?: string }) {
           onPlay={() => setPaused(false)}
           onPause={() => setPaused(true)}
           onError={() => setFailed(true)}
-          onPointerDown={(e) => (touch.current = e.pointerType !== "mouse")}
           onClick={press}
           aria-label="Nuzky in one minute: cutting a talking video by its words, captions, a cover and three finished reels"
           className="size-full cursor-pointer object-cover"
