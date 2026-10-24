@@ -63,11 +63,16 @@ def proxy(r):
                     'libx264', str(magenta)], check=True)
     # The preview lets a decoder go after 5 s unused, so the next frame opens the swapped copy.
     if WINDOWS:
-        # Windows refuses to replace a file a decoder holds open. A frame past the clip lets the idle decoder go, as
-        # the clip's next frame does on Unix, and the copy is swapped then.
+        # Windows refuses to replace a file a decoder holds open, and the preview draws the clip's last frame even past
+        # its end. With its track hidden the next frame leaves the idle decoder unused and lets it go.
+        name = r.s.run("return window.__nuzky.store.getState().snap.project.tracks.find((t) => t.id === 'main').name")
+        toggle = "[...document.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === arguments[0]).click()"
+        r.s.run(toggle, f'Hide {name}')
         time.sleep(6)
-        r.s.run('window.__nuzky.api.seek(arguments[0])', 30_000_000)
-        if not wait(lambda: magenta.replace(copies(r)[0]) or True, 10):
+        swapped = wait(lambda: r.s.run('window.__nuzky.api.seek(arguments[0])', 1_000_000) or magenta.replace(copies(r)[0])
+                       or True, 10)
+        r.s.run(toggle, f'Show {name}')
+        if not swapped:
             raise RuntimeError('the preview kept its copy open')
     else:
         magenta.replace(copies(r)[0])
