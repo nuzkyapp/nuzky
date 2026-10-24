@@ -333,15 +333,17 @@ impl Drop for Turn {
 /// SIGINT lets the agent record the interrupted turn so the next one can resume; SIGKILL is the fallback.
 /// The whole process group gets it, so the MCP bridge the agent started goes too. Windows has no SIGINT for a
 /// child without a console window, so there the agent and everything it started end at once. Like a signal, that
-/// happens a moment later: Stop and edit ends the agent's run itself first, before its bridge goes.
+/// happens a moment later: Stop and edit ends the agent's run itself first, before its bridge goes. The fallback
+/// tries once more, for a tree the first attempt missed.
 fn signal(pid: u32, kill: bool) {
     #[cfg(unix)]
     unsafe {
         libc::kill(-(pid as i32), if kill { libc::SIGKILL } else { libc::SIGINT });
     }
     #[cfg(windows)]
-    if !kill {
-        std::thread::spawn(move || crate::discover::kill_tree(pid));
+    match kill {
+        true => crate::discover::kill_tree(pid),
+        false => drop(std::thread::spawn(move || crate::discover::kill_tree(pid))),
     }
 }
 
