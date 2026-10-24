@@ -1,6 +1,6 @@
 //! Cover frames and subject masks on a real face with the real models. The face is the NASA
 //! interview in scripts/fixtures.sh; run as AGENTS.md says:
-//! `XDG_DATA_HOME=$PWD/tmp-test/xdg/data cargo test --workspace --test vision -- --ignored`.
+//! `scripts/isolated.sh cargo test --workspace --test vision -- --ignored`.
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
@@ -18,7 +18,7 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 fn models() -> PathBuf {
-    let data = std::env::var_os("XDG_DATA_HOME").expect("set XDG_DATA_HOME=$PWD/tmp-test/xdg/data");
+    let data = std::env::var_os("XDG_DATA_HOME").expect("run with scripts/isolated.sh");
     PathBuf::from(data).join("nuzky/models")
 }
 
@@ -54,7 +54,7 @@ fn summary(candidates: &[Candidate]) -> String {
 }
 
 #[test]
-#[ignore = "Requires scripts/fixtures.sh media and models; run with XDG_DATA_HOME=$PWD/tmp-test/xdg/data"]
+#[ignore = "Requires scripts/fixtures.sh media and models; run with scripts/isolated.sh"]
 fn open_eyes_win_over_a_blink_and_a_blur() {
     // [0,3) s open eyes blurred, [3,6) the blink, [6,12) sharp open eyes.
     let candidates = frames(&timeline(&[("face-thumb.mp4", 0, 12_000_000)]));
@@ -84,7 +84,7 @@ fn open_eyes_win_over_a_blink_and_a_blur() {
 }
 
 #[test]
-#[ignore = "Requires scripts/fixtures.sh media and models; run with XDG_DATA_HOME=$PWD/tmp-test/xdg/data"]
+#[ignore = "Requires scripts/fixtures.sh media and models; run with scripts/isolated.sh"]
 fn frames_beside_a_cut_are_not_offered() {
     // The only open eyes are 0.8 s between two cuts; every frame of them is within 0.4 s of one.
     let project = timeline(&[
@@ -150,7 +150,7 @@ fn read_mask(path: &Path) -> (u32, u32, Vec<u8>) {
 }
 
 #[test]
-#[ignore = "Requires scripts/fixtures.sh media and models; run with XDG_DATA_HOME=$PWD/tmp-test/xdg/data"]
+#[ignore = "Requires scripts/fixtures.sh media and models; run with scripts/isolated.sh"]
 fn the_mask_follows_the_person() {
     let cache =
         Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../tmp-test/vision-cache-{}", std::process::id()));
@@ -230,7 +230,7 @@ fn is_green(p: &[u8]) -> bool {
 }
 
 #[test]
-#[ignore = "Requires scripts/fixtures.sh media and models; run with XDG_DATA_HOME=$PWD/tmp-test/xdg/data"]
+#[ignore = "Requires scripts/fixtures.sh media and models; run with scripts/isolated.sh"]
 fn a_background_goes_behind_the_person_along_their_outline_and_holds_still() {
     let cache =
         Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../tmp-test/matte-cache-{}", std::process::id()));

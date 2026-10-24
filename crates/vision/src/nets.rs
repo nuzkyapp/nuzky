@@ -429,9 +429,10 @@ mod tests {
     /// The face models on two stills, without the renderer, so it also runs under an emulated CPU
     /// without AVX: .github/workflows/checks.yml runs it with `qemu-x86_64-static -cpu Nehalem`.
     #[test]
-    #[ignore = "Requires tmp-test/face-open.png, face-blink.png and the models; run with XDG_DATA_HOME=$PWD/tmp-test/xdg/data"]
+    #[ignore = "Requires tmp-test/face-open.png, face-blink.png and the models; run with scripts/isolated.sh"]
     fn the_face_models_tell_open_eyes_from_a_blink() {
-        let dir = PathBuf::from(std::env::var_os("XDG_DATA_HOME").expect("XDG_DATA_HOME")).join("nuzky/models");
+        let dir = PathBuf::from(std::env::var_os("XDG_DATA_HOME").expect("run with scripts/isolated.sh"))
+            .join("nuzky/models");
         let cancel = AtomicBool::new(false);
         let (mut yunet, mut mesh, mut blend) =
             (Yunet::load(&dir).unwrap(), FaceMesh::load(&dir).unwrap(), Blendshapes::load(&dir).unwrap());

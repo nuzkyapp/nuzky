@@ -466,11 +466,11 @@ mod tests {
     /// (scripts/fixtures.sh). Reframed to 9:16, the detector finds the face whole and centred inside what Reels leaves
     /// free in every quarter second of the result as the renderer draws it, and each clip moves at most once.
     #[test]
-    #[ignore = "Requires scripts/fixtures.sh media and models; run with XDG_DATA_HOME=$PWD/tmp-test/xdg/data"]
+    #[ignore = "Requires scripts/fixtures.sh media and models; run with scripts/isolated.sh"]
     fn a_wide_talking_head_reframed_to_vertical_keeps_the_face_in_the_frame() {
         let file = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tmp-test/wide-head.mp4");
         let file = dunce::canonicalize(&file).expect("tmp-test/wide-head.mp4 is missing: run scripts/fixtures.sh");
-        let data = std::env::var_os("XDG_DATA_HOME").expect("set XDG_DATA_HOME=$PWD/tmp-test/xdg/data");
+        let data = std::env::var_os("XDG_DATA_HOME").expect("run with scripts/isolated.sh");
         let models = std::path::PathBuf::from(data).join("nuzky/models");
         let mut project = Project::new("reframe");
         let asset = nuzky_engine::media::probe(&file, "wide".into()).unwrap();

@@ -80,25 +80,6 @@ own_node_modules() {
   fi
 }
 
-# Tests must not touch the user's Nuzky transcripts, caches or the socket of their running app.
-runtime=$(mktemp -d "${TMPDIR:-/tmp}/nuzky-check.XXXXXX")
-trap 'rm -rf "$runtime"' EXIT
-isolated() {
-  local data=$PWD/tmp-test/xdg/data cache=$PWD/tmp-test/xdg/cache
-  if [ "$os" = Darwin ]; then
-    # macOS ignores the XDG variables and keeps Nuzky's data and cache under ~/Library, so the tests get a home
-    # of their own whose Library folders lead to the same directories. Cargo, rustup and the build dependencies
-    # stay in the real home.
-    local home=$PWD/tmp-test/xdg/home
-    mkdir -p "$home/Library/Application Support" "$home/Library/Caches" "$data/nuzky" "$cache/nuzky"
-    ln -sfn "$data/nuzky" "$home/Library/Application Support/nuzky"
-    ln -sfn "$cache/nuzky" "$home/Library/Caches/nuzky"
-    set -- HOME="$home" CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}" RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}" \
-      NUZKY_DEPS="${NUZKY_DEPS:-$HOME/.cache/nuzky/deps}" "$@"
-  fi
-  env -u NUZKY_DATA_DIR XDG_DATA_HOME="$data" XDG_CACHE_HOME="$cache" XDG_RUNTIME_DIR="$runtime" "$@"
-}
-
 # The Rust tests with media and the UI flows spend their time waiting for speech recognition on the GPU, the app
 # and real time, each with about a tenth of the CPU, so they run side by side. The flows' report follows the tests'.
 media_tests_and_flows() {
@@ -108,7 +89,7 @@ media_tests_and_flows() {
   # A job in the background ignores Ctrl+C, so a stopped gate stops its UI flows too and waits for their cleanup.
   trap 'kill -TERM "$pid" 2>/dev/null; wait "$pid"; exit 130' INT
   trap 'kill -TERM "$pid" 2>/dev/null; wait "$pid"; exit 143' TERM
-  isolated cargo test --workspace --locked -- --ignored || tests_failed=1
+  scripts/isolated.sh cargo test --workspace --locked -- --ignored || tests_failed=1
   wait "$pid" || flows_failed=1
   trap - INT TERM
   echo
@@ -127,7 +108,7 @@ step "Frontend types and build" npm run build
 step "Website build" npm run site:build
 step "Clippy" cargo clippy --workspace --all-targets --locked -- -D warnings
 step "ONNX Runtime" node scripts/fetch-onnxruntime.mjs
-step "Rust tests" isolated cargo test --workspace --locked
+step "Rust tests" scripts/isolated.sh cargo test --workspace --locked
 step "Test media and models" scripts/fixtures.sh
 step "Rust tests with media and models, and the UI flows" media_tests_and_flows
 

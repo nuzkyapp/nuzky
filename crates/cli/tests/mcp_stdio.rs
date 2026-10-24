@@ -2391,7 +2391,7 @@ fn emphasis_suggests_and_apply_zooms_punches_in_as_one_undo_over_stdio() {
 }
 
 #[test]
-#[ignore = "Requires tmp-test/speech.wav and installed small, Silero and English word timing models; run with isolated HOME and XDG_DATA_HOME"]
+#[ignore = "Requires tmp-test/speech.wav and installed small, Silero and English word timing models; run with scripts/isolated.sh"]
 fn transcribe_edit_and_caption_real_media_over_stdio() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut c = Client::new(true);
@@ -2918,7 +2918,7 @@ fn reframe_names_missing_models_without_changing_the_project_over_stdio() {
 }
 
 #[test]
-#[ignore = "Requires tmp-test/wide-head.mp4 and the face model from scripts/fixtures.sh; run with XDG_DATA_HOME=$PWD/tmp-test/xdg/data"]
+#[ignore = "Requires tmp-test/wide-head.mp4 and the face model from scripts/fixtures.sh; run with scripts/isolated.sh"]
 fn reframe_follows_a_wide_head_and_undoes_with_the_run_over_stdio() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let media = dunce::canonicalize(root.join("tmp-test/wide-head.mp4")).unwrap();
@@ -3004,7 +3004,7 @@ fn cover_tools_name_missing_models_and_never_download_them() {
 }
 
 #[test]
-#[ignore = "Requires tmp-test/face-thumb.mp4 and the vision models from scripts/fixtures.sh; run with XDG_DATA_HOME=tmp-test/xdg/data"]
+#[ignore = "Requires tmp-test/face-thumb.mp4 and the vision models from scripts/fixtures.sh; run with scripts/isolated.sh"]
 fn cover_frames_and_subject_mask_of_a_face_over_stdio() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let media = dunce::canonicalize(root.join("tmp-test/face-thumb.mp4")).unwrap();
@@ -3444,7 +3444,7 @@ fn a_project_from_before_thumbnails_saves_unchanged_over_stdio() {
 /// Text behind a real face: where the mask has the person the picture shows, beside them the text. The cover
 /// is saved with the project and draws the same after reopening, through MCP and the CLI.
 #[test]
-#[ignore = "Requires tmp-test/face-thumb.mp4 and the vision models from scripts/fixtures.sh; run with XDG_DATA_HOME=tmp-test/xdg/data"]
+#[ignore = "Requires tmp-test/face-thumb.mp4 and the vision models from scripts/fixtures.sh; run with scripts/isolated.sh"]
 fn text_behind_a_face_over_stdio_and_the_cli() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let media = dunce::canonicalize(root.join("tmp-test/face-thumb.mp4")).unwrap();

@@ -54,7 +54,7 @@ python3 -m pip install --user Pillow numpy
 | --- | --- |
 | Frontend lint and build | `npm run lint` and `npm run build` |
 | Rust tests by name | `cargo test --workspace <name>` (`-p <crate>` builds most dependencies again with other features) |
-| Tests that need media and models | `scripts/fixtures.sh`, then `XDG_DATA_HOME=$PWD/tmp-test/xdg/data cargo test --workspace <name> -- --ignored` |
+| Tests that need media and models | `scripts/fixtures.sh`, then `scripts/isolated.sh cargo test --workspace <name> -- --ignored` (keeps Nuzky's data, cache and socket inside `tmp-test/xdg` on Linux and macOS) |
 | A UI flow in the real app | `python3 scripts/repro.py <flow>` (`--list` shows them) |
 | Everything local before a release (GitHub runs the audits and the check without AVX2) | `scripts/check.sh` (tens of minutes) |
 
