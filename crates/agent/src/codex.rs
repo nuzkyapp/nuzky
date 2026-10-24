@@ -1,6 +1,6 @@
 //! Codex as `codex exec --json`: the command and a parser of its events.
 
-use crate::event::{AgentEvent, ErrorCode, ToolStatus};
+use crate::event::{AgentEvent, ErrorCode, ToolStatus, web_search_input};
 use crate::turn::{SYSTEM, Step, TurnRequest};
 use serde_json::{Value, json};
 use std::process::Command;
@@ -175,13 +175,8 @@ impl Parser {
             }
             Some("web_search") => {
                 self.kept |= completed;
-                let action = &item["action"];
-                let query = item["query"].as_str().filter(|q| !q.is_empty()).or(action["query"].as_str());
-                let input = match (query, action["url"].as_str()) {
-                    (Some(query), _) => Some(json!({"query": query})),
-                    (None, Some(url)) => Some(json!({"url": url})),
-                    (None, None) => None,
-                };
+                let query = item["query"].as_str().filter(|q| !q.is_empty());
+                let input = web_search_input(&item["action"]).or_else(|| query.map(|q| json!({"query": q})));
                 Some(Step::Event(AgentEvent::Tool {
                     id: format!("{}@{}", item["id"].as_str().unwrap_or(""), self.turn),
                     name: "web_search".into(),
@@ -319,6 +314,7 @@ mod tests {
             r#"{"type":"item.started","item":{"id":"item_1","type":"web_search","id":"ws_1","query":"","action":{"type":"other"}}}"#,
             r#"{"type":"item.completed","item":{"id":"item_1","type":"web_search","id":"ws_1","query":"Spotify logo svg","action":{"type":"search","query":"Spotify logo svg","queries":["Spotify logo svg"]}}}"#,
             r#"{"type":"item.completed","item":{"id":"item_2","type":"web_search","id":"ws_2","query":"","action":{"type":"open_page","url":"https://commons.wikimedia.org/wiki/File:Spotify_logo.svg"}}}"#,
+            r#"{"type":"item.completed","item":{"id":"item_3","type":"web_search","id":"ws_3","query":"","action":{"type":"search","queries":["Spotify brand colors","Spotify green hex"]}}}"#,
         ]);
         let search = |id: &str, status, input| {
             Ok(AgentEvent::Tool { id: format!("{id}@7"), name: "web_search".into(), status, input })
@@ -333,6 +329,7 @@ mod tests {
                     ToolStatus::Done,
                     Some(json!({"url": "https://commons.wikimedia.org/wiki/File:Spotify_logo.svg"}))
                 ),
+                search("ws_3", ToolStatus::Done, Some(json!({"query": "Spotify brand colors · Spotify green hex"}))),
             ]
         );
         assert!(session.is_some());

@@ -365,17 +365,21 @@ fn tools_reasoning_images_and_failures_round_trip() {
 }
 
 #[test]
-fn a_web_search_shows_as_a_step_and_goes_back_without_its_id() {
+fn a_web_search_shows_as_a_step_and_goes_back_with_its_id() {
     let started = json!({"type": "web_search_call", "id": "ws-1", "status": "in_progress"});
     let searched = json!({"type": "web_search_call", "id": "ws-1", "status": "completed",
         "action": {"type": "search", "query": "Spotify logo svg"}});
+    let several = json!({"type": "web_search_call", "id": "ws-2", "status": "completed",
+        "action": {"type": "search", "queries": ["Spotify brand colors", "Spotify green hex"]}});
     let added = json!({"type": "response.output_item.added", "item": started});
-    let server = Server::new(vec![sse(vec![added, item(searched.clone()), item(call()), completed()]), answer()]);
+    let first = sse(vec![added, item(searched.clone()), item(several.clone()), item(call()), completed()]);
+    let server = Server::new(vec![first, answer()]);
     let f = Fixture::start(&server, tool_reply(), None, None, vec![]);
-    let search = |status, input| AgentEvent::Tool { id: "ws-1".into(), name: "web_search".into(), status, input };
+    let search = |id: &str, status, input| AgentEvent::Tool { id: id.into(), name: "web_search".into(), status, input };
     let mut expected = vec![
-        search(ToolStatus::Running, None),
-        search(ToolStatus::Done, Some(json!({"query": "Spotify logo svg"}))),
+        search("ws-1", ToolStatus::Running, None),
+        search("ws-1", ToolStatus::Done, Some(json!({"query": "Spotify logo svg"}))),
+        search("ws-2", ToolStatus::Done, Some(json!({"query": "Spotify brand colors · Spotify green hex"}))),
         AgentEvent::Tool {
             id: "call-1".into(),
             name: "cut".into(),
@@ -386,13 +390,11 @@ fn a_web_search_shows_as_a_step_and_goes_back_without_its_id() {
     ];
     expected.extend(text_events());
     assert_eq!(f.finish(), expected);
-    let mut input_search = searched;
-    input_search.as_object_mut().unwrap().remove("id");
     let mut input_call = call();
     input_call.as_object_mut().unwrap().remove("id");
     let result = json!({"type": "function_call_output", "call_id": "call-1", "output": "Edited"});
     let requests = server.requests.lock().unwrap();
-    assert_eq!(requests[1]["input"], json!([user(), input_search, input_call, result]));
+    assert_eq!(requests[1]["input"], json!([user(), searched, several, input_call, result]));
 }
 
 #[test]

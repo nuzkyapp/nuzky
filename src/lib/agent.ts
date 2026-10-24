@@ -227,7 +227,6 @@ const toolName = (raw: string) => raw.replace(/^mcp__nuzky__/, "").replace(/^nuz
 const HIDDEN = new Set(["begin_run", "end_run", "job"]);
 /** The tool an agent offers choices with; the panel shows them as buttons, not as a step. */
 const OFFER = "suggest_options";
-/** The step of the agent's own web search; each search keeps its own row. */
 export const SEARCHING = "Searching the web";
 
 const TITLES: Record<string, string> = {
@@ -380,6 +379,9 @@ export async function loadChats() {
 /** What was typed in each chat of this session, so a draft stays with its own chat. */
 const drafts = new Map<string | null, { draft: string; attachments: Attachment[] }>();
 
+const interrupted = (items: ChatItem[]) =>
+  items.map((it): ChatItem => (it.kind === "steps" ? { ...it, steps: it.steps.map((x) => (x.status === "running" ? { ...x, status: "interrupted" } : x)) } : it));
+
 /** Opens a chat the project keeps, to read and continue it; it stops what the current one left running. */
 export async function openChat(id: string) {
   const s = useAgent.getState();
@@ -389,7 +391,7 @@ export async function openChat(id: string) {
     const opened = await agentApi.open(id);
     if (useAgent.getState().status !== "idle" || useEditor.getState().snap?.sessionEpoch !== epoch) return;
     // What was still running when Nuzky closed did not finish.
-    const items = (opened.items ?? []).map((it): ChatItem => (it.kind === "steps" ? { ...it, steps: it.steps.map((x) => (x.status === "running" ? { ...x, status: "interrupted" } : x)) } : it));
+    const items = interrupted(opened.items ?? []);
     const { chat, draft, attachments } = useAgent.getState();
     drafts.set(chat, { draft, attachments });
     useAgent.setState({ ...endChat(), agent: opened.agent, chat: opened.id, items, pastCount: items.length, draft: "", attachments: [], ...drafts.get(opened.id) });
@@ -665,7 +667,7 @@ export async function stop() {
  */
 function fail(code: AgentErrorCode, message: string) {
   const s = useAgent.getState();
-  let items = s.items;
+  let items = interrupted(s.items);
   let draft = s.draft;
   let attachments = s.attachments;
   let retry: string | undefined;

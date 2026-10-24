@@ -3,7 +3,7 @@
 //! and runs Nuzky's tools in the app, as the MCP bridge's clients run them. See
 //! docs/AI-ARCHITECTURE.md, "AI panel".
 
-use crate::event::{AgentEvent, ErrorCode, ToolStatus};
+use crate::event::{AgentEvent, ErrorCode, ToolStatus, web_search_input};
 use crate::turn::{Inbox, Message, SYSTEM, Turn};
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -296,19 +296,12 @@ fn respond(
     }
 }
 
-/// A web search ChatGPT made, as a step with what it searched for or the page it opened.
 fn search(item: &Value, status: ToolStatus) -> AgentEvent {
-    let action = &item["action"];
-    let input = match (action["query"].as_str(), action["url"].as_str()) {
-        (Some(query), _) => Some(json!({"query": query})),
-        (None, Some(url)) => Some(json!({"url": url})),
-        (None, None) => None,
-    };
     AgentEvent::Tool {
         id: item["id"].as_str().unwrap_or_default().to_owned(),
         name: "web_search".into(),
         status,
-        input,
+        input: web_search_input(&item["action"]),
     }
 }
 
@@ -485,12 +478,15 @@ fn namespace(tools: &Value) -> Value {
 }
 
 /// An output item as the next request's input. Without its id, as nothing is stored on OpenAI's side to
-/// refer to; reasoning only with its encrypted content, the only form that can go back.
+/// refer to, except a web search call, whose input schema requires it; reasoning only with its encrypted
+/// content, the only form that can go back.
 fn as_input(mut item: Value) -> Option<Value> {
     if item["type"] == "reasoning" && !item["encrypted_content"].is_string() {
         return None;
     }
-    item.as_object_mut()?.remove("id");
+    if item["type"] != "web_search_call" {
+        item.as_object_mut()?.remove("id");
+    }
     Some(item)
 }
 

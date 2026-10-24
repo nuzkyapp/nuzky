@@ -151,7 +151,6 @@ impl Parser {
         }
     }
 
-    /// A call that starts; a tool Nuzky did not give Claude stops the turn.
     fn tool_use(&mut self, block: &Value, input: Option<Value>) -> Step {
         let (id, name) = (block["id"].as_str().unwrap_or(""), block["name"].as_str().unwrap_or(""));
         if !allowed(name) {
