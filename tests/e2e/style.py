@@ -93,8 +93,10 @@ def pair(dir):
     srt = ''.join(f'{i + 1}\n{stamp(i * 0.5)} --> {stamp(i * 0.5 + 0.5)}\n{words[i % len(words)]}\n\n' for i in range(int(length / 0.5)))
     (dir / 'captions.srt').write_text(srt)
     inputs = ''.join(f'[v{k}][a{k}]' for k in range(len(pieces)))
+    # A filter reads ':' as the end of an option, as in a Windows drive letter.
+    subtitles = (dir / 'captions.srt').as_posix().replace(':', r'\:')
     graph += (f"{inputs}concat=n={len(pieces)}:v=1:a=1[v][a];"
-              f"[v]subtitles={dir / 'captions.srt'}:force_style='Fontsize=24,Outline=2,Shadow=0,Alignment=5'[out]")
+              f"[v]subtitles={subtitles}:force_style='Fontsize=24,Outline=2,Shadow=0,Alignment=5'[out]")
     run('ffmpeg', '-v', 'error', '-y', '-i', str(recording), '-filter_complex', graph, '-map', '[out]', '-map', '[a]',
         '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', str(cut))
     return recording, cut
