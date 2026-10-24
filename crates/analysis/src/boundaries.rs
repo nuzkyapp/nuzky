@@ -217,7 +217,8 @@ impl Levels {
             }
             .max(from);
             let (k, last) = (Self::hop(from), Self::hop(limit).min(self.db.len()));
-            let k = k + Self::sound_reach(self.db.get(k..last).unwrap_or_default(), floor);
+            let past_dips = right.is_none_or(|r| measured[r]);
+            let k = k + Self::sound_reach(self.db.get(k..last).unwrap_or_default(), floor, past_dips);
             quiet = k < last;
             end = Some(time(k).clamp(from, limit));
         }
@@ -233,7 +234,7 @@ impl Levels {
             .min(from);
             let (first, k) = (Self::hop(limit), Self::hop(from).min(self.db.len()));
             let before: Vec<f32> = self.db.get(first..k).unwrap_or_default().iter().rev().copied().collect();
-            let k = k - Self::sound_reach(&before, floor);
+            let k = k - Self::sound_reach(&before, floor, left.is_none_or(|j| measured[j]));
             start = Some(time(k).clamp(limit, from));
         }
         if let (Some(j), Some(r)) = (left, right)
@@ -256,17 +257,24 @@ impl Levels {
     }
 
     /// How many of `levels`, windows in the order a measured edge grows through them, the word's sound
-    /// goes on above `floor`. The first dip ends it, unless every dip before a pause is shorter than a
-    /// quiet run: recognition can mishear a word's last syllable, so the model ends the word at the
-    /// dip before it, and only a pause after it tells that it is not the next word's first.
-    fn sound_reach(levels: &[f32], floor: f32) -> usize {
-        let lasts = |windows: usize| samples_to_us(((windows - 1) * HOP + WINDOW) as i64);
+    /// goes on above `floor`. The first dip ends it, unless `past_dips` and every dip before a pause
+    /// is shorter than a quiet run: recognition can mishear a word's last syllable, so the model ends
+    /// the word at the dip before it, and only a pause after it tells that it is not the next word's
+    /// first. An unmeasured neighbour holds the whole gap the model left, so its sound is never
+    /// crossed into.
+    fn sound_reach(levels: &[f32], floor: f32, past_dips: bool) -> usize {
         let first = levels.iter().position(|&db| db < floor).unwrap_or(levels.len());
+        if !past_dips {
+            return first;
+        }
         let mut k = first;
         while k < levels.len() {
             let quiet = levels[k..].iter().take_while(|&&db| db < floor).count();
-            if lasts(quiet) >= QUIET_RUN_US {
-                return if lasts(quiet) >= PAUSE_US { k } else { first };
+            // A run that reaches the limit counts only up to it, not to the end of its last window.
+            let samples = if k + quiet == levels.len() { quiet * HOP } else { (quiet - 1) * HOP + WINDOW };
+            let lasts = samples_to_us(samples as i64);
+            if lasts >= QUIET_RUN_US {
+                return if lasts >= PAUSE_US { k } else { first };
             }
             k += quiet;
             k += levels[k..].iter().take_while(|&&db| db >= floor).count();
@@ -456,10 +464,17 @@ mod tests {
         let mut words = vec![word(0.1, 0.5, "srádě."), word(1.09, 1.5, "Pozadí")];
         refine_words(&mut words, &samples, &[true, true]);
         assert!(near(words[0].end_us, 0.62) && near(words[1].start_us, 1.0), "{words:?}");
-        // Without a pause after it, the sound past the dip is the next word's, up to its closure.
+        // Without a pause after it, the sound past the dip is the next word's, whose start the model
+        // heard late, past its closure.
         let samples = tone(&[(0.1, 0.5), (0.51, 0.6), (0.64, 1.0)]);
-        let mut words = vec![word(0.1, 0.5, "za"), word(0.5, 1.0, "10")];
-        refine_words(&mut words, &samples, &[true, false]);
+        let mut words = vec![word(0.1, 0.5, "za"), word(0.7, 1.0, "deset")];
+        refine_words(&mut words, &samples, &[true, true]);
+        assert!(near(words[0].end_us, 0.5), "{words:?}");
+        // A number the model cannot measure holds the whole gap; its sound past the dip is its own,
+        // even with a pause after it.
+        let samples = tone(&[(0.1, 0.5), (0.51, 0.8), (1.5, 1.9)]);
+        let mut words = vec![word(0.1, 0.5, "za"), word(0.5, 1.5, "10"), word(1.5, 1.9, "minut")];
+        refine_words(&mut words, &samples, &[true, false, true]);
         assert!(near(words[0].end_us, 0.5), "{words:?}");
     }
 
