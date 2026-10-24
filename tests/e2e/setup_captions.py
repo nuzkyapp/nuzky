@@ -5,7 +5,7 @@ and the step stay after a restart, and the first captions download nothing more.
 language here."""
 import json, time
 
-from e2e.harness import FIXTURES, MACOS, MODELS, flow, press, wait
+from e2e.harness import FIXTURES, MACOS, MODELS, WINDOWS, flow, press, wait
 from e2e.home import focus_card, make, resize, wait_library
 from e2e.setup import BOX, CLICK, FOCUS_TEXT, relaunch
 from e2e.speech_model import Models
@@ -120,7 +120,16 @@ def run(r):
                    and [c['lines'][0] for c in d['cards']] == ['Fast', 'Balanced', 'Most accurate'], d):
         return
     r.check('opening puts the focus on the step in the rail, not on Download or Skip', d['focus'] == 'tab', d['focus'])
-    r.check('the spoken language starts as the system language, Czech', d['language'] == 'cs', d['language'])
+    system = 'cs'
+    if WINDOWS:
+        # WebView2 takes the display language of Windows, which no variable of one process changes.
+        import ctypes, locale
+        system = locale.windows_locale[ctypes.windll.kernel32.GetUserDefaultUILanguage()][:2]
+    r.check(f'the spoken language starts as the system language, {"Czech" if system == "cs" else system}',
+            d['language'] == system, d['language'])
+    if d['language'] != 'cs':
+        r.s.run(SET_LANGUAGE, 'cs')
+        d = wait(lambda: (d := step(r)) and d['language'] == 'cs' and d, 5)
     sizes = [next((l for l in c['lines'] if l.endswith(' MB')), None) for c in d['cards']]
     r.check('each model shows the size of its file and that it is not downloaded', sizes == ['141 MB', f'{mb(SMALL)} MB', f'{mb(TURBO)} MB']
             and all('Not downloaded' in c['lines'] for c in d['cards']), d['cards'])

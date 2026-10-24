@@ -1,7 +1,7 @@
 import subprocess
 import time
 
-from e2e.harness import CLI, changed_share, export, flow, preview_crop, preview_rect, wait
+from e2e.harness import CLI, WINDOWS, changed_share, export, flow, preview_crop, preview_rect, wait
 
 
 def phone_clip(path, seconds):
@@ -61,11 +61,17 @@ def proxy(r):
     magenta = r.work / 'magenta.mp4'
     subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=magenta:s=192x108:r=30:d=4', '-c:v',
                     'libx264', str(magenta)], check=True)
-    # The preview lets a decoder go after 5 s unused, so the next frame opens the swapped copy. Windows refuses to
-    # replace a file a decoder holds open, so there the copy is swapped once it lets go.
-    if not wait(lambda: magenta.replace(copies(r)[0]) or True, 10):
-        raise RuntimeError('the preview kept its copy open')
-    time.sleep(6)
+    # The preview lets a decoder go after 5 s unused, so the next frame opens the swapped copy.
+    if WINDOWS:
+        # Windows refuses to replace a file a decoder holds open. A frame past the clip lets the idle decoder go, as
+        # the clip's next frame does on Unix, and the copy is swapped then.
+        time.sleep(6)
+        r.s.run('window.__nuzky.api.seek(arguments[0])', 30_000_000)
+        if not wait(lambda: magenta.replace(copies(r)[0]) or True, 10):
+            raise RuntimeError('the preview kept its copy open')
+    else:
+        magenta.replace(copies(r)[0])
+        time.sleep(6)
     r.seek(2_000_000)
     time.sleep(1.5)
     centre = shown(r, 'swapped-copy', (360, 640)).getpixel((180, 320))

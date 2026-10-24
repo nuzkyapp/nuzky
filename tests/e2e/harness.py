@@ -900,6 +900,18 @@ def program(r, script, name=None):
     return exe
 
 
+def running_with(text):
+    """The ids of the processes whose command line holds `text`, apart from the one that looks."""
+    if WINDOWS:
+        query = f"$_.CommandLine -like '*{text}*' -and $_.ProcessId -ne $PID"
+        listed = subprocess.run(['powershell', '-NoProfile', '-Command',
+                                 f'(Get-CimInstance Win32_Process | Where-Object {{ {query} }}).ProcessId'],
+                                capture_output=True, text=True).stdout
+    else:
+        listed = subprocess.run(['pgrep', '-f', text], capture_output=True, text=True).stdout
+    return listed.split()
+
+
 def kill_hard(pid):
     """Ends a process at once, as a crash does; Windows has no SIGKILL, and its TerminateProcess is the same."""
     os.kill(pid, getattr(signal, 'SIGKILL', signal.SIGTERM))

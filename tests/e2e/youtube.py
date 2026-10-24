@@ -5,7 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from e2e.ducking import CHECKBOX, SOURCE, TONE, WINDOW, RATE, decode, speech_levels, tone_levels
-from e2e.harness import WINDOWS, Bridge, flow, export, press, program, wait
+from e2e.harness import WINDOWS, Bridge, flow, export, press, program, running_with, wait
 from e2e.layout import resize
 
 SONG = 'yt_Song0001'
@@ -236,7 +236,7 @@ input.dispatchEvent(new Event('input', {bubbles: true}));""", FIELD, f'https://y
     took = time.time() - started
     time.sleep(0.5)
     left = [p.name for p in r.work.rglob('*') if p.name.startswith('.nuzky-part-') or 'ytSlow' in p.name]
-    running = subprocess.run(['pgrep', '-f', 'nuzky-fake-ytdlp-child'], capture_output=True, text=True).stdout.split()
+    running = running_with('nuzky-fake-ytdlp-child')
     r.check('Stop ends a YouTube download and what yt-dlp started within seconds, adds nothing and leaves no part behind',
             stopped and took < 3 and len(r.state()['assets']) == assets and left == [] and running == [],
             (round(took, 1), left, running))
