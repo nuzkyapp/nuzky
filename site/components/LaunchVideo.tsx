@@ -45,6 +45,7 @@ async function preferAv1(cut: (typeof cuts)["wide"]) {
 export function LaunchVideo({ className = "" }: { className?: string }) {
   const box = useRef<HTMLDivElement>(null);
   const video = useRef<HTMLVideoElement>(null);
+  const at = useRef(0);
   const [file, setFile] = useState<{ src: string; poster: string; at: number }>();
   const [sound, setSound] = useState(false);
   const [refused, setRefused] = useState(false);
@@ -55,8 +56,10 @@ export function LaunchVideo({ className = "" }: { className?: string }) {
   const playing = shown && (sound || !still);
 
   // The breakpoint is the one that switches the box between 9:16 and 16:9; both cuts run on the same timeline, so
-  // turning a phone carries on where it was. The video waits for the page's load event, because a loading video
-  // holds that event back and the page's own pictures should come first.
+  // turning a phone carries on where it was, even when it turns back before the other cut has loaded. The same
+  // element only changes its file, because Safari lets the sound play only in the element the visitor tapped. The
+  // video waits for the page's load event, because a loading video holds that event back and the page's own
+  // pictures should come first.
   useEffect(() => {
     const computer = window.matchMedia("(min-width: 40rem)");
     const loaded = new Promise((done) => (document.readyState === "complete" ? done(0) : window.addEventListener("load", done, { once: true })));
@@ -65,7 +68,8 @@ export function LaunchVideo({ className = "" }: { className?: string }) {
       const av1 = await preferAv1(cut);
       await loaded;
       if (cut !== (computer.matches ? cuts.wide : cuts.tall)) return;
-      setFile({ src: av1 ? cut.av1 : cut.h264, poster: cut.poster, at: video.current?.currentTime ?? 0 });
+      if (video.current?.readyState) at.current = video.current.currentTime;
+      setFile({ src: av1 ? cut.av1 : cut.h264, poster: cut.poster, at: at.current });
       setFailed(false);
     };
     pick();
@@ -109,7 +113,6 @@ export function LaunchVideo({ className = "" }: { className?: string }) {
     >
       {file && (
         <video
-          key={file.src}
           ref={video}
           src={file.src}
           poster={still || refused || failed ? file.poster : undefined}
