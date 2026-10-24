@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { Fit } from "./Fit";
 import { HeroDownload } from "./GetNuzky";
+import { LaunchVideo } from "./LaunchVideo";
 import { fitSizes } from "@/lib/fit";
 import { usePlaying } from "@/lib/playing";
 import type { Release } from "@/lib/site";
@@ -274,6 +275,8 @@ export function Hero({ release }: { release: Release }) {
         <div className="mt-10 w-full sm:mt-11">
           <HeroDownload release={release} />
         </div>
+
+        <LaunchVideo className="mt-12 sm:mt-16" />
 
         <div data-waves="swell" className="mt-14 flex w-full justify-center sm:mt-20">
           <Fit width={WIDE} height={330} className="hidden lg:block">
