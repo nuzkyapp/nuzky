@@ -45,6 +45,7 @@ def edge_driver():
 
 
 DRIVER = edge_driver() if WINDOWS else WEBKIT_DRIVER
+DEBUG_PORT = 4445  # The webview's on Windows, which Edge WebDriver attaches to.
 
 
 def flow(name, description, before=None, home=False, first_launch=False):
@@ -109,9 +110,14 @@ class Session:
                 raise RuntimeError('the app did not start, see app.log')
             caps = {}
         elif WINDOWS:
-            # What tauri-driver sends Microsoft Edge WebDriver for a WebView2 app.
+            # Started here too: Edge WebDriver would give the webview a new profile for each session, so nothing the
+            # page keeps would outlive a restart. It attaches to the webview's debugging port instead.
+            RUN.app = start([str(APP), *RUN.args], RUN.work / 'app.log', RUN.launch_env(
+                TAURI_WEBVIEW_AUTOMATION='true', WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=f'--remote-debugging-port={DEBUG_PORT}'))
+            if not started(RUN.app, DEBUG_PORT, 60):
+                raise RuntimeError('the app did not start, see app.log')
             caps = {'capabilities': {'alwaysMatch': {'browserName': 'webview2', 'ms:edgeOptions': {
-                'binary': str(APP), 'args': RUN.args, 'webviewOptions': {}}}}}
+                'debuggerAddress': f'127.0.0.1:{DEBUG_PORT}'}}}}
         else:
             # What tauri-driver sends on Linux. Talking to WebKitWebDriver directly avoids tauri-driver's connection
             # pool, whose stale connections now and then dropped a request mid-flow.
@@ -142,7 +148,7 @@ class Session:
             webdriver('DELETE', self.path)
         except Exception:
             pass
-        if MACOS:
+        if MACOS or WINDOWS:
             stop(RUN.app)
 
 

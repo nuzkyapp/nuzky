@@ -15,8 +15,9 @@ where nobody works; input goes to the webview, not the screen. Media and models 
 
 Needs Pillow and numpy, on Linux gamescope, WebKitWebDriver and python-xlib, and on Windows the Edge WebDriver
 and FFmpeg that scripts/setup-windows-deps.ps1 sets up in the same PowerShell. Vite takes port 1420 (the app's
-dev URL) and the WebDriver 4444. Runs on one machine take turns: a second one waits for the first. A port that
-something else holds, such as a dev server, stops the run instead of touching it.
+dev URL), the WebDriver 4444 and on Windows the webview's debugging port 4445. Runs on one machine take turns: a
+second one waits for the first. A port that something else holds, such as a dev server, stops the run instead of
+touching it.
 """
 import importlib, json, os, shutil, signal, subprocess, sys, time
 from pathlib import Path
@@ -28,7 +29,7 @@ if sys.platform == 'win32' and not sys.flags.utf8_mode:
 sys.dont_write_bytecode = True
 TESTS = Path(__file__).resolve().parent.parent / 'tests'
 sys.path.insert(0, str(TESTS))
-from e2e.harness import DRIVER, FIXTURES, FLOWS, LINUX, MACOS, MODELS, OUT, ROOT, WINDOWS, port_busy, run_flow, start, started, stop  # noqa: E402
+from e2e.harness import DEBUG_PORT, DRIVER, FIXTURES, FLOWS, LINUX, MACOS, MODELS, OUT, ROOT, WINDOWS, port_busy, run_flow, start, started, stop  # noqa: E402
 
 for module in sorted(p.stem for p in (TESTS / 'e2e').glob('*.py') if p.stem != 'harness'):
     importlib.import_module(f'e2e.{module}')
@@ -71,7 +72,8 @@ def preflight(names):
             or ('first-reel' in names and not all((FIXTURES / f).exists() for f in (
                 'first-reel.mov', 'xdg/data/nuzky/models/ggml-large-v3-turbo-q5_0.bin')))):
         problems.append('test media or models are missing: run scripts/fixtures.sh')
-    problems += [f'port {port} is in use by another session' for port in ((1420,) if MACOS else (1420, 4444)) if port_busy(port)]
+    ports = (1420,) if MACOS else (1420, 4444, DEBUG_PORT) if WINDOWS else (1420, 4444)
+    problems += [f'port {port} is in use by another session' for port in ports if port_busy(port)]
     return problems
 
 
