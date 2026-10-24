@@ -218,13 +218,14 @@ class Run:
         if WINDOWS:
             # Windows names a user's folders under USERPROFILE, so the app gets a home of its own as on macOS: its
             # cache, the webview's storage and CapCut's drafts live in this run's AppData, with the cache joined to
-            # this run's folder. NUZKY_DATA_DIR moves the data folder, which roams elsewhere.
+            # this run's folder. NUZKY_DATA_DIR moves the data folder, which roams elsewhere. The CLI the flows run
+            # gets the same home, so it shares the app's cache and never writes the person's own.
             home = self.work / 'home'
             for folder in (home / 'AppData/Local', home / 'AppData/Roaming', self.work / 'cache/nuzky'):
                 folder.mkdir(parents=True)
             subprocess.run(['cmd', '/c', 'mklink', '/J', str(home / 'AppData/Local/nuzky'), str(self.work / 'cache/nuzky')],
                            check=True, capture_output=True)
-            self.env.update(HOME=str(home), NUZKY_DATA_DIR=str(self.work / 'data/nuzky'))
+            self.env.update(HOME=str(home), USERPROFILE=str(home), NUZKY_DATA_DIR=str(self.work / 'data/nuzky'))
 
     def launch_env(self, **extra):
         """r.env for a process this run starts; on Windows the home a flow set in HOME is the one apps read."""
