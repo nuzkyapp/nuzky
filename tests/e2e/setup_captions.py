@@ -1,8 +1,9 @@
 """Get set up's Captions model step on an empty install: the spoken language starts as the system's, three models
 with their size, state and the recommended one, and Download gets everything the first transcript in that language
 needs, with the percentage, Stop and resuming, Try again after a network failure and a free space check. The choice
-and the step stay after a restart, and the first captions download nothing more. Czech is only the test's system
-language here."""
+and the step stay after a restart, and the first captions download nothing more. On the processor, where the recommended
+model depends on the language, the chosen model follows the language while it is the recommended one, unless it is
+downloaded and at least as big. Czech is only the test's system language here."""
 import json, time
 
 from e2e.harness import FIXTURES, MACOS, MODELS, WINDOWS, flow, press, wait
@@ -48,6 +49,7 @@ return out;"""
 SET_LANGUAGE = """const s = document.querySelector('[aria-labelledby=setup-title] select');
 s.value = arguments[0]; s.dispatchEvent(new Event('change', {bubbles: true}));"""
 SETUP = "window.__nuzky.api.speechSetup(arguments[0]).then((s) => JSON.stringify(s))"
+CHOSEN = "return window.__nuzky.speech.getState().model"
 
 
 def mb(*names):
@@ -83,6 +85,10 @@ def files(r):
 
 def card(d, model):
     return next((c for c in (d or {}).get('cards', []) if c['id'] == model), None)
+
+
+def marked(d):
+    return [c['id'] for c in (d or {}).get('cards', []) if 'Recommended' in c['lines']]
 
 
 def small_window(r, name):
@@ -297,3 +303,49 @@ def run(r):
             len(r.models.requests) == requests and files(r) == downloaded, {'requests': r.models.requests[requests:], 'files': files(r)})
     r.shot('first-captions')
     r.check('no error toast', not r.errors(), r.errors())
+    on_processor(r)
+
+
+def on_processor(r):
+    """Recognition on the processor, as on Windows: Recommended moves with the language, and the choice with it while it
+    is the recommended one, so English on Fast becomes Czech on Balanced. A downloaded Balanced stays in English, where
+    it is better than Fast, and a model picked over the recommended one stays."""
+    r.env['NUZKY_TEST_SPEECH_CPU'] = '1'
+    relaunch(r)
+    wait_library(r)
+    d = open_setup(r, first_start=False)
+    r.check('on the processor, in Czech, Recommended marks Balanced, which is still chosen',
+            d and 'recognises speech on its processor' in d['text'] and marked(d) == ['small'] and card(d, 'small')['checked'], d)
+    r.s.run(SET_LANGUAGE, 'en')
+    d = wait(lambda: (d := step(r)) and d['language'] == 'en' and marked(d) == ['base'] and d, 5)
+    time.sleep(0.4)
+    d = step(r)
+    r.check('in English Recommended moves to Fast, and Balanced, downloaded and better in English too, stays chosen with no model to download',
+            d and card(d, 'small')['checked'] and r.s.run(CHOSEN) == 'small' and d['buttons'][0] == f'Download {mb(EN_TIMING)} MB'
+            and f'Download gets the English word timing model ({mb(EN_TIMING)} MB).' in d['text'], d)
+    r.shot('processor-english-downloaded')
+    r.s.run(SET_LANGUAGE, 'cs')
+    r.check('back in Czech Balanced is chosen', wait(lambda: (d := step(r)) and d['language'] == 'cs' and card(d, 'small')['checked'], 5), step(r))
+    pick = lambda model: r.s.run(f"document.querySelector('{BOX} input[value=\"{model}\"]').closest('label').click()")
+    pick('large-v3-turbo-q5_0')
+    r.check('a click picks Most accurate', wait(lambda: r.s.run(CHOSEN) == 'large-v3-turbo-q5_0', 3), r.s.run(CHOSEN))
+    r.s.run(SET_LANGUAGE, 'en')
+    d = wait(lambda: (d := step(r)) and d['language'] == 'en' and marked(d) == ['base'] and d, 5)
+    time.sleep(0.4)
+    r.check('in English Recommended moves to Fast, and Most accurate, picked over Balanced, stays chosen',
+            d and card(step(r), 'large-v3-turbo-q5_0')['checked'] and r.s.run(CHOSEN) == 'large-v3-turbo-q5_0', step(r))
+    pick('base')
+    r.check('a click picks Fast', wait(lambda: r.s.run(CHOSEN) == 'base', 3), r.s.run(CHOSEN))
+
+    relaunch(r)
+    wait_library(r)
+    d = open_setup(r, first_start=False)
+    r.check('after a restart the step starts in English on Fast, which Recommended marks', d and d['language'] == 'en'
+            and marked(d) == ['base'] and card(d, 'base')['checked'], d)
+    r.shot('processor-english')
+    r.s.run(SET_LANGUAGE, 'cs')
+    d = wait(lambda: (d := step(r)) and d['language'] == 'cs' and marked(d) == ['small'] and d, 5)
+    time.sleep(0.4)
+    r.check('in Czech the choice moves to Balanced with Recommended, and Captions and Transcript use it',
+            d and card(step(r), 'small')['checked'] and r.s.run(CHOSEN) == 'small', step(r))
+    r.shot('processor-czech')
