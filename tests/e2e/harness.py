@@ -866,9 +866,11 @@ class Bridge:
             stop(self.process)
 
 
-def deny(path, mode, access='W'):
+def deny(path, mode, access='WD,AD'):
     """Takes away the right to write `path` (or with access 'R', to read it) until the returned function gives it back:
-    `mode` on Unix, and on Windows, which ignores a folder's read-only flag, a deny entry for the user in its access list."""
+    `mode` on Unix, and on Windows, which ignores a folder's read-only flag, a deny entry for the user in its access list.
+    Its default denies adding files and folders; icacls' W also denies the right to wait on a handle, without which a
+    folder cannot even be listed."""
     if WINDOWS:
         user = os.environ['USERNAME']
         subprocess.run(['icacls', str(path), '/deny', f'{user}:({access})'], check=True, capture_output=True)
