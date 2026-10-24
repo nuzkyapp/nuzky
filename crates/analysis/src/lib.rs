@@ -6,6 +6,8 @@ mod boundaries;
 mod captions;
 mod emphasis;
 mod fillers;
+#[cfg(all(windows, feature = "gpu"))]
+mod no_vulkan;
 mod retakes;
 mod scenes;
 mod speech;
