@@ -144,6 +144,11 @@ function Step() {
   ).filter(([, left]) => left > 0);
   const missing = parts.reduce((sum, [, left]) => sum + left, 0);
   const contents = LIST.format(parts.map(([what, left, size]) => `${left < size ? "the rest of " : ""}${what} (${left} MB)`));
+  // On the processor the recommendation depends on the language; a model picked over it stays.
+  const changeLanguage = (next: string) => {
+    if (model === recommended) setSpeechModel(recommend(next, setup.gpu));
+    setSpeechLanguage(next);
+  };
   const download = () => {
     asked = { model, language };
     setError(null);
@@ -163,7 +168,7 @@ function Step() {
                 : `${name} has a word timing model, so cuts land between words.`
           }
         >
-          <Select value={language} disabled={!!(lock ?? busy)} title={lock ?? busy ?? undefined} onChange={(e) => setSpeechLanguage(e.target.value)}>
+          <Select value={language} disabled={!!(lock ?? busy)} title={lock ?? busy ?? undefined} onChange={(e) => changeLanguage(e.target.value)}>
             {SPEECH_LANGUAGES.map(([id, name]) => (
               <option key={id} value={id}>
                 {name}

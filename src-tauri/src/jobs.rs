@@ -587,11 +587,21 @@ fn mb(bytes: u64) -> u32 {
     }
 }
 
+/// Where recognition runs, as Get set up shows it. With `NUZKY_TEST_SPEECH_CPU` a debug build shows the processor, so
+/// the UI flows check a computer without a GPU on any machine; recognition itself does not change.
+fn speech_on_gpu() -> bool {
+    #[cfg(debug_assertions)]
+    if std::env::var_os("NUZKY_TEST_SPEECH_CPU").is_some() {
+        return false;
+    }
+    nuzky_analysis::use_gpu()
+}
+
 #[tauri::command]
 pub async fn speech_setup(language: String) -> SpeechSetup {
     let align = nuzky_analysis::align_model(&language);
     SpeechSetup {
-        gpu: nuzky_analysis::use_gpu(),
+        gpu: speech_on_gpu(),
         word_timing_mb: align.map(|model| mb(model.size)),
         word_timing_missing_mb: align
             .map_or(0, |model| mb(missing_model_bytes(&models_dir().join(model.file), model.size))),
