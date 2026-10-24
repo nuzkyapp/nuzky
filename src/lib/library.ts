@@ -32,8 +32,8 @@ interface LibraryState {
   sort: Sort;
   /** Paths of the selected projects on the home screen. */
   selection: string[];
-  /** The poster of each project, by path, with the poster key it was drawn for; null for a draft cover, asked for again. */
-  posters: Record<string, { version: string | null; url: string | null }>;
+  /** The poster of each project, by path, with the poster key it was drawn for (null for a draft cover, asked for again) and its width over height. */
+  posters: Record<string, { version: string | null; url: string | null; ratio: number | null }>;
   pendingSwitch: PendingSwitch | null;
   /** A card to focus once it is listed, e.g. a duplicate. */
   focusPath: string | null;
@@ -140,15 +140,11 @@ const requested = new Map<string, string>();
 const drafts = new Map<string, string>();
 let postersLoading = 0;
 
-/** The poster changes with the project file and when its cover can or can no longer be drawn. */
-const posterKey = (p: LibraryProject) => `${p.modifiedMs}:${p.cover ?? ""}`;
-
 /** Asks for the project's poster once per poster key, a draft cover again at each list; two render at a time. */
 export function loadPoster(p: LibraryProject) {
   if (p.state === "broken" || p.state === "empty") return;
-  const key = posterKey(p);
-  if (useLibrary.getState().posters[p.path]?.version === key || requested.get(p.path) === key) return;
-  requested.set(p.path, key);
+  if (useLibrary.getState().posters[p.path]?.version === p.poster || requested.get(p.path) === p.poster) return;
+  requested.set(p.path, p.poster);
   posterQueue.push(p);
   pumpPosters();
 }
@@ -167,8 +163,9 @@ function pumpPosters() {
         else drafts.delete(p.path);
         const old = useLibrary.getState().posters[p.path]?.url;
         if (old?.startsWith("blob:")) URL.revokeObjectURL(old);
-        const version = poster?.provisional ? null : posterKey(p);
-        useLibrary.setState((s) => ({ posters: { ...s.posters, [p.path]: { version, url: poster ? blobUrl(poster.url) : null } } }));
+        const version = poster?.provisional ? null : p.poster;
+        const ratio = poster?.height ? poster.width / poster.height : null;
+        useLibrary.setState((s) => ({ posters: { ...s.posters, [p.path]: { version, url: poster ? blobUrl(poster.url) : null, ratio } } }));
       })
       .finally(() => {
         postersLoading--;

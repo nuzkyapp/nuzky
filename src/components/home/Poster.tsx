@@ -6,10 +6,13 @@ import type { LibraryProject, ThumbnailFormat } from "../../lib/types";
 
 const COVER_RATIO: Record<ThumbnailFormat, number> = { cover_9x16: 9 / 16, youtube_16x9: 16 / 9 };
 
-/** The picture's size inside a box of `box` width over height, in the shape of its cover or else its canvas. */
-function frameStyle(p: LibraryProject, box: number) {
+/**
+ * The picture's size inside a box of `box` width over height, in the `shown` shape of the poster it shows, or until one
+ * arrives, of its cover or else its canvas.
+ */
+function frameStyle(p: LibraryProject, box: number, shown: number | null | undefined) {
   const canvas = p.width > 0 && p.height > 0 ? p.width / p.height : 9 / 16;
-  const ratio = p.cover ? COVER_RATIO[p.cover] : canvas;
+  const ratio = shown ?? (p.cover ? COVER_RATIO[p.cover] : canvas);
   return ratio < box ? { height: "100%", aspectRatio: `${ratio}` } : { width: "100%", aspectRatio: `${ratio}` };
 }
 
@@ -30,7 +33,7 @@ export function Poster({ p, box, ai = false, compact = false }: { p: LibraryProj
         {!compact && <span className="text-[12px]">Can't open</span>}
       </div>
     );
-  const frame = frameStyle(p, box);
+  const frame = frameStyle(p, box, poster?.ratio);
   if (p.state === "empty")
     return (
       <div className="flex h-full w-full items-center justify-center">

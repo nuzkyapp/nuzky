@@ -150,10 +150,7 @@ impl Covers {
             let path = &project.asset(id)?.path;
             Some((id.clone(), path.clone(), nuzky_engine::thumbnail::file_version(path)))
         });
-        let waiting: usize = match &shown {
-            Some(shown) => nuzky_engine::matte::missing(cache, shown).iter().map(|(_, chunks)| chunks.len()).sum(),
-            None => 0,
-        };
+        let waiting = waiting_mattes(project, thumbnail, cache);
         let fresh = !self.frame.as_ref().is_some_and(|f| match &still {
             Some(_) => f.still == still,
             None => f.still.is_none() && f.time_us == thumbnail.time_us && f.picture == shown && f.waiting == waiting,
@@ -214,6 +211,15 @@ pub fn draw(
     // The mask only where the export uses it too, so the two never differ.
     let mask = if thumbnail.needs_mask() { mask } else { None };
     Ok((renderer.render_thumbnail(project, thumbnail, frame, mask, width)?, false))
+}
+
+/// How many chunks of person outlines the project's clip backgrounds still wait for, which a cover's frame shows as
+/// recorded until they are made; none for a cover made from an image.
+pub fn waiting_mattes(project: &Project, thumbnail: &Thumbnail, cache: &Path) -> usize {
+    if thumbnail.image.is_some() {
+        return 0;
+    }
+    nuzky_engine::matte::missing(cache, project).iter().map(|(_, chunks)| chunks.len()).sum()
 }
 
 /// Names of the missing files of the pictures shown at `t_us`.
