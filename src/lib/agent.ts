@@ -11,7 +11,7 @@ import { useEditor } from "./store";
 import type { AgentStatus, Snapshot } from "./types";
 
 /**
- * An agent the panel can run: the user's own installed Claude Code or Codex, or ChatGPT on the user's plan, which runs in Nuzky.
+ * An agent the panel can run: the user's own installed Claude Code, Codex or OpenCode, or ChatGPT on the user's plan, which runs in Nuzky.
  * Gemini (`antigravity`) never runs here: Google lets no other app run it, so the panel shows how to use it from a terminal.
  */
 export type AgentId = CliAgentId | "chatgpt" | "antigravity";
@@ -25,7 +25,7 @@ export interface AgentInfo {
 }
 
 /** What went wrong with a turn, so the panel can say what to do next. */
-/** `SESSION_GONE`: Claude Code or Codex no longer has the conversation a reopened chat would continue. */
+/** `SESSION_GONE`: Claude Code, Codex or OpenCode no longer has the conversation a reopened chat would continue. */
 export type AgentErrorCode = "NOT_INSTALLED" | "NOT_SIGNED_IN" | "USAGE_LIMIT" | "PLAN_UNAVAILABLE" | "AGENT_FAILED" | "SESSION_GONE";
 
 /** Events from the backend for one chat, in order. */
@@ -175,7 +175,7 @@ const usable = (a: AgentInfo) => !!a.path;
 
 export function agentName(id: AgentId, agents = useAgent.getState().agents): string {
   if (id === "antigravity") return "Gemini";
-  return id === "chatgpt" ? "ChatGPT" : (agents?.find((a) => a.id === id)?.name ?? (id === "codex" ? "Codex" : (id === "opencode" ? "OpenCode" : "Claude Code")));
+  return id === "chatgpt" ? "ChatGPT" : (agents?.find((a) => a.id === id)?.name ?? { claude: "Claude Code", codex: "Codex", opencode: "OpenCode" }[id]);
 }
 
 /** Whether any agent can answer: an installed one, or ChatGPT signed in with its plan allowed. */

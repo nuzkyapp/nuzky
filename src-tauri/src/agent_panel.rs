@@ -461,32 +461,32 @@ pub async fn agent_models(agent: AgentId) -> CmdResult<Vec<AgentModel>> {
             }
             codex_models(&output.stdout).map_err(|_| failed.into())
         }
-        // OpenCode lists its models as "provider/model" lines; no reasoning efforts.
+        // Run on the panel's own config, as a turn is, so providers only the user's config adds are not offered.
         AgentId::Opencode => {
             let failed = "MODELS_FAILED: Couldn't list OpenCode's models. Try again.";
             let path = nuzky_agent::find(agent).path.ok_or(failed)?;
-            let output = nuzky_agent::run(&path, &["models"], &[], None, std::time::Duration::from_secs(15))
-                .map_err(|_| failed)?
-                .ok_or(failed)?;
-            if !output.status.success() {
-                return Err(failed.into());
-            }
+            let config = work_dir().to_string_lossy().into_owned();
+            let output = nuzky_agent::run(
+                &path,
+                &["models", "--pure"],
+                &[("XDG_CONFIG_HOME", &config)],
+                None,
+                std::time::Duration::from_secs(15),
+            )
+            .map_err(|_| failed)?
+            .ok_or(failed)?;
             let models: Vec<AgentModel> = String::from_utf8_lossy(&output.stdout)
                 .lines()
                 .map(str::trim)
-                .filter(|line| !line.is_empty() && !line.starts_with('#'))
-                .map(|line| {
-                    let (slug, name) = line.split_once(|c| c == ' ' || c == '\t').unwrap_or((line, ""));
-                    let name = name.trim();
-                    AgentModel {
-                        slug: slug.trim().into(),
-                        display_name: if name.is_empty() { slug.trim().into() } else { name.into() },
-                        efforts: Vec::new(),
-                        default_effort: None,
-                    }
+                .filter(|slug| slug.contains('/'))
+                .map(|slug| AgentModel {
+                    slug: slug.into(),
+                    display_name: slug.into(),
+                    efforts: Vec::new(),
+                    default_effort: None,
                 })
                 .collect();
-            if models.is_empty() {
+            if !output.status.success() || models.is_empty() {
                 return Err(failed.into());
             }
             Ok(models)

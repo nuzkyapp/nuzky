@@ -79,7 +79,7 @@ import { IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from "../panel/assets";
 import { ChatGptLogo } from "../ChatGptLogo";
 import { ContinueButton, USAGE_PAGE } from "../ChatGptDialog";
 import { continueWithChatGpt, openChatGpt, planReady, useChatGpt } from "../../lib/chatgpt";
-import { EFFORTS, chooseEffort, chooseModel, effortLabel, loadModels, resolved, useModels } from "../../lib/models";
+import { EFFORTS, chooseEffort, chooseModel, effortLabel, loadModels, ownDefault, resolved, useModels } from "../../lib/models";
 import { moveFloatBy, startMove } from "./AiDock";
 import { GeminiGuide } from "./GeminiGuide";
 
@@ -516,7 +516,14 @@ function ErrorNotice({ code, message, retryText, retryAttachments, last = false 
   );
   const term = (text: string) => <code className="rounded bg-white/[.08] px-1">{text}</code>;
   const cmd = agent === "chatgpt" || agent === "antigravity" ? null : term(COMMAND[agent]);
-  const signIn = agent === "codex" ? <>run {term("codex login")} and choose Sign in with ChatGPT</> : <>run {cmd} and sign in</>;
+  const signIn =
+    agent === "codex" ? (
+      <>run {term("codex login")} and choose Sign in with ChatGPT</>
+    ) : agent === "opencode" ? (
+      <>run {term("opencode auth login")} and sign in to a provider (its free models work only in OpenCode itself)</>
+    ) : (
+      <>run {cmd} and sign in</>
+    );
   // A message that failed after the agent began answering stays in the conversation, with Try again, not in the field.
   const kept = retryText !== undefined ? message : <>{message} Your message is still here.</>;
   const [icon, title, body, buttons]: [ReactNode, string, ReactNode, ReactNode] =
@@ -613,7 +620,7 @@ const STYLE_STARTERS: [ReactNode, string][] = [
 /** What the panel is about; on the Your style page, the creator's style. */
 const About = createContext<AiAbout>("project");
 
-/** ChatGPT chosen but not ready: signing in, or allowing the plan, is the way on. Without Claude Code or Codex, how to get them or Gemini too. */
+/** ChatGPT chosen but not ready: signing in, or allowing the plan, is the way on. Without an agent installed, how to get one or Gemini too. */
 function ChatGptSignIn() {
   const agents = useAgent((s) => s.agents) ?? [];
   const gemini = useAgent((s) => s.gemini);
@@ -629,7 +636,7 @@ function ChatGptSignIn() {
       <ContinueButton onClick={continueWithChatGpt} />
       {!agents.some((a) => a.path) && (
         <div className="mt-6 flex w-full flex-col">
-          <p className="mb-1.5 text-[12px] leading-[18px] text-muted">Or use Claude Code or Codex: install one, sign in from your terminal, then check again.</p>
+          <p className="mb-1.5 text-[12px] leading-[18px] text-muted">Or use Claude Code, Codex or OpenCode: install one, sign in from your terminal, then check again.</p>
           {agents.map((a) => (
             <div key={a.id} className="flex h-9 items-center justify-between border-t border-white/[.07] text-[13px]">
               {a.name}
@@ -1058,7 +1065,7 @@ function Composer() {
   };
   const sendTitle = !working
     ? "Send (Enter)"
-    : agent === "codex"
+    : agent === "codex" || agent === "opencode"
       ? `Send now (Enter). ${name} stops its current step and goes on with this, or answers it next when it has not started yet`
       : `Send now (Enter). ${name} takes it after its current step`;
   const sendButton = (
@@ -1272,8 +1279,8 @@ function ModelMenu() {
   const list = models.lists[agent];
   const error = models.errors[agent];
   const { model, effort, efforts } = resolved(agent, models);
-  // Without a model Claude Code uses its own setting, and so does Codex when its list didn't load.
-  const name = model?.displayName ?? (agent === "claude" || (agent === "codex" && error) ? "Default" : error ? "No models" : "Loading models…");
+  // Without a model Claude Code and OpenCode use their own setting, and so does Codex when its list didn't load.
+  const name = model?.displayName ?? (ownDefault(agent) || (agent === "codex" && error) ? "Default" : error ? "No models" : "Loading models…");
   return (
     <Menu
       label="Model"
@@ -1309,10 +1316,10 @@ function ModelMenu() {
       {() => (
         <>
           <p className="px-2 pb-1 pt-1.5 text-[12px] font-semibold text-muted">Model</p>
-          {agent === "claude" && (
+          {ownDefault(agent) && (
             <MenuItem checked={!model} onClick={() => chooseModel(agent, null)}>
               Default
-              <span className="ml-auto text-[12px] text-muted">Claude Code setting</span>
+              <span className="ml-auto text-[12px] text-muted">{agent === "claude" ? "Claude Code setting" : "OpenCode's last model"}</span>
             </MenuItem>
           )}
           {error ? (
