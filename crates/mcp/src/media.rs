@@ -1,10 +1,12 @@
-use std::path::Path;
+use std::{collections::HashMap, path::Path};
 
 use anyhow::{Context, Result, ensure};
 use nuzky_engine::{
     Pending, Project, Renderer, Wait,
+    media::VideoDecoder,
     model::{Background, ClipContent, ThumbnailFormat},
 };
+use serde_json::{Value, json};
 
 const DEFAULT_WIDTH: u32 = 320;
 pub const MAX_FRAMES: usize = 16;
@@ -169,6 +171,89 @@ pub fn shade_thumbnail_zones(pixels: &mut [u8], width: u32, height: u32, format:
     }
 }
 
+/// The colours of the image file itself with its transparency, every few pixels of it: see `colors`. It is
+/// converted at its own size, since scaling blends edges with the transparent black around them and moves the
+/// colours of a palette PNG by one.
+pub fn image_colors(path: &Path) -> Result<(f64, Vec<Value>)> {
+    let mut decoder = VideoDecoder::open(path)?;
+    let (t, frame) = decoder.next_frame()?.context("The image has no picture")?;
+    let rgba = decoder.convert(&frame, t, frame.width(), frame.height())?;
+    let (w, h) = (rgba.width as usize, rgba.height as usize);
+    let step = (w.max(h) / 256).max(1);
+    let (sw, sh) = (w.div_ceil(step), h.div_ceil(step));
+    let sample: Vec<u8> = (0..sw * sh)
+        .flat_map(|i| {
+            let at = ((i / sw) * step * w + (i % sw) * step) * 4;
+            rgba.data[at..at + 4].to_vec()
+        })
+        .collect();
+    Ok(colors(&sample, sw as u32, sh as u32))
+}
+
+/// The share of pixels that show (at least half as opaque as the image's most opaque one, so a faint watermark
+/// still has colours) and up to six groups of alike colours among them, largest first. Each group is named by its
+/// most common exact colour, so a flat colour comes out exactly even with JPEG noise or blended edges around it.
+/// The group most of a mostly opaque border falls in is the backdrop.
+pub fn colors(rgba: &[u8], width: u32, height: u32) -> (f64, Vec<Value>) {
+    const NEAR: u32 = 24 * 24;
+    let round = |share: f64| (share * 100.0).round() / 100.0;
+    let pixels = rgba.as_chunks::<4>().0;
+    let half = pixels.iter().map(|p| p[3]).max().unwrap_or(0).div_ceil(2).max(1);
+    let mut counts = HashMap::<[u8; 3], u32>::new();
+    for p in pixels.iter().filter(|p| p[3] >= half) {
+        *counts.entry([p[0], p[1], p[2]]).or_default() += 1;
+    }
+    let visible: u32 = counts.values().sum();
+    let mut exact: Vec<_> = counts.into_iter().collect();
+    exact.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    let distance = |a: [u8; 3], b: [u8; 3]| a.iter().zip(b).map(|(&a, b)| u32::from(a.abs_diff(b)).pow(2)).sum::<u32>();
+    let mut groups: Vec<([u8; 3], u32)> = Vec::new();
+    let mut group_of = HashMap::new();
+    for (rgb, count) in exact {
+        let group = groups.iter().position(|(seed, _)| distance(*seed, rgb) <= NEAR).unwrap_or_else(|| {
+            groups.push((rgb, 0));
+            groups.len() - 1
+        });
+        groups[group].1 += count;
+        group_of.insert(rgb, group);
+    }
+
+    let (w, h) = (width as usize, height as usize);
+    let border = (0..w * h).filter(|i| i % w == 0 || i % w == w - 1 || i / w == 0 || i / w == h - 1);
+    let (mut edge, mut shown, mut on_edge) = (0, 0, vec![0; groups.len()]);
+    for p in border.map(|i| pixels[i]) {
+        edge += 1;
+        if p[3] >= half {
+            shown += 1;
+            if let Some(&group) = group_of.get(&[p[0], p[1], p[2]]) {
+                on_edge[group] += 1;
+            }
+        }
+    }
+    let backdrop = (shown * 4 >= edge * 3)
+        .then(|| (0..groups.len()).max_by_key(|&g| on_edge[g]))
+        .flatten()
+        .filter(|&g| on_edge[g] * 4 >= shown * 3);
+
+    let mut order: Vec<usize> = (0..groups.len()).collect();
+    order.sort_by(|&a, &b| groups[b].1.cmp(&groups[a].1).then(groups[a].0.cmp(&groups[b].0)));
+    let list = order
+        .into_iter()
+        .filter(|&group| groups[group].1 as f64 >= 0.01 * visible as f64)
+        .take(6)
+        .map(|group| {
+            let ([r, g, b], count) = groups[group];
+            let mut color =
+                json!({"hex": format!("#{r:02x}{g:02x}{b:02x}"), "share": round(count as f64 / visible as f64)});
+            if backdrop == Some(group) {
+                color["background"] = json!(true);
+            }
+            color
+        })
+        .collect();
+    (round(visible as f64 / (w * h).max(1) as f64), list)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,5 +272,87 @@ mod tests {
         let before = pixels.clone();
         shade_unsafe(&mut pixels, 108, 192, &canvas);
         assert_eq!(pixels, before);
+    }
+
+    fn image(w: usize, h: usize, pixel: impl Fn(usize, usize) -> [u8; 4]) -> Vec<u8> {
+        (0..w * h).flat_map(|i| pixel(i % w, i / w)).collect()
+    }
+
+    const RED: [u8; 4] = [0xe5, 0x09, 0x14, 255];
+
+    /// A 20x20 red square in the middle of 40x40, half its pixels off by up to 6 as JPEG leaves them.
+    fn square(x: usize, y: usize, outside: [u8; 4]) -> [u8; 4] {
+        if !((10..30).contains(&x) && (10..30).contains(&y)) {
+            return outside;
+        }
+        let [r, g, b, a] = RED;
+        match (x + y * 3) % 6 {
+            3 => [r + 6, g - 6, b + 6, a],
+            4 => [r - 6, g + 6, b - 6, a],
+            5 => [r + 6, g + 6, b + 6, a],
+            _ => RED,
+        }
+    }
+
+    #[test]
+    fn colors_count_only_what_shows_and_name_a_noisy_colour_exactly() {
+        let logo = image(40, 40, |x, y| square(x, y, if x < 5 { [255, 255, 255, 127] } else { [0; 4] }));
+        let (visible, colors) = colors(&logo, 40, 40);
+        assert_eq!(visible, 0.25);
+        assert_eq!(colors, [json!({"hex": "#e50914", "share": 1.0})]);
+    }
+
+    #[test]
+    fn colors_keep_close_brand_blues_apart_and_leave_out_specks() {
+        let flag = image(40, 10, |x, y| match (x, y) {
+            (39, 9) => [0, 0, 0, 255],
+            (0..24, _) => [0x00, 0x57, 0xb8, 255],
+            _ => [0x00, 0x78, 0xd4, 255],
+        });
+        let (visible, colors) = colors(&flag, 40, 10);
+        assert_eq!(visible, 1.0);
+        // Neither blue is most of the border, so neither is a backdrop.
+        assert_eq!(colors, [json!({"hex": "#0057b8", "share": 0.6}), json!({"hex": "#0078d4", "share": 0.4})]);
+    }
+
+    #[test]
+    fn colors_mark_the_backdrop_only_along_a_mostly_shown_border() {
+        let white = [255; 4];
+        let card = image(40, 40, |x, y| square(x, y, white));
+        let (visible, colors) = colors(&card, 40, 40);
+        assert_eq!(visible, 1.0);
+        assert_eq!(
+            colors,
+            [json!({"hex": "#ffffff", "share": 0.75, "background": true}), json!({"hex": "#e50914", "share": 0.25})]
+        );
+        // With the left part of the border transparent, the white is not a backdrop any more.
+        let torn = image(40, 40, |x, y| square(x, y, if x < 12 { [0; 4] } else { white }));
+        let (_, torn) = super::colors(&torn, 40, 40);
+        assert!(torn.iter().all(|c| c.get("background").is_none()), "{torn:?}");
+        assert_eq!(torn[0]["hex"], "#ffffff");
+    }
+
+    #[test]
+    fn colors_of_a_faint_watermark() {
+        let faint = image(40, 40, |x, y| match square(x, y, [0; 4]) {
+            [r, g, b, 255] => [r, g, b, 96],
+            outside => outside,
+        });
+        assert_eq!(colors(&faint, 40, 40), (0.25, vec![json!({"hex": "#e50914", "share": 1.0})]));
+    }
+
+    #[test]
+    fn colors_count_a_sky_of_unique_shades_beside_many_flat_colours() {
+        // The top half is 2048 blues that each occur once, the bottom half 32 flat colours a row each.
+        let photo = image(64, 64, |x, y| {
+            let (k, i) = (y * 64 + x, y.saturating_sub(32));
+            let [r, g, b] = if y < 32 {
+                [k % 16, k / 16 % 16, 200 + k / 256]
+            } else {
+                [100 + 50 * (i % 4), 100 + 50 * (i / 4 % 4), 60 * (i / 16)]
+            };
+            [r as u8, g as u8, b as u8, 255]
+        });
+        assert_eq!(colors(&photo, 64, 64).1[0], json!({"hex": "#0000c8", "share": 0.5}));
     }
 }

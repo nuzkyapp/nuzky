@@ -1,19 +1,20 @@
 //! Codex as `codex exec --json`: the command and a parser of its events.
 
-use crate::event::{AgentEvent, ErrorCode, ToolStatus};
+use crate::event::{AgentEvent, ErrorCode, ToolStatus, web_search_input};
 use crate::turn::{SYSTEM, Step, TurnRequest};
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::process::Command;
 
-/// Everything that would give Codex a tool besides Nuzky's and its image generation. `-c` rather than
-/// `--disable`, since Codex refuses to start on a feature name it no longer knows but only warns about a setting.
+/// Everything that would give Codex a tool besides Nuzky's, its image generation and its web search. `-c` rather
+/// than `--disable`, since Codex refuses to start on a feature name it no longer knows but only warns about a setting.
 const OFF: &[&str] = &[
     // Reads only what Codex itself needs and writes nothing, so image generation cannot take a user's
     // file as a reference and send it to OpenAI; a read-only sandbox would still read every file.
     "default_permissions=\"nuzky\"",
     "permissions.nuzky.filesystem={\":minimal\"=\"read\"}",
     "approval_policy=\"never\"",
-    "web_search=\"disabled\"",
+    // Searches OpenAI's index on OpenAI's servers; "live" would fetch pages as the search goes.
+    "web_search=\"cached\"",
     "agents.enabled=false",
     "skills.include_instructions=false",
     "features.shell_tool=false",
@@ -172,8 +173,19 @@ impl Parser {
                     input: (status == ToolStatus::Running).then(|| item["arguments"].clone()),
                 }))
             }
+            Some("web_search") => {
+                self.kept |= completed;
+                let query = item["query"].as_str().filter(|q| !q.is_empty());
+                let input = web_search_input(&item["action"]).or_else(|| query.map(|q| json!({"query": q})));
+                Some(Step::Event(AgentEvent::Tool {
+                    id: format!("{}@{}", item["id"].as_str().unwrap_or(""), self.turn),
+                    name: "web_search".into(),
+                    status: if completed { ToolStatus::Done } else { ToolStatus::Running },
+                    input,
+                }))
+            }
             Some("agent_message" | "todo_list" | "error") | None => None,
-            // A shell command, a file change, a web search, another agent or another server's tool.
+            // A shell command, a file change, another agent or another server's tool.
             Some(kind) => {
                 let what = item["server"]
                     .as_str()
@@ -193,7 +205,6 @@ impl Parser {
 mod tests {
     use super::*;
     use crate::turn::{McpServer, Message};
-    use serde_json::json;
     use std::path::PathBuf;
 
     type Outcome = Result<AgentEvent, (ErrorCode, String)>;
@@ -295,6 +306,35 @@ mod tests {
         }
     }
 
+    // The shape of codex-rs 0.164.0 (exec_events.rs): the web search's own id follows the item's, and the later one counts.
+    #[test]
+    fn a_web_search_is_a_step_with_its_query_or_page() {
+        let (events, session) = run(&[
+            r#"{"type":"thread.started","thread_id":"01a12779-e1a0-7391-8130-1242bc8fb459"}"#,
+            r#"{"type":"item.started","item":{"id":"item_1","type":"web_search","id":"ws_1","query":"","action":{"type":"other"}}}"#,
+            r#"{"type":"item.completed","item":{"id":"item_1","type":"web_search","id":"ws_1","query":"Spotify logo svg","action":{"type":"search","query":"Spotify logo svg","queries":["Spotify logo svg"]}}}"#,
+            r#"{"type":"item.completed","item":{"id":"item_2","type":"web_search","id":"ws_2","query":"","action":{"type":"open_page","url":"https://commons.wikimedia.org/wiki/File:Spotify_logo.svg"}}}"#,
+            r#"{"type":"item.completed","item":{"id":"item_3","type":"web_search","id":"ws_3","query":"","action":{"type":"search","queries":["Spotify brand colors","Spotify green hex"]}}}"#,
+        ]);
+        let search = |id: &str, status, input| {
+            Ok(AgentEvent::Tool { id: format!("{id}@7"), name: "web_search".into(), status, input })
+        };
+        assert_eq!(
+            events,
+            [
+                search("ws_1", ToolStatus::Running, None),
+                search("ws_1", ToolStatus::Done, Some(json!({"query": "Spotify logo svg"}))),
+                search(
+                    "ws_2",
+                    ToolStatus::Done,
+                    Some(json!({"url": "https://commons.wikimedia.org/wiki/File:Spotify_logo.svg"}))
+                ),
+                search("ws_3", ToolStatus::Done, Some(json!({"query": "Spotify brand colors · Spotify green hex"}))),
+            ]
+        );
+        assert!(session.is_some());
+    }
+
     #[test]
     fn the_command_gives_codex_only_nuzkys_tools_and_resumes_by_its_id() {
         let req = TurnRequest {
@@ -327,6 +367,7 @@ mod tests {
         assert_eq!(setting("mcp_servers.nuzky.env.XDG_RUNTIME_DIR"), json!("/run/user/1000"));
         assert_eq!(setting("developer_instructions"), json!(format!("{SYSTEM} {IMAGES}")));
         assert_eq!(setting("features.image_generation"), json!(true));
+        assert_eq!(setting("web_search"), json!("cached"));
         assert_eq!(setting("default_permissions"), json!("nuzky"));
         assert_eq!(setting("permissions.nuzky.filesystem"), json!({":minimal": "read"}));
     }

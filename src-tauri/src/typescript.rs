@@ -146,6 +146,7 @@ fn generate() -> String {
     types.visit::<crate::library::Listing>();
     types.visit::<crate::library::DeletedCollection>();
     types.visit::<crate::library::Said>();
+    types.visit::<crate::library::ProjectPoster>();
     types.visit::<crate::transcripts::TranscriptView>();
     types.visit::<crate::transcripts::TranscriptCut>();
     types.visit::<crate::transcripts::WordsCorrected>();

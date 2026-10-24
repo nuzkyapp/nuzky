@@ -1,5 +1,5 @@
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 /// What the panel shows of a turn, in order. A turn ends with exactly one `Done` or `Error`.
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -49,4 +49,17 @@ pub enum ErrorCode {
     PlanUnavailable,
     AgentFailed,
     SessionGone,
+}
+
+/// The step input of a web search action as OpenAI reports it to Codex and ChatGPT. A search can name
+/// several `queries` in place of one `query`; the step shows them all, so different searches keep their own rows.
+pub(crate) fn web_search_input(action: &Value) -> Option<Value> {
+    let queries: Vec<&str> = action["queries"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    let query =
+        if queries.is_empty() { action["query"].as_str().map(str::to_owned) } else { Some(queries.join(" · ")) };
+    match (query, action["url"].as_str()) {
+        (Some(query), _) => Some(json!({"query": query})),
+        (None, Some(url)) => Some(json!({"url": url})),
+        (None, None) => None,
+    }
 }

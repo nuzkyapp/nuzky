@@ -1,5 +1,5 @@
 import { invoke, type Channel } from "@tauri-apps/api/core";
-import type { AgentAccess, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, Boot, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Part, PreviewStarted, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFraming, Said, SampleRun, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied } from "./types";
+import type { AgentAccess, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, Boot, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Part, PreviewStarted, ProjectPoster, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFraming, Said, SampleRun, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied } from "./types";
 
 /**
  * The session a change was made for. Mutating commands carry it, so a change still in flight when
@@ -74,8 +74,8 @@ export const api = {
   /** A PNG data URL of the picture CapCut keeps of a draft, or null. */
   capCutDraftCover: (path: string) => invoke<string | null>("capcut_draft_cover", { path }),
   library: () => invoke<Library>("library"),
-  /** A PNG data URL of the project's picture, or null when it has none. */
-  projectPoster: (path: string) => invoke<string | null>("project_poster", { path }),
+  /** The project's picture, or null when it has none. */
+  projectPoster: (path: string) => invoke<ProjectPoster | null>("project_poster", { path }),
   searchSaid: (query: string, collection: string | null = null) => invoke<Said>("search_said", { query, collection }),
   /** For a project that is not open; the open one is renamed with an edit. */
   renameProject: (path: string, name: string) => invoke<void>("rename_project", { path, name }),

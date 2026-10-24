@@ -872,6 +872,14 @@ export type LibraryProject = {
    */
   width: number,
   height: number,
+  /**
+   * The cover the card shows instead of a frame, in that cover's shape.
+   */
+  cover: ThumbnailFormat | null,
+  /**
+   * The poster cache key: a new one draws its picture again.
+   */
+  poster: string,
   collection: string | null,
   /**
    * `broken`: the file cannot be read. `busy`: another Nuzky window or an agent has it open.
@@ -990,6 +998,24 @@ export type Project = {
    * The timeline of another editor the project was opened from.
    */
   imported?: Imported | null,
+};
+
+/**
+ * A project's picture on its card.
+ */
+export type ProjectPoster = {
+  /**
+   * A PNG data URL.
+   */
+  url: string,
+  width: number,
+  height: number,
+  /**
+   * A cover drawn before the person is found in its frame or cut out of it. It is not kept on disk, and the home
+   * screen asks for it again when it lists the projects; it is the same picture until the person's outlines or mask
+   * are made.
+   */
+  provisional: boolean,
 };
 
 export type ProjectSummary = {

@@ -3,7 +3,7 @@
 //! and runs Nuzky's tools in the app, as the MCP bridge's clients run them. See
 //! docs/AI-ARCHITECTURE.md, "AI panel".
 
-use crate::event::{AgentEvent, ErrorCode, ToolStatus};
+use crate::event::{AgentEvent, ErrorCode, ToolStatus, web_search_input};
 use crate::turn::{Inbox, Message, SYSTEM, Turn};
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -137,14 +137,15 @@ fn converse(
 ) -> (AgentEvent, bool) {
     let http = http();
     let instructions = format!("{SYSTEM}\n\n{HERE}\n\n{}", req.guide);
-    let tools = namespace(&req.tools);
+    // OpenAI's web search of its own index, as Codex sends it: no live page fetch.
+    let tools = [namespace(&req.tools), json!({"type": "web_search", "external_web_access": false})];
     let mut answered = false;
     for _ in 0..MAX_ROUNDS {
         let mut body = json!({
             "model": req.model,
             "instructions": instructions,
             "input": items,
-            "tools": [tools],
+            "tools": tools,
             "store": false,
             "stream": true,
             // Nothing is stored, so the model's reasoning goes back to it with the history.
@@ -158,14 +159,14 @@ fn converse(
             Err(end) => return (end, answered),
         };
         answered = true;
-        if let Some(other) =
-            output.iter().find(|item| !matches!(item["type"].as_str(), Some("message" | "reasoning" | "function_call")))
-        {
+        if let Some(other) = output.iter().find(|item| {
+            !matches!(item["type"].as_str(), Some("message" | "reasoning" | "function_call" | "web_search_call"))
+        }) {
             let what = other["type"].as_str().unwrap_or("unknown");
             return (
                 failure(
                     ErrorCode::AgentFailed,
-                    &format!("ChatGPT tried to use something other than Nuzky's tools ({what}), so Nuzky stopped it."),
+                    &format!("ChatGPT tried to use a tool Nuzky did not give it ({what}), so Nuzky stopped it."),
                 ),
                 true,
             );
@@ -263,7 +264,18 @@ fn respond(
                     emit(AgentEvent::Text { text: text.to_owned() });
                 }
             }
-            "response.output_item.done" => output.push(event["item"].clone()),
+            // ChatGPT searches the web on OpenAI's servers within the answer; the panel shows each search.
+            "response.output_item.added" if event["item"]["type"] == "web_search_call" => {
+                emit(search(&event["item"], ToolStatus::Running));
+            }
+            "response.output_item.done" => {
+                let item = &event["item"];
+                if item["type"] == "web_search_call" {
+                    let failed = item["status"] == "failed";
+                    emit(search(item, if failed { ToolStatus::Failed } else { ToolStatus::Done }));
+                }
+                output.push(item.clone());
+            }
             "response.completed" => return Ok(output),
             // A usage limit can come this way after the answer began.
             "response.failed" => return Err(problem(None, &event["response"]["error"], id)),
@@ -277,6 +289,15 @@ fn respond(
             }
             _ => {}
         }
+    }
+}
+
+fn search(item: &Value, status: ToolStatus) -> AgentEvent {
+    AgentEvent::Tool {
+        id: item["id"].as_str().unwrap_or_default().to_owned(),
+        name: "web_search".into(),
+        status,
+        input: web_search_input(&item["action"]),
     }
 }
 
@@ -453,12 +474,15 @@ fn namespace(tools: &Value) -> Value {
 }
 
 /// An output item as the next request's input. Without its id, as nothing is stored on OpenAI's side to
-/// refer to; reasoning only with its encrypted content, the only form that can go back.
+/// refer to, except a web search call, whose input schema requires it; reasoning only with its encrypted
+/// content, the only form that can go back.
 fn as_input(mut item: Value) -> Option<Value> {
     if item["type"] == "reasoning" && !item["encrypted_content"].is_string() {
         return None;
     }
-    item.as_object_mut()?.remove("id");
+    if item["type"] != "web_search_call" {
+        item.as_object_mut()?.remove("id");
+    }
     Some(item)
 }
 

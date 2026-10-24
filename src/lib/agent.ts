@@ -227,6 +227,7 @@ const toolName = (raw: string) => raw.replace(/^mcp__nuzky__/, "").replace(/^nuz
 const HIDDEN = new Set(["begin_run", "end_run", "job"]);
 /** The tool an agent offers choices with; the panel shows them as buttons, not as a step. */
 const OFFER = "suggest_options";
+export const SEARCHING = "Searching the web";
 
 const TITLES: Record<string, string> = {
   get_state: "Read the project",
@@ -244,6 +245,9 @@ const TITLES: Record<string, string> = {
   add_sticker: "Adding a sticker",
   export_video: "Exporting",
   undo_run: "Undoing its changes",
+  web_search: SEARCHING,
+  import_web_image: "Getting a picture from the web",
+  inspect_image: "Looking at a picture",
 };
 
 const ANALYSES: Record<string, string> = {
@@ -282,10 +286,20 @@ function stepTitle(raw: string, input?: unknown): string {
   return TITLES[name] ?? name;
 }
 
-/** The detail worth showing next to a step: which frames, which file. */
+const host = (url: unknown): string | null => {
+  try {
+    return new URL(String(url)).host || null;
+  } catch {
+    return null;
+  }
+};
+
+/** The detail worth showing next to a step: which frames, which file, what it searched for. */
 function stepDetail(raw: string, input?: unknown): string | null {
   const args = obj(input);
   const name = toolName(raw);
+  if (name === "web_search") return typeof args.query === "string" ? args.query : host(args.url);
+  if (name === "import_web_image") return host(args.url);
   if (name === "inspect_frames" && Array.isArray(args.times_us)) return args.times_us.slice(0, 4).map((t) => formatTime(Number(t), false)).join(" · ") + (args.times_us.length > 4 ? " …" : "");
   if (name === "export_video" && typeof args.path === "string") return args.path.split(/[\\/]/).pop() ?? null;
   if (name === "apply_edits" && Array.isArray(args.edits)) return args.edits.length === 1 ? "1 change" : `${args.edits.length} changes`;
@@ -364,6 +378,9 @@ export async function loadChats() {
 /** What was typed in each chat of this session, so a draft stays with its own chat. */
 const drafts = new Map<string | null, { draft: string; attachments: Attachment[] }>();
 
+const interrupted = (items: ChatItem[]) =>
+  items.map((it): ChatItem => (it.kind === "steps" ? { ...it, steps: it.steps.map((x) => (x.status === "running" ? { ...x, status: "interrupted" } : x)) } : it));
+
 /** Opens a chat the project keeps, to read and continue it; it stops what the current one left running. */
 export async function openChat(id: string) {
   const s = useAgent.getState();
@@ -373,7 +390,7 @@ export async function openChat(id: string) {
     const opened = await agentApi.open(id);
     if (useAgent.getState().status !== "idle" || useEditor.getState().snap?.sessionEpoch !== epoch) return;
     // What was still running when Nuzky closed did not finish.
-    const items = (opened.items ?? []).map((it): ChatItem => (it.kind === "steps" ? { ...it, steps: it.steps.map((x) => (x.status === "running" ? { ...x, status: "interrupted" } : x)) } : it));
+    const items = interrupted(opened.items ?? []);
     const { chat, draft, attachments } = useAgent.getState();
     drafts.set(chat, { draft, attachments });
     useAgent.setState({ ...endChat(), agent: opened.agent, chat: opened.id, items, pastCount: items.length, draft: "", attachments: [], ...drafts.get(opened.id) });
@@ -649,7 +666,7 @@ export async function stop() {
  */
 function fail(code: AgentErrorCode, message: string) {
   const s = useAgent.getState();
-  let items = s.items;
+  let items = interrupted(s.items);
   let draft = s.draft;
   let attachments = s.attachments;
   let retry: string | undefined;

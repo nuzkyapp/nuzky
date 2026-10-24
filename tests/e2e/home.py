@@ -1,11 +1,12 @@
 """The home screen and the launcher. Nuzky starts on every project, with the last one open behind it: pictures
-rendered like the export, collections, Rename, Duplicate, the Trash with Undo, and search through names and
-through what was said. Over the editor, the launcher opens recent projects, starts new ones and searches the
-same way. Opening another project while an agent edits asks whether to keep or undo its changes."""
+rendered like the export, a project's cover when it has one, collections, Rename, Duplicate, the Trash with Undo,
+and search through names and through what was said. Over the editor, the launcher opens recent projects, starts new
+ones and searches the same way. Opening another project while an agent edits asks whether to keep or undo its
+changes."""
 import json, os, subprocess, time
 from pathlib import Path
 
-from e2e.harness import CLI, FIXTURES, LINUX, Bridge, close_window, deny, flow, link_models, wait, webdriver
+from e2e.harness import CLI, FIXTURES, LINUX, Bridge, changed_share, close_window, deny, flow, link_models, wait, webdriver
 
 DAY = 86_400
 CARDS = """return [...document.querySelectorAll('[role=listbox][aria-label=Projects] [role=option][data-path]')].map((c) => ({
@@ -21,6 +22,22 @@ const g = c.getContext('2d'); g.drawImage(img, 0, 0);
 const d = g.getImageData(0, 0, c.width, c.height).data; const seen = new Set();
 for (let i = 0; i < d.length; i += 16) seen.add((d[i] >> 4) << 8 | (d[i + 1] >> 4) << 4 | d[i + 2] >> 4);
 return seen.size;"""
+# A card's picture: the share of its pixels near the colour `arguments[1]`, the shapes of the image and its frame, the
+# image's address and, with `arguments[2]`, the picture as a PNG data URL.
+PICTURE = """const img = document.querySelector(`[data-path="${CSS.escape(arguments[0])}"] img`);
+if (!img || !img.complete || !img.naturalWidth) return null;
+const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight;
+const g = c.getContext('2d'); g.drawImage(img, 0, 0);
+const d = g.getImageData(0, 0, c.width, c.height).data; const [red, green, blue] = arguments[1]; let n = 0;
+for (let i = 0; i < d.length; i += 4) if (Math.abs(d[i] - red) < 40 && Math.abs(d[i + 1] - green) < 40 && Math.abs(d[i + 2] - blue) < 40) n++;
+const frame = img.parentElement.getBoundingClientRect();
+return {share: n / (d.length / 4), image: img.naturalWidth / img.naturalHeight, frame: frame.width / frame.height, src: img.src,
+        png: arguments[2] ? c.toDataURL('image/png') : null};"""
+MAGENTA, CYAN, YELLOW, ORANGE = (255, 0, 255), (0, 255, 255), (255, 255, 0), (255, 128, 0)
+# What the poster worker logs each time it draws a cover before the person is cut out of it.
+DRAFT_DRAWN = 'shows its cover without the person cut out until their mask is made'
+VISION = ('yunet-2026may.onnx', 'face-landmarks-v2.onnx', 'face-blendshapes-v2.onnx', 'selfie-segmenter.onnx',
+          'birefnet-lite.onnx')
 TYPE = """const el = document.querySelector(arguments[0]); el.focus();
 Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, arguments[1]);
 el.dispatchEvent(new Event('input', {bubbles: true})); return true;"""
@@ -49,11 +66,59 @@ def make(r, file, name, media, age_days):
     return path
 
 
+def set_cover(r, path, cover, image=None, before=(), logo=None):
+    """An agent makes the project's cover, from `image` when given, with the image `logo` on it as `logo['transform']`
+    places it, after the edits `before`, and leaves the project as old as it was."""
+    stamp = path.stat().st_mtime
+    agent = Bridge(r, path)
+    try:
+        run = agent.call('begin_run', {'label': 'Cover'})['run_id']
+        if image:
+            cover['image'] = agent.call('import_media', {'run_id': run, 'paths': [str(image)], 'request_id': 'image'})['asset_ids'][0]
+        if logo:
+            asset = agent.call('import_media', {'run_id': run, 'paths': [str(logo['path'])], 'request_id': 'logo'})['asset_ids'][0]
+            cover['overlays'] = [{'assetId': asset, 'transform': logo['transform']}]
+        edits = [*before, {'type': 'setThumbnail', 'thumbnail': cover}]
+        agent.call('apply_edits', {'run_id': run, 'request_id': 'cover', 'edits': edits})
+        agent.call('end_run', {'run_id': run, 'action': 'keep'})
+    finally:
+        agent.close()
+    if not json.loads(path.read_text()).get('thumbnails'):
+        raise RuntimeError(f'the cover of {path.name} was not saved')
+    os.utime(path, (stamp, stamp))
+
+
+def behind(path, background):
+    """The edit that puts `background` behind the person in the first clip of the project at `path`."""
+    clip = json.loads(path.read_text())['tracks'][0]['clips'][0]['id']
+    return {'type': 'updateClip', 'clipId': clip, 'background': background}
+
+
 def seed(r):
-    link_models(r)
+    link_models(r, ('ggml-small.bin', 'ggml-silero-v5.1.2.bin', *VISION))
     make(r, 'talk.nuzky', 'Talk to camera', [FIXTURES / 'talk.mp4'], 0)
-    make(r, 'croatia.nuzky', 'Croatia day 2', [FIXTURES / 'wide.mp4'], 3)
-    make(r, 'reel.nuzky', 'Morning reel', [FIXTURES / 'portrait.mp4'], 40)
+    croatia = make(r, 'croatia.nuzky', 'Croatia day 2', [FIXTURES / 'wide-head.mp4'], 3)
+    reel = make(r, 'reel.nuzky', 'Morning reel', [FIXTURES / 'portrait.mp4'], 40)
+    # The reel, on a 16:9 canvas, has a 9:16 cover made from a generated image. The landscape interview, on a 16:9
+    # canvas too, has only a 9:16 cover, on a solid colour, which cuts the person out of its frame and so waits for
+    # their mask; its clip blurs what is behind the person, who is not found in its frames yet either.
+    image = r.work / 'generated-cover.png'
+    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=#ff00ff:s=1080x1920', '-frames:v', '1', str(image)],
+                   check=True)
+    # On the reel's cover a logo: a yellow square in the middle half of a transparent picture. Its file is moved away
+    # before Nuzky starts, so the cover first cannot be drawn.
+    from PIL import Image
+    logo = Image.new('RGBA', (400, 400), (0, 0, 0, 0))
+    logo.paste((255, 255, 0, 255), (100, 100, 300, 300))
+    logo.save(r.work / 'logo.png')
+    plain = {'x': 0, 'y': 0, 'scale': 1, 'rotation': 0, 'opacity': 1}
+    set_cover(r, reel, {'format': 'cover_9x16', 'timeUs': 0, 'frame': plain, 'texts': []}, image,
+              logo={'path': r.work / 'logo.png', 'transform': dict(plain, x=0.15, y=-0.2, scale=0.5)},
+              before=[{'type': 'setCanvas', 'width': 1920, 'height': 1080}])
+    (r.work / 'logo.png').rename(r.work / 'logo-away.png')
+    set_cover(r, croatia, {'format': 'cover_9x16', 'timeUs': 1_000_000, 'frame': plain, 'texts': [],
+                           'background': {'picture': False, 'blur': 0, 'dim': 0, 'color': '#00ffff'}},
+              before=[{'type': 'setCanvas', 'width': 1920, 'height': 1080}, behind(croatia, {'type': 'blur', 'strength': 1})])
     broken = projects_dir(r) / 'broken.nuzky'
     broken.write_text('{"name": "half a proj')
     empty = projects_dir(r) / 'empty.nuzky'
@@ -100,6 +165,20 @@ def resize(r, width, height):
     return wait(lambda: r.s.run('return [window.innerWidth, window.innerHeight]') == [width, height], 5)
 
 
+def poster_cached(r, path):
+    """Whether the poster cache holds a picture of the project at `path`; named by the FNV-1a of the path."""
+    name = 0xcbf29ce484222325
+    for byte in path.encode():
+        name = ((name ^ byte) * 0x100000001b3) % 2 ** 64
+    return any((r.work / 'cache/nuzky/posters').glob(f'{name:016x}-*.png'))
+
+
+def drafts_drawn(r):
+    """How many times the app drew a cover before the person was cut out of it, from its log file."""
+    logs = r.work / 'data/nuzky/logs'
+    return sum(p.read_text(errors='replace').count(DRAFT_DRAWN) for p in logs.glob('nuzky*.log'))
+
+
 def wait_library(r):
     return wait(lambda: len(cards(r)) > 0, 20)
 
@@ -130,10 +209,105 @@ def home(r):
     order = [c['name'] for c in cards(r)]
     r.check('a few projects show newest first, without date groups', sections == [] and order[0] == 'Talk to camera'
             and order.index('Croatia day 2') < order.index('Morning reel'), (sections, order))
-    for name in ('Talk to camera', 'Croatia day 2', 'Morning reel'):
-        path = card(r, name)['path']
-        colours = wait(lambda: r.s.run(POSTER_COLOURS, path) > 40 and r.s.run(POSTER_COLOURS, path), 40)
-        r.check(f'{name} shows its picture, rendered like the export', colours, colours)
+    talk = card(r, 'Talk to camera')['path']
+    colours = wait(lambda: r.s.run(POSTER_COLOURS, talk) > 40 and r.s.run(POSTER_COLOURS, talk), 40)
+    r.check('a project without a cover shows a frame, rendered like the export', colours, colours)
+    upright = lambda p: abs(p['image'] - 9 / 16) < 0.02 and abs(p['frame'] - 9 / 16) < 0.02
+    wide = lambda p: abs(p['image'] - 16 / 9) < 0.02 and abs(p['frame'] - 16 / 9) < 0.02
+    reel = card(r, 'Morning reel')['path']
+    # The test pattern has a magenta bar too, so the frame is told apart by its many colours and less magenta.
+    is_frame = lambda: r.s.run(POSTER_COLOURS, reel) > 40 and (p := r.s.run(PICTURE, reel, MAGENTA)) and p['share'] < 0.5 and p
+    frame = wait(is_frame, 40)
+    r.check('a cover whose logo file is gone leaves the card its frame, kept like any poster', frame and wide(frame)
+            and poster_cached(r, reel), {'frame': frame, 'cached': poster_cached(r, reel)})
+    # The logo is back but does not open, so the cover cannot be drawn, as its export cannot: the card keeps its frame, in
+    # the frame's shape, though the list expected the cover's.
+    logo = r.work / 'logo.png'
+    logo.write_bytes(b'not a picture')
+    r.s.call('window.__nuzky.refreshLibrary()')
+    again = wait(lambda: (p := is_frame()) and p['src'] != frame['src'] and p, 20)
+    r.check('a cover whose logo does not open leaves the card its frame, not cut to the shape of the cover', again
+            and wide(again), again or r.s.run(PICTURE, reel, MAGENTA))
+    # The logo that opens is back in its place: the next list shows the cover, with the logo where its export has it.
+    (r.work / 'logo-away.png').replace(logo)
+    r.s.call('window.__nuzky.refreshLibrary()')
+    cover = lambda: (p := r.s.run(PICTURE, reel, MAGENTA)) and p['share'] > 0.85 and upright(p) and p
+    shown = wait(cover, 20)
+    r.check('once its logo opens, a reel with a cover made from a generated image shows that cover in its 9:16 shape',
+            shown, r.s.run(PICTURE, reel, MAGENTA))
+    exported = r.work / 'reel-cover.png'
+    made = subprocess.run([str(CLI), 'thumbnail', str(projects_dir(r) / 'reel.nuzky'), 'cover_9x16', str(exported)], env=r.env,
+                          capture_output=True, text=True)
+    picture = r.s.run(PICTURE, reel, YELLOW, True)
+    if made.returncode == 0 and picture:
+        import base64, io
+        from PIL import Image
+        on_card = Image.open(io.BytesIO(base64.b64decode(picture['png'].split(',', 1)[1]))).convert('RGB')
+        differs = changed_share(on_card, Image.open(exported).convert('RGB').resize(on_card.size, Image.BOX))
+    else:
+        differs = None
+    r.check('the card shows the logo on the cover as the exported cover has it', picture and picture['share'] > 0.02
+            and differs is not None and differs < 0.006, {'logo': picture and picture['share'], 'differs': differs,
+                                                         'export': made.stderr[-300:]})
+    # The cover's own image stops opening. Its export fails, so the card shows the frame rather than a cover without its
+    # picture, and the cover again once the image opens.
+    image = r.work / 'generated-cover.png'
+    good = image.read_bytes()
+    image.write_bytes(b'not a picture')
+    r.s.call('window.__nuzky.refreshLibrary()')
+    frame = wait(lambda: (p := is_frame()) and wide(p) and p, 20)
+    r.check('a cover whose image does not open leaves the card its frame', frame, r.s.run(PICTURE, reel, MAGENTA))
+    image.write_bytes(good)
+    r.s.call('window.__nuzky.refreshLibrary()')
+    r.check('once its image opens again, the card shows the cover', wait(cover, 20), r.s.run(PICTURE, reel, MAGENTA))
+    # The reel's cover becomes its frame at 1 s, and its clip gets a colour behind the person, who is not found in its
+    # frames yet: the card shows the clip as recorded, as the cover editor does, and once the person is found, the
+    # next list draws the cover again with the colour.
+    file, plain = projects_dir(r) / 'reel.nuzky', {'x': 0, 'y': 0, 'scale': 1, 'rotation': 0, 'opacity': 1}
+    set_cover(r, file, {'format': 'cover_9x16', 'timeUs': 1_000_000, 'frame': plain, 'texts': []},
+              before=[behind(file, {'type': 'color', 'color': '#ff8000'})])
+    # Changed as any edit changes it; set_cover keeps the seeded age.
+    os.utime(file, (file.stat().st_mtime + 60,) * 2)
+    r.s.call('window.__nuzky.refreshLibrary()')
+    recorded = wait(lambda: r.s.run(POSTER_COLOURS, reel) > 40 and (p := r.s.run(PICTURE, reel, ORANGE)) and upright(p) and p, 20)
+    found = subprocess.run([str(CLI), 'frame', str(file), '1', str(r.work / 'reel-frame.png')], env=r.env, capture_output=True,
+                           text=True)
+    r.s.call('window.__nuzky.refreshLibrary()')
+    coloured = wait(lambda: (p := r.s.run(PICTURE, reel, ORANGE)) and recorded and p['share'] > recorded['share'] + 0.1 and p, 20)
+    r.check('a cover drawn before the person is found in its clip shows the colour behind them once they are found',
+            recorded and found.returncode == 0 and coloured,
+            {'recorded': recorded, 'found': found.stderr[-300:], 'shown': r.s.run(PICTURE, reel, ORANGE)})
+    croatia = card(r, 'Croatia day 2')['path']
+    cover = lambda: (p := r.s.run(PICTURE, croatia, CYAN)) and p['share'] > 0.5 and upright(p) and p
+    shown = wait(cover, 40)
+    r.check('a landscape video with only a 9:16 cover shows it in that shape, as the cover editor draws it until the '
+            'person is cut out', shown and r.s.run(POSTER_COLOURS, croatia) > 40,
+            {'cyan': r.s.run(PICTURE, croatia, CYAN), 'colours': r.s.run(POSTER_COLOURS, croatia)})
+    r.check('a cover drawn before the person is cut out is not kept', poster_cached(r, reel) and poster_cached(r, talk)
+            and not poster_cached(r, croatia))
+    # Each list asks for the draft again, in case the mask was made; until then nothing is drawn again and the card's
+    # image stays as it is.
+    before = (r.s.run(PICTURE, croatia, CYAN) or {}).get('src')
+    for _ in range(3):
+        r.s.call('window.__nuzky.refreshLibrary()')
+        time.sleep(1)
+    after = (r.s.run(PICTURE, croatia, CYAN) or {}).get('src')
+    r.check('listing the projects again does not draw the draft cover again', drafts_drawn(r) == 1, drafts_drawn(r))
+    r.check('the card keeps its image while the same draft comes back', before and after == before, {'before': before, 'after': after})
+    # The person is found in the clip's frames and cut out of the cover's frame, as the cover editor's jobs do, which
+    # leaves the project as it was. What is behind them is blurred now and the mask is made for those pixels: the next
+    # list draws the cover from that frame, with the person cut out, and keeps it.
+    file = projects_dir(r) / 'croatia.nuzky'
+    stamp, draft = file.stat().st_mtime, shown
+    masked = subprocess.run([str(CLI), 'mask', str(file), '1', str(r.work / 'croatia-mask.png')], env=r.env, capture_output=True,
+                            text=True)
+    r.s.call('window.__nuzky.refreshLibrary()')
+    redrawn = lambda: (p := r.s.run(PICTURE, croatia, CYAN)) and draft and abs(p['share'] - draft['share']) > 0.02 and upright(p) and p
+    shown = wait(redrawn, 20)
+    r.check('once the person is cut out, the next list draws the cover with them cut out and keeps it',
+            masked.returncode == 0 and file.stat().st_mtime == stamp and shown and wait(lambda: poster_cached(r, croatia), 5),
+            {'mask': masked.stderr[-300:], 'draft': draft, 'shown': r.s.run(PICTURE, croatia, CYAN),
+             'unchanged': file.stat().st_mtime == stamp})
     r.shot('home')
     if resize(r, 1024, 640):
         time.sleep(0.5)
@@ -226,7 +400,7 @@ def home(r):
                 and os.path.exists(reel) and wait(lambda: card(r, 'Morning reel'), 5), toast_texts(r))
     finally:
         agent.close()
-    r.check('the videos it used are untouched', (FIXTURES / 'wide.mp4').exists())
+    r.check('the videos it used are untouched', (FIXTURES / 'wide-head.mp4').exists())
     open_card = card(r, 'Talk to camera')['path']
     r.s.run("document.querySelector(`[data-path=\"${CSS.escape(arguments[0])}\"]`).focus()", open_card)
     r.key('Delete')
@@ -248,8 +422,9 @@ def home(r):
     hits = wait(lambda: (r.s.run(quote) or None), 20)
     r.check('a word said in a video finds the project, with the sentence around it', hits and 'Talk to camera' in hits[0]['text']
             and hits[0]['mark'].lower().startswith('laptop'), hits)
+    # The interview of Croatia day 2 has no sound, so only the reel has speech to transcribe.
     r.check('projects that are not transcribed are named, so nothing is silently missed',
-            "aren't transcribed" in (r.s.run("return document.querySelector('section[aria-label=\"Said in your videos\"]').textContent") or ''))
+            "Morning reel isn't transcribed" in (r.s.run("return document.querySelector('section[aria-label=\"Said in your videos\"]').textContent") or ''))
     r.shot('search-said')
 
     # In a collection, what was said in its projects is found even when ten newer projects elsewhere,
@@ -272,6 +447,34 @@ def home(r):
             and v['tab'] == 'transcript', v)
     unexpected = [e for e in r.errors() if 'so it was not moved to the Trash' not in e]
     r.check('no other error toast', not unexpected, unexpected)
+
+    # A cover made just before going home: the list shown at once has the project as it was, before its save lands.
+    # The card shows the cover once it is saved, without a focus event or a restart, and nothing is listed after that.
+    save_state = 'return window.__nuzky.store.getState().saveState'
+    wait(lambda: r.s.run(save_state) == 'saved', 10)
+    r.s.run("const api = window.__nuzky.api; window.__list = api.library; window.__listed = 0; api.library = () => (window.__listed++, window.__list());")
+    hook = {'text': 'NEW', 'behind': False, 'transform': plain, 'style': {'fontSize': 400, 'color': '#ffffff', 'bold': True,
+            'strokeWidth': 0, 'strokeColor': '#000000', 'background': '#ffffff'}}
+    cover = {'format': 'cover_9x16', 'timeUs': 1_000_000, 'frame': plain, 'texts': [hook],
+             'background': {'picture': True, 'blur': 0, 'dim': 0, 'color': '#000000'}}
+    edited = r.s.call("window.__nuzky.store.getState().edit({type: 'setThumbnail', thumbnail: arguments[0]}).then((s) => s?.revision)", cover)
+    saving = r.s.run(save_state)
+    close_window()
+    home_state = wait(lambda: view(r)['view'] == 'home' and r.s.run(save_state), 5)
+    r.check('closing the window right after the cover changed goes home while the project is still saving',
+            edited['ok'] and edited['value'] and saving == 'saving' and home_state == 'saving', (edited, saving, home_state))
+    WHITE = (255, 255, 255)
+    shown = wait(lambda: (p := r.s.run(PICTURE, talk, WHITE)) and p['share'] > 0.05 and upright(p) and p, 20)
+    r.check('once the save lands, the card shows the new cover', shown and r.s.run(save_state) == 'saved',
+            {'card': r.s.run(PICTURE, talk, WHITE), 'saved': r.s.run(save_state)})
+    listed = r.s.run('return window.__listed')
+    # The editor's state changes without a save, as with a toast or the progress of an export.
+    r.s.run("window.__nuzky.store.getState().toast({kind: 'info', text: 'Nothing saved'})")
+    time.sleep(3)
+    r.check('then nothing is listed again while nothing is saved', listed and r.s.run('return window.__listed') == listed,
+            (listed, r.s.run('return window.__listed')))
+    r.s.run('window.__nuzky.api.library = window.__list')
+    r.shot('home-after-cover')
 
     # Collections that cannot be read are never written over.
     index = r.work / 'data/nuzky/library.json'

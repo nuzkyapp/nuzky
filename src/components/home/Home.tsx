@@ -139,13 +139,20 @@ export function Home() {
     // Files may have changed while Nuzky was in the background; a list a few seconds old is kept.
     const onFocus = () => void refreshLibrary(3000);
     window.addEventListener("focus", onFocus);
+    // The open project is saved a moment after its last change, often after the list showed it as it was.
+    const offSaved = useEditor.subscribe((s, prev) => {
+      if (s.saveState === "saved" && prev.saveState !== "saved") void refreshLibrary();
+    });
     // A search started in the launcher continues here.
     const handed = useLibrary.getState().handoffQuery;
     if (handed) {
       setQuery(handed);
       useLibrary.setState({ handoffQuery: null });
     }
-    return () => window.removeEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      offSaved();
+    };
   }, []);
 
   const collectionOf = (id: string | null) => collections.find((c) => c.id === id);

@@ -13,7 +13,10 @@ use anyhow::{Context, Result, bail, ensure};
 use base64::Engine as _;
 use nuzky_engine::Project;
 use nuzky_engine::edit::{EditCmd, new_id};
+use nuzky_engine::media::VideoDecoder;
+use nuzky_engine::model::{Thumbnail, ThumbnailFormat};
 use nuzky_engine::render::{Renderer, Wait};
+use nuzky_engine::thumbnail::ImageKind;
 use nuzky_session::Expect;
 use nuzky_session::hash::{FNV_OFFSET, hash_bytes};
 use nuzky_session::transcripts::TranscriptStore;
@@ -31,7 +34,7 @@ const TRASH_DELAY: Duration = Duration::from_secs(30);
 /// Longest side of a poster in pixels: sharp on a 2× screen at the size of a card.
 const POSTER_SIDE: u32 = 360;
 /// A new value makes every cached poster render again.
-const POSTER_VERSION: u8 = 3;
+const POSTER_VERSION: u8 = 4;
 const MAX_HITS_PER_PROJECT: usize = 3;
 const MAX_HITS: usize = 30;
 const CONTEXT_BEFORE: usize = 5;
@@ -71,6 +74,10 @@ pub struct Entry {
     /// Canvas size; 0 for a project that cannot be read.
     width: u32,
     height: u32,
+    /// The cover the card shows instead of a frame, in that cover's shape.
+    cover: Option<ThumbnailFormat>,
+    /// The poster cache key: a new one draws its picture again.
+    poster: String,
     collection: Option<String>,
     /// `broken`: the file cannot be read. `busy`: another Nuzky window or an agent has it open.
     /// `missing`: some of its media files are gone. `empty`: nothing on the timeline.
@@ -146,7 +153,52 @@ struct Spoken {
 
 struct PosterRequest {
     project: Project,
-    reply: Sender<Option<Vec<u8>>>,
+    /// The cover to draw, when it can be drawn; otherwise the frame.
+    cover: Option<ThumbnailFormat>,
+    reply: Sender<Option<Poster>>,
+}
+
+struct Poster {
+    png: Vec<u8>,
+    /// For a cover drawn before what it needs is made; none for a finished picture.
+    waits_for: Option<Waits>,
+}
+
+/// What a cover was drawn without: the chunks of person outlines the project's clip backgrounds still waited for, and
+/// when the person's mask was not made, the file it will be in with that file's state then.
+struct Waits {
+    mattes: usize,
+    mask: Option<(PathBuf, Option<u128>)>,
+}
+
+impl Waits {
+    fn unchanged(&self, project: &Project, cover: &Thumbnail) -> bool {
+        self.mattes == crate::cover::waiting_mattes(project, cover, &store::cache_dir())
+            && self.mask.as_ref().is_none_or(|(file, seen)| file_state(file) == *seen)
+    }
+}
+
+/// A cover drawn before what it needs is made. It is shown again without drawing while the poster it stands for
+/// (`file`, the poster cache key) and what it waits for are the same.
+struct Draft {
+    file: String,
+    png: Vec<u8>,
+    waits: Waits,
+}
+
+/// A project's picture on its card.
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectPoster {
+    /// A PNG data URL.
+    url: String,
+    width: u32,
+    height: u32,
+    /// A cover drawn before the person is found in its frame or cut out of it. It is not kept on disk, and the home
+    /// screen asks for it again when it lists the projects; it is the same picture until the person's outlines or mask
+    /// are made.
+    provisional: bool,
 }
 
 #[derive(Default)]
@@ -162,6 +214,8 @@ pub struct Library {
     posters: Mutex<Option<Sender<PosterRequest>>>,
     /// Poster cache keys whose rendering failed this session; they are not tried again.
     failed_posters: Mutex<HashSet<String>>,
+    /// The draft cover each project's card shows, by project path.
+    drafts: Mutex<HashMap<String, Draft>>,
 }
 
 /// The path a project is known by: canonical where it exists, so every list and the editor agree.
@@ -281,6 +335,8 @@ impl Library {
                         duration_us: 0,
                         width: 0,
                         height: 0,
+                        cover: None,
+                        poster: String::new(),
                         collection,
                         state: Some("broken"),
                         missing: 0,
@@ -310,6 +366,8 @@ impl Library {
             } else {
                 None
             };
+            let shown = shown_cover(&project).filter(|c| duration_us > 0 && drawable(&project, c));
+            let (cover, poster) = (shown.map(|c| c.format), poster_stamp(&meta, &project, shown));
             projects.push(Entry {
                 path: path_key,
                 name: project.name,
@@ -317,6 +375,8 @@ impl Library {
                 duration_us,
                 width: project.canvas.width,
                 height: project.canvas.height,
+                cover,
+                poster,
                 collection,
                 state,
                 missing,
@@ -669,38 +729,60 @@ impl Library {
         said
     }
 
-    /// A PNG of the project's picture, rendered like the preview and cached until the file changes.
-    pub fn poster(&self, path: &Path) -> Result<Option<String>> {
+    /// The project's picture, its cover or a frame, rendered like the export and cached until its poster cache key
+    /// (`poster_stamp`) changes.
+    pub fn poster(&self, path: &Path) -> Result<Option<ProjectPoster>> {
         let meta = std::fs::metadata(path).context("The project file is gone")?;
-        let mut path_hash = FNV_OFFSET;
-        hash_bytes(&mut path_hash, key(path).as_bytes());
-        let mut stamp = FNV_OFFSET;
-        hash_bytes(&mut stamp, &modified(&meta).to_le_bytes());
-        hash_bytes(&mut stamp, &meta.len().to_le_bytes());
-        hash_bytes(&mut stamp, &[POSTER_VERSION]);
-        let dir = store::cache_dir().join("posters");
-        let file = dir.join(format!("{path_hash:016x}-{stamp:016x}.png"));
-        let url =
-            |png: &[u8]| format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(png));
-        if let Ok(png) = std::fs::read(&file) {
-            return Ok(Some(url(&png)));
-        }
-        let cache_key = file.to_string_lossy().into_owned();
-        if self.failed_posters.lock().unwrap().contains(&cache_key) {
-            return Ok(None);
-        }
         let project = store::load(path)?;
         nuzky_session::validate(&project)?;
         if project.duration_us() == 0 {
             return Ok(None);
         }
-        let Some(png) = self.render_poster(project) else {
+        let shown = shown_cover(&project).filter(|c| drawable(&project, c));
+        let path_key = key(path);
+        let mut path_hash = FNV_OFFSET;
+        hash_bytes(&mut path_hash, path_key.as_bytes());
+        let dir = store::cache_dir().join("posters");
+        let file = dir.join(format!("{path_hash:016x}-{}.png", poster_stamp(&meta, &project, shown)));
+        let url = |png: &[u8], provisional| {
+            let (width, height) = png_size(png);
+            ProjectPoster {
+                url: format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(png)),
+                width,
+                height,
+                provisional,
+            }
+        };
+        if let Ok(png) = std::fs::read(&file) {
+            return Ok(Some(url(&png, false)));
+        }
+        let cache_key = file.to_string_lossy().into_owned();
+        if self.failed_posters.lock().unwrap().contains(&cache_key) {
+            return Ok(None);
+        }
+        if let Some(draft) = self.drafts.lock().unwrap().get(&path_key)
+            && draft.file == cache_key
+            && shown.is_some_and(|cover| draft.waits.unchanged(&project, cover))
+        {
+            return Ok(Some(url(&draft.png, true)));
+        }
+        let cover = shown.map(|c| c.format);
+        let Some(poster) = self.render_poster(project, cover) else {
             self.failed_posters.lock().unwrap().insert(cache_key);
             return Ok(None);
         };
+        if let Some(waits) = poster.waits_for {
+            let provisional = url(&poster.png, true);
+            let draft = Draft { file: cache_key, png: poster.png, waits };
+            self.drafts.lock().unwrap().insert(path_key, draft);
+            return Ok(Some(provisional));
+        }
+        self.drafts.lock().unwrap().remove(&path_key);
         std::fs::create_dir_all(&dir).context("Creating the poster cache")?;
         let part = sidecar(&file, &format!(".{}.part", new_id()));
-        std::fs::write(&part, &png).and_then(|()| std::fs::rename(&part, &file)).context("Caching the poster")?;
+        std::fs::write(&part, &poster.png)
+            .and_then(|()| std::fs::rename(&part, &file))
+            .context("Caching the poster")?;
         // Older posters of the same project are not needed any more.
         let prefix = format!("{path_hash:016x}-");
         for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
@@ -709,13 +791,13 @@ impl Library {
                 let _ = std::fs::remove_file(entry.path());
             }
         }
-        Ok(Some(url(&png)))
+        Ok(Some(url(&poster.png, false)))
     }
 
     /// One renderer draws posters one after another; it is freed after a while without requests.
-    fn render_poster(&self, project: Project) -> Option<Vec<u8>> {
+    fn render_poster(&self, project: Project, cover: Option<ThumbnailFormat>) -> Option<Poster> {
         let (reply, answer) = mpsc::channel();
-        let mut request = Some(PosterRequest { project, reply });
+        let mut request = Some(PosterRequest { project, cover, reply });
         let mut posters = self.posters.lock().unwrap();
         for _ in 0..2 {
             let sender = posters.get_or_insert_with(spawn_poster_worker);
@@ -760,35 +842,78 @@ fn spawn_poster_worker() -> Sender<PosterRequest> {
                 }
                 Err(RecvTimeoutError::Disconnected) => break,
             };
-            // A project that trips the renderer gets no poster; the others still do.
-            let png = std::panic::catch_unwind(AssertUnwindSafe(|| -> Result<Vec<u8>> {
-                if renderer.is_none() {
-                    let mut new = Renderer::new()?;
-                    // A clip whose person is not found yet shows as recorded, as in the preview.
-                    new.use_mattes(store::cache_dir(), nuzky_engine::Pending::Original);
-                    renderer = Some(new);
-                }
-                draw_poster(renderer.as_mut().expect("renderer was just created"), &request.project)
-            }));
-            let png = match png {
-                Ok(Ok(png)) => Some(png),
-                Ok(Err(error)) => {
-                    log::warn!("No poster for “{}”: {error:#}", request.project.name);
-                    None
-                }
-                Err(_) => {
-                    log::error!("The renderer failed on the poster of “{}”", request.project.name);
-                    renderer = None;
-                    None
-                }
-            };
-            let _ = request.reply.send(png);
+            let project = &request.project;
+            let drawn = request.cover.and_then(|format| project.thumbnail(format)).and_then(|cover| {
+                guarded(&mut renderer, |r| draw_cover(r, project, cover))
+                    .inspect_err(|error| log::warn!("The cover of “{}” cannot be drawn: {error:#}", project.name))
+                    .ok()
+            });
+            let poster = drawn.or_else(|| {
+                guarded(&mut renderer, |r| draw_frame(r, project))
+                    .map(|png| Poster { png, waits_for: None })
+                    .inspect_err(|error| log::warn!("No poster for “{}”: {error:#}", project.name))
+                    .ok()
+            });
+            let _ = request.reply.send(poster);
         }
     });
     if let Err(error) = spawned {
         log::error!("Cannot start the poster renderer: {error}");
     }
     tx
+}
+
+/// Runs `draw` with the poster renderer, started when there is none. A project that trips the renderer gets no
+/// picture from it and the others still do: the renderer, maybe left halfway through a frame, is freed.
+fn guarded<T>(renderer: &mut Option<Renderer>, draw: impl FnOnce(&mut Renderer) -> Result<T>) -> Result<T> {
+    std::panic::catch_unwind(AssertUnwindSafe(|| {
+        if renderer.is_none() {
+            let mut new = Renderer::new()?;
+            // A clip whose person is not found yet shows as recorded, as in the preview.
+            new.use_mattes(store::cache_dir(), nuzky_engine::Pending::Original);
+            *renderer = Some(new);
+        }
+        draw(renderer.as_mut().expect("renderer was just created"))
+    }))
+    .unwrap_or_else(|_| {
+        *renderer = None;
+        bail!("the renderer failed")
+    })
+}
+
+/// The cover a card shows instead of a frame: on a landscape canvas the YouTube thumbnail, on any other the 9:16
+/// cover, or the other one when only that exists.
+fn shown_cover(project: &Project) -> Option<&Thumbnail> {
+    let (first, second) = if project.canvas.width > project.canvas.height {
+        (ThumbnailFormat::Youtube16x9, ThumbnailFormat::Cover9x16)
+    } else {
+        (ThumbnailFormat::Cover9x16, ThumbnailFormat::Youtube16x9)
+    };
+    project.thumbnail(first).or_else(|| project.thumbnail(second))
+}
+
+/// The files the cover is drawn from are there and its frame is in the video.
+fn drawable(project: &Project, cover: &Thumbnail) -> bool {
+    (cover.image.is_some() || cover.time_us < project.duration_us())
+        && crate::cover::cover_missing(project, cover).is_empty()
+}
+
+/// The poster cache key of a project file whose card shows `cover`, when it can be drawn. It changes with the file and
+/// with the images the cover is drawn from, so a logo that would not open, replaced by one that does, is drawn again.
+fn poster_stamp(meta: &std::fs::Metadata, project: &Project, cover: Option<&Thumbnail>) -> String {
+    let mut stamp = FNV_OFFSET;
+    hash_bytes(&mut stamp, &modified(meta).to_le_bytes());
+    hash_bytes(&mut stamp, &meta.len().to_le_bytes());
+    hash_bytes(&mut stamp, &[POSTER_VERSION, u8::from(cover.is_some())]);
+    let images = cover.into_iter().flat_map(|c| c.image.iter().chain(c.overlays.iter().map(|o| &o.asset_id)));
+    for image in images.filter_map(|id| project.asset(id)) {
+        hash_bytes(&mut stamp, nuzky_engine::thumbnail::file_version(&image.path).as_bytes());
+    }
+    format!("{stamp:016x}")
+}
+
+fn png_size(png: &[u8]) -> (u32, u32) {
+    png::Decoder::new(std::io::Cursor::new(png)).read_info().map_or((0, 0), |r| (r.info().width, r.info().height))
 }
 
 /// Width and height with the canvas's shape, the longer side `POSTER_SIDE`, both even.
@@ -798,7 +923,7 @@ fn poster_size(width: u32, height: u32) -> (u32, u32) {
     (side(width), side(height))
 }
 
-fn draw_poster(renderer: &mut Renderer, project: &Project) -> Result<Vec<u8>> {
+fn draw_frame(renderer: &mut Renderer, project: &Project) -> Result<Vec<u8>> {
     let (width, height) = poster_size(project.canvas.width, project.canvas.height);
     // Just after the start: past a fade in, still the opening shot.
     let t = (project.duration_us() / 10).min(1_500_000);
@@ -810,6 +935,43 @@ fn draw_poster(renderer: &mut Renderer, project: &Project) -> Result<Vec<u8>> {
         encoder.write_header()?.write_image_data(&rgba)?;
     }
     Ok(png)
+}
+
+/// The cover at the size of a poster, drawn as its export draws it. A poster never makes the person's outlines or
+/// mask: without them the cover is drawn as the cover editor shows it meanwhile.
+fn draw_cover(renderer: &mut Renderer, project: &Project, cover: &Thumbnail) -> Result<Poster> {
+    if let Some(image) = cover.image.as_deref().and_then(|id| project.asset(id)) {
+        // This renderer leaves out a picture that does not decode, where the export fails.
+        VideoDecoder::open(Path::new(&image.path))?.next_frame()?.context("The cover's image has no picture")?;
+    }
+    let cache = store::cache_dir();
+    // Counted before the frame is drawn, so outlines made meanwhile still count as a change.
+    let mattes = crate::cover::waiting_mattes(project, cover, &cache);
+    let frame = renderer.thumbnail_frame(project, cover)?;
+    let size = (frame.width, frame.height);
+    // Looked at before it is read, so a mask made meanwhile still counts as a change.
+    let mask_file = cover.needs_mask().then(|| {
+        let file = nuzky_vision::mask_path(&frame.data, size, &cache);
+        let seen = file_state(&file);
+        (file, seen)
+    });
+    let mask = mask_file.as_ref().and_then(|_| nuzky_vision::cached_alpha(&frame.data, size, &cache));
+    let (width, height) = cover.format.size();
+    let (rendered, draft) =
+        crate::cover::draw(renderer, project, cover, &frame, mask.as_deref(), poster_size(width, height).0)?;
+    if draft {
+        log::info!(
+            "The card of “{}” shows its cover without the person cut out until their mask is made",
+            project.name
+        );
+    }
+    let png = nuzky_engine::thumbnail::encode(&rendered, ImageKind::Png)?;
+    let waits_for = (draft || mattes > 0).then(|| Waits { mattes, mask: mask_file.filter(|_| draft) });
+    Ok(Poster { png, waits_for })
+}
+
+fn file_state(path: &Path) -> Option<u128> {
+    std::fs::metadata(path).ok().map(|meta| modified(&meta))
 }
 
 // --- Commands ---------------------------------------------------------------------------------------
@@ -830,7 +992,7 @@ pub async fn library(app: AppHandle) -> CmdResult<Listing> {
 }
 
 #[tauri::command]
-pub async fn project_poster(app: AppHandle, path: String) -> CmdResult<Option<String>> {
+pub async fn project_poster(app: AppHandle, path: String) -> CmdResult<Option<ProjectPoster>> {
     tauri::async_runtime::spawn_blocking(move || app.state::<AppState>().library.poster(Path::new(&path)))
         .await
         .map_err(err)?
@@ -969,6 +1131,48 @@ mod tests {
         assert!(!library.remove_pristine(&older));
         assert!(emptied.exists() && older.exists());
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_card_shows_the_cover_of_its_canvas_shape_first() {
+        let dir = std::env::temp_dir().join(format!("library-cover-{}", new_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let image = dir.join("cover.png");
+        std::fs::write(&image, b"").unwrap();
+        let mut project = Project::new("Covers");
+        project.assets.push(
+            serde_json::from_value(
+                serde_json::json!({"id": "image", "name": "cover.png", "path": image, "kind": "image",
+                "durationUs": 0, "width": 1080, "height": 1920, "fps": 0.0, "hasAudio": false}),
+            )
+            .unwrap(),
+        );
+        let cover = |format| Thumbnail {
+            format,
+            time_us: 0,
+            image: Some("image".into()),
+            frame: Default::default(),
+            background: Default::default(),
+            texts: Vec::new(),
+            overlays: Vec::new(),
+            outline: None,
+        };
+        let shown = |p: &Project| shown_cover(p).filter(|c| drawable(p, c)).map(|c| c.format);
+        project.thumbnails = vec![cover(ThumbnailFormat::Cover9x16), cover(ThumbnailFormat::Youtube16x9)];
+        for (width, height, format) in [
+            (1920, 1080, ThumbnailFormat::Youtube16x9),
+            (1080, 1080, ThumbnailFormat::Cover9x16),
+            (1080, 1920, ThumbnailFormat::Cover9x16),
+        ] {
+            (project.canvas.width, project.canvas.height) = (width, height);
+            assert_eq!(shown(&project), Some(format), "{width}×{height}");
+        }
+        project.thumbnails = vec![cover(ThumbnailFormat::Cover9x16)];
+        assert_eq!(shown(&project), Some(ThumbnailFormat::Cover9x16), "only the other format");
+        std::fs::remove_dir_all(dir).unwrap();
+        assert_eq!(shown(&project), None, "its image is gone");
+        project.thumbnails[0].image = None;
+        assert_eq!(shown(&project), None, "its frame is past the end of an empty timeline");
     }
 
     #[test]

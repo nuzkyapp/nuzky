@@ -6,6 +6,10 @@ from e2e.harness import CLI, FIXTURES, LINUX, WINDOWS, clipboard, close_window, 
 from e2e.history import alive as window_alive
 
 FAKE = Path(__file__).resolve().parent / 'fake_agent'
+# What the agents search for when asked to "search the web", as SEARCHES in fake_agent.
+SEARCHES = ['Spotify logo svg', 'Spotify brand colors']
+# OpenAI's web search of its own index, which every ChatGPT request offers.
+SEARCH_TOOL = {'type': 'web_search', 'external_web_access': False}
 PANEL = """const p = document.querySelector('aside[aria-label=AI]'); if (!p) return null; const b = p.getBoundingClientRect();
 return {left: Math.round(b.left), top: Math.round(b.top), width: Math.round(b.width), right: Math.round(window.innerWidth - b.right),
         bottom: Math.round(window.innerHeight - b.bottom), text: p.innerText, slot: p.dataset.dockSlot ?? null,
@@ -141,6 +145,8 @@ class ChatGptPanelServer:
                 try:
                     body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
                     server.requests.append({'body': body, 'authorization': self.headers.get('Authorization')})
+                    if SEARCH_TOOL not in body.get('tools', []):
+                        server.errors.append(f"a request without OpenAI's web search: {body.get('tools')}")
                     events, pause = server.answer(body['input'])
                     self.send_response(200)
                     self.send_header('Content-Type', 'text/event-stream')
@@ -171,6 +177,11 @@ class ChatGptPanelServer:
             return [{'type': 'response.output_text.delta', 'delta': 'Checking your plan now.'},
                     {'type': 'response.failed', 'response': {'error': {
                         'code': 'subscription_sharing_usage_limit_exceeded', 'message': 'The plan usage limit was reached.'}}}], 0
+        if 'lose the connection' in message:
+            # The stream breaks off while a search runs: it began, but neither it nor the answer completes.
+            return [{'type': 'response.output_item.added', 'item': {'type': 'web_search_call', 'id': 'ws-lost', 'status': 'in_progress'}}], 0
+        if 'search the web' in message:
+            return self.search(items[last + 1:])
         if 'split' not in message:
             raise ValueError(f'unexpected user message: {message}')
         outputs = [json.loads(item['output']) for item in items[last + 1:] if item['type'] == 'function_call_output']
@@ -196,6 +207,30 @@ class ChatGptPanelServer:
                            'call_id': f'call-{count}', 'namespace': 'nuzky', 'name': name, 'arguments': json.dumps(arguments)}})
         events.append({'type': 'response.completed', 'response': {'id': f'response-{count}'}})
         return events, 1 if count in (1, 2, 3) else 0
+
+    @staticmethod
+    def search(after):
+        """Searches the web twice and reads the project, then answers once the searches came back as they went, with their ids."""
+        if not after:
+            events = []
+            for n, query in enumerate(SEARCHES):
+                found = {'type': 'web_search_call', 'id': f'ws-{n}'}
+                events += [{'type': 'response.output_item.added', 'item': dict(found, status='in_progress')},
+                           {'type': 'response.output_item.done', 'item': dict(found, status='completed', action={'type': 'search', 'query': query})}]
+            events += [{'type': 'response.output_item.done', 'item': {'type': 'function_call', 'id': 'item-read', 'call_id': 'call-read',
+                                                                       'namespace': 'nuzky', 'name': 'get_state', 'arguments': '{}'}},
+                       {'type': 'response.completed', 'response': {'id': 'response-search'}}]
+            return events, 0
+        searches = [item for item in after if item['type'] == 'web_search_call']
+        if searches != [{'type': 'web_search_call', 'id': f'ws-{n}', 'status': 'completed', 'action': {'type': 'search', 'query': q}}
+                        for n, q in enumerate(SEARCHES)]:
+            raise ValueError(f'the searches did not come back as they went, with their ids: {after}')
+        text = "Spotify's logo is green, #1ED760."
+        # Long enough for the flow to see the searches while it works.
+        return [{'type': 'response.output_text.delta', 'delta': text},
+                {'type': 'response.output_item.done', 'item': {'type': 'message', 'id': 'msg-search', 'role': 'assistant',
+                                                               'content': [{'type': 'output_text', 'text': text}]}},
+                {'type': 'response.completed', 'response': {'id': 'response-searched'}}], 1.5
 
 
 # The creator's style ChatGPT has to read before the guide.
@@ -325,13 +360,13 @@ def ai_panel_chatgpt(r):
         heading = next(line for line in guide.splitlines() if line.startswith('# '))
         requests = server.requests
         bodies = [request['body'] for request in requests]
-        check('all requests use the selected model, bearer token, preview fields, guide and only namespaced Nuzky tools',
+        check("all requests use the selected model, bearer token, preview fields, guide, namespaced Nuzky tools and only OpenAI's own web search",
               len(bodies) == 6 and not server.errors and all(
                   request['authorization'] == 'Bearer e2e-access' and body.get('model') == 'gpt-e2e-luna'
                   and body.get('reasoning') == {'effort': 'high'}
                   and body.get('store') is False and body.get('stream') is True and not unsupported.intersection(body)
                   and 'You are the AI panel inside Nuzky' in body.get('instructions', '') and heading in body['instructions']
-                  and len(body.get('tools', [])) == 1 and body['tools'][0].get('type') == 'namespace'
+                  and len(body.get('tools', [])) == 2 and body['tools'][0].get('type') == 'namespace' and body['tools'][1] == SEARCH_TOOL
                   and body['tools'][0].get('name') == 'nuzky' and all(t.get('type') == 'function' for t in body['tools'][0]['tools'])
                   and {'get_state', 'begin_run', 'apply_edits', 'end_run'} <= {t['name'] for t in body['tools'][0]['tools']}
                   for request, body in zip(requests, bodies)), {'requests': len(bodies), 'server_errors': server.errors})
@@ -347,6 +382,85 @@ def ai_panel_chatgpt(r):
               and all(any(i['type'] == 'function_call_output' and i['call_id'] == call['call_id'] and isinstance(i['output'], str)
                           for i in bodies[-1]['input']) for call in calls), bodies[-1]['input'])
 
+    finally:
+        server.http.shutdown()
+        server.http.server_close()
+        server.worker.join(timeout=5)
+        (r.work / 'requests.json').write_text(json.dumps(server.requests, indent=2) + '\n')
+
+
+def setup_web_search(r):
+    setup_chatgpt(r)
+    # Claude Code and Codex stand in beside the ChatGPT sign-in, so one flow asks each of them.
+    r.env.update(NUZKY_AGENT_CLAUDE=str(FAKE), NUZKY_AGENT_CODEX=str(FAKE.with_name('fake_codex')))
+
+
+STEP_ROWS = "return [...document.querySelectorAll('aside[aria-label=AI] ol[aria-label=Steps] li')].map((li) => li.innerText.replace(/\\s+/g, ' ').trim())"
+UNFOLD = "[...document.querySelectorAll('aside[aria-label=AI] button')].filter((b) => /^\\d+ steps?$/.test(b.textContent.trim())).forEach((b) => b.click())"
+
+
+@flow('ai_panel_web_search', "Claude Code, Codex and ChatGPT search the web with their provider's own search, and the panel "
+      'shows each search as a step of its own with what it searched for', before=setup_web_search)
+def ai_panel_web_search(r):
+    server = r.chatgpt
+    searched = [f'Searching the web {query}' for query in SEARCHES]
+    try:
+        r.s.run('document.body.focus()')
+        r.key('j', ctrlKey=True)
+        wait(lambda: panel(r) and r.s.run('return window.__nuzky.agent.getState().agents'), 10)
+        for agent_id, name, answer, steps in [
+                ('claude', 'Claude Code', 'Logo Spotify je zelené, #1ED760.', searched),
+                ('codex', 'Codex', 'Logo Spotify je zelené, #1ED760.', searched),
+                ('chatgpt', 'ChatGPT', "Spotify's logo is green, #1ED760.", searched + ['Read the project'])]:
+            if r.s.run('return window.__nuzky.agent.getState().agent') != agent_id:
+                r.s.run("""document.querySelector('aside[aria-label=AI] button[title="Choose the agent"]').click()""")
+                click(r, name, '[role=menu][aria-label=Agent]')
+            r.check(f'{name} is the agent', wait(lambda: r.s.run('return window.__nuzky.agent.getState().agent') == agent_id
+                                                 and (agent_id != 'chatgpt' or 'GPT E2E Sol' in panel(r)['text']), 10), panel(r)['text'])
+            send(r, 'Search the web for the Spotify logo and its colours')
+            live = wait(lambda: all(row in (r.s.run(STEP_ROWS) or []) for row in searched), 15)
+            r.check(f'{name}: while it works, each search shows as a step of its own with its query', live, r.s.run(STEP_ROWS))
+            r.shot(f'{agent_id}-searching')
+            wait(lambda: agent(r)['status'] == 'idle', 20)
+            r.s.run(UNFOLD)
+            rows = wait(lambda: (lambda rows: rows if rows == steps else None)(r.s.run(STEP_ROWS)), 5) or r.s.run(STEP_ROWS)
+            r.check(f'{name}: the turn ends without an error, its answer shown and every search kept as its own row',
+                    rows == steps and 'error' not in agent(r)['kinds'] and r.s.run(MESSAGES)[-1:] == [answer] and not r.errors(),
+                    {'rows': rows, 'kinds': agent(r)['kinds'], 'messages': r.s.run(MESSAGES), 'errors': r.errors()})
+            r.shot(f'{agent_id}-searched')
+            webdriver('POST', r.s.path + '/window/rect', {'width': 1024, 'height': 640})
+            wait(lambda: panel(r)['windowWidth'] <= 1030 and panel(r)['slot'] == 'inspector', 5)
+            # In the inspector's place the panel draws anew, with its steps folded.
+            r.s.run(UNFOLD)
+            wait(lambda: r.s.run(STEP_ROWS) == steps, 3)
+            time.sleep(0.5)  # WebKitGTK's screenshot can trail a change made just before it.
+            r.shot(f'{agent_id}-searched-small')
+            webdriver('POST', r.s.path + '/window/rect', {'width': 1440, 'height': 900})
+            wait(lambda: panel(r)['windowWidth'] >= 1430, 5)
+
+        claude = next(x for x in runs(r) if x['argv'][:1] != ['exec'])
+        codex = next(x for x in runs(r) if x['argv'][:1] == ['exec'])
+        r.check("Claude Code got only its own WebSearch beside Nuzky's tools, and Codex only its search of OpenAI's index",
+                not claude['missing'] and flag(claude['argv'], '--tools') == 'WebSearch'
+                and flag(claude['argv'], '--allowedTools') == 'mcp__nuzky,WebSearch'
+                and not codex['missing'] and 'web_search="cached"' in codex['argv'],
+                {'claude': claude['argv'], 'codex': codex['argv']})
+        bodies = [request['body'] for request in server.requests]
+        back = [i for i in bodies[-1]['input'] if i['type'] == 'web_search_call'] if bodies else []
+        r.check("ChatGPT offered OpenAI's web search without live pages, and its searches went back in the next request with their ids",
+                len(bodies) == 2 and not server.errors and all(SEARCH_TOOL in body['tools'] for body in bodies)
+                and [i['action']['query'] for i in back] == SEARCHES and [i.get('id') for i in back] == ['ws-0', 'ws-1'],
+                {'requests': len(bodies), 'server_errors': server.errors, 'back': back})
+
+        send(r, 'Search the web, then lose the connection')
+        wait(lambda: agent(r)['status'] == 'idle' and 'error' in agent(r)['kinds'], 20)
+        r.s.run(UNFOLD)
+        rows = r.s.run(STEP_ROWS)
+        running = r.s.run("return window.__nuzky.agent.getState().items.flatMap((i) => i.kind === 'steps' ? i.steps : []).filter((s) => s.status === 'running').length")
+        r.check('a search the connection broke off in the middle of says Interrupted when the turn fails, with no step left running',
+                'error' in agent(r)['kinds'] and rows[-1:] == ['Searching the web Interrupted'] and running == 0,
+                {'rows': rows, 'running': running, 'kinds': agent(r)['kinds']})
+        r.shot('chatgpt-search-broke-off')
     finally:
         server.http.shutdown()
         server.http.server_close()

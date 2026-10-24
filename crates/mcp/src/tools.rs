@@ -288,6 +288,7 @@ impl Backend {
             "search_sounds" => search_sounds(parse(arguments)?),
             "add_sound" => self.add_sound(parse(arguments)?, state),
             "add_youtube_video" => self.add_youtube_video(parse(arguments)?, state),
+            "import_web_image" => self.import_web_image(parse(arguments)?, state),
             "add_sticker" => self.add_sticker(parse(arguments)?, state),
             "activity" => self.activity(parse(arguments)?, state),
             "analyze" => self.analyze(parse(arguments)?, state),
@@ -678,6 +679,32 @@ impl Backend {
             "clip_id": clip.map(|c| &c.clip.id), "track_id": clip.map(|c| &c.track_id),
             "start_us": clip.map(|c| c.clip.start_us),
             "duration_us": clip.map_or(asset.duration_us, |c| c.clip.duration_us),
+        }))
+    }
+
+    /// A picture the project has already goes through the edit as well, which changes nothing but saves, so a save
+    /// that failed the first time is retried.
+    fn import_web_image(&self, args: ImportWebImage, state: &SessionState) -> Result<Value> {
+        owns_run(state, &args.run_id)?;
+        // Stop in the app ends the run, and with it the download.
+        let stopped = || self.closed.load(Ordering::Acquire) || self.host.session.check_run(&args.run_id).is_err();
+        let (asset, url) = match crate::web_image::fetch(&args.url, stopped)? {
+            crate::web_image::Found::Picture(asset, url) => (*asset, url),
+            crate::web_image::Found::Page(pictures) => return Ok(json!({"asset_id": null, "pictures": pictures})),
+        };
+        let asset = match state.project.assets.iter().find(|a| Path::new(&a.path) == Path::new(&asset.path)) {
+            Some(existing) => existing.clone(),
+            None => asset,
+        };
+        let result = self.host.session.apply_edits(
+            &args.run_id,
+            &new_id(),
+            vec![EditCmd::AddAssets { assets: vec![asset.clone()] }],
+            Expect { revision: Some(state.stamp.revision), speech_layout_key: None },
+        )?;
+        Ok(json!({
+            "revision": result.stamp.revision, "session_epoch": result.stamp.session_epoch, "asset_id": asset.id,
+            "name": asset.name, "width": asset.width, "height": asset.height, "url": url,
         }))
     }
 
@@ -1545,7 +1572,9 @@ impl Backend {
             overlay_bounds: Vec::new(),
         };
         let png = nuzky_engine::thumbnail::encode(&rendered, ImageKind::Png)?;
-        let info = json!({"asset_id": asset.id, "name": asset.name, "width": width, "height": height});
+        let (visible, colors) = media::image_colors(Path::new(&asset.path))?;
+        let info = json!({"asset_id": asset.id, "name": asset.name, "width": width, "height": height,
+            "visible": visible, "colors": colors});
         Ok(CallToolResult::success(vec![
             ContentBlock::text(info.to_string()),
             ContentBlock::image(BASE64_STANDARD.encode(png), "image/png"),

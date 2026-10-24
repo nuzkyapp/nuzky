@@ -3848,6 +3848,7 @@ dependencies = [
  "dirs 6.0.0",
  "dunce",
  "getrandom 0.4.3",
+ "imagesize",
  "libc",
  "log",
  "nuzky-analysis",
@@ -3855,9 +3856,11 @@ dependencies = [
  "nuzky-interchange",
  "nuzky-session",
  "nuzky-vision",
+ "percent-encoding",
  "png 0.18.1",
  "resvg",
  "rmcp",
+ "roxmltree 0.21.1",
  "ruzstd",
  "schemars 1.2.2",
  "serde",
@@ -3867,6 +3870,7 @@ dependencies = [
  "ts-rs",
  "uds_windows",
  "ureq",
+ "url",
  "windows-sys 0.61.2",
 ]
 

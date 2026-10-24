@@ -118,8 +118,9 @@ pub fn subject_alpha(
     alpha_of(Frame { width, height, rgba: rgba.to_vec() }, &path, models_dir, cancel, progress)
 }
 
-/// The cache key is the rendered frame itself with the model, so a change of file, time or edit gives a new mask.
-fn mask_path(rgba: &[u8], size: (u32, u32), cache_dir: &Path) -> PathBuf {
+/// The file the subject's alpha over such a frame is cached in, made yet or not. The cache key is the rendered frame
+/// itself with the model, so a change of file, time or edit gives a new mask.
+pub fn mask_path(rgba: &[u8], size: (u32, u32), cache_dir: &Path) -> PathBuf {
     let mut key = Sha256::new();
     key.update(format!("{MASK_VERSION}:{}:{}x{}:", models::BIREFNET.sha256, size.0, size.1));
     key.update(rgba);
