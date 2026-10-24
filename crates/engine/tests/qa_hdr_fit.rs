@@ -344,7 +344,11 @@ fn hdr_decode_speed() {
     for (name, seeking) in [("open (export)", false), ("open_for_seeking (preview)", true)] {
         let mut runs = Vec::new();
         for _ in 0..5 {
-            let mut decoder = if seeking { VideoDecoder::open_for_seeking(&path).unwrap() } else { VideoDecoder::open(&path).unwrap() };
+            let mut decoder = if seeking {
+                VideoDecoder::open_for_seeking(&path).unwrap()
+            } else {
+                VideoDecoder::open(&path).unwrap()
+            };
             decoder.next_frame().unwrap().unwrap();
             let s = std::time::Instant::now();
             let mut n = 0;
@@ -357,4 +361,74 @@ fn hdr_decode_speed() {
         runs.sort_by(|a, b| a.partial_cmp(b).unwrap());
         eprintln!("SPEED decode 4K HLG {name}: {:.2} ms a frame (range {:.2}..{:.2})", runs[2], runs[0], runs[4]);
     }
+}
+
+#[test]
+#[ignore]
+fn hdr_preview_speed() {
+    let d = dir("hdr-fit");
+    let path = d.join("pipeline-4k.mov");
+    assert!(path.exists(), "run hdr_pipeline_speed first");
+    let with_proxy = d.join("preview-cache");
+    // The asset keeps the canonical path, which names its proxy.
+    let source = std::path::PathBuf::from(&project(&path, 3_000_000).assets[0].path);
+    nuzky_engine::proxy::ensure_proxy(&with_proxy, &source, |_| Ok(())).unwrap();
+    let without_proxy = d.join("preview-empty-cache");
+    std::fs::create_dir_all(&without_proxy).unwrap();
+    let set = |old: bool| unsafe {
+        if old { std::env::set_var("NUZKY_HDR_OLD_FLAGS", "1") } else { std::env::remove_var("NUZKY_HDR_OLD_FLAGS") }
+    };
+    let median = |mut v: Vec<f64>| {
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        format!("{:.2} (range {:.2}..{:.2})", v[v.len() / 2], v[0], v[v.len() - 1])
+    };
+    for (name, cache) in [("before its proxy exists", &without_proxy), ("from its proxy", &with_proxy)] {
+        let mut play = [Vec::new(), Vec::new()];
+        let mut distinct = 0;
+        for _round in 0..5 {
+            for (k, old) in [true, false].into_iter().enumerate() {
+                set(old);
+                let p = project(&path, 3_000_000);
+                let mut renderer = Renderer::new().unwrap();
+                renderer.use_proxies(cache.clone());
+                let mut last = renderer.render(&p, 0, 1280, 720, Wait::Exact, true).unwrap();
+                let s = std::time::Instant::now();
+                for i in 1..90 {
+                    let frame = renderer.render(&p, i * 33_333, 1280, 720, Wait::Exact, true).unwrap();
+                    distinct += usize::from(frame != last);
+                    last = frame;
+                }
+                play[k].push(s.elapsed().as_secs_f64() * 1000.0 / 89.0);
+            }
+        }
+        let [old, new] = play;
+        eprintln!(
+            "SPEED preview 4K HLG {name} at 1280x720, ms a frame: old {}, full_chroma {}; {distinct} of {} frames new",
+            median(old),
+            median(new),
+            89 * 10
+        );
+    }
+    set(false);
+}
+
+#[test]
+#[ignore]
+fn hdr_preview_profile() {
+    let d = dir("hdr-fit");
+    let path = d.join("pipeline-4k.mov");
+    let cache = d.join(std::env::var("PREVIEW_CACHE").unwrap_or("preview-cache".into()));
+    let p = project(&path, 3_000_000);
+    eprintln!("proxy ready: {:?}", nuzky_engine::proxy::ready(&cache, std::path::Path::new(&p.assets[0].path)));
+    let s = std::time::Instant::now();
+    let mut frames = 0;
+    while s.elapsed().as_secs() < 12 {
+        let mut renderer = Renderer::new().unwrap();
+        renderer.use_proxies(cache.clone());
+        for i in 0..90 {
+            std::hint::black_box(renderer.render(&p, i * 33_333, 1280, 720, Wait::Exact, true).unwrap());
+            frames += 1;
+        }
+    }
+    eprintln!("PROFILE {:.2} ms a frame", s.elapsed().as_secs_f64() * 1000.0 / frames as f64);
 }
