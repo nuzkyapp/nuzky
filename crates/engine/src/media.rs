@@ -708,10 +708,14 @@ type ScalerKey = (Pixel, u32, u32, u32, u32, Transfer);
 
 /// Scaling 8-bit video, or converting 10-bit at any size, swscale's default RGB output drew limited range about 2
 /// levels of 255 darker than BT.709 (FFmpeg 8.1, Apple Silicon); with chroma converted at full width it is exact.
-/// HDR keeps the darker output, which its tone mapping was fitted on.
+/// 8-bit YUV kept at its size goes through a special converter instead, which ignores that flag. On Apple Silicon it is
+/// within 0.14 levels of BT.709 and ten times as fast as the usual path. On x86 it drew 0.7 levels darker (FFmpeg 6.1
+/// and 8.1), so there accurate rounding turns it off. HDR keeps the darker output its tone mapping was fitted on.
 fn rgba_flags(transfer: Transfer) -> scaling::Flags {
+    let sdr = scaling::Flags::BILINEAR | scaling::Flags::FULL_CHR_H_INT;
     match transfer {
-        Transfer::Sdr => scaling::Flags::BILINEAR | scaling::Flags::FULL_CHR_H_INT,
+        Transfer::Sdr if cfg!(any(target_arch = "x86", target_arch = "x86_64")) => sdr | scaling::Flags::ACCURATE_RND,
+        Transfer::Sdr => sdr,
         Transfer::Pq | Transfer::Hlg => scaling::Flags::BILINEAR,
     }
 }

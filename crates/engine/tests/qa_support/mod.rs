@@ -30,12 +30,15 @@ pub fn ff(args: &[&str], out: &Path) {
         .arg(out));
 }
 pub fn raw(path: &Path, extra: &[&str]) -> Vec<u8> {
+    // Without full_chroma_int FFmpeg draws scaled and 10-bit SDR about 2 levels darker than BT.709. On x86 accurate_rnd
+    // keeps 8-bit video at its size off a converter 0.7 levels darker, as the engine does.
+    let x86 = cfg!(any(target_arch = "x86", target_arch = "x86_64"));
+    let flags = if x86 { "bilinear+full_chroma_int+accurate_rnd" } else { "bilinear+full_chroma_int" };
     run(Command::new("ffmpeg")
         .args(["-v", "error", "-threads", "2", "-filter_threads", "1", "-i"])
         .arg(path)
         .args(extra)
-        // Without full_chroma_int FFmpeg draws scaled and 10-bit SDR about 2 levels darker than BT.709.
-        .args(["-sws_flags", "bilinear+full_chroma_int"])
+        .args(["-sws_flags", flags])
         .args(["-f", "rawvideo", "-pix_fmt", "rgba", "-fps_mode", "passthrough", "-"]))
     .stdout
 }

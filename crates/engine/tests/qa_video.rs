@@ -446,8 +446,9 @@ fn patch_error(rgba: &[u8], (w, h): (usize, usize), want: &[[f64; 3]]) -> (f64, 
 }
 
 // The preview and thumbnails decode at the size they show, and export often does too. Scaling, swscale's default RGB
-// output drew limited range SDR about 2 levels of 255 darker than BT.709 on Apple Silicon. The FFmpeg references of
-// the other tests had the same bias, so here the reference is BT.709 of the decoded Y'CbCr, worked out by hand.
+// output drew limited range SDR about 2 levels of 255 darker than BT.709 on Apple Silicon, and at the file's own size
+// x86 drew it 0.7 levels darker. The FFmpeg references of the other tests had the same bias, so here the reference is
+// BT.709 of the decoded Y'CbCr, worked out by hand.
 #[test]
 fn sdr_bt709_matches_an_exact_conversion_at_every_size() {
     if !available() {
