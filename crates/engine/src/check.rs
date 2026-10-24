@@ -15,7 +15,7 @@ use crate::edit::MAIN_TRACK;
 use crate::effects::{source_time, transform_at, transition_at, transition_window};
 use crate::export::{frame_count, frame_time_us};
 use crate::media::{VideoDecoder, open_input, origin_us};
-use crate::model::{Asset, AssetKind, CHANNELS, Clip, ClipContent, Project, TrackKind, TransitionKind};
+use crate::model::{Asset, AssetKind, CHANNELS, Clip, ClipContent, Crop, Project, TrackKind, TransitionKind};
 use crate::render::visible_clips;
 
 /// Cells of the picture grid along its long and short side, like the frames scene detection compares.
@@ -315,11 +315,11 @@ pub fn review(
         [(Kind::Black, frames(measured.black.clone())), (Kind::Silent, silent), (Kind::Frozen, frames(frozen))]
     {
         for (range, times) in stretches {
-            for (piece, why) in split(&range, &times, &cuts, |t| match kind {
+            for (piece, why) in split(&range, &times, &cuts, cancelled, |t| match kind {
                 Kind::Black => black_at(project, t),
                 Kind::Frozen => frozen_at(project, t),
                 Kind::Silent => silent_at(project, t),
-            }) {
+            })? {
                 // Runs of one picture can follow each other within a clip; a file is looked at once for them.
                 match pieces.last_mut() {
                     Some((k, last, w)) if *k == kind && last.end == piece.start && *w == why => last.end = piece.end,
@@ -408,9 +408,18 @@ fn cut_times(project: &Project) -> Vec<i64> {
 }
 
 /// Splits `range` where a cut passes or the reason changes; `times` are the times measured in it.
-fn split(range: &Range<i64>, times: &[i64], cuts: &[i64], why: impl Fn(i64) -> Why) -> Vec<(Range<i64>, Why)> {
+fn split(
+    range: &Range<i64>,
+    times: &[i64],
+    cuts: &[i64],
+    cancelled: &dyn Fn() -> bool,
+    why: impl Fn(i64) -> Why,
+) -> Result<Vec<(Range<i64>, Why)>> {
     let mut pieces: Vec<(Range<i64>, Why, usize)> = Vec::new();
     for &t in times {
+        if cancelled() {
+            bail!("CANCELLED: the check was stopped");
+        }
         let (segment, why) = (cuts.partition_point(|c| *c <= t), why(t));
         match pieces.last_mut() {
             Some((piece, last, at)) if *at == segment && *last == why => piece.end = t,
@@ -424,7 +433,7 @@ fn split(range: &Range<i64>, times: &[i64], cuts: &[i64], why: impl Fn(i64) -> W
     if let Some((piece, _, _)) = pieces.last_mut() {
         piece.end = range.end;
     }
-    pieces.into_iter().filter(|(r, _, _)| r.start < r.end).map(|(r, why, _)| (r, why)).collect()
+    Ok(pieces.into_iter().filter(|(r, _, _)| r.start < r.end).map(|(r, why, _)| (r, why)).collect())
 }
 
 /// A picture of a clip visible at a time.
@@ -433,6 +442,7 @@ struct Layer<'a> {
     asset: &'a Asset,
     opacity: f32,
     animating: bool,
+    covers: bool,
 }
 
 /// Below this opacity a layer over black looks black.
@@ -456,7 +466,17 @@ fn layers(project: &Project, t: i64) -> Vec<Layer<'_>> {
             })
         });
         let opacity = if transform.scale > 0.0 { transform.opacity } else { 0.0 };
-        layers.push(Layer { clip, asset, opacity, animating });
+        let (cw, ch) = (project.canvas.width as f32, project.canvas.height as f32);
+        let fit = (cw / asset.width as f32).min(ch / asset.height as f32) * transform.scale;
+        let spans = |drawn: f32, side: f32, offset: f32| {
+            drawn >= side - 1.0 && offset.abs() * side <= (drawn - side) / 2.0 + 0.5
+        };
+        let covers = opacity >= 0.99
+            && transform.rotation.rem_euclid(360.0) < 0.01
+            && Crop::visible(transform.crop) == [0.0, 0.0, 1.0, 1.0]
+            && spans(asset.width as f32 * fit, cw, transform.x)
+            && spans(asset.height as f32 * fit, ch, transform.y);
+        layers.push(Layer { clip, asset, opacity, animating, covers });
     }
     layers
 }
@@ -498,16 +518,19 @@ fn frozen_at(project: &Project, t: i64) -> Why {
     if videos.is_empty() {
         return Why::Intended("image");
     }
+    // A full-frame picture may hide the video under it, or only frame it if it is partly transparent.
+    if shown.last().is_some_and(|top| top.asset.kind != AssetKind::Video && top.covers) {
+        return Why::Shows("image_over_video");
+    }
     Why::Plays(videos)
 }
 
 fn silent_at(project: &Project, t: i64) -> Why {
     let mut heard = Vec::new();
-    let mut fading = true;
     for track in project.tracks.iter().filter(|track| !track.muted && track.kind != TrackKind::Text) {
         let main = track.id == MAIN_TRACK;
         for (index, clip) in track.clips.iter().enumerate() {
-            let ClipContent::Media { asset_id, volume, fade_in_us, fade_out_us, .. } = &clip.content else { continue };
+            let ClipContent::Media { asset_id, volume, .. } = &clip.content else { continue };
             if *volume <= 0.0 || !project.asset(asset_id).is_some_and(has_audio) {
                 continue;
             }
@@ -518,17 +541,10 @@ fn silent_at(project: &Project, t: i64) -> Why {
             if t < from.min(clip.start_us) || t >= to.max(clip.end_us()) {
                 continue;
             }
-            fading &= t < clip.start_us + fade_in_us || t >= clip.end_us() - fade_out_us;
             heard.push(clip.id.clone());
         }
     }
-    if heard.is_empty() {
-        Why::Shows("nothing_heard")
-    } else if fading {
-        Why::Intended("audio_fade")
-    } else {
-        Why::Plays(heard)
-    }
+    if heard.is_empty() { Why::Shows("nothing_heard") } else { Why::Plays(heard) }
 }
 
 /// Decodes the files of `clips` over the source of `range` and says whether they explain the stretch.
@@ -541,10 +557,12 @@ fn look(
 ) -> Result<Why> {
     let mut held = false;
     let mut loudest = None::<f64>;
-    let mut ended = false;
+    let (mut ended, mut faded) = (false, false);
     for id in clips {
         let clip = project.tracks.iter().flat_map(|t| &t.clips).find(|c| &c.id == id).context("The clip is gone")?;
-        let ClipContent::Media { asset_id, volume, .. } = &clip.content else { continue };
+        let ClipContent::Media { asset_id, volume, speed, fade_in_us, fade_out_us, .. } = &clip.content else {
+            continue;
+        };
         let asset = project.asset(asset_id).context("The clip's file is gone")?;
         let from = source_time(clip, range.start);
         let to = source_time(clip, range.end).max(from + 1);
@@ -556,7 +574,9 @@ fn look(
                 }
             }
             Kind::Frozen => {
-                let seen = look_at_picture(path, from, to, Need::Still, cancelled)?;
+                // A hold shorter than a frozen picture on the timeline is the file's own end, in the file's time.
+                let min_hold = (FREEZE_MIN_US as f64 * f64::from(*speed)) as i64;
+                let seen = look_at_picture(path, from, to, Need::Still(min_hold), cancelled)?;
                 if !seen.still {
                     return Ok(Why::Plays(clips.to_vec()));
                 }
@@ -566,8 +586,10 @@ fn look(
                 let heard = hear(path, from, to, cancelled)?;
                 ended |= heard.ended;
                 if let Some(db) = heard.loudest_db {
-                    let db = db + 20.0 * f64::from(*volume).log10();
-                    loudest = Some(loudest.map_or(db, |l| l.max(db)));
+                    let gain = f64::from(*volume) * fade_peak(clip, *fade_in_us, *fade_out_us, range);
+                    let mixed = db + 20.0 * gain.log10();
+                    faded |= db > QUIET_SOURCE_DB && mixed <= QUIET_SOURCE_DB;
+                    loudest = Some(loudest.map_or(mixed, |l| l.max(mixed)));
                 }
             }
         }
@@ -576,17 +598,28 @@ fn look(
         Kind::Black => Why::Intended("dark_source"),
         Kind::Frozen if held => Why::Shows("held_last_frame"),
         Kind::Frozen => Why::Intended("still_source"),
-        // Sound the file has there and the export lost.
         Kind::Silent if loudest.is_some_and(|db| db > QUIET_SOURCE_DB) => Why::Plays(clips.to_vec()),
+        Kind::Silent if faded => Why::Intended("audio_fade"),
         Kind::Silent if ended => Why::Shows("past_source_end"),
         Kind::Silent => Why::Intended("quiet_source"),
     })
 }
 
+/// The loudest gain a clip's fades leave over `range` of the timeline; the mixer fades linearly.
+fn fade_peak(clip: &Clip, fade_in_us: i64, fade_out_us: i64, range: &Range<i64>) -> f64 {
+    let ramp = |n: i64, d: i64| if d > 0 { (n as f64 / d as f64).clamp(0.0, 1.0) } else { 1.0 };
+    let last = (range.end - 1).max(range.start);
+    (0..=8)
+        .map(|k| range.start + (last - range.start) * k / 8 - clip.start_us)
+        .map(|u| ramp(u, fade_in_us) * ramp(clip.duration_us - 1 - u, fade_out_us))
+        .fold(0.0, f64::max)
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Need {
     Dark,
-    Still,
+    /// Held is when the picture ends at least this long before the range does.
+    Still(i64),
 }
 
 struct Seen {
@@ -607,15 +640,18 @@ fn look_at_picture(path: &Path, from: i64, to: i64, need: Need, cancelled: &dyn 
         let (w, h) = ((gw * CELL_SAMPLES) as u32, (gh * CELL_SAMPLES) as u32);
         let rgba = decoder.convert(frame, t, w, h)?;
         let cells = grid(&rgba.data, rgba.width, rgba.height);
-        seen.dark &= dark_share(&cells) >= SOURCE_BLACK_SHARE;
-        match &anchor {
-            Some(anchor) => seen.still &= picture_difference(anchor, &cells) <= SOURCE_STILL_DIFFERENCE,
-            None => anchor = Some(cells),
-        }
-        // Nothing more to learn once the answer is no.
         Ok(match need {
-            Need::Dark => seen.dark,
-            Need::Still => seen.still,
+            Need::Dark => {
+                seen.dark &= dark_share(&cells) >= SOURCE_BLACK_SHARE;
+                seen.dark
+            }
+            Need::Still(_) => {
+                match &anchor {
+                    Some(anchor) => seen.still &= picture_difference(anchor, &cells) <= SOURCE_STILL_DIFFERENCE,
+                    None => anchor = Some(cells),
+                }
+                seen.still
+            }
         })
     };
     let (mut covering, mut seen_at, mut last) = (None, None::<i64>, None::<i64>);
@@ -657,7 +693,8 @@ fn look_at_picture(path: &Path, from: i64, to: i64, need: Need, cancelled: &dyn 
     }
     // The last frame shows until the next would start. A clip runs a little past its picture when its sound is
     // longer; held that briefly, the frozen picture is the file's own.
-    seen.ended = last.is_none_or(|t| to - (t + decoder.frame_duration_us) >= FREEZE_MIN_US);
+    let min_hold = if let Need::Still(min_hold) = need { min_hold } else { FREEZE_MIN_US };
+    seen.ended = last.is_none_or(|t| to - (t + decoder.frame_duration_us) >= min_hold);
     Ok(seen)
 }
 
@@ -802,7 +839,6 @@ fn look_times(project: &Project, measured: &Measured, found: &[Finding]) -> Vec<
         }
     }
     for finding in found {
-        // The frames showing the first and the last moment of it.
         for t in [finding.start_us, finding.end_us - 1] {
             let at = frame_count(t + 1, fps);
             if at > 0 && at <= frames {
@@ -877,10 +913,37 @@ mod tests {
     }
 
     #[test]
+    fn stopping_stops_the_check_of_a_long_silent_video_of_many_clips() {
+        let mut project = Project::new("t");
+        let asset: Asset = serde_json::from_value(serde_json::json!({"id": "v", "name": "v", "path": "/tmp/v",
+            "kind": "video", "durationUs": 1_000_000, "width": 1080, "height": 1920, "fps": 30.0, "hasAudio": false,
+            "rotation": 0}))
+        .unwrap();
+        project.apply(crate::edit::EditCmd::AddAssets { assets: vec![asset] }).unwrap();
+        project.apply(crate::edit::EditCmd::AddClip { asset_id: "v".into(), start_us: None, track_id: None }).unwrap();
+        let one = project.tracks[0].clips[0].clone();
+        project.tracks[0].clips =
+            (0..7200).map(|i| Clip { id: format!("c{i}"), start_us: i * 1_000_000, ..one.clone() }).collect();
+        let duration_us = 7_200_000_000;
+        let measured = Measured {
+            fps: 30,
+            frames: 216_000,
+            duration_us,
+            black: vec![],
+            frozen: vec![],
+            silent: vec![0..duration_us * 48_000 / 1_000_000],
+        };
+        let started = std::time::Instant::now();
+        let stopped = review(&project, &measured, &|| true, &mut |_| {});
+        assert!(format!("{:#}", stopped.unwrap_err()).starts_with("CANCELLED"));
+        assert!(started.elapsed() < std::time::Duration::from_secs(1), "took {:?}", started.elapsed());
+    }
+
+    #[test]
     fn pieces_split_at_cuts_and_where_the_reason_changes() {
         let times: Vec<i64> = (0..10).map(|i| i * 100).collect();
         let why = |t: i64| if t < 500 { Why::Shows("a") } else { Why::Shows("b") };
-        let pieces = split(&(0..1000), &times, &[250], why);
+        let pieces = split(&(0..1000), &times, &[250], &|| false, why).unwrap();
         let ranges: Vec<_> = pieces.iter().map(|(r, _)| r.clone()).collect();
         assert_eq!(ranges, [0..300, 300..500, 500..1000]);
         assert_eq!(without(&[0..10, 20..30], &[2..4, 8..22]), [0..2, 4..8, 22..30]);
