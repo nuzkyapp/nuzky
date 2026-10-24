@@ -144,9 +144,11 @@ function Step() {
   ).filter(([, left]) => left > 0);
   const missing = parts.reduce((sum, [, left]) => sum + left, 0);
   const contents = LIST.format(parts.map(([what, left, size]) => `${left < size ? "the rest of " : ""}${what} (${left} MB)`));
-  // On the processor the recommendation depends on the language; a model picked over it stays.
+  // On the processor the recommendation depends on the language; a model picked over it stays, and so does a downloaded
+  // one at least as big, since a bigger model gets fewer words wrong in every language in WER.
   const changeLanguage = (next: string) => {
-    if (model === recommended) setSpeechModel(recommend(next, setup.gpu));
+    const to = recommend(next, setup.gpu);
+    if (model === recommended && !(downloaded && MODEL_ORDER.indexOf(model) >= MODEL_ORDER.indexOf(to))) setSpeechModel(to);
     setSpeechLanguage(next);
   };
   const download = () => {

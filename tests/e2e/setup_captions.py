@@ -2,8 +2,8 @@
 with their size, state and the recommended one, and Download gets everything the first transcript in that language
 needs, with the percentage, Stop and resuming, Try again after a network failure and a free space check. The choice
 and the step stay after a restart, and the first captions download nothing more. On the processor, where the recommended
-model depends on the language, the chosen model follows the language while it is the recommended one. Czech is only the
-test's system language here."""
+model depends on the language, the chosen model follows the language while it is the recommended one, unless it is
+downloaded and at least as big. Czech is only the test's system language here."""
 import json, time
 
 from e2e.harness import FIXTURES, MACOS, MODELS, flow, press, wait
@@ -305,13 +305,24 @@ def run(r):
 
 def on_processor(r):
     """Recognition on the processor, as on Windows: Recommended moves with the language, and the choice with it while it
-    is the recommended one, so English on Fast becomes Czech on Balanced; a model picked over it stays."""
+    is the recommended one, so English on Fast becomes Czech on Balanced. A downloaded Balanced stays in English, where
+    it is better than Fast, and a model picked over the recommended one stays."""
     r.env['NUZKY_TEST_SPEECH_CPU'] = '1'
     relaunch(r)
     wait_library(r)
     d = open_setup(r, first_start=False)
     r.check('on the processor, in Czech, Recommended marks Balanced, which is still chosen',
             d and 'recognises speech on its processor' in d['text'] and marked(d) == ['small'] and card(d, 'small')['checked'], d)
+    r.s.run(SET_LANGUAGE, 'en')
+    d = wait(lambda: (d := step(r)) and d['language'] == 'en' and marked(d) == ['base'] and d, 5)
+    time.sleep(0.4)
+    d = step(r)
+    r.check('in English Recommended moves to Fast, and Balanced, downloaded and better in English too, stays chosen with no model to download',
+            d and card(d, 'small')['checked'] and r.s.run(CHOSEN) == 'small' and d['buttons'][0] == f'Download {mb(EN_TIMING)} MB'
+            and f'Download gets the English word timing model ({mb(EN_TIMING)} MB).' in d['text'], d)
+    r.shot('processor-english-downloaded')
+    r.s.run(SET_LANGUAGE, 'cs')
+    r.check('back in Czech Balanced is chosen', wait(lambda: (d := step(r)) and d['language'] == 'cs' and card(d, 'small')['checked'], 5), step(r))
     pick = lambda model: r.s.run(f"document.querySelector('{BOX} input[value=\"{model}\"]').closest('label').click()")
     pick('large-v3-turbo-q5_0')
     r.check('a click picks Most accurate', wait(lambda: r.s.run(CHOSEN) == 'large-v3-turbo-q5_0', 3), r.s.run(CHOSEN))
