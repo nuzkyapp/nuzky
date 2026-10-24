@@ -29,16 +29,21 @@ pub fn ff(args: &[&str], out: &Path) {
         .args(args)
         .arg(out));
 }
+/// The swscale flags `raw()` converts to RGBA with, as the engine does at a file's own size. Without full_chroma_int
+/// FFmpeg draws scaled and 10-bit SDR about 2 levels darker than BT.709. On x86 accurate_rnd keeps 8-bit video off a
+/// converter 0.7 levels darker, and neighbor draws its nearest chroma sample as that converter does. An explicit
+/// `scale` filter ignores `-sws_flags`; give it these as its `flags`.
+pub const SWS_FLAGS: &str = if cfg!(any(target_arch = "x86", target_arch = "x86_64")) {
+    "neighbor+full_chroma_int+accurate_rnd"
+} else {
+    "bilinear+full_chroma_int"
+};
 pub fn raw(path: &Path, extra: &[&str]) -> Vec<u8> {
-    // Without full_chroma_int FFmpeg draws scaled and 10-bit SDR about 2 levels darker than BT.709. On x86 accurate_rnd
-    // keeps 8-bit video at its size off a converter 0.7 levels darker, as the engine does.
-    let x86 = cfg!(any(target_arch = "x86", target_arch = "x86_64"));
-    let flags = if x86 { "bilinear+full_chroma_int+accurate_rnd" } else { "bilinear+full_chroma_int" };
     run(Command::new("ffmpeg")
         .args(["-v", "error", "-threads", "2", "-filter_threads", "1", "-i"])
         .arg(path)
         .args(extra)
-        .args(["-sws_flags", flags])
+        .args(["-sws_flags", SWS_FLAGS])
         .args(["-f", "rawvideo", "-pix_fmt", "rgba", "-fps_mode", "passthrough", "-"]))
     .stdout
 }

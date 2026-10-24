@@ -374,7 +374,7 @@ fn saturated_png_colours_match_ffmpeg_in_preview_thumbnails_and_export() {
             let cancel = std::sync::atomic::AtomicBool::new(false);
             nuzky_engine::export::export(&timeline, &d.join("cache"), &out, &options, &cancel, |_| {}).unwrap();
             let through_yuv = format!(
-                "{over_black},scale=out_color_matrix=bt709:out_range=tv,format=yuv420p,scale=in_color_matrix=bt709:in_range=tv"
+                "{over_black},scale=out_color_matrix=bt709:out_range=tv,format=yuv420p,scale=in_color_matrix=bt709:in_range=tv:flags={SWS_FLAGS}"
             );
             let theirs = middles(&raw(&p, &["-filter_complex", &through_yuv, "-frames:v", "1"]), w, h);
             let exported = middles(&raw(&out, &["-frames:v", "1"]), w / 2, h / 2);

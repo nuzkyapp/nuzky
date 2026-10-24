@@ -708,15 +708,18 @@ type ScalerKey = (Pixel, u32, u32, u32, u32, Transfer);
 
 /// Scaling 8-bit video, or converting 10-bit at any size, swscale's default RGB output drew limited range about 2
 /// levels of 255 darker than BT.709 (FFmpeg 8.1, Apple Silicon); with chroma converted at full width it is exact.
-/// 8-bit YUV kept at its size goes through a special converter instead, which ignores that flag. On Apple Silicon it is
-/// within 0.14 levels of BT.709 and ten times as fast as the usual path. On x86 it drew 0.7 levels darker (FFmpeg 6.1
-/// and 8.1), so there accurate rounding turns it off. HDR keeps the darker output its tone mapping was fitted on.
-fn rgba_flags(transfer: Transfer) -> scaling::Flags {
-    let sdr = scaling::Flags::BILINEAR | scaling::Flags::FULL_CHR_H_INT;
+/// 8-bit YUV kept at its size goes through a special converter instead, which ignores that flag and repeats each
+/// chroma sample. On Apple Silicon it is within 0.14 levels of BT.709 and ten times as fast as the usual path. On x86
+/// it drew 0.7 levels darker (FFmpeg 6.1 and 8.1), so there accurate rounding turns it off and the nearest chroma
+/// sample draws its picture without the error. HDR keeps the darker output its tone mapping was fitted on.
+fn rgba_flags(transfer: Transfer, same_size: bool) -> scaling::Flags {
+    use scaling::Flags;
     match transfer {
-        Transfer::Sdr if cfg!(any(target_arch = "x86", target_arch = "x86_64")) => sdr | scaling::Flags::ACCURATE_RND,
-        Transfer::Sdr => sdr,
-        Transfer::Pq | Transfer::Hlg => scaling::Flags::BILINEAR,
+        Transfer::Sdr if same_size && cfg!(any(target_arch = "x86", target_arch = "x86_64")) => {
+            Flags::POINT | Flags::FULL_CHR_H_INT | Flags::ACCURATE_RND
+        }
+        Transfer::Sdr => Flags::BILINEAR | Flags::FULL_CHR_H_INT,
+        Transfer::Pq | Transfer::Hlg => Flags::BILINEAR,
     }
 }
 
@@ -727,7 +730,8 @@ fn to_rgba(scaler: &mut Option<(ScalerKey, Scaler)>, f: &frame::Video, t_us: i64
         let space = if is_rgb(f.format()) { ff::ffi::SWS_CS_DEFAULT } else { sws_colorspace(matrix(f)) };
         let colorspace = [(space, is_full_range(f)), (ff::ffi::SWS_CS_DEFAULT, true)];
         let src = (f.format(), f.width(), f.height());
-        *scaler = Some((key, Scaler::new(src, (Pixel::RGBA, w, h), rgba_flags(key.5), colorspace)?));
+        let flags = rgba_flags(key.5, (f.width(), f.height()) == (w, h));
+        *scaler = Some((key, Scaler::new(src, (Pixel::RGBA, w, h), flags, colorspace)?));
     }
     let mut out = frame::Video::new(Pixel::RGBA, w, h);
     scaler.as_mut().unwrap().1.run(f, &mut out)?;
@@ -1570,8 +1574,8 @@ mod tests {
         for (format, size, space, range, (w, h), (cs, full)) in cases {
             let case = format!("{format:?} {}x{} {space:?} {range:?} to {w}x{h}", size.0, size.1);
             let f = noise(format, size, space, range);
-            let mut one_pass =
-                scaling::Context::get(format, size.0, size.1, Pixel::RGBA, w, h, rgba_flags(Transfer::Sdr)).unwrap();
+            let flags = rgba_flags(Transfer::Sdr, size == (w, h));
+            let mut one_pass = scaling::Context::get(format, size.0, size.1, Pixel::RGBA, w, h, flags).unwrap();
             set_sws_colorspace(&mut one_pass, cs, full, SWS_CS_DEFAULT, true);
             let mut expected = frame::Video::new(Pixel::RGBA, w, h);
             one_pass.run(&f, &mut expected).unwrap();
