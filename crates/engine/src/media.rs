@@ -717,7 +717,10 @@ fn to_rgba(scaler: &mut Option<(ScalerKey, Scaler)>, f: &frame::Video, t_us: i64
         let space = if is_rgb(f.format()) { ff::ffi::SWS_CS_DEFAULT } else { sws_colorspace(matrix(f)) };
         let colorspace = [(space, is_full_range(f)), (ff::ffi::SWS_CS_DEFAULT, true)];
         let src = (f.format(), f.width(), f.height());
-        *scaler = Some((key, Scaler::new(src, (Pixel::RGBA, w, h), RGBA_FLAGS, colorspace)?));
+        // Measurement only: NUZKY_HDR_OLD_FLAGS converts HDR the way it was converted before.
+        let old = std::env::var_os("NUZKY_HDR_OLD_FLAGS").is_some() && transfer(f) != Transfer::Sdr;
+        let flags = if old { scaling::Flags::BILINEAR } else { RGBA_FLAGS };
+        *scaler = Some((key, Scaler::new(src, (Pixel::RGBA, w, h), flags, colorspace)?));
     }
     let mut out = frame::Video::new(Pixel::RGBA, w, h);
     scaler.as_mut().unwrap().1.run(f, &mut out)?;
