@@ -152,7 +152,7 @@ const EXAMPLE = "Cut the pauses and retakes in the video open in Nuzky, then add
 /** The path as one argument to paste into a shell; `~/` stays outside the quotes, where the shell expands it. PowerShell
  * runs a path in quotes only after `&`. */
 function shellPath(path: string) {
-  if (WINDOWS) return /\s/.test(path) ? `& '${path.replaceAll("'", "''")}'` : path;
+  if (WINDOWS) return /^[\w:.\\-]+$/.test(path) ? path : `& '${path.replaceAll("'", "''")}'`;
   if (/^[\w@%+=:,./~-]+$/.test(path)) return path;
   const home = path.startsWith("~/") ? "~/" : "";
   return `${home}'${path.slice(home.length).replaceAll("'", "'\\''")}'`;

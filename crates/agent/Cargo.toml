@@ -16,5 +16,9 @@ ureq = "3.4.2"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.190"
 
+# The job that ends a probed CLI with what it started. Already in the build through wry and tokio.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+
 [dev-dependencies]
 toml = "1.1"

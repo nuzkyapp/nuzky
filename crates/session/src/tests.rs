@@ -1248,7 +1248,7 @@ fn a_save_waits_for_another_program_holding_the_project_open() {
         std::thread::sleep(Duration::from_millis(300));
         drop(held);
     });
-    storage::save(&f.0, &Project::new("Saved")).unwrap();
+    storage::save_waiting(&f.0, &Project::new("Saved")).unwrap();
     release.join().unwrap();
     assert_eq!(f.disk().name, "Saved");
 }

@@ -122,7 +122,7 @@ fn write_loop(path: PathBuf, events: Option<Sender<SessionEvent>>, broken: Arc<A
                 let _ = reply.send(result);
             }
             Some(Message::Checkpoint(value, reply)) => {
-                let result = storage::save(&storage::sidecar(&path, ".checkpoint.json"), &value)
+                let result = storage::save_waiting(&storage::sidecar(&path, ".checkpoint.json"), &value)
                     .context("SAVE_FAILED: saving checkpoint");
                 let _ = reply.send(result);
             }
@@ -130,7 +130,7 @@ fn write_loop(path: PathBuf, events: Option<Sender<SessionEvent>>, broken: Arc<A
                 let file = storage::sidecar(&path, HISTORY_SUFFIX);
                 let result = match write {
                     Write::Append(line) => append(&file, &line),
-                    Write::Replace(text) => storage::save_bytes(&file, text.as_bytes()),
+                    Write::Replace(text) => storage::save_bytes(&file, text.as_bytes(), true),
                 };
                 versions_error = result.err().map(|error| format!("SAVE_FAILED: saving versions: {error:#}"));
                 if let Some(error) = &versions_error {
@@ -156,7 +156,7 @@ fn save(
     snapshot: Snapshot,
     versions_error: &Option<String>,
 ) -> Result<()> {
-    let result = storage::save(path, &snapshot.project).context("SAVE_FAILED: saving project");
+    let result = storage::save_waiting(path, &snapshot.project).context("SAVE_FAILED: saving project");
     let error = result.as_ref().err().map(|error| format!("{error:#}")).or_else(|| versions_error.clone());
     notify(events, snapshot.revision, error);
     result

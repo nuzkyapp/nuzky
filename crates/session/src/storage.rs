@@ -17,10 +17,15 @@ pub fn json_temp_path(path: &Path) -> PathBuf {
 }
 
 pub fn save(path: &Path, value: &impl Serialize) -> Result<()> {
-    save_bytes(path, &serde_json::to_vec_pretty(value).context("Serializing project state")?)
+    save_bytes(path, &serde_json::to_vec_pretty(value).context("Serializing project state")?, false)
 }
 
-pub(crate) fn save_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
+/// As `save`, for the project's writer thread only: on Windows it may wait a second, which the UI thread must not.
+pub(crate) fn save_waiting(path: &Path, value: &impl Serialize) -> Result<()> {
+    save_bytes(path, &serde_json::to_vec_pretty(value).context("Serializing project state")?, true)
+}
+
+pub(crate) fn save_bytes(path: &Path, bytes: &[u8], wait: bool) -> Result<()> {
     let tmp = json_temp_path(path);
     let result = (|| {
         let mut file = OpenOptions::new()
@@ -30,7 +35,7 @@ pub(crate) fn save_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
             .with_context(|| format!("Creating {}", tmp.display()))?;
         file.write_all(bytes).context("Writing project state")?;
         file.sync_all().context("Syncing project state")?;
-        replace(&tmp, path).with_context(|| format!("Saving {}", path.display()))?;
+        replace(&tmp, path, wait).with_context(|| format!("Saving {}", path.display()))?;
         Ok(())
     })();
     if result.is_err() {
@@ -40,13 +45,14 @@ pub(crate) fn save_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
 }
 
 /// Windows refuses to replace a file another program holds open without sharing its deletion, as a virus scan,
-/// a backup or a file preview does for a moment, so the save waits a second for it to let go.
-fn replace(from: &Path, to: &Path) -> std::io::Result<()> {
+/// a backup or a file preview does for a moment, so a save that may `wait` waits a second for it to let go.
+fn replace(from: &Path, to: &Path, wait: bool) -> std::io::Result<()> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
     loop {
         match fs::rename(from, to) {
             Err(error)
-                if cfg!(windows)
+                if wait
+                    && cfg!(windows)
                     && error.kind() == std::io::ErrorKind::PermissionDenied
                     && std::time::Instant::now() < deadline =>
             {

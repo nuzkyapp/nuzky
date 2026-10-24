@@ -353,7 +353,7 @@ def port_busy(port):
 
 
 def start_driver(r):
-    """The WebDriver, which on Linux and Windows starts the app with its own environment, so r.env as it is now."""
+    """The WebDriver, which on Linux starts the app with its own environment, so r.env as it is now."""
     # Tauri 2 lets WebDriver drive its webview only with this set, as tauri-driver does.
     host = [] if WINDOWS else ['--host=127.0.0.1']
     r.driver = start([str(DRIVER), '--port=4444', *host], r.work / 'driver.log', r.launch_env(TAURI_WEBVIEW_AUTOMATION='true'))
@@ -678,14 +678,15 @@ class win32:
 
     @staticmethod
     def windows(title):
-        """The visible top-level windows with exactly this title."""
+        """The visible top-level windows with exactly this title of this run's app, never of a Nuzky the person has open."""
         ctypes, wintypes, user32, _ = win32._api()
         found = []
 
         def each(hwnd, _):
-            text = ctypes.create_unicode_buffer(256)
+            text, pid = ctypes.create_unicode_buffer(256), wintypes.DWORD()
             user32.GetWindowTextW(hwnd, text, 256)
-            if text.value == title and user32.IsWindowVisible(hwnd):
+            user32.GetWindowThreadProcessId(wintypes.HWND(hwnd), ctypes.byref(pid))
+            if text.value == title and user32.IsWindowVisible(hwnd) and RUN.app and pid.value == RUN.app.pid:
                 found.append(hwnd)
             return True
         user32.EnumWindows(ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)(each), 0)

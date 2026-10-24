@@ -191,6 +191,8 @@ fn run_in(
     #[cfg(windows)]
     no_window(&mut command);
     let mut child = command.spawn()?;
+    #[cfg(windows)]
+    let job = Job::around(&child);
     if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
         // A CLI that exits without reading closes the pipe; its output says what went wrong.
         let _ = std::io::Write::write_all(&mut stdin, input);
@@ -217,10 +219,12 @@ fn run_in(
     unsafe {
         libc::kill(-(child.id() as i32), libc::SIGKILL)
     };
-    // Only a tree whose top still runs can be found on Windows.
     #[cfg(windows)]
-    if matches!(status, Ok(None)) {
-        kill_tree(child.id());
+    match job {
+        Some(job) => drop(job),
+        // Without a job only a tree whose top still runs can be found.
+        None if matches!(status, Ok(None)) => kill_tree(child.id()),
+        None => {}
     }
     let _ = child.kill();
     let _ = child.wait();
@@ -233,6 +237,41 @@ fn run_in(
 #[cfg(windows)]
 pub fn no_window(command: &mut Command) {
     std::os::windows::process::CommandExt::creation_flags(command, 0x0800_0000);
+}
+
+/// Ends the process and everything it starts once dropped, as killing its process group does on Unix, also after the
+/// process itself has exited and its helpers hold on to its output.
+#[cfg(windows)]
+struct Job(std::os::windows::io::OwnedHandle);
+
+#[cfg(windows)]
+impl Job {
+    fn around(child: &std::process::Child) -> Option<Job> {
+        use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+        use windows_sys::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation, SetInformationJobObject,
+        };
+        // SAFETY: a job without a name or attributes; OwnedHandle closes the handle CreateJobObjectW returns.
+        let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        if handle.is_null() {
+            return None;
+        }
+        let job = Job(unsafe { OwnedHandle::from_raw_handle(handle) });
+        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        // SAFETY: limits is the structure this information class names, and both handles are open.
+        let set = unsafe {
+            SetInformationJobObject(
+                handle,
+                JobObjectExtendedLimitInformation,
+                (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            ) != 0
+                && AssignProcessToJobObject(handle, child.as_raw_handle()) != 0
+        };
+        set.then_some(job)
+    }
 }
 
 /// Ends a process with everything it started, as killing its process group does on Unix.
@@ -299,5 +338,17 @@ mod tests {
         assert_eq!(version_of("codex-cli 0.160.1\n").as_deref(), Some("0.160.1"));
         assert_eq!(version_of("1.4.3\n").as_deref(), Some("1.4.3"));
         assert_eq!(version_of("unknown"), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_probe_ends_what_the_cli_left_holding_its_output() {
+        let cmd = PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("System32").join("cmd.exe");
+        let started = Instant::now();
+        // cmd exits at once and leaves ping writing to its output for half a minute, as a CLI's server may.
+        let output =
+            run(&cmd, &["/c", "start /b ping -n 30 127.0.0.1 & exit 0"], &[], None, Duration::from_secs(5)).unwrap();
+        assert!(output.is_some_and(|output| output.status.success()));
+        assert!(started.elapsed() < Duration::from_secs(10), "the probe waited {:?}", started.elapsed());
     }
 }

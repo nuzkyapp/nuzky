@@ -72,19 +72,12 @@ def row(r):
 
 def relaunch(r):
     """Starts the app again, with r.env as it is now."""
-    if MACOS:
+    if MACOS or WINDOWS:
+        # The harness started the app, and the next session starts it again.
         leave_editor(r)
         close_window()
         r.check('the window closes and Nuzky quits', wait(lambda: r.app.poll() is not None, 15))
         r.s.close()
-    elif WINDOWS:
-        # Closing the window on the home screen quits as a person does; Edge WebDriver then starts the app again.
-        leave_editor(r)
-        close_window()
-        r.check('the window closes and Nuzky quits', wait(lambda: app_pid(r) is None, 15))
-        r.s.close()
-        stop(r.driver)
-        start_driver(r)
     else:
         # Ending the session would make WebKitWebDriver kill the app, which leaves the crash marker; a SIGTERM ends it
         # as logging out does. A new WebKitWebDriver starts the app with r.env as it is now.

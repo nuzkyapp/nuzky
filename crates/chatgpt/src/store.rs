@@ -187,9 +187,11 @@ fn delete_keychain(host_id: &str) -> Result<()> {
 }
 
 /// Credential Manager keeps at most 2560 bytes in an entry, fewer than the tokens take, so on Windows they are
-/// split over the entry and numbered ones after it.
+/// split over the entry and numbered ones after it, never more than a sign-in takes many times over.
 #[cfg(windows)]
 const PART_BYTES: usize = 2560;
+#[cfg(windows)]
+const MAX_PARTS: usize = 16;
 
 #[cfg(windows)]
 fn part(host_id: &str, index: usize) -> Result<keyring::Entry> {
@@ -217,6 +219,10 @@ fn read_keychain(host_id: &str) -> Result<Option<String>> {
 #[cfg(windows)]
 fn write_keychain(host_id: &str, text: &str) -> Result<()> {
     let parts: Vec<&[u8]> = text.as_bytes().chunks(PART_BYTES).collect();
+    anyhow::ensure!(
+        parts.len() <= MAX_PARTS,
+        "KEYCHAIN_UNAVAILABLE: the ChatGPT sign-in is too large for Credential Manager"
+    );
     for (index, bytes) in parts.iter().enumerate() {
         part(host_id, index)?.set_secret(bytes).map_err(|error| unavailable(&error))?;
     }
@@ -229,12 +235,12 @@ fn delete_keychain(host_id: &str) -> Result<()> {
     delete_parts(host_id, 0)
 }
 
+/// Every part from `from` on, also past a gap a removal cut short left.
 #[cfg(windows)]
 fn delete_parts(host_id: &str, from: usize) -> Result<()> {
-    for index in from.. {
+    for index in from..MAX_PARTS {
         match part(host_id, index)?.delete_credential() {
-            Ok(()) => {}
-            Err(keyring::Error::NoEntry) => break,
+            Ok(()) | Err(keyring::Error::NoEntry) => {}
             Err(error) => return Err(unavailable(&error)),
         }
     }
@@ -287,8 +293,13 @@ mod tests {
         let shorter = r#"{"tokens":"short"}"#;
         let replaced = write_keychain(&host, shorter).and_then(|()| read_keychain(&host));
         let deleted = delete_keychain(&host).and_then(|()| read_keychain(&host));
+        // A sign-out cut short after the first part: signing out again still removes the rest.
+        write_keychain(&host, &long).unwrap();
+        part(&host, 0).unwrap().delete_credential().unwrap();
+        let left = delete_keychain(&host).and_then(|()| part(&host, 1)?.get_secret().map_err(|e| unavailable(&e)));
         assert_eq!(read.unwrap().as_deref(), Some(long.as_str()));
         assert_eq!(replaced.unwrap().as_deref(), Some(shorter));
         assert_eq!(deleted.unwrap(), None);
+        assert!(left.is_err(), "a part outlived signing out");
     }
 }
