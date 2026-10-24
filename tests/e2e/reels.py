@@ -243,13 +243,13 @@ def moved(r):
 
 
 def missing(r):
-    video = r.work / 'long-talk.mp4'
-    if WINDOWS:
-        if not move_while_away(r, video):
-            return
-    else:
-        video.rename(r.work / 'moved.mp4')
+    video, moved = r.work / 'long-talk.mp4', r.work / 'moved.mp4'
     try:
+        if WINDOWS:
+            if not move_while_away(r, video, moved):
+                return
+        else:
+            video.rename(moved)
         r.s.call('window.__nuzky.refreshLibrary()')
         said = wait(lambda: 'missing' in (text(r, f'{LIST} [role=status]') or '') and text(r, f'{LIST} [role=status]'), 10)
         r.check('with its video moved away, the list says to put it back', said and 'Put it back' in said, said)
@@ -258,11 +258,12 @@ def missing(r):
         time.sleep(0.3)
         r.shot('missing')
     finally:
-        (r.work / 'moved.mp4').rename(video)
+        if moved.exists():
+            moved.rename(video)
         r.s.call('window.__nuzky.refreshLibrary()')
 
 
-def move_while_away(r, video):
+def move_while_away(r, video, moved):
     """Windows does not let Explorer move a video Nuzky has open, so there the user moves it while another project is
     open and comes back to the reels of the talk."""
     source = r.s.run('return window.__nuzky.store.getState().snap.path')
@@ -274,7 +275,7 @@ def move_while_away(r, video):
                    wait(lambda: r.s.run('return window.__nuzky.store.getState().snap.path') not in (None, source), 20)):
         return False
     # Drawing posters on Home keeps the video open for up to 20 s more.
-    if not r.check('then the video can be moved', wait(lambda: video.rename(r.work / 'moved.mp4'), 30)):
+    if not r.check('then the video can be moved', wait(lambda: video.rename(moved), 30)):
         return False
     r.s.run('window.__nuzky.openProject({path: arguments[0], name: "long-talk"})', source)
     r.check('the talk opens again', wait(lambda: r.s.run('return window.__nuzky.store.getState().snap.path') == source, 20))
