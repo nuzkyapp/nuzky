@@ -330,7 +330,8 @@ def check_words(r, out, transcript, truths):
     joined = ' '.join(heard_words)
     r.check('the export says "Dneska vám ukážu" and "Kamera musí stát" once each',
             joined.count('dneska vam ukazu') == 1 and joined.count('kamera musi stat') == 1, ' '.join(exported))
-    kept = [w for t, role, text, s, e in truths if role == 'keep' for w in words(text)]
+    # Recognition writes the "deset" the takes say as 10.
+    kept = [{'deset': '10'}.get(w, w) for t, role, text, s, e in truths if role == 'keep' for w in words(text)]
     # A "jakoby" that means something is kept: none is heard more often than the kept sentences say it.
     r.check('no filler is left', all(heard_words.count(w) <= kept.count(w) for w in ('ehm', 'jakoby', 'proste')),
             ' '.join(exported))
