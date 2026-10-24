@@ -283,11 +283,11 @@ fn sniff(bytes: &[u8], page: bool) -> Result<Sniffed> {
     if let Some(ext) = raster {
         let size = imagesize::blob_size(bytes)
             .map_err(|_| anyhow!("NOT_A_PICTURE: Nuzky cannot read the picture at this address. Find a PNG of it."))?;
+        let (width, height) =
+            frames(bytes, ext).into_iter().fold((size.width, size.height), |(w, h), (fw, fh)| (w.max(fw), h.max(fh)));
         ensure!(
-            size.width <= MAX_SIDE && size.height <= MAX_SIDE && size.width * size.height <= MAX_PIXELS,
-            "TOO_LARGE: this picture is {}×{} px, more than Nuzky takes ({MAX_SIDE} px a side, 25 megapixels). Find a smaller one.",
-            size.width,
-            size.height
+            width <= MAX_SIDE && height <= MAX_SIDE && width * height <= MAX_PIXELS,
+            "TOO_LARGE: this picture is {width}×{height} px, more than Nuzky takes ({MAX_SIDE} px a side, 25 megapixels). Find a smaller one."
         );
         return Ok(Sniffed::Raster(ext));
     }
@@ -301,6 +301,45 @@ fn sniff(bytes: &[u8], page: bool) -> Result<Sniffed> {
     }
     ensure!(page, "NOT_A_PICTURE: this address gives no PNG, JPEG, WebP or SVG picture. {FIND_THE_FILE}");
     Ok(Sniffed::Page)
+}
+
+/// The sizes of the frames FFmpeg can decode beside the one `imagesize` reads: a WebP's frames inside a smaller
+/// canvas, and every JPEG frame header, since FFmpeg takes a later one over the first. FFmpeg finds a JPEG's markers
+/// by scanning, so this scans too, for headers whose length fits their components as FFmpeg requires.
+fn frames(bytes: &[u8], ext: &str) -> Vec<(usize, usize)> {
+    let be = |b: &[u8]| usize::from(u16::from_be_bytes([b[0], b[1]]));
+    let mut sizes = Vec::new();
+    match ext {
+        "jpg" => sizes.extend(
+            bytes
+                .windows(10)
+                .filter(|w| w[0] == 0xff && w[1] & 0xf0 == 0xc0 && ![0xc4, 0xc8, 0xcc].contains(&w[1]))
+                .filter(|w| be(&w[2..]) == 8 + 3 * usize::from(w[9]))
+                .map(|w| (be(&w[7..]), be(&w[5..]))),
+        ),
+        "webp" => webp_frames(bytes.get(12..).unwrap_or_default(), true, &mut sizes),
+        _ => {}
+    }
+    sizes
+}
+
+fn webp_frames(mut chunks: &[u8], top: bool, sizes: &mut Vec<(usize, usize)>) {
+    let le = |b: &[u8]| b.iter().rev().fold(0, |n, &b| n << 8 | usize::from(b));
+    while chunks.len() >= 8 {
+        let size = le(&chunks[4..8]);
+        let data = &chunks[8..][..size.min(chunks.len() - 8)];
+        match &chunks[..4] {
+            b"VP8 " if data.len() >= 10 => sizes.push((le(&data[6..8]) & 0x3fff, le(&data[8..10]) & 0x3fff)),
+            b"VP8L" if data.len() >= 5 => {
+                let bits = le(&data[1..5]);
+                sizes.push(((bits & 0x3fff) + 1, (bits >> 14 & 0x3fff) + 1));
+            }
+            // A frame holds no frames, so a file nesting them cannot run the stack out.
+            b"ANMF" if top && data.len() >= 16 => webp_frames(&data[16..], false, sizes),
+            _ => {}
+        }
+        chunks = chunks.get(8 + size + size % 2..).unwrap_or_default();
+    }
 }
 
 fn rasterize(svg: &[u8]) -> Result<Vec<u8>> {
@@ -502,6 +541,28 @@ mod tests {
         let long = format!("<img src=/{}.png>", "a".repeat(MAX_PICTURE_CHARS));
         assert!(pictures(&long, &base).is_empty());
         assert!(pictures("<p>No pictures <img", &base).is_empty());
+    }
+
+    #[test]
+    fn a_picture_is_as_large_as_the_frame_ffmpeg_draws() {
+        let riff = |chunks: &[u8]| [b"RIFF", &(4 + chunks.len() as u32).to_le_bytes()[..], b"WEBP", chunks].concat();
+        let canvas = [&b"VP8X"[..], &10u32.to_le_bytes(), &[0; 10]].concat();
+        let vp8 = |w: u16, h: u16| {
+            [&b"VP8 "[..], &10u32.to_le_bytes(), &[0, 0, 0, 0x9d, 0x01, 0x2a], &w.to_le_bytes(), &h.to_le_bytes()]
+                .concat()
+        };
+        let sof = |w: u16, h: u16| {
+            [&[0xff, 0xc0, 0, 17, 8][..], &h.to_be_bytes(), &w.to_be_bytes(), &[3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1]]
+                .concat()
+        };
+        let jpeg = |frames: &[Vec<u8>]| [vec![0xff, 0xd8], frames.concat()].concat();
+        let too_large =
+            |bytes: &[u8]| sniff(bytes, false).is_err_and(|error| error.to_string().starts_with("TOO_LARGE"));
+        // The canvas and the first frame header say 1x1.
+        assert!(too_large(&riff(&[canvas.clone(), vp8(6000, 5000)].concat())));
+        assert!(too_large(&jpeg(&[sof(1, 1), sof(6000, 5000)])));
+        assert!(matches!(sniff(&riff(&[canvas, vp8(64, 64)].concat()), false), Ok(Sniffed::Raster("webp"))));
+        assert!(matches!(sniff(&jpeg(&[sof(64, 64)]), false), Ok(Sniffed::Raster("jpg"))));
     }
 
     #[test]
