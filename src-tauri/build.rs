@@ -18,10 +18,9 @@ fn main() {
         }
     }
     // whisper.cpp links the Vulkan loader, which Windows has only with a graphics driver. Loading it on first use
-    // lets Nuzky start without one, and crates/analysis/src/no_vulkan.rs then keeps speech on the processor.
+    // lets Nuzky start without one; crates/analysis/build.rs says why speech then runs on the processor.
     if std::env::var("CARGO_CFG_TARGET_ENV").is_ok_and(|env| env == "msvc") {
         println!("cargo:rustc-link-arg=/DELAYLOAD:vulkan-1.dll");
-        println!("cargo:rustc-link-arg=/INCLUDE:__pfnDliFailureHook2");
         println!("cargo:rustc-link-arg=delayimp.lib");
     }
     tauri_build::build()
