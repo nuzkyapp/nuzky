@@ -40,7 +40,7 @@ if (!(Test-Path "$env:VULKAN_SDK/.ready")) {
     if (Test-Path $env:VULKAN_SDK) { Remove-Item -Recurse -Force $env:VULKAN_SDK }
     & $installer --root $env:VULKAN_SDK --accept-licenses --default-answer --confirm-command install copy_only=1 | Out-Null
     if ($LASTEXITCODE -ne 0 -or !(Test-Path "$env:VULKAN_SDK/Bin/glslc.exe") -or !(Test-Path "$env:VULKAN_SDK/Include/vulkan/vulkan.hpp") -or !(Test-Path "$env:VULKAN_SDK/Lib/vulkan-1.lib")) {
-        throw "The Vulkan SDK installer failed ($LASTEXITCODE); run this script again from an administrator PowerShell."
+        throw "The Vulkan SDK installer failed ($LASTEXITCODE)."
     }
     New-Item -ItemType File "$env:VULKAN_SDK/.ready" | Out-Null
     Remove-Item $installer
