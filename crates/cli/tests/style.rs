@@ -354,7 +354,9 @@ fn timeline(fixture: &Fixture) -> (PathBuf, Vec<Piece>) {
     let file = |path: &Path, length: i64, audio: bool| {
         json!({
             "OTIO_SCHEMA": "ExternalReference.1",
-            "target_url": format!("file://{}", path.display()).replace(' ', "%20"),
+            // file:///C:/… on Windows.
+            "target_url": format!("file://{}{}", if cfg!(windows) { "/" } else { "" }, path.display())
+                .replace('\\', "/").replace(' ', "%20"),
             "available_range": range(HOUR, length, audio),
         })
     };

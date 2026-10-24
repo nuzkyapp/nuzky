@@ -256,7 +256,12 @@ pub fn local_path(target: &str, folder: &Path) -> Option<PathBuf> {
             if !rest.starts_with('/') {
                 return None;
             }
-            PathBuf::from(percent_encoding::percent_decode_str(rest).decode_utf8().ok()?.as_ref())
+            let decoded = percent_encoding::percent_decode_str(rest).decode_utf8().ok()?;
+            let path = decoded.as_ref();
+            // file:///C:/… names C:/… on Windows.
+            let drive =
+                path.as_bytes().get(1).is_some_and(u8::is_ascii_alphabetic) && path.as_bytes().get(2) == Some(&b':');
+            PathBuf::from(if cfg!(windows) && drive { &path[1..] } else { path })
         }
         Some(_) => return None,
         None if target.is_empty() => return None,
@@ -283,6 +288,8 @@ mod tests {
         assert_eq!(local_path("FILE:/home/me/a.mov", folder), Some("/home/me/a.mov".into()));
         assert_eq!(local_path("media/a.mov", folder), Some("/home/me/edits/media/a.mov".into()));
         assert_eq!(local_path("/abs/a.mov", folder), Some("/abs/a.mov".into()));
+        #[cfg(windows)]
+        assert_eq!(local_path("file:///C:/Users/me/My%20Talk.mov", folder), Some("C:/Users/me/My Talk.mov".into()));
         for foreign in [
             "http://example.com/a.mov",
             "https://x/a.mov",
