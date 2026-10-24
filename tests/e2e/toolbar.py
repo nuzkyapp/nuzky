@@ -216,8 +216,9 @@ def undo_preview(r):
     r.check('Undo of a split names the piece that goes and the length the first part gets back',
             tip and tip.startswith('Undo · Split') and 'Removes talk.mp4' in tip and 'talk.mp4 length 2.0 s → 14.3 s' in tip, tip)
     first_width = "return document.querySelector(`[data-clip-id='${arguments[0]}']`).getBoundingClientRect().width"
+    whole_s = (split[0]['durationUs'] + piece['durationUs']) / 1e6
     r.check('and draws the first part at its old length, marked Trimmed', r.s.run(MARKS).get(first) == 'trimmed'
-            and abs(r.s.run(first_width, first) - 14.3 * r.s.run('return window.__nuzky.store.getState().zoom')) < 4,
+            and abs(r.s.run(first_width, first) - whole_s * r.s.run('return window.__nuzky.store.getState().zoom')) < 4,
             [r.s.run(MARKS), r.s.run(first_width, first)])
     r.s.run(HOVER, 'undo', False)
 
