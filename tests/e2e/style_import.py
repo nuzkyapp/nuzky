@@ -198,7 +198,8 @@ def style_import(r):
 
     # Meanwhile the style changes elsewhere, say in a text editor: replacing it now would lose that unseen.
     elsewhere = mine + '- Keep the outro short.\n'
-    (r.work / 'data/nuzky/EDIT.md').write_text(elsewhere)
+    # As written, not with Windows' line ends, so the replaced file reads back as the preview shows it.
+    (r.work / 'data/nuzky/EDIT.md').write_bytes(elsewhere.encode())
     r.check('the page learns of the change', wait(lambda: 'Keep the outro short.' in (view(r)['text'] or ''), 5))
     click(r, 'Replace my style')
     click(r, 'Replace')
