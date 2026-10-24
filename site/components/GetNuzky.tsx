@@ -1,9 +1,9 @@
 "use client";
 
 import { Fragment, useState } from "react";
-import { ArrowDown, ArrowDownToLine, CircleCheck, CircleDashed, CircleMinus, Link2, Monitor, Share, Smartphone, TriangleAlert } from "lucide-react";
+import { ArrowDown, ArrowDownToLine, CircleMinus, Link2, Monitor, Share, Smartphone, TriangleAlert } from "lucide-react";
 import { GitHubLogo, systemLogo } from "./Logos";
-import { type FileId, type Release, type Status, type SystemId, bugReport, repo, statusWord, systems, url } from "@/lib/site";
+import { type FileId, type Release, type SystemId, repo, systems, url } from "@/lib/site";
 
 // The visitor's system goes on <html> as `data-os` while the page is still parsing, so the first paint already shows
 // the right download and nothing jumps. Elements with `data-show` show only for the systems they list (globals.css);
@@ -34,18 +34,6 @@ const except = (os: string) => desktops.filter((d) => d !== os).join(" ");
 const link = "underline decoration-white/30 underline-offset-4 transition-colors hover:text-fg hover:decoration-fg";
 const primary = "btn-light flex h-12 w-full items-center justify-center gap-2.5 rounded-full pl-5 pr-6 text-[15px] font-semibold sm:w-auto";
 const secondary = "glass flex h-12 w-full items-center justify-center gap-2 rounded-full px-[22px] text-[15px] font-semibold transition-colors hover:bg-white/10 sm:w-auto";
-
-// Status is a word and a shape; the colour only repeats them.
-export function StatusMark({ status, className = "size-4" }: { status: Status; className?: string }) {
-  if (status === "tested") return <CircleCheck aria-hidden className={`${className} shrink-0 text-ok`} />;
-  if (status === "untested") return <CircleDashed aria-hidden className={`${className} shrink-0 text-muted`} />;
-  return (
-    <svg aria-hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={`${className} shrink-0 text-warn`}>
-      <circle cx="12" cy="12" r="10" />
-      <path d="M12 2a10 10 0 0 0 0 20Z" fill="currentColor" stroke="none" />
-    </svg>
-  );
-}
 
 const code = "font-mono text-[12.5px] text-fg";
 const install: Record<FileId, (file: string) => React.ReactNode> = {
@@ -120,11 +108,10 @@ function useSend() {
   return { send, copy, label };
 }
 
-function Status({ status, children, mark }: { status?: Status; mark?: React.ReactNode; children: React.ReactNode }) {
+function Status({ children, mark }: { mark?: React.ReactNode; children: React.ReactNode }) {
   return (
     <p className="flex flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5 text-[14px] leading-[1.45]">
-      {mark ?? (status && <StatusMark status={status} />)}
-      {status && <span className="font-semibold">{statusWord[status]}</span>}
+      {mark}
       {children}
     </p>
   );
@@ -145,12 +132,9 @@ export function HeroDownload({ release, base = "" }: { release: Release; base?: 
   const also = (id: SystemId) => {
     const s = systems.find((x) => x.id === id)!;
     return (
-      <span className="whitespace-nowrap">
-        <a href={`${base}#dl-${id}`} className={link}>
-          {s.name}
-        </a>
-        , {statusWord[s.status].toLowerCase()}
-      </span>
+      <a href={`${base}#dl-${id}`} className={`${link} whitespace-nowrap`}>
+        {s.name}
+      </a>
     );
   };
   const star = (
@@ -178,11 +162,11 @@ export function HeroDownload({ release, base = "" }: { release: Release; base?: 
           ["dmg"],
           true,
           <>
-            <Status status="tested">
-              <span className="text-muted">on Macs with Apple silicon and macOS 14 or newer</span>
+            <Status>
+              <span className="text-muted">For Macs with Apple silicon and macOS 14 or newer</span>
             </Status>
             <Note>
-              Also for {also("linux")}, and {also("windows")}. {version}
+              Also for {also("linux")} and {also("windows")}. {version}
             </Note>
           </>,
         )}
@@ -200,20 +184,20 @@ export function HeroDownload({ release, base = "" }: { release: Release; base?: 
           ["exe"],
           true,
           <>
-            <Status status="untested">
-              <span className="text-muted">on 64-bit Intel or AMD PCs with Windows 10 or 11</span>
+            <Status>
+              <span className="text-muted">For 64-bit Intel or AMD PCs with Windows 10 or 11</span>
             </Status>
             <p className="flex max-w-[540px] items-start gap-2 text-left text-[14px] leading-[1.45] text-fg/85">
               <TriangleAlert aria-hidden className="mt-[2px] size-4 shrink-0 text-warn" />
               <span>
-                Nobody has tried this build on a Windows PC yet. Windows warns you the first time, and AI editing is off.{" "}
+                Windows warns you the first time, because the installer isn&apos;t signed yet.{" "}
                 <a href={`${base}#dl-windows`} className={link}>
                   What to expect
                 </a>
               </span>
             </p>
             <Note>
-              Also for {also("mac")}, and {also("linux")}. {version}
+              Also for {also("mac")} and {also("linux")}. {version}
             </Note>
           </>,
         )}
@@ -234,13 +218,13 @@ export function HeroDownload({ release, base = "" }: { release: Release; base?: 
           ["deb", "appimage"],
           true,
           <>
-            <Status status="partly">
-              <span className="text-muted">on 64-bit Intel or AMD PCs</span>
+            <Status>
+              <span className="text-muted">For 64-bit Intel or AMD PCs</span>
             </Status>
             <Note>
               The .deb is for Ubuntu 24.04 or newer, the AppImage for other distributions with glibc 2.39 or newer.
               <br />
-              Also for {also("mac")}, and {also("windows")}. {version}
+              Also for {also("mac")} and {also("windows")}. {version}
             </Note>
           </>,
         )}
@@ -295,13 +279,7 @@ export function HeroDownload({ release, base = "" }: { release: Release; base?: 
             return (
               <a key={s.id} href={`${base}#dl-${s.id}`} className="flex flex-1 items-center gap-3 rounded-2xl px-3.5 py-2.5 text-left transition-colors hover:bg-white/[0.07]">
                 <Logo className="size-5 shrink-0" />
-                <span className="flex flex-col gap-0.5">
-                  <span className="text-[15px] font-semibold leading-tight">{s.name}</span>
-                  <span className="flex items-center gap-1.5 whitespace-nowrap text-[12.5px] text-muted">
-                    <StatusMark status={s.status} className="size-3.5" />
-                    {statusWord[s.status]}
-                  </span>
-                </span>
+                <span className="text-[15px] font-semibold leading-tight">{s.name}</span>
                 <ArrowDown aria-hidden className="ml-auto size-4 shrink-0 text-muted" />
               </a>
             );
@@ -322,7 +300,7 @@ export function HeroDownload({ release, base = "" }: { release: Release; base?: 
 
 const rowButton = "flex h-10 items-center justify-center gap-2 rounded-full px-4 text-[14px] font-semibold transition-colors";
 
-/** Every system with its status and files, from the most tested down. The visitor's row says so and leads with the white button. */
+/** Every system with its requirements and files. The visitor's row says so and leads with the white button. */
 export function DownloadRows({ release }: { release: Release }) {
   const { start, after } = useStep(release);
   const { send, copy, label } = useSend();
@@ -379,21 +357,7 @@ export function DownloadRows({ release }: { release: Release }) {
                 </div>
 
                 <div className="flex flex-col gap-1.5 @3xl:pt-[3px]">
-                  <span className="flex items-center gap-2 text-[15px] font-semibold">
-                    <StatusMark status={s.status} />
-                    {statusWord[s.status]}
-                  </span>
-                  <p className="text-[14px] leading-[1.5] text-muted">
-                    {s.note}
-                    {s.report && (
-                      <>
-                        {" "}
-                        <a href={bugReport} className={link}>
-                          {s.report}
-                        </a>
-                      </>
-                    )}
-                  </p>
+                  {s.note && <p className="text-[14px] leading-[1.5] text-muted">{s.note}</p>}
                   {s.warnings?.map((w) => (
                     <p key={w} className="flex items-start gap-2 text-[14px] leading-[1.5] text-fg/85">
                       <TriangleAlert aria-hidden className="mt-[3px] size-4 shrink-0 text-warn" />

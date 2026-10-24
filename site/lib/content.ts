@@ -19,7 +19,7 @@ export const capcutDraftParts = "Clips, cuts, speed, volume, keyframes, texts, c
 export const faq: Faq[] = [
   {
     q: "Which computers does it run on?",
-    a: "Macs with Apple silicon and macOS 14 or newer, where I test it. 64-bit Intel or AMD PCs with Linux and glibc 2.39 or newer, like Ubuntu 24.04, partly tested. Windows 10 or 11 on a 64-bit Intel or AMD PC, not tested yet, and AI editing is off there. Intel Macs, and Windows or Linux on ARM, aren't supported.",
+    a: "Macs with Apple silicon and macOS 14 or newer. 64-bit Intel or AMD PCs with Linux and glibc 2.39 or newer, like Ubuntu 24.04. Windows 10 or 11 on a 64-bit Intel or AMD PC. Intel Macs, and Windows or Linux on ARM, aren't supported.",
     link: { label: "See the downloads", href: "#download" },
   },
   {
@@ -41,7 +41,7 @@ export const faq: Faq[] = [
   },
   {
     q: "Can AI edit the video for me?",
-    a: "Yes, if you want it to. Type what you want, like “cut the ums and pauses and add captions”, and watch it edit in the app. Stop it any time, and one undo takes it all back. Sign in with ChatGPT inside Nuzky to use the plan you already pay for, with no terminal, or connect Claude Code or Codex. Editing, captions and export work without any AI. AI editing doesn't work on Windows yet.",
+    a: "Yes, if you want it to. Type what you want, like “cut the ums and pauses and add captions”, and watch it edit in the app. Stop it any time, and one undo takes it all back. Sign in with ChatGPT inside Nuzky to use the plan you already pay for, with no terminal, or connect Claude Code or Codex. Editing, captions and export work without any AI.",
   },
   {
     q: "How do updates work?",
@@ -87,7 +87,7 @@ export const features = [
   "MP4 export from 720p to 4K with no watermark, drawn by the same renderer as the preview",
   "Reels and TikTok preset: 1080 × 1920 at 30 fps, sound levelled to −14 LUFS",
   "Saves after every edit and recovers after a crash",
-  "AI editing in the app: sign in with ChatGPT, or use Claude Code, Codex or any MCP client, with one undo per run (not on Windows yet)",
+  "AI editing in the app: sign in with ChatGPT, or use Claude Code, Codex or any MCP client, with one undo per run",
   "Learns how a creator edits from their finished cuts or CapCut drafts into an EDIT.md that agents follow",
   "New versions download inside the app in one click, and install when you restart",
 ];
@@ -112,7 +112,7 @@ export const comparison: { label: string; nuzky: string; capcut: string }[] = [
   },
   {
     label: "AI editing",
-    nuzky: "Type what to cut and watch it work. Sign in with ChatGPT inside the app, or use Claude Code or Codex, on the plan you already have. Not on Windows yet.",
+    nuzky: "Type what to cut and watch it work. Sign in with ChatGPT inside the app, or use Claude Code or Codex, on the plan you already have.",
     capcut: "Built-in AI tools, paid with credits",
   },
   {
@@ -122,7 +122,7 @@ export const comparison: { label: string; nuzky: string; capcut: string }[] = [
   },
   {
     label: "Where it runs",
-    nuzky: "Mac with Apple silicon (tested), Linux (partly tested) and Windows (not tested yet)",
+    nuzky: "Mac with Apple silicon, Linux and Windows",
     capcut: "Phones, Mac, Windows and the web",
   },
 ];

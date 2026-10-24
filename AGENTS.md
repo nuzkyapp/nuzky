@@ -1,6 +1,6 @@
 # Nuzky
 
-Nuzky ([nuzky.app](https://nuzky.app)) is an open-source desktop video editor in the spirit of CapCut (GPL-3.0-or-later). A Rust engine (`crates/engine`: project model, edits and undo, FFmpeg decoding, wgpu compositor, audio mixing, export), local Whisper (`crates/analysis`), local face and subject models (`crates/vision`), the editing authority (`crates/session`), tools for AI agents (`crates/mcp`, `crates/cli`), a Tauri 2 desktop shell (`src-tauri`) and a React 19 + zustand UI (`src`). Status: alpha. The maintainer tests macOS by hand, Linux only partly and Windows not at all.
+Nuzky ([nuzky.app](https://nuzky.app)) is an open-source desktop video editor in the spirit of CapCut (GPL-3.0-or-later). A Rust engine (`crates/engine`: project model, edits and undo, FFmpeg decoding, wgpu compositor, audio mixing, export), local Whisper (`crates/analysis`), local face and subject models (`crates/vision`), the editing authority (`crates/session`), tools for AI agents (`crates/mcp`, `crates/cli`), a Tauri 2 desktop shell (`src-tauri`) and a React 19 + zustand UI (`src`). Status: alpha. The maintainer tests macOS, Linux and Windows by hand.
 
 People edit videos from their phones and often let an AI agent do the cutting for them. A change rarely belongs to one surface only: the UI, the engine, the MCP tools, the CLI and the export share the same project.
 
@@ -48,7 +48,7 @@ The most common defect is a change that works only on the path you tried.
 - Write a change of behaviour or keys into `docs/INTERACTION.md` in the same PR, and visuals into `DESIGN.md`.
 - A new control respects the AI lock (`useLockReason`, `lockedProps` in `src/components/ui.tsx`), has a keyboard path and shows why it is disabled.
 - New media reading goes through `media::open_input` and has a test on phone media (rotation, VFR, HEVC) against an FFmpeg reference.
-- Platforms: macOS is tested by hand, Linux only partly, and Windows not at all; CI only builds Windows and runs its Rust tests. Claim only what you ran, and nothing about Windows.
+- Platforms: the maintainer tests macOS, Linux and Windows by hand; CI only builds Windows and runs its Rust tests. Claim only what you ran.
 
 ## Verification
 
@@ -70,7 +70,7 @@ The most common defect is a change that works only on the path you tried.
 - Before a merge to `main`, the required GitHub checks pass on its head: `.github/workflows/checks.yml` runs fmt, lint, types, both builds, clippy, the Rust tests, the dependency audits and the check without AVX2 on Linux, and `secrets.yml` scans for secrets. Locally you have run the narrow tests and the repro flows of what the pull request changes, including the ignored tests the verification section asks for.
 - A pull request that changes only the website in `site/` is verified by `tsc --noEmit` and `next build` in `site/` and by clicking through the affected pages.
 - The pre-push hook (`.githooks/pre-push`, turned on by `git config core.hooksPath .githooks`) scans for secrets and blocks video and audio files. The exceptions are the media built into Nuzky, each file listed in its folder's `manifest.json` and made from sources pinned by SHA-256: the CC0 sound effects and songs, `assets/sounds/*.ogg` made by `scripts/build-sounds.py`, and the CC BY sample video of the tour for new users, `assets/sample/*.mp4` made by `scripts/build-sample.py`. Do not bypass it with `--no-verify`. Test media are generated and do not belong in git, because they could be someone's private videos.
-- Release: the same version in `src-tauri/tauri.conf.json`, `Cargo.toml` and `package.json`, then the tag `v<version>`. The tag runs the build and tests on Linux, macOS and Windows and prepares a version draft plus a separate third-party source draft pre-release. Only a person publishes them together, after checking it on each system they can test on as `docs/BUILDING.md` describes; the release notes say which systems nobody tested.
+- Release: the same version in `src-tauri/tauri.conf.json`, `Cargo.toml` and `package.json`, then the tag `v<version>`. The tag runs the build and tests on Linux, macOS and Windows and prepares a version draft plus a separate third-party source draft pre-release. Only a person publishes them together, after checking it on each system as `docs/BUILDING.md` describes.
 - Clean up only after yourself. Several sessions share `tmp-test/`.
 - After your pull request is merged, delete what your checkout built: `target/`, every `target-*`, `tmp-test/`, `node_modules/`, `site/node_modules/` and `site/.next/`. Do the same in a checkout you made only to run the gate. Do it without asking, once your own processes there have stopped. A finished worktree keeps its build, often more than 10 GB of its own, and the leftover builds fill the disk. Leave the worktree and the branch; the maintainer removes those.
 

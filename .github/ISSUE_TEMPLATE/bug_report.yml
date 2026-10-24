@@ -13,7 +13,7 @@ body:
     attributes:
       label: Nuzky version
       description: Find it at the bottom of the home screen's sidebar.
-      placeholder: 0.1.0-alpha
+      placeholder: 0.1.1-alpha
     validations:
       required: true
   - type: input

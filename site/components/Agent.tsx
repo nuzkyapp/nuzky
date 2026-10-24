@@ -140,7 +140,7 @@ export function Agent() {
               </span>
             </div>
             <p className="text-[13px] leading-[1.5] text-muted">
-              Sign in with ChatGPT inside Nuzky. No terminal, and no credits to buy. AI editing doesn&apos;t work on Windows yet.
+              Sign in with ChatGPT inside Nuzky. No terminal, and no credits to buy.
             </p>
           </div>
         </div>

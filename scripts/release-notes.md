@@ -1,18 +1,25 @@
-The first alpha of Nuzky, a free, open-source video editor for your computer. It's early, so expect rough edges. Nuzky never changes or deletes your original videos.
+The second alpha of Nuzky, a free, open-source video editor for your computer. It's early, so expect rough edges. Nuzky never changes or deletes your original videos.
 
-## What it does
+## What's new
 
-- **Captions in Czech and English.** Speech is recognised on your computer, with no limit. Pick a style and make the spoken word light up. The first run downloads the speech model.
-- **Retakes and pauses.** Transcribe a talking video and delete words straight from the text, or press Remove retakes and pauses to cut restarted sentences, filler words and silences in one step. One Undo takes it back.
-- **Export.** MP4 from 720p to 4K, with presets for Reels & TikTok, Shorts and YouTube and no watermark. The file looks exactly like the preview.
-- **Phone videos.** iPhone and Android videos open the right way up, selfies included, and every cut lands on the frame you picked.
-- **AI editing with ChatGPT, Claude Code or Codex.** Sign in with ChatGPT in the AI panel, no terminal needed, or connect Claude Code or Codex in one click. You watch it edit, Stop works at any time, and one Undo takes back the whole run. It runs on the plan you already have. Gemini works from a terminal through Google's Antigravity CLI, and the AI panel shows how.
-- **Your CapCut drafts.** The home screen lists the drafts CapCut keeps on your computer. Open one and its clips, cuts, speed, volume, keyframes, texts, captions and transitions come over. A list says what didn't, and the draft itself stays as it was.
-- **Reels from a long video.** AI finds the moments that stand on their own, you trim each one by its words, and Nuzky makes a vertical project for every reel.
-- **Covers and thumbnails.** A 9:16 cover and a 16:9 thumbnail from a frame of your video, with your text behind you, saved as PNG or JPEG.
-- **Music and sound.** Paste a YouTube or YouTube Music link to add its sound, search CC0 and CC BY music and effects, or use the effects built in. Nuzky lists the credits to copy.
-- **Picture and voice.** Blur or replace the background behind a person, keep a face in frame when you change the shape, and clean up a voice recorded in a room.
-- Nuzky saves after every edit and recovers after a crash.
+- **AI editing on Windows.** The AI panel, Connect and `nuzky mcp` now work on Windows too, and captions recognise speech on the graphics card there, as they do on a Mac.
+- **OpenCode in the AI panel**, next to ChatGPT, Claude Code and Codex. Connect copies its setup for you.
+- **AI that looks things up.** Ask for the logo and colours of a brand you mention, and the AI searches the web, puts the logo into your video and colours the captions to match. It can also bring in a picture from the web by its address.
+- **AI that checks its own export.** After an export the AI looks for black frames, a frozen picture and silence, and at the frames around every cut, before it tells you it's done.
+- **A tour on a sample video.** The first time you open Nuzky, Get set up offers a one-minute sample video and a short tour of where things are, with a scripted AI edit you can undo. Take the tour in the sidebar replays it.
+- **Captions styled all at once.** A caption's style now changes all captions or just this one. Font, size, colour and case come first, and More style adds alignment, box opacity and corners.
+- **Snapping and moving.** Moved, scaled and cropped layers snap to the frame's edges and middle. Drag several selected clips together on the timeline.
+- **Covers with a logo.** Put images such as a logo on a cover, and see each project's cover on its card on the home screen.
+- **Cleaner reels.** Reels start and end on the long video's own cuts, so none opens or closes with a flash of another shot.
+- **Easier YouTube parts.** Choosing a part of a YouTube video shows the whole video with both handles, and holding a handle zooms in for frame-accurate trimming.
+
+## Fixed
+
+- Video in the preview, thumbnails and export is as bright as the original. Phone video, HDR included, used to come out slightly darker.
+- Inserting a clip between clips on the main track moves the captions and overlays above along with them.
+- Remove retakes and pauses keeps the last syllable of a word the speech model heard wrong.
+- In Get set up, the captions model follows the spoken language you pick.
+- The cover editor shows the cover without the video's overlays.
 
 ## Not yet
 
@@ -20,8 +27,6 @@ The first alpha of Nuzky, a free, open-source video editor for your computer. It
 - Export makes MP4 only. There's no template library and no phone app.
 
 ## Systems
-
-macOS works and is where Nuzky is tested. Linux is only partly tested. Windows isn't tested at all: the installer builds, but nobody has tried it on a Windows PC yet. If something breaks on Linux or Windows, please report it.
 
 - **macOS 14 or newer on Apple Silicon**: the `.dmg`. Open it and drag Nuzky to Applications.
 - **Windows 10 or 11, x64**: the `-setup.exe`. The installer downloads Microsoft WebView2 if it's missing.
@@ -42,4 +47,4 @@ Open an issue at https://github.com/nuzkyapp/nuzky/issues, or use Send feedback 
 
 ## Source
 
-Nuzky is GPL-3.0-or-later, and its source is the Source code archive below. The installers include FFmpeg, ONNX Runtime and other libraries. Their source, and what each installer was built from, is in [Third-party source for Nuzky v0.1.0-alpha](https://github.com/nuzkyapp/nuzky/releases/tag/third-party-source-0.1.0-alpha).
+Nuzky is GPL-3.0-or-later, and its source is the Source code archive below. The installers include FFmpeg, ONNX Runtime and other libraries. Their source, and what each installer was built from, is in [Third-party source for Nuzky v0.1.1-alpha](https://github.com/nuzkyapp/nuzky/releases/tag/third-party-source-0.1.1-alpha).

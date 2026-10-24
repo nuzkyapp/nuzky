@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/engine", "crates/cli", "src-tauri", "crates/analysis", "crates/session", "crates/mcp", "crates/agent", "crates/vision", "crates/interchange", "crates/chatgpt"]
 
 [workspace.package]
-version = "0.1.0-alpha"
+version = "0.1.1-alpha"
 edition = "2024"
 license = "GPL-3.0-or-later"
 homepage = "https://nuzky.app"

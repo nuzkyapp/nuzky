@@ -48,17 +48,12 @@ export async function getRelease(): Promise<Release> {
 }
 
 export type SystemId = "mac" | "linux" | "windows";
-export type Status = "tested" | "partly" | "untested";
-export const statusWord: Record<Status, string> = { tested: "Tested", partly: "Partly tested", untested: "Not tested yet" };
-
-// What each system needs and how far it is tested, from the most tested down. Claim nothing past this.
+// What each system needs. Claim nothing past this.
 export const systems: {
   id: SystemId;
   name: string;
   requirement: string;
-  status: Status;
-  note: string;
-  report?: string;
+  note?: string;
   warnings?: string[];
   files: { id: FileId; label: string; what: string; phone: string }[];
 }[] = [
@@ -66,17 +61,13 @@ export const systems: {
     id: "mac",
     name: "Mac",
     requirement: "Apple silicon (M1 or newer), macOS 14 or newer",
-    status: "tested",
-    note: "I test it on my own Mac, and Apple notarized it.",
+    note: "Apple notarized it, so macOS opens it after one question.",
     files: [{ id: "dmg", label: "Download .dmg", what: "Disk image. Drag Nuzky to Applications.", phone: "A .dmg disk image" }],
   },
   {
     id: "linux",
     name: "Linux",
     requirement: "64-bit Intel or AMD PC (x86_64) with glibc 2.39 or newer",
-    status: "partly",
-    note: "Only partly tested so far, so expect more rough edges.",
-    report: "Tell me what breaks",
     files: [
       { id: "deb", label: "Download .deb", what: "For Ubuntu 24.04 or newer", phone: "A .deb for Ubuntu 24.04 or newer" },
       { id: "appimage", label: "Download AppImage", what: "For other distributions", phone: "An AppImage for other distributions" },
@@ -86,13 +77,7 @@ export const systems: {
     id: "windows",
     name: "Windows",
     requirement: "Windows 10 or 11 on a 64-bit Intel or AMD PC",
-    status: "untested",
-    note: "It builds, but nobody has tried it on a Windows PC yet.",
-    report: "Tell me how it goes",
-    warnings: [
-      "Windows warns you the first time, because the installer isn't signed yet. Click More info, then Run anyway.",
-      "AI editing is off on Windows, and captions take longer there.",
-    ],
+    warnings: ["Windows warns you the first time, because the installer isn't signed yet. Click More info, then Run anyway."],
     files: [{ id: "exe", label: "Download installer", what: "Setup program (.exe)", phone: "A setup program (.exe)" }],
   },
 ];

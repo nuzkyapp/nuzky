@@ -16,7 +16,7 @@ import {
   pickCapcut,
   pickNuzky,
 } from "./content";
-import { type Release, buildFromSource, license, releases, repo, statusWord, systems, url } from "./site";
+import { type Release, buildFromSource, license, releases, repo, systems, url } from "./site";
 
 const raw = repo.replace("github.com", "raw.githubusercontent.com") + "/main";
 // Links within the site point at the Markdown of the page.
@@ -28,13 +28,13 @@ const summary =
   "Nuzky is a free, open source desktop video editor in the spirit of CapCut, for TikTok, Reels, Shorts and YouTube. It opens your CapCut drafts, writes captions locally in your language and lets ChatGPT, Claude Code or Codex make the rough cut in the open project while you watch.";
 
 const status = (r: Release) =>
-  `Status: early, so expect rough edges. ${r.version ? `Current version: ${r.version}. ` : ""}Download it at ${url}/#download for a Mac with Apple silicon and macOS 14 or newer (tested), a 64-bit Intel or AMD PC with Linux and glibc 2.39 or newer (partly tested) or Windows 10 or 11 on a 64-bit Intel or AMD PC (not tested yet, and AI editing is off there). Intel Macs, and Windows or Linux on ARM, aren't supported. License: GPL-3.0-or-later.`;
+  `Status: early, so expect rough edges. ${r.version ? `Current version: ${r.version}. ` : ""}Download it at ${url}/#download for a Mac with Apple silicon and macOS 14 or newer, a 64-bit Intel or AMD PC with Linux and glibc 2.39 or newer or Windows 10 or 11 on a 64-bit Intel or AMD PC. Intel Macs, and Windows or Linux on ARM, aren't supported. License: GPL-3.0-or-later.`;
 
 const downloads = (r: Release) =>
   systems
     .map(
       (s) =>
-        `### ${s.name}: ${statusWord[s.status].toLowerCase()}\n\n${s.requirement}. ${s.note}${s.warnings ? ` ${s.warnings.join(" ")}` : ""}\n\n${list(
+        `### ${s.name}\n\n${s.requirement}.${s.note ? ` ${s.note}` : ""}${s.warnings ? ` ${s.warnings.join(" ")}` : ""}\n\n${list(
           s.files.map((f) => `[${r.files[f.id].name ?? f.label}](${r.files[f.id].href}): ${f.what}`),
         )}`,
     )
@@ -69,7 +69,7 @@ Recording is the fun part. Nuzky does the boring one.
 
 ## Or hand the cut to ChatGPT or Claude
 
-Sign in with ChatGPT inside Nuzky, with no terminal, or use Claude Code, Codex or any MCP client, and ask for an edit in plain words. It runs on the ChatGPT or Claude plan you already pay for, with no credits to buy: cut the ums and long pauses, add captions, put music under the video, export for Reels. The agent edits the project open in the app. Every change goes through the same undo as yours, your controls lock while it works with a Stop button, and one undo takes the whole run back. You can write to it while it works, attach a screenshot or a video, pick the model and come back to past chats. AI editing does not work on Windows yet.
+Sign in with ChatGPT inside Nuzky, with no terminal, or use Claude Code, Codex or any MCP client, and ask for an edit in plain words. It runs on the ChatGPT or Claude plan you already pay for, with no credits to buy: cut the ums and long pauses, add captions, put music under the video, export for Reels. The agent edits the project open in the app. Every change goes through the same undo as yours, your controls lock while it works with a Stop button, and one undo takes the whole run back. You can write to it while it works, attach a screenshot or a video, pick the model and come back to past chats.
 
 ## It learns how you edit
 
