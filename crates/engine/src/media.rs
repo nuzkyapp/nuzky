@@ -704,16 +704,26 @@ fn is_rgb(format: Pixel) -> bool {
     !desc.is_null() && unsafe { (*desc).flags } & (AV_PIX_FMT_FLAG_RGB | AV_PIX_FMT_FLAG_PAL) as u64 != 0
 }
 
-type ScalerKey = (Pixel, u32, u32, u32, u32);
+type ScalerKey = (Pixel, u32, u32, u32, u32, Transfer);
+
+/// Scaling 8-bit video, or converting 10-bit at any size, swscale's default RGB output drew limited range about 2
+/// levels of 255 darker than BT.709 (FFmpeg 8.1, Apple Silicon); with chroma converted at full width it is exact.
+/// HDR keeps the darker output, which its tone mapping was fitted on.
+fn rgba_flags(transfer: Transfer) -> scaling::Flags {
+    match transfer {
+        Transfer::Sdr => scaling::Flags::BILINEAR | scaling::Flags::FULL_CHR_H_INT,
+        Transfer::Pq | Transfer::Hlg => scaling::Flags::BILINEAR,
+    }
+}
 
 fn to_rgba(scaler: &mut Option<(ScalerKey, Scaler)>, f: &frame::Video, t_us: i64, w: u32, h: u32) -> Result<RgbaFrame> {
-    let key = (f.format(), f.width(), f.height(), w, h);
+    let key = (f.format(), f.width(), f.height(), w, h, transfer(f));
     if scaler.as_ref().map(|s| s.0) != Some(key) {
         // swscale scales an RGB source in YUV and must convert it back with the matrix it went in with.
         let space = if is_rgb(f.format()) { ff::ffi::SWS_CS_DEFAULT } else { sws_colorspace(matrix(f)) };
         let colorspace = [(space, is_full_range(f)), (ff::ffi::SWS_CS_DEFAULT, true)];
         let src = (f.format(), f.width(), f.height());
-        *scaler = Some((key, Scaler::new(src, (Pixel::RGBA, w, h), scaling::Flags::BILINEAR, colorspace)?));
+        *scaler = Some((key, Scaler::new(src, (Pixel::RGBA, w, h), rgba_flags(key.5), colorspace)?));
     }
     let mut out = frame::Video::new(Pixel::RGBA, w, h);
     scaler.as_mut().unwrap().1.run(f, &mut out)?;
@@ -1557,7 +1567,7 @@ mod tests {
             let case = format!("{format:?} {}x{} {space:?} {range:?} to {w}x{h}", size.0, size.1);
             let f = noise(format, size, space, range);
             let mut one_pass =
-                scaling::Context::get(format, size.0, size.1, Pixel::RGBA, w, h, scaling::Flags::BILINEAR).unwrap();
+                scaling::Context::get(format, size.0, size.1, Pixel::RGBA, w, h, rgba_flags(Transfer::Sdr)).unwrap();
             set_sws_colorspace(&mut one_pass, cs, full, SWS_CS_DEFAULT, true);
             let mut expected = frame::Video::new(Pixel::RGBA, w, h);
             one_pass.run(&f, &mut expected).unwrap();

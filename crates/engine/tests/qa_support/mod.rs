@@ -34,7 +34,9 @@ pub fn raw(path: &Path, extra: &[&str]) -> Vec<u8> {
         .args(["-v", "error", "-threads", "2", "-filter_threads", "1", "-i"])
         .arg(path)
         .args(extra)
-        .args(["-sws_flags", "bilinear", "-f", "rawvideo", "-pix_fmt", "rgba", "-fps_mode", "passthrough", "-"]))
+        // Without full_chroma_int FFmpeg draws scaled and 10-bit SDR about 2 levels darker than BT.709.
+        .args(["-sws_flags", "bilinear+full_chroma_int"])
+        .args(["-f", "rawvideo", "-pix_fmt", "rgba", "-fps_mode", "passthrough", "-"]))
     .stdout
 }
 pub fn info(path: &Path) -> serde_json::Value {
