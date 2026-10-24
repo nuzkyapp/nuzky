@@ -127,18 +127,7 @@ impl Detector {
     }
 }
 
-/// Mean absolute RGB difference of two RGBA pictures of one size, 0..=1: the measure a scene cut
-/// crosses at `SceneParams::threshold`.
-pub fn picture_difference(a: &[u8], b: &[u8]) -> f32 {
-    let sum: u64 = a
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .zip(b.as_chunks::<4>().0)
-        .map(|(a, b)| (0..3).map(|ch| a[ch].abs_diff(b[ch]) as u64).sum::<u64>())
-        .sum();
-    sum as f32 / ((a.len().min(b.len()) / 4).max(1) as f32 * 3.0 * 255.0)
-}
+pub use nuzky_engine::check::picture_difference;
 
 #[cfg(test)]
 mod tests {

@@ -43,7 +43,8 @@ pub(crate) const TOOLS: &[Rules] = &[
     rules("add_youtube_video", Never, false, false, false),
     rules("import_web_image", Never, false, false, false),
     rules("add_sticker", Never, false, false, false),
-    // Only renders; a missing person outline behind a clip's background is made as a job into the cache.
+    // Only renders, or decodes a finished export of this client; a missing person outline behind a clip's background
+    // is made as a job into the cache.
     rules("inspect_frames", Always, false, true, true),
     // Only renders and mixes the timeline; preparing missing sound runs as a job.
     rules("activity", Always, false, true, true),

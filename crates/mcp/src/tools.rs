@@ -9,14 +9,18 @@ use anyhow::{Context, Result, anyhow, ensure};
 use base64::{Engine as _, prelude::BASE64_STANDARD};
 use nuzky_analysis::{SceneParams, SilenceParams};
 use nuzky_engine::{
-    Pending, Project, Renderer,
+    Pending, Project, Renderer, check,
     edit::{EditCmd, TimeRange, new_id},
     export::{ExportOptions, ExportPhase, Quality, check_options, export},
     media::probe,
     model::{ReelStatus, Thumbnail, ThumbnailFormat},
     thumbnail::ImageKind,
 };
-use nuzky_session::{Expect, Mode, ProjectSession, SessionState, Target, host::Host, jobs::check_cancel};
+use nuzky_session::{
+    Expect, Mode, ProjectSession, SessionState, Target,
+    host::Host,
+    jobs::{Progress, check_cancel},
+};
 use rmcp::model::{CallToolResult, ContentBlock};
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -325,6 +329,9 @@ impl Backend {
     }
 
     fn inspect(&self, args: Inspect, state: &SessionState) -> Result<CallToolResult> {
+        if let Some(job_id) = &args.export_job_id {
+            return self.inspect_export(job_id, &args);
+        }
         let project = self.media_project(&state.project);
         let mut info = json!({"revision": state.stamp.revision, "session_epoch": state.stamp.session_epoch,
             "labels": "seconds.microseconds"});
@@ -376,6 +383,38 @@ impl Backend {
         self.require_mattes(&project, state)?;
         let bytes = media::contact_sheet(&project, &times, args.width, args.safe_area, &self.host.cache_dir)?;
         info["times_us"] = json!(times);
+        Ok(CallToolResult::success(vec![
+            ContentBlock::text(info.to_string()),
+            ContentBlock::image(BASE64_STANDARD.encode(bytes), "image/png"),
+        ]))
+    }
+
+    /// Frames of the file an export of this client wrote, decoded from the file: the path comes from the job, never
+    /// from the agent.
+    fn inspect_export(&self, job_id: &str, args: &Inspect) -> Result<CallToolResult> {
+        ensure!(
+            args.sample.is_none()
+                && args.range_us.is_none()
+                && args.cursor.is_none()
+                && args.max_frames.is_none()
+                && args.min_change.is_none()
+                && !args.safe_area,
+            "INVALID_ARGUMENTS: with export_job_id give only times_us and width"
+        );
+        let times = args.times_us.as_ref().context("INVALID_ARGUMENTS: give times_us with export_job_id")?;
+        let job = self.host.jobs.get_for(Some(&self.client.id), job_id, false)?;
+        ensure!(
+            job["owner"] == self.client.id.as_str() && job["kind"] == "export",
+            "INVALID_ARGUMENTS: export_job_id must name an export_video job you started"
+        );
+        ensure!(
+            job["status"] == "done",
+            "EXPORT_NOT_DONE: the export is {}; wait with job action wait until done",
+            job["status"].as_str().unwrap_or("unknown")
+        );
+        let path = job["result"]["path"].as_str().context("The export job names no file")?;
+        let bytes = media::file_sheet(Path::new(path), times, args.width, &|| self.closed.load(Ordering::Acquire))?;
+        let info = json!({"export_job_id": job_id, "path": path, "times_us": times, "labels": "seconds.microseconds"});
         Ok(CallToolResult::success(vec![
             ContentBlock::text(info.to_string()),
             ContentBlock::image(BASE64_STANDARD.encode(bytes), "image/png"),
@@ -1475,16 +1514,18 @@ impl Backend {
             state.stamp.clone(),
             move |cancel, progress| {
                 progress.set("waiting_for_export", None);
-                let _export = queue.lock().unwrap();
+                let exporting = queue.lock().unwrap();
                 check_cancel(&cancel)?;
                 vision_models::prepare_mattes(&project, &cache, &refused, &cancel, &progress)?;
-                export(&project, &cache, &out, &options, &cancel, |p| {
+                let measured = export(&project, &cache, &out, &options, &cancel, |p| {
                     let phase = match p.phase {
                         ExportPhase::Loudness => "measuring_loudness",
                         ExportPhase::Rendering => "exporting",
                     };
-                    progress.set(phase, Some(p.fraction))
+                    progress.set(phase, Some(p.fraction * EXPORT_SHARE))
                 })?;
+                // The next export need not wait for this one's check.
+                drop(exporting);
                 // Learned on its own thread once the export is done, so no export waits for it.
                 std::thread::spawn(move || {
                     let learned = moment.and_then(|m| match m {
@@ -1497,7 +1538,8 @@ impl Backend {
                         log::error!("Learning the style from this export failed: {error:#}");
                     }
                 });
-                Ok(json!({"path": out, "duration_us": project.duration_us(), "preset": options.delivery}))
+                let check = check_export(&project, &measured, &cancel, &progress);
+                Ok(json!({"path": out, "duration_us": project.duration_us(), "preset": options.delivery, "check": check}))
             },
         )
     }
@@ -1876,6 +1918,29 @@ fn caption_stats(project: &Project) -> Value {
         (count + 1, chars.max(text.chars().count()), words.max(text.split_whitespace().count()))
     });
     json!({"count": count, "max_chars": max_chars, "max_words": max_words})
+}
+
+/// The share of an export job's progress the file takes; checking it takes the rest.
+const EXPORT_SHARE: f32 = 0.98;
+
+/// What `check::review` found in a published export, or why it did not finish. The video is finished either way, so
+/// neither an error nor a stop turns the job into a failed or cancelled one.
+fn check_export(project: &Project, measured: &check::Measured, cancel: &AtomicBool, progress: &Progress) -> Value {
+    progress.set("checking_export", Some(EXPORT_SHARE));
+    let cancelled = || cancel.load(Ordering::Relaxed);
+    let mut report =
+        |fraction: f32| progress.set("checking_export", Some(EXPORT_SHARE + (1.0 - EXPORT_SHARE) * fraction));
+    let reviewed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        check::review(project, measured, &cancelled, &mut report)
+    }));
+    let why = match reviewed {
+        Ok(Ok(review)) => return json!(review),
+        _ if cancelled() => "the check was stopped".to_owned(),
+        Ok(Err(error)) => format!("the check failed: {error:#}"),
+        Err(_) => "the check failed".to_owned(),
+    };
+    log::warn!("Export check skipped: {why}");
+    json!({"skipped": why})
 }
 
 #[cfg(test)]

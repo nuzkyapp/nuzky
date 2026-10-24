@@ -10,6 +10,7 @@ use ff::util::{color, format::Pixel, frame};
 use ffmpeg_next as ff;
 
 use crate::audio::{Chain, Mixer, chains, has_audio};
+use crate::check::{Measured, Watch};
 use crate::loudness::{Limiter, Meter, db_to_gain};
 use crate::media::{Scaler, init};
 use crate::model::{CHANNELS, Clip, ClipContent, Project, SAMPLE_RATE, TrackKind};
@@ -171,7 +172,8 @@ pub struct ExportProgress {
     pub fraction: f32,
 }
 
-/// Renders the whole timeline to `out`. Returns early with an error if `cancel` is set.
+/// Renders the whole timeline to `out` and returns what `check::review` needs to look for black frames, a frozen
+/// picture and silence in it. Returns early with an error if `cancel` is set.
 pub fn export(
     project: &Project,
     cache_dir: &Path,
@@ -179,7 +181,7 @@ pub fn export(
     options: &ExportOptions,
     cancel: &AtomicBool,
     mut progress: impl FnMut(ExportProgress),
-) -> Result<()> {
+) -> Result<Measured> {
     init();
     let duration = project.duration_us();
     if duration <= 0 {
@@ -196,15 +198,15 @@ pub fn export(
     prepare_sound(project, cache_dir, cancel)?;
     // A clip with a background needs its person outlines made first (`nuzky_vision::matte::prepare`).
     crate::matte::check(cache_dir, project)?;
-    write_beside(out, options.replace_existing, cancel, |tmp| {
+    let measured = write_beside(out, options.replace_existing, cancel, |tmp| {
         encode(project, cache_dir, tmp, options, cancel, &mut progress, duration)
     })?;
-    match credits {
-        Some(text) => write_credits(&text, &credits_out, options.replace_credits).with_context(|| {
+    if let Some(text) = credits {
+        write_credits(&text, &credits_out, options.replace_credits).with_context(|| {
             format!("The video is saved, but its credits could not be written to {}", credits_out.display())
-        }),
-        None => Ok(()),
+        })?;
     }
+    Ok(measured)
 }
 
 /// Prepares the sound of every file heard in `project` as its clips play it: decoded into the cache, cleaned
@@ -233,12 +235,12 @@ pub(crate) fn prepare_sound(project: &Project, cache_dir: &Path, cancel: &Atomic
 
 /// Writes `out` through a temporary `.nuzky-part-*` file beside it, so rename stays on the same filesystem and
 /// nothing half written ever has its name.
-pub(crate) fn write_beside(
+pub(crate) fn write_beside<T>(
     out: &Path,
     replace_existing: bool,
     cancel: &AtomicBool,
-    write: impl FnOnce(&Path) -> Result<()>,
-) -> Result<()> {
+    write: impl FnOnce(&Path) -> Result<T>,
+) -> Result<T> {
     let tmp = loop {
         let path = out.with_file_name(format!(".nuzky-part-{}.mp4", uuid::Uuid::new_v4()));
         match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
@@ -255,7 +257,7 @@ pub(crate) fn write_beside(
             }
         }
     };
-    let result = write(&tmp).and_then(|()| publish(&tmp, out, replace_existing, cancel));
+    let result = write(&tmp).and_then(|written| publish(&tmp, out, replace_existing, cancel).map(|()| written));
     if result.is_err() {
         // Report why the export failed, not a secondary cleanup problem.
         if let Err(e) = std::fs::remove_file(&tmp) {
@@ -431,7 +433,7 @@ fn encode(
     cancel: &AtomicBool,
     progress: &mut impl FnMut(ExportProgress),
     duration: i64,
-) -> Result<()> {
+) -> Result<Measured> {
     let delivery = options.delivery;
     let fps = export_fps(project, options);
     if fps == 0 || fps > 240 {
@@ -471,6 +473,7 @@ fn encode(
     let profile = if delivery.is_some() { ("profile", "high") } else { ("", "") };
     let x264 = [("preset", options.preset.as_str()), profile];
     let mut mp4 = Mp4Writer::create(out, vcodec, w, h, fps, options.crf, &x264)?;
+    let mut watch = Watch::new(fps, duration);
     let render = |i| {
         let pixels = renderer.render(project, frame_time_us(i, fps), w, h, Wait::Exact, true)?;
         progress(ExportProgress {
@@ -482,12 +485,17 @@ fn encode(
         Ok(pixels)
     };
     let write = |i, pixels: Vec<u8>| {
+        watch.frame(i, &pixels, w, h);
         mp4.frame(i, &pixels)?;
         let audio_until = crate::audio::us_to_samples(frame_time_us(i + 1, fps)).min(total_samples);
-        mp4.sound_until(audio_until, |pos, mix| sound.fill(project, pos, mix))
+        mp4.sound_until(audio_until, |pos, mix| {
+            sound.fill(project, pos, mix);
+            watch.sound(pos, mix);
+        })
     };
     overlap(total_frames, cancel, render, write)?;
-    mp4.finish()
+    mp4.finish()?;
+    Ok(watch.finish())
 }
 
 /// Makes items `0..count` in order and hands each to `write` on another thread, so making the next one overlaps

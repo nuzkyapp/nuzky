@@ -4030,3 +4030,217 @@ fn reels_are_proposed_and_made_beside_a_long_talk_over_stdio() {
     assert!(c.dir.join("project-reel-3.nuzky").is_file());
     c.finish();
 }
+
+/// Makes `name` beside the client's project with ffmpeg from lavfi `inputs` and the given output arguments.
+fn ffmpeg_media(c: &Client, name: &str, inputs: &[&str], output: &[&str]) -> PathBuf {
+    let path = c.dir.join(name);
+    let mut command = Command::new("ffmpeg");
+    command.args(["-hide_banner", "-loglevel", "error", "-y"]);
+    for input in inputs {
+        command.args(["-f", "lavfi", "-i", input]);
+    }
+    let status = command.args(output).arg(&path).status().expect("ffmpeg makes the test media");
+    assert!(status.success(), "ffmpeg failed to make {name}");
+    path
+}
+
+/// A moving picture of `seconds` with a tone of `hz` for `sound_seconds`, in a MOV whose PCM sound is exactly that
+/// long, so clips land on whole frames.
+fn tone_video(c: &Client, name: &str, seconds: u32, hue: u32, hz: u32, sound_seconds: u32) -> PathBuf {
+    ffmpeg_media(
+        c,
+        name,
+        &[
+            &format!("testsrc2=s=360x640:r=30:d={seconds},hue=h={hue}"),
+            &format!("sine=frequency={hz}:sample_rate=48000:duration={sound_seconds}"),
+        ],
+        &["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le"],
+    )
+}
+
+fn sheet_of(c: &mut Client, args: Value) -> (Value, png::OutputInfo, Vec<u8>) {
+    use base64::Engine as _;
+    let result = c.rpc("tools/call", json!({"name":"inspect_frames","arguments":args}));
+    assert_ne!(result["result"]["isError"], true, "{result}");
+    let content = &result["result"]["content"];
+    let info: Value = serde_json::from_str(content[0]["text"].as_str().unwrap()).unwrap();
+    let bytes = base64::prelude::BASE64_STANDARD.decode(content[1]["data"].as_str().unwrap()).unwrap();
+    let (frame, rgba) = decode_png(&bytes);
+    (info, frame, rgba)
+}
+
+/// Defects planted on purpose come back as findings and look-alikes the project makes on purpose do not: a title
+/// running past the last clip leaves a black tail, a clip whose picture ends before its sound holds its last frame,
+/// and a broken sound cache exports silence where the file has sound. A fade through black and a still image are
+/// intended. inspect_frames then shows the exported file, not the timeline changed since.
+#[test]
+fn an_export_is_checked_for_black_frozen_and_silent_stretches_over_stdio() {
+    let mut c = Client::new(true);
+    let a = tone_video(&c, "a.mov", 3, 0, 440, 3);
+    let b = tone_video(&c, "b.mov", 2, 120, 660, 2);
+    let d = tone_video(&c, "d.mov", 1, 240, 550, 2);
+    let still = ffmpeg_media(&c, "still.png", &["testsrc2=s=360x640:d=1"], &["-frames:v", "1"]);
+    let run = c.call("begin_run", json!({"label":"plant"}))["run_id"].clone();
+    let ids = c.call("import_media", json!({"run_id":run,"paths":[a, b, still, d]}))["asset_ids"].clone();
+    let edits = json!([{"type":"addClip","assetId":ids[0]},{"type":"addClip","assetId":ids[1]},
+        {"type":"addClip","assetId":ids[2]},
+        {"type":"addText","startUs":0,"text":"Check","style":{"fontSize":40.0,"color":"#ffffff"}}]);
+    c.call("apply_edits", json!({"run_id":run,"request_id":"place","edits":edits}));
+    let state = c.call("get_state", json!({}));
+    let main = state["tracks"][0]["clips"].clone();
+    let title =
+        state["tracks"].as_array().unwrap().iter().find(|t| t["kind"] == "text").unwrap()["clips"][0]["id"].clone();
+    let edits = json!([
+        {"type":"setTransition","clipId":main[1]["id"],"transition":{"kind":"fadeBlack","durationUs":600_000}},
+        {"type":"trimClip","clipId":main[2]["id"],"startUs":5_000_000,"durationUs":1_000_000},
+        {"type":"trimClip","clipId":title,"startUs":0,"durationUs":9_000_000}]);
+    c.call("apply_edits", json!({"run_id":run,"request_id":"shape","edits":edits}));
+    c.call("apply_edits", json!({"run_id":run,"request_id":"held","edits":[{"type":"addClip","assetId":ids[3]}]}));
+    c.call("end_run", json!({"run_id":run,"action":"keep"}));
+    let state = c.call("get_state", json!({}));
+    let starts: Vec<_> = state["tracks"][0]["clips"].as_array().unwrap().iter().map(|c| c["startUs"].clone()).collect();
+    assert_eq!(json!(starts), json!([0, 3_000_000, 5_000_000, 6_000_000]), "{state}");
+    assert_eq!(state["duration_us"], 9_000_000);
+
+    // A's sound is prepared, then a second of its cache is zeroed, as a broken cache once left it.
+    let asset: nuzky_engine::model::Asset = serde_json::from_value(state["assets"][0].clone()).unwrap();
+    let pcm = nuzky_engine::audio::ensure_pcm(&c.dir.join("cache"), &asset, |_| Ok(())).unwrap();
+    let mut samples = std::fs::read(&pcm).unwrap();
+    let second = 48_000 * 2 * 4;
+    samples[second..2 * second].fill(0);
+    std::fs::write(&pcm, samples).unwrap();
+
+    let out = c.dir.join("checked.mp4");
+    let job = c.call("export_video", json!({"path":out,"resolution":360,"fps":30}));
+    let done = wait_job(&mut c, &job, Duration::from_secs(120), |_| false);
+    assert_eq!(done["status"], "done", "{done}");
+    let check = &done["result"]["check"];
+    assert!(check.get("skipped").is_none(), "{check}");
+    let found: Vec<(String, Value, i64, i64)> = check["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| {
+            (
+                f["kind"].as_str().unwrap().into(),
+                f["cause"].clone(),
+                f["start_us"].as_i64().unwrap(),
+                f["end_us"].as_i64().unwrap(),
+            )
+        })
+        .collect();
+    // Silence is measured in blocks of 1024 samples, 21.3 ms, so its edges land up to a block inside the cause.
+    let block = 21_334;
+    let expected: [(&str, Value, i64, i64, i64); 5] = [
+        ("silent", Value::Null, 1_000_000, 2_000_000, block),
+        ("silent", json!("nothing_heard"), 5_000_000, 6_000_000, block),
+        ("frozen", json!("held_last_frame"), 6_966_667, 8_000_000, 0),
+        ("black", json!("uncovered"), 8_000_000, 9_000_000, 0),
+        ("silent", json!("nothing_heard"), 8_000_000, 9_000_000, block),
+    ];
+    assert_eq!(found.len(), expected.len(), "{check}");
+    for ((kind, cause, start, end), (want_kind, want_cause, want_start, want_end, slack)) in found.iter().zip(&expected)
+    {
+        assert!(
+            kind == want_kind
+                && cause == want_cause
+                && (*want_start..=want_start + slack).contains(start)
+                && (want_end - slack..=*want_end).contains(end),
+            "{kind} {cause} {start}..{end} is not {want_kind} {want_cause} {want_start}..{want_end}: {check}"
+        );
+    }
+    assert_eq!(check["more_findings"], 0);
+    assert_eq!(check["explained"], json!({"fade_transition": 1, "image": 1}), "{check}");
+    let pages = check["frame_time_us"].as_array().unwrap();
+    assert!(pages.iter().all(|p| (1..=16).contains(&p.as_array().unwrap().len())), "{check}");
+    let looks: Vec<i64> =
+        pages.iter().flat_map(|p| p.as_array().unwrap().iter().map(|t| t.as_i64().unwrap())).collect();
+    for cut in [3_000_000, 5_000_000, 6_000_000, 8_000_000] {
+        assert!(
+            looks.contains(&(cut - 33_333)) && looks.contains(&cut),
+            "the frames around the cut at {cut}: {looks:?}"
+        );
+    }
+    assert!(looks.contains(&8_966_667) && looks.windows(2).all(|w| w[0] < w[1]), "{looks:?}");
+
+    // The canvas turns red after the export: the timeline shows it in the tail, the file still has black there.
+    let run = c.call("begin_run", json!({"label":"red"}))["run_id"].clone();
+    let edits = json!([{"type":"setCanvas","width":1080,"height":1920,"background":"#ff0000"}]);
+    c.call("apply_edits", json!({"run_id":run,"request_id":"red","edits":edits}));
+    c.call("end_run", json!({"run_id":run,"action":"keep"}));
+    let corner = |rgba: &[u8], width: u32, tile: u32| pixel(rgba, width, tile * 96 + 8, 8);
+    let (_, timeline, rgba) = sheet_of(&mut c, json!({"times_us":[8_500_000],"width":96}));
+    assert_eq!(corner(&rgba, timeline.width, 0), [255, 0, 0]);
+    let args = json!({"export_job_id":job["job_id"],"times_us":[8_500_000, 500_000, 7_500_000],"width":96});
+    let (info, file, rgba) = sheet_of(&mut c, args);
+    assert_eq!(info["path"], json!(dunce::canonicalize(&out).unwrap()), "{info}");
+    assert_eq!(info["times_us"], json!([8_500_000, 500_000, 7_500_000]));
+    assert_eq!((file.width, file.height), (3 * 96, 170 + 24));
+    assert!(
+        corner(&rgba, file.width, 0).iter().all(|v| *v < 24),
+        "the file's tail is black: {:?}",
+        corner(&rgba, file.width, 0)
+    );
+    for tile in [1, 2] {
+        let [r, g, b] = corner(&rgba, file.width, tile);
+        assert!(r.max(g).max(b) > 60 && !(r > 200 && g < 40 && b < 40), "tile {tile} shows the clip: {:?}", [r, g, b]);
+    }
+    let error = c.error("inspect_frames", json!({"export_job_id":job["job_id"],"times_us":[0],"safe_area":true}));
+    assert!(error.contains("INVALID_ARGUMENTS"), "{error}");
+    let error = c.error("inspect_frames", json!({"export_job_id":job["job_id"],"sample":"changes"}));
+    assert!(error.contains("INVALID_ARGUMENTS"), "{error}");
+    let error = c.error("inspect_frames", json!({"export_job_id":job["job_id"],"times_us":[9_100_000]}));
+    assert!(error.contains("inside the exported video"), "{error}");
+    let error = c.error("inspect_frames", json!({"export_job_id":"nope","times_us":[0]}));
+    assert!(error.contains("UNKNOWN_JOB"), "{error}");
+    c.finish();
+}
+
+/// Stopping an export while it renders stops it within seconds; stopping it while the finished file is checked
+/// leaves the export done, with a check that says it did not complete.
+#[test]
+fn stopping_an_export_while_it_is_checked_keeps_the_video_over_stdio() {
+    let mut c = Client::new(true);
+    // A minute of one still picture: checking it decodes the whole minute of its file.
+    let still = ffmpeg_media(
+        &c,
+        "still.mp4",
+        &["color=c=gray:s=1920x1080:r=30:d=60"],
+        &["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p"],
+    );
+    let run = c.call("begin_run", json!({"label":"still"}))["run_id"].clone();
+    let ids = c.call("import_media", json!({"run_id":run,"paths":[still]}))["asset_ids"].clone();
+    c.call("apply_edits", json!({"run_id":run,"request_id":"place","edits":[{"type":"addClip","assetId":ids[0]}]}));
+    c.call("end_run", json!({"run_id":run,"action":"keep"}));
+
+    let stop_in = |c: &mut Client, path: &PathBuf, phase: &str| {
+        let job = c.call("export_video", json!({"path":path,"resolution":360,"fps":30}));
+        // Polled often: the check of this minute takes about 0.4 s.
+        let deadline = std::time::Instant::now() + Duration::from_secs(300);
+        let seen = loop {
+            let status = c.call("job", json!({"job_id": job["job_id"], "action": "get"}));
+            if status["phase"] == phase || status["status"] != "running" || std::time::Instant::now() > deadline {
+                break status;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        assert_eq!(seen["phase"], phase, "{seen}");
+        let at = std::time::Instant::now();
+        c.call("job", json!({"job_id":job["job_id"],"action":"cancel"}));
+        let done = wait_job(c, &job, Duration::from_secs(10), |_| false);
+        (done, at.elapsed())
+    };
+    let rendering = c.dir.join("rendering.mp4");
+    let (stopped, took) = stop_in(&mut c, &rendering, "exporting");
+    assert_eq!(stopped["status"], "cancelled", "{stopped}");
+    assert!(took < Duration::from_secs(3), "the export stopped after {took:?}");
+    assert!(!rendering.exists());
+
+    let checked = c.dir.join("checked.mp4");
+    let (done, took) = stop_in(&mut c, &checked, "checking_export");
+    assert_eq!(done["status"], "done", "{done}");
+    assert_eq!(done["result"]["check"], json!({"skipped": "the check was stopped"}), "{done}");
+    assert!(took < Duration::from_secs(3), "the check stopped after {took:?}");
+    assert!(checked.is_file());
+    c.finish();
+}

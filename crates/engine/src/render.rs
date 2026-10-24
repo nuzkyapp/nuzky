@@ -96,12 +96,12 @@ struct TransitionRole {
 }
 
 #[derive(Clone, Copy)]
-struct VisibleClip<'a> {
-    clip: &'a Clip,
+pub(crate) struct VisibleClip<'a> {
+    pub(crate) clip: &'a Clip,
     transition: Option<TransitionRole>,
 }
 
-fn visible_clips(track: &Track, t_us: i64) -> impl Iterator<Item = VisibleClip<'_>> {
+pub(crate) fn visible_clips(track: &Track, t_us: i64) -> impl Iterator<Item = VisibleClip<'_>> {
     let clips = if track.hidden || track.kind == TrackKind::Audio {
         [None, None]
     } else if let Some((a, b, transition, progress)) = transition_at(track, t_us) {

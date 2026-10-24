@@ -2,6 +2,7 @@
 //! The desktop app and the `nuzky` CLI are thin layers over this crate.
 
 pub mod audio;
+pub mod check;
 pub mod credits;
 pub mod dereverb;
 pub mod edit;

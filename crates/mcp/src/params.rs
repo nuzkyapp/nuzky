@@ -193,6 +193,9 @@ pub struct Inspect {
     /// last four kept frames, default 16. Gestures within one shot mostly stay below it, a cut to
     /// other footage differs in 30 or more.
     pub min_change: Option<u32>,
+    /// The job_id of a finished export_video you started: shows times_us of the exported
+    /// file itself instead of the timeline. Only times_us and width go with it.
+    pub export_job_id: Option<String>,
 }
 #[derive(Clone, Copy, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]

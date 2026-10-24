@@ -1,9 +1,9 @@
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, path::Path, sync::Arc};
 
 use anyhow::{Context, Result, ensure};
 use nuzky_engine::{
     Pending, Project, Renderer, Wait,
-    media::VideoDecoder,
+    media::{DecodedFrame, VideoDecoder},
     model::{Background, ClipContent, ThumbnailFormat},
 };
 use serde_json::{Value, json};
@@ -44,6 +44,75 @@ pub fn contact_sheet(
     let width = width.unwrap_or(DEFAULT_WIDTH);
     ensure!((96..=1280).contains(&width), "Frame width must be 96..=1280 pixels");
     let height = (width as u64 * project.canvas.height as u64 / project.canvas.width as u64) as u32;
+    let mut renderer = None;
+    sheet(times, width, height, |time| {
+        let renderer = match &mut renderer {
+            Some(renderer) => renderer,
+            None => {
+                let mut made = Renderer::new().context("Starting frame renderer")?;
+                made.use_mattes(cache_dir.to_path_buf(), Pending::Fail);
+                renderer.insert(made)
+            }
+        };
+        let mut rgba = renderer
+            .render(project, time, width, height, Wait::Exact, false)
+            .context("Rendering contact sheet frame")?;
+        if safe_area {
+            shade_unsafe(&mut rgba, width, height, &project.canvas);
+        }
+        Ok(rgba)
+    })
+}
+
+/// A frame up to this much after a time asked for still counts as at it: frame times are rounded to microseconds.
+const FRAME_SLACK_US: i64 = 500;
+/// The next time asked for is decoded on from the last frame shown, without seeking, up to this far ahead.
+const DECODE_ON_US: i64 = 2_000_000;
+
+/// The frames of the video file at `path` shown at `times`, decoded from the file itself, laid out as `contact_sheet`
+/// lays out the timeline. `cancelled` is checked on every decoded frame.
+pub fn file_sheet(path: &Path, times: &[i64], width: Option<u32>, cancelled: &dyn Fn() -> bool) -> Result<Vec<u8>> {
+    ensure!(!times.is_empty() && times.len() <= MAX_FRAMES, "Provide 1..={MAX_FRAMES} frame times");
+    let width = width.unwrap_or(DEFAULT_WIDTH);
+    ensure!((96..=1280).contains(&width), "Frame width must be 96..=1280 pixels");
+    let mut decoder = VideoDecoder::open_for_seeking(path)
+        .with_context(|| format!("MEDIA_MISSING: cannot read the exported video {}", path.display()))?;
+    let duration = decoder.duration_us();
+    ensure!(
+        times.iter().all(|t| *t >= 0 && *t < duration),
+        "Frame times must be inside the exported video, 0 to {duration} microseconds"
+    );
+    let (w, h) = decoder.source_size();
+    let height = ((width as u64 * h as u64 / w.max(1) as u64) as u32).max(2);
+    let (mut covering, mut next) = (None::<DecodedFrame>, None::<DecodedFrame>);
+    sheet(times, width, height, |time| {
+        let want = time + FRAME_SLACK_US;
+        if !covering.as_ref().is_some_and(|(t, _)| *t <= want && want - *t <= DECODE_ON_US) {
+            decoder.seek(want)?;
+            (covering, next) = (None, None);
+        }
+        loop {
+            ensure!(!cancelled(), "CANCELLED: the connection closed");
+            match next.take() {
+                Some(frame) if frame.0 <= want => covering = Some(frame),
+                Some(frame) => {
+                    next = Some(frame);
+                    break;
+                }
+                None => match decoder.next_frame()? {
+                    Some(frame) => next = Some(frame),
+                    None => break,
+                },
+            }
+        }
+        let (t, frame) = covering.as_ref().or(next.as_ref()).context("The exported video has no frame there")?;
+        Ok(Arc::unwrap_or_clone(decoder.convert(frame, *t, width, height)?.data))
+    })
+}
+
+/// Lays out frames of `width` × `height`, four in a row, each labelled with its time, as one PNG. `frame` gives the
+/// straight RGBA of the frame at a time.
+fn sheet(times: &[i64], width: u32, height: u32, mut frame: impl FnMut(i64) -> Result<Vec<u8>>) -> Result<Vec<u8>> {
     let columns = (times.len() as u32).min(4);
     let rows = (times.len() as u32).div_ceil(columns);
     let (sheet_w, sheet_h) = (columns * width, rows * (height + LABEL_HEIGHT));
@@ -55,15 +124,8 @@ pub fn contact_sheet(
     for pixel in pixels.as_chunks_mut::<4>().0 {
         pixel[3] = 255;
     }
-    let mut renderer = Renderer::new().context("Starting frame renderer")?;
-    renderer.use_mattes(cache_dir.to_path_buf(), Pending::Fail);
     for (index, &time) in times.iter().enumerate() {
-        let mut rgba = renderer
-            .render(project, time, width, height, Wait::Exact, false)
-            .context("Rendering contact sheet frame")?;
-        if safe_area {
-            shade_unsafe(&mut rgba, width, height, &project.canvas);
-        }
+        let rgba = frame(time)?;
         let (x, y) = (index as u32 % columns * width, index as u32 / columns * (height + LABEL_HEIGHT));
         for row in 0..height as usize {
             let dest = ((y as usize + row) * sheet_w as usize + x as usize) * 4;
