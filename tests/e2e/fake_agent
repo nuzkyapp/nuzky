@@ -30,7 +30,7 @@ stream-json user messages from stdin while it works; Codex reads one prompt up t
              cover's image with the hook GROKBOT in front, as the guide's cover from a generated picture says
   "image"    (Codex) generates an orange PNG into a Codex home of its own (generated_images/<thread>/) as Codex's image_gen does, imports it with
              import_media and shows it as a picture in picture from 0, as Nuzky's instructions ask
-  "signin"   is not signed in;  "limit" has hit its usage limit
+  "signin"   is not signed in (Claude says so after a second);  "limit" has hit its usage limit
   a message with pictures or a video attached says how many it got, with the size of each picture
   anything else is echoed back.
 Each start is logged to $NUZKY_FAKE_AGENT_LOG/runs.jsonl (argv, pid, session, the pictures' sizes), and each message
@@ -395,6 +395,8 @@ if 'signin' in message and not thumbnail:
             time.sleep(1)
         emit({'type': 'turn.failed', 'error': {'message': error}})
         sys.exit(1)
+    # Claude Code finds out only when it asks for the answer, later than the panel next looks at the agent's jobs.
+    time.sleep(1)
     emit({'type': 'assistant', 'error': 'authentication_failed', 'parent_tool_use_id': None,
           'message': {'content': [{'type': 'text', 'text': 'Not logged in · Please run /login'}]}})
     emit({'type': 'result', 'subtype': 'success', 'is_error': True, 'result': 'Not logged in · Please run /login'})

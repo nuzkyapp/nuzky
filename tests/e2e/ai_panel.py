@@ -31,9 +31,10 @@ GRIP_AT = """const g = document.querySelector('aside[aria-label=AI] button[aria-
 return g.left <= arguments[0] && arguments[0] <= g.right && g.top <= arguments[1] && arguments[1] <= g.bottom;"""
 
 
-def setup(r):
+def setup(r, takes=1):
+    """`takes`: how many times the talk follows itself in the project."""
     project = r.work / 'data/nuzky/projects/panel.nuzky'
-    subprocess.run([str(CLI), 'new', str(project), str(FIXTURES / 'talk.mp4')], env=r.env, check=True, capture_output=True)
+    subprocess.run([str(CLI), 'new', str(project), *[str(FIXTURES / 'talk.mp4')] * takes], env=r.env, check=True, capture_output=True)
     # The fake stands in for Claude Code; Codex is deliberately missing, whatever this machine has.
     r.env.update(NUZKY_AGENT_CLAUDE=str(FAKE), NUZKY_AGENT_CODEX=str(r.work / 'no-codex'), NUZKY_FAKE_AGENT_LOG=str(r.work / 'fake'))
 
@@ -99,7 +100,9 @@ def idle(r):
 
 
 def setup_jobs(r):
-    setup(r)
+    # About a minute of video: an idle Mac exports the 14 s talk in under 2 s, before an answer that cannot start
+    # has even failed, and the flow needs the export running until it presses Stop.
+    setup(r, takes=4)
     # A copy of the fake, so the flow can take the agent away; an older Claude Code, which names no models.
     shutil.copy(FAKE, r.work / 'claude')
     r.env.update(NUZKY_AGENT_CLAUDE=str(r.work / 'claude'), FAKE_AGENT_OLD='1')
@@ -809,7 +812,7 @@ def ai_panel_jobs(r):
     # The folder goes away while the user decides, so the export cannot be saved.
     shutil.rmtree(fake / 'folder')
     r.check('an export that fails between turns says so in the panel, with no Stop',
-            wait(lambda: 'Exporting failed' in r.s.run(status) and not r.s.run(stop), 30), r.s.run(status))
+            wait(lambda: 'Exporting failed' in r.s.run(status) and not r.s.run(stop), 60), r.s.run(status))
     r.shot('job-failed')
 
     fourth = ask()
@@ -819,12 +822,24 @@ def ai_panel_jobs(r):
     r.check('and stops the job the old one started', wait(lambda: f'Job {fourth}: cancelled' in said(), 30), said())
 
     ask()
+    failed = "return window.__nuzky.agent.getState().items.findLast((i) => i.kind === 'error')?.message ?? ''"
+    shown = lambda: wait(lambda: 'Exporting' in r.s.run(status) and r.s.run(stop), 5)
+    # The agent is signed out: its answer starts, then fails before it says anything.
+    send(r, 'signin please')
+    r.check('when the answer fails as it starts, the panel still shows the export with Stop',
+            wait(lambda: 'Not logged in' in r.s.run(failed) and agent(r)['status'] == 'idle', 10) and shown(),
+            {'status': r.s.run(status), 'agent': agent(r), 'error': r.s.run(failed)})
     # The agent goes away while its answer starts, so no turn starts.
     (fake / 'vanish').touch()
     send(r, 'Wait and continue')
     r.check('when the answer cannot start, the panel still shows the export with Stop',
-            wait(lambda: 'error' in agent(r)['kinds'], 10) and wait(lambda: 'Exporting' in r.s.run(status) and r.s.run(stop), 5),
-            {'status': r.s.run(status), 'agent': agent(r)})
+            wait(lambda: 'error' in agent(r)['kinds'], 10) and shown(), {'status': r.s.run(status), 'agent': agent(r)})
+    r.shot('job-after-failed-start')
+    # Sent again, it is refused before the panel next asks for its jobs: the agent is no longer there.
+    send(r, 'Wait and continue')
+    r.check('and when Nuzky refuses the answer at once',
+            wait(lambda: 'is not installed' in r.s.run(failed) and agent(r)['status'] == 'idle', 10) and shown(),
+            {'status': r.s.run(status), 'agent': agent(r), 'error': r.s.run(failed)})
     click(r, 'Stop')
     r.check('and Stop stops it', wait(lambda: 'Exporting' not in r.s.run(status) and not r.s.run(stop), 5), r.s.run(status))
     left = lambda: sorted(p.name for p in fake.iterdir() if p.name.startswith(('export-', '.nuzky-part')))
