@@ -74,7 +74,7 @@ export type AgentModel = {
 /**
  * An agent Nuzky cannot connect itself, which gets the server and a first message to paste.
  */
-export type AgentSetup = "claude" | "cursor" | "other";
+export type AgentSetup = "claude" | "cursor" | "opencode" | "other";
 
 export type AgentStatus = {
   installed: boolean,

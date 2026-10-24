@@ -32,7 +32,7 @@ export const useModels = create<Models>(() => ({
   lists: {},
   errors: {},
   chatgptFor: null,
-  choices: { claude: saved("claude"), codex: saved("codex"), chatgpt: saved("chatgpt"), antigravity: saved("antigravity") },
+  choices: { claude: saved("claude"), codex: saved("codex"), opencode: saved("opencode"), chatgpt: saved("chatgpt"), antigravity: saved("antigravity") },
 }));
 
 export const EFFORTS: Record<string, { label: string; short: string; hint: string }> = {
@@ -45,15 +45,18 @@ export const EFFORTS: Record<string, { label: string; short: string; hint: strin
 
 export const effortLabel = (effort: string) => EFFORTS[effort]?.label ?? effort.charAt(0).toUpperCase() + effort.slice(1);
 
+/** Agents that keep their own model until one is chosen; OpenCode's list is every provider's, in no order of use. */
+export const ownDefault = (agent: AgentId) => agent === "claude" || agent === "opencode";
+
 /**
- * What the panel sends with now. Claude Code keeps its own setting until a model is chosen; Codex and ChatGPT
- * start with the first model of their list and its default effort. An effort the model does not take falls
- * back to the model's default, and comes back with a model that takes it.
+ * What the panel sends with now. Claude Code and OpenCode keep their own setting until a model is chosen; Codex
+ * and ChatGPT start with the first model of their list and its default effort. An effort the model does not take
+ * falls back to the model's default, and comes back with a model that takes it.
  */
 export function resolved(agent: AgentId, s: Models = useModels.getState()) {
   const list = s.lists[agent] ?? [];
   const choice = s.choices[agent];
-  const model = list.find((m) => m.slug === choice.model) ?? (agent === "claude" ? null : (list[0] ?? null));
+  const model = list.find((m) => m.slug === choice.model) ?? (ownDefault(agent) ? null : (list[0] ?? null));
   // With Claude Code's own model, its effort levels are those all its models take.
   const efforts = model?.efforts ?? (agent === "claude" ? (list[0]?.efforts ?? []) : []);
   const effort = choice.effort && efforts.includes(choice.effort) ? choice.effort : (model?.defaultEffort ?? null);
@@ -65,7 +68,7 @@ function choose(agent: AgentId, choice: Choice) {
   useModels.setState((s) => ({ choices: { ...s.choices, [agent]: choice } }));
 }
 
-/** `null` is Claude Code's own setting, for the effort too. */
+/** `null` is the agent's own setting, for the effort too. */
 export function chooseModel(agent: AgentId, slug: string | null) {
   choose(agent, slug === null ? { model: null, effort: null } : { ...useModels.getState().choices[agent], model: slug });
 }

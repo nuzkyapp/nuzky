@@ -137,29 +137,35 @@ fn app_image(exe: &Path, dir: Option<PathBuf>, image: Option<PathBuf>) -> Option
 pub enum Setup {
     Claude,
     Cursor,
+    Opencode,
     Other,
 }
 
-/// The `nuzky` server in the `mcpServers` form Claude, Cursor and most agents read, between where
-/// it goes and what to tell the agent first.
+/// The `nuzky` server in the form the agent reads, between where it goes and what to tell the agent first.
 pub fn setup(setup: Setup, command: &Command) -> Result<String> {
-    let server = serde_json::json!({"mcpServers": {NAME: {"command": command.program, "args": command.args}}});
+    let (key, server) = if setup == Setup::Opencode {
+        let command: Vec<&String> = std::iter::once(&command.program).chain(&command.args).collect();
+        ("mcp", serde_json::json!({"type": "local", "command": command}))
+    } else {
+        ("mcpServers", serde_json::json!({"command": command.program, "args": command.args}))
+    };
     let (place, agent) = match setup {
         Setup::Claude => {
             ("the Claude Desktop config (Settings, Developer, Edit Config), then restart Claude", "Claude")
         }
         Setup::Cursor => ("Cursor's MCP settings (~/.cursor/mcp.json)", "Cursor"),
+        Setup::Opencode => ("OpenCode's config (~/.config/opencode/opencode.json)", "OpenCode"),
         Setup::Other => ("your agent's MCP settings", "the agent"),
     };
     Ok(format!(
         "Nuzky's MCP server lets an agent edit the video open in Nuzky, live.\n\n\
-         1. Add it to {place}. If the file already has \"mcpServers\", add only the \"nuzky\" entry:\n\n{}\n\n\
+         1. Add it to {place}. If the file already has \"{key}\", add only the \"nuzky\" entry:\n\n{}\n\n\
          2. Then tell {agent}:\n\n\
          Nuzky is the video editor open on this computer, and its MCP server nuzky edits the project open in it. \
          Start by reading the resource nuzky://guide and follow it. Change the video only through Nuzky's tools, \
          never its project file. Open a run with begin_run before you change anything and close it with end_run: \
          the whole run is one undo step for the user.\n",
-        serde_json::to_string_pretty(&server)?
+        serde_json::to_string_pretty(&serde_json::json!({key: {NAME: server}}))?
     ))
 }
 
