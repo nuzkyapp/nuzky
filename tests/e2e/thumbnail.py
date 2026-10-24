@@ -5,7 +5,7 @@ editor draws and the exported files. The face and person models are linked from 
 import json, os, shutil, subprocess, time
 from pathlib import Path
 
-from e2e.harness import CLI, FIXTURES, MODELS, changed_share, flow, wait, webdriver
+from e2e.harness import CLI, FIXTURES, MODELS, WINDOWS, Session, changed_share, close_window, flow, leave_editor, wait, webdriver
 
 FAKE = Path(__file__).resolve().parent / 'fake_agent'
 VISION = ('yunet-2026may.onnx', 'face-landmarks-v2.onnx', 'face-blendshapes-v2.onnx', 'selfie-segmenter.onnx',
@@ -566,13 +566,26 @@ def cover_states(r):
     r.shot('cover-no-face')
 
     # The file goes away; the cover says which and what to do.
-    # Windows refuses to move a file the app holds open; the preview lets it go a few seconds after its last frame.
-    wait(lambda: (r.work / 'pattern.mp4').rename(r.work / 'pattern-moved.mp4') or True, 15)
-    r.key('Escape')
+    if WINDOWS:
+        # Windows refuses to move a file a program holds open, as the preview holds the one it shows: there it
+        # goes while Nuzky is closed.
+        leave_editor(r)
+        close_window()
+        wait(lambda: r.app.poll() is not None, 15)
+        r.s.close()
+        (r.work / 'pattern.mp4').rename(r.work / 'pattern-moved.mp4')
+        r.s = Session()
+        wait(lambda: r.s.run('return !!window.__nuzky?.store.getState().snap', retries=3), 60)
+        webdriver('POST', r.s.path + '/window/rect', {'width': 1440, 'height': 900})
+        r.s.run("window.__nuzky.openProject({path: window.__nuzky.store.getState().snap.path, name: 'pattern'})")
+        wait(lambda: r.s.run('return window.__nuzky.store.getState().view') == 'editor', 10)
+    else:
+        (r.work / 'pattern.mp4').rename(r.work / 'pattern-moved.mp4')
+        r.key('Escape')
     click(r, 'Edit the cover')
     missing = wait(lambda: r.s.run("return document.querySelector('[data-testid=cover-stage] [role=alert]')?.innerText ?? null"), 10)
     r.check('a missing file says which and to put it back', missing and 'pattern.mp4 is missing' in missing, missing)
     r.shot('cover-media-missing')
     refused = r.s.call("window.__nuzky.api.startCoverPick('cover_9x16', arguments[0])", r.state()['epoch'])
     r.check('Pick for me refuses with the same reason', not refused['ok'] and 'MEDIA_MISSING' in refused['error'], refused)
-    wait(lambda: (r.work / 'pattern-moved.mp4').rename(r.work / 'pattern.mp4') or True, 15)
+    (r.work / 'pattern-moved.mp4').rename(r.work / 'pattern.mp4')
