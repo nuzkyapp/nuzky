@@ -200,8 +200,10 @@ if OPENCODE:
                                                'permission': {'*': 'deny', 'nuzky_*': 'allow'}}} \
             or not panel_agent.get('prompt', '').startswith('You are the AI panel inside Nuzky, a video editor.'):
         missing.append('agent.nuzky-panel mode, prompt and permission')
-    for k, v in {'XDG_CONFIG_HOME': os.getcwd(), 'PWD': os.getcwd(), 'OPENCODE_TEST_HOME': os.getcwd(), 'OPENCODE_DISABLE_PROJECT_CONFIG': 'true',
-                 'OPENCODE_DISABLE_EXTERNAL_SKILLS': 'true',
+    # getcwd() resolves symlinks, and on macOS the panel folder is under /tmp, a link to /private/tmp.
+    missing += [k for k in ('XDG_CONFIG_HOME', 'PWD', 'OPENCODE_TEST_HOME')
+                if not os.environ.get(k) or os.path.realpath(os.environ[k]) != os.getcwd()]
+    for k, v in {'OPENCODE_DISABLE_PROJECT_CONFIG': 'true', 'OPENCODE_DISABLE_EXTERNAL_SKILLS': 'true',
                  'OPENCODE_DISABLE_CLAUDE_CODE': 'true', 'OPENCODE_DISABLE_AUTOUPDATE': 'true'}.items():
         if os.environ.get(k) != v:
             missing.append(k)
