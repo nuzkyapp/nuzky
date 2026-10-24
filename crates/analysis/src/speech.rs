@@ -20,8 +20,9 @@ const GAP: usize = RATE / 5;
 /// Audio Whisper encodes in one pass.
 const WINDOW: usize = 30 * RATE;
 
-/// Vulkan where the `gpu` feature is on, Metal on a Mac that has a Metal device. whisper.cpp lists a
-/// Metal device even without one and then crashes allocating the model there, before the CPU retry.
+/// Vulkan where the `gpu` feature is on and ggml found a graphics card, Metal on a Mac that has a Metal device.
+/// whisper.cpp lists a Metal device even without one and then crashes allocating the model there, before the CPU
+/// retry.
 pub fn use_gpu() -> bool {
     #[cfg(target_os = "macos")]
     {
@@ -35,7 +36,21 @@ pub fn use_gpu() -> bool {
     }
     #[cfg(not(target_os = "macos"))]
     {
+        use whisper_rs::whisper_rs_sys as sys;
+        static GPU: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        // The devices whisper.cpp picks from (whisper_backend_init_gpu). Without a Vulkan driver, or with only a
+        // software one, ggml lists none.
         cfg!(feature = "gpu")
+            && *GPU.get_or_init(|| {
+                // SAFETY: ggml builds its device list once and keeps it for the process; these only read it.
+                (0..unsafe { sys::ggml_backend_dev_count() }).any(|i| {
+                    matches!(
+                        unsafe { sys::ggml_backend_dev_type(sys::ggml_backend_dev_get(i)) },
+                        sys::ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_GPU
+                            | sys::ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_IGPU
+                    )
+                })
+            })
     }
 }
 
