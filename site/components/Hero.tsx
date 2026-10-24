@@ -273,12 +273,13 @@ export function Hero({ release }: { release: Release }) {
         </p>
 
         <LaunchVideo className="mt-10 sm:mt-12" />
+        <span data-waves="swell" aria-hidden className="block w-full" />
 
         <div className="mt-10 w-full sm:mt-12">
           <HeroDownload release={release} />
         </div>
 
-        <div data-waves="swell" className="mt-14 flex w-full justify-center sm:mt-20">
+        <div className="mt-14 flex w-full justify-center sm:mt-20">
           <Fit width={WIDE} height={330} className="hidden lg:block">
             <Pipeline spoken={spoken} />
           </Fit>
