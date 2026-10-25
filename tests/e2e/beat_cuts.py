@@ -326,11 +326,14 @@ def beat_cuts_states(r):
 
     # A title past where the cut ends keeps the video going, so the section says where it really ends.
     r.s.call("window.__nuzky.store.getState().edit({type: 'addText', startUs: 18000000, text: 'Day two', style: {fontSize: 80, color: '#ffffff'}})")
+    # Adding the title selects it; the song's section shows again once the song is selected.
+    r.s.call('window.__nuzky.store.getState().select([arguments[0]])', click['id'])
     past = wait(lambda: (b := beats(r)) and '1 title runs past the cut until 00:21.00, so the video ends there' in b['text'] and b, 10)
     r.check('a title past the cut says where the video then ends', past and 'The cut ends with it on the bar at' in past['text'], beats(r))
     planned = {p['rhythm']: p for p in plans(r, click['id'])['rhythms']}
     r.check('the plan ends the video with the title', all(p['projectEndUs'] == 21000000 and p['pastEnd']['titles'] == 1 for p in planned.values()),
             {k: (p['endUs'], p['projectEndUs'], p['pastEnd']) for k, p in planned.items()})
+    r.s.run(f'{SECTION}?.scrollIntoView({{block: "start"}})')
     r.shot('title-past-cut')
 
     # As an agent can: the click track's asset id now names City walk's file, on a new clip, while nothing is selected.
