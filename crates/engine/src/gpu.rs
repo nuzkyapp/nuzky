@@ -55,12 +55,14 @@ fn nuzky_hdr_to_sdr(rgb: vec3<f32>, transfer: f32) -> vec3<f32> {
 }
 "#;
 
-/// Shrinks what effects drew to the size the layer is shown at. Each output pixel averages taps spread evenly over the
-/// texels it covers, bilinear in premultiplied colour, so lines finer than the output blend instead of being skipped.
+/// One step of shrinking what effects drew to the size the layer is shown at, by at most `SHRINK_STEP` per side. Each
+/// output pixel averages, in premultiplied colour, every texel of the area it covers weighted by how much of it lies
+/// inside, so lines finer than the output blend instead of being skipped. The source is the top-left `size` of its
+/// texture, as earlier steps leave it.
 const SHRINK: &str = r#"
 struct Shrink {
     ratio: vec2<f32>, // texels per output pixel
-    taps: vec2<f32>,
+    size: vec2<f32>,
 };
 @group(0) @binding(0) var<uniform> shrink: Shrink;
 @group(0) @binding(1) var src: texture_2d<f32>;
@@ -71,30 +73,31 @@ fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
     return vec4<f32>(corner.x * 2.0 - 1.0, 1.0 - corner.y * 2.0, 0.0, 1.0);
 }
 
-fn texel(p: vec2<i32>, size: vec2<i32>) -> vec4<f32> {
-    let c = textureLoad(src, clamp(p, vec2<i32>(0), size - 1), 0);
-    return vec4<f32>(c.rgb * c.a, c.a);
-}
-
 @fragment
 fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
-    let size = vec2<i32>(textureDimensions(src));
-    let n = vec2<i32>(shrink.taps);
-    let corner = floor(pos.xy) * shrink.ratio;
+    let lo = floor(pos.xy) * shrink.ratio;
+    let hi = min(lo + shrink.ratio, shrink.size);
+    let first = vec2<i32>(floor(lo));
+    let last = min(vec2<i32>(ceil(hi)) - 1, vec2<i32>(shrink.size) - 1);
     var sum = vec4<f32>(0.0);
-    for (var y = 0; y < n.y; y += 1) {
-        for (var x = 0; x < n.x; x += 1) {
-            let s = corner + (vec2<f32>(f32(x), f32(y)) + 0.5) / vec2<f32>(n) * shrink.ratio - 0.5;
-            let i = vec2<i32>(floor(s));
-            let f = fract(s);
-            let top = mix(texel(i, size), texel(i + vec2<i32>(1, 0), size), f.x);
-            sum += mix(top, mix(texel(i + vec2<i32>(0, 1), size), texel(i + 1, size), f.x), f.y);
+    var weight = 0.0;
+    for (var y = first.y; y <= last.y; y += 1) {
+        let wy = min(hi.y, f32(y + 1)) - max(lo.y, f32(y));
+        for (var x = first.x; x <= last.x; x += 1) {
+            let w = (min(hi.x, f32(x + 1)) - max(lo.x, f32(x))) * wy;
+            let c = textureLoad(src, vec2<i32>(x, y), 0);
+            sum += vec4<f32>(c.rgb * c.a, c.a) * w;
+            weight += w;
         }
     }
-    let c = sum / f32(n.x * n.y);
+    let c = sum / max(weight, 1e-6);
     return vec4<f32>(select(vec3<f32>(0.0), c.rgb / c.a, c.a > 0.0), c.a);
 }
 "#;
+
+/// The most one shrink step divides a side by: at most 25 texels per output pixel, and a 4K picture shown at 60 pixels
+/// wide takes three steps.
+const SHRINK_STEP: u32 = 4;
 
 const SHADER: &str = r#"
 struct Layer {
@@ -1081,19 +1084,30 @@ impl Gpu {
                 params: std::array::from_fn(|row| std::array::from_fn(|column| p[row * 4 + column])),
             };
             let target = &passes[i % 2];
-            self.whole_texture_pass(encoder, pipeline, bytemuck::bytes_of(&uniform), &source, target);
+            self.whole_texture_pass(encoder, pipeline, bytemuck::bytes_of(&uniform), &source, target, (w, h));
             source = target.clone();
             transfer = 0.0;
         }
         let Some(shrunk) = shrunk else { return Ok(source) };
-        let ratio = [w as f32 / shrunk.width() as f32, h as f32 / shrunk.height() as f32];
-        let taps = ratio.map(|r| r.ceil().clamp(1.0, 16.0));
-        let uniform: [f32; 4] = [ratio[0], ratio[1], taps[0], taps[1]];
-        self.whole_texture_pass(encoder, &self.shrink, bytemuck::bytes_of(&uniform), &source, &shrunk);
-        Ok(shrunk)
+        // Steps before the last draw into the top-left of the pass texture the effects no longer need, in turn.
+        let mut spare = passes[layer.effects.len() % 2].clone();
+        let mut from = (w, h);
+        loop {
+            let to = (from.0.div_ceil(SHRINK_STEP).max(shown.0), from.1.div_ceil(SHRINK_STEP).max(shown.1));
+            let target = if to == shown { &shrunk } else { &spare };
+            let uniform: [f32; 4] =
+                [from.0 as f32 / to.0 as f32, from.1 as f32 / to.1 as f32, from.0 as f32, from.1 as f32];
+            self.whole_texture_pass(encoder, &self.shrink, bytemuck::bytes_of(&uniform), &source, target, to);
+            if to == shown {
+                return Ok(shrunk);
+            }
+            (source, spare) = (spare, source);
+            from = to;
+        }
     }
 
-    /// Draws all of `target` with `pipeline` from `input` and a uniform of `contents`.
+    /// Draws the top-left `width` × `height` of `target` with `pipeline` from `input` and a uniform of `contents`,
+    /// clearing the rest.
     fn whole_texture_pass(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -1101,6 +1115,7 @@ impl Gpu {
         contents: &[u8],
         input: &wgpu::Texture,
         target: &wgpu::Texture,
+        (width, height): (u32, u32),
     ) {
         let buffer = self.uniform_buffer("effect", contents);
         let input = input.create_view(&Default::default());
@@ -1129,6 +1144,7 @@ impl Gpu {
             occlusion_query_set: None,
             multiview_mask: None,
         });
+        pass.set_viewport(0.0, 0.0, width as f32, height as f32, 0.0, 1.0);
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &group, &[]);
         pass.draw(0..4, 0..1);

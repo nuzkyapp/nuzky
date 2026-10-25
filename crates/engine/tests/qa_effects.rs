@@ -331,3 +331,57 @@ fn the_effects_stamp_changes_with_the_plugin() {
     assert!(plugin_effects::stamp(&p).contains("missing"));
     assert_eq!(plugin_effects::stamp(&Project::new("None")), "");
 }
+
+/// Two-pixel columns a quarter as bright, one pixel off the grid: a reduction that skips texels lands on the dark ones.
+const COLUMNS: &str = "fn effect(p: Pixel) -> vec4<f32> {
+    if ((u32(floor(p.uv.x * p.size.x)) + 1u) / 2u) % 2u == 1u {
+        return vec4<f32>(p.color.rgb * 0.25, p.color.a);
+    }
+    return p.color;
+}
+";
+
+/// A 4K clip shown at an eighth draws its effect on its own 4K grid, so a preview at an eighth of the canvas shrinks
+/// that grid 64 times. Every texel counts there as it does in the export's eightfold reduction, so fine columns blend
+/// to the same grey in both instead of the preview landing on the dark ones.
+#[test]
+fn a_much_smaller_preview_blends_what_the_export_blends() {
+    if !available() {
+        return;
+    }
+    install("columns", "scanlines", COLUMNS);
+    let d = dir("effects-much-smaller");
+    let grey = d.join("grey.mp4");
+    ff(
+        &["-f", "lavfi", "-i", "color=c=0x909090:size=3840x2160:rate=25:duration=0.12", "-c:v", "libx264", "-crf", "0"],
+        &grey,
+    );
+    let mut p = with_effect(project(&grey, 120_000), "columns");
+    p.canvas.fps = 25;
+    let ClipContent::Media { transform, .. } = &mut p.tracks[0].clips[0].content else { unreachable!() };
+    transform.scale = 0.125;
+    let t = 40_000;
+    // The middle of the clip, which covers canvas pixels 1680..2160 × 945..1215.
+    let mean = |rgba: &[u8], w: usize, k: usize| {
+        let (xs, ys) = (1720 / k..2120 / k, 984 / k..1176 / k);
+        let n = xs.len() * ys.len();
+        ys.flat_map(|y| xs.clone().map(move |x| (y * w + x) * 4)).map(|i| rgba[i] as f64).sum::<f64>() / n as f64
+    };
+
+    let out = d.join("export.mp4");
+    let options = ExportOptions { preset: "ultrafast".into(), crf: 0, replace_existing: true, ..Default::default() };
+    export(&p, &d.join("cache"), &out, &options, &AtomicBool::new(false), |_| {}).unwrap();
+    let size = 3840 * 2160 * 4;
+    let index = (t * 25 / 1_000_000) as usize;
+    let exported = mean(&raw(&out, &[])[index * size..(index + 1) * size], 3840, 1);
+
+    let mut preview = Renderer::new().unwrap();
+    preview.use_proxies(d.join("cache"));
+    preview.use_mattes(d.join("cache"), Pending::Original);
+    preview.set_gpu_timeout(Duration::from_secs(2));
+    let shown = mean(&preview.render(&p, t, 480, 270, Wait::Exact, false).unwrap(), 480, 8);
+    eprintln!("QA effects: an eighth of a 4K clip, export {exported:.1}, preview at an eighth {shown:.1}");
+    let blended = 144.0 * 0.625;
+    assert!((exported - blended).abs() < 3.0, "the export blends the columns: {exported}");
+    assert!((shown - exported).abs() < 3.0, "the preview shows {shown} where the export shows {exported}");
+}
