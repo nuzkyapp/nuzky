@@ -10,7 +10,7 @@ use anyhow::{Context, Result, anyhow, ensure};
 use nuzky_analysis::Beats;
 use nuzky_engine::audio::{ensure_pcm, pcm_path};
 use nuzky_engine::edit::MAIN_TRACK;
-use nuzky_engine::model::{Asset, AssetKind, ClipContent, Project};
+use nuzky_engine::model::{Asset, AssetKind, Clip, ClipContent, Project, TrackKind};
 use nuzky_mcp::beats::{self as planner, Every, MIN_CONFIDENCE, Options, Plan};
 use nuzky_session::{Expect, host::Host};
 use serde::{Deserialize, Serialize};
@@ -93,9 +93,17 @@ pub struct RhythmPlan {
     clips: usize,
     /// Where each new main-track clip starts on the timeline, the first at 0.
     cut_us: Vec<i64>,
+    /// Where the cut main track ends.
     end_us: i64,
+    /// Where the video ends after the cut: later than `end_us` while titles or overlays run past it.
+    project_end_us: i64,
+    past_end: PastEnd,
     /// Clips that show footage shown before, because the videos ran out.
     repeated: usize,
+    /// Cuts that do not show, because no other video was long enough and the shot before goes on across them.
+    continued: usize,
+    /// The beat comes in only after the cut ends, so nothing is cut to it.
+    beat_after_end: bool,
     captions_removed: usize,
     /// The intro before the beat is cut on bar lines, because no video is as long as it.
     intro_cut: bool,
@@ -103,6 +111,16 @@ pub struct RhythmPlan {
     same_as: Option<Rhythm>,
     /// Why this rhythm cannot cut, in words for the user.
     error: Option<String>,
+}
+
+/// Clips other than the song that still run after the cut main track ends, keeping the video going.
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[derive(Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PastEnd {
+    titles: usize,
+    captions: usize,
+    overlays: usize,
 }
 
 #[cfg_attr(test, derive(ts_rs::TS))]
@@ -209,6 +227,39 @@ fn captions_removed(before: &Project, after: &Project) -> usize {
         .count()
 }
 
+/// Sound does not keep the video going, so only pictures and text count.
+fn past_end(after: &Project, end_us: i64) -> PastEnd {
+    let mut past = PastEnd::default();
+    for track in after.tracks.iter().filter(|t| t.id != MAIN_TRACK && t.kind != TrackKind::Audio) {
+        let n = track.clips.iter().filter(|c| c.end_us() > end_us).count();
+        match track.kind {
+            TrackKind::Text if track.is_captions() => past.captions += n,
+            TrackKind::Text => past.titles += n,
+            _ => past.overlays += n,
+        }
+    }
+    past
+}
+
+/// Main-track cuts after which the same footage goes on, so the cut does not show.
+fn continued(after: &Project) -> usize {
+    // The file, and where in it the clip starts and stops; a picture is the same all through.
+    fn source<'a>(after: &Project, c: &'a Clip) -> Option<(&'a str, i64, i64)> {
+        let ClipContent::Media { asset_id, source_in_us, speed, .. } = &c.content else { return None };
+        let picture = after.asset(asset_id).is_some_and(|a| a.kind == AssetKind::Image);
+        let used = if picture { 0 } else { (c.duration_us as f64 * *speed as f64).ceil() as i64 };
+        Some((asset_id, *source_in_us, *source_in_us + used))
+    }
+    let Some(main) = after.tracks.iter().find(|t| t.id == MAIN_TRACK) else { return 0 };
+    main.clips
+        .windows(2)
+        .filter(|w| match (source(after, &w[0]), source(after, &w[1])) {
+            (Some((a, _, out)), Some((b, at, _))) => a == b && (at - out).abs() <= 1,
+            _ => false,
+        })
+        .count()
+}
+
 fn plans(cuts: &BeatCuts, host: &Host, clip_id: &str) -> Result<Option<BeatPlans>> {
     let state = host.session.state()?;
     let project = &state.project;
@@ -259,6 +310,10 @@ fn plans(cuts: &BeatCuts, host: &Host, clip_id: &str) -> Result<Option<BeatPlans
                         clips: plan.cut_us.len(),
                         intro_cut: plan.cut_us.iter().any(|&t| t > 0 && t < beat_from - 1),
                         captions_removed: captions_removed(base, &after),
+                        project_end_us: after.duration_us(),
+                        past_end: past_end(&after, plan.end_us),
+                        continued: continued(&after),
+                        beat_after_end: beat_from >= plan.end_us,
                         cut_us: plan.cut_us,
                         end_us: plan.end_us,
                         repeated: plan.repeated,
@@ -271,7 +326,11 @@ fn plans(cuts: &BeatCuts, host: &Host, clip_id: &str) -> Result<Option<BeatPlans
                     clips: 0,
                     cut_us: Vec::new(),
                     end_us: 0,
+                    project_end_us: 0,
+                    past_end: PastEnd::default(),
                     repeated: 0,
+                    continued: 0,
+                    beat_after_end: false,
                     captions_removed: 0,
                     intro_cut: false,
                     same_as: None,
@@ -426,4 +485,74 @@ pub async fn cut_to_beat(
     })
     .await
     .map_err(crate::err)?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nuzky_analysis::{BeatDrop, Section};
+    use nuzky_engine::edit::EditCmd;
+    use nuzky_engine::model::TextStyle;
+
+    fn asset(id: &str, kind: AssetKind, duration_us: i64) -> Asset {
+        Asset {
+            id: id.into(),
+            name: id.into(),
+            path: format!("/{id}"),
+            kind,
+            duration_us,
+            width: 1080,
+            height: 1920,
+            fps: 30.0,
+            has_audio: true,
+            rotation: 0,
+            mirror: false,
+            credit: None,
+            part: None,
+        }
+    }
+
+    /// The planner's own case: two 20 s takes, where the second goes on across the last three cuts, a 60 s song and
+    /// titles at 2 s, 39 s and 45 s, the last two past where the cut ends.
+    #[test]
+    fn the_plan_counts_cuts_that_do_not_show_and_titles_that_keep_the_video_going() {
+        let mut p = Project::new("beats");
+        let assets = vec![
+            asset("red", AssetKind::Video, 20_000_000),
+            asset("blue", AssetKind::Video, 20_000_000),
+            asset("song", AssetKind::Audio, 60_000_000),
+        ];
+        p.apply(EditCmd::AddAssets { assets }).unwrap();
+        for id in ["red", "blue", "song"] {
+            p.apply(EditCmd::AddClip { asset_id: id.into(), start_us: (id == "song").then_some(0), track_id: None })
+                .unwrap();
+        }
+        let style: TextStyle =
+            serde_json::from_value(serde_json::json!({"fontSize": 60.0, "color": "#ffffff"})).unwrap();
+        for start_us in [2_000_000, 39_000_000, 45_000_000] {
+            p.apply(EditCmd::AddText { start_us, text: "Hi".into(), style: style.clone() }).unwrap();
+        }
+        let song = p.tracks.iter().find(|t| t.kind == TrackKind::Audio).unwrap().clips[0].id.clone();
+        let beats_us: Vec<i64> = (0..90).map(|i| 333_333 + i * 600_000).collect();
+        let beats = Beats {
+            bpm: 100.0,
+            confidence: 0.9,
+            steady_from_us: beats_us[4],
+            first_downbeat: 0,
+            drops: vec![BeatDrop { beat: 12, at_us: beats_us[12], rise_db: 9.0 }],
+            sections: vec![Section { beat: 0, at_us: beats_us[0], level_db: -20.0 }],
+            beats_us,
+        };
+        let (plan, after) = dry_run(&p, &beats, &song, Rhythm::Builds, false).unwrap();
+        assert!(
+            plan.warnings.iter().any(|w| w.starts_with("no other shot was long enough, so 3 of")),
+            "{:?}",
+            plan.warnings
+        );
+        assert_eq!(continued(&after), 3);
+        let past = past_end(&after, plan.end_us);
+        assert_eq!((past.titles, past.captions, past.overlays), (2, 0, 0));
+        assert_eq!(after.duration_us(), 48_000_000);
+        assert!(plan.end_us < 39_000_000, "{}", plan.end_us);
+    }
 }

@@ -11,7 +11,7 @@ const MIN_GAP_PX = 4;
  * drop. Source times go through the clip's source in and speed, as the waveform's do. Not subscribed to the playhead.
  */
 export const BeatTicks = memo(function BeatTicks({
-  assetId,
+  path,
   sourceInUs,
   speed,
   zoom,
@@ -19,7 +19,8 @@ export const BeatTicks = memo(function BeatTicks({
   height,
   visible,
 }: {
-  assetId: string;
+  /** The song's file: the beat belongs to it, not to an asset id that can name another file. */
+  path: string;
   sourceInUs: number;
   speed: number;
   zoom: number;
@@ -28,7 +29,7 @@ export const BeatTicks = memo(function BeatTicks({
   /** The part of the clip on screen, in clip pixels. */
   visible: [number, number];
 }) {
-  const song = useBeats((s) => s.songs[assetId]);
+  const song = useBeats((s) => s.songs[path]);
   if (!song || song.beatsUs.length < 2) return null;
   const x = (us: number) => ((us - sourceInUs) / speed / US) * zoom;
   const gap = x(song.beatsUs[1]) - x(song.beatsUs[0]);

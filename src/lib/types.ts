@@ -1013,6 +1013,15 @@ export type Part = {
   endUs: number,
 };
 
+/**
+ * Clips other than the song that still run after the cut main track ends, keeping the video going.
+ */
+export type PastEnd = {
+  titles: number,
+  captions: number,
+  overlays: number,
+};
+
 export type PlannedRecording = {
   path: string,
   name: string,
@@ -1209,11 +1218,27 @@ export type RhythmPlan = {
    * Where each new main-track clip starts on the timeline, the first at 0.
    */
   cutUs: Array<number>,
+  /**
+   * Where the cut main track ends.
+   */
   endUs: number,
+  /**
+   * Where the video ends after the cut: later than `end_us` while titles or overlays run past it.
+   */
+  projectEndUs: number,
+  pastEnd: PastEnd,
   /**
    * Clips that show footage shown before, because the videos ran out.
    */
   repeated: number,
+  /**
+   * Cuts that do not show, because no other video was long enough and the shot before goes on across them.
+   */
+  continued: number,
+  /**
+   * The beat comes in only after the cut ends, so nothing is cut to it.
+   */
+  beatAfterEnd: boolean,
   captionsRemoved: number,
   /**
    * The intro before the beat is cut on bar lines, because no video is as long as it.

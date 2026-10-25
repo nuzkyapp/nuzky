@@ -261,9 +261,10 @@ def finding(r):
     return b and 'Finding the beat in Click track' in b['text'] and b
 
 
-@flow('beat-cuts-states', 'The Beats section shows finding the beat with its progress and a Stop in the top bar that stops it '
-      'within seconds, says where a shorter song ends the video, and for a sound without a steady beat explains it '
-      'without rhythms or a Cut button', before=states_setup)
+@flow('beat-cuts-states', 'The Beats section shows finding the beat with its progress and a Stop, in the section and in the '
+      'top bar, that stops it within seconds, shows a missing song file instead of its old plan, says where a shorter song '
+      'and a title past the cut end the video, drops the ticks of a song whose asset now names another file, and for a '
+      'sound without a steady beat explains it without rhythms or a Cut button', before=states_setup)
 def beat_cuts_states(r):
     resize(r, 1440, 900)
     r.import_media(*clips_of(r, 3))
@@ -291,9 +292,30 @@ def beat_cuts_states(r):
     r.s.run(f'{SECTION}?.scrollIntoView({{block: "start"}})')
     r.shot('finding-1024')
     resize(r, 1440, 900)
+    # An export or captions would take the top bar, so the section has its own Stop.
+    r.check('the section has its own Stop', r.s.run("return !!document.querySelector('[data-stop-beats]')"))
+    r.s.run("document.querySelector('[data-stop-beats]').focus(); document.querySelector('[data-stop-beats]').click()")
+    stopped = wait(lambda: (b := beats(r)) and 'Stopped before the beat was found.' in b['text'] and b, 10, 0.1)
+    r.check("the section's Stop stops finding", stopped, beats(r))
+    focused = r.s.run("return document.activeElement?.hasAttribute('data-find-beats') ?? false")
+    r.check('the keyboard moves to Find the beat', focused, r.s.run('return document.activeElement?.outerHTML.slice(0, 80) ?? null'))
+    r.s.run("document.querySelector('[data-find-beats]').click()")
+    r.check('Find the beat starts it once more', wait(lambda: finding(r), 10), beats(r))
     found = wait(lambda: (b := beats(r)) and len(b['rows']) == 3 and b, 120, 0.5)
     r.check('the click track then offers rhythms', found, beats(r))
     r.check('its tempo is 100 BPM', found and '100 BPM' in found['text'], found and found['text'][:60])
+
+    # The song's file goes missing after its plans were made: the section says so instead of offering the old plan.
+    song_file, away = r.work / 'Click track.opus', r.work / 'Click track gone.opus'
+    song_file.rename(away)
+    try:
+        r.s.call("window.__nuzky.store.getState().edit({type: 'renameProject', name: 'Trip'})")
+        missing = wait(lambda: (b := beats(r)) and "The song's file is missing." in b['text'] and b, 10)
+        r.check('a missing song file shows its error and no rhythm or Cut', missing and not missing['rows'] and not missing['cut'], beats(r))
+    finally:
+        away.rename(song_file)
+    r.s.run("document.querySelector('[data-find-beats]').click()")
+    r.check('Try again with the file back offers the rhythms again', wait(lambda: (b := beats(r)) and len(b['rows']) == 3, 10), beats(r))
 
     # Trimmed to 20 s, the song is shorter than the 24 s of videos: the section says where the video ends.
     r.s.call("window.__nuzky.store.getState().edit({type: 'trimClip', clipId: arguments[0], startUs: 0, durationUs: 20000000, sourceInUs: null})", click['id'])
@@ -302,9 +324,31 @@ def beat_cuts_states(r):
     r.check('a beat from the first second names no intro', shorter and 'beat from' not in shorter['text'] and 'after its intro' not in shorter['text'], shorter and shorter['text'][:200])
     r.shot('shorter')
 
-    r.s.call("window.__nuzky.store.getState().edit({type: 'deleteClips', clipIds: [arguments[0]]})", click['id'])
-    walk = add_song(r, 'City walk.m4a')
-    r.check('City walk lies on a music track', walk)
+    # A title past where the cut ends keeps the video going, so the section says where it really ends.
+    r.s.call("window.__nuzky.store.getState().edit({type: 'addText', startUs: 18000000, text: 'Day two', style: {fontSize: 80, color: '#ffffff'}})")
+    past = wait(lambda: (b := beats(r)) and '1 title runs past the cut until 00:21.00, so the video ends there' in b['text'] and b, 10)
+    r.check('a title past the cut says where the video then ends', past and 'The cut ends with it on the bar at' in past['text'], beats(r))
+    planned = {p['rhythm']: p for p in plans(r, click['id'])['rhythms']}
+    r.check('the plan ends the video with the title', all(p['projectEndUs'] == 21000000 and p['pastEnd']['titles'] == 1 for p in planned.values()),
+            {k: (p['endUs'], p['projectEndUs'], p['pastEnd']) for k, p in planned.items()})
+    r.shot('title-past-cut')
+
+    # As an agent can: the click track's asset id now names City walk's file, on a new clip, while nothing is selected.
+    r.check('the click track shows its ticks', wait(lambda: ticks(r, click['id'])['ticks'], 5), ticks(r, click['id']))
+    r.import_media(r.work / 'City walk.m4a')
+    r.s.run('window.__nuzky.store.getState().select([])')
+    r.s.call("""(() => { const st = window.__nuzky.store.getState(); const assets = st.snap.project.assets;
+        const id = arguments[0], file = assets.find((a) => a.name === 'City walk.m4a');
+        return st.edit([{type: 'removeAsset', assetId: id}, {type: 'addAssets', assets: [{...file, id}]}, {type: 'addClip', assetId: id, startUs: 0, trackId: null}]); })()""",
+             click['content']['assetId'])
+    walk = wait(lambda: next((c for t in r.s.run(PROJECT)['tracks'] if t['kind'] == 'audio' and t['keepInPlace'] for c in t['clips']
+                              if c['content']['assetId'] == click['content']['assetId']), None), 10)
+    r.check('City walk lies on a music track under the old id', walk)
+    # At once, before finding City walk's beat could clear what an asset id kept, and still a moment later.
+    drawn = walk and wait(lambda: ticks(r, walk['id'])['box'], 5, 0.05)
+    r.check("the new file shows none of the old song's ticks", drawn and not ticks(r, walk['id'])['ticks'], walk and ticks(r, walk['id']))
+    time.sleep(1)
+    r.check("nor a moment later", walk and not ticks(r, walk['id'])['ticks'], walk and ticks(r, walk['id']))
     r.check('Cut to beat is offered for it', reveal(r))
     plain = wait(lambda: (b := beats(r)) and 'No steady beat in City walk,' in b['text'] and b, 30)
     r.check('a sound without a steady beat says so and offers no rhythm or Cut', plain and not plain['rows'] and not plain['cut']

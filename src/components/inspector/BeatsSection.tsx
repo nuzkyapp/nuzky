@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { AlertTriangle, Check, Scissors } from "lucide-react";
+import { AlertTriangle, Check, Scissors, X } from "lucide-react";
 import { RHYTHMS, cutToBeat, loadBeats, useBeats } from "../../lib/beats";
 import { api, errorText, plainError } from "../../lib/api";
 import { useEditor } from "../../lib/store";
 import { US, formatTime } from "../../lib/time";
-import type { Asset, BeatPlans, Clip, Rhythm, RhythmPlan } from "../../lib/types";
+import type { Asset, BeatPlans, Clip, PastEnd, Rhythm, RhythmPlan } from "../../lib/types";
 import { Button, Checkbox, ProgressBar, Section, lockedProps, useLockReason } from "../ui";
 
 const LINE = "text-[12px] leading-[17px] text-muted";
@@ -24,6 +24,12 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 const seconds = (us: number) => `${(us / US).toFixed(1)} s`;
 /** Where the beat comes in after an intro worth naming; a beat from the first second has none. */
 const intro = (beatFromUs: number | null) => (beatFromUs !== null && beatFromUs >= US ? beatFromUs : null);
+
+/** "1 title and 2 overlays": what keeps the video going after the cut ends. */
+function layers({ titles, captions, overlays }: PastEnd) {
+  const named = [titles > 0 && plural(titles, "title"), captions > 0 && plural(captions, "caption"), overlays > 0 && plural(overlays, "overlay")].filter((n): n is string => !!n);
+  return named.length > 1 ? `${named.slice(0, -1).join(", ")} and ${named.at(-1)}` : named[0];
+}
 
 function footage(plans: BeatPlans) {
   const { videos, pictures } = plans;
@@ -52,6 +58,9 @@ function describe(plan: RhythmPlan, plans: BeatPlans, song: string) {
 function Consequences({ plan, plans, song, keepSound, children }: { plan: RhythmPlan; plans: BeatPlans; song: string; keepSound: boolean; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const shorter = plans.songEndUs < plans.footageEndUs;
+  const past = plan.pastEnd.titles + plan.pastEnd.captions + plan.pastEnd.overlays;
+  // Titles and overlays past the cut keep the video going, so it ends with the last of them.
+  const runsOn = past > 0 && plan.projectEndUs > plan.endUs;
   const line = [
     `${plural(plan.clips, "clip")} from ${footage(plans)}`,
     keepSound ? "their own sound kept" : "their sound muted",
@@ -66,14 +75,20 @@ function Consequences({ plan, plans, song, keepSound, children }: { plan: Rhythm
     plan.repeated > 0 && `Your videos run out, so ${plan.repeated} of the ${plan.clips} clips show footage again. More videos avoid it.`,
     before && (plan.introCut ? `${before} change shot on bar lines, as no video is that long.` : `${before} stay one shot.`),
     plan.captionsRemoved > 0 ? "The captions of the old speech go with it. Titles and stickers keep their time." : "Titles and stickers keep their time.",
-    !shorter && `Ends on the bar at ${formatTime(plan.endUs)}.${plan.endUs < plans.songEndUs ? ` ${song} fades out over it.` : ""}`,
+    !shorter && `${runsOn ? "The cut ends" : "Ends"} on the bar at ${formatTime(plan.endUs)}.${plan.endUs < plans.songEndUs ? ` ${song} fades out over it.` : ""}`,
     plans.coverFrame && "Your cover shows a frame of the video. Choose it again after cutting.",
   ].filter((d): d is string => !!d);
   return (
     <>
       {plan.repeated > 0 ? <Warning>{line}</Warning> : <p className={`tabular ${LINE}`}>{line}</p>}
-      {shorter && <Warning>{`${song} is shorter. The video ends with it on the bar at ${formatTime(plan.endUs)}, ${seconds(plans.footageEndUs - plan.endUs)} shorter.`}</Warning>}
-      {plans.videos + plans.pictures === 1 && plan.clips > 1 && <Warning>Only one video, so each clip goes on where the last stopped and the cuts hardly show.</Warning>}
+      {shorter && <Warning>{`${song} is shorter. ${runsOn ? "The cut ends" : "The video ends"} with it on the bar at ${formatTime(plan.endUs)}, ${seconds(plans.footageEndUs - plan.endUs)} shorter.`}</Warning>}
+      {runsOn && <Warning>{`${layers(plan.pastEnd)} ${past === 1 ? "runs" : "run"} past the cut until ${formatTime(plan.projectEndUs)}, so the video ends there, ${seconds(plan.projectEndUs - plan.endUs)} after the last clip.`}</Warning>}
+      {plans.videos + plans.pictures === 1 && plan.clips > 1 ? (
+        <Warning>Only one video, so each clip goes on where the last stopped and the cuts hardly show.</Warning>
+      ) : (
+        plan.continued > 0 && <Warning>{`${plural(plan.continued, "cut")} won't show: no other video was long enough there, so the shot goes on across ${plan.continued === 1 ? "it" : "them"}.`}</Warning>
+      )}
+      {plan.beatAfterEnd && plans.beatFromUs !== null && <Warning>{`The beat comes in at ${formatTime(plans.beatFromUs, false)}, after the video ends, so nothing is cut to it.`}</Warning>}
       {children}
       <p className={LINE}>{describe(plan, plans, song)}</p>
       <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="-my-1 self-start rounded-md py-0.5 text-[12px] font-medium text-accent hover:underline">
@@ -108,15 +123,23 @@ export function BeatsSection({ clip, asset }: { clip: Clip; asset: Asset }) {
   const cutting = useBeats((s) => s.cutting);
   const reveal = useBeats((s) => s.reveal === clip.id);
   const section = useRef<HTMLElement>(null);
+  const stopped = useRef(false);
   const song = songName(asset.name);
   const finding = job?.status === "running";
   // Finding starts by itself until it failed or was stopped; then it waits for Try again.
   const find = !job || job.status === "done";
 
   useEffect(() => {
-    void loadBeats(clip.id, asset.id, find);
+    void loadBeats(clip.id, find);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the plans follow the project; the job's end loads them itself
   }, [clip.id, asset.id, revision]);
+
+  // Stop went away with the progress, so the focus goes to Find the beat, which took its place.
+  useEffect(() => {
+    if (job?.status !== "cancelled" || !stopped.current) return;
+    stopped.current = false;
+    section.current?.querySelector<HTMLElement>("[data-find-beats]")?.focus();
+  }, [job?.status]);
 
   const ready = !!plans && plans.clipId === clip.id;
   useEffect(() => {
@@ -148,7 +171,7 @@ export function BeatsSection({ clip, asset }: { clip: Clip; asset: Asset }) {
     if (cutting || r.error) return;
     // After a cut, picking is cutting: it replaces that cut, or recuts the clips as they are.
     if (current) {
-      if (!(current.newest && r.rhythm === current.rhythm)) void cutToBeat(clip.id, asset.id, song, r.rhythm);
+      if (!(current.newest && r.rhythm === current.rhythm)) void cutToBeat(clip.id, song, r.rhythm);
     } else useBeats.setState((s) => ({ chosen: { ...s.chosen, [clip.id]: r.rhythm } }));
   };
   const retry = () => {
@@ -162,7 +185,11 @@ export function BeatsSection({ clip, asset }: { clip: Clip; asset: Asset }) {
       delete errors[clip.id];
       return { errors };
     });
-    void api.findBeats(clip.id, useEditor.getState().snap?.sessionEpoch).catch((e) => useBeats.setState((s) => ({ errors: { ...s.errors, [clip.id]: plainError(errorText(e)) } })));
+    // With the beat already known, what failed was planning, which loads again.
+    api
+      .findBeats(clip.id, useEditor.getState().snap?.sessionEpoch)
+      .then((id) => (id === null ? loadBeats(clip.id, false) : undefined))
+      .catch((e) => useBeats.setState((s) => ({ errors: { ...s.errors, [clip.id]: plainError(errorText(e)) } })));
   };
 
   const cutRow = plan && (
@@ -174,7 +201,7 @@ export function BeatsSection({ clip, asset }: { clip: Clip; asset: Asset }) {
         data-cut-to-beat
         disabled={cutting || !!plan.error}
         disabledReason={plan.error ?? "Cutting…"}
-        onClick={() => pick && void cutToBeat(clip.id, asset.id, song, pick)}
+        onClick={() => pick && void cutToBeat(clip.id, song, pick)}
       >
         <Scissors size={14} /> {cutting ? "Cutting…" : "Cut to the beat"}
       </Button>
@@ -186,15 +213,29 @@ export function BeatsSection({ clip, asset }: { clip: Clip; asset: Asset }) {
     const doing = `Finding the beat in ${song}`;
     const progress = job.progress > 0 ? job.progress : (preparing ?? 0) * 0.95;
     body = (
-      <div className="flex flex-col gap-1.5" role="status">
-        <span className={`tabular ${LINE}`}>
-          {doing}
-          {progress > 0 && ` · ${Math.round(progress * 100)}%`}
-        </span>
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-center gap-2">
+          <span role="status" className={`tabular min-w-0 flex-1 ${LINE}`}>
+            {doing}
+            {progress > 0 && ` · ${Math.round(progress * 100)}%`}
+          </span>
+          <Button
+            variant="ghost"
+            className="h-7 shrink-0 px-2"
+            title="Stop finding the beat. Nothing in the video changes."
+            data-stop-beats
+            onClick={() => {
+              stopped.current = true;
+              void api.cancelJob(job.id);
+            }}
+          >
+            <X size={14} /> Stop
+          </Button>
+        </div>
         <ProgressBar value={progress} label={doing} />
       </div>
     );
-  } else if (job?.status === "failed" || job?.status === "cancelled" || (error && !ready)) {
+  } else if (job?.status === "failed" || job?.status === "cancelled" || error) {
     body = (
       <>
         {job?.status === "cancelled" ? (
@@ -205,7 +246,7 @@ export function BeatsSection({ clip, asset }: { clip: Clip; asset: Asset }) {
             {job?.status === "failed" ? `The beat could not be found: ${plainError(job.message ?? "").replace(/\.$/, "")}.` : error}
           </p>
         )}
-        <Button className="self-start" onClick={retry}>
+        <Button className="self-start" onClick={retry} data-find-beats>
           {job?.status === "cancelled" ? "Find the beat" : "Try again"}
         </Button>
       </>

@@ -16,7 +16,7 @@ type Beats = {
   /** By music clip: what each rhythm would cut, or why that cannot be known. */
   plans: Record<string, BeatPlans>;
   errors: Record<string, string>;
-  /** By song file, for the ticks on its clips; only songs with a steady beat. */
+  /** By the song's file path, for the ticks on its clips; only songs with a steady beat. */
   songs: Record<string, SongBeats>;
   chosen: Record<string, Rhythm>;
   made: Record<string, MadeCut>;
@@ -27,6 +27,11 @@ type Beats = {
 };
 
 export const useBeats = create<Beats>(() => ({ plans: {}, errors: {}, songs: {}, chosen: {}, made: {}, keepSound: false, cutting: false, reveal: null }));
+
+// Another project can reuse clip ids and asset paths for other files.
+useEditor.subscribe((s, prev) => {
+  if (s.snap?.sessionEpoch !== prev.snap?.sessionEpoch) useBeats.setState({ plans: {}, errors: {}, songs: {}, chosen: {}, made: {} });
+});
 
 /** The song a beat cut goes to: a sound on a music track, the one an agent's cut_to_beats would take when it is alone. */
 export function musicClipOf(project: Project): { clipId: string; name: string } | null {
@@ -41,39 +46,72 @@ export function musicClipOf(project: Project): { clipId: string; name: string } 
   return null;
 }
 
-const loading = new Map<string, Promise<void>>();
+type Load = { revision?: number; find: boolean; again: boolean; done: Promise<void> };
+const loading = new Map<string, Load>();
 
 /**
  * What each rhythm would cut for this music clip, against the project as it is. When the song's beat is not known
- * yet and `find` is set, it starts finding it; the job's end loads the plans again.
+ * yet and `find` is set, it starts finding it; the job's end loads the plans again. One request per clip at a time:
+ * a call while the project moved on asks again once that one ends, and only the newest answer is kept.
  */
-export function loadBeats(clipId: string, assetId: string, find: boolean): Promise<void> {
-  const key = `${clipId}:${find}`;
-  const running = loading.get(key);
-  if (running) return running;
-  const epoch = useEditor.getState().snap?.sessionEpoch;
-  const done = (async () => {
+export function loadBeats(clipId: string, find: boolean): Promise<void> {
+  const running = loading.get(clipId);
+  if (running) {
+    if (running.revision !== useEditor.getState().snap?.revision || (find && !running.find)) {
+      running.again = true;
+      running.find ||= find;
+    }
+    return running.done;
+  }
+  const load: Load = { find, again: false, done: Promise.resolve() };
+  load.done = (async () => {
     try {
-      const plans = await api.beatPlans(clipId, epoch);
-      if (plans) {
-        useBeats.setState((s) => {
-          const errors = { ...s.errors };
-          delete errors[clipId];
-          const songs = { ...s.songs };
-          if (plans.steady) songs[assetId] = plans.song;
-          else delete songs[assetId];
-          return { plans: { ...s.plans, [clipId]: plans }, errors, songs };
-        });
-      } else if (find) await api.findBeats(clipId, epoch);
-    } catch (e) {
-      const text = errorText(e);
-      if (!text.startsWith("EPOCH_CHANGED")) useBeats.setState((s) => ({ errors: { ...s.errors, [clipId]: plainError(text) } }));
+      do {
+        load.again = false;
+        await loadOnce(clipId, load);
+      } while (load.again);
     } finally {
-      loading.delete(key);
+      loading.delete(clipId);
     }
   })();
-  loading.set(key, done);
-  return done;
+  loading.set(clipId, load);
+  return load.done;
+}
+
+async function loadOnce(clipId: string, load: Load) {
+  const snap = useEditor.getState().snap;
+  if (!snap) return;
+  load.revision = snap.revision;
+  const epoch = snap.sessionEpoch;
+  const content = snap.project.tracks.flatMap((t) => t.clips).find((c) => c.id === clipId)?.content;
+  const path = content?.type === "media" ? snap.project.assets.find((a) => a.id === content.assetId)?.path : undefined;
+  // An answer for a project that changed since is dropped; the next request brings the newest.
+  const current = () => !load.again && useEditor.getState().snap?.sessionEpoch === epoch;
+  try {
+    const plans = await api.beatPlans(clipId, epoch);
+    if (!current()) return;
+    useBeats.setState((s) => {
+      const errors = { ...s.errors };
+      delete errors[clipId];
+      const all = { ...s.plans };
+      if (plans) all[clipId] = plans;
+      else delete all[clipId];
+      const songs = { ...s.songs };
+      if (path && plans?.steady) songs[path] = plans.song;
+      else if (path) delete songs[path];
+      return { plans: all, errors, songs };
+    });
+    if (!plans && load.find) await api.findBeats(clipId, epoch);
+  } catch (e) {
+    const text = errorText(e);
+    if (!current() || text.startsWith("EPOCH_CHANGED")) return;
+    // The plans were for the project before; the latest error is what holds now.
+    useBeats.setState((s) => {
+      const plans = { ...s.plans };
+      delete plans[clipId];
+      return { plans, errors: { ...s.errors, [clipId]: plainError(text) } };
+    });
+  }
 }
 
 /** Finding a song's beat ended: the plans of its clips on screen come again. */
@@ -81,12 +119,12 @@ export function onBeatsFound(assetId: string) {
   const project = useEditor.getState().snap?.project;
   if (!project) return;
   for (const clip of project.tracks.flatMap((t) => t.clips)) {
-    if (clip.content.type === "media" && clip.content.assetId === assetId) void loadBeats(clip.id, assetId, false);
+    if (clip.content.type === "media" && clip.content.assetId === assetId) void loadBeats(clip.id, false);
   }
 }
 
 /** Cuts the main track to the song in `rhythm` as one undo step and offers Undo. */
-export async function cutToBeat(clipId: string, assetId: string, songName: string, rhythm: Rhythm) {
+export async function cutToBeat(clipId: string, songName: string, rhythm: Rhythm) {
   if (aiLocked() || useBeats.getState().cutting) return;
   const keepSound = useBeats.getState().keepSound;
   useBeats.setState({ cutting: true });
@@ -106,5 +144,5 @@ export async function cutToBeat(clipId: string, assetId: string, songName: strin
       ? { kind: "warning", text: `${text}. Your videos ran out, so ${done.repeated === 1 ? "1 clip shows" : `${done.repeated} clips show`} footage again.`, action: undoAction(done.snapshot) }
       : { kind: "info", text, action: undoAction(done.snapshot) },
   );
-  await loadBeats(clipId, assetId, false);
+  await loadBeats(clipId, false);
 }

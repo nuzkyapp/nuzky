@@ -162,7 +162,7 @@ export const ClipView = memo(function ClipView({
       {sound && asset && c.type === "media" && (
         <Waveform assetId={asset.id} sourceInUs={sourceInUs} durationUs={durationUs} speed={speed} gain={c.volume} width={width} visible={local} color="#5fd497" className="absolute top-[5px] h-[calc(100%-8px)]" />
       )}
-      {sound && asset && c.type === "media" && <BeatTicks assetId={asset.id} sourceInUs={sourceInUs} speed={speed} zoom={zoom} width={width} height={innerH} visible={local} />}
+      {sound && asset && c.type === "media" && <BeatTicks path={asset.path} sourceInUs={sourceInUs} speed={speed} zoom={zoom} width={width} height={innerH} visible={local} />}
       {(fadeIn > 0 || fadeOut > 0) && (
         // The fades as ramps over the waveform: the shaded corner above the line is how much quieter the sound plays there.
         // The line has a dark edge, like the snap guide, so it stays visible over loud sound.
