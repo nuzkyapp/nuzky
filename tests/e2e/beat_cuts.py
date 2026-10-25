@@ -183,6 +183,9 @@ def beat_cuts(r):
     finally:
         bridge.close()
     wait(lambda: (b := beats(r)) and not b['cut']['disabled'], 10)
+    # The stand-in agent's run ends with its own toast, which is not part of a person's cut.
+    wait(lambda: r.s.run('return window.__nuzky.store.getState().toasts.some((t) => t.text.startsWith("AI edit done"))'), 5)
+    r.s.run('const s = window.__nuzky.store.getState(); s.toasts.filter((t) => t.text.startsWith("AI edit done")).forEach((t) => s.dismissToast(t.id))')
 
     r.s.run('document.querySelector(\'[data-rhythm="fast"]\').click()')
     chosen = wait(lambda: (b := beats(r)) and next(row for row in b['rows'] if row['pressed'])['rhythm'] == 'fast' and b, 5)
