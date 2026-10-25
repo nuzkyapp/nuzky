@@ -858,6 +858,13 @@ fn sandbox<T>(
         Err(_) if Instant::now() >= deadline => {
             bail!("PLUGIN_TIMEOUT: the plugin ran longer than {} seconds and was stopped", limit.as_secs())
         }
+        Err(message) if message.ends_with("InternalError: out of memory") => {
+            bail!("PLUGIN_OUT_OF_MEMORY: the plugin's script took more than 256 MB of memory and was stopped")
+        }
+        // QuickJS throws null when it runs out of memory while building its own error.
+        Err(message) if message == "threw null" => {
+            bail!("{failed}: the script threw null, which also happens when it runs out of its 256 MB of memory")
+        }
         Err(message) => bail!("{failed}: {message}"),
     }
 }
@@ -918,6 +925,22 @@ fn thrown(ctx: &Ctx, error: rquickjs::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn failure(script: &str) -> String {
+        let run = |_: &Ctx, run: Function| run.call::<_, rquickjs::Value>(()).map(drop);
+        let logs = Logs::default();
+        sandbox(script, "PLUGIN_FAILED", Duration::from_secs(20), logs, Rc::new(|_| {}), run).unwrap_err().to_string()
+    }
+
+    /// A script that fills QuickJS's 256 MB fails with an error or with a bare null, never with what it allocated.
+    #[test]
+    fn a_script_that_runs_out_of_memory_says_so() {
+        let arrays = failure("function run() { const a = []; for (;;) a.push(new Float64Array(1 << 20)); }");
+        assert!(arrays.starts_with("PLUGIN_OUT_OF_MEMORY: the plugin's script took more than 256 MB"), "{arrays}");
+        let strings = failure("function run() { const a = []; for (;;) a.push(String(Math.random()).repeat(100)); }");
+        let said = strings.starts_with("PLUGIN_OUT_OF_MEMORY") || strings.ends_with("runs out of its 256 MB of memory");
+        assert!(said, "{strings}");
+    }
 
     /// The guide's JSON is what plugins copy, so a renamed edit or field must fail here before it fails them.
     #[test]
