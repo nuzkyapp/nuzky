@@ -284,7 +284,8 @@ export function Timeline({ height }: { height: number }) {
   const tracks = useMemo(() => (drawn ? displayTracks(drawn) : []), [drawn]);
   const duration = drawn ? contentEnd(drawn) : 0;
   // A shorter preview never narrows the lanes, so the scroll position survives it.
-  const laneWidth = Math.max(view.width - HEADER_W, (Math.max(duration, project ? contentEnd(project) : 0) / US + 30) * zoom);
+  const lanesShown = view.width - HEADER_W;
+  const laneWidth = Math.max(lanesShown, (Math.max(duration, project ? contentEnd(project) : 0) / US) * zoom + lanesShown / 2);
   // Clips get the window they draw filmstrip tiles in. It moves in steps, with at least 200 px of margin on
   // each side, so scrolling re-renders the clips once per step instead of on every scroll event.
   const windowFrom = Math.floor(view.left / VISIBLE_STEP) * VISIBLE_STEP;
@@ -660,7 +661,8 @@ export function Timeline({ height }: { height: number }) {
           {/* Ruler */}
           <div className="sticky top-0 z-40 flex shrink-0" style={{ height: RULER_H }}>
             <div className="shrink-0" style={{ width: HEADER_W }} />
-            <div data-ruler className="relative flex-1 cursor-pointer border-b border-white/[.07] bg-panel" onPointerDown={startScrub}>
+            {/* Clipped, or labels past the lanes' end would widen the scroll, which draws more labels, without end. */}
+            <div data-ruler className="relative flex-1 cursor-pointer overflow-x-clip border-b border-white/[.07] bg-panel" onPointerDown={startScrub}>
               {ticks.map((t) => (
                 <div key={t} className="absolute top-0 h-full" style={{ left: t * zoom }}>
                   <span className="tabular absolute left-1 top-[5px] text-[11px] leading-[13px] text-muted">{formatTime(t * US, step < 1)}</span>
