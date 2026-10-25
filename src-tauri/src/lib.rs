@@ -86,10 +86,12 @@ pub struct AppState {
     timeline_lessons: Mutex<Option<(String, Vec<nuzky_mcp::style::Evidence>, u64)>>,
 }
 
-/// Per asset id: the source file its cached previews show, and the lock of their decoding.
+/// Per asset id: the source file its cached previews show, and a lock for decoding each kind of preview. Each kind
+/// has its own, so the thumbnail, which takes one frame, never waits for the filmstrip, which can take seconds.
 struct PreviewLock {
     source: String,
-    lock: Arc<Mutex<()>>,
+    thumb: Arc<Mutex<()>>,
+    strip: Arc<Mutex<()>>,
 }
 
 #[cfg_attr(test, derive(ts_rs::TS))]
@@ -432,6 +434,7 @@ impl AppState {
         &self,
         asset_id: &str,
         cache: &Mutex<HashMap<String, T>>,
+        kind: fn(&PreviewLock) -> &Arc<Mutex<()>>,
         decode: impl FnOnce(&nuzky_engine::model::Asset) -> anyhow::Result<Option<T>>,
     ) -> CmdResult<Option<T>> {
         let (asset, lock) = {
@@ -440,10 +443,12 @@ impl AppState {
                 return Ok(None);
             };
             let mut locks = self.preview_locks.lock().unwrap();
-            let entry = locks
-                .entry(asset_id.into())
-                .or_insert_with(|| PreviewLock { source: asset.path.clone(), lock: Arc::default() });
-            let lock = entry.lock.clone();
+            let entry = locks.entry(asset_id.into()).or_insert_with(|| PreviewLock {
+                source: asset.path.clone(),
+                thumb: Arc::default(),
+                strip: Arc::default(),
+            });
+            let lock = kind(entry).clone();
             (asset, lock)
         };
         let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
@@ -454,7 +459,7 @@ impl AppState {
                 .lock()
                 .unwrap()
                 .get(asset_id)
-                .is_some_and(|current| Arc::ptr_eq(&current.lock, &lock))
+                .is_some_and(|current| Arc::ptr_eq(kind(current), &lock))
             {
                 return Ok(None);
             }
@@ -465,7 +470,7 @@ impl AppState {
         let value = decode(&asset).map_err(err)?;
         let _current = self.session.lock().unwrap();
         // Removal or replacement invalidates in-flight decodes, even if the ID is reused.
-        if !self.preview_locks.lock().unwrap().get(asset_id).is_some_and(|current| Arc::ptr_eq(&current.lock, &lock)) {
+        if !self.preview_locks.lock().unwrap().get(asset_id).is_some_and(|current| Arc::ptr_eq(kind(current), &lock)) {
             return Ok(None);
         }
         if let Some(value) = &value {
@@ -743,7 +748,12 @@ async fn import_media(app: AppHandle, paths: Vec<String>, expected_epoch: Option
 async fn thumbnail(app: AppHandle, asset_id: String) -> CmdResult<Option<String>> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        state.asset_preview(&asset_id, &state.thumbs, |asset| thumbs::thumbnail(&state.cache_dir, asset))
+        state.asset_preview(
+            &asset_id,
+            &state.thumbs,
+            |locks| &locks.thumb,
+            |asset| thumbs::thumbnail(&state.cache_dir, asset),
+        )
     })
     .await
     .map_err(err)?
@@ -1118,7 +1128,12 @@ async fn layer_bounds(app: AppHandle, t_us: i64) -> CmdResult<Vec<LayerBounds>> 
 async fn filmstrip(app: AppHandle, asset_id: String) -> CmdResult<Option<Filmstrip>> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        state.asset_preview(&asset_id, &state.filmstrips, |asset| thumbs::filmstrip(&state.cache_dir, asset))
+        state.asset_preview(
+            &asset_id,
+            &state.filmstrips,
+            |locks| &locks.strip,
+            |asset| thumbs::filmstrip(&state.cache_dir, asset),
+        )
     })
     .await
     .map_err(err)?

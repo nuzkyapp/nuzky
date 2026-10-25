@@ -1,7 +1,14 @@
 import subprocess
 import time
 
-from e2e.harness import CLI, WINDOWS, changed_share, export, flow, preview_crop, preview_rect, wait
+from e2e.harness import CLI, WINDOWS, changed_share, export, flow, preview_crop, preview_rect, wait, webdriver
+
+# Milliseconds until the filmstrip of an asset arrives, and its thumbnail asked for once the filmstrip has started.
+TIMED = """const done = arguments[arguments.length - 1];
+const api = window.__nuzky.api, start = performance.now(), took = {};
+const timed = (kind) => api[kind](arguments[0]).then(() => { took[kind] = Math.round(performance.now() - start); });
+const later = new Promise((go) => setTimeout(go, 50)).then(() => timed('thumbnail'));
+Promise.all([timed('filmstrip'), later]).then(() => done(took));"""
 
 
 def phone_clip(path, seconds):
@@ -97,6 +104,12 @@ def proxy(r):
     r.check('Stop ends the preparation within seconds', wait(lambda: job(r, 'cancelled'), 5), r.state()['jobs'])
     leftovers = [p.name for p in (r.work / 'cache/nuzky/proxy').iterdir() if not p.name.endswith('.lock')]
     r.check('a stopped preparation leaves no file behind', len(leftovers) == 1, leftovers)
+
+    # Without a copy the filmstrip decodes the phone file itself, which takes a while. The clip's thumbnail, asked for
+    # just after it, shows meanwhile instead of leaving the clip empty until the filmstrip is done.
+    asset = next(a['id'] for a in r.s.run('return window.__nuzky.store.getState().snap.project.assets') if a['name'] == long_clip.name)
+    took = webdriver('POST', r.s.path + '/execute/async', {'script': TIMED, 'args': [asset]})
+    r.check('the thumbnail does not wait for the filmstrip', took['thumbnail'] < took['filmstrip'] / 2, took)
     r.add_clip(long_clip.name)
     time.sleep(3)
     r.check('the next edit does not start the stopped preparation again', not job(r, 'running'), r.state()['jobs'])
