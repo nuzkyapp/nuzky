@@ -21,9 +21,43 @@ use crate::{
     plugins::Manifest,
 };
 
-pub const TOOLS: [&str; 3] = ["build_captions", "apply_zooms", "apply_motion"];
-/// Those that read the transcript, so a plugin that uses them needs the words.
-pub const READ_WORDS: [&str; 2] = ["build_captions", "apply_zooms"];
+/// The tools a plugin may use. Planning a call and the gallery's sentence for a plugin that uses one match on this, so a
+/// new tool cannot be left out of either.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Tool {
+    BuildCaptions,
+    ApplyZooms,
+    ApplyMotion,
+}
+
+impl Tool {
+    pub const ALL: [Tool; 3] = [Tool::BuildCaptions, Tool::ApplyZooms, Tool::ApplyMotion];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Tool::BuildCaptions => "build_captions",
+            Tool::ApplyZooms => "apply_zooms",
+            Tool::ApplyMotion => "apply_motion",
+        }
+    }
+
+    pub fn named(name: &str) -> Option<Tool> {
+        Tool::ALL.into_iter().find(|tool| tool.name() == name)
+    }
+
+    /// It reads the transcript, so a plugin that uses it needs the words.
+    pub fn reads_words(self) -> bool {
+        match self {
+            Tool::BuildCaptions | Tool::ApplyZooms => true,
+            Tool::ApplyMotion => false,
+        }
+    }
+
+    /// "build_captions, apply_zooms, apply_motion".
+    pub fn all_names() -> String {
+        Tool::ALL.map(Tool::name).join(", ")
+    }
+}
 const MAX_CALLS: usize = 20;
 /// A tool's arguments are a few settings; a style's text is a font or colour name. Caption styles are copied into every
 /// caption, so a long one would grow the project by the number of words.
@@ -69,11 +103,9 @@ fn check(declared: &[String], calls: &[Call]) -> Result<Vec<Checked>> {
         .enumerate()
         .map(|(i, call)| {
             let tool = call.tool.as_str();
-            ensure!(
-                TOOLS.contains(&tool),
-                "PLUGIN_FORBIDDEN_TOOL: tools[{i}] ({tool}): a plugin can use only {}",
-                TOOLS.join(", ")
-            );
+            let known = Tool::named(tool).ok_or_else(|| {
+                anyhow!("PLUGIN_FORBIDDEN_TOOL: tools[{i}] ({tool}): a plugin can use only {}", Tool::all_names())
+            })?;
             ensure!(
                 declared.iter().any(|name| name == tool),
                 "PLUGIN_FORBIDDEN_TOOL: tools[{i}] ({tool}) is not in plugin.json's tools"
@@ -91,10 +123,10 @@ fn check(declared: &[String], calls: &[Call]) -> Result<Vec<Checked>> {
             args.insert("run_id".into(), json!(""));
             let args = Value::Object(args);
             let bad = |e: serde_json::Error| anyhow!("PLUGIN_BAD_TOOL: tools[{i}] ({tool}): {e}");
-            Ok(match tool {
-                "build_captions" => Checked::Captions(Box::new(serde_json::from_value(args).map_err(bad)?)),
-                "apply_zooms" => Checked::Zooms(serde_json::from_value(args).map_err(bad)?),
-                _ => Checked::Motion(serde_json::from_value(args).map_err(bad)?),
+            Ok(match known {
+                Tool::BuildCaptions => Checked::Captions(Box::new(serde_json::from_value(args).map_err(bad)?)),
+                Tool::ApplyZooms => Checked::Zooms(serde_json::from_value(args).map_err(bad)?),
+                Tool::ApplyMotion => Checked::Motion(serde_json::from_value(args).map_err(bad)?),
             })
         })
         .collect()

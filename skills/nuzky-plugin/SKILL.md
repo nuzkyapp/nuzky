@@ -249,7 +249,7 @@ function run(ctx) {
 
 A plugin can also add a look, such as VHS or a glitch, that the user puts on a video or image clip in the Adjust tab under Effects. An effect is one WGSL function in `effects/<id>.wgsl` that Nuzky calls for every pixel of the clip's picture before it places the clip; its result replaces the picture, so the clip's position, crop, shape, background, Adjust, animations and transitions work as without it. The project keeps only the effect's name and settings: on a computer without the plugin the clip is drawn and exported without it, and Nuzky says so.
 
-The manifest lists them in `effects`, at most 8, each with `id` (lowercase letters, digits and dashes, also the file's name), `name` (at most 40 characters) and `params`: `number`, `toggle` and `color` entries written as inputs are. A plugin that only adds effects needs no plugin.js, so it has no button and cannot run after import or before export, and its manifest has no `needs`, `inputs`, `sections`, `actions` or `files`, as the VHS example:
+The manifest lists them in `effects`, at most 8, each with `id` (lowercase letters, digits and dashes, also the file's name), `name` (at most 40 characters) and `params`: `number`, `toggle` and `color` entries written as inputs are. A plugin that only adds effects needs no plugin.js, so it has no button and cannot run after import or before export, and its manifest has no `needs`, `inputs`, `sections`, `actions`, `files` or `tools`, as the VHS example:
 
 ```json
 {

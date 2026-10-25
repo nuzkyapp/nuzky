@@ -19,6 +19,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::plugin_files;
+use crate::plugin_tools::Tool;
 use crate::plugins::{self, Manifest, Need};
 
 const REPO: &str = "https://raw.githubusercontent.com/nuzkyapp/nuzky-plugins";
@@ -359,6 +360,8 @@ enum Fact {
     },
     /// The names of the looks it adds to clips.
     Looks(Vec<String>),
+    /// One of Nuzky's own tools it calls after its edits.
+    Uses(Tool),
     Reads(Need),
     Sealed,
     /// Opening it runs its script for a preview that changes nothing.
@@ -389,6 +392,7 @@ fn facts(manifest: &Manifest, runs: bool) -> Vec<Fact> {
     if !manifest.effects.is_empty() {
         facts.push(Fact::Looks(manifest.effects.iter().map(|effect| effect.name.clone()).collect()));
     }
+    facts.extend(manifest.tools.iter().filter_map(|name| Tool::named(name)).map(Fact::Uses));
     facts.extend(manifest.needs.iter().map(|need| Fact::Reads(*need)));
     facts.push(Fact::Sealed);
     facts.extend(if runs { vec![Fact::Preview, Fact::OnPress] } else { vec![Fact::OnClips] });
@@ -424,6 +428,12 @@ fn sentence(fact: Fact, manifest: &Manifest, files: &[Listing]) -> String {
         }
         Fact::Looks(names) if names.len() == 1 => format!("Adds a look you can put on clips: {}.", names[0]),
         Fact::Looks(names) => format!("Adds {} looks you can put on clips: {}.", names.len(), listed(&names)),
+        Fact::Uses(tool) => match tool {
+            Tool::BuildCaptions => "Adds captions to your video.",
+            Tool::ApplyZooms => "Adds zooms to your video.",
+            Tool::ApplyMotion => "Adds motion to your video.",
+        }
+        .into(),
         Fact::Reads(need) => need_line(need).into(),
         Fact::Sealed => "Can't reach the internet, your files or other apps.".into(),
         Fact::Preview => {
@@ -1392,6 +1402,33 @@ mod tests {
                  you turn that on.",
             ]
         );
+    }
+
+    #[test]
+    fn a_plugin_that_calls_nuzkys_tools_says_what_each_adds_and_an_update_marks_a_new_one() {
+        let (mut manifest, mut files) = plugin("beep");
+        manifest["tools"] = serde_json::json!(["build_captions", "apply_motion"]);
+        files[0].1 = serde_json::to_vec(&manifest).unwrap();
+        let server = Server::start("beep", &files);
+        let home = Home::new();
+        let gallery = gallery_of(&server.repo, &[(manifest, files)]);
+        let entry = entries(&gallery, &home.plugins()).remove(0);
+        assert_eq!(entry.state, State::Available);
+        let lines: Vec<_> = entry.summary.iter().map(|line| line.text.as_str()).collect();
+        assert_eq!(
+            lines[2..5],
+            ["Adds captions to your video.", "Adds motion to your video.", "Reads the words said in the video."]
+        );
+        home.install(&gallery, "beep", None).unwrap();
+        // 1.1 also zooms.
+        let (mut newer, mut files) = plugin("beep");
+        newer["version"] = "1.1.0".into();
+        newer["tools"] = serde_json::json!(["build_captions", "apply_zooms", "apply_motion"]);
+        files[0].1 = serde_json::to_vec(&newer).unwrap();
+        let entry = entries(&gallery_of(&server.repo, &[(newer, files)]), &home.plugins()).remove(0);
+        assert_eq!(entry.state, State::Update);
+        let new: Vec<_> = entry.summary.iter().filter(|line| line.new).map(|line| line.text.as_str()).collect();
+        assert_eq!(new, ["Adds zooms to your video."]);
     }
 
     #[test]

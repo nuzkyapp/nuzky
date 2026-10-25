@@ -4753,8 +4753,13 @@ fn a_plugin_effect_is_saved_checked_and_put_on_a_clip_over_stdio() {
     assert!(error.starts_with("PLUGIN_BROKEN: effects/vhs.wgsl:3:5: an effect cannot use loops"), "{error}");
     let dim =
         "fn effect(p: Pixel) -> vec4<f32> {\n    return vec4<f32>(p.color.rgb * (1.0 - p.params[0]), p.color.a);\n}\n";
-    // Without a script nothing would read a button or a file, so a manifest naming one is refused.
-    for (field, value) in [("actions", json!([{"id": "go", "label": "Go"}])), ("files", json!(["logo.png"]))] {
+    // Without a script nothing would read a button or a file or call a tool, so a manifest naming one is refused.
+    let refused = [
+        ("actions", json!([{"id": "go", "label": "Go"}])),
+        ("files", json!(["logo.png"])),
+        ("tools", json!(["apply_motion"])),
+    ];
+    for (field, value) in refused {
         let mut runs = manifest.clone();
         runs[field] = value;
         let error = plugin_error(c.error("save_plugin", json!({"manifest": runs, "effects": {"vhs": dim}})));

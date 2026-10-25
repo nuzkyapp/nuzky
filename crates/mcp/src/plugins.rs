@@ -374,14 +374,15 @@ pub(crate) fn manifest(value: &Value) -> Result<Manifest> {
     ensure!(manifest.tools.is_empty() || api >= 2, "PLUGIN_BROKEN: plugin.json: tools needs nuzkyPlugin 2");
     let mut tools = HashSet::new();
     for tool in &manifest.tools {
-        ensure!(
-            plugin_tools::TOOLS.contains(&tool.as_str()),
-            "PLUGIN_BROKEN: plugin.json: tools: {tool} is not a tool plugins can use; they can use {}",
-            plugin_tools::TOOLS.join(", ")
-        );
+        let known = plugin_tools::Tool::named(tool).with_context(|| {
+            format!(
+                "PLUGIN_BROKEN: plugin.json: tools: {tool} is not a tool plugins can use; they can use {}",
+                plugin_tools::Tool::all_names()
+            )
+        })?;
         ensure!(tools.insert(tool), "PLUGIN_BROKEN: plugin.json: tools names {tool} twice");
         ensure!(
-            !plugin_tools::READ_WORDS.contains(&tool.as_str()) || manifest.needs.contains(&Need::Words),
+            !known.reads_words() || manifest.needs.contains(&Need::Words),
             "PLUGIN_BROKEN: plugin.json: {tool} reads the transcript, so needs must include \"words\""
         );
     }
@@ -654,6 +655,7 @@ pub(crate) fn only_effects(manifest: &Manifest) -> Result<()> {
         ("sections", manifest.sections.is_empty()),
         ("actions", manifest.actions.is_empty()),
         ("files", manifest.files.is_empty()),
+        ("tools", manifest.tools.is_empty()),
     ];
     match ran.into_iter().find(|(_, empty)| !empty) {
         Some((field, _)) => {

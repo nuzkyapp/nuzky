@@ -944,6 +944,8 @@ def plugin_panel(r):
     r.check('no error toast', not r.errors(), r.errors())
 
 
+DIM = 'fn effect(p: Pixel) -> vec4<f32> {\n    return vec4<f32>(p.color.rgb * 0.5, p.color.a);\n}\n'
+
 TOOLS_SCRIPT = '''function run(ctx) {
   const end = ctx.words.findIndex((w) => /[.!?]$/.test(w.text.trim()));
   return {edits: [], message: "Added captions and zoomed in on the first sentence.", tools: [
@@ -960,13 +962,14 @@ def plugin_tools(r):
     r.add_clip('talk.mp4')
     manifest = {'nuzkyPlugin': 2, 'id': 'caption-zoom', 'name': 'Caption and zoom', 'version': '1.0.0',
                 'description': 'Captions the video and zooms in on its first sentence.', 'action': 'Caption',
-                'needs': ['words'], 'tools': ['build_captions', 'apply_zooms']}
+                'needs': ['words'], 'tools': ['build_captions', 'apply_zooms'],
+                'effects': [{'id': 'dim', 'name': 'Dim', 'params': []}]}
     bridge = Bridge(r, r.saved_project())
     try:
         job = poll(bridge, bridge.call('transcribe', {'language': 'en', 'model': 'small'}), 300)
         r.check('the speech is recognised', job['status'] == 'done', job)
         words = bridge.call('get_transcript', {})['words']
-        stored = bridge.call('save_plugin', {'manifest': manifest, 'script': TOOLS_SCRIPT})
+        stored = bridge.call('save_plugin', {'manifest': manifest, 'script': TOOLS_SCRIPT, 'effects': {'dim': DIM}})
     finally:
         bridge.close()
     r.check('the plugin saves with its tools', stored['plugin']['manifest']['tools'] == manifest['tools'], stored)
@@ -978,6 +981,8 @@ def plugin_tools(r):
     r.s.run(f'{row}.click()')
     said = wait(lambda: r.s.run("return document.body.textContent.includes('Adds captions and zooms.')"), 10)
     r.check('the preview names the captions and zooms it would add', said, r.s.run('return document.body.innerText.slice(-400)'))
+    r.check("the plugin's effect is listed beside the tools it calls", r.s.run(
+        "return !!document.querySelector('aside[aria-label=Inspector] [data-plugin-effect=\"dim\"]')"))
     r.check('the preview runs neither tool', project(r) == before)
     r.shot('tools-preview')
 
