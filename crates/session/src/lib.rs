@@ -199,6 +199,33 @@ impl ProjectSession {
         Ok(result)
     }
 
+    /// Applies `cmds` in place of the newest undo step, as one user step that undoes to `before`. Refuses as a whole,
+    /// changing nothing, while a run is open, when the project moved past `expect`, or when the newest step is not a
+    /// user step that undoes to `before`.
+    pub fn replace_newest(&self, before: &Project, cmds: Vec<EditCmd>, expect: Expect) -> Result<EditResult> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.user_editable()?;
+        inner.check_expect(&expect)?;
+        ensure!(
+            inner.editor.peek(false).is_some_and(|p| p.key.is_none() && p.project == before),
+            "STALE_REVISION: the newest step is no longer the one to replace"
+        );
+        let revision = inner.editor.revision;
+        inner.record();
+        inner.editor.undo();
+        match inner.apply(cmds, None, Origin::User) {
+            Ok(result) => {
+                inner.schedule()?;
+                Ok(result)
+            }
+            Err(error) => {
+                inner.editor.redo();
+                inner.editor.revision = revision;
+                Err(error)
+            }
+        }
+    }
+
     pub fn undo(&self) -> Result<Stamp> {
         self.history(false)
     }

@@ -156,10 +156,6 @@ export type BeatCutDone = {
   clips: number,
   repeated: number,
   captionsRemoved: number,
-  /**
-   * The cut replaced the one before it, so one undo still leads back to the video before both.
-   */
-  replaced: boolean,
 };
 
 /**

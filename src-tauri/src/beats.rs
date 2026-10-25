@@ -149,8 +149,6 @@ pub struct BeatCutDone {
     clips: usize,
     repeated: usize,
     captions_removed: usize,
-    /// The cut replaced the one before it, so one undo still leads back to the video before both.
-    replaced: bool,
 }
 
 /// The music clip's file, which must be on disk.
@@ -307,55 +305,29 @@ fn plans(cuts: &BeatCuts, host: &Host, clip_id: &str) -> Result<Option<BeatPlans
     }))
 }
 
-/// Cuts the main track to the song in `rhythm` as one undo step. While this clip's last cut is the newest step it is
-/// undone first, so the new cut replaces it and one undo still leads back to the video before both.
-fn cut(
-    cuts: &BeatCuts,
-    host: &Host,
-    clip_id: &str,
-    rhythm: Rhythm,
-    keep_sound: bool,
-) -> Result<(usize, usize, usize, bool)> {
+/// Cuts the main track to the song in `rhythm` as one undo step. While this clip's last cut is the newest step the new
+/// cut takes its place, so one undo still leads back to the video before both.
+fn cut(cuts: &BeatCuts, host: &Host, clip_id: &str, rhythm: Rhythm, keep_sound: bool) -> Result<(usize, usize, usize)> {
     let session = &host.session;
     let state = session.state()?;
     let asset = song(&state.project, clip_id)?;
     let beats = cuts.beats(&host.cache_dir, &asset).context("BEATS_UNKNOWN: find the beat first")?;
     ensure!(beats.confidence >= MIN_CONFIDENCE, "NO_STEADY_BEAT: this song has no steady beat");
     let epoch = state.stamp.session_epoch.clone();
-    let last = cuts.last(host, &state.project, &epoch, clip_id);
-    let replace = last.as_ref().filter(|l| l.1).map(|l| l.0.clone());
-    let base = if replace.is_some() {
-        session.undo()?;
-        session.state()?
-    } else {
-        state
+    let replace = cuts.last(host, &state.project, &epoch, clip_id).filter(|l| l.1).map(|l| l.0);
+    let base = replace.as_ref().map_or(&state.project, |l| &l.before);
+    let (plan, after) = dry_run(base, &beats, clip_id, rhythm, keep_sound)?;
+    let expect = Expect { revision: Some(state.stamp.revision), speech_layout_key: None };
+    match &replace {
+        Some(last) => session.replace_newest(&last.before, plan.edits.clone(), expect)?,
+        None => session.edit(plan.edits.clone(), None, expect)?,
     };
-    let made = (|| -> Result<(usize, usize, usize)> {
-        let (plan, _) = dry_run(&base.project, &beats, clip_id, rhythm, keep_sound)?;
-        session.edit(
-            plan.edits.clone(),
-            None,
-            Expect { revision: Some(base.stamp.revision), speech_layout_key: None },
-        )?;
-        let after = session.state()?.project;
-        let captions = captions_removed(&base.project, &after);
-        let main = after.tracks.iter().find(|t| t.id == MAIN_TRACK).context("INVALID_PROJECT: no main track")?;
-        let made = main.clips.iter().map(|c| c.id.clone()).collect();
-        let before = replace.as_ref().map_or_else(|| base.project.clone(), |l| l.before.clone());
-        *cuts.last.lock().unwrap() =
-            Some(LastCut { epoch: epoch.clone(), clip_id: clip_id.into(), rhythm, before, after, made });
-        Ok((plan.cut_us.len(), plan.repeated, captions))
-    })();
-    match made {
-        Ok((clips, repeated, captions)) => Ok((clips, repeated, captions, replace.is_some())),
-        Err(error) => {
-            // The cut it was to replace comes back.
-            if replace.is_some() {
-                session.redo().ok();
-            }
-            Err(error)
-        }
-    }
+    let captions = captions_removed(base, &after);
+    let main = after.tracks.iter().find(|t| t.id == MAIN_TRACK).context("INVALID_PROJECT: no main track")?;
+    let made = main.clips.iter().map(|c| c.id.clone()).collect();
+    let before = base.clone();
+    *cuts.last.lock().unwrap() = Some(LastCut { epoch, clip_id: clip_id.into(), rhythm, before, after, made });
+    Ok((plan.cut_us.len(), plan.repeated, captions))
 }
 
 /// The planner's codes, in words for the user.
@@ -448,9 +420,9 @@ pub async fn cut_to_beat(
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         let current = crate::lock_session(&state.session, expected_epoch.as_deref())?;
-        let (clips, repeated, captions_removed, replaced) =
+        let (clips, repeated, captions_removed) =
             cut(&state.beat_cuts, &current.host, &clip_id, rhythm, keep_video_sound).map_err(explain)?;
-        Ok(BeatCutDone { snapshot: current.snapshot(vec![clip_id])?, clips, repeated, captions_removed, replaced })
+        Ok(BeatCutDone { snapshot: current.snapshot(vec![clip_id])?, clips, repeated, captions_removed })
     })
     .await
     .map_err(crate::err)?

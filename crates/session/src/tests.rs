@@ -1252,3 +1252,44 @@ fn a_save_waits_for_another_program_holding_the_project_open() {
     release.join().unwrap();
     assert_eq!(f.disk().name, "Saved");
 }
+
+#[test]
+fn replace_newest_is_one_step_and_refuses_as_a_whole() {
+    let f = Fixture::new();
+    let s = f.open();
+    let original = s.state().unwrap().project;
+    s.edit(rename("Cut"), None, Expect::default()).unwrap();
+    let at = |s: &ProjectSession| Expect { revision: Some(s.state().unwrap().stamp.revision), speech_layout_key: None };
+
+    // An agent's run opened after the UI read the project: nothing changes, the cut and its undo stay.
+    let expect = at(&s);
+    let run = s.begin_run("AI".into()).unwrap().run_id;
+    let refused = s.replace_newest(&original, rename("Recut"), expect.clone()).unwrap_err();
+    assert!(refused.to_string().contains("RUN_ACTIVE"), "{refused:#}");
+    assert_eq!(s.state().unwrap().project.name, "Cut");
+    assert_eq!(s.peek(false).unwrap().project, original);
+    apply(&s, &run, "AI");
+    s.end_run(&run, EndAction::Keep).unwrap();
+
+    // The newest step is someone else's now.
+    let moved = s.replace_newest(&original, rename("Recut"), expect).unwrap_err();
+    assert!(moved.to_string().contains("STALE_REVISION"), "{moved:#}");
+    s.undo().unwrap();
+    s.undo().unwrap();
+    s.redo().unwrap();
+    let cut = s.state().unwrap();
+    assert_eq!(cut.project.name, "Cut");
+    let wrong_base = s.replace_newest(&cut.project, rename("Recut"), at(&s)).unwrap_err();
+    assert!(wrong_base.to_string().contains("STALE_REVISION"), "{wrong_base:#}");
+    let mut bad = asset();
+    bad.duration_us = -1;
+    assert!(s.replace_newest(&original, vec![EditCmd::AddAssets { assets: vec![bad] }], at(&s)).is_err());
+    assert_eq!(s.state().unwrap().project, cut.project);
+    assert_eq!(s.state().unwrap().stamp.revision, cut.stamp.revision);
+    assert_eq!(s.peek(false).unwrap().project, original);
+
+    s.replace_newest(&original, rename("Recut"), at(&s)).unwrap();
+    assert_eq!(s.state().unwrap().project.name, "Recut");
+    s.undo().unwrap();
+    assert_eq!(s.state().unwrap().project, original);
+}
