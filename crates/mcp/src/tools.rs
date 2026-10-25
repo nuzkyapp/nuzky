@@ -1843,7 +1843,7 @@ pub(crate) fn state_value(state: &SessionState, args: State) -> Result<Value> {
 const MAX_LOUDNESS_VALUES: i64 = 360_000;
 const MAX_LOUDNESS_WINDOW_US: i64 = 3_600_000_000;
 
-fn loudness_window(duration_us: i64, window_us: Option<i64>) -> Result<i64> {
+pub(crate) fn loudness_window(duration_us: i64, window_us: Option<i64>) -> Result<i64> {
     let min = (duration_us / MAX_LOUDNESS_VALUES + 1).max(10_000);
     let window = window_us.unwrap_or(min.max(100_000));
     ensure!(

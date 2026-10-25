@@ -139,3 +139,67 @@ def plugins(r):
     base = r.work / 'data/nuzky/plugins'
     r.check('Show folder opens the plugins folder or the chosen plugin folder', folders == [str(base), str(base / 'remove-short-clips')], folders)
     r.check('no error toast', not r.errors(), r.errors())
+
+
+PAUSES = ROOT / 'skills/nuzky-plugin/examples/remove-pauses'
+PAUSES_ROW = "document.querySelector('[data-plugin=\"remove-pauses\"]')"
+
+
+SLIDE = """const input = document.querySelector(`input[type=range][aria-label="${arguments[0]}"]`);
+if (!input) return false;
+Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, String(arguments[1]));
+input.dispatchEvent(new Event('input', {bubbles: true}));
+return true;"""
+
+
+def prepare_pauses(r):
+    shutil.copytree(PAUSES, r.work / 'data/nuzky/plugins/remove-pauses')
+
+
+def cuts(tracks):
+    """Where each clip sits and what of its file it plays; the pieces of a cut get ids of their own."""
+    return [[(c['startUs'], c['durationUs'], c['content'].get('sourceInUs')) for c in t['clips']] for t in tracks]
+
+
+@flow('plugin_pauses', 'A plugin that needs the silences of the sound previews and cuts the pauses of a trimmed '
+      'talking head where the timeline has them, as one undo step', before=prepare_pauses)
+def plugin_pauses(r):
+    r.import_media(FIXTURES / 'talk.mp4')
+    r.add_clip('talk.mp4')
+    # Trimmed, so the timeline and the file disagree about where each pause is.
+    clip = r.track()[0]
+    trimmed = r.s.call('window.__nuzky.store.getState().edit(arguments[0])',
+                       {'type': 'trimClip', 'clipId': clip['id'], 'startUs': 0,
+                        'durationUs': clip['durationUs'] - 700_000, 'sourceInUs': 700_000})
+    r.check('the take starts 0.7 s into its file',
+            trimmed['ok'] and wait(lambda: project(r)['tracks'][0]['clips'][0]['content']['sourceInUs'] == 700_000, 5), trimmed)
+    before = project(r)
+    length = r.track()[-1]['startUs'] + r.track()[-1]['durationUs']
+    r.s.run("[...document.querySelectorAll('[role=tab]')].find((b) => b.textContent === 'Plugins').click()")
+    r.check('the Plugins tab lists Remove pauses', wait(lambda: r.s.run(f'return !!{PAUSES_ROW}'), 10))
+    r.s.run(f'{PAUSES_ROW}.click()')
+    # The synthetic speech pauses for about 0.4 s between sentences.
+    for label, value in (('Longer than', 0.3), ('Keep on each side', 0.05)):
+        r.check(f'{label} is set to {value} s', wait(lambda: r.s.run(SLIDE, label, value), 5))
+    shown = wait(lambda: r.s.run("return document.body.textContent.includes('Video length')"), 30)
+    r.check('the inspector says how much shorter the video gets', shown, r.s.run('return document.body.innerText.slice(-600)'))
+    r.check('the preview leaves the project unchanged', project(r) == before)
+    r.shot('pauses-preview')
+    preview = r.s.call("window.__nuzky.api.previewPlugin('remove-pauses', arguments[0], [], 0).then(JSON.stringify)",
+                       {'minSeconds': 0.3, 'keepSeconds': 0.05})
+    expected = cuts(json.loads(preview['value'])['tracks']) if preview['ok'] else None
+    r.check('the preview of these settings cuts pauses out of the main track',
+            expected and len(expected[0]) > 1 and expected[0][-1][0] + expected[0][-1][1] < length, preview)
+
+    r.s.run("[...document.querySelectorAll('button')].find((b) => b.textContent === 'Remove pauses').click()")
+    cut = wait(lambda: cuts(project(r)['tracks']) == expected, 20)
+    r.check('running cuts exactly what the preview showed', cut, cuts(project(r)['tracks']))
+    end = r.track()[-1]['startUs'] + r.track()[-1]['durationUs']
+    toast = next((t['text'] for t in r.state()['toasts'] if t['kind'] == 'success'), '')
+    r.check('the toast says how many pauses went and how long they were',
+            toast.startswith('Removed ') and f'{(length - end) / 1e6:.1f} s in all.' in toast, (toast, length - end))
+    r.check('the saved project has the cut', cut and wait(lambda: cuts(saved(r)['tracks']) == expected, 5))
+    r.shot('pauses-done')
+    r.s.call('window.__nuzky.store.getState().undo()')
+    r.check('one undo brings the pauses back', wait(lambda: project(r) == before, 5), project(r))
+    r.check('no error toast', not r.errors(), r.errors())

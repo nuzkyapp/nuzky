@@ -320,3 +320,174 @@ fn a_plugin_whose_edits_need_gigabytes_runs_out_of_its_own_memory() {
         assert!(peak < 512 << 10, "the test process took {} MB", peak >> 10);
     }
 }
+
+/// A phone-sized video of `seconds` whose sound is the FFmpeg `aevalsrc` expression `sound` in `codec`, on the main
+/// track from 0. PCM keeps the quiet exactly where the expression puts it.
+fn with_sound(sound: &str, seconds: u32, codec: &str) -> Fixture {
+    data();
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("plugins-{}", new_id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let video = dir.join("take.mov");
+    assert!(
+        Command::new("ffmpeg")
+            .args(["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i"])
+            .arg(format!("color=s=108x192:r=30:d={seconds}"))
+            .args(["-f", "lavfi", "-i"])
+            .arg(format!("aevalsrc={sound}:s=48000:c=stereo:d={seconds}"))
+            .args(["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-shortest", "-c:a", codec])
+            .arg(&video)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let path = dir.join("project.nuzky");
+    std::fs::write(&path, serde_json::to_vec(&Project::new("Sound")).unwrap()).unwrap();
+    let host = Arc::new(Host::new(ProjectSession::open(&path, Mode::Write, None).unwrap(), dir.join("cache")).unwrap());
+    let asset = nuzky_engine::media::probe(&video, "take".into()).unwrap();
+    host.session
+        .edit(
+            vec![
+                EditCmd::AddAssets { assets: vec![asset] },
+                EditCmd::AddClip { asset_id: "take".into(), start_us: None, track_id: None },
+            ],
+            None,
+            Expect::default(),
+        )
+        .unwrap();
+    Fixture { host, dir }
+}
+
+fn edit(host: &Host, edit: Value) {
+    host.session.edit(vec![serde_json::from_value(edit).unwrap()], None, Expect::default()).unwrap();
+}
+
+/// Within one window of the silence finder.
+fn near(actual: i64, expected: i64) -> bool {
+    (actual - expected).abs() <= 10_000
+}
+
+fn source_in(clip: &nuzky_engine::model::Clip) -> i64 {
+    match &clip.content {
+        ClipContent::Media { source_in_us, .. } => *source_in_us,
+        _ => panic!("not media"),
+    }
+}
+
+/// The guide's Remove pauses on a take with a 1 s pause at 1.5 s and a 0.3 s one at 3.3 s of the file, whose first
+/// 0.5 s is trimmed off: the silences arrive in timeline time, so the plugin cuts the long pause where the timeline
+/// has it, keeping 0.1 s on each side, and leaves the short one. The preview finds nothing before the app has
+/// prepared the sound; the run prepares it itself, as part of its job.
+#[test]
+fn remove_pauses_cuts_the_silences_where_the_timeline_has_them() {
+    let f = with_sound("0.5*sin(2*PI*440*t)*(lt(t\\,1.5)+between(t\\,2.5\\,3.3)+gte(t\\,3.6))", 6, "pcm_s16le");
+    let clip = main(&f.host)[0].id.clone();
+    edit(
+        &f.host,
+        json!({"type": "trimClip", "clipId": clip, "startUs": 0, "durationUs": 5_500_000, "sourceInUs": 500_000}),
+    );
+    install("remove-pauses");
+    let before = f.host.session.state().unwrap().project;
+
+    let early = plugins::dry_run_in_app(&f.host, "remove-pauses", &Map::new(), vec![], 0, Arc::default()).unwrap_err();
+    assert!(format!("{early:#}").starts_with("AUDIO_NOT_READY: "), "{early:#}");
+
+    let job = plugins::run_in_app(&f.host, "remove-pauses", &Map::new(), vec![], 0).unwrap();
+    let done = finish(&f.host, &job, Duration::from_secs(20));
+    assert_eq!(done["status"], "done", "{done}");
+    assert_eq!(done["result"]["message"], "Removed 1 pause, 0.8 s in all.");
+    // The pause is 1.0-2.0 s of the timeline, so 1.1-1.9 s goes.
+    let clips = main(&f.host);
+    assert_eq!(clips.len(), 2, "{clips:?}");
+    assert!(near(clips[0].duration_us, 1_100_000) && source_in(&clips[0]) == 500_000, "{clips:?}");
+    assert!(near(clips[1].start_us, 1_100_000) && near(source_in(&clips[1]), 2_400_000), "{clips:?}");
+    assert!(near(clips[1].end_us(), 4_700_000), "{clips:?}");
+    assert_eq!(f.host.session.list_history(1).unwrap().versions[0].label, "Plugin: Remove pauses");
+    f.host.session.undo().unwrap();
+    assert_eq!(f.host.session.state().unwrap().project, before);
+
+    // The sound is prepared now, so the preview finds both pauses when asked for short ones.
+    let short = inputs(json!({"minSeconds": 0.2, "keepSeconds": 0}));
+    let both = plugins::dry_run_in_app(&f.host, "remove-pauses", &short, vec![], 0, Arc::default()).unwrap();
+    let ranges = both["edits"][0]["ranges"].as_array().unwrap().clone();
+    let at = |i: usize, key: &str| ranges[i][key].as_i64().unwrap();
+    assert_eq!(ranges.len(), 2, "{ranges:?}");
+    assert!(near(at(0, "startUs"), 1_000_000) && near(at(0, "endUs"), 2_000_000), "{ranges:?}");
+    assert!(near(at(1, "startUs"), 2_800_000) && near(at(1, "endUs"), 3_100_000), "{ranges:?}");
+}
+
+/// Beats and loudness on the timeline: a click every 0.5 s of the file, played from 2 s at double speed, is a beat
+/// every 0.25 s of the timeline at 240 BPM; loudness windows start at the clip's start, half as long, and are quiet
+/// where the file is.
+#[test]
+fn beats_and_loudness_arrive_in_timeline_time() {
+    let f = with_sound("if(between(t\\,6\\,7)\\,0\\,0.8*exp(-60*mod(t\\,0.5))*sin(2*PI*1000*t))", 20, "pcm_s16le");
+    let clip = main(&f.host)[0].id.clone();
+    edit(
+        &f.host,
+        json!({"type": "trimClip", "clipId": clip, "startUs": 0, "durationUs": 18_000_000, "sourceInUs": 2_000_000}),
+    );
+    edit(&f.host, json!({"type": "updateClip", "clipId": clip, "speed": 2.0}));
+    assert_eq!(main(&f.host)[0].duration_us, 9_000_000);
+    let reads = json!({"nuzkyPlugin": 2, "id": "reads", "name": "Reads", "description": "Logs what it reads",
+        "version": "1", "needs": ["beats", "loudness"]});
+    let script = r#"function run(ctx) {
+  const b = ctx.beats[0], l = ctx.loudness[0];
+  nuzky.log(JSON.stringify({clips: [ctx.beats.length, ctx.loudness.length], same: b.clip_id === l.clip_id,
+    track: b.track_id, bpm: b.bpm, confidence: b.confidence, beats: b.beats_us.slice(0, 6), count: b.beats_us.length,
+    last: b.beats_us[b.beats_us.length - 1], down: b.downbeats_us.length, span: [b.start_us, b.end_us]}));
+  nuzky.log(JSON.stringify({times: l.times_us.slice(0, 3), count: l.times_us.length, values: l.dbfs.length,
+    quiet: l.dbfs[Math.floor(2200000 / 50000)], loud: Math.max(...l.dbfs.slice(0, 20))}));
+  return [];
+}"#;
+    plugins::save(&reads, script, None).unwrap();
+    let job = plugins::run_in_app(&f.host, "reads", &Map::new(), vec![], 0).unwrap();
+    let done = finish(&f.host, &job, Duration::from_secs(20));
+    assert_eq!(done["status"], "done", "{done}");
+    let logs = done["result"]["logs"].as_array().unwrap();
+    let beats: Value = serde_json::from_str(logs[0].as_str().unwrap()).unwrap();
+    let loudness: Value = serde_json::from_str(logs[1].as_str().unwrap()).unwrap();
+    assert_eq!((&beats["clips"], &beats["same"], &beats["track"]), (&json!([1, 1]), &json!(true), &json!("main")));
+    assert_eq!(beats["span"], json!([0, 9_000_000]), "{beats}");
+    let bpm = beats["bpm"].as_f64().unwrap();
+    assert!((bpm - 240.0).abs() < 1.0 && beats["confidence"].as_f64().unwrap() > 0.3, "{beats}");
+    // The click at 2 s of the file is found a hair before it, outside the clip, so the first beat is the next one.
+    for (i, beat) in beats["beats"].as_array().unwrap().iter().enumerate() {
+        assert!((beat.as_i64().unwrap() - (i as i64 + 1) * 250_000).abs() <= 15_000, "{beats}");
+    }
+    assert!((34..=36).contains(&beats["count"].as_i64().unwrap()), "{beats}");
+    assert!(beats["last"].as_i64().unwrap() < 9_000_000, "{beats}");
+    assert!((8..=10).contains(&beats["down"].as_i64().unwrap()), "{beats}");
+    // 0.1 s of the file is 0.05 s of the timeline, and 6-7 s of the file is 2-2.5 s of the timeline.
+    assert_eq!(loudness["times"], json!([0, 50_000, 100_000]), "{loudness}");
+    assert_eq!((&loudness["count"], &loudness["values"]), (&json!(180), &json!(180)), "{loudness}");
+    assert_eq!(loudness["quiet"], -120.0, "{loudness}");
+    assert!(loudness["loud"].as_f64().unwrap() > -20.0, "{loudness}");
+}
+
+/// Stop in the AI bar ends a plugin within two seconds while Nuzky still prepares a long file's sound for it, and
+/// nothing changes.
+#[test]
+fn stop_ends_a_plugin_while_it_prepares_the_sound() {
+    let f = with_sound("0.3*sin(2*PI*220*t)", 1800, "aac");
+    let waits = json!({"nuzkyPlugin": 2, "id": "waits", "name": "Waits", "description": "Needs the beat",
+        "version": "1", "needs": ["beats"]});
+    plugins::save(&waits, "function run(ctx) {\n  return [];\n}\n", None).unwrap();
+    let before = f.host.session.state().unwrap().project;
+    let job = plugins::run_in_app(&f.host, "waits", &Map::new(), vec![], 0).unwrap();
+    let id = job["job_id"].as_str().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while f.host.jobs.get(id, false).unwrap()["progress"].as_f64().is_none_or(|p| p == 0.0) {
+        assert!(Instant::now() < deadline, "no progress: {}", f.host.jobs.get(id, false).unwrap());
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let listening = f.host.jobs.get(id, false).unwrap();
+    assert_eq!(listening["phase"], "listening", "{listening}");
+    let stopping = Instant::now();
+    f.host.stop_run().unwrap();
+    let stopped = finish(&f.host, &job, Duration::from_secs(2));
+    assert_eq!(stopped["status"], "cancelled", "{stopped}");
+    assert!(stopping.elapsed() < Duration::from_secs(2), "stopped after {:?}", stopping.elapsed());
+    let state = f.host.session.state().unwrap();
+    assert!(state.open_run.is_none());
+    assert_eq!(state.project, before);
+}

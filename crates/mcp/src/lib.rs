@@ -10,6 +10,7 @@ mod limits;
 mod media;
 pub mod model_download;
 mod params;
+mod plugin_data;
 pub mod plugins;
 pub mod recap;
 pub mod reels;
@@ -253,7 +254,7 @@ fn catalog() -> Result<Vec<Tool>> {
         )?,
         tool::<params::ListPlugins>(
             "list_plugins",
-            "List the user's plugins: small scripts that add an edit Nuzky lacks, kept in Nuzky's plugins folder and shown in the app's Plugins panel. Each has id, status (\"ok\", or \"broken\" with error saying why), manifest (name, description, action, version, needs, inputs with their types, bounds and defaults) and readme. api is the plugin API this Nuzky runs (manifest nuzkyPlugin). guide: true also returns the guide to writing one (nuzky://plugin-guide); read it before save_plugin.",
+            "List the user's plugins: small scripts that add an edit Nuzky lacks, kept in Nuzky's plugins folder and shown in the app's Plugins panel. Each has id, status (\"ok\", or \"broken\" with error saying why), manifest (name, description, action, version, needs, inputs with their types, bounds and defaults) and readme. api is the plugin API this Nuzky runs (manifest nuzkyPlugin), 2; plugins for 1 run too. needs is what a plugin reads beyond the project: words (the transcript), and from API 2 silences, loudness and beats, which Nuzky finds in the sound of every media clip with sound and gives in timeline microseconds, as nuzky://plugin-guide describes. guide: true also returns the guide to writing one (nuzky://plugin-guide); read it before save_plugin.",
         )?,
         tool::<params::SavePlugin>(
             "save_plugin",
@@ -261,7 +262,7 @@ fn catalog() -> Result<Vec<Tool>> {
         )?,
         tool::<params::RunPlugin>(
             "run_plugin",
-            "Run a plugin from list_plugins on this project. inputs by input id, checked against its manifest (INVALID_INPUT: <id> …); those left out take their default. selection and playhead_us default to the app's. dry_run: true applies its edits to a copy and changes nothing: it answers edits, message, logs (its nuzky.log lines) and valid with error when they would not apply. Otherwise requires run_id: its edits apply as one batch of your run, all or nothing, and undo with it; it answers applied (the number of edits), message and logs. Runs as a job of your run, which Stop ends; it answers at once when it finishes within 10 s, else gives the job to wait for with job action wait. Errors: PLUGIN_NOT_FOUND, PLUGIN_BROKEN, PLUGIN_API_NEWER, PLUGIN_API_OLD, PLUGIN_FAILED: plugin.js:<line>:<column>: … (with the last lines of its log), PLUGIN_TIMEOUT (60 s), PLUGIN_TOO_MANY_EDITS (5000), PLUGIN_FORBIDDEN_EDIT (a plugin cannot add files), PLUGIN_BAD_EDIT: edit <index> (<type>): …, TRANSCRIPT_MISSING (needs words; transcribe first).",
+            "Run a plugin from list_plugins on this project. inputs by input id, checked against its manifest (INVALID_INPUT: <id> …); those left out take their default. selection and playhead_us default to the app's. dry_run: true applies its edits to a copy and changes nothing: it answers edits, message, logs (its nuzky.log lines) and valid with error when they would not apply. Otherwise requires run_id: its edits apply as one batch of your run, all or nothing, and undo with it; it answers applied (the number of edits), message and logs. Runs as a job of your run, which Stop ends; a plugin that needs silences, loudness or beats first prepares the sound of files not prepared yet and finds them in it, in the same job. It answers at once when it finishes within 10 s, else gives the job to wait for with job action wait. Errors: PLUGIN_NOT_FOUND, PLUGIN_BROKEN, PLUGIN_API_NEWER, PLUGIN_API_OLD, PLUGIN_FAILED: plugin.js:<line>:<column>: … (with the last lines of its log), PLUGIN_TIMEOUT (60 s), PLUGIN_TOO_MANY_EDITS (5000), PLUGIN_FORBIDDEN_EDIT (a plugin cannot add files), PLUGIN_BAD_EDIT: edit <index> (<type>): …, TRANSCRIPT_MISSING (needs words; transcribe first), MEDIA_MISSING (needs the sound of a missing file).",
         )?,
         tool::<params::SuggestOptions>(
             "suggest_options",

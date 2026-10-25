@@ -35,6 +35,8 @@ export interface PluginPreview {
   revision: number;
   project: Project | null;
   error: string | null;
+  /** The app is still preparing the sound the plugin needs; a run prepares it itself. */
+  waiting: boolean;
 }
 
 interface PluginsState {
@@ -133,12 +135,12 @@ export async function previewPlugin(p: Plugin, values: PluginValues, key: string
   let preview: PluginPreview;
   try {
     const project = await api.previewPlugin(p.id, values, selection, timeUs);
-    preview = { key, revision: snap.revision, project, error: null };
+    preview = { key, revision: snap.revision, project, error: null, waiting: false };
   } catch (e) {
     const text = errorText(e);
     // A newer request cancelled it.
     if (text.startsWith("CANCELLED")) return;
-    preview = { key, revision: snap.revision, project: null, error: plainDetail(text) };
+    preview = { key, revision: snap.revision, project: null, error: plainDetail(text), waiting: text.startsWith("AUDIO_NOT_READY") };
   }
   // An older answer arriving late, a closed plugin or a run that started meanwhile keeps what is shown.
   if (mine === previews && usePlugins.getState().open === p.id && !usePlugins.getState().running) usePlugins.setState({ preview });

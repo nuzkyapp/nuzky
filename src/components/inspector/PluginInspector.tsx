@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { Eye, MoreHorizontal, Sparkles, X } from "lucide-react";
 import { describePeek } from "../../lib/peek";
 import { fixable, fixWithAi, plainDetail, pluginBlocked, previewPlugin, runPlugin, setValue, usePlugins, valuesFor, type Plugin, type PluginInput, type PluginValue } from "../../lib/plugins";
-import { useTranscriptView } from "../../lib/speech";
+import { useSpeech, useTranscriptView } from "../../lib/speech";
 import { useEditor } from "../../lib/store";
 import { Select } from "../panel/SpeechControls";
 import { PluginMark, pluginMenu } from "../panel/PluginsTab";
@@ -76,12 +76,12 @@ function useOutcome(p: Plugin, key: string) {
     const said = describePeek(snap.project, preview.project).lines;
     return said.length ? said : ["Changes the project"];
   }, [preview, snap]);
-  if (blocked) return { blocked, lines: null, stale: false };
-  if (!preview) return { blocked: null, lines: null, stale: true };
+  if (blocked) return { blocked, lines: null, stale: false, waiting: false };
+  if (!preview) return { blocked: null, lines: null, stale: true, waiting: false };
   const stale = preview.key !== key || preview.revision !== snap?.revision;
-  if (preview.error) return { blocked: preview.error, lines: null, stale };
-  if (lines && lines.length === 0) return { blocked: "Nothing left to change.", lines: null, stale };
-  return { blocked: null, lines, stale };
+  if (preview.error) return { blocked: preview.error, lines: null, stale, waiting: preview.waiting };
+  if (lines && lines.length === 0) return { blocked: "Nothing left to change.", lines: null, stale, waiting: false };
+  return { blocked: null, lines, stale, waiting: false };
 }
 
 function PluginBody({ plugin: p }: { plugin: Plugin }) {
@@ -94,12 +94,14 @@ function PluginBody({ plugin: p }: { plugin: Plugin }) {
   const playhead = useEditor((s) => (s.playing ? null : s.timeUs));
   const key = JSON.stringify([p.id, all, selection, playhead]);
   const outcome = useOutcome(p, key);
+  // Prepared sound and new words change what a plugin that needs them finds.
+  const heard = useSpeech((s) => (p.needs.length ? s.stored : 0));
 
   useEffect(() => {
     if (p.error || running) return;
     const timer = window.setTimeout(() => void previewPlugin(p, all, key), PREVIEW_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [p, all, key, revision, running]);
+  }, [p, all, key, revision, running, heard]);
 
   return (
     <>
@@ -123,7 +125,7 @@ function PluginBody({ plugin: p }: { plugin: Plugin }) {
           variant="primary"
           pill
           className="h-8 w-full"
-          disabled={(!!outcome.blocked && !outcome.stale) || running}
+          disabled={(!!outcome.blocked && !outcome.stale && !outcome.waiting) || running}
           disabledReason={running ? "Running…" : (outcome.blocked ?? undefined)}
           onClick={() => void runPlugin(p)}
         >

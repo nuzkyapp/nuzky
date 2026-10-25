@@ -9,7 +9,7 @@ A plugin is a small JavaScript file that reads the project and returns edits. Th
 
 ## What a plugin can and cannot do
 
-- It reads: the project as `get_state` gives it, the clips the user selected, the playhead, the values of its inputs and, when it asks for them, the words of the transcript.
+- It reads: the project as `get_state` gives it, the clips the user selected, the playhead, the values of its inputs and, when it asks for them, the words of the transcript and the silences, loudness and beats Nuzky finds in the sound.
 - It returns edits, the same EditCmd JSON as `apply_edits`. Nuzky applies them as ONE batch: all of them or none. The user undoes them in one step.
 - It cannot read or write files, reach the network, start processes, use timers or import modules. There is no `fetch`, `require`, `import`, `setTimeout` or `process`. `Math`, `Date`, `JSON`, strings, arrays and regular expressions work. `run` must return its result, not a Promise.
 - It cannot add media: `addAssets` is refused, so are reel candidates pointing at a new project file. It works with the assets the project already has (`addClip`, `replaceClip` with an existing `assetId`).
@@ -21,7 +21,7 @@ A plugin is a small JavaScript file that reads the project and returns edits. Th
 
 ```json
 {
-  "nuzkyPlugin": 1,
+  "nuzkyPlugin": 2,
   "id": "remove-short-clips",
   "name": "Remove short clips",
   "description": "Deletes clips shorter than a length you choose, such as stray frames left between cuts.",
@@ -34,10 +34,10 @@ A plugin is a small JavaScript file that reads the project and returns edits. Th
 }
 ```
 
-- `nuzkyPlugin` is the plugin API, 1. `list_plugins` gives the `api` this Nuzky runs.
+- `nuzkyPlugin` is the plugin API, 2; plugins made for 1 still run. `list_plugins` gives the `api` this Nuzky runs, and an older Nuzky refuses a plugin for a newer API with PLUGIN_API_NEWER.
 - `id`: 1 to 40 lowercase letters, digits and dashes; also the folder's name. Saving with the same id replaces the plugin and keeps the old files as plugin.prev.json and plugin.prev.js.
 - `name` (at most 40 characters), `description` (300), `version` (20) and `action`, the verb on its button (24, "Run" when left out). Write them in the user's language, plainly, saying what will happen.
-- `needs`: `["words"]` when the plugin reads the transcript.
+- `needs`: what the plugin reads beyond the project, any of `"words"` (the transcript), `"silences"`, `"loudness"` and `"beats"` (found in the sound; these three need `nuzkyPlugin` 2). Ask only for what `run` uses: finding them in a long video takes a while the first time.
 - `inputs`, at most 20, each with `id` (letters, digits and `_`), `label` (at most 40 characters), `type` and `default`:
   - `number`: `min`, `max`, `step`, `default`, optional `unit` such as `"s"` or `"%"`.
   - `toggle`: `default` true or false.
@@ -61,12 +61,16 @@ function run(ctx) {
 
 `ctx`:
 
-- `api`: 1.
+- `api`: 2.
 - `project`: what `get_state` answers: `canvas`, `assets`, `tracks` (bottom to top; `tracks[0]` is the main track, id `"main"`), each with `clips` `{id, startUs, durationUs, content, animIn, animOut, keyframes, transitionIn}`, `duration_us`, `thumbnails`, `selection`, `playhead_us`. `content.type` is `"media"` (`assetId`, `sourceInUs`, `speed`, `volume`, `transform`…) or `"text"` (`text`, `style`, `transform`).
 - `inputs`: every input's value by id, checked against the manifest; those the user did not set have their default.
 - `selection`: ids of the clips the user selected, maybe none.
 - `playheadUs`: where the playhead is.
 - `words`: only with `"needs": ["words"]`, the timeline's words as `get_transcript` gives them: `{i, start_us, end_us, text, p}`. Without a transcript the run fails with TRANSCRIPT_MISSING, so the user transcribes first.
+- `silences`, `loudness`, `beats`: only when `needs` names them. Nuzky finds them in the sound of every media clip whose file has sound, on every track, muted or not, and places them on the timeline through the clip: times are timeline microseconds within the clip, a sped-up clip's are shorter, and the part of the file a clip does not play is left out. Each entry names its `clip_id`, `track_id` and `asset_id`, so keep the clips you want, such as `track_id === "main"` for the main track's own sound. The levels are the file's, before the clip's volume and fades.
+  - `silences`: `[{clip_id, track_id, asset_id, start_us, end_us}]` in timeline order, every quiet stretch of at least 0.1 s of the file, unpadded. Quiet is at most 6 dB above the level the quietest tenth of the file stays under, and never above -35 dBFS, so it follows the room's own noise. Choose your own minimum length, and keep a margin on each side so speech does not start abruptly.
+  - `loudness`: one `{clip_id, track_id, asset_id, start_us, end_us, times_us, dbfs}` per clip, in track and clip order. `dbfs[i]` is the RMS level in dBFS of the window starting at `times_us[i]` and lasting until `times_us[i + 1]`, the last one until `end_us`; -120 is digital silence. A window is 0.1 s of the file, longer for files of many hours.
+  - `beats`: one `{clip_id, track_id, asset_id, start_us, end_us, bpm, confidence, beats_us, downbeats_us, steady_from_us, drops, sections}` per clip, as `analyze` finds the beat. `bpm` is the tempo heard on the timeline. Under a `confidence` of 0.3 there is no beat worth cutting to, as in speech. `beats_us` is every beat in the clip, `downbeats_us` those that start a 4/4 bar; beats before `steady_from_us` continue the beat's grid back to the start without being heard. `drops` `[{at_us, rise_db}]` are bars where the music gets at least 6 dB louder; `sections` `[{at_us, level_db}]` start where the level changes by 6 dB, the first at the clip's start when it began before.
 
 Host functions: `nuzky.progress(fraction)` reports 0..1 for a long run; `nuzky.log(...values)` keeps a line (objects as JSON), at most the last 200, which come back to you with the result and with an error.
 
@@ -172,7 +176,7 @@ Mute or hide a track, and rename the project.
 1. Read `get_state` so you know the project the plugin will meet, and write the plugin for any project, not only this one.
 2. `save_plugin(manifest, script, readme)`. PLUGIN_BROKEN names the field of plugin.json, or the line and column of plugin.js (`plugin.js:3:1: SyntaxError: …`). Fix it and save again.
 3. `run_plugin(id, inputs, dry_run: true)` changes nothing. Check `edits`, `message` and `logs`; `valid: false` with `error` says which edit would fail. Try the inputs the user will use, and an edge such as no selection.
-4. `begin_run`, then `run_plugin(id, inputs, run_id)`. Its edits join your run. A long run answers with a job: wait with `job` action `wait`.
+4. `begin_run`, then `run_plugin(id, inputs, run_id)`. Its edits join your run. A long run answers with a job: wait with `job` action `wait`. A plugin that needs silences, loudness or beats first prepares the sound of each file Nuzky has not prepared yet, as part of that job.
 5. `inspect_frames` where it changed something, and `get_state`. If it is wrong, `end_run` with discard, or keep and `undo_run`, fix the plugin and try again.
 6. Tell the user the plugin is in their Plugins panel, what it does and what its inputs mean.
 
@@ -183,6 +187,7 @@ Mute or hide a track, and rename the project.
 - PLUGIN_API_NEWER: it needs a newer Nuzky. PLUGIN_API_OLD: it was made for an older one.
 - INVALID_INPUT: `<input> must be …`, outside its bounds or options, or not an input of the plugin.
 - TRANSCRIPT_MISSING: it needs the words; `transcribe` first.
+- MEDIA_MISSING: it needs the sound of a file that is missing; the user relinks it.
 - PLUGIN_FAILED: the script threw, with `plugin.js:<line>:<column>`, or returned something that is not edits; the last lines of its log follow.
 - PLUGIN_TIMEOUT: it ran longer than 60 seconds. CANCELLED or RUN_STOPPED: the user stopped it.
 - PLUGIN_OUT_OF_MEMORY: the script, or its edits applied to the copy of the project, took more than 1 GB. Make it change less at once, such as fewer clips or fewer keyframes per clip.

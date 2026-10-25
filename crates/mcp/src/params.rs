@@ -88,7 +88,7 @@ pub struct ListPlugins {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SavePlugin {
-    /// plugin.json: {nuzkyPlugin: 1, id, name, description, version, action?, needs?, inputs?}.
+    /// plugin.json: {nuzkyPlugin: 2, id, name, description, version, action?, needs?, inputs?}.
     pub manifest: serde_json::Value,
     /// plugin.js, which defines function run(ctx).
     pub script: String,

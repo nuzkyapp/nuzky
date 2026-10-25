@@ -28,7 +28,7 @@ use rquickjs::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-pub const API: u64 = 1;
+pub const API: u64 = 2;
 pub const GUIDE: &str = include_str!("../../../skills/nuzky-plugin/SKILL.md");
 const MAX_SCRIPT_BYTES: u64 = 1 << 20;
 const MAX_TEXT_BYTES: u64 = 64 << 10;
@@ -71,10 +71,14 @@ fn default_action() -> String {
     "Run".into()
 }
 
-#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Need {
     Words,
+    /// From API 2 on, found in the sound by `plugin_data`.
+    Silences,
+    Loudness,
+    Beats,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -196,10 +200,15 @@ fn manifest(value: &Value) -> Result<Manifest> {
     let api = value
         .get("nuzkyPlugin")
         .and_then(Value::as_u64)
-        .context("PLUGIN_BROKEN: plugin.json: nuzkyPlugin must be 1")?;
+        .context("PLUGIN_BROKEN: plugin.json: nuzkyPlugin must be 1 or 2")?;
     ensure!(api <= API, "PLUGIN_API_NEWER: This plugin needs a newer Nuzky. Update Nuzky.");
-    ensure!(api == API, "PLUGIN_API_OLD: This plugin was made for an older Nuzky. Ask its author for a new version.");
+    ensure!(api >= 1, "PLUGIN_API_OLD: This plugin was made for an older Nuzky. Ask its author for a new version.");
     let manifest = Manifest::deserialize(value).map_err(|e| anyhow!("PLUGIN_BROKEN: plugin.json: {e}"))?;
+    // So a Nuzky that cannot find it refuses the plugin as too new instead of running it without.
+    ensure!(
+        api >= 2 || manifest.needs.iter().all(|need| *need == Need::Words),
+        "PLUGIN_BROKEN: plugin.json: needs silences, loudness or beats only with nuzkyPlugin 2"
+    );
     ensure!(is_id(&manifest.id), "PLUGIN_BROKEN: plugin.json: id is 1 to 40 lowercase letters, digits and dashes");
     let texts = [
         ("name", &manifest.name, 40),
@@ -374,7 +383,18 @@ pub fn save(manifest: &Value, script: &str, readme: Option<&str>) -> Result<Plug
 pub(crate) struct Prepared {
     manifest: Manifest,
     script: String,
-    ctx: String,
+    ctx: Value,
+    /// The project with its media's full paths, for what `needs` finds in the sound.
+    media: Project,
+}
+
+impl Prepared {
+    /// Adds what `needs` finds in the sound to `ctx`; see `plugin_data::gather`.
+    fn gather(&mut self, cache: &Path, prepare: bool, cancel: &AtomicBool, progress: &dyn Fn(f32)) -> Result<()> {
+        let found = crate::plugin_data::gather(&self.media, cache, &self.manifest.needs, prepare, cancel, progress)?;
+        self.ctx.as_object_mut().context("ctx is an object")?.extend(found);
+        Ok(())
+    }
 }
 
 pub(crate) fn prepare(
@@ -398,12 +418,12 @@ pub(crate) fn prepare(
         "selection": selection.unwrap_or_else(|| state.selection.clone()),
         "playheadUs": playhead_us.unwrap_or(state.playhead_us),
     });
+    let dir = host.session.path().parent().map(Path::to_path_buf).unwrap_or_default();
+    let mut media = state.project.clone();
+    for asset in &mut media.assets {
+        asset.path = dir.join(&asset.path).to_string_lossy().into_owned();
+    }
     if manifest.needs.contains(&Need::Words) {
-        let dir = host.session.path().parent().map(Path::to_path_buf).unwrap_or_default();
-        let mut media = state.project.clone();
-        for asset in &mut media.assets {
-            asset.path = dir.join(&asset.path).to_string_lossy().into_owned();
-        }
         let derived = crate::transcript::derive(&media, &host.transcripts)?;
         ensure!(
             derived.untranscribed.is_empty(),
@@ -412,7 +432,7 @@ pub(crate) fn prepare(
         );
         ctx["words"] = crate::transcript::summary(&derived, None)?["words"].take();
     }
-    Ok(Prepared { manifest, script, ctx: ctx.to_string() })
+    Ok(Prepared { manifest, script, ctx, media })
 }
 
 #[derive(Serialize, Deserialize)]
@@ -578,8 +598,13 @@ pub(crate) fn start(
     let project = state.project.clone();
     let revision = state.stamp.revision;
     let run_id = run.clone().unwrap_or_default();
+    let cache = host.cache_dir.clone();
+    let mut prepared = prepared;
     host.start_job(owner, run.as_deref(), "plugin", state.stamp.clone(), move |cancel, progress| {
-        let checked = isolated(&prepared, &project, &cancel, move |done| progress.set("running", Some(done)));
+        let listening = progress.clone();
+        let checked = prepared
+            .gather(&cache, true, &cancel, &|done| listening.set("listening", Some(done)))
+            .and_then(|()| isolated(&prepared, &project, &cancel, move |done| progress.set("running", Some(done))));
         let host = weak.upgrade().context("APP_CLOSED: project is closed")?;
         match mode {
             Mode::DryRun => Ok(dry(checked?).0),
@@ -630,7 +655,9 @@ pub fn dry_run_in_app(
     cancel: Arc<AtomicBool>,
 ) -> Result<Value> {
     let state = host.session.state()?;
-    let prepared = prepare(host, &state, id, inputs, Some(selection), Some(playhead_us))?;
+    let mut prepared = prepare(host, &state, id, inputs, Some(selection), Some(playhead_us))?;
+    // The app prepares every file's sound in a job of its own, which the user sees; a preview never decodes.
+    prepared.gather(&host.cache_dir, false, &cancel, &|_| {})?;
     let (mut answer, after) = dry(isolated(&prepared, &state.project, &cancel, |_| {})?);
     answer["project"] = json!(after);
     Ok(answer)
@@ -684,7 +711,7 @@ fn isolated(
     // It waits for its input, so the limit holds before it does anything.
     #[cfg(windows)]
     let _job = limit_memory(&child.0)?;
-    let input = serde_json::to_vec(&(&prepared.script, &prepared.ctx, project))?;
+    let input = serde_json::to_vec(&(&prepared.script, prepared.ctx.to_string(), project))?;
     let mut stdin = child.0.stdin.take().context("PLUGIN_FAILED: no input")?;
     std::thread::spawn(move || stdin.write_all(&input));
     let stdout = std::io::BufReader::new(child.0.stdout.take().context("PLUGIN_FAILED: no output")?);

@@ -4290,7 +4290,12 @@ fn a_plugin_is_saved_listed_tried_run_and_undone_over_stdio() {
     let folder = c.dir.join("data/nuzky/plugins");
     for (id, manifest) in [
         ("broken", json!({"nuzkyPlugin": 1, "id": "broken"})),
-        ("future", json!({"nuzkyPlugin": 2, "id": "future", "somethingNew": true})),
+        ("future", json!({"nuzkyPlugin": 3, "id": "future", "somethingNew": true})),
+        (
+            "old-beats",
+            json!({"nuzkyPlugin": 1, "id": "old-beats", "name": "Old beats", "description": "Reads beats",
+            "version": "1", "needs": ["beats"]}),
+        ),
     ] {
         std::fs::create_dir_all(folder.join(id)).unwrap();
         std::fs::write(folder.join(id).join("plugin.json"), manifest.to_string()).unwrap();
@@ -4306,6 +4311,13 @@ fn a_plugin_is_saved_listed_tried_run_and_undone_over_stdio() {
     assert!(
         plugin("future")["error"].as_str().unwrap().starts_with("PLUGIN_API_NEWER: This plugin needs a newer Nuzky.")
     );
+    // An older Nuzky would run it without the beats, so it must say it needs API 2.
+    let old = plugin("old-beats")["error"].as_str().unwrap().to_owned();
+    assert!(
+        old.starts_with("PLUGIN_BROKEN: plugin.json: needs silences, loudness or beats only with nuzkyPlugin 2"),
+        "{old}"
+    );
+    assert_eq!(list["api"], 2);
     assert!(list["guide"].as_str().unwrap().contains("function run(ctx)"));
     let out_of_range =
         plugin_error(c.error("run_plugin", json!({"id": "rename", "dry_run": true, "inputs": {"times": 11}})));
