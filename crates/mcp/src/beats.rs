@@ -318,7 +318,7 @@ pub fn plan(project: &Project, beats: &Beats, options: &Options) -> Result<Plan>
         .map(|(&start, &next)| (start, next - start))
         .collect();
 
-    let (clips, used, repeated) = fill(&sources, &pieces, options.keep_video_sound)?;
+    let (clips, used, repeated, continued) = fill(&sources, &pieces, options.keep_video_sound)?;
     if repeated > 0 {
         warnings.push(format!(
             "footage repeats: {repeated} of {} pieces show footage shown before; give more shots or an earlier end_us",
@@ -330,6 +330,11 @@ pub fn plan(project: &Project, beats: &Beats, options: &Options) -> Result<Plan>
             "only one shot: each piece continues where the last stopped, so the cuts do not show; give more shots"
                 .into(),
         );
+    } else if continued > 0 {
+        warnings.push(format!(
+            "no other shot was long enough, so {continued} of {} pieces continue the shot before them and those cuts do not show; give more or longer shots",
+            pieces.len()
+        ));
     }
     if let Some(&(_, t)) = mapped.iter().find(|m| m.0 == steady)
         && t >= end_us
@@ -536,10 +541,11 @@ fn sources(project: &Project, main: &Track, shots: Option<&[Shot]>) -> Result<Ve
 }
 
 /// Main-track clips for the pieces: the shots in turn, each continuing where it stopped, never the same shot twice
-/// in a row while another can fill the piece. When every shot has run out they all start again.
-fn fill(sources: &[Source], pieces: &[(i64, i64)], keep_sound: bool) -> Result<(Vec<CopiedClip>, usize, usize)> {
+/// in a row while another can fill the piece. When none can, the same shot goes on; when every shot has run out they
+/// all start again.
+fn fill(sources: &[Source], pieces: &[(i64, i64)], keep_sound: bool) -> Result<(Vec<CopiedClip>, usize, usize, usize)> {
     let mut cursor: Vec<i64> = sources.iter().map(|s| s.from).collect();
-    let (mut next, mut previous, mut wrapped, mut repeated) = (0, None, false, 0);
+    let (mut next, mut previous, mut wrapped, mut repeated, mut continued) = (0, None, false, 0, 0);
     let mut used = HashSet::new();
     let mut clips = Vec::with_capacity(pieces.len());
     for &(start, duration) in pieces {
@@ -550,7 +556,7 @@ fn fill(sources: &[Source], pieces: &[(i64, i64)], keep_sound: bool) -> Result<(
                 .map(|o| (next + o) % sources.len())
                 .find(|&k| (!other || sources.len() == 1 || Some(k) != previous) && fits(k, cursor))
         };
-        let k = match pick(&cursor, true) {
+        let k = match pick(&cursor, true).or_else(|| pick(&cursor, false)) {
             Some(k) => k,
             None => {
                 cursor = sources.iter().map(|s| s.from).collect();
@@ -570,6 +576,7 @@ fn fill(sources: &[Source], pieces: &[(i64, i64)], keep_sound: bool) -> Result<(
         }
         cursor[k] += need(&sources[k]);
         repeated += usize::from(wrapped);
+        continued += usize::from(Some(k) == previous);
         used.insert(k);
         (next, previous) = (k + 1, Some(k));
         clips.push(CopiedClip {
@@ -579,7 +586,7 @@ fn fill(sources: &[Source], pieces: &[(i64, i64)], keep_sound: bool) -> Result<(
             keep_in_place: false,
         });
     }
-    Ok((clips, used.len(), repeated))
+    Ok((clips, used.len(), repeated, continued))
 }
 
 /// The answer, from the project as the plan left it: checks that every piece starts where planned.
@@ -735,10 +742,13 @@ mod tests {
                 ClipContent::Text { .. } => unreachable!(),
             })
             .collect();
-        assert!(looks.windows(2).all(|w| w[0].0 != w[1].0) && looks.iter().all(|l| l.1 == 0.0), "{looks:?}");
-        // Taking turns, the first take fills more of the pieces and runs out three pieces before the end.
-        assert_eq!(plan.repeated, 3);
-        assert!(plan.warnings[0].starts_with("footage repeats: 3 of"), "{:?}", plan.warnings);
+        // Taking turns, the first take fills more of the pieces and runs out three pieces before the end, where the
+        // second goes on where it stopped rather than showing footage again.
+        let (turns, last) = looks.split_at(looks.len() - 4);
+        assert!(turns.windows(2).all(|w| w[0].0 != w[1].0) && looks.iter().all(|l| l.1 == 0.0), "{looks:?}");
+        assert!(last.iter().all(|l| l.0 == "blue"), "{looks:?}");
+        assert_eq!(plan.repeated, 0);
+        assert!(plan.warnings[0].starts_with("no other shot was long enough, so 3 of"), "{:?}", plan.warnings);
         let clip =
             |p: &Project, id: &str| p.tracks.iter().flat_map(|t| &t.clips).find(|c| c.id == id).cloned().unwrap();
         for title in &titles {
@@ -770,22 +780,7 @@ mod tests {
         };
         let turns =
             plan(&p, &beats(), &options(vec![shot("red", 0, 1_000_000), shot("blue", 5_000_000, 6_000_000)])).unwrap();
-        let pieces: Vec<(String, i64)> = turns
-            .edits
-            .iter()
-            .find_map(|e| match e {
-                EditCmd::PasteClips { clips, .. } => Some(
-                    clips
-                        .iter()
-                        .map(|c| match &c.clip.content {
-                            ClipContent::Media { asset_id, source_in_us, .. } => (asset_id.clone(), *source_in_us),
-                            ClipContent::Text { .. } => unreachable!(),
-                        })
-                        .collect(),
-                ),
-                _ => None,
-            })
-            .unwrap();
+        let pieces = sources_of(&turns);
         // 0.33 s before the first beat, then 0.6 s pieces. Blue has 0.4 s left for the fourth, so both start again.
         assert_eq!(
             pieces[..5],
@@ -827,6 +822,56 @@ mod tests {
             .map(|c| (c.start_us, c.duration_us))
             .collect();
         assert_eq!(after, titles);
+    }
+
+    /// 120 BPM, a bar every 2 s from 0.
+    fn steady_beats() -> Beats {
+        let beats_us: Vec<i64> = (0..120).map(|i| i * 500_000).collect();
+        Beats {
+            bpm: 120.0,
+            confidence: 0.9,
+            steady_from_us: 0,
+            first_downbeat: 0,
+            drops: vec![],
+            sections: vec![Section { beat: 0, at_us: 0, level_db: -20.0 }],
+            beats_us,
+        }
+    }
+
+    fn sources_of(plan: &Plan) -> Vec<(String, i64)> {
+        plan.edits
+            .iter()
+            .find_map(|e| match e {
+                EditCmd::PasteClips { clips, .. } => Some(
+                    clips
+                        .iter()
+                        .map(|c| match &c.clip.content {
+                            ClipContent::Media { asset_id, source_in_us, .. } => (asset_id.clone(), *source_in_us),
+                            ClipContent::Text { .. } => unreachable!(),
+                        })
+                        .collect(),
+                ),
+                _ => None,
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn a_long_shot_goes_on_where_it_stopped_when_the_other_is_too_short() {
+        let (p, _) = project();
+        let shot =
+            |asset_id: &str, to: i64| Shot { asset_id: asset_id.into(), source_in_us: 0, source_out_us: Some(to) };
+        let options = Options {
+            every: Some(Every::Bar),
+            shots: Some(vec![shot("red", 20_000_000), shot("blue", 1_000_000)]),
+            end_us: Some(8_000_000),
+            ..Options::default()
+        };
+        let plan = plan(&p, &steady_beats(), &options).unwrap();
+        assert_eq!(plan.cut_us, [0, 2_000_000, 4_000_000, 6_000_000]);
+        let red = |t: i64| ("red".to_string(), t);
+        assert_eq!(sources_of(&plan), [red(0), red(2_000_000), red(4_000_000), red(6_000_000)]);
+        assert_eq!(plan.repeated, 0);
     }
 
     #[test]
