@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use anyhow::{Result, bail};
@@ -79,6 +80,13 @@ pub struct Renderer {
     skipped: Vec<String>,
     skipped_ever: Vec<String>,
 }
+
+/// How long a frame without effects may take on the GPU before the device counts as stuck.
+const FRAME_LIMIT: Duration = Duration::from_secs(60);
+/// The least a frame drawn again without effects may take, on a new device that uploads its textures anew.
+const RETRY_LIMIT: Duration = Duration::from_secs(2);
+/// The longest side of the grid a clip's effects draw on.
+const MAX_EFFECT_SIDE: u32 = 4096;
 
 /// What a renderer draws for a clip with a background whose person matte is not made yet.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -327,7 +335,6 @@ impl Renderer {
     /// How long a frame with plugin effects may take on the GPU before they count as broken: 10 s unless set.
     pub fn set_gpu_timeout(&mut self, timeout: Duration) {
         self.gpu_timeout = timeout;
-        self.gpu.effect_timeout = timeout;
     }
 
     /// The effects the last frame was drawn without, missing or broken, by name.
@@ -345,6 +352,12 @@ impl Renderer {
         self.gpu.lose_device();
     }
 
+    /// Makes the GPU act as if it never finished the next `frames` frames, as a hung driver would.
+    #[doc(hidden)]
+    pub fn hang_gpu(&mut self, frames: u32) {
+        self.gpu.hung_frames = frames;
+    }
+
     fn skip(&mut self, name: String) {
         if !self.skipped.contains(&name) {
             self.skipped.push(name.clone());
@@ -354,8 +367,17 @@ impl Renderer {
         }
     }
 
-    /// The clip's effects that draw on this computer; the others are skipped by name.
-    fn effect_passes(&mut self, clip: &Clip, size: (f32, f32), t_us: i64) -> Vec<EffectPass> {
+    /// The clip's effects that draw on this computer; the others are skipped by name. `size` is the clip's in canvas
+    /// pixels, `scale` its transform's, and `k` output pixels per canvas pixel.
+    fn effect_passes(&mut self, clip: &Clip, size: (f32, f32), scale: f32, k: f32, t_us: i64) -> Vec<EffectPass> {
+        // Their grid does not depend on the output, so the preview shows what the export does, only smaller. A clip
+        // scaled up gets a finer one, in powers of two so a zoom does not make new textures every frame.
+        let finer = 2f32.powf(scale.clamp(1.0, 4.0).log2().ceil());
+        let side =
+            (MAX_EFFECT_SIDE.min(self.gpu.max_texture_dimension()) as f32 / (size.0.max(size.1) * finer)).min(1.0);
+        let texels = |n: f32| (n.round() as u32).max(1);
+        let grid = [texels(size.0 * finer * side), texels(size.1 * finer * side)];
+        let shown = [(size.0 * scale * k).ceil() as u32, (size.1 * scale * k).ceil() as u32].map(|n| n.max(1));
         let mut passes = Vec::new();
         for effect in clip.effects.iter().take(MAX_CLIP_EFFECTS) {
             let name = plugin_effects::display_name(effect);
@@ -372,6 +394,8 @@ impl Renderer {
             passes.push(EffectPass {
                 key: loaded.key,
                 size: [size.0, size.1],
+                grid,
+                shown,
                 time: (t_us - clip.start_us).max(0) as f32 / 1e6,
                 seed: plugin_effects::seed(&clip.id),
                 params: loaded.def.pack(&effect.params),
@@ -381,22 +405,27 @@ impl Renderer {
         passes
     }
 
-    /// Draws the frame; when the GPU fails on it, the device is replaced, and a frame with effects marks them
-    /// broken for every renderer and is drawn again without them.
-    fn composite(&mut self, w: u32, h: u32, background: [f32; 4], draws: &mut [Draw]) -> Result<Vec<u8>> {
-        let error = match self.gpu.render(w, h, background, draws) {
+    /// Draws the frame, failing within the frame's limit or soon after `stop`. When the GPU fails on it the device is
+    /// replaced, and a frame with effects marks them broken for every renderer and is drawn again without them.
+    fn composite(
+        &mut self,
+        w: u32,
+        h: u32,
+        background: [f32; 4],
+        draws: &mut [Draw],
+        stop: &AtomicBool,
+    ) -> Result<Vec<u8>> {
+        let effects = !self.frame_effects.is_empty();
+        let limit = if effects { self.gpu_timeout } else { FRAME_LIMIT };
+        let error = match self.gpu.render_within(w, h, background, draws, Some(limit), stop) {
             Err(error) if error.downcast_ref::<GpuFault>().is_some() => error,
             done => return done,
         };
-        log::error!("Drawing a frame failed on the GPU: {error:#}");
-        let mut fresh = Gpu::new()?;
-        fresh.effect_timeout = self.gpu_timeout;
-        let old = std::mem::replace(&mut self.gpu, fresh);
-        // A device stuck on a shader may block while it is dropped; the frame does not wait for it.
-        std::thread::Builder::new().name("gpu-end".into()).spawn(move || drop(old)).ok();
-        if self.frame_effects.is_empty() {
+        self.renew_gpu()?;
+        if !effects || matches!(error.downcast_ref(), Some(GpuFault::Stopped)) {
             return Err(error);
         }
+        log::error!("Drawing a frame failed on the GPU: {error:#}");
         for (key, name, file) in std::mem::take(&mut self.frame_effects) {
             plugin_effects::mark_broken(key, &format!("{file}: {error}"));
             self.skip(name);
@@ -407,7 +436,22 @@ impl Renderer {
                 Draw::Transition(pair) => pair.iter_mut().for_each(|layer| layer.effects.clear()),
             }
         }
-        self.gpu.render(w, h, background, draws)
+        // A GPU still stuck must not hold the preview or the export either.
+        let retried = self.gpu.render_within(w, h, background, draws, Some(self.gpu_timeout.max(RETRY_LIMIT)), stop);
+        if retried.as_ref().is_err_and(|error| error.downcast_ref::<GpuFault>().is_some()) {
+            self.renew_gpu()?;
+        }
+        retried
+    }
+
+    /// A new device for one busy with a frame it failed on.
+    fn renew_gpu(&mut self) -> Result<()> {
+        let mut fresh = Gpu::new()?;
+        fresh.hung_frames = self.gpu.hung_frames;
+        let old = std::mem::replace(&mut self.gpu, fresh);
+        // A device stuck on a shader may block while it is dropped; the frame does not wait for it.
+        std::thread::Builder::new().name("gpu-end".into()).spawn(move || drop(old)).ok();
+        Ok(())
     }
 
     /// Reads person mattes from `cache_dir`. Without it a clip with a background fails with `MATTE_MISSING`.
@@ -448,6 +492,21 @@ impl Renderer {
         out_h: u32,
         wait: Wait,
         playing: bool,
+    ) -> Result<Vec<u8>> {
+        self.render_until(project, t_us, out_w, out_h, wait, playing, &AtomicBool::new(false))
+    }
+
+    /// `render` that stops waiting for the GPU soon after `stop` is set, as an export's cancel does.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_until(
+        &mut self,
+        project: &Project,
+        t_us: i64,
+        out_w: u32,
+        out_h: u32,
+        wait: Wait,
+        playing: bool,
+        stop: &AtomicBool,
     ) -> Result<Vec<u8>> {
         self.drop_stale_workers(project);
         self.needed.clear();
@@ -518,7 +577,7 @@ impl Renderer {
             .map(|layer| Arc::as_ptr(&layer.image.data) as usize)
             .collect();
         self.behind.retain(|key, _| behind_used.contains(&key.0));
-        self.composite(out_w, out_h, parse_color(&canvas.background), &mut draws)
+        self.composite(out_w, out_h, parse_color(&canvas.background), &mut draws, stop)
     }
 
     /// Decoders of removed or relinked clips go at once, others after idling. Runs before drawing,
@@ -683,7 +742,7 @@ impl Renderer {
                     matte = self.matte_for(project, asset, &frame, background, place.size)?;
                 }
                 let image = Image { width: frame.width, height: frame.height, data: frame.data };
-                effects = self.effect_passes(clip, place.size, t_us);
+                effects = self.effect_passes(clip, place.size, place.transform.scale, k, t_us);
                 (image, (asset.rotation, asset.mirror), *adjust, frame.transfer)
             }
             ClipContent::Text { .. } => {

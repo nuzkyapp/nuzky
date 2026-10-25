@@ -1,6 +1,6 @@
 //! Plugin effects on real files: the preview, the export as FFmpeg decodes it, a saved frame and a cover show the
-//! same picture; an effect keeps to the picture as shown on rotated phone video; a missing or failing effect leaves
-//! the clip drawn without it.
+//! same picture, also when the preview is smaller; an effect keeps to the picture as shown on rotated phone video; a
+//! missing or failing effect leaves the clip drawn without it, and a GPU that never finishes holds no frame for long.
 mod qa_support;
 use nuzky_engine::{
     Pending, Renderer, Wait,
@@ -12,8 +12,11 @@ use qa_support::*;
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
-    sync::{OnceLock, atomic::AtomicBool},
-    time::Duration,
+    sync::{
+        Arc, OnceLock,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::{Duration, Instant},
 };
 
 /// Dark bands `spacing` canvas pixels high across the picture as shown.
@@ -188,4 +191,143 @@ fn a_lost_device_or_a_timeout_marks_the_effect_broken_and_draws_without_it() {
         assert_eq!(other.render(&p, 0, w, h, Wait::Exact, false).unwrap(), without, "{plugin}: another renderer");
         assert!(plugin_effects::issues(&p)[0].sentence().starts_with("Scanlines has an error"), "{plugin}");
     }
+}
+
+/// Every other canvas row dimmed to a quarter: finer than a preview at half size can show row by row.
+const ROWS: &str = "fn effect(p: Pixel) -> vec4<f32> {
+    if u32(floor(p.uv.y * p.size.y)) % 2u == 1u {
+        return vec4<f32>(p.color.rgb * 0.25, p.color.a);
+    }
+    return p.color;
+}
+";
+
+/// RGBA `w`×`h` shrunk to half by averaging each 2×2 block.
+fn half(rgba: &[u8], w: usize, h: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(w * h);
+    for y in (0..h).step_by(2) {
+        for x in (0..w).step_by(2) {
+            for c in 0..4 {
+                let at = |x: usize, y: usize| rgba[(y * w + x) * 4 + c] as u32;
+                out.push(((at(x, y) + at(x + 1, y) + at(x, y + 1) + at(x + 1, y + 1) + 2) / 4) as u8);
+            }
+        }
+    }
+    out
+}
+
+/// The effect draws on the clip's own grid in a preview at half size too, and the preview shrinks its picture, so
+/// stripes one canvas pixel high come out as the export's stripes seen from further away, not as one dark field.
+#[test]
+fn a_smaller_preview_shows_what_the_export_shows() {
+    if !available() {
+        return;
+    }
+    install("rows", "scanlines", ROWS);
+    let d = dir("effects-smaller");
+    let grey = d.join("grey.mp4");
+    ff(
+        &["-f", "lavfi", "-i", "color=c=0x909090:size=64x64:rate=25:duration=0.4", "-c:v", "libx264", "-crf", "0"],
+        &grey,
+    );
+    let mut p = with_effect(project(&grey, 400_000), "rows");
+    p.canvas.fps = 25;
+    let t = 120_000;
+
+    let out = d.join("export.mp4");
+    let options = ExportOptions { preset: "ultrafast".into(), crf: 0, replace_existing: true, ..Default::default() };
+    export(&p, &d.join("cache"), &out, &options, &AtomicBool::new(false), |_| {}).unwrap();
+    let size = 64 * 64 * 4;
+    let index = (t * 25 / 1_000_000) as usize;
+    let exported = raw(&out, &[])[index * size..(index + 1) * size].to_vec();
+    let row = |y: usize| exported[y * 64 * 4] as i32;
+    assert!(row(0) - row(1) > 60, "the export has the stripes: rows {} and {}", row(0), row(1));
+
+    let mut preview = Renderer::new().unwrap();
+    preview.use_proxies(d.join("cache"));
+    preview.use_mattes(d.join("cache"), Pending::Original);
+    preview.set_gpu_timeout(Duration::from_secs(2));
+    let shown = preview.render(&p, t, 32, 32, Wait::Exact, false).unwrap();
+    let error = mae(&shown, &half(&exported, 64, 64));
+    eprintln!("QA effects: half-size preview MAE {error:.2}");
+    assert!(error < 4.0, "the half-size preview differs from the export seen at that size: MAE {error}");
+}
+
+/// A frame that times out with an effect is drawn again without it, and that try is bounded too, so a GPU that
+/// never finishes either try ends the frame with an error within seconds instead of holding the preview or export.
+#[test]
+fn a_gpu_that_never_finishes_ends_the_frame_within_seconds() {
+    if !available() {
+        return;
+    }
+    install("never-ends", "scanlines", &format!("{SCANLINES}// never ends\n"));
+    let d = dir("effects-hung");
+    let p = with_effect(project(&rotated(&d), 400_000), "never-ends");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let started = Instant::now();
+    let shown = p.clone();
+    std::thread::spawn(move || {
+        let mut renderer = Renderer::new().unwrap();
+        renderer.set_gpu_timeout(Duration::from_millis(200));
+        renderer.hang_gpu(2);
+        let (w, h) = (shown.canvas.width, shown.canvas.height);
+        tx.send(renderer.render(&shown, 0, w, h, Wait::Exact, false).map(drop).map_err(|e| format!("{e:#}"))).ok();
+    });
+    let result = rx.recv_timeout(Duration::from_secs(30)).expect("the frame never ended");
+    let error = result.expect_err("a GPU that never finishes draws no frame");
+    assert!(error.contains("longer than"), "{error}");
+    assert!(started.elapsed() < Duration::from_secs(30), "{:?}", started.elapsed());
+    assert!(matches!(plugin_effects::lookup(&data().join("plugins"), "never-ends", "scanlines"), Lookup::Broken(_)));
+}
+
+/// An export's cancel ends the wait for a GPU that does not finish, and does not count against the effect.
+#[test]
+fn cancel_ends_the_wait_for_a_stuck_gpu() {
+    if !available() {
+        return;
+    }
+    install("cancelled", "scanlines", &format!("{SCANLINES}// cancelled\n"));
+    let d = dir("effects-cancel");
+    let p = with_effect(project(&rotated(&d), 400_000), "cancelled");
+    let stop = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (shown, stopped) = (p.clone(), stop.clone());
+    std::thread::spawn(move || {
+        let mut renderer = Renderer::new().unwrap();
+        renderer.set_gpu_timeout(Duration::from_secs(60));
+        renderer.hang_gpu(1);
+        let (w, h) = (shown.canvas.width, shown.canvas.height);
+        tx.send(Instant::now()).ok();
+        let result = renderer.render_until(&shown, 0, w, h, Wait::Exact, true, &stopped);
+        tx.send(Instant::now()).ok();
+        result.map(drop).map_err(|e| format!("{e:#}")).expect_err("a stopped frame draws nothing");
+    });
+    rx.recv_timeout(Duration::from_secs(30)).unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    let cancelled = Instant::now();
+    stop.store(true, Ordering::Relaxed);
+    let ended = rx.recv_timeout(Duration::from_secs(30)).expect("cancel did not end the frame");
+    assert!(ended.duration_since(cancelled) < Duration::from_secs(3), "{:?}", ended.duration_since(cancelled));
+    assert!(matches!(plugin_effects::lookup(&data().join("plugins"), "cancelled", "scanlines"), Lookup::Ready(_)));
+}
+
+/// Posters and covers kept for later go stale when a plugin effect of the project changes, breaks or goes away.
+#[test]
+fn the_effects_stamp_changes_with_the_plugin() {
+    install("stamped", "scanlines", SCANLINES);
+    let mut p = Project::new("Stamp");
+    p.tracks[0].clips.push(clip("still", "a", 0, 1_000_000));
+    let p = with_effect(p, "stamped");
+    let installed = plugin_effects::stamp(&p);
+    assert!(!installed.is_empty() && !installed.contains("missing"), "{installed}");
+    let file = data().join("plugins/stamped/effects/scanlines.wgsl");
+    std::fs::write(&file, format!("{SCANLINES}// changed\n")).unwrap();
+    let changed = plugin_effects::stamp(&p);
+    assert_ne!(changed, installed);
+    std::fs::write(&file, "fn effect(p: Pixel) -> vec4<f32> { loop { } }\n").unwrap();
+    let broken = plugin_effects::stamp(&p);
+    assert!(broken.contains("broken"), "{broken}");
+    std::fs::remove_dir_all(data().join("plugins/stamped")).unwrap();
+    assert!(plugin_effects::stamp(&p).contains("missing"));
+    assert_eq!(plugin_effects::stamp(&Project::new("None")), "");
 }

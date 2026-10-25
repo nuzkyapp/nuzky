@@ -248,7 +248,7 @@ The function is `fn effect(p: Pixel) -> vec4<f32>` and returns straight-alpha RG
 
 - `uv`: where in the clip, 0..1 from its top left, upright as the clip shows, also on a rotated or mirrored phone video.
 - `color`: the clip's colour there, straight alpha, already converted from HDR.
-- `size`: the clip's size in canvas pixels, the same in the preview and the export. Work in `p.uv * p.size` for anything measured in pixels, so lines and grain do not change with the preview's size.
+- `size`: the clip's size in canvas pixels, the same in the preview and the export. The effect draws on that grid in both (finer for a clip scaled up), and a smaller preview shrinks the result, so work in `p.uv * p.size` for anything measured in pixels and the preview shows the export's lines and grain from further away.
 - `time`: seconds since the clip started, on the timeline, so playback, scrubbing and export agree.
 - `seed`: a number of the clip's own, the same wherever it is drawn.
 - `params`: 16 floats, the params in manifest order: a number or toggle (0 or 1) takes one slot, a colour three (red, green, blue, 0..1). Nuzky keeps each value within the manifest's bounds.
@@ -259,8 +259,8 @@ What Nuzky refuses, so no effect can stall or crash the preview:
 
 - Loops (`for`, `while`, `loop`): write the few steps out, or call a function for each.
 - Textures, buffers, uniforms and every global but `var<private>`; read the picture only through `nuzky_source`, at most 16 times per pixel, counting the calls inside your own functions.
-- More than 4096 operations per pixel with what it calls, variables over 1 KB, `discard`, derivatives (`dpdx`), barriers, atomics, `override` and entry points of its own.
-- Names that start with `nuzky_`, and a struct named `Pixel`: they are Nuzky's.
+- More than 4096 operations per pixel with what it calls, any value over 1 KB (a variable, a `let`, an argument or a result), `discard`, derivatives (`dpdx`), barriers, atomics, `override` and entry points of its own.
+- Names that start with `nuzky_`, and a struct named `Pixel`: they are Nuzky's. Of its functions, call only the four helpers above.
 - A file over 16 KB.
 
 An effect that passes and still takes the GPU longer than 2 s in the preview (10 s in an export) is dropped for the rest of the session, and the clip is drawn without it. Whole-frame effects, such as one over every clip at once, and wide blurs are out of reach.

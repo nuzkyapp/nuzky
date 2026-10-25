@@ -1,8 +1,9 @@
 //! Offscreen wgpu compositor shared by preview and export.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result};
 use wgpu::util::DeviceExt;
@@ -54,6 +55,47 @@ fn nuzky_hdr_to_sdr(rgb: vec3<f32>, transfer: f32) -> vec3<f32> {
 }
 "#;
 
+/// Shrinks what effects drew to the size the layer is shown at. Each output pixel averages taps spread evenly over the
+/// texels it covers, bilinear in premultiplied colour, so lines finer than the output blend instead of being skipped.
+const SHRINK: &str = r#"
+struct Shrink {
+    ratio: vec2<f32>, // texels per output pixel
+    taps: vec2<f32>,
+};
+@group(0) @binding(0) var<uniform> shrink: Shrink;
+@group(0) @binding(1) var src: texture_2d<f32>;
+
+@vertex
+fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
+    let corner = vec2<f32>(f32(i & 1u), f32(i >> 1u));
+    return vec4<f32>(corner.x * 2.0 - 1.0, 1.0 - corner.y * 2.0, 0.0, 1.0);
+}
+
+fn texel(p: vec2<i32>, size: vec2<i32>) -> vec4<f32> {
+    let c = textureLoad(src, clamp(p, vec2<i32>(0), size - 1), 0);
+    return vec4<f32>(c.rgb * c.a, c.a);
+}
+
+@fragment
+fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    let size = vec2<i32>(textureDimensions(src));
+    let n = vec2<i32>(shrink.taps);
+    let corner = floor(pos.xy) * shrink.ratio;
+    var sum = vec4<f32>(0.0);
+    for (var y = 0; y < n.y; y += 1) {
+        for (var x = 0; x < n.x; x += 1) {
+            let s = corner + (vec2<f32>(f32(x), f32(y)) + 0.5) / vec2<f32>(n) * shrink.ratio - 0.5;
+            let i = vec2<i32>(floor(s));
+            let f = fract(s);
+            let top = mix(texel(i, size), texel(i + vec2<i32>(1, 0), size), f.x);
+            sum += mix(top, mix(texel(i + vec2<i32>(0, 1), size), texel(i + 1, size), f.x), f.y);
+        }
+    }
+    let c = sum / f32(n.x * n.y);
+    return vec4<f32>(select(vec3<f32>(0.0), c.rgb / c.a, c.a > 0.0), c.a);
+}
+"#;
+
 const SHADER: &str = r#"
 struct Layer {
     corners: array<vec4<f32>, 4>, // xy = clip-space position, zw = uv
@@ -66,7 +108,7 @@ struct Layer {
     mask: vec4<f32>, // half width and height of the visible part, corner radius, border width; no mask at 0 width
     border: vec4<f32>, // premultiplied border colour
     shadow: vec4<f32>, // opacity, blur, offset down
-    matte: vec4<f32>, // fill behind the person: 0 none, 1 footage, 2 colour, 3 picture; picture scale
+    matte: vec4<f32>, // fill behind the person: 0 none, 1 footage, 2 colour, 3 picture; footage: its own transfer, or picture scale
     fill: vec4<f32>, // premultiplied fill colour
 };
 @group(0) @binding(0) var<uniform> layer: Layer;
@@ -179,7 +221,13 @@ fn person(uv: vec2<f32>, smooth_outline: bool) -> f32 {
 // The fill behind the person at a point, premultiplied.
 fn fill_at(uv: vec2<f32>, layer_uv: vec2<f32>) -> vec4<f32> {
     if layer.matte.x < 1.5 {
-        return sample_straight(fill_tex, uv);
+        let f = sample_straight(fill_tex, uv);
+        if layer.matte.y > 0.0 {
+            // HDR footage behind a picture its effects already made SDR is tone mapped on its own.
+            let rgb = select(vec3<f32>(0.0), f.rgb / f.a, f.a > 0.0);
+            return vec4<f32>(nuzky_hdr_to_sdr(rgb, layer.matte.y) * f.a, f.a);
+        }
+        return f;
     } else if layer.matte.x < 2.5 {
         return layer.fill;
     }
@@ -363,6 +411,11 @@ pub struct EffectPass {
     pub key: u64,
     /// The layer's upright size in canvas pixels, the same in the preview and the export.
     pub size: [f32; 2],
+    /// The upright texels the effects draw, the same in the preview and the export, so a pattern of canvas pixels
+    /// comes out alike; the same for each effect of a layer.
+    pub grid: [u32; 2],
+    /// The upright pixels the layer takes in the output; a smaller output gets the effects' picture shrunk to it.
+    pub shown: [u32; 2],
     /// Seconds since the clip started, on the timeline.
     pub time: f32,
     pub seed: u32,
@@ -375,6 +428,8 @@ pub enum GpuFault {
     Timeout(Duration),
     Lost(String),
     Error(String),
+    /// The wait for the frame ended at the caller's cancel.
+    Stopped,
 }
 
 impl std::fmt::Display for GpuFault {
@@ -383,6 +438,7 @@ impl std::fmt::Display for GpuFault {
             Self::Timeout(limit) => write!(f, "the GPU took longer than {} s to draw it", limit.as_secs_f32()),
             Self::Lost(why) => write!(f, "the GPU stopped while drawing it ({why})"),
             Self::Error(why) => write!(f, "the GPU refused to draw it ({why})"),
+            Self::Stopped => write!(f, "CANCELLED: stopped while the GPU drew the frame"),
         }
     }
 }
@@ -503,10 +559,12 @@ pub struct Gpu {
     layout: wgpu::BindGroupLayout,
     effect_layout: wgpu::BindGroupLayout,
     effect_pipelines: HashMap<u64, wgpu::RenderPipeline>,
-    /// Two textures per layer with effects in a frame, which its passes draw into in turn.
-    effect_targets: Vec<[wgpu::Texture; 2]>,
-    /// How long a frame with effects may take on the GPU.
-    pub effect_timeout: Duration,
+    shrink: wgpu::RenderPipeline,
+    /// The textures of each layer with effects in a frame.
+    effect_targets: Vec<EffectTargets>,
+    /// Frames whose wait acts as if the GPU never answered, for tests of a hung driver.
+    #[doc(hidden)]
+    pub hung_frames: u32,
     /// Errors wgpu reported outside an error scope during the frame, which by default would panic.
     errors: Arc<Mutex<Vec<String>>>,
     lost: Arc<Mutex<Option<String>>>,
@@ -516,6 +574,54 @@ pub struct Gpu {
     /// Bound where a layer has no matte or fill.
     blank: wgpu::Texture,
     pub adapter_name: String,
+}
+
+/// Two textures a layer's effects draw into in turn, and the one their picture is shrunk into for a smaller output.
+struct EffectTargets {
+    passes: [wgpu::Texture; 2],
+    shrunk: Option<wgpu::Texture>,
+}
+
+/// How often a wait for the GPU looks at its cancel.
+const WAIT_SLICE: Duration = Duration::from_millis(25);
+
+/// A pipeline drawing a whole texture through `module`'s `vs` and `fs`, replacing what was there.
+fn whole_texture_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    module: &wgpu::ShaderModule,
+    [vs, fs]: [&str; 2],
+) -> wgpu::RenderPipeline {
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some(fs),
+        bind_group_layouts: &[Some(layout)],
+        immediate_size: 0,
+    });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(fs),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module,
+            entry_point: Some(vs),
+            compilation_options: Default::default(),
+            buffers: &[],
+        },
+        primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleStrip, ..Default::default() },
+        depth_stencil: None,
+        multisample: Default::default(),
+        fragment: Some(wgpu::FragmentState {
+            module,
+            entry_point: Some(fs),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview_mask: None,
+        cache: None,
+    })
 }
 
 fn texture_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
@@ -642,6 +748,11 @@ impl Gpu {
                 texture_entry(1),
             ],
         });
+        let shrink_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("shrink"),
+            source: wgpu::ShaderSource::Wgsl(SHRINK.into()),
+        });
+        let shrink = whole_texture_pipeline(&device, &effect_layout, &shrink_module, ["vs", "fs"]);
         let blank = device.create_texture_with_data(
             &queue,
             &wgpu::TextureDescriptor {
@@ -666,8 +777,9 @@ impl Gpu {
             layout,
             effect_layout,
             effect_pipelines: HashMap::new(),
+            shrink,
             effect_targets: Vec::new(),
-            effect_timeout: Duration::from_secs(10),
+            hung_frames: 0,
             errors,
             lost,
             target: None,
@@ -801,9 +913,13 @@ impl Gpu {
                 )
             }
         };
+        // Effects draw SDR, so the picture is not tone mapped again; HDR footage behind it is, on its own.
+        let transfer = layer.transfer as u8 as f32;
+        let (picture_transfer, footage_transfer) =
+            if layer.effects.is_empty() { (transfer, 0.0) } else { (0.0, transfer) };
         let (matte, fill) = match layer.matte.as_ref().map(|m| &m.fill) {
             None => ([0.0; 4], [0.0; 4]),
-            Some(Fill::Footage(_)) => ([1.0, 0.0, 0.0, 0.0], [0.0; 4]),
+            Some(Fill::Footage(_)) => ([1.0, footage_transfer, 0.0, 0.0], [0.0; 4]),
             Some(Fill::Color([r, g, b, a])) => ([2.0, 0.0, 0.0, 0.0], [r * a, g * a, b * a, *a]),
             Some(Fill::Picture { scale, .. }) => ([3.0, scale[0], scale[1], 0.0], [0.0; 4]),
         };
@@ -811,13 +927,7 @@ impl Gpu {
         let uniform = LayerUniform {
             corners,
             local,
-            // Effects draw SDR.
-            opacity: [
-                layer.opacity.clamp(0.0, 1.0),
-                if layer.effects.is_empty() { layer.transfer as u8 as f32 } else { 0.0 },
-                0.0,
-                0.0,
-            ],
+            opacity: [layer.opacity.clamp(0.0, 1.0), picture_transfer, 0.0, 0.0],
             adjust: [a.brightness, a.contrast, a.saturation, a.temperature],
             effects: [a.vignette, layer.blur, premult as u8 as f32, a.fade],
             grading: [a.exposure, a.tint, a.highlights, a.shadows],
@@ -902,36 +1012,7 @@ impl Gpu {
             label: Some("effect"),
             source: wgpu::ShaderSource::Wgsl(shader.into()),
         });
-        let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("effect"),
-            bind_group_layouts: &[Some(&self.effect_layout)],
-            immediate_size: 0,
-        });
-        let pipeline = self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("effect"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &module,
-                entry_point: Some("nuzky_vs"),
-                compilation_options: Default::default(),
-                buffers: &[],
-            },
-            primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleStrip, ..Default::default() },
-            depth_stencil: None,
-            multisample: Default::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: Some("nuzky_fs"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::Rgba8Unorm,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let pipeline = whole_texture_pipeline(&self.device, &self.effect_layout, &module, ["nuzky_vs", "nuzky_fs"]);
         let errors = [validation.pop(), memory.pop(), internal.pop()].map(pollster::block_on);
         if let Some(error) = errors.into_iter().flatten().next() {
             return Err(format!("the GPU cannot build it: {error}"));
@@ -940,6 +1021,8 @@ impl Gpu {
         Ok(())
     }
 
+    /// Draws the layer's effects over `image` on their own grid, then shrinks the result to the size the layer is
+    /// shown at when that is smaller, and returns the texture the layer then draws from.
     fn draw_effects(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
@@ -947,34 +1030,47 @@ impl Gpu {
         image: wgpu::Texture,
         slot: usize,
     ) -> Result<wgpu::Texture> {
-        let (w, h) = (image.width(), image.height());
-        if self.effect_targets.get(slot).map(|pair| (pair[0].width(), pair[0].height())) != Some((w, h)) {
-            let make = || {
-                self.device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("effect"),
-                    size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Rgba8Unorm,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-                    view_formats: &[],
-                })
-            };
-            let pair = [make(), make()];
-            if slot == self.effect_targets.len() {
-                self.effect_targets.push(pair);
-            } else {
-                self.effect_targets[slot] = pair;
-            }
+        let first = &layer.effects[0];
+        // The grid and output sizes are upright; the textures keep the image's own orientation.
+        let texels =
+            |[x, y]: [u32; 2]| if layer.uv_rotation % 180 == 90 { (y.max(1), x.max(1)) } else { (x.max(1), y.max(1)) };
+        let (w, h) = texels(first.grid);
+        let shown = texels(first.shown);
+        let shown = (shown.0.min(w), shown.1.min(h));
+        let shrunk = (shown != (w, h)).then_some(shown);
+        let make = |(width, height): (u32, u32)| {
+            self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("effect"),
+                size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+        };
+        let size = |texture: &wgpu::Texture| (texture.width(), texture.height());
+        let targets = match self.effect_targets.get(slot) {
+            Some(targets) if size(&targets.passes[0]) == (w, h) => EffectTargets {
+                passes: targets.passes.clone(),
+                shrunk: targets.shrunk.clone().filter(|t| Some(size(t)) == shrunk).or_else(|| shrunk.map(make)),
+            },
+            _ => EffectTargets { passes: [make((w, h)), make((w, h))], shrunk: shrunk.map(make) },
+        };
+        if slot == self.effect_targets.len() {
+            self.effect_targets.push(targets);
+        } else {
+            self.effect_targets[slot] = targets;
         }
+        let EffectTargets { passes, shrunk } = &self.effect_targets[slot];
+        let (passes, shrunk) = (passes.clone(), shrunk.clone());
         let (to_texture, to_upright, offsets) = orientation(layer.uv_rotation, layer.mirror);
         let mut source = image;
         let mut transfer = layer.transfer as u8 as f32;
         for (i, effect) in layer.effects.iter().enumerate() {
             let pipeline =
                 self.effect_pipelines.get(&effect.key).context("An effect was drawn before it was prepared")?;
-            let target = self.effect_targets[slot][i % 2].clone();
             let p = effect.params;
             let uniform = EffectUniform {
                 to_texture,
@@ -984,41 +1080,58 @@ impl Gpu {
                 seed: [effect.seed, 0, 0, 0],
                 params: std::array::from_fn(|row| std::array::from_fn(|column| p[row * 4 + column])),
             };
-            let buffer = self.uniform_buffer("effect", bytemuck::bytes_of(&uniform));
-            let input = source.create_view(&Default::default());
-            let group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("effect"),
-                layout: &self.effect_layout,
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&input) },
-                ],
-            });
-            let view = target.create_view(&Default::default());
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("effect"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            pass.set_pipeline(pipeline);
-            pass.set_bind_group(0, &group, &[]);
-            pass.draw(0..4, 0..1);
-            drop(pass);
-            source = target;
+            let target = &passes[i % 2];
+            self.whole_texture_pass(encoder, pipeline, bytemuck::bytes_of(&uniform), &source, target);
+            source = target.clone();
             transfer = 0.0;
         }
-        Ok(source)
+        let Some(shrunk) = shrunk else { return Ok(source) };
+        let ratio = [w as f32 / shrunk.width() as f32, h as f32 / shrunk.height() as f32];
+        let taps = ratio.map(|r| r.ceil().clamp(1.0, 16.0));
+        let uniform: [f32; 4] = [ratio[0], ratio[1], taps[0], taps[1]];
+        self.whole_texture_pass(encoder, &self.shrink, bytemuck::bytes_of(&uniform), &source, &shrunk);
+        Ok(shrunk)
+    }
+
+    /// Draws all of `target` with `pipeline` from `input` and a uniform of `contents`.
+    fn whole_texture_pass(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        pipeline: &wgpu::RenderPipeline,
+        contents: &[u8],
+        input: &wgpu::Texture,
+        target: &wgpu::Texture,
+    ) {
+        let buffer = self.uniform_buffer("effect", contents);
+        let input = input.create_view(&Default::default());
+        let group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("effect"),
+            layout: &self.effect_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&input) },
+            ],
+        });
+        let view = target.create_view(&Default::default());
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("effect"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &group, &[]);
+        pass.draw(0..4, 0..1);
     }
 
     /// Ends the device as a crashed driver would, for tests of what happens then.
@@ -1061,6 +1174,20 @@ impl Gpu {
 
     /// Composites the layers bottom to top over `background` and returns tight RGBA rows.
     pub fn render(&mut self, w: u32, h: u32, background: [f32; 4], layers: &[Draw]) -> Result<Vec<u8>> {
+        self.render_within(w, h, background, layers, None, &AtomicBool::new(false))
+    }
+
+    /// `render` that fails with a `GpuFault` when the GPU takes longer than `limit`, or when `stop` is set while it
+    /// draws; the device is then still busy with the frame and must not draw again.
+    pub fn render_within(
+        &mut self,
+        w: u32,
+        h: u32,
+        background: [f32; 4],
+        layers: &[Draw],
+        limit: Option<Duration>,
+        stop: &AtomicBool,
+    ) -> Result<Vec<u8>> {
         let max = self.max_texture_dimension();
         if w > max || h > max {
             anyhow::bail!("This resolution is larger than your GPU supports (max {max} px)");
@@ -1070,6 +1197,8 @@ impl Gpu {
         let mut encoder = self.device.create_command_encoder(&Default::default());
         let mut transition_index = 0;
         let mut effect_slots = 0;
+        let hung = self.hung_frames > 0;
+        self.hung_frames = self.hung_frames.saturating_sub(1);
         for draw in layers {
             match draw {
                 Draw::Layer(layer) => {
@@ -1167,12 +1296,7 @@ impl Gpu {
         slice.map_async(wgpu::MapMode::Read, move |r| {
             tx.send(r).ok();
         });
-        // A plugin's shader passed Nuzky's checks, but a driver may still take too long on it.
-        let timeout = (effect_slots > 0).then_some(self.effect_timeout);
-        match self.device.poll(wgpu::PollType::Wait { submission_index: None, timeout }) {
-            Err(wgpu::PollError::Timeout) => return Err(GpuFault::Timeout(self.effect_timeout).into()),
-            polled => polled.context("GPU poll failed")?,
-        };
+        wait(&self.device, hung, limit, stop)?;
         if let Some(why) = self.lost.lock().unwrap().clone() {
             return Err(GpuFault::Lost(why).into());
         }
@@ -1180,7 +1304,7 @@ impl Gpu {
         if !errors.is_empty() {
             return Err(GpuFault::Error(errors.join("; ")).into());
         }
-        let mapped = rx.recv_timeout(timeout.unwrap_or(Duration::from_secs(60)));
+        let mapped = rx.recv_timeout(limit.unwrap_or(Duration::from_secs(60)));
         let mapped = mapped.map_err(|_| GpuFault::Lost("no answer from the GPU".into()))?;
         if mapped.is_err() && effect_slots > 0 {
             return Err(GpuFault::Lost("the frame could not be read back".into()).into());
@@ -1197,6 +1321,31 @@ impl Gpu {
         }
         target.readback.unmap();
         Ok(out)
+    }
+}
+
+/// Waits for the frame submitted to `device`, looking at `stop` every `WAIT_SLICE`.
+fn wait(device: &wgpu::Device, hung: bool, limit: Option<Duration>, stop: &AtomicBool) -> Result<()> {
+    let started = Instant::now();
+    loop {
+        if stop.load(Ordering::Relaxed) {
+            return Err(GpuFault::Stopped.into());
+        }
+        let left = limit.map(|limit| limit.saturating_sub(started.elapsed()));
+        let slice = left.map_or(WAIT_SLICE, |left| left.min(WAIT_SLICE));
+        if hung {
+            std::thread::sleep(slice);
+        } else {
+            match device.poll(wgpu::PollType::Wait { submission_index: None, timeout: Some(slice) }) {
+                Err(wgpu::PollError::Timeout) => {}
+                polled => return polled.map(drop).context("GPU poll failed"),
+            }
+        }
+        if let (Some(limit), Some(left)) = (limit, left)
+            && left <= slice
+        {
+            return Err(GpuFault::Timeout(limit).into());
+        }
     }
 }
 
@@ -1271,6 +1420,45 @@ mod tests {
 
     /// Preview keeps drawing while an export or an agent's contact sheet starts its own renderer.
     /// The Vulkan loader freed driver records under the drawing threads and crashed the process.
+    /// With an effect the picture comes out of it SDR, while the blurred footage behind the person is still HLG: it is
+    /// tone mapped on its own, as it is without the effect.
+    #[test]
+    fn hdr_footage_behind_an_effect_is_tone_mapped_as_without_it() {
+        let mut gpu = Gpu::new().unwrap();
+        let shader = crate::plugin_effects::shader("fn effect(p: Pixel) -> vec4<f32> { return p.color; }");
+        gpu.prepare_effect(1, &shader).unwrap();
+        let grey = |v: u8, a: u8| Image { width: 1, height: 1, data: Arc::new(vec![v, v, v, a]) };
+        // Nobody in the matte, so all that shows is the footage.
+        let matte = Matte { alpha: grey(0, 0), fill: Fill::Footage(grey(150, 255)) };
+        let mut layer = Layer {
+            image: grey(200, 255),
+            corners: [[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]],
+            uv_rotation: 0,
+            mirror: false,
+            opacity: 1.0,
+            adjust: Adjust::default(),
+            blur: 0.0,
+            clip: None,
+            transfer: Transfer::Hlg,
+            mask: None,
+            matte: Some(Box::new(matte)),
+            effects: Vec::new(),
+        };
+        let without = gpu.render(2, 2, [0.0, 0.0, 0.0, 1.0], &[Draw::Layer(layer.clone())]).unwrap();
+        assert!(without[0] < 140, "the footage is tone mapped: {:?}", &without[..4]);
+        layer.effects = vec![EffectPass {
+            key: 1,
+            size: [2.0; 2],
+            grid: [2; 2],
+            shown: [2; 2],
+            time: 0.0,
+            seed: 0,
+            params: [0.0; 16],
+        }];
+        let with = gpu.render(2, 2, [0.0, 0.0, 0.0, 1.0], &[Draw::Layer(layer)]).unwrap();
+        assert!(with.iter().zip(&without).all(|(a, b)| a.abs_diff(*b) <= 1), "{:?} vs {:?}", &with[..4], &without[..4]);
+    }
+
     #[test]
     fn renderers_start_and_stop_while_others_draw() {
         use std::sync::atomic::{AtomicBool, Ordering};

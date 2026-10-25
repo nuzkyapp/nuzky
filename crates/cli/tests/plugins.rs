@@ -650,7 +650,8 @@ fn a_plugins_sound_with_a_huge_cover_is_refused_unread() {
         "version": "1", "files": ["beep.mp3"]});
     let save = |path: &Path| {
         let files = [("beep.mp3".to_string(), path.to_path_buf())].into_iter().collect();
-        plugins::save_with_files(&manifest, Some("function run() { return []; }"), None, &files, &Default::default()).map(drop)
+        plugins::save_with_files(&manifest, Some("function run() { return []; }"), None, &files, &Default::default())
+            .map(drop)
     };
     let ffmpeg = |args: &[&str], out: &Path| {
         let made = Command::new("ffmpeg").args(["-hide_banner", "-loglevel", "error"]).args(args).arg(out).status();

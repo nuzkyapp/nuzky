@@ -898,8 +898,9 @@ fn drawable(project: &Project, cover: &Thumbnail) -> bool {
         && crate::cover::cover_missing(project, cover).is_empty()
 }
 
-/// The poster cache key of a project file whose card shows `cover`, when it can be drawn. It changes with the file and
-/// with the images the cover is drawn from, so a logo that would not open, replaced by one that does, is drawn again.
+/// The poster cache key of a project file whose card shows `cover`, when it can be drawn. It changes with the file, with
+/// the images the cover is drawn from, so a logo that would not open, replaced by one that does, is drawn again, and
+/// with how its plugin effects draw, so a plugin changed, added or removed draws it again.
 fn poster_stamp(meta: &std::fs::Metadata, project: &Project, cover: Option<&Thumbnail>) -> String {
     let mut stamp = FNV_OFFSET;
     hash_bytes(&mut stamp, &modified(meta).to_le_bytes());
@@ -909,6 +910,7 @@ fn poster_stamp(meta: &std::fs::Metadata, project: &Project, cover: Option<&Thum
     for image in images.filter_map(|id| project.asset(id)) {
         hash_bytes(&mut stamp, nuzky_engine::thumbnail::file_version(&image.path).as_bytes());
     }
+    hash_bytes(&mut stamp, nuzky_engine::plugin_effects::stamp(project).as_bytes());
     format!("{stamp:016x}")
 }
 

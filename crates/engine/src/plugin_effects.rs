@@ -24,8 +24,10 @@ pub const MAX_PLUGIN_EFFECTS: usize = 8;
 /// What one pixel of an effect may cost: expressions over everything it calls, and reads of the picture.
 pub const MAX_EXPRESSIONS: usize = 4096;
 pub const MAX_SOURCE_READS: usize = 16;
-/// The largest local or private variable, so no shader asks the GPU for megabytes per pixel.
+/// The largest value an effect's own code may hold, so no shader asks the GPU for megabytes per pixel.
 const MAX_VARIABLE_BYTES: u32 = 1024;
+/// Nuzky's functions an effect may call; the others are its own parts, such as the texel read `nuzky_source` counts.
+const HELPERS: [&str; 4] = ["nuzky_source", "nuzky_hash", "nuzky_random", "nuzky_noise"];
 const MAX_MANIFEST_BYTES: u64 = 64 << 10;
 
 /// An effect's setting, the same shapes as a plugin's number, toggle and colour inputs.
@@ -369,9 +371,36 @@ pub fn check(source: &str) -> Result<(), String> {
     let module = naga::front::wgsl::parse_str(&full)
         .map_err(|e| located(&full, source.len(), e.labels().map(|(span, _)| span), e.message()))?;
     rules(&module, &full, source.len())?;
-    naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty())
+    let info = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty())
         .validate(&module)
         .map_err(|e| located(&full, source.len(), e.spans().map(|(span, _)| *span), &chain(e.as_inner())))?;
+    sizes(&module, &info, &|span| at(&full, source.len(), span))
+}
+
+/// Refuses a value larger than `MAX_VARIABLE_BYTES` anywhere in the effect's own functions: an argument, a result, a
+/// `let` or any expression, as variables are in `rules`.
+fn sizes(
+    module: &naga::Module,
+    info: &naga::valid::ModuleInfo,
+    at: &impl Fn(naga::Span) -> String,
+) -> Result<(), String> {
+    let ctx = module.to_ctx();
+    let big = |inner: &TypeInner| inner.size(ctx) > MAX_VARIABLE_BYTES;
+    let refused = |span| Err(format!("{}a value takes at most {MAX_VARIABLE_BYTES} bytes", at(span)));
+    for (h, function) in module.functions.iter() {
+        if NUZKY_NAMES.contains(function.name.as_deref().unwrap_or_default()) {
+            continue;
+        }
+        let ends = function.arguments.iter().map(|a| a.ty).chain(function.result.as_ref().map(|r| r.ty));
+        if ends.into_iter().any(|ty| big(&module.types[ty].inner)) {
+            return refused(module.functions.get_span(h));
+        }
+        for (e, _) in function.expressions.iter() {
+            if big(info[h][e].ty.inner_with(&module.types)) {
+                return refused(function.expressions.get_span(e));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -536,7 +565,11 @@ fn rules(module: &naga::Module, full: &str, source_len: usize) -> Result<(), Str
                     return Err(format!("{}an effect cannot use {what}", at(function.expressions.get_span(e))));
                 }
             }
-            statements(&function.body, &at)?;
+            let helper = |callee: Handle<naga::Function>| {
+                let name = module.functions[callee].name.as_deref().unwrap_or_default();
+                !NUZKY_NAMES.contains(name) || HELPERS.contains(&name)
+            };
+            statements(&function.body, &at, &helper)?;
             if name == "effect" {
                 effect = Some((h, function));
             }
@@ -575,24 +608,32 @@ fn rules(module: &naga::Module, full: &str, source_len: usize) -> Result<(), Str
     Ok(())
 }
 
-fn statements(block: &naga::Block, at: &impl Fn(naga::Span) -> String) -> Result<(), String> {
+/// `callable` says whether a function may be called from the effect's code.
+fn statements(
+    block: &naga::Block,
+    at: &impl Fn(naga::Span) -> String,
+    callable: &impl Fn(Handle<naga::Function>) -> bool,
+) -> Result<(), String> {
     for (statement, span) in block.span_iter() {
         let forbidden = match statement {
             Statement::Block(inner) => {
-                statements(inner, at)?;
+                statements(inner, at, callable)?;
                 None
             }
             Statement::If { accept, reject, .. } => {
-                statements(accept, at)?;
-                statements(reject, at)?;
+                statements(accept, at, callable)?;
+                statements(reject, at, callable)?;
                 None
             }
             Statement::Switch { cases, .. } => {
                 for case in cases {
-                    statements(&case.body, at)?;
+                    statements(&case.body, at, callable)?;
                 }
                 None
             }
+            Statement::Call { function, .. } if !callable(*function) => Some(
+                "Nuzky's own parts; of its functions call only nuzky_source, nuzky_hash, nuzky_random and nuzky_noise",
+            ),
             Statement::Loop { .. } | Statement::Continue => {
                 Some("loops; write each step out, or call a function for it")
             }
@@ -634,8 +675,6 @@ fn calls(block: &naga::Block, each: &mut impl FnMut(Handle<naga::Function>)) {
 #[derive(Debug)]
 pub struct Loaded {
     pub def: EffectDef,
-    /// The plugin's version.
-    pub version: String,
     /// The hash of its shader: the key of its pipeline and of its place on the broken list.
     pub key: u64,
     pub shader: Arc<str>,
@@ -709,8 +748,8 @@ fn read(path: &Path, max: u64) -> Result<String, String> {
     std::fs::read_to_string(path).map_err(|_| "unreadable".into())
 }
 
-/// The effects a plugin's manifest declares, checked, and the plugin's version.
-fn manifest_effects(folder: &Path) -> Result<(Vec<EffectDef>, String), String> {
+/// The effects a plugin's manifest declares, checked.
+fn manifest_effects(folder: &Path) -> Result<Vec<EffectDef>, String> {
     let text = read(&folder.join("plugin.json"), MAX_MANIFEST_BYTES).map_err(|e| format!("plugin.json: {e}"))?;
     let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("plugin.json: {e}"))?;
     if value.get("nuzkyPlugin").and_then(serde_json::Value::as_u64) != Some(API) {
@@ -721,15 +760,14 @@ fn manifest_effects(folder: &Path) -> Result<(Vec<EffectDef>, String), String> {
         Some(effects) => Vec::<EffectDef>::deserialize(effects).map_err(|e| format!("plugin.json: effects: {e}"))?,
     };
     check_defs(&effects).map_err(|e| format!("plugin.json: {e}"))?;
-    let version = value.get("version").and_then(serde_json::Value::as_str).unwrap_or_default().to_owned();
-    Ok((effects, version))
+    Ok(effects)
 }
 
 fn load(folder: &Path, plugin: &str, effect: &str) -> Lookup {
     if !std::fs::symlink_metadata(folder).is_ok_and(|meta| meta.is_dir()) {
         return Lookup::Missing;
     }
-    let (defs, version) = match manifest_effects(folder) {
+    let defs = match manifest_effects(folder) {
         Ok(found) => found,
         Err(why) => return Lookup::Broken(why),
     };
@@ -749,7 +787,7 @@ fn load(folder: &Path, plugin: &str, effect: &str) -> Lookup {
     let shader: Arc<str> = shader(&source).into();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     (plugin, effect, &*shader).hash(&mut hasher);
-    Lookup::Ready(Arc::new(Loaded { def, version, key: hasher.finish(), shader }))
+    Lookup::Ready(Arc::new(Loaded { def, key: hasher.finish(), shader }))
 }
 
 /// Keeps an effect from drawing again in this process, in every renderer.
@@ -817,6 +855,26 @@ pub fn issues_in(project: &Project, dir: Option<&Path>) -> Vec<EffectIssue> {
     }
     for issue in &mut out {
         issue.message = issue.sentence();
+    }
+    out
+}
+
+/// How the project's effects draw on this computer now: the shader and settings of each one installed, and why each
+/// other one is left out. A picture of the project kept for later, such as a poster, is stale when it changes.
+pub fn stamp(project: &Project) -> String {
+    let dir = plugins_dir();
+    let mut out = String::new();
+    for effect in
+        project.tracks.iter().flat_map(|t| &t.clips).flat_map(|c| c.effects.iter().take(crate::model::MAX_CLIP_EFFECTS))
+    {
+        let state = match dir.as_deref().map(|dir| lookup(dir, &effect.plugin, &effect.effect)) {
+            Some(Lookup::Ready(loaded)) => {
+                format!("{:016x}{}", loaded.key, serde_json::to_string(&loaded.def).unwrap_or_default())
+            }
+            Some(Lookup::Broken(why)) => format!("broken {why}"),
+            None | Some(Lookup::Missing) => "missing".into(),
+        };
+        out += &format!("{}/{}: {state}\n", effect.plugin, effect.effect);
     }
     out
 }
@@ -1022,6 +1080,35 @@ fn effect(p: Pixel) -> vec4<f32> {
             error("fn effect(p: Pixel) -> vec4<f32> {\n    var big: array<vec4<f32>, 512>;\n    return p.color;\n}\n");
         assert!(e.contains("bytes"), "{e}");
         assert!(error(&format!("{OK}//{}", "x".repeat(17 << 10))).contains("16 KB"));
+    }
+
+    #[test]
+    fn only_the_public_helpers_may_be_called() {
+        let taps: Vec<String> = (0..128).map(|i| format!("nuzky_texel(vec2<i32>({i}, 0), vec2<i32>(64))")).collect();
+        let texels = format!("fn effect(p: Pixel) -> vec4<f32> {{\n    return ({}) / 128.0;\n}}\n", taps.join(" + "));
+        let e = error(&texels);
+        assert!(e.starts_with("2:") && e.contains("nuzky_source, nuzky_hash, nuzky_random and nuzky_noise"), "{e}");
+        let hidden = "fn tap(p: vec2<i32>) -> vec4<f32> { return nuzky_texel(p, vec2<i32>(8)); }\n\
+            fn effect(p: Pixel) -> vec4<f32> { return tap(vec2<i32>(0)); }\n";
+        assert!(error(hidden).contains("nuzky_source, nuzky_hash"), "{}", error(hidden));
+        assert!(
+            error("fn effect(p: Pixel) -> vec4<f32> { return vec4<f32>(nuzky_hdr_to_sdr(p.color.rgb, 2.0), 1.0); }")
+                .contains("nuzky_source, nuzky_hash")
+        );
+    }
+
+    #[test]
+    fn every_value_is_bounded_not_only_variables() {
+        let passed = "fn first(a: array<f32, 1048576>) -> f32 {\n    return a[0];\n}\n\
+            fn effect(p: Pixel) -> vec4<f32> {\n    let a = array<f32, 1048576>();\n    return p.color * first(a);\n}\n";
+        let e = error(passed);
+        assert!(e.starts_with("1:") && e.contains("1024 bytes"), "{e}");
+        let returned = "fn big() -> array<vec4<f32>, 128> {\n    return array<vec4<f32>, 128>();\n}\n\
+            fn effect(p: Pixel) -> vec4<f32> {\n    return big()[3] + p.color;\n}\n";
+        assert!(error(returned).contains("1024 bytes"), "{}", error(returned));
+        let kept =
+            "fn effect(p: Pixel) -> vec4<f32> {\n    let a = array<vec4<f32>, 128>();\n    return a[1] + p.color;\n}\n";
+        assert!(error(kept).contains("1024 bytes"), "{}", error(kept));
     }
 
     #[test]

@@ -43,6 +43,8 @@ struct Frame {
     /// How many chunks of person outlines the project's clip backgrounds still wait for; as they get made, it is drawn
     /// again.
     waiting: usize,
+    /// How the plugin effects of its clips drew (`plugin_effects::stamp`), so a changed or removed plugin draws it again.
+    effects: String,
 }
 
 /// What the cover canvas shows besides its pixels.
@@ -151,15 +153,23 @@ impl Covers {
             Some((id.clone(), path.clone(), nuzky_engine::thumbnail::file_version(path)))
         });
         let waiting = waiting_mattes(project, thumbnail, cache);
+        let effects = nuzky_engine::plugin_effects::stamp(project);
         let fresh = !self.frame.as_ref().is_some_and(|f| match &still {
             Some(_) => f.still == still,
-            None => f.still.is_none() && f.time_us == thumbnail.time_us && f.picture == shown && f.waiting == waiting,
+            None => {
+                f.still.is_none()
+                    && f.time_us == thumbnail.time_us
+                    && f.picture == shown
+                    && f.waiting == waiting
+                    && f.effects == effects
+            }
         });
         if fresh {
             self.frame = None;
             let image = renderer.thumbnail_frame(project, thumbnail)?;
             let mask = nuzky_vision::cached_alpha(&image.data, (image.width, image.height), cache);
-            self.frame = Some(Frame { picture: shown, time_us: thumbnail.time_us, still, image, mask, waiting });
+            self.frame =
+                Some(Frame { picture: shown, time_us: thumbnail.time_us, still, image, mask, waiting, effects });
         }
         let frame = self.frame.as_mut().unwrap();
         if refresh_mask && frame.mask.is_none() {

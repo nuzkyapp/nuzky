@@ -475,7 +475,7 @@ fn encode(
     let mut mp4 = Mp4Writer::create(out, vcodec, w, h, fps, options.crf, &x264)?;
     let mut watch = Watch::new(fps, duration);
     let render = |i| {
-        let pixels = renderer.render(project, frame_time_us(i, fps), w, h, Wait::Exact, true)?;
+        let pixels = renderer.render_until(project, frame_time_us(i, fps), w, h, Wait::Exact, true, cancel)?;
         progress(ExportProgress {
             phase: ExportPhase::Rendering,
             frame: i + 1,

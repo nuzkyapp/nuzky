@@ -10,7 +10,6 @@ import { Control } from "./PluginInspector";
 /** As `MAX_CLIP_EFFECTS` in the engine. */
 const MAX_EFFECTS = 4;
 
-/** The value a control shows: the clip's, within the installed bounds, else the default. */
 function shown(param: EffectParam, effect: Effect): PluginValue {
   const v = effect.params[param.id];
   if (param.type === "number") return typeof v === "number" ? Math.min(param.max, Math.max(param.min, v)) : param.default;
