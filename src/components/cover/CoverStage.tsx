@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { api, errorText, plainError } from "../../lib/api";
 import { COVER_FORMATS, frameAt, chooseFrame, coverFormat, downloadModels, draftCover, editCover, editOverlay, editText, mask, selectOverlay, selectText, switchFormat, thumbnailOf, useCover } from "../../lib/cover";
+import { useEffectsVersion } from "../../lib/plugins";
 import { AI_EDITING, projectDuration, useAiLocked, useEditor } from "../../lib/store";
 import { formatTime } from "../../lib/time";
 import type { CoverView, LayerBounds, Snapshot, Thumbnail, ThumbnailFormat, Transform } from "../../lib/types";
@@ -36,6 +37,7 @@ function coverError(text: string, format: ThumbnailFormat) {
 function useCoverView(format: ThumbnailFormat, width: number, draft: Thumbnail | null) {
   const revision = useEditor((s) => s.snap?.revision ?? 0);
   const masks = useCover((s) => s.masks);
+  const effects = useEffectsVersion();
   const canvas = useRef<HTMLCanvasElement>(null);
   const [view, setView] = useState<CoverView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -92,7 +94,7 @@ function useCoverView(format: ThumbnailFormat, width: number, draft: Thumbnail |
         });
     };
     request();
-  }, [format, width, revision, masks, draftKey]);
+  }, [format, width, revision, masks, draftKey, effects]);
 
   /** Resolves once a cover drawn from `revision` or later is on screen. */
   const shownFrom = (revision: number) => (state.current.shown >= revision ? Promise.resolve() : new Promise<void>((done) => state.current.waiters.push({ revision, done })));

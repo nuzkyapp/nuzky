@@ -2,7 +2,7 @@ import json
 import shutil
 import time
 
-from e2e.harness import ROOT, changed_share, export, flow, preview_crop, preview_rect, wait, webdriver
+from e2e.harness import ROOT, Bridge, changed_share, export, flow, preview_crop, preview_rect, wait, webdriver
 
 EXAMPLES = ROOT / 'skills/nuzky-plugin/examples'
 EFFECTS = ("return window.__nuzky.store.getState().snap.project.tracks.flatMap((t) => t.clips)"
@@ -20,6 +20,15 @@ INSPECTOR = "return document.querySelector('aside[aria-label=Inspector]')?.inner
 DRAFT = "return window.__nuzky.agent.getState().draft"
 TOASTS = "return window.__nuzky.store.getState().toasts.map((t) => ({kind: t.kind, text: t.text, action: t.action?.label ?? null}))"
 WARM = 'fn effect(p: Pixel) -> vec4<f32> {\n    let k = p.params[0];\n    return vec4<f32>(p.color.r, p.color.g * (1.0 - 0.1 * k), p.color.b * (1.0 - 0.3 * k), p.color.a);\n}\n'
+
+BLUE = 'fn effect(p: Pixel) -> vec4<f32> {\n    return vec4<f32>(0.1, 0.2, 0.9, p.color.a);\n}\n'
+# The mean colour of a cover canvas, once the engine has drawn into it.
+CANVAS_MEAN = """const c = document.querySelector(arguments[0]); if (!c || !c.width || c.width === 300) return null;
+const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; const m = [0, 0, 0];
+for (let i = 0; i < d.length; i += 4) { m[0] += d[i]; m[1] += d[i + 1]; m[2] += d[i + 2]; }
+return m.map((v) => v / (d.length / 4));"""
+COVER_DRAWN = """const s = document.querySelector('[data-testid=cover-stage]');
+return !!s && Number(s.dataset.revision) === window.__nuzky.store.getState().snap.revision;"""
 
 
 def plugins(r):
@@ -109,11 +118,46 @@ def add_effect(r, name):
     r.s.run(f'{MENU_ITEM}.click()', name)
 
 
+def cover_follows_the_shader(r, clip):
+    """An agent rewrites the Warm shader while the cover editor is open: the cover and its tile draw with the new
+    shader, as the cover export does."""
+    r.s.call("window.__nuzky.store.getState().edit(() => ({type: 'setThumbnail', thumbnail: {format: 'cover_9x16', timeUs: arguments[0]}}))",
+             clip['durationUs'] // 2)
+    r.s.run("document.querySelector('[data-testid=cover-tile]').click()")
+    stage, tile = '[data-testid=cover-canvas]', '[data-testid=cover-tile] canvas'
+    warm = wait(lambda: r.s.run(COVER_DRAWN) and r.s.run(CANVAS_MEAN, stage), 15)
+    r.check('the cover editor draws the cover with the Warm effect, warmer than grey', warm and warm[0] - warm[2] > 10, warm)
+    bridge = Bridge(r, r.saved_project())
+    try:
+        manifest = json.loads((plugins(r) / 'warm/plugin.json').read_text())
+        bridge.call('save_plugin', {'manifest': manifest, 'effects': {'warm': BLUE}})
+    finally:
+        bridge.close()
+    blue = lambda c: c and c[2] > 200 and c[0] < 60
+    shown = wait(lambda: blue(c := r.s.run(CANVAS_MEAN, stage)) and c, 10)
+    r.check('the open cover draws with the shader the agent saved', shown, r.s.run(CANVAS_MEAN, stage))
+    r.check('so does the Cover tile', wait(lambda: blue(r.s.run(CANVAS_MEAN, tile)), 10), r.s.run(CANVAS_MEAN, tile))
+    png = r.work / 'cover.png'
+    started = r.s.call('window.__nuzky.api.startCoverExport(arguments[0], arguments[1], arguments[2], arguments[3])',
+                       'cover_9x16', str(png), False, r.state()['epoch'])
+    done = started['ok'] and wait(lambda: (j := r.s.run('return window.__nuzky.store.getState().jobs[arguments[0]] ?? null', started['value']))
+                                  and j['status'] != 'running' and j, 60)
+    from PIL import Image, ImageStat
+    exported = ImageStat.Stat(Image.open(png).convert('RGB')).mean if png.exists() else None
+    r.check('the exported cover has the colours the editor shows', done and done['status'] == 'done' and exported and shown
+            and max(abs(a - b) for a, b in zip(exported, shown)) < 4, {'export': exported, 'editor': shown, 'job': done})
+    time.sleep(0.5)
+    r.shot('cover-new-shader')
+    r.s.run("document.querySelector('[data-testid=cover-tile]').click()")
+    wait(lambda: not r.s.run("return !!document.querySelector('[data-testid=cover-stage]')"), 5)
+
+
 @flow('plugin_effects', 'Without an effect plugin the Effects section says where effects come from; an effect added '
       'from the + menu changes the preview with its bands across the rotated photo as shown, and a second one stacks '
-      'under a line; the Plugins tab lists each plugin\'s effects; a broken shader leaves the clip drawn without it, '
-      'says so plainly once and hands the detail to the AI; the project opens and exports without the plugin, warning '
-      'once, in the export dialog or a toast')
+      'under a line; a shader an agent saves shows in the open cover and its tile as the cover export draws it; the '
+      'Plugins tab lists each plugin\'s effects; a broken shader leaves the clip drawn without it, says so plainly once '
+      'and hands the detail to the AI; the project opens and exports without the plugin, warning once, in the export '
+      'dialog or a toast')
 def plugin_effects(r):
     # Fix with AI and Make an effect put their text in the AI panel's field without running an agent.
     r.s.run("window.__nuzky.agent.setState({agent: 'antigravity'})")
@@ -177,6 +221,8 @@ def plugin_effects(r):
     r.check('a line parts the two effects, and their names are smaller than the section title',
             wait(lambda: groups() == [{'line': '0px', 'name': '12px'}, {'line': '1px', 'name': '12px'}], 5), groups())
     look(r, 'two-effects')
+    cover_follows_the_shader(r, clip)
+    adjust(r, clip['id'])
     r.s.run("document.querySelector('aside[aria-label=Inspector] button[aria-label=\"Remove Warm\"]').click()")
     r.check('× removes the second effect', wait(lambda: [e['effect'] for e in r.s.run(EFFECTS, clip['id'])] == ['vhs'], 5))
 

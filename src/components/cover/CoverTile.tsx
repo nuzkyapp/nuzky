@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ImagePlus } from "lucide-react";
 import { api } from "../../lib/api";
 import { closeCover, openCover, thumbnailOf, useCover } from "../../lib/cover";
+import { useEffectsVersion } from "../../lib/plugins";
 import { projectDuration, useEditor } from "../../lib/store";
 import type { ThumbnailFormat } from "../../lib/types";
 
@@ -21,6 +22,7 @@ export function CoverTile() {
   const revision = useEditor((s) => s.snap?.revision ?? 0);
   // Every project starts at revision 0, so the session tells two projects apart.
   const epoch = useEditor((s) => s.snap?.sessionEpoch);
+  const effects = useEffectsVersion();
   const canvas = useRef<HTMLCanvasElement>(null);
   const [drawn, setDrawn] = useState(false);
 
@@ -53,7 +55,7 @@ export function CoverTile() {
       alive = false;
       window.clearTimeout(timer);
     };
-  }, [format, revision, open, epoch]);
+  }, [format, revision, open, epoch, effects]);
 
   const label = empty ? "Cover: add a clip to the timeline first" : open ? "Close the cover editor" : format ? "Edit the cover" : "Make a cover";
   return (

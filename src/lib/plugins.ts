@@ -236,8 +236,12 @@ export async function loadPlugins() {
   }
 }
 
+/** How many times the plugins' files changed while the app ran. */
+const usePluginFiles = create(() => ({ changes: 0 }));
+
 export function listenPlugins() {
   return listen("plugins-changed", () => {
+    usePluginFiles.setState((s) => ({ changes: s.changes + 1 }));
     void loadPlugins();
     void loadEffectIssues();
   });
@@ -257,6 +261,16 @@ export interface EffectIssue {
 export const useEffectIssues = create<{ issues: EffectIssue[]; epoch: string | null; toasted: Record<string, number> }>(() => ({ issues: [], epoch: null, toasted: {} }));
 
 const issueKey = (i: EffectIssue) => `${i.broken ? "broken" : "missing"}:${i.plugin}/${i.effect}`;
+
+/**
+ * Changes when a plugin's files change or an effect of the project stops or starts drawing, so a picture drawn with
+ * effects outside the preview, such as the cover, is asked for again.
+ */
+export function useEffectsVersion() {
+  const changes = usePluginFiles((s) => s.changes);
+  const issues = useEffectIssues((s) => s.issues.map(issueKey).join(","));
+  return `${changes}:${issues}`;
+}
 
 /** What an effect's row in the clip inspector says about it. */
 export const issueRow = (i: EffectIssue) =>
