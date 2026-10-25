@@ -1,6 +1,4 @@
-// Every command in `generate_handler!` in lib.rs. build.rs allows them all in the `main-ui` permission, which
-// capabilities/default.json grants to the main webview only. Tauri refuses a command missing here, and acl_tests.rs
-// fails until the two lists match.
+// Exactly what `generate_handler!` in lib.rs registers: Tauri refuses a command missing here.
 pub const COMMANDS: &[&str] = &[
     "agent_access",
     "agent_attach_file",
