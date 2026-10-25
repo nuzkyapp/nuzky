@@ -7,8 +7,8 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use cosmic_text::{
-    Align, Attrs, Buffer, CacheKey, Color, Fallback, Family, FeatureTag, FontFeatures, FontSystem, LineIter, Metrics,
-    PlatformFallback, Shaping, SwashCache, SwashContent, Weight,
+    Align, Attrs, AttrsList, Buffer, CacheKey, Color, Fallback, Family, FeatureTag, FontFeatures, FontSystem, LineIter,
+    Metrics, PlatformFallback, Shaping, SwashCache, SwashContent, Weight,
 };
 
 use crate::gpu::Image;
@@ -330,21 +330,19 @@ impl TextRenderer {
             TextAlign::Center => Align::Center,
             TextAlign::Right => Align::Right,
         };
-        let emoji = attrs.clone().family(Family::Name(EMOJI_FAMILY));
-        let mut spans = Vec::new();
-        let mut at = 0;
-        for run in emoji_requests(&text) {
-            spans.push((&text[at..run.start], attrs.clone()));
-            spans.push((&text[run.clone()], emoji.clone()));
-            at = run.end;
+        buffer.set_text(&text, &attrs, Shaping::Advanced, Some(align));
+        let requests = emoji_requests(&text);
+        if !requests.is_empty() {
+            // Per line of `set_text`, which splits lines as `LineIter` does; `set_rich_text` splits them otherwise.
+            let emoji = attrs.clone().family(Family::Name(EMOJI_FAMILY));
+            for ((range, _), line) in LineIter::new(&text).zip(buffer.lines.iter_mut()) {
+                let mut list = AttrsList::new(&attrs);
+                for run in requests.iter().filter(|run| range.start <= run.start && run.end <= range.end) {
+                    list.add_span(run.start - range.start..run.end - range.start, &emoji);
+                }
+                line.set_attrs_list(list);
+            }
         }
-        spans.push((&text[at..], attrs.clone()));
-        buffer.set_rich_text(
-            spans.into_iter().filter(|(span, _)| !span.is_empty()),
-            &attrs,
-            Shaping::Advanced,
-            Some(align),
-        );
         buffer.shape_until_scroll(&mut self.fonts, false);
 
         let mut line_w: f32 = 0.0;
@@ -1256,6 +1254,9 @@ mod tests {
                 assert!(opaque(&drawn) == opaque(&image), "{emoji} ignores installed fonts, bold {}", style.bold);
             }
         }
+        // Lines split as in text without emoji, also at Windows line ends.
+        let mut lines = |text| bundled.render(text, &look, 1.0, 2000.0).image.height;
+        assert_eq!(lines("Ahoj\r\nsvěte ❤️"), lines("Ahoj\nsvěte ❤️"));
     }
 
     /// The pixels of `image`, cropped to what is visible.
