@@ -108,6 +108,13 @@ def layout(r):
         r.check('in the smallest window the inspector gives way first and the preview keeps 340 px',
                 small['preview'] == 340 and small['library'] == 360 and small['inspector'] == 300, small)
         r.check('the timeline leaves 300 px above it for the preview', small['timeline'] == 640 - 48 - 300 - 12, small)
+        tabs = r.s.run("const list = document.querySelector('[role=tablist][aria-label=Library]').getBoundingClientRect();"
+                       "return {list: [list.left, list.right], labels: [...document.querySelectorAll('[role=tablist][aria-label=Library] [role=tab] span')]"
+                       ".map((s) => { const r = s.getBoundingClientRect(); return [r.left, r.right, s.scrollWidth]; })}")
+        labels = tabs['labels']
+        gaps = [b[0] - a[1] for a, b in zip(labels, labels[1:])]
+        r.check('in the narrowest library every tab label shows whole and no two touch',
+                len(labels) == 8 and min(gaps) >= 2 and labels[0][0] >= tabs['list'][0] and labels[-1][1] <= tabs['list'][1], tabs)
         r.shot('small-window')
         resize(r, w, h)
         r.check('back in the large window the inspector and the timeline are as the user left them',

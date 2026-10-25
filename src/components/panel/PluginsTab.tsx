@@ -52,7 +52,7 @@ function Row({ plugin: p, open }: { plugin: Plugin; open: boolean }) {
         <PluginMark plugin={p} />
         <span className="flex min-w-0 flex-col leading-[17px]">
           <span className="truncate font-medium text-fg">{p.name}</span>
-          {p.error ? <span className="line-clamp-2 text-[12px] text-danger">{p.error}</span> : <span className="truncate text-[12px] text-muted">{p.description}</span>}
+          {p.error ? <span className="line-clamp-2 text-[12px] text-danger">Can’t load: {p.error.replace(/^[A-Z][A-Z_]+: ?/, "")}</span> : <span className="truncate text-[12px] text-muted">{p.description}</span>}
         </span>
       </button>
       {p.error && (

@@ -65,7 +65,7 @@ export function LeftPanel({ width }: { width: number }) {
             aria-controls={tab === t.id ? tabIds("library", t.id).panel : undefined}
             tabIndex={tab === t.id ? 0 : -1}
             onClick={() => setTab(t.id)}
-            className={`flex flex-auto flex-col items-center gap-[3px] rounded-[11px] px-0.5 pt-1.5 pb-[5px] text-[11px] leading-[13px] font-medium whitespace-nowrap transition-colors duration-[120ms] ease-out ${
+            className={`flex flex-auto flex-col items-center gap-[3px] rounded-[11px] px-px pt-1.5 pb-[5px] text-[11px] leading-[13px] font-medium tracking-[-0.02em] whitespace-nowrap transition-colors duration-[120ms] ease-out ${
               tab === t.id ? "seg-on text-fg" : "text-muted hover:text-fg"
             }`}
           >
