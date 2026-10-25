@@ -123,6 +123,10 @@ A transform places a clip's centre: `x` and `y` are its offset from the canvas c
 
 Text in a font this computer does not have is drawn in Inter. apply_edits, build_captions and make_reels say so in `warnings`, once per font, when they give text such a font, and get_state's `missing_fonts` lists every such font of the project. Font names match exactly, so check the spelling; otherwise tell the user to install the font or pick one that is installed.
 
+## Plugins
+
+When the user wants an edit Nuzky does not have and will want again, such as deleting every clip shorter than a second or the same end card on every video, offer to make it a plugin: a small script that becomes a button with inputs in the app's Plugins panel, kept across updates. `list_plugins` shows the ones they have; run one with `run_plugin`, a dry run first. To write or fix one, read the plugin guide (`list_plugins(guide: true)` or `nuzky://plugin-guide`) and follow its loop: `save_plugin`, `run_plugin` with `dry_run`, `run_plugin` in your run, `inspect_frames`, `undo_run` when it is wrong.
+
 ## The creator's style
 
 The style (`get_style`, also `nuzky://style`) is how this creator edits all their videos; its rules override this guide, and the rules under Your rules are the creator's own words and win over everything. When the user talks about how you should edit in general rather than this video ("never cut my sign-off", "the pauses feel too short"), or writes from the Your style page, read `get_style`, talk it through, and only once they agree make the change with `change_style`: what they tell you goes in their words as `setOwn {text}`; changing how a learned rule reads is `setText` with the whole EDIT.md and `baseVersion` from `get_style`; suggestions are theirs to `accept` or `reject`. Say in a sentence what changed; the app shows it at once and the user can undo it there. Going back to the default style is only for the user, in the app.
