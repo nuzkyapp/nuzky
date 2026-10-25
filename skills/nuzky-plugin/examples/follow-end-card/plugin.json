@@ -1,5 +1,5 @@
 {
-  "nuzkyPlugin": 2,
+  "nuzkyPlugin": 1,
   "id": "follow-end-card",
   "name": "Follow end card",
   "description": "Puts a line of text over the last seconds of the video, such as a call to follow.",

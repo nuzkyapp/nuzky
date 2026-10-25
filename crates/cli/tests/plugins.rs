@@ -156,7 +156,7 @@ fn the_guide_examples_edit_generated_media() {
 fn stop_ends_a_stuck_plugin_and_a_dry_run_changes_nothing() {
     let f = project();
     install("remove-short-clips");
-    let spin = json!({"nuzkyPlugin": 2, "id": "spin", "name": "Spin", "description": "Never ends", "version": "1"});
+    let spin = json!({"nuzkyPlugin": 1, "id": "spin", "name": "Spin", "description": "Never ends", "version": "1"});
     plugins::save(&spin, "function run(ctx) {\n  while (true) {}\n}\n", None).unwrap();
     let before = f.host.session.state().unwrap().project;
 
@@ -199,7 +199,7 @@ fn a_plugin_cannot_blow_up_the_project_or_write_through_a_link() {
     let style = serde_json::from_value(json!({"fontSize": 60.0, "color": "#FFFFFF"})).unwrap();
     f.host.session.edit(vec![EditCmd::AddText { start_us: 0, text: long, style }], None, Expect::default()).unwrap();
     let copies =
-        json!({"nuzkyPlugin": 2, "id": "copies", "name": "Copies", "description": "Copies the text", "version": "1"});
+        json!({"nuzkyPlugin": 1, "id": "copies", "name": "Copies", "description": "Copies the text", "version": "1"});
     let script = "function run(ctx) {\n  const id = ctx.project.tracks[1].clips[0].id;\n  \
                   return Array.from({length: 100}, () => ({type: 'duplicateClip', clipId: id}));\n}\n";
     plugins::save(&copies, script, None).unwrap();
@@ -233,7 +233,7 @@ fn a_plugin_cannot_spread_a_huge_text_or_read_through_a_link() {
     let captions =
         json!({"type": "addCaptions", "segments": segments, "style": {"fontSize": 60.0, "color": "#FFFFFF"}});
     f.host.session.edit(vec![serde_json::from_value(captions).unwrap()], None, Expect::default()).unwrap();
-    let restyle = json!({"nuzkyPlugin": 2, "id": "restyle", "name": "Restyle", "description": "Restyles captions", "version": "1"});
+    let restyle = json!({"nuzkyPlugin": 1, "id": "restyle", "name": "Restyle", "description": "Restyles captions", "version": "1"});
     let script = "function run(ctx) {\n  const track = ctx.project.tracks.find((t) => t.kind === 'text');\n  \
                   return [{type: 'restyleTrack', trackId: track.id, style: {fontFamily: 'x'.repeat(1 << 20)}}];\n}\n";
     plugins::save(&restyle, script, None).unwrap();
@@ -266,7 +266,7 @@ fn a_cancelled_plugin_job_applies_nothing() {
         json!({"type": "addCaptions", "segments": segments, "style": {"fontSize": 60.0, "color": "#FFFFFF"}});
     f.host.session.edit(vec![serde_json::from_value(captions).unwrap()], None, Expect::default()).unwrap();
     let renames =
-        json!({"nuzkyPlugin": 2, "id": "renames", "name": "Renames", "description": "Renames a lot", "version": "1"});
+        json!({"nuzkyPlugin": 1, "id": "renames", "name": "Renames", "description": "Renames a lot", "version": "1"});
     let script = "function run(ctx) {\n  const edits = Array.from({length: 5000}, (_, i) => ({type: 'renameProject', name: 'n' + i}));\n  \
                   nuzky.progress(1);\n  return edits;\n}\n";
     plugins::save(&renames, script, None).unwrap();
@@ -325,7 +325,7 @@ fn a_plugin_whose_edits_need_gigabytes_runs_out_of_its_own_memory() {
     let captions =
         json!({"type": "addCaptions", "segments": segments, "style": {"fontSize": 60.0, "color": "#FFFFFF"}});
     f.host.session.edit(vec![serde_json::from_value(captions).unwrap()], None, Expect::default()).unwrap();
-    let bomb = json!({"nuzkyPlugin": 2, "id": "bomb", "name": "Bomb", "description": "Pastes a lot", "version": "1"});
+    let bomb = json!({"nuzkyPlugin": 1, "id": "bomb", "name": "Bomb", "description": "Pastes a lot", "version": "1"});
     let script = "function run(ctx) {\n  const track = ctx.project.tracks.find((t) => t.kind === 'text');\n  \
                   const transform = {x: 0, y: 0, scale: 1, rotation: 0, opacity: 1};\n  \
                   const keyframes = Array.from({length: 50000}, (_, i) => ({tUs: i, transform}));\n  \
@@ -650,7 +650,7 @@ fn a_plugins_sound_with_a_huge_cover_is_refused_unread() {
         "version": "1", "files": ["beep.mp3"]});
     let save = |path: &Path| {
         let files = [("beep.mp3".to_string(), path.to_path_buf())].into_iter().collect();
-        plugins::save_with_files(&manifest, "function run() { return []; }", None, &files).map(drop)
+        plugins::save_with_files(&manifest, Some("function run() { return []; }"), None, &files, &Default::default()).map(drop)
     };
     let ffmpeg = |args: &[&str], out: &Path| {
         let made = Command::new("ffmpeg").args(["-hide_banner", "-loglevel", "error"]).args(args).arg(out).status();

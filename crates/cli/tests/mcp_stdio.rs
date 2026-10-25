@@ -4259,7 +4259,7 @@ fn plugin_error(text: String) -> String {
 fn save_plugin(c: &mut Client, id: &str, script: &str, inputs: Value) -> Value {
     c.call(
         "save_plugin",
-        json!({"manifest": {"nuzkyPlugin": 2, "id": id, "name": format!("Test {id}"), "description": "A test plugin",
+        json!({"manifest": {"nuzkyPlugin": 1, "id": id, "name": format!("Test {id}"), "description": "A test plugin",
             "version": "1.0.0", "inputs": inputs}, "script": script}),
     )
 }
@@ -4271,7 +4271,7 @@ fn a_plugin_is_saved_listed_tried_run_and_undone_over_stdio() {
     let mut c = Client::start(true, None, Some(None));
     let typo = plugin_error(c.error(
         "save_plugin",
-        json!({"manifest": {"nuzkyPlugin": 2, "id": "rename", "name": "Rename", "description": "Renames",
+        json!({"manifest": {"nuzkyPlugin": 1, "id": "rename", "name": "Rename", "description": "Renames",
             "version": "1.0.0"}, "script": "function run(ctx) {\n  return [\n}\n"}),
     ));
     assert!(typo.starts_with("PLUGIN_BROKEN: plugin.js:3:1: SyntaxError"), "{typo}");

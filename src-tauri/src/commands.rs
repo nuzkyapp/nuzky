@@ -44,6 +44,7 @@ pub const COMMANDS: &[&str] = &[
     "diagnostics",
     "download_update",
     "duplicate_project",
+    "effect_issues",
     "filmstrip",
     "find_beats",
     "import_media",
