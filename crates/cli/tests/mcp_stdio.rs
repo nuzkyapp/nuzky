@@ -4311,7 +4311,7 @@ fn a_plugin_is_saved_listed_tried_run_and_undone_over_stdio() {
     assert!(
         plugin("future")["error"].as_str().unwrap().starts_with("PLUGIN_API_NEWER: This plugin needs a newer Nuzky.")
     );
-    // An older Nuzky would run it without the beats, so it must say it needs API 2.
+    // An older Nuzky would call it broken, so it must say it needs API 2.
     let old = plugin("old-beats")["error"].as_str().unwrap().to_owned();
     assert!(
         old.starts_with("PLUGIN_BROKEN: plugin.json: needs silences, loudness or beats only with nuzkyPlugin 2"),

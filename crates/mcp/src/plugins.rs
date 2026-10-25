@@ -204,7 +204,7 @@ fn manifest(value: &Value) -> Result<Manifest> {
     ensure!(api <= API, "PLUGIN_API_NEWER: This plugin needs a newer Nuzky. Update Nuzky.");
     ensure!(api >= 1, "PLUGIN_API_OLD: This plugin was made for an older Nuzky. Ask its author for a new version.");
     let manifest = Manifest::deserialize(value).map_err(|e| anyhow!("PLUGIN_BROKEN: plugin.json: {e}"))?;
-    // So a Nuzky that cannot find it refuses the plugin as too new instead of running it without.
+    // So a Nuzky that does not know these needs says it is too old instead of calling plugin.json broken.
     ensure!(
         api >= 2 || manifest.needs.iter().all(|need| *need == Need::Words),
         "PLUGIN_BROKEN: plugin.json: needs silences, loudness or beats only with nuzkyPlugin 2"

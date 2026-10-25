@@ -413,6 +413,34 @@ fn remove_pauses_cuts_the_silences_where_the_timeline_has_them() {
     assert_eq!(ranges.len(), 2, "{ranges:?}");
     assert!(near(at(0, "startUs"), 1_000_000) && near(at(0, "endUs"), 2_000_000), "{ranges:?}");
     assert!(near(at(1, "startUs"), 2_800_000) && near(at(1, "endUs"), 3_100_000), "{ranges:?}");
+
+    // A cut in the middle of the long pause gives one silence per clip; it is still one pause.
+    edit(&f.host, json!({"type": "splitClip", "clipId": clip, "atUs": 1_500_000}));
+    let split = plugins::dry_run_in_app(&f.host, "remove-pauses", &Map::new(), vec![], 0, Arc::default()).unwrap();
+    assert_eq!(split["message"], "Removed 1 pause, 0.8 s in all.", "{split}");
+}
+
+/// A clip that starts inside a loudness window hears only what it plays: the file is loud for its first 50 ms, the
+/// clip plays it from 50 ms, so its first window is silent.
+#[test]
+fn loudness_of_a_trimmed_clip_leaves_out_what_it_does_not_play() {
+    let f = with_sound("0.5*sin(2*PI*440*t)*lt(t\\,0.05)", 2, "pcm_s16le");
+    let clip = main(&f.host)[0].id.clone();
+    edit(
+        &f.host,
+        json!({"type": "trimClip", "clipId": clip, "startUs": 0, "durationUs": 1_000_000, "sourceInUs": 50_000}),
+    );
+    let reads = json!({"nuzkyPlugin": 2, "id": "loud", "name": "Loud", "description": "Logs the loudness",
+        "version": "1", "needs": ["loudness"]});
+    let script = "function run(ctx) { nuzky.log(JSON.stringify(ctx.loudness[0])); return []; }";
+    plugins::save(&reads, script, None).unwrap();
+    let job = plugins::run_in_app(&f.host, "loud", &Map::new(), vec![], 0).unwrap();
+    let done = finish(&f.host, &job, Duration::from_secs(20));
+    assert_eq!(done["status"], "done", "{done}");
+    let loudness: Value = serde_json::from_str(done["result"]["logs"][0].as_str().unwrap()).unwrap();
+    assert_eq!(loudness["times_us"][0], 0, "{loudness}");
+    assert_eq!(loudness["dbfs"][0], -120.0, "{loudness}");
+    assert_eq!(loudness["times_us"].as_array().unwrap().len(), 10, "{loudness}");
 }
 
 /// Beats and loudness on the timeline: a click every 0.5 s of the file, played from 2 s at double speed, is a beat

@@ -1,7 +1,7 @@
 //! What a plugin's `needs` asks Nuzky to find in the sound: silences, loudness and beats, found by the same
 //! analysis as the `analyze` tool, from the same prepared sound, and placed on the timeline through the clips that
 //! play it. Every media clip whose file has sound counts, on every track, muted or not.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{
     Arc, Mutex,
@@ -21,12 +21,18 @@ use crate::plugins::Need;
 
 /// Every quiet stretch of 0.1 s or more, unpadded, so a plugin chooses its own length and margin.
 const SILENCES: SilenceParams = SilenceParams { threshold_db: None, min_silence_us: 100_000, pad_us: 0 };
-/// Results of a few dozen files; each is small next to the sound it was found in.
+/// Results of a few dozen files beyond the open project's; each is small next to the sound it was found in.
 const KEPT: usize = 64;
 
 enum Found {
     Silences(Vec<Range>),
-    Loudness { window_us: i64, dbfs: Vec<f32> },
+    /// `dbfs` in steps of a tenth of a window or 10 ms, so a clip that starts or ends inside a window is measured by
+    /// what it plays.
+    Loudness {
+        window_us: i64,
+        step_us: i64,
+        dbfs: Vec<f32>,
+    },
     Beats(Beats),
 }
 
@@ -42,12 +48,16 @@ fn kept(need: Need, pcm: &Path) -> Option<Arc<Found>> {
 fn keep(need: Need, pcm: PathBuf, found: Found) -> Arc<Found> {
     let found = Arc::new(found);
     let mut all = FOUND.lock().unwrap();
-    let all = all.get_or_insert_default();
-    if all.len() >= KEPT {
-        all.clear();
-    }
-    all.insert((need, pcm), found.clone());
+    all.get_or_insert_default().insert((need, pcm), found.clone());
     found
+}
+
+/// Forgets other files' results once there are many, never the open project's, so its previews find them all.
+fn forget_others(used: &HashSet<PathBuf>) {
+    let mut all = FOUND.lock().unwrap();
+    if let Some(all) = all.as_mut().filter(|all| all.len() > KEPT) {
+        all.retain(|(_, pcm), _| used.contains(pcm));
+    }
 }
 
 /// Each kind of `needs` beyond the words, by its name in `ctx`. `project` has the media's full paths. With `prepare`
@@ -83,6 +93,7 @@ pub(crate) fn gather(
     }
     let stopped = || cancel.load(Ordering::Relaxed);
     let mut found: HashMap<(Need, &str), Arc<Found>> = HashMap::new();
+    let mut used = HashSet::new();
     for (i, asset) in assets.iter().enumerate() {
         ensure!(Path::new(&asset.path).is_file(), "MEDIA_MISSING: {} is missing; relink it", asset.name);
         let pcm = pcm_path(cache, asset);
@@ -109,8 +120,9 @@ pub(crate) fn gather(
                         }
                         Need::Loudness => {
                             let window_us = crate::tools::loudness_window(asset.duration_us, None)?;
-                            let dbfs = nuzky_analysis::loudness_cancellable(asset, cache, window_us, stopped)?;
-                            Found::Loudness { window_us, dbfs }
+                            let step_us = (window_us / 10).max(10_000);
+                            let dbfs = nuzky_analysis::loudness_cancellable(asset, cache, step_us, stopped)?;
+                            Found::Loudness { window_us, step_us, dbfs }
                         }
                         Need::Beats => Found::Beats(nuzky_analysis::beats_cancellable(asset, cache, stopped)?),
                         Need::Words => unreachable!("words come from the transcript"),
@@ -121,15 +133,19 @@ pub(crate) fn gather(
             };
             found.insert((need, asset.id.as_str()), result);
         }
+        used.insert(pcm);
         part(1.0);
     }
+    forget_others(&used);
     for need in needs {
         let mut entries: Vec<Value> = Vec::new();
         for &(track, clip, asset) in &clips {
             let place = Place::of(track, clip, asset);
             match found[&(need, asset.id.as_str())].as_ref() {
                 Found::Silences(ranges) => entries.extend(place.silences(ranges)),
-                Found::Loudness { window_us, dbfs } => entries.push(place.loudness(*window_us, dbfs)),
+                Found::Loudness { window_us, step_us, dbfs } => {
+                    entries.push(place.loudness(*window_us, *step_us, dbfs))
+                }
                 Found::Beats(beats) => entries.push(place.beats(beats)),
             }
         }
@@ -192,14 +208,24 @@ impl<'a> Place<'a> {
             .collect()
     }
 
-    /// The windows the clip plays, each from where it starts on the timeline; the first from the clip's start.
-    fn loudness(&self, window_us: i64, dbfs: &[f32]) -> Value {
-        let first = (self.source_in / window_us) as usize;
-        let last = ((self.source_end + window_us - 1) / window_us) as usize;
-        let windows = first.min(dbfs.len())..last.min(dbfs.len());
-        let times: Vec<i64> = windows.clone().map(|i| self.at(i as i64 * window_us)).collect();
+    /// Windows of the file from where the clip starts playing it, each the mean power of the steps it plays.
+    fn loudness(&self, window_us: i64, step_us: i64, dbfs: &[f32]) -> Value {
+        let (mut times, mut levels) = (Vec::new(), Vec::new());
+        let mut start = self.source_in;
+        while start < self.source_end {
+            let end = (start + window_us).min(self.source_end);
+            let (first, last) = ((start / step_us) as usize, ((end + step_us - 1) / step_us) as usize);
+            let steps = &dbfs[first.min(dbfs.len())..last.min(dbfs.len())];
+            if steps.is_empty() {
+                break;
+            }
+            let power = steps.iter().map(|db| 10f64.powf(*db as f64 / 10.0)).sum::<f64>() / steps.len() as f64;
+            times.push(self.at(start));
+            levels.push((10.0 * power.log10()).max(-120.0) as f32);
+            start = end;
+        }
         self.named(json!({"start_us": self.clip.start_us, "end_us": self.clip.end_us(), "times_us": times,
-            "dbfs": dbfs[windows]}))
+            "dbfs": levels}))
     }
 
     fn beats(&self, beats: &Beats) -> Value {

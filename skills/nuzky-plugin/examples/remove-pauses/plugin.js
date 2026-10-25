@@ -3,8 +3,15 @@
 function run(ctx) {
   const shortest = Math.round(ctx.inputs.minSeconds * 1000000);
   const keep = Math.round(ctx.inputs.keepSeconds * 1000000);
-  const ranges = ctx.silences
-    .filter((s) => s.track_id === "main" && s.end_us - s.start_us >= shortest)
+  // A cut inside a pause gives one silence per clip; they are one pause.
+  const pauses = [];
+  for (const s of ctx.silences.filter((s) => s.track_id === "main")) {
+    const last = pauses[pauses.length - 1];
+    if (last && s.start_us <= last.end_us) last.end_us = Math.max(last.end_us, s.end_us);
+    else pauses.push({ start_us: s.start_us, end_us: s.end_us });
+  }
+  const ranges = pauses
+    .filter((s) => s.end_us - s.start_us >= shortest)
     .map((s) => ({ startUs: s.start_us + keep, endUs: s.end_us - keep }))
     .filter((r) => r.endUs > r.startUs);
   nuzky.log("pauses longer than", ctx.inputs.minSeconds, "s:", ranges);
