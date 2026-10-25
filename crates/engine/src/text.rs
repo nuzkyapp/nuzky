@@ -150,7 +150,12 @@ impl TextRenderer {
         for data in BUNDLED_FONTS.iter() {
             db.load_font_data(data.to_vec());
         }
-        db.load_font_source(cosmic_text::fontdb::Source::Binary(Arc::new(EMOJI_FONT)));
+        // cosmic-text falls back only to faces of the weight it draws, and the emoji font has only a regular one, so
+        // bold text would take its emoji from an installed font.
+        for id in db.load_font_source(cosmic_text::fontdb::Source::Binary(Arc::new(EMOJI_FONT))) {
+            let face = db.face(id).expect("just loaded").clone();
+            db.push_face_info(cosmic_text::fontdb::FaceInfo { weight: Weight::BOLD, ..face });
+        }
         db.set_sans_serif_family(DEFAULT_FAMILY);
         let families = db
             .faces()
@@ -286,7 +291,7 @@ impl TextRenderer {
         let (w, h) = (layout.w, layout.h);
         let mut mask = vec![0u8; w * h];
         for glyph in layout.glyphs.iter().filter(|glyph| ranges.iter().any(|range| range.contains(&glyph.start))) {
-            stamp(&mut self.swash, &mut self.fonts, glyph, &mut mask, w, h);
+            stamp(&mut self.swash, &mut self.fonts, glyph, &mut mask, None, w, h);
         }
         mask
     }
@@ -329,7 +334,21 @@ impl TextRenderer {
             TextAlign::Center => Align::Center,
             TextAlign::Right => Align::Right,
         };
-        buffer.set_text(&text, &attrs, Shaping::Advanced, Some(align));
+        let emoji = attrs.clone().family(Family::Name(EMOJI_FAMILY));
+        let mut spans = Vec::new();
+        let mut at = 0;
+        for run in emoji_requests(&text) {
+            spans.push((&text[at..run.start], attrs.clone()));
+            spans.push((&text[run.clone()], emoji.clone()));
+            at = run.end;
+        }
+        spans.push((&text[at..], attrs.clone()));
+        buffer.set_rich_text(
+            spans.into_iter().filter(|(span, _)| !span.is_empty()),
+            &attrs,
+            Shaping::Advanced,
+            Some(align),
+        );
         buffer.shape_until_scroll(&mut self.fonts, false);
 
         let mut line_w: f32 = 0.0;
@@ -392,8 +411,7 @@ impl TextRenderer {
                 let shown = line_start + glyph.start;
                 let start = shown_to_typed.as_ref().map_or(shown, |typed| typed.get(shown).copied().unwrap_or(shown));
                 let placed = Placed { start, key: physical.cache_key, x: physical.x, y: physical.y };
-                stamp(&mut self.swash, &mut self.fonts, &placed, &mut fill, w, h);
-                stamp_colour(&mut self.swash, &mut self.fonts, &placed, &mut colour, w, h);
+                stamp(&mut self.swash, &mut self.fonts, &placed, &mut fill, Some(&mut colour), w, h);
                 glyphs.push(placed);
             }
         }
@@ -508,6 +526,31 @@ impl Layout {
     }
 }
 
+/// Byte ranges of the emoji in `text` that ask for their colour picture with U+FE0F, such as ❤️, with the rest of
+/// their sequence. A font with a plain glyph for the character, as Inter has for ❤, would otherwise draw it.
+fn emoji_requests(text: &str) -> Vec<Range<usize>> {
+    let chars: Vec<(usize, char)> = text.char_indices().collect();
+    let mut runs = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars.get(i + 1).is_none_or(|&(_, c)| c != '\u{FE0F}') {
+            i += 1;
+            continue;
+        }
+        let start = chars[i].0;
+        i += 2;
+        while let Some(&(_, c)) = chars.get(i) {
+            i += match c {
+                '\u{200D}' => 2,
+                '\u{FE0F}' | '\u{20E3}' | '\u{1F3FB}'..='\u{1F3FF}' | '\u{E0020}'..='\u{E007F}' => 1,
+                _ => break,
+            };
+        }
+        runs.push(start..chars.get(i).map_or(text.len(), |&(at, _)| at));
+    }
+    runs
+}
+
 /// `text` as `case` draws it and, when that changed it, the byte of `text` each of its bytes comes from, so
 /// karaoke and key words still find their words.
 fn cased(text: &str, case: LetterCase) -> (std::borrow::Cow<'_, str>, Option<Vec<usize>>) {
@@ -602,51 +645,52 @@ pub struct TextStats {
     pub paints: u64,
 }
 
-fn is_colour(swash: &mut SwashCache, fonts: &mut FontSystem, glyph: &Placed) -> bool {
-    if swash.image_cache.values().flatten().map(|image| image.data.len()).sum::<usize>() > MAX_GLYPH_CACHE_BYTES {
-        swash.image_cache.clear();
-    }
-    swash.get_image(fonts, glyph.key).as_ref().is_some_and(|image| image.content == SwashContent::Color)
-}
-
-/// Draws one glyph's coverage into `mask`, keeping the higher value where glyphs overlap. Colour glyphs such as
-/// emoji stay out of it, so the text's fill, outline, shadow and highlight never paint over them.
-fn stamp(swash: &mut SwashCache, fonts: &mut FontSystem, glyph: &Placed, mask: &mut [u8], w: usize, h: usize) {
-    if is_colour(swash, fonts, glyph) {
-        return;
-    }
-    swash.with_pixels(fonts, glyph.key, Color::rgb(255, 255, 255), |x, y, color| {
-        let (px, py) = (x + glyph.x, y + glyph.y);
-        if px >= 0 && py >= 0 && (px as usize) < w && (py as usize) < h {
-            let i = py as usize * w + px as usize;
-            mask[i] = mask[i].max(color.a());
-        }
-    });
-}
-
-/// Draws a colour glyph into `layer`, RGBA of `w` × `h` made on its first colour glyph, keeping the more opaque
-/// pixel where glyphs overlap.
-fn stamp_colour(
+/// Draws one glyph's coverage into `mask`, keeping the higher value where glyphs overlap. A colour glyph such as an
+/// emoji goes over `colour` instead, RGBA of `w` × `h` made on the first one, so the text's fill, outline, shadow and
+/// highlight never paint over it; without `colour` it is left out.
+fn stamp(
     swash: &mut SwashCache,
     fonts: &mut FontSystem,
     glyph: &Placed,
-    layer: &mut Vec<u8>,
+    mask: &mut [u8],
+    colour: Option<&mut Vec<u8>>,
     w: usize,
     h: usize,
 ) {
-    if !is_colour(swash, fonts, glyph) {
-        return;
+    if swash.image_cache.values().flatten().map(|image| image.data.len()).sum::<usize>() > MAX_GLYPH_CACHE_BYTES {
+        swash.image_cache.clear();
     }
-    if layer.is_empty() {
-        layer.resize(w * h * 4, 0);
-    }
-    swash.with_pixels(fonts, glyph.key, Color::rgb(0, 0, 0), |x, y, color| {
-        let (px, py) = (x + glyph.x, y + glyph.y);
-        if px >= 0 && py >= 0 && (px as usize) < w && (py as usize) < h {
-            let i = (py as usize * w + px as usize) * 4;
-            if color.a() > layer[i + 3] {
-                layer[i..i + 4].copy_from_slice(&color.as_rgba());
+    let is_colour =
+        swash.get_image(fonts, glyph.key).as_ref().is_some_and(|image| image.content == SwashContent::Color);
+    let mut layer = match colour {
+        Some(layer) if is_colour => {
+            if layer.is_empty() {
+                layer.resize(w * h * 4, 0);
             }
+            Some(layer)
+        }
+        _ if is_colour => return,
+        _ => None,
+    };
+    swash.with_pixels(fonts, glyph.key, Color::rgb(255, 255, 255), |x, y, color| {
+        let (px, py) = (x + glyph.x, y + glyph.y);
+        if px < 0 || py < 0 || px as usize >= w || py as usize >= h {
+            return;
+        }
+        let i = py as usize * w + px as usize;
+        let Some(layer) = layer.as_deref_mut() else {
+            mask[i] = mask[i].max(color.a());
+            return;
+        };
+        // Straight-alpha "over", so overlapping emoji blend at their edges.
+        let (src, dst) = (color.as_rgba().map(f32::from), &mut layer[i * 4..i * 4 + 4]);
+        let (sa, da) = (src[3] / 255.0, f32::from(dst[3]) / 255.0 * (1.0 - src[3] / 255.0));
+        let a = sa + da;
+        if a > 0.0 {
+            for k in 0..3 {
+                dst[k] = ((src[k] * sa + f32::from(dst[k]) * da) / a).round() as u8;
+            }
+            dst[3] = (a * 255.0).round() as u8;
         }
     });
 }
@@ -1196,22 +1240,25 @@ mod tests {
         other.color = "#00ff00".into();
         other.stroke_color = "#ff0000".into();
         other.highlight = Some("#0000ff".into());
+        other.bold = true;
         other.shadow =
             Some(TextShadow { color: "#ff00ff".into(), opacity: 1.0, distance: 10.0, angle: 45.0, blur: 0.0 });
         let mut bundled = bundled_renderer();
         let mut installed = TextRenderer::new();
-        // The skull is grey; the others have a colour the white text with a black outline does not.
-        for (emoji, coloured) in [("😀", true), ("💀", false), ("👍🏽", true), ("🇨🇿", true)] {
+        // The skull is grey; the others have a colour the white text with a black outline does not. Inter has a plain
+        // heart of its own, which ❤️ asks not to be.
+        for (emoji, coloured) in [("😀", true), ("💀", false), ("👍🏽", true), ("🇨🇿", true), ("❤️", true)]
+        {
             let image = bundled.render(emoji, &look, 1.0, 2000.0).image;
             let colour = |p: &&[u8; 4]| p[3] == 255 && p[0].abs_diff(p[2]) > 80;
             assert_eq!(image.data.as_chunks::<4>().0.iter().any(|p| colour(&p)), coloured, "{emoji}");
             // No outline or shadow around it either: the same pixels, only the room kept for them differs.
             let restyled = bundled.render_spoken(emoji, &other, 1.0, 2000.0, Some(0..emoji.len()), &[]).image;
             assert!(opaque(&restyled) == opaque(&image), "{emoji} takes no colour, outline or shadow from the style");
-            assert!(
-                installed.render(emoji, &look, 1.0, 2000.0).image.data == image.data,
-                "{emoji} ignores installed fonts"
-            );
+            for style in [&look, &other] {
+                let drawn = installed.render_spoken(emoji, style, 1.0, 2000.0, Some(0..emoji.len()), &[]).image;
+                assert!(opaque(&drawn) == opaque(&image), "{emoji} ignores installed fonts, bold {}", style.bold);
+            }
         }
     }
 
