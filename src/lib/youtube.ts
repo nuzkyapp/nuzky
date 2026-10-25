@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { api, errorText, plainError } from "./api";
+import { runAutomatically } from "./plugins";
 import { aiLocked, currentEpoch, useEditor } from "./store";
 import type { Part, YoutubeVideo } from "./types";
 
@@ -22,6 +23,7 @@ export async function addYoutubeVideo(video: YoutubeVideo, part: Part | null, ur
   useEditor.setState({ importing: [...useEditor.getState().importing, pending] });
   try {
     setSnap(await api.youtubeVideoAdd(video, part, addId, currentEpoch()));
+    void runAutomatically("import");
   } catch (e) {
     if (errorText(e).startsWith("CANCELLED")) return;
     toast({ kind: "error", text: `Couldn't add ${video.title}. ${plainError(errorText(e))}`, action: { label: "Open again", run: () => openYoutube(url) } });

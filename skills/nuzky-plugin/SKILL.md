@@ -13,6 +13,7 @@ A plugin is a small JavaScript file that reads the project and returns edits. Th
 - It returns edits, the same EditCmd JSON as `apply_edits`. Nuzky applies them as ONE batch: all of them or none. The user undoes them in one step.
 - It cannot read or write files, reach the network, start processes, use timers or import modules. There is no `fetch`, `require`, `import`, `setTimeout` or `process`. `Math`, `Date`, `JSON`, strings, arrays and regular expressions work. `run` must return its result, not a Promise.
 - It cannot add media of its own choosing: `addAssets` is refused, so are reel candidates pointing at a new project file. It works with the assets the project already has (`addClip`, `replaceClip` with an existing `assetId`) and with its own pictures and sounds, such as a logo or a beep (Pictures and sounds below).
+- The user can turn it on to run by itself after every import they make in the app, or before every export, with the inputs they last set. Only the user turns that on, in the app; you and the plugin cannot. Such a run gets no selection and the playhead at 0, and may meet the same project again, after another import or the next export. Write a plugin meant for that to change nothing when its work is already done, such as a logo already in the corner, and say so in `message`.
 - It runs at most 60 seconds, with 256 MB of memory for the script. It runs in a process of its own, where Nuzky also applies its edits to a copy of the project first; that process may take at most 1 GB. plugin.js is at most 1 MB and a run returns at most 5000 edits.
 
 ## Files
@@ -194,7 +195,7 @@ A logo in the top right corner for the whole video:
 3. `run_plugin(id, inputs, dry_run: true)` changes nothing. Check `edits`, `adds`, `message` and `logs`; `valid: false` with `error` says which edit would fail. Try the inputs the user will use, and an edge such as no selection.
 4. `begin_run`, then `run_plugin(id, inputs, run_id)`. Its edits join your run. A long run answers with a job: wait with `job` action `wait`. A plugin that needs silences, loudness or beats first prepares the sound of each file Nuzky has not prepared yet, as part of that job.
 5. `inspect_frames` where it changed something, and `get_state`. If it is wrong, `end_run` with discard, or keep and `undo_run`, fix the plugin and try again.
-6. Tell the user the plugin is in their Plugins panel, what it does and what its inputs mean.
+6. Tell the user the plugin is in their Plugins panel, what it does and what its inputs mean. When they want it every time, tell them to turn on Run after import or Run before export there.
 
 ## Errors
 

@@ -47,7 +47,7 @@ export function BackgroundSection({ clips }: { clips: Clip[] }) {
     if (aiLocked()) return;
     const picked = await open({ multiple: false, filters: [{ name: "Images", extensions: IMAGE_EXTENSIONS }] });
     if (typeof picked !== "string") return;
-    const [assetId] = await importPaths([picked]);
+    const [assetId] = await importPaths([picked], undefined, { plugins: false });
     if (assetId) set({ type: "image", assetId });
   };
   const choose = (next: Kind) => {

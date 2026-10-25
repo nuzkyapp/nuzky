@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { create } from "zustand";
 import { open as pickFiles } from "@tauri-apps/plugin-dialog";
 import { api, errorText, plainError } from "./api";
+import { runAutomatically } from "./plugins";
 import { allClips, blobUrl, stopAiRun, switchProject, useEditor } from "./store";
 import type { Collection, Library, LibraryProject, Project, Said, Snapshot } from "./types";
 import { MEDIA_EXTENSIONS, VIDEO_EXTENSIONS, importFailures } from "../components/panel/assets";
@@ -320,7 +321,10 @@ export function newProjectFromMedia(paths: string[], then?: () => void) {
       if (result.failed.length > 0) toast({ kind: "error", text: importFailures(result.failed) });
       return result.snapshot;
     },
-    then,
+    then: () => {
+      then?.();
+      void runAutomatically("import");
+    },
   });
 }
 

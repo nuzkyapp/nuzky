@@ -30,6 +30,7 @@ import { checkForUpdates, startUpdates, useUpdates } from "./lib/updates";
 import { useSounds } from "./lib/sounds";
 import { useStickers } from "./lib/stickers";
 import { listenPlugins, usePlugins } from "./lib/plugins";
+import { exportVideo } from "./components/ExportDialog";
 import { addProjects, findDrafts, listenStyle, loadStyle, useStyle } from "./lib/style";
 import { closeCover, closeExport, deleteOverlay, deleteText, exportCover, loadModels as loadVisionModels, onCoverJob, selectedOverlay, useCover } from "./lib/cover";
 import { candidateOf, closeReels, onReelsJob, openReelsToFind, playEnding, toggleReelPlay, useReels } from "./lib/reels";
@@ -469,7 +470,7 @@ useEditor.subscribe((s, prev) => {
 // Test hook for WebDriver runs; native file dialogs cannot be automated.
 if (import.meta.env.DEV)
   Object.assign(window, {
-    __nuzky: { importPaths, store: useEditor, cover: useCover, reels: useReels, openReelsToFind, speech: useSpeech, api, agent: useAgent, dock: useDock, setup: useSetup, library: useLibrary, style: useStyle, addProjects, findDrafts, newProjectFromMedia, capcut: useCapCut, openDraft, openDraftFolder, openProject, refreshLibrary, trashProjects, updates: useUpdates, checkForUpdates, sounds: useSounds, stickers: useStickers, tour: useTour, youtube: useYoutube, previewWindow: appWindow },
+    __nuzky: { importPaths, exportVideo, plugins: usePlugins, store: useEditor, cover: useCover, reels: useReels, openReelsToFind, speech: useSpeech, api, agent: useAgent, dock: useDock, setup: useSetup, library: useLibrary, style: useStyle, addProjects, findDrafts, newProjectFromMedia, capcut: useCapCut, openDraft, openDraftFolder, openProject, refreshLibrary, trashProjects, updates: useUpdates, checkForUpdates, sounds: useSounds, stickers: useStickers, tour: useTour, youtube: useYoutube, previewWindow: appWindow },
   });
 
 async function startEditor() {

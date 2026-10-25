@@ -6,7 +6,8 @@ import { AlertCircle, AlertTriangle, AudioLines, CheckCircle2, ChevronDown, X } 
 import { api, errorText, plainError } from "../lib/api";
 import { formatLabel } from "../lib/presets";
 import { closeExport, useCover } from "../lib/cover";
-import { currentEpoch, projectDuration, useEditor } from "../lib/store";
+import { runBeforeExport, usePlugins } from "../lib/plugins";
+import { currentEpoch, projectDuration, stopAiRun, useEditor } from "../lib/store";
 import { CoverExport } from "./cover/CoverExport";
 import { LogsButton } from "./Feedback";
 import { FormatShape } from "./home/Home";
@@ -98,8 +99,24 @@ function loadOptions(canvas: Canvas, asked: Delivery | null): ExportRequest {
   }
 }
 
+/** Export… after the save panel: the plugins the user turned on for export run first, then the video exports what they left. */
+export async function exportVideo(path: string, options: ExportRequest, epoch: string | undefined, replace: boolean, credits: boolean) {
+  await runBeforeExport();
+  useEditor.setState({ exportJobId: await api.startExport(path, options, epoch, replace, credits) });
+}
+
+/** The plugin an export waits for, and how far its run is. */
+function usePluginBeforeExport() {
+  const name = usePlugins((s) => (s.pass === "export" ? (s.list?.find((p) => p.id === s.running)?.name ?? "") : null));
+  const progress = useEditor((s) =>
+    name ? (Object.values(s.jobs).find((j) => j.kind === "agent" && j.status === "running" && j.label === "Running a plugin")?.progress ?? 0) : 0,
+  );
+  return name === null ? null : { name, progress };
+}
+
 export function ExportDialog() {
   const open = useEditor((s) => s.exportOpen);
+  const before = usePluginBeforeExport();
   const project = useEditor((s) => s.snap?.project);
   const jobId = useEditor((s) => s.exportJobId);
   const job = useEditor((s) => (s.exportJobId ? s.jobs[s.exportJobId] : undefined));
@@ -198,7 +215,7 @@ export function ExportDialog() {
       // The preset and run menus close on their own Esc, and the dialog stays.
       if (e.key !== "Escape" || presetMenu || runMenu) return;
       e.stopPropagation();
-      if (!running || what === "cover") close();
+      if ((!running && !before) || what === "cover") close();
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
@@ -255,10 +272,13 @@ export function ExportDialog() {
     setCreditsExist(null);
     last.current = { path, replace, credits };
     try {
-      startedAt.current = Date.now();
-      const job =
-        what === "recap" ? await api.startRecap(path, recapRun, endCard, epoch, replace) : await api.startExport(path, options, epoch, replace, credits);
-      useEditor.setState({ exportJobId: job });
+      if (what === "recap") {
+        startedAt.current = Date.now();
+        useEditor.setState({ exportJobId: await api.startRecap(path, recapRun, endCard, epoch, replace) });
+      } else {
+        await exportVideo(path, options, epoch, replace, credits);
+        startedAt.current = Date.now();
+      }
     } catch (e) {
       const text = errorText(e);
       if (text.startsWith("DESTINATION_EXISTS")) setExists(path);
@@ -289,8 +309,8 @@ export function ExportDialog() {
     const left = (elapsed / job.progress) * (1 - job.progress);
     return left < 60 ? `${Math.ceil(left)} s left` : `${Math.ceil(left / 60)} min left`;
   })();
-  const failed = asking ? null : (error ?? jobFailed);
-  const settingsLocked = running || job?.status === "done";
+  const failed = asking || before ? null : (error ?? jobFailed);
+  const settingsLocked = running || !!before || job?.status === "done";
   const info = recap.info;
   const recapBlocked =
     what !== "recap"
@@ -502,6 +522,16 @@ export function ExportDialog() {
           </fieldset>
           )}
 
+          {before && (
+            <div className="flex flex-col gap-2" role="status">
+              <span className="tabular text-[12px] text-fg">
+                {before.name ? `${before.name} runs before export…` : "Plugins run before export…"}
+                {before.progress > 0 && ` ${Math.round(before.progress * 100)}%`}
+              </span>
+              <ProgressBar value={before.progress} label={`${before.name} before export`} />
+              <p className="text-[12px] text-muted">Stop plugin exports the project as it was.</p>
+            </div>
+          )}
           {job && running && (
             <div className="flex flex-col gap-2" role="status">
               <div className="flex justify-between text-[12px]">
@@ -553,7 +583,16 @@ export function ExportDialog() {
             </span>
           )}
           <div className="flex shrink-0 gap-2.5">
-            {running ? (
+            {before ? (
+              <>
+                <Button pill disabled={!before.name} title={`Stop ${before.name || "the plugin"} and export the project as it was`} onClick={() => void stopAiRun()}>
+                  Stop plugin
+                </Button>
+                <Button pill variant="primary" data-autofocus onClick={close}>
+                  Keep editing
+                </Button>
+              </>
+            ) : running ? (
               <>
                 <Button pill onClick={() => api.cancelJob(jobId!)}>
                   Cancel export

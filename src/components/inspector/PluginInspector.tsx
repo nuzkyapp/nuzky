@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { Eye, MoreHorizontal, Sparkles, X } from "lucide-react";
 import { describePeek } from "../../lib/peek";
-import { fixable, fixWithAi, plainDetail, pluginBlocked, previewPlugin, runPlugin, setValue, usePlugins, valuesFor, type Plugin, type PluginInput, type PluginValue } from "../../lib/plugins";
+import { fixable, fixWithAi, plainDetail, pluginBlocked, previewPlugin, runPlugin, setAuto, setValue, usePlugins, valuesFor, type Plugin, type PluginInput, type PluginValue, type Trigger } from "../../lib/plugins";
 import { useSpeech, useTranscriptView } from "../../lib/speech";
 import { useEditor } from "../../lib/store";
 import { Select } from "../panel/SpeechControls";
@@ -139,6 +139,16 @@ function PluginBody({ plugin: p }: { plugin: Plugin }) {
   );
 }
 
+function AutoSwitch({ plugin: p, trigger, label }: { plugin: Plugin; trigger: Trigger; label: string }) {
+  const on = usePlugins((s) => s.auto[trigger].includes(p.id));
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-[12px] text-muted">{label}</span>
+      <Switch label={label} checked={on} onChange={(v) => setAuto(p.id, trigger, v)} />
+    </div>
+  );
+}
+
 /** The chosen plugin's settings, what it would change, and its button. Closing it brings back what the inspector showed. */
 export function PluginInspector({ plugin: p }: { plugin: Plugin }) {
   const [menu, setMenu] = useState<{ x: number; y: number; keyboard: boolean } | null>(null);
@@ -177,6 +187,12 @@ export function PluginInspector({ plugin: p }: { plugin: Plugin }) {
             <PluginBody key={p.id} plugin={p} />
           </AiLock>
         )}
+        <AiLock>
+          <section className="flex flex-col gap-3 border-t border-white/[.07] px-4 py-4">
+            <AutoSwitch plugin={p} trigger="import" label="Run after import" />
+            <AutoSwitch plugin={p} trigger="export" label="Run before export" />
+          </section>
+        </AiLock>
       </div>
     </>
   );

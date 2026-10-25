@@ -2,6 +2,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { AudioLines, Film, Image as ImageIcon, Plus, X } from "lucide-react";
 import { api, errorText } from "../../lib/api";
 import { followPointer } from "../../lib/drag";
+import { runAutomatically } from "../../lib/plugins";
 import { MAIN_TRACK, aiLocked, allClips, currentEpoch, findClip, undoAction, useEditor } from "../../lib/store";
 import type { Asset } from "../../lib/types";
 import { lockedProps, useLockReason } from "../ui";
@@ -34,8 +35,11 @@ export function importFailures(failed: { path: string; error: string }[]) {
   return [lead, ...other].filter(Boolean).join(". ");
 }
 
-/** Imports files; optionally places them on the timeline one after another, or puts the first in a clip. Resolves to the ids of the new assets. */
-export async function importPaths(paths: string[], place?: DropTarget | { replaceId: string }): Promise<string[]> {
+/**
+ * Imports files; optionally places them on the timeline one after another, or puts the first in a clip. Resolves to the ids of the new assets.
+ * Then the plugins the user turned on for imports run, unless the file is for a clip, a background or a cover, which `plugins: false` says.
+ */
+export async function importPaths(paths: string[], place?: DropTarget | { replaceId: string }, { plugins = true } = {}): Promise<string[]> {
   const { setSnap, toast, edit } = useEditor.getState();
   if (paths.length === 0 || aiLocked()) return [];
   const epoch = currentEpoch();
@@ -60,6 +64,7 @@ export async function importPaths(paths: string[], place?: DropTarget | { replac
         if (added) startUs = added.clip.startUs + added.clip.durationUs;
       }
     }
+    if (plugins && res.added.length > 0 && !(place && "replaceId" in place) && currentEpoch() === epoch) void runAutomatically("import");
     return res.added;
   } catch (e) {
     toast({ kind: "error", text: errorText(e) });

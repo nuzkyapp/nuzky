@@ -85,7 +85,7 @@ async function importOverlay(format: ThumbnailFormat) {
   if (aiLocked()) return;
   const picked = await open({ multiple: false, filters: [{ name: "Images", extensions: IMAGE_EXTENSIONS }] });
   if (typeof picked !== "string") return;
-  const [assetId] = await importPaths([picked]);
+  const [assetId] = await importPaths([picked], undefined, { plugins: false });
   if (assetId) await addOverlay(format, assetId);
 }
 

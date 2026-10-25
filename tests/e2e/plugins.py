@@ -4,7 +4,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from e2e.harness import CLI, FIXTURES, ROOT, Bridge, export, flow, leave_editor, wait, webdriver
+from e2e.harness import CLI, FIXTURES, ROOT, Bridge, export, ffprobe, flow, leave_editor, wait, webdriver
 
 EXAMPLE = ROOT / 'skills/nuzky-plugin/examples/remove-short-clips'
 ROW = "document.querySelector('[data-plugin=\"remove-short-clips\"]')"
@@ -358,4 +358,154 @@ def plugin_files(r):
     frame = exported_frame(r, export(r, 'after-delete.mp4'), 'export-after-delete')
     share = white(frame, logo_box(frame, canvas))
     r.check('it still exports the logo in the corner', share > 0.9, f'{share:.0%} of the box is the logo')
+    r.check('no error toast', not r.errors(), r.errors())
+
+
+AUTO_PLUGINS = {
+    'broken-export': ('Broken export', 'function run(ctx) { throw new Error("the logo file is missing"); }'),
+    'stuck-export': ('Stuck export', 'function run(ctx) { while (true) {} }'),
+}
+UNDO_IN_TOAST = """const toast = [...document.querySelectorAll('[data-toast]')].find((t) => t.textContent.includes(arguments[0]));
+const undo = toast && [...toast.querySelectorAll('button')].find((b) => b.textContent === 'Undo');
+if (undo) undo.click();
+return !!undo;"""
+DIALOG_TEXT = "return document.querySelector('[role=dialog]')?.textContent ?? ''"
+SWITCH = "document.querySelector(`[role=switch][aria-label=\"${arguments[0]}\"]`)"
+
+
+def prepare_autorun(r):
+    plugins = r.work / 'data/nuzky/plugins'
+    shutil.copytree(PAUSES, plugins / 'remove-pauses')
+    for id, (name, script) in AUTO_PLUGINS.items():
+        (plugins / id).mkdir()
+        (plugins / id / 'plugin.json').write_text(json.dumps({'nuzkyPlugin': 2, 'id': id, 'name': name, 'version': '1.0.0',
+                                                              'description': 'Runs before an export.'}))
+        (plugins / id / 'plugin.js').write_text(script)
+
+
+def open_plugin(r, id):
+    r.s.run("[...document.querySelectorAll('[role=tab]')].find((b) => b.textContent === 'Plugins').click()")
+    row = f"document.querySelector('[data-plugin=\"{id}\"]')"
+    if not wait(lambda: r.s.run(f'return !!{row}'), 10):
+        raise RuntimeError(f'the Plugins tab does not list {id}')
+    r.s.run(f'{row}.click()')
+    if not wait(lambda: r.s.run(f'return !!{SWITCH}', 'Run after import'), 5):
+        raise RuntimeError(f'{id} did not open in the inspector')
+
+
+def switched_on(r, label):
+    return r.s.run(f"return {SWITCH}.getAttribute('aria-checked')", label) == 'true'
+
+
+def new_project(r, video):
+    old = r.state()['epoch']
+    r.s.call('window.__nuzky.newProjectFromMedia(arguments[0])', [str(video)])
+    if not wait(lambda: (s := r.state())['epoch'] != old and s['tracks'][0]['clips'], 30):
+        raise RuntimeError('the new project did not open with the video on the timeline')
+
+
+def auto_toasts(r):
+    """The toasts of automatic runs, and the one a run of the AI gets, which a plugin run must not get as well."""
+    return [t for t in r.state()['toasts'] if ' after import' in t['text'] or ' before export' in t['text']
+            or t['text'].startswith('AI edit done')]
+
+
+def sizes(r, name):
+    """A screenshot at the smallest window, 1024 x 640, then at 1440 x 900, where the flow goes on."""
+    for width, height, suffix in ((1024, 640, '-1024'), (1440, 900, '')):
+        webdriver('POST', r.s.path + '/window/rect', {'width': width, 'height': height})
+        wait(lambda: r.s.run('return window.innerWidth') == width, 5)
+        time.sleep(1)
+        r.shot(f'{name}{suffix}')
+
+
+def saved_open(r):
+    return json.loads(Path(r.s.run('return window.__nuzky.store.getState().snap.path')).read_text())
+
+
+@flow('plugin_autorun', 'A plugin the user turned on runs by itself after a new project is made of a video, with the '
+      'settings last set, and says what it did with Undo that takes back exactly its step; plugins left off do not '
+      'run; one that fails before an export and one stopped from the export dialog let the export finish with the '
+      'project as it was', before=prepare_autorun)
+def plugin_autorun(r):
+    video = FIXTURES / 'talk.mp4'
+    open_plugin(r, 'remove-pauses')
+    r.check('both switches start off', not switched_on(r, 'Run after import') and not switched_on(r, 'Run before export'))
+    for label, value in (('Longer than', 0.3), ('Keep on each side', 0.05)):
+        r.check(f'{label} is set to {value} s', wait(lambda: r.s.run(SLIDE, label, value), 5))
+
+    new_project(r, video)
+    time.sleep(3)
+    plain = project(r)
+    r.check('with every plugin off, the new project keeps the whole video as one clip',
+            len(plain['tracks'][0]['clips']) == 1 and not auto_toasts(r), (cuts(plain['tracks']), auto_toasts(r)))
+
+    def preview(values):
+        answer = r.s.call("window.__nuzky.api.previewPlugin('remove-pauses', arguments[0], [], 0).then(JSON.stringify)", values)
+        return answer['ok'] and cuts(json.loads(answer['value'])['tracks'])
+    expected = wait(lambda: preview({'minSeconds': 0.3, 'keepSeconds': 0.05}), 30)
+    r.check('the settings set cut pauses out of this video', expected and len(expected[0]) > 1, expected)
+    defaults = preview({'minSeconds': 0.6, 'keepSeconds': 0.1})
+    r.check('the default settings would cut it differently, so the run shows which it used',
+            defaults and defaults != expected, defaults)
+
+    open_plugin(r, 'remove-pauses')
+    shown = r.s.run("return document.querySelector('input[type=range][aria-label=\"Longer than\"]').value")
+    r.check('the settings stay as last set in the next project', shown == '0.3', shown)
+    r.s.run(f'{SWITCH}.click()', 'Run after import')
+    r.check('Run after import turns on', wait(lambda: switched_on(r, 'Run after import'), 5))
+    r.check('Run before export stays off', not switched_on(r, 'Run before export'))
+    sizes(r, 'autorun-switch')
+
+    new_project(r, video)
+    ran = wait(lambda: cuts(project(r)['tracks']) == expected, 30)
+    r.check('after the import the plugin cut the pauses exactly as its preview with the settings set does',
+            ran, cuts(project(r)['tracks']))
+    toast = wait(lambda: next((t['text'] for t in auto_toasts(r) if t['kind'] == 'success'), None), 5)
+    r.check('a toast says the plugin ran after import and what it did',
+            toast and toast.startswith('Remove pauses ran after import: removed ') and toast.endswith(' s in all.'), auto_toasts(r))
+    r.check('the run gets that one toast only', len(auto_toasts(r)) == 1, auto_toasts(r))
+    r.check('the saved project has the cut', ran and wait(lambda: cuts(saved_open(r)['tracks']) == expected, 5))
+    r.shot('autorun-import')
+    r.check('the toast offers Undo', r.s.run(UNDO_IN_TOAST, 'ran after import'))
+    r.check('Undo takes back exactly the plugin\'s step: the whole video as one clip again',
+            wait(lambda: cuts(project(r)['tracks']) == cuts(plain['tracks']), 5), cuts(project(r)['tracks']))
+
+    for id in AUTO_PLUGINS:
+        open_plugin(r, id)
+        r.s.run(f'{SWITCH}.click()', 'Run before export')
+        r.check(f'{id} turns on for export', wait(lambda: switched_on(r, 'Run before export'), 5))
+    before = project(r)
+    length = max(c['startUs'] + c['durationUs'] for c in before['tracks'][0]['clips'])
+    r.key('e', ctrlKey=True)
+    r.check('Ctrl+E opens the export dialog', wait(lambda: r.s.run(DIALOG_TEXT), 5))
+    time.sleep(0.5)  # the dialog fades in over 200 ms
+    target = r.work / 'after-plugins.mp4'
+    # Started as Export… does after the save panel, which cannot be driven.
+    r.s.run("window.autorunExport = window.__nuzky.exportVideo(arguments[0], arguments[1], arguments[2], true, false)"
+            ".then(() => 'ok', String)", str(target), {'resolution': 720, 'fps': 30, 'quality': 'small'}, r.state()['epoch'])
+    waiting = wait(lambda: 'Stuck export runs before export' in r.s.run(DIALOG_TEXT), 10)
+    r.check('the dialog says which plugin the export waits for, with Stop plugin',
+            waiting and 'Stop plugin' in r.s.run(DIALOG_TEXT), r.s.run(DIALOG_TEXT))
+    r.check('the export has not started meanwhile', not r.s.run('return window.__nuzky.store.getState().exportJobId'))
+    broken = next((t['text'] for t in auto_toasts(r) if t['kind'] == 'warning'), '')
+    r.check('the broken plugin, first by name, says it did not run and why, and that the export goes on',
+            broken.startswith("Broken export didn't run before export: ") and 'the logo file is missing. Nothing changed.' in broken
+            and broken.endswith('The export goes on without it.'), auto_toasts(r))
+    sizes(r, 'autorun-export-waits')
+    r.s.run("[...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent === 'Stop plugin').click()")
+    started = wait(lambda: r.s.run('return window.__nuzky.store.getState().exportJobId'), 15)
+    r.check('Stop plugin ends the plugin and the export starts', started)
+    job = started and wait(lambda: (j := r.s.run('return window.__nuzky.store.getState().jobs[arguments[0]] ?? null', started))
+                           and j['status'] != 'running' and j, 180)
+    r.check('the export finishes; Stop did not cancel it', job and job['status'] == 'done', job)
+    r.check('exportVideo resolves', r.s.call('window.autorunExport') == {'ok': True, 'value': 'ok'})
+    stopped = [t['text'] for t in auto_toasts(r) if t['text'].startswith('Stuck export')]
+    r.check('a toast says the stuck plugin was stopped and the export goes on',
+            stopped == ['Stuck export was stopped before export. Nothing changed. The export goes on without it.'], auto_toasts(r))
+    r.check('the plugins left the project as it was, and the one off for export did not run', project(r) == before)
+    duration = ffprobe(target)[0] if target.exists() else 0
+    r.check('the exported file has the length of the unchanged project', abs(duration - length / 1e6) < 0.1,
+            (duration, length / 1e6))
+    r.shot('autorun-export-done')
     r.check('no error toast', not r.errors(), r.errors())
