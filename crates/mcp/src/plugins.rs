@@ -31,6 +31,9 @@ const MAX_SCRIPT_BYTES: u64 = 1 << 20;
 const MAX_TEXT_BYTES: u64 = 64 << 10;
 const MAX_TEXT_INPUT: usize = 500;
 const MAX_EDITS: usize = 5_000;
+/// What `run` may return, and how big its edits may make the project: a get_state answer must still fit a message.
+const MAX_RESULT_BYTES: usize = 8 << 20;
+const MAX_PROJECT_BYTES: usize = crate::limits::MAX_TOOL_BYTES;
 const MAX_LOG_LINES: usize = 200;
 const RUN_LIMIT: Duration = Duration::from_secs(60);
 /// Saving runs the script's top level once, to report syntax errors and a missing `run`.
@@ -326,10 +329,16 @@ pub fn save(manifest: &Value, script: &str, readme: Option<&str>) -> Result<Plug
     sandbox(script, "PLUGIN_BROKEN", SAVE_LIMIT, Arc::default(), Rc::default(), Rc::new(|_| {}), |_, _| Ok(()))?;
     let folder = dir()?.join(&manifest.id);
     let failed = "STORE_WRITE_FAILED: cannot save the plugin";
+    // A plugin folder from someone else may hold links; writing through one would overwrite the file it points at.
+    ensure!(
+        std::fs::symlink_metadata(&folder).map_or(true, |meta| meta.is_dir()),
+        "PLUGIN_BROKEN: plugins/{} is not a folder",
+        manifest.id
+    );
     std::fs::create_dir_all(&folder).context(failed)?;
     for (file, previous) in [("plugin.json", "plugin.prev.json"), ("plugin.js", "plugin.prev.js")] {
-        if folder.join(file).is_file() {
-            std::fs::copy(folder.join(file), folder.join(previous)).context(failed)?;
+        if let Ok(old) = read(&folder.join(file), MAX_SCRIPT_BYTES) {
+            crate::sounds::publish(&folder.join(previous), |out| Ok(out.write_all(old.as_bytes())?)).context(failed)?;
         }
     }
     let json = serde_json::to_vec_pretty(&manifest)?;
@@ -413,7 +422,13 @@ fn execute(prepared: &Prepared, cancel: Arc<AtomicBool>, progress: impl Fn(f32) 
 
 fn edits(json: Option<&str>) -> Result<(Vec<EditCmd>, Option<String>)> {
     let shape = "PLUGIN_FAILED: run(ctx) must return an array of edits or {edits, message}";
-    let (list, message) = match serde_json::from_str(json.context(shape)?)? {
+    let json = json.context(shape)?;
+    ensure!(
+        json.len() <= MAX_RESULT_BYTES,
+        "PLUGIN_TOO_BIG: the plugin returned more than {} MB of edits",
+        MAX_RESULT_BYTES >> 20
+    );
+    let (list, message) = match serde_json::from_str(json)? {
         Value::Array(list) => (list, None),
         Value::Object(mut object) => match object.remove("edits") {
             Some(Value::Array(list)) => (list, object.remove("message")),
@@ -465,6 +480,16 @@ fn check(project: &Project, edits: &[EditCmd]) -> Result<Project> {
             kind(edit)
         );
         after.apply(edit.clone()).map_err(|e| anyhow!("PLUGIN_BAD_EDIT: edit {i} ({}): {e:#}", kind(edit)))?;
+        // Duplicating a clip copies its text, so a few edits can grow the project without bound; measured often enough
+        // that the copies between two checks stay small.
+        if i % 16 == 15 || i + 1 == edits.len() {
+            ensure!(
+                serde_json::to_vec(&after)?.len() <= MAX_PROJECT_BYTES,
+                "PLUGIN_TOO_BIG: edit {i} ({}) makes the project larger than {} MB",
+                kind(edit),
+                MAX_PROJECT_BYTES >> 20
+            );
+        }
     }
     nuzky_session::validate(&after)
         .map_err(|e| anyhow!("PLUGIN_BAD_EDIT: the edits leave the project invalid: {e:#}"))?;

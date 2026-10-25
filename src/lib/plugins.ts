@@ -66,7 +66,7 @@ export interface ListedPlugin {
 
 const listed = ({ id, error, manifest: m }: ListedPlugin): Plugin => ({
   id,
-  name: m?.name ?? id,
+  name: m?.name ?? id.charAt(0).toUpperCase() + id.slice(1).replaceAll("-", " "),
   description: m?.description ?? "",
   action: m?.action ?? "Run",
   needs: m?.needs ?? [],
@@ -88,6 +88,11 @@ export function listenPlugins() {
   return listen("plugins-changed", () => void loadPlugins());
 }
 
+// A preview of a plugin no longer shown would only keep a stuck script running.
+usePlugins.subscribe((s, prev) => {
+  if (prev.open && s.open !== prev.open) void api.cancelPluginPreview().catch(() => {});
+});
+
 // The inspector shows a plugin only while the Plugins tab is open, and never one of another project.
 useEditor.subscribe((s, prev) => {
   if (usePlugins.getState().open && (s.panelTab !== "plugins" || s.snap?.sessionEpoch !== prev.snap?.sessionEpoch)) usePlugins.setState({ open: null, preview: null });
@@ -107,7 +112,10 @@ export function pluginBlocked(p: Plugin, hasWords: boolean): string | null {
 }
 
 /** The text after "CODE: ", for showing an error the plugin caused. */
-const detail = (text: string) => text.replace(/^[A-Z][A-Z_]+: ?/, "");
+export const plainDetail = (text: string) => text.replace(/^[A-Z][A-Z_]+: ?/, "");
+
+/** Whether the AI can fix the error by changing the plugin; a plugin made for a newer Nuzky needs an update instead. */
+export const fixable = (error: string) => !error.startsWith("PLUGIN_API_NEWER");
 
 export async function previewPlugin(p: Plugin, values: PluginValues, key: string) {
   const { snap, selection, timeUs } = useEditor.getState();
@@ -117,7 +125,7 @@ export async function previewPlugin(p: Plugin, values: PluginValues, key: string
     const project = await api.previewPlugin(p.id, values, selection, timeUs);
     preview = { key, revision: snap.revision, project, error: null };
   } catch (e) {
-    preview = { key, revision: snap.revision, project: null, error: detail(errorText(e)) };
+    preview = { key, revision: snap.revision, project: null, error: plainDetail(errorText(e)) };
   }
   // A newer preview or a closed plugin wins.
   if (usePlugins.getState().open === p.id && !usePlugins.getState().running) usePlugins.setState({ preview });
@@ -148,7 +156,7 @@ export async function runPlugin(p: Plugin) {
     if (text.startsWith("RUN_ACTIVE") || text.startsWith("EPOCH_CHANGED")) return toast({ kind: "error", text: plainError(text) });
     return toast({
       kind: "warning",
-      text: `${p.name} stopped: ${detail(text)} Nothing changed.`,
+      text: `${p.name} stopped: ${plainDetail(text)} Nothing changed.`,
       action: { label: "Fix with AI", run: () => fixWithAi(p, text) },
       secondary: { label: "Copy error", run: () => void navigator.clipboard.writeText(text) },
     });

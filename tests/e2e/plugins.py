@@ -80,7 +80,7 @@ def plugins(r):
     r.check('the plugin message reaches the success toast', wait(lambda: any(
         t['kind'] == 'success' and t['text'] == 'Removed 2 clips.' for t in r.state()['toasts']), 5), r.state()['toasts'])
     r.check('the finished inspector says there is nothing else to remove', wait(lambda:
-        r.s.run("return document.body.textContent.includes('Changes nothing in this project now.')"), 5))
+        r.s.run("return document.body.textContent.includes('Nothing left to change.')"), 5))
     r.shot('done')
 
     r.s.call('window.__nuzky.store.getState().undo()')
@@ -128,7 +128,7 @@ def plugins(r):
         bridge.close()
     rejected = r.s.call("window.__nuzky.api.removePlugin('../projects')")
     r.check('removing a folder outside plugins is refused', not rejected['ok'] and rejected['error'].startswith('PLUGIN_NOT_FOUND:'), rejected)
-    r.s.run("document.querySelector('[aria-label=\"More for broken\"]').click()")
+    r.s.run("document.querySelector('[aria-label=\"More for Broken\"]').click()")
     r.s.run("[...document.querySelectorAll('[role=menuitem]')].find((b) => b.textContent.includes('Move to Trash')).click()")
     r.check('Move to Trash removes the broken plugin folder and row', wait(lambda:
         not (r.work / 'data/nuzky/plugins/broken').exists()

@@ -16,7 +16,7 @@ import {
   useSaidSearch,
   whenLabel,
 } from "../../lib/library";
-import { loadPlugins, openPlugin, usePlugins } from "../../lib/plugins";
+import { loadPlugins, openPlugin, plainDetail, usePlugins } from "../../lib/plugins";
 import { FORMATS, formatLabel } from "../../lib/presets";
 import { useEditor } from "../../lib/store";
 import { formatLength } from "../../lib/time";
@@ -188,7 +188,7 @@ export function Launcher() {
               openPlugin(p.id);
               showEditor();
             },
-            node: (on: boolean) => <Row active={on} thumb={<span className="flex w-9 justify-center"><PluginMark plugin={p} size={28} /></span>} title={p.name} sub={p.error ?? p.description} end="Plugin" />,
+            node: (on: boolean) => <Row active={on} thumb={<span className="flex w-9 justify-center"><PluginMark plugin={p} size={28} /></span>} title={p.name} sub={p.error ? `Can’t load: ${plainDetail(p.error)}` : p.description} end="Plugin" />,
           }))
       : [];
   const groups: { title: string; options: Option[] }[] = searching

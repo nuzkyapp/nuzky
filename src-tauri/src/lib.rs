@@ -1415,6 +1415,7 @@ pub fn run() {
             reels::start_make_reels,
             plugins::list_plugins,
             plugins::preview_plugin,
+            plugins::cancel_plugin_preview,
             plugins::run_plugin,
             plugins::remove_plugin,
             plugins::show_plugin_folder,

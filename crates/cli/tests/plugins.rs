@@ -174,3 +174,35 @@ fn stop_ends_a_stuck_plugin_and_a_dry_run_changes_nothing() {
     assert!(state.open_run.is_none());
     assert_eq!(state.project, before);
 }
+
+/// A plugin cannot grow the project without bound by copying a long text, which would take all memory already in
+/// the preview, and saving a plugin whose folder holds a link never writes through the link.
+#[test]
+fn a_plugin_cannot_blow_up_the_project_or_write_through_a_link() {
+    let f = project();
+    let long = "x".repeat(1 << 20);
+    let style = serde_json::from_value(json!({"fontSize": 60.0, "color": "#FFFFFF"})).unwrap();
+    f.host.session.edit(vec![EditCmd::AddText { start_us: 0, text: long, style }], None, Expect::default()).unwrap();
+    let copies =
+        json!({"nuzkyPlugin": 1, "id": "copies", "name": "Copies", "description": "Copies the text", "version": "1"});
+    let script = "function run(ctx) {\n  const id = ctx.project.tracks[1].clips[0].id;\n  \
+                  return Array.from({length: 100}, () => ({type: 'duplicateClip', clipId: id}));\n}\n";
+    plugins::save(&copies, script, None).unwrap();
+    let before = f.host.session.state().unwrap().project;
+    let dry = plugins::dry_run_in_app(&f.host, "copies", &Map::new(), vec![], 0, Arc::default()).unwrap();
+    assert_eq!(dry["valid"], false, "{}", dry["error"]);
+    assert!(dry["error"].as_str().unwrap().starts_with("PLUGIN_TOO_BIG: edit 63"), "{}", dry["error"]);
+    assert_eq!(f.host.session.state().unwrap().project, before);
+
+    #[cfg(unix)]
+    {
+        let video = f.dir.join("take.mp4");
+        let original = std::fs::read(&video).unwrap();
+        let folder = plugins::dir().unwrap().join("copies");
+        std::fs::remove_file(folder.join("plugin.prev.js")).ok();
+        std::os::unix::fs::symlink(&video, folder.join("plugin.prev.js")).unwrap();
+        plugins::save(&copies, script, None).unwrap();
+        assert_eq!(std::fs::read(&video).unwrap(), original, "saving wrote through the link into the video");
+        assert!(!std::fs::symlink_metadata(folder.join("plugin.prev.js")).unwrap().is_symlink());
+    }
+}

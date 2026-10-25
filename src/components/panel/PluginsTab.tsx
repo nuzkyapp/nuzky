@@ -1,7 +1,7 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { AlertTriangle, FolderOpen, MoreHorizontal, Puzzle, Sparkles, Trash2 } from "lucide-react";
 import { api, errorText } from "../../lib/api";
-import { askAi, changeWithAi, fixWithAi, loadPlugins, makeWithAi, openPlugin, removePlugin, usePlugins, type Plugin } from "../../lib/plugins";
+import { askAi, changeWithAi, fixable, fixWithAi, loadPlugins, makeWithAi, openPlugin, plainDetail, removePlugin, usePlugins, type Plugin } from "../../lib/plugins";
 import { useEditor } from "../../lib/store";
 import { Button, IconButton, Menu, lockedProps, useLockReason, type MenuEntry } from "../ui";
 
@@ -46,17 +46,17 @@ function Row({ plugin: p, open }: { plugin: Plugin; open: boolean }) {
         type="button"
         data-plugin={p.id}
         aria-current={open || undefined}
-        onClick={() => openPlugin(open ? null : p.id)}
+        onClick={() => openPlugin(p.id)}
         className="flex min-w-0 flex-1 items-center gap-2.5 self-stretch rounded-[10px] py-2 pl-2 text-left"
       >
         <PluginMark plugin={p} />
         <span className="flex min-w-0 flex-col leading-[17px]">
           <span className="truncate font-medium text-fg">{p.name}</span>
-          {p.error ? <span className="line-clamp-2 text-[12px] text-danger">Can’t load: {p.error.replace(/^[A-Z][A-Z_]+: ?/, "")}</span> : <span className="truncate text-[12px] text-muted">{p.description}</span>}
+          {p.error ? <span className="line-clamp-2 text-[12px] text-danger">Can’t load: {plainDetail(p.error)}</span> : <span className="truncate text-[12px] text-muted">{p.description}</span>}
         </span>
       </button>
-      {p.error && (
-        <Button variant="ghost" className="h-7 shrink-0 gap-1 px-2 text-[12px] text-accent" onClick={() => fixWithAi(p, p.error ?? "")}>
+      {p.error && fixable(p.error) && (
+        <Button variant="ghost" className="h-7 shrink-0 gap-1 px-2 text-[12px] text-accent! hover:text-accent!" onClick={() => fixWithAi(p, p.error ?? "")}>
           <Sparkles size={13} /> Fix with AI
         </Button>
       )}
@@ -93,7 +93,7 @@ function Empty() {
           </li>
         ))}
       </ul>
-      <Button variant="ghost" className="mt-3 h-7 gap-1.5 px-2 text-[12px] text-accent" onClick={() => void showFolder(null)}>
+      <Button variant="ghost" className="mt-3 h-7 gap-1.5 px-2 text-[12px] text-accent! hover:text-accent!" onClick={() => void showFolder(null)}>
         <FolderOpen size={13} /> Show plugins folder
       </Button>
     </div>
@@ -113,7 +113,7 @@ export function PluginsTab() {
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-10 shrink-0 items-center justify-between px-3.5">
         <h3 className="text-[13px] font-semibold text-fg">Plugins</h3>
-        <Button variant="ghost" className="h-7 gap-1 px-2 text-[12px] text-accent" onClick={makeWithAi}>
+        <Button variant="ghost" className="h-7 gap-1 px-2 text-[12px] text-accent! hover:text-accent!" onClick={makeWithAi}>
           <Sparkles size={13} /> Make a plugin
         </Button>
       </div>

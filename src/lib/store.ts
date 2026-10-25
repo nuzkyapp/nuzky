@@ -308,8 +308,12 @@ function noticeAiRun() {
 
 /** True while an agent's run is open: the edit is not sent, and the notice shows once. */
 export function aiLocked(): boolean {
-  if (!useEditor.getState().aiRun) return false;
-  noticeAiRun();
+  const { aiRun, toasts, toast } = useEditor.getState();
+  if (!aiRun) return false;
+  if (aiRun.startsWith(PLUGIN_RUN)) {
+    const text = `${aiRun.slice(PLUGIN_RUN.length)} is still running. Edit when it's done.`;
+    if (!toasts.some((t) => t.text === text)) toast({ kind: "info", text });
+  } else noticeAiRun();
   return true;
 }
 

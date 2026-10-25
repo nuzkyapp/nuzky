@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type MouseEvent } from "react";
-import { Eye, MoreHorizontal, X } from "lucide-react";
+import { Eye, MoreHorizontal, Sparkles, X } from "lucide-react";
 import { describePeek } from "../../lib/peek";
-import { defaults, pluginBlocked, previewPlugin, runPlugin, setValue, usePlugins, type Plugin, type PluginInput, type PluginValue } from "../../lib/plugins";
+import { defaults, fixable, fixWithAi, plainDetail, pluginBlocked, previewPlugin, runPlugin, setValue, usePlugins, type Plugin, type PluginInput, type PluginValue } from "../../lib/plugins";
 import { useTranscriptView } from "../../lib/speech";
 import { useEditor } from "../../lib/store";
 import { Select } from "../panel/SpeechControls";
@@ -60,18 +60,22 @@ function Control({ input, value, onChange }: { input: PluginInput; value: Plugin
   }
 }
 
-/** What running it would do, from the preview, or why it cannot run. */
+/**
+ * What running it would do, from the preview, or why it cannot run. While a newer preview is on its way the last one
+ * stays, `stale`, so the panel does not jump on every change.
+ */
 function useOutcome(p: Plugin, key: string) {
   const preview = usePlugins((s) => s.preview);
   const snap = useEditor((s) => s.snap);
   const { view } = useTranscriptView();
   const blocked = pluginBlocked(p, !!view?.words.length);
   const lines = useMemo(() => (preview?.project && snap ? describePeek(snap.project, preview.project).lines : null), [preview, snap]);
-  if (blocked) return { blocked, lines: null };
-  if (!preview || preview.key !== key || preview.revision !== snap?.revision) return { blocked: null, lines: null, checking: true };
-  if (preview.error) return { blocked: preview.error, lines: null };
-  if (lines && lines.length === 0) return { blocked: "Changes nothing in this project now.", lines: null };
-  return { blocked: null, lines };
+  if (blocked) return { blocked, lines: null, stale: false };
+  if (!preview) return { blocked: null, lines: null, stale: true };
+  const stale = preview.key !== key || preview.revision !== snap?.revision;
+  if (preview.error) return { blocked: preview.error, lines: null, stale };
+  if (lines && lines.length === 0) return { blocked: "Nothing left to change.", lines: null, stale };
+  return { blocked: null, lines, stale };
 }
 
 function PluginBody({ plugin: p }: { plugin: Plugin }) {
@@ -80,7 +84,9 @@ function PluginBody({ plugin: p }: { plugin: Plugin }) {
   const revision = useEditor((s) => s.snap?.revision);
   const selection = useEditor((s) => s.selection);
   const running = usePlugins((s) => s.running === p.id);
-  const key = JSON.stringify([p.id, all, selection]);
+  // The playhead counts once it rests: a plugin may work where it is, but playback must not run it every frame.
+  const playhead = useEditor((s) => (s.playing ? null : s.timeUs));
+  const key = JSON.stringify([p.id, all, selection, playhead]);
   const outcome = useOutcome(p, key);
 
   // Runs it without changing anything once the settings, the selection or the project rest.
@@ -101,17 +107,24 @@ function PluginBody({ plugin: p }: { plugin: Plugin }) {
       )}
       <section className="flex flex-col gap-2.5 px-4 py-4">
         {outcome.lines && (
-          <div className="flex gap-2 text-[12px] text-fg/85">
+          <div className={`flex gap-2 text-[12px] text-fg/85 transition-opacity duration-[120ms] ${outcome.stale ? "opacity-50" : ""}`}>
             <Eye size={14} className="mt-px shrink-0 text-muted" aria-hidden />
             <span>
               {outcome.lines.slice(0, 3).join(". ")}. <span className="text-muted">Marked on the timeline.</span>
             </span>
           </div>
         )}
-        <Button variant="primary" pill className="h-8 w-full" disabled={!!outcome.blocked || running || !!outcome.checking} disabledReason={outcome.blocked ?? (running ? "Running…" : "Checking what it would change…")} onClick={() => void runPlugin(p)}>
+        <Button
+          variant="primary"
+          pill
+          className="h-8 w-full"
+          disabled={(!!outcome.blocked && !outcome.stale) || running}
+          disabledReason={running ? "Running…" : (outcome.blocked ?? undefined)}
+          onClick={() => void runPlugin(p)}
+        >
           {running ? "Running…" : p.action}
         </Button>
-        {outcome.blocked && <p className="text-[12px] text-muted">{outcome.blocked}</p>}
+        {outcome.blocked && <p className={`text-[12px] text-muted ${outcome.stale ? "opacity-50" : ""}`}>{outcome.blocked}</p>}
       </section>
     </>
   );
@@ -127,10 +140,10 @@ export function PluginInspector({ plugin: p }: { plugin: Plugin }) {
   return (
     <>
       <div className="flex shrink-0 items-start gap-2.5 px-4 pt-4 pb-3">
-        <PluginMark plugin={p} size={28} />
+        <PluginMark plugin={p} />
         <div className="min-w-0 flex-1">
           <div className="truncate text-[15px] leading-5 font-semibold tracking-[-0.015em] text-fg">{p.name}</div>
-          <div className="mt-[3px] text-[12px] text-muted">{p.description}</div>
+          {p.description && <div className="mt-[3px] text-[12px] text-muted">{p.description}</div>}
         </div>
         <IconButton label={`More for ${p.name}`} className="size-7 shrink-0" onClick={showMenu}>
           <MoreHorizontal size={16} />
@@ -141,9 +154,20 @@ export function PluginInspector({ plugin: p }: { plugin: Plugin }) {
         {menu && <Menu items={pluginMenu(p)} at={{ x: menu.x, y: menu.y, align: "end" }} label={p.name} keyboard={menu.keyboard} onClose={() => setMenu(null)} />}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto border-t border-white/[.07]">
-        <AiLock>
-          <PluginBody key={p.id} plugin={p} />
-        </AiLock>
+        {p.error ? (
+          <section className="flex flex-col items-start gap-3 px-4 py-4">
+            <p className="text-[12px] text-danger">Can’t load: {plainDetail(p.error)}</p>
+            {fixable(p.error) && (
+              <Button className="h-8 gap-1.5 px-3" onClick={() => fixWithAi(p, p.error ?? "")}>
+                <Sparkles size={14} className="text-accent" /> Fix with AI
+              </Button>
+            )}
+          </section>
+        ) : (
+          <AiLock>
+            <PluginBody key={p.id} plugin={p} />
+          </AiLock>
+        )}
       </div>
     </>
   );

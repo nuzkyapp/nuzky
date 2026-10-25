@@ -251,6 +251,7 @@ export const api = {
   /** The project as the plugin would leave it, without changing it. */
   previewPlugin: (id: string, values: PluginValues, selection: string[], playheadUs: number) =>
     invoke<Project>("preview_plugin", { id, values, selection, playheadUs: Math.round(playheadUs) }),
+  cancelPluginPreview: () => invoke<void>("cancel_plugin_preview"),
   /** One undo step; `snapshot` is null when the plugin changed nothing. */
   runPlugin: (id: string, values: PluginValues, selection: string[], playheadUs: number, epoch: Epoch) =>
     invoke<{ snapshot: Snapshot | null; message: string | null }>("run_plugin", { id, values, selection, playheadUs: Math.round(playheadUs), expectedEpoch: epoch }),

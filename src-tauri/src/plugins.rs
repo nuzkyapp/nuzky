@@ -40,6 +40,12 @@ pub async fn preview_plugin(
     .map_err(err)?
 }
 
+/// Stops the preview still running, once the plugin it was for is closed.
+#[tauri::command]
+pub fn cancel_plugin_preview(app: AppHandle) {
+    app.state::<AppState>().plugin_preview.lock().unwrap().store(true, Ordering::Relaxed);
+}
+
 #[tauri::command]
 pub async fn run_plugin(
     app: AppHandle,
