@@ -1411,22 +1411,43 @@ fn spelling(sources: &[Source], say: &dyn Fn(&[Example]) -> String) -> Option<Ru
     // The word itself: the punctuation around it goes with the sentence, and a word heard at the
     // start of a sentence is the same word.
     let bare = |w: &str| w.trim().trim_end_matches(['.', ',', '!', '?', ';', ':', '…']).to_owned();
-    let mut rows: Vec<(String, String, usize)> = Vec::new();
-    let mut examples = Vec::new();
+    let mut found = Vec::new();
     for (index, source) in sources.iter().enumerate() {
         for c in source.corrections {
-            let (heard, text) = (bare(&c.heard).to_lowercase(), bare(&c.text));
-            match rows.iter_mut().find(|r| r.0 == heard && r.1 == text) {
-                Some(row) => row.2 += 1,
-                None => rows.push((heard, text, 1)),
-            }
             let line = format!("\"{}\" corrected to \"{}\"", c.heard.trim(), c.text.trim());
-            examples.push(Example { source: index, time_us: c.time_us, line });
+            found.push((
+                bare(&c.heard).to_lowercase(),
+                bare(&c.text),
+                Example { source: index, time_us: c.time_us, line },
+            ));
         }
     }
-    if examples.len() < MIN_EXAMPLES {
+    let mut left = std::collections::HashMap::new();
+    for word in sources.iter().flat_map(|s| s.cut_words) {
+        *left.entry(bare(&word.text).to_lowercase()).or_insert(0) += 1;
+    }
+    // The rule corrects a word wherever it is heard, so it takes only words misheard: corrected to
+    // the same word every time and more often than left as heard. A word corrected for its
+    // sentence, deleted or only capitalised would spoil every other sentence it is in.
+    let misheard = |heard: &str, text: &str| {
+        let fixes = found.iter().filter(|f| f.0 == heard);
+        !text.is_empty()
+            && text.to_lowercase() != heard
+            && fixes.clone().all(|f| f.1.to_lowercase() == text.to_lowercase())
+            && fixes.count() > left.get(heard).copied().unwrap_or(0)
+    };
+    let found: Vec<_> = found.iter().filter(|f| misheard(&f.0, &f.1)).collect();
+    if found.len() < MIN_EXAMPLES {
         return None;
     }
+    let mut rows: Vec<(String, String, usize)> = Vec::new();
+    for (heard, text, _) in &found {
+        match rows.iter_mut().find(|r| &r.0 == heard && &r.1 == text) {
+            Some(row) => row.2 += 1,
+            None => rows.push((heard.clone(), text.clone(), 1)),
+        }
+    }
+    let examples: Vec<Example> = found.into_iter().map(|f| f.2.clone()).collect();
     rows.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(&b.0)).then(a.1.cmp(&b.1)));
     let mut out = String::from(
         "## Spelling\n\nWords speech recognition gets wrong, as the creator corrected them. After transcribing, correct them with correct_words wherever they are heard. Times in the examples are in the finished cut.\n\n| Recognised | Should read | Times |\n|---|---|---|\n",
@@ -1436,16 +1457,15 @@ fn spelling(sources: &[Source], say: &dyn Fn(&[Example]) -> String) -> Option<Ru
     }
     let _ = writeln!(out, "\n{}", say(&examples));
     let pairs: Vec<String> = rows.iter().map(|(heard, text, _)| format!("\"{heard}\" as \"{text}\"")).collect();
-    let mut sorted = pairs.clone();
-    sorted.sort_unstable();
-    Some(Rule {
-        title: "Spelling",
-        summary: format!("Write {}", pairs.iter().take(3).cloned().collect::<Vec<_>>().join(", ")),
-        text: out,
-        settings: Vec::new(),
-        choices: vec![Choice::text("Corrections", sorted.join(", "))],
-        moments: examples,
-    })
+    let mut summary = format!("Write {}", pairs.iter().take(3).cloned().collect::<Vec<_>>().join(", "));
+    if pairs.len() > 3 {
+        let _ = write!(summary, " and {} more", pairs.len() - 3);
+    }
+    // A word each, so a change shows only the words it adds or drops.
+    let mut choices: Vec<Choice> =
+        rows.iter().map(|(heard, text, _)| Choice::text(&format!("\"{heard}\""), format!("\"{text}\""))).collect();
+    choices.sort_by(|a, b| a.name.cmp(&b.name).then(a.value.cmp(&b.value)));
+    Some(Rule { title: "Spelling", summary, text: out, settings: Vec::new(), choices, moments: examples })
 }
 
 fn ends_sentence(text: &str) -> bool {
@@ -1754,6 +1774,41 @@ mod tests {
         assert!(rule.text.contains("the creator cut 1 of 1. Cut them unless the user asks for one."), "{}", rule.text);
         assert_eq!(rule.moments.len(), 1);
         assert!(rule.moments[0].line.starts_with("cut \"so follow me for more.\""), "{:?}", rule.moments);
+    }
+
+    #[test]
+    fn spelling_takes_only_misheard_words() {
+        let (words, cut_words, alignment, picture) = fixture();
+        let fix = |heard: &str, text: &str| Correction { time_us: 1_000_000, heard: heard.into(), text: text.into() };
+        let corrections = [
+            fix("grogbot", "Grokbot."),
+            fix("Grogbot", "Grokbot"),
+            fix("nahrane", "na hraně"),
+            fix("A", "a"),
+            fix("bota", ""),
+            fix("se", "sám"),
+            fix("se", "jsem"),
+            fix("se", "sám"),
+            // Heard and kept in the cut elsewhere.
+            fix("I", "we"),
+        ];
+        let source = Source {
+            recording: "talk.mov".into(),
+            cut: "reel.mp4".into(),
+            language: "cs".into(),
+            recording_us: 30_000_000,
+            words: &words,
+            cut_words: &cut_words,
+            alignment: &alignment,
+            picture: &picture,
+            places: None,
+            corrections: &corrections,
+        };
+        let rule = spelling(&[source], &|_| String::new()).expect("three misheard words are a rule");
+        assert_eq!(rule.summary, r#"Write "grogbot" as "Grokbot", "nahrane" as "na hraně""#);
+        let choices: Vec<_> = rule.choices.iter().map(|c| (c.name.as_str(), c.value.as_str())).collect();
+        assert_eq!(choices, [(r#""grogbot""#, r#""Grokbot""#), (r#""nahrane""#, r#""na hraně""#)]);
+        assert_eq!(rule.moments.len(), 3);
     }
 
     #[test]

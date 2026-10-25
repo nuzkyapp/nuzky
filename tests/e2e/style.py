@@ -340,7 +340,8 @@ def style_auto(r):
     time.sleep(12)
     r.check('neither the AI\'s cut nor its export teaches anything', sources(r) == [] and edit_md(r) is None, sources(r))
 
-    # The user corrects the AI's cut: a side remark goes, and three misheard words are put right.
+    # The user corrects the AI's cut: a side remark goes, three misheard words are put right, and one "the" of
+    # several is changed for its sentence, which is no spelling.
     epoch = "window.__nuzky.store.getState().snap.sessionEpoch"
     shown = answer(r, "window.__nuzky.api.transcriptView(700000)")
     texts = [w['text'].strip().lower().strip('.,') for w in shown['words']]
@@ -352,9 +353,9 @@ def style_auto(r):
     said = [w['text'].strip() for w in shown['words']]
     trail = lambda word: word[len(word.rstrip('.,')):]
     fixes = [{'i': (i := texts.index(word)), 'text': right + trail(said[i]), 'expected': said[i]}
-             for word, right in (('phone', 'iPhone'), ('videos', 'reels'), ('captions', 'subtitles'))]
+             for word, right in (('phone', 'iPhone'), ('videos', 'reels'), ('captions', 'subtitles'), ('the', 'a'))]
     corrected = r.s.call(f"window.__nuzky.api.correctWords(arguments[0], arguments[1], {epoch})", shown['key'], fixes)
-    r.check('the user cuts a side remark and corrects three words', corrected['ok'], corrected)
+    r.check('the user cuts a side remark and corrects four words', corrected['ok'], corrected)
     # And gives the captions their own look, half again as large, as picking a style in Captions does.
     restyled = r.s.call("""window.__nuzky.store.getState().edit((p) => {
         const track = p.tracks.find((t) => t.kind === 'text' && t.name === 'Captions');
@@ -366,6 +367,8 @@ def style_auto(r):
     r.check('it suggests rules, the corrected words among them', 'Spelling' in titles, titles)
     spelling = next(s for s in view(r)['suggestions'] if s['title'] == 'Spelling')
     r.check('Spelling quotes the corrections', any(m['line'].startswith('"phone') and '"iPhone' in m['line'] for m in spelling['moments']), spelling['moments'])
+    r.check('but not a word corrected for its sentence', not any(m['line'].startswith('"the') for m in spelling['moments'])
+            and '| the |' not in spelling['text'], spelling)
     r.check('and the style is unchanged until accepted', edit_md(r) is None)
     canvas = r.s.run('return window.__nuzky.store.getState().snap.project.canvas')
     size = LOOK['fontSize'] * 1.5 * 1080 / min(canvas['width'], canvas['height'])
@@ -433,6 +436,8 @@ def style_auto(r):
     fix = [{'i': i, 'text': 'Sound' + trail(said[i]), 'expected': said[i]}]
     r.check('the user corrects another word', r.s.call(f"window.__nuzky.api.correctWords(arguments[0], arguments[1], {epoch})", shown['key'], fix)['ok'])
     r.check('learning suggests changing Spelling', wait(lambda: [(s['title'], s['update']) for s in view(r)['suggestions']] == [('Spelling', True)], 25), view(r)['suggestions'])
+    r.check('the change names only the new word', view(r)['suggestions'][0]['changes'] == [{'name': '"music"', 'from': None, 'to': '"Sound"'}],
+            view(r)['suggestions'])
     rows = r.s.run(ROWS, PAGE)
     r.check('the accepted Spelling says a change is suggested, not the confidence of the change', rows.get('Spelling') == 'Change suggested', rows)
     r.check('the other rules keep their confidence', all(' confidence: ' in v for t, v in rows.items() if t != 'Spelling'), rows)
