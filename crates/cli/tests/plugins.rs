@@ -223,10 +223,10 @@ fn a_plugin_cannot_spread_a_huge_text_or_read_through_a_link() {
                   return [{type: 'restyleTrack', trackId: track.id, style: {fontFamily: 'x'.repeat(1 << 20)}}];\n}\n";
     plugins::save(&restyle, script, None).unwrap();
     let error = match plugins::dry_run_in_app(&f.host, "restyle", &Map::new(), vec![], 0, Arc::default()) {
-        Ok(dry) => dry["error"].to_string(),
+        Ok(dry) => dry["error"].as_str().unwrap_or_default().to_owned(),
         Err(error) => format!("{error:#}"),
     };
-    assert!(error.contains("text longer than"), "{error}");
+    assert!(error.starts_with("PLUGIN_TOO_BIG: edit 0 (restyleTrack)"), "{error}");
 
     #[cfg(unix)]
     {

@@ -186,6 +186,7 @@ Mute or hide a track, and rename the project.
 - PLUGIN_FAILED: the script threw, with `plugin.js:<line>:<column>`, or returned something that is not edits; the last lines of its log follow.
 - PLUGIN_TIMEOUT: it ran longer than 60 seconds. CANCELLED or RUN_STOPPED: the user stopped it.
 - PLUGIN_TOO_MANY_EDITS: more than 5000 edits.
+- PLUGIN_TOO_BIG: the result is larger than 8 MB, or its edits would add more than 64 MB to the project, for example by copying a long text or many keyframes into every caption.
 - PLUGIN_FORBIDDEN_EDIT: `edit <index> (<type>)` would add a file.
 - PLUGIN_BAD_EDIT: `edit <index> (<type>): …` is not a valid edit or does not apply (index counts from 0), or the edits together leave the project invalid.
 

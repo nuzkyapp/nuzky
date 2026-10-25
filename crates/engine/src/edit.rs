@@ -19,6 +19,9 @@ pub const MAX_SPEED: f32 = 10.0;
 pub const MAX_TRANSITION_US: i64 = 2_000_000;
 pub const MAX_DUCK_DB: f32 = 40.0;
 pub const CAPTION_Y: f32 = 0.15;
+/// How much one batch of edits may add to the project. Some edits copy a value into many clips, so a small request
+/// can ask for gigabytes; `growth` bounds each edit before it runs.
+pub const MAX_BATCH_GROWTH: usize = 64 << 20;
 
 /// A caption style: its look, a font when it brings its own, the entry and exit animation of every caption
 /// and how it marks key words. The built-in ones are in `assets/presets/captions.json`; the user's own live
@@ -663,7 +666,55 @@ fn overlay_duration(asset: &Asset, duration_us: Option<i64>, min: i64) -> i64 {
     }
 }
 
+/// Serialized size, without building the bytes.
+fn json_size(value: &impl Serialize) -> usize {
+    struct Count(usize);
+    impl std::io::Write for Count {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 += bytes.len();
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut count = Count(0);
+    let _ = serde_json::to_writer(&mut count, value);
+    count.0
+}
+
 impl Project {
+    /// At most how many bytes `cmd` adds to the project, known before it runs: an edit adds its own content, a copy of
+    /// a clip it splits or duplicates, and what it copies into each clip it reaches.
+    pub fn growth(&self, cmd: &EditCmd) -> usize {
+        let clip = |id: &str| self.find_clip(id).map_or(0, |(ti, ci)| json_size(&self.tracks[ti].clips[ci]));
+        let largest =
+            |tracks: &mut dyn Iterator<Item = &Track>| tracks.flat_map(|t| &t.clips).map(json_size).max().unwrap_or(0);
+        let own = json_size(cmd);
+        own + match cmd {
+            EditCmd::DuplicateClip { clip_id } | EditCmd::SplitClip { clip_id, .. } => clip(clip_id),
+            EditCmd::PasteAttributes { source, clip_ids } => json_size(source).saturating_mul(clip_ids.len()),
+            EditCmd::RestyleTrack { track_id, style, transform } => {
+                let clips = self.track_index(track_id).map_or(0, |ti| self.tracks[ti].clips.len());
+                (json_size(style) + json_size(transform)).saturating_mul(clips)
+            }
+            EditCmd::AddCaptions { segments, style, anim_in, anim_out, transform }
+            | EditCmd::ReplaceCaptions { segments, style, anim_in, anim_out, transform, .. } => {
+                (json_size(style) + json_size(anim_in) + json_size(anim_out) + json_size(transform))
+                    .saturating_mul(segments.len())
+            }
+            // Each range cuts at most twice, and pasting into a clip cuts it once.
+            EditCmd::ZoomRanges { ranges } => {
+                largest(&mut self.tracks.iter().filter(|t| t.id == MAIN_TRACK)).saturating_mul(2 * ranges.len())
+            }
+            EditCmd::RippleDeleteRanges { ranges, .. } => {
+                largest(&mut self.tracks.iter()).saturating_mul(2 * ranges.len())
+            }
+            EditCmd::PasteClips { .. } => largest(&mut self.tracks.iter()),
+            _ => 0,
+        }
+    }
+
     fn find_clip(&self, id: &str) -> Option<(usize, usize)> {
         self.tracks.iter().enumerate().find_map(|(ti, t)| t.clips.iter().position(|c| c.id == id).map(|ci| (ti, ci)))
     }
@@ -2309,7 +2360,13 @@ impl Editor {
         let before = self.project.clone();
         let applied = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mut outcome = EditOutcome::default();
+            let mut grown = 0usize;
             for cmd in cmds {
+                grown = grown.saturating_add(self.project.growth(&cmd));
+                ensure!(
+                    grown <= MAX_BATCH_GROWTH,
+                    "EDIT_TOO_LARGE: these edits would add more than 64 MB to the project"
+                );
                 let step = self.project.apply(cmd)?;
                 outcome.select.extend(step.select);
                 outcome.skipped.extend(step.skipped);
@@ -4660,6 +4717,35 @@ mod tests {
         let clips = vec![copied(&p, &takes[2]), copied(&p, &early), copied(&p, &title)];
         let out = p.apply(EditCmd::PasteClips { clips, at_us: 0 }).unwrap();
         assert_eq!((start(&p, &out.select[1]).1, start(&p, &out.select[2]).1), (0, 1_000_000));
+    }
+
+    /// Pasting a clip's keyframes onto hundreds of captions asks for far more than the request carries; the batch is
+    /// refused before anything is copied, and the project stays as it was.
+    #[test]
+    fn a_batch_that_would_copy_too_much_is_refused_before_it_grows() {
+        let mut p = project();
+        let segments = (0..400)
+            .map(|i| CaptionSegment {
+                start_us: i * 10_000,
+                end_us: i * 10_000 + 10_000,
+                text: format!("w{i}"),
+                words: vec![],
+            })
+            .collect();
+        let style: TextStyle =
+            serde_json::from_value(serde_json::json!({"fontSize": 60.0, "color": "#FFFFFF"})).unwrap();
+        p.apply(EditCmd::AddCaptions { segments, style, anim_in: None, anim_out: None, transform: None }).unwrap();
+        let track = p.tracks.iter().find(|t| t.kind == TrackKind::Text).unwrap();
+        let ids: Vec<String> = track.clips.iter().map(|c| c.id.clone()).collect();
+        assert_eq!(ids.len(), 100);
+        let mut clip = track.clips[0].clone();
+        clip.keyframes =
+            (0..10_000).map(|i| Keyframe { t_us: i, transform: Transform::default(), ease: Ease::Smooth }).collect();
+        let source = CopiedClip { clip, track_id: track.id.clone(), track_kind: TrackKind::Text, keep_in_place: false };
+        let mut editor = Editor::new(p.clone());
+        let error = editor.apply_batch(vec![EditCmd::PasteAttributes { source, clip_ids: ids }], None).unwrap_err();
+        assert!(error.to_string().starts_with("EDIT_TOO_LARGE"), "{error}");
+        assert_eq!(editor.project, p);
     }
 
     #[test]

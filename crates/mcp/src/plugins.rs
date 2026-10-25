@@ -31,11 +31,7 @@ const MAX_SCRIPT_BYTES: u64 = 1 << 20;
 const MAX_TEXT_BYTES: u64 = 64 << 10;
 const MAX_TEXT_INPUT: usize = 500;
 const MAX_EDITS: usize = 5_000;
-/// What `run` may return, and how big its edits may make the project: a get_state answer must still fit a message.
 const MAX_RESULT_BYTES: usize = 8 << 20;
-const MAX_PROJECT_BYTES: usize = crate::limits::MAX_TOOL_BYTES;
-/// Restyling a track copies one value into every clip, so no single text may be long enough to multiply into gigabytes.
-const MAX_STRING_CHARS: usize = 10_000;
 const MAX_LOG_LINES: usize = 200;
 const RUN_LIMIT: Duration = Duration::from_secs(60);
 /// Saving runs the script's top level once, to report syntax errors and a missing `run`.
@@ -460,25 +456,10 @@ fn edits(json: Option<&str>) -> Result<(Vec<EditCmd>, Option<String>)> {
         .enumerate()
         .map(|(i, edit)| {
             let kind = edit["type"].as_str().unwrap_or("no type").to_owned();
-            ensure!(
-                !has_long_string(&edit),
-                "PLUGIN_TOO_BIG: edit {i} ({kind}) has a text longer than {MAX_STRING_CHARS} characters"
-            );
             serde_json::from_value(edit).map_err(|e| anyhow!("PLUGIN_BAD_EDIT: edit {i} ({kind}): {e}"))
         })
         .collect::<Result<_>>()?;
     Ok((edits, message))
-}
-
-fn has_long_string(value: &Value) -> bool {
-    match value {
-        Value::String(text) => text.len() > MAX_STRING_CHARS && text.chars().count() > MAX_STRING_CHARS,
-        Value::Array(items) => items.iter().any(has_long_string),
-        Value::Object(fields) => {
-            fields.iter().any(|(key, value)| key.len() > MAX_STRING_CHARS || has_long_string(value))
-        }
-        _ => false,
-    }
 }
 
 fn kind(edit: &EditCmd) -> String {
@@ -491,6 +472,7 @@ fn check(project: &Project, edits: &[EditCmd], cancel: &AtomicBool) -> Result<Pr
     let made: HashSet<_> = project.reel_candidates.iter().filter_map(|c| c.project_path.as_ref()).collect();
     let new_path = |path: &Option<String>| path.as_ref().is_some_and(|path| !made.contains(path));
     let mut after = project.clone();
+    let mut grown = 0usize;
     for (i, edit) in edits.iter().enumerate() {
         ensure!(!cancel.load(Ordering::Relaxed), "CANCELLED: job cancelled");
         let forbidden = match edit {
@@ -504,18 +486,14 @@ fn check(project: &Project, edits: &[EditCmd], cancel: &AtomicBool) -> Result<Pr
             "PLUGIN_FORBIDDEN_EDIT: edit {i} ({}): a plugin cannot add files to the project or point it at one",
             kind(edit)
         );
+        // The session refuses the same batch; checked here before the copy grows, as the preview runs on its own.
+        grown = grown.saturating_add(after.growth(edit));
+        ensure!(
+            grown <= nuzky_engine::edit::MAX_BATCH_GROWTH,
+            "PLUGIN_TOO_BIG: edit {i} ({}) would make the edits add more than 64 MB to the project",
+            kind(edit)
+        );
         after.apply(edit.clone()).map_err(|e| anyhow!("PLUGIN_BAD_EDIT: edit {i} ({}): {e:#}", kind(edit)))?;
-        // Duplicating a clip copies its text and restyling a track copies a style into every clip, so the project is
-        // measured often enough that what grows between two checks stays small.
-        let spreads = matches!(edit, EditCmd::RestyleTrack { .. } | EditCmd::PasteAttributes { .. });
-        if spreads || i % 16 == 15 || i + 1 == edits.len() {
-            ensure!(
-                serde_json::to_vec(&after)?.len() <= MAX_PROJECT_BYTES,
-                "PLUGIN_TOO_BIG: edit {i} ({}) makes the project larger than {} MB",
-                kind(edit),
-                MAX_PROJECT_BYTES >> 20
-            );
-        }
     }
     nuzky_session::validate(&after)
         .map_err(|e| anyhow!("PLUGIN_BAD_EDIT: the edits leave the project invalid: {e:#}"))?;

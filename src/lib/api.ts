@@ -273,6 +273,7 @@ const PLAIN: Record<string, string | ((detail: string) => string)> = {
   READ_ONLY: "This project cannot be changed in this window. Open it again from Projects.",
   RECOVERY_PENDING: "Choose what happens to the unfinished AI edit first.",
   RUN_ACTIVE: "AI is editing. Stop it to edit yourself.",
+  EDIT_TOO_LARGE: "This change would make the project too large. Make it in smaller steps.",
   RUN_BUSY: "An AI edit is still open. Stop it first.",
   EPOCH_CHANGED: "Another project was opened meanwhile, so this did not happen.",
   EDIT_REJECTED: (detail) => {
