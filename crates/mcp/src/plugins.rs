@@ -858,14 +858,13 @@ fn sandbox<T>(
         Err(_) if Instant::now() >= deadline => {
             bail!("PLUGIN_TIMEOUT: the plugin ran longer than {} seconds and was stopped", limit.as_secs())
         }
-        Err(message) if message.ends_with("InternalError: out of memory") => {
-            bail!("PLUGIN_OUT_OF_MEMORY: the plugin's script took more than 256 MB of memory and was stopped")
+        Err(Thrown::OutOfMemory(at)) => {
+            bail!("PLUGIN_OUT_OF_MEMORY: the plugin's script took more than 256 MB of memory and was stopped ({at})")
         }
-        // QuickJS throws null when it runs out of memory while building its own error.
-        Err(message) if message == "threw null" => {
+        Err(Thrown::Null) => {
             bail!("{failed}: the script threw null, which also happens when it runs out of its 256 MB of memory")
         }
-        Err(message) => bail!("{failed}: {message}"),
+        Err(Thrown::Message(message)) => bail!("{failed}: {message}"),
     }
 }
 
@@ -898,28 +897,41 @@ fn host_api<'js>(ctx: &Ctx<'js>, logs: Logs, progress: Rc<dyn Fn(f32)>) -> rquic
     ctx.globals().set("nuzky", nuzky)
 }
 
+enum Thrown {
+    OutOfMemory(String),
+    /// QuickJS throws null when it runs out of memory while making its own error.
+    Null,
+    Message(String),
+}
+
 /// What the script threw, with where in plugin.js when it says.
-fn thrown(ctx: &Ctx, error: rquickjs::Error) -> String {
+fn thrown(ctx: &Ctx, error: rquickjs::Error) -> Thrown {
     if !matches!(error, rquickjs::Error::Exception) {
-        return error.to_string();
+        return Thrown::Message(error.to_string());
     }
     let value = ctx.catch();
+    if value.is_null() {
+        return Thrown::Null;
+    }
     let Some(exception) = value.as_exception() else {
         let text = ctx.json_stringify(value).ok().flatten().and_then(|json| json.to_string().ok());
-        return format!("threw {}", text.unwrap_or_else(|| "a value that is not an Error".into()));
+        return Thrown::Message(format!("threw {}", text.unwrap_or_else(|| "a value that is not an Error".into())));
     };
     let name: String = exception.get("name").unwrap_or_else(|_| "Error".into());
-    let message = format!("{name}: {}", exception.message().unwrap_or_default());
+    let text = exception.message().unwrap_or_default();
+    let out_of_memory = name == "InternalError" && text == "out of memory";
+    let message = format!("{name}: {text}");
     let stack = exception.stack().unwrap_or_default();
     let place = stack.find("plugin.js:").map(|start| {
         let rest = &stack[start..];
         let end = rest.find(|c: char| !(c.is_ascii_alphanumeric() || c == '.' || c == ':')).unwrap_or(rest.len());
         rest[..end].trim_end_matches(':')
     });
-    match place {
+    let message = match place {
         Some(place) => format!("{place}: {message}"),
         None => message,
-    }
+    };
+    if out_of_memory { Thrown::OutOfMemory(message) } else { Thrown::Message(message) }
 }
 
 #[cfg(test)]
@@ -937,9 +949,21 @@ mod tests {
     fn a_script_that_runs_out_of_memory_says_so() {
         let arrays = failure("function run() { const a = []; for (;;) a.push(new Float64Array(1 << 20)); }");
         assert!(arrays.starts_with("PLUGIN_OUT_OF_MEMORY: the plugin's script took more than 256 MB"), "{arrays}");
-        let strings = failure("function run() { const a = []; for (;;) a.push(String(Math.random()).repeat(100)); }");
-        let said = strings.starts_with("PLUGIN_OUT_OF_MEMORY") || strings.ends_with("runs out of its 256 MB of memory");
-        assert!(said, "{strings}");
+        for strings in [
+            "function run() { const a = []; for (;;) a.push(String(Math.random()).repeat(100)); }",
+            "const a = []; function run() { for (;;) a.push(String(Math.random()).repeat(100)); }",
+        ] {
+            let error = failure(strings);
+            let said = error.starts_with("PLUGIN_OUT_OF_MEMORY") || error.ends_with("runs out of its 256 MB of memory");
+            assert!(said, "{error}");
+        }
+        let null = failure("function run() { throw null; }");
+        assert_eq!(
+            null,
+            "PLUGIN_FAILED: the script threw null, which also happens when it runs out of its 256 MB of memory"
+        );
+        let own = failure("function run() { throw new Error('bad input: InternalError: out of memory'); }");
+        assert!(own.starts_with("PLUGIN_FAILED: plugin.js:1:"), "{own}");
     }
 
     /// The guide's JSON is what plugins copy, so a renamed edit or field must fail here before it fails them.
