@@ -31,7 +31,7 @@ def install_warm(r):
     folder = plugins(r) / 'warm'
     shutil.copytree(EXAMPLES / 'remove-short-clips', folder)
     manifest = json.loads((folder / 'plugin.json').read_text())
-    manifest.update(id='warm', name='Warm and tidy', description='Removes short clips and adds a warm look.', effects=[
+    manifest.update(nuzkyPlugin=2, id='warm', name='Warm and tidy', description='Removes short clips and adds a warm look.', effects=[
         {'id': 'warm', 'name': 'Warm', 'params': [
             {'type': 'number', 'id': 'strength', 'label': 'Strength', 'min': 0, 'max': 1, 'step': 0.05, 'default': 0.5}]}])
     (folder / 'plugin.json').write_text(json.dumps(manifest))
