@@ -706,11 +706,15 @@ fn apply(
             staged.remove(&asset.id).map(plugin_files::Staged::keep).transpose()?;
         }
     }
+    let mut changed = false;
     if count > 0 {
+        let before = host.session.state()?.project;
         let expect = Expect { revision: Some(revision), speech_layout_key: None };
         host.session.apply_edits(run_id, &new_id(), add.into_iter().chain(output.edits).collect(), expect)?;
+        // Edits that leave the project as it was make no undo step.
+        changed = host.session.state()?.project != before;
     }
-    Ok(json!({"applied": count, "added": names, "message": output.message, "logs": output.logs}))
+    Ok(json!({"applied": count, "changed": changed, "added": names, "message": output.message, "logs": output.logs}))
 }
 
 pub(crate) enum Mode {

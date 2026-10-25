@@ -56,6 +56,8 @@ interface PluginsState {
   running: string | null;
   /** The automatic runs going on now; an export waits for its own. */
   pass: Trigger | null;
+  /** An export waits for plugins: its own, or a pass still running before it. */
+  exportWaits: boolean;
   /** Which of the pass's plugins runs now, from 1. */
   step: { index: number; total: number } | null;
   /** The pass before the export, which the export dialog shows until it closes. */
@@ -75,7 +77,17 @@ function savedSettings(): Pick<PluginsState, "values" | "auto"> {
   }
 }
 
-export const usePlugins = create<PluginsState>(() => ({ list: null, open: null, ...savedSettings(), preview: null, running: null, pass: null, step: null, report: null }));
+export const usePlugins = create<PluginsState>(() => ({
+  list: null,
+  open: null,
+  ...savedSettings(),
+  preview: null,
+  running: null,
+  pass: null,
+  exportWaits: false,
+  step: null,
+  report: null,
+}));
 
 usePlugins.subscribe((s, prev) => {
   if (s.values !== prev.values || s.auto !== prev.auto) localStorage.setItem(SETTINGS_KEY, JSON.stringify({ values: s.values, auto: s.auto }));
@@ -120,7 +132,13 @@ const listed = ({ id, error, manifest: m }: ListedPlugin): Plugin => ({
 export async function loadPlugins() {
   try {
     const list = (await api.listPlugins()).map(listed);
-    usePlugins.setState((s) => ({ list, open: s.open && list.some((p) => p.id === s.open) ? s.open : null }));
+    // A plugin gone from the folder loses its switches, so another saved later under its name does not run by itself.
+    const kept = (ids: string[]) => ids.filter((id) => list.some((p) => p.id === id));
+    usePlugins.setState((s) => {
+      const auto = { import: kept(s.auto.import), export: kept(s.auto.export) };
+      const same = auto.import.length === s.auto.import.length && auto.export.length === s.auto.export.length;
+      return { list, open: s.open && list.some((p) => p.id === s.open) ? s.open : null, auto: same ? s.auto : auto };
+    });
   } catch (e) {
     usePlugins.setState({ list: [] });
     useEditor.getState().toast({ kind: "error", text: `Couldn't read your plugins: ${errorText(e)}` });
@@ -209,16 +227,16 @@ export interface PassReport {
   done: boolean;
 }
 
-/** Runs it in a run of its own: the AI lock with Stop while it runs, and one undo step. */
-async function execute(p: Plugin, selection: string[], timeUs: number): Promise<Ran> {
+/** Runs it in a run of its own: the AI lock with Stop while it runs, and one undo step. `epoch` keeps it to that project. */
+async function execute(p: Plugin, selection: string[], timeUs: number, epoch?: string): Promise<Ran> {
   const values = valuesOf(p);
   // The last preview stays, dimmed, so the panel keeps its height while the run goes on.
   usePlugins.setState({ running: p.id });
   const out: { failure?: string; message?: string | null; from?: number } = {};
-  const snap = await enqueue(async (epoch) => {
+  const snap = await enqueue(async (current) => {
     out.from = useEditor.getState().snap?.revision;
     try {
-      const done = await api.runPlugin(p.id, values, selection, timeUs, epoch);
+      const done = await api.runPlugin(p.id, values, selection, timeUs, epoch ?? current);
       out.message = done.message;
       return done.snapshot;
     } catch (e) {
@@ -301,23 +319,59 @@ function announce({ trigger, results, skipped }: PassReport) {
   if (skipped) toast({ kind: "info", text: skippedText(skipped, when) });
 }
 
-let cancelRequested = false;
+interface Pass {
+  trigger: Trigger;
+  /** The project the pass is for; it ends when another opens. */
+  epoch: string | undefined;
+  cancelled: boolean;
+}
+
+/** One pass at a time, so an export starts from what the plugins after an import finished, never from half of it. */
+let passes: Promise<unknown> = Promise.resolve();
+let exporting: Pass | null = null;
+/** A pass after imports that has not started; imports finishing meanwhile join it instead of running the plugins again. */
+let importWaiting: Promise<PassReport | null> | null = null;
 
 /** Cancel export: stops the plugin running before the export, skips the rest, and the export never starts. */
 export function cancelExport() {
-  if (usePlugins.getState().pass !== "export") return;
-  cancelRequested = true;
-  if (usePlugins.getState().running) void stopAiRun();
+  if (!exporting) return;
+  exporting.cancelled = true;
+  if (usePlugins.getState().pass === "export" && usePlugins.getState().running) void stopAiRun();
 }
+
+/** Resolves once no import is adding media, as a plugin's run would keep an import that is still probing from adding. */
+const importsDone = () =>
+  new Promise<void>((resolve) => {
+    if (useEditor.getState().importing.length === 0) return resolve();
+    const stop = useEditor.subscribe((s) => {
+      if (s.importing.length > 0) return;
+      stop();
+      resolve();
+    });
+  });
 
 /**
  * Runs the plugins the user turned on for `trigger`, one after another by name, each its own undo step, on the whole
  * project from its start with the values last set. None of them blocks the import or export. Before an export the
  * dialog shows how each went while it is open, and the toasts wait until it closes.
  */
-export async function runAutomatically(trigger: Trigger): Promise<PassReport | null> {
-  if (usePlugins.getState().auto[trigger].length === 0) return null;
-  cancelRequested = false;
+export function runAutomatically(trigger: Trigger, pass: Pass = { trigger, epoch: useEditor.getState().snap?.sessionEpoch, cancelled: false }): Promise<PassReport | null> {
+  if (usePlugins.getState().auto[trigger].length === 0) return Promise.resolve(null);
+  if (trigger === "import" && importWaiting) return importWaiting;
+  const run = passes.then(async () => {
+    if (trigger === "import") {
+      await importsDone();
+      importWaiting = null;
+    }
+    return runPass(pass);
+  });
+  if (trigger === "import") importWaiting = run;
+  passes = run.catch(() => null);
+  return run;
+}
+
+async function runPass(pass: Pass): Promise<PassReport> {
+  const { trigger } = pass;
   let report: PassReport = { trigger, results: [], skipped: null, cancelled: false, done: false };
   const publish = (patch: Partial<PassReport>) => {
     report = { ...report, ...patch };
@@ -330,22 +384,26 @@ export async function runAutomatically(trigger: Trigger): Promise<PassReport | n
     const { list, auto } = usePlugins.getState();
     const chosen = (list ?? []).filter((p) => auto[trigger].includes(p.id)).sort((a, b) => a.name.localeCompare(b.name, "en") || a.id.localeCompare(b.id, "en"));
     for (const [i, p] of chosen.entries()) {
-      if (cancelRequested) break;
-      const { aiRun } = useEditor.getState();
+      if (pass.cancelled) break;
+      // Turned off while an earlier one ran.
+      if (!usePlugins.getState().auto[trigger].includes(p.id)) continue;
+      const { aiRun, snap } = useEditor.getState();
       // A plugin run that has ended may not have said so yet; the backend refuses a run while another is open.
       const agent = !!aiRun && !aiRun.startsWith(PLUGIN_RUN);
-      if (agent || usePlugins.getState().running) {
-        publish({ skipped: { names: chosen.slice(i).map((c) => c.name), all: i === 0, reason: agent ? "the AI is editing" : "another plugin is running" } });
+      const elsewhere = snap?.sessionEpoch !== pass.epoch;
+      if (agent || elsewhere || usePlugins.getState().running) {
+        const reason = elsewhere ? "another project is open" : agent ? "the AI is editing" : "another plugin is running";
+        publish({ skipped: { names: chosen.slice(i).map((c) => c.name), all: i === 0, reason } });
         break;
       }
       usePlugins.setState({ step: { index: i + 1, total: chosen.length } });
-      const ran: Ran = p.error ? { plugin: p, did: "failed", error: p.error, loaded: false } : await execute(p, [], 0);
+      const ran: Ran = p.error ? { plugin: p, did: "failed", error: p.error, loaded: false } : await execute(p, [], 0, pass.epoch);
       publish({ results: [...report.results, ran] });
     }
   } finally {
     usePlugins.setState({ pass: null, step: null });
   }
-  publish({ cancelled: cancelRequested, done: true });
+  publish({ cancelled: pass.cancelled, done: true });
   if (trigger === "import" || !useEditor.getState().exportOpen) {
     if (trigger === "export") usePlugins.setState({ report: null });
     announce(report);
@@ -362,20 +420,47 @@ useEditor.subscribe((s, prev) => {
   }
 });
 
-/** The project as the plugins for export last left it; exporting it again, as Replace and Retry do, runs none. */
-let exportReady: { epoch: string; revision: number } | null = null;
+/**
+ * The project as the plugins for export last left it, with which plugins were on and their settings; exporting it again
+ * unchanged, as Replace and Retry do, runs none.
+ */
+let exportReady: string | null = null;
+
+const exportKey = () => {
+  const { snap } = useEditor.getState();
+  const { auto, list } = usePlugins.getState();
+  const on = auto.export.map((id) => {
+    const p = list?.find((p) => p.id === id);
+    return [id, p && valuesOf(p)];
+  });
+  return snap && JSON.stringify([snap.sessionEpoch, snap.revision, on]);
+};
 
 /** Runs the plugins the user turned on for export, and resolves whether the export may start. */
 export async function runBeforeExport() {
-  const snap = () => useEditor.getState().snap;
-  const now = snap();
-  if (!now || (exportReady?.epoch === now.sessionEpoch && exportReady.revision === now.revision)) return true;
-  const report = await runAutomatically("export");
-  if (report?.cancelled) return false;
-  const after = snap();
-  // Plugins the AI kept from running get their turn at the next export.
-  exportReady = report?.skipped ? null : after && { epoch: after.sessionEpoch, revision: after.revision };
-  return true;
+  const pass: Pass = { trigger: "export", epoch: useEditor.getState().snap?.sessionEpoch, cancelled: false };
+  exporting = pass;
+  usePlugins.setState({ exportWaits: true });
+  const cancelled = () => {
+    if (!usePlugins.getState().report?.cancelled) usePlugins.setState({ report: { trigger: "export", results: [], skipped: null, cancelled: true, done: true } });
+    return false;
+  };
+  try {
+    // A pass after an import finishes first, so the export has all its changes.
+    await passes;
+    if (pass.cancelled) return cancelled();
+    if (exportReady !== null && exportReady === exportKey()) return true;
+    const report = await runAutomatically("export", pass);
+    if (pass.cancelled) return cancelled();
+    // Plugins the AI kept from running get their turn at the next export.
+    exportReady = report?.skipped ? null : exportKey();
+    return true;
+  } finally {
+    if (exporting === pass) {
+      exporting = null;
+      usePlugins.setState({ exportWaits: false });
+    }
+  }
 }
 
 function openAi(draft?: string) {

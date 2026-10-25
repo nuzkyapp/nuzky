@@ -675,4 +675,31 @@ def plugin_autorun(r):
         bridge.call('end_run', {'run_id': run, 'action': 'keep'})
     finally:
         bridge.close()
+
+    # An export waits for the plugins still running after an import, and Cancel export stays cancelled when they end.
+    dismiss_toasts(r)
+    for id in AUTO_PLUGINS:
+        open_plugin(r, id)
+        if switched_on(r, 'Run before export'):
+            r.s.run(f'{SWITCH}.click()', 'Run before export')
+    turn_on(r, 'slow-check', 'Run after import')
+    r.s.run('window.__nuzky.importPaths(arguments[0])', [str(video)])
+    r.check('the plugins after the import reach Slow check',
+            wait(lambda: r.s.run("const p = window.__nuzky.plugins.getState(); return p.pass === 'import' && p.running === 'slow-check'"), 30))
+    r.check('the export dialog opens', open_dialog(r))
+    waited = r.work / 'waited.mp4'
+    start_export(r, waited)
+    r.check('the export waits for the plugins after the import and has not started',
+            wait(lambda: 'Waiting for plugins…' in r.s.run(DIALOG_TEXT), 10) and not r.s.run('return window.__nuzky.store.getState().exportJobId'),
+            r.s.run(DIALOG_TEXT))
+    r.check('Cancel export is there to click', r.s.run(CLICK_IN_DIALOG, 'Cancel export'))
+    r.check('Slow check is still running after Cancel export, as it runs for the import',
+            r.s.run('return window.__nuzky.plugins.getState().running') == 'slow-check')
+    r.s.call('window.__nuzky.api.stopRun(window.__nuzky.store.getState().snap.sessionEpoch, false)')
+    r.check('once Slow check is stopped the pass after the import ends',
+            wait(lambda: r.s.run('return window.__nuzky.plugins.getState().pass') is None, 30))
+    time.sleep(2)
+    r.check('the cancelled export never starts when that pass ends',
+            r.s.call('window.autorunExport') == {'ok': True, 'value': 'false'} and not waited.exists()
+            and not r.s.run('return window.__nuzky.store.getState().exportJobId'), r.s.call('window.autorunExport'))
     r.check('no error toast', not r.errors(), r.errors())

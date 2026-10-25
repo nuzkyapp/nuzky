@@ -78,7 +78,7 @@ pub async fn run_plugin(
             return Err(job["error"].as_str().unwrap_or("CANCELLED: plugin stopped").to_owned());
         }
         let result = &job["result"];
-        let snapshot = if result["applied"].as_u64().unwrap() > 0 {
+        let snapshot = if result["changed"] == true {
             Some(lock_session(&state.session, Some(&epoch))?.snapshot(Vec::new())?)
         } else {
             None

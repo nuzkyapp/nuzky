@@ -110,9 +110,8 @@ export async function exportVideo(path: string, options: ExportRequest, epoch: s
   return true;
 }
 
-/** The plugin an export waits for, which of how many it is, and how far its run is. */
 function usePluginBeforeExport() {
-  const name = usePlugins((s) => (s.pass === "export" ? (s.list?.find((p) => p.id === s.running)?.name ?? "") : null));
+  const name = usePlugins((s) => (s.exportWaits ? (s.pass === "export" ? (s.list?.find((p) => p.id === s.running)?.name ?? "") : "") : null));
   const index = usePlugins((s) => s.step?.index ?? 0);
   const total = usePlugins((s) => s.step?.total ?? 0);
   const progress = useEditor((s) =>
@@ -121,7 +120,6 @@ function usePluginBeforeExport() {
   return name === null ? null : { name, index, total, progress };
 }
 
-/** How each plugin before the export went: failures and plugins kept from running as warnings with their error to copy. */
 function PassNotes({ report }: { report: PassReport }) {
   if (!report.results.length && !report.skipped) return null;
   return (
