@@ -693,13 +693,14 @@ def plugin_autorun(r):
             wait(lambda: 'Waiting for plugins…' in r.s.run(DIALOG_TEXT), 10) and not r.s.run('return window.__nuzky.store.getState().exportJobId'),
             r.s.run(DIALOG_TEXT))
     r.check('Cancel export is there to click', r.s.run(CLICK_IN_DIALOG, 'Cancel export'))
-    r.check('Slow check is still running after Cancel export, as it runs for the import',
-            r.s.run('return window.__nuzky.plugins.getState().running') == 'slow-check')
+    r.check('Cancel export ends the wait at once, while Slow check goes on running for the import',
+            wait(lambda: r.s.call('window.autorunExport') == {'ok': True, 'value': 'false'}, 5)
+            and r.s.run('return window.__nuzky.plugins.getState().running') == 'slow-check'
+            and not r.s.run('return window.__nuzky.plugins.getState().exportWaits'), r.s.call('window.autorunExport'))
     r.s.call('window.__nuzky.api.stopRun(window.__nuzky.store.getState().snap.sessionEpoch, false)')
     r.check('once Slow check is stopped the pass after the import ends',
             wait(lambda: r.s.run('return window.__nuzky.plugins.getState().pass') is None, 30))
     time.sleep(2)
     r.check('the cancelled export never starts when that pass ends',
-            r.s.call('window.autorunExport') == {'ok': True, 'value': 'false'} and not waited.exists()
-            and not r.s.run('return window.__nuzky.store.getState().exportJobId'), r.s.call('window.autorunExport'))
+            not waited.exists() and not r.s.run('return window.__nuzky.store.getState().exportJobId'))
     r.check('no error toast', not r.errors(), r.errors())

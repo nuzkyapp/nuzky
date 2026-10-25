@@ -324,18 +324,21 @@ interface Pass {
   /** The project the pass is for; it ends when another opens. */
   epoch: string | undefined;
   cancelled: boolean;
+  /** Ends the export's wait for passes before it at once. */
+  stop?: () => void;
 }
 
 /** One pass at a time, so an export starts from what the plugins after an import finished, never from half of it. */
 let passes: Promise<unknown> = Promise.resolve();
 let exporting: Pass | null = null;
 /** A pass after imports that has not started; imports finishing meanwhile join it instead of running the plugins again. */
-let importWaiting: Promise<PassReport | null> | null = null;
+let importWaiting: { epoch: string | undefined; run: Promise<PassReport | null> } | null = null;
 
 /** Cancel export: stops the plugin running before the export, skips the rest, and the export never starts. */
 export function cancelExport() {
   if (!exporting) return;
   exporting.cancelled = true;
+  exporting.stop?.();
   if (usePlugins.getState().pass === "export" && usePlugins.getState().running) void stopAiRun();
 }
 
@@ -357,15 +360,16 @@ const importsDone = () =>
  */
 export function runAutomatically(trigger: Trigger, pass: Pass = { trigger, epoch: useEditor.getState().snap?.sessionEpoch, cancelled: false }): Promise<PassReport | null> {
   if (usePlugins.getState().auto[trigger].length === 0) return Promise.resolve(null);
-  if (trigger === "import" && importWaiting) return importWaiting;
-  const run = passes.then(async () => {
+  const waiting = importWaiting;
+  if (trigger === "import" && waiting && waiting.epoch === pass.epoch) return waiting.run;
+  const run: Promise<PassReport | null> = passes.then(async () => {
     if (trigger === "import") {
       await importsDone();
-      importWaiting = null;
+      if (importWaiting?.run === run) importWaiting = null;
     }
     return runPass(pass);
   });
-  if (trigger === "import") importWaiting = run;
+  if (trigger === "import") importWaiting = { epoch: pass.epoch, run };
   passes = run.catch(() => null);
   return run;
 }
@@ -426,19 +430,24 @@ useEditor.subscribe((s, prev) => {
  */
 let exportReady: string | null = null;
 
-const exportKey = () => {
-  const { snap } = useEditor.getState();
+/** Which plugins are on for export, with their settings. */
+const exportConfig = () => {
   const { auto, list } = usePlugins.getState();
-  const on = auto.export.map((id) => {
+  return auto.export.map((id) => {
     const p = list?.find((p) => p.id === id);
     return [id, p && valuesOf(p)];
   });
-  return snap && JSON.stringify([snap.sessionEpoch, snap.revision, on]);
+};
+
+const exportKey = (config: unknown) => {
+  const { snap } = useEditor.getState();
+  return snap && JSON.stringify([snap.sessionEpoch, snap.revision, config]);
 };
 
 /** Runs the plugins the user turned on for export, and resolves whether the export may start. */
 export async function runBeforeExport() {
   const pass: Pass = { trigger: "export", epoch: useEditor.getState().snap?.sessionEpoch, cancelled: false };
+  const stopped = new Promise<null>((resolve) => (pass.stop = () => resolve(null)));
   exporting = pass;
   usePlugins.setState({ exportWaits: true });
   const cancelled = () => {
@@ -447,13 +456,14 @@ export async function runBeforeExport() {
   };
   try {
     // A pass after an import finishes first, so the export has all its changes.
-    await passes;
+    await Promise.race([passes, stopped]);
     if (pass.cancelled) return cancelled();
-    if (exportReady !== null && exportReady === exportKey()) return true;
-    const report = await runAutomatically("export", pass);
+    const config = exportConfig();
+    if (exportReady !== null && exportReady === exportKey(config)) return true;
+    const report = await Promise.race([runAutomatically("export", pass), stopped]);
     if (pass.cancelled) return cancelled();
-    // Plugins the AI kept from running get their turn at the next export.
-    exportReady = report?.skipped ? null : exportKey();
+    // Plugins the AI kept from running get their turn at the next export; one turned on meanwhile, at the next.
+    exportReady = report?.skipped ? null : exportKey(config);
     return true;
   } finally {
     if (exporting === pass) {
