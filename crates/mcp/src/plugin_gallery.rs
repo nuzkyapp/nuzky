@@ -976,11 +976,14 @@ mod tests {
         fn snapshot(&self) -> BTreeMap<String, Vec<u8>> {
             let mut found = BTreeMap::new();
             let mut stack = vec![self.0.join("data")];
+            // A Stop's download may still be removing its staging folder, so what vanishes meanwhile is skipped.
             while let Some(dir) = stack.pop() {
-                for entry in std::fs::read_dir(&dir).unwrap() {
-                    let path = entry.unwrap().path();
+                let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+                for entry in entries.flatten() {
+                    let path = entry.path();
                     let name = path.strip_prefix(&self.0).unwrap().to_string_lossy().into_owned();
-                    if std::fs::symlink_metadata(&path).unwrap().is_dir() {
+                    let Ok(meta) = std::fs::symlink_metadata(&path) else { continue };
+                    if meta.is_dir() {
                         stack.push(path.clone());
                         found.insert(name + "/", vec![]);
                     } else {
