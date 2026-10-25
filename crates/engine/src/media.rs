@@ -504,11 +504,11 @@ fn header(path: &Path, formats: Option<&str>) -> Result<ff::format::context::Inp
     }
 }
 
-/// Whether the file is MP3, WAV, AAC, FLAC, Ogg or MPEG-4 sound and its header shows nothing but sound. Run it on a
-/// sound from outside before `probe`, whose `avformat_find_stream_info` would decode a picture of any size. These
-/// formats name all their streams in the header, unlike MPEG-TS, which can add a video later.
+/// Whether the file is MP3, WAV, AAC, FLAC or MPEG-4 sound and its header shows nothing but sound. Run it on a sound
+/// from outside before `probe`, whose `avformat_find_stream_info` would decode a picture of any size. These formats
+/// name all their streams in the header, unlike MPEG-TS, which can add a video later, or Ogg, a cover.
 pub fn sound_only(path: &Path) -> Result<bool> {
-    let formats = Some("mp3,wav,aac,flac,ogg,mov");
+    let formats = Some("mp3,wav,aac,flac,mov");
     let input = header(path, formats).with_context(|| format!("Cannot read {} as a sound", path.display()))?;
     let audio = |stream: ff::format::stream::Stream| stream.parameters().medium() == ff::media::Type::Audio;
     Ok(input.streams().count() > 0 && input.streams().all(audio))

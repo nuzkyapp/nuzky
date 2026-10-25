@@ -15,8 +15,8 @@ use crate::web_image::{DECODE_PIXELS, MAX_PIXELS, MAX_SIDE};
 pub(crate) const MAX_FILES: usize = 20;
 const MAX_BYTES: u64 = 20 << 20;
 const PICTURES: [&str; 4] = ["png", "jpg", "jpeg", "webp"];
-const SOUNDS: [&str; 7] = ["mp3", "wav", "m4a", "aac", "ogg", "opus", "flac"];
-const NAMES: &str = "1 to 60 letters, digits, dots, dashes and _, not starting with a dot, ending in .png, .jpg, .jpeg, .webp, .mp3, .wav, .m4a, .aac, .ogg, .opus or .flac";
+const SOUNDS: [&str; 5] = ["mp3", "wav", "m4a", "aac", "flac"];
+const NAMES: &str = "1 to 60 letters, digits, dots, dashes and _, not starting with a dot, ending in .png, .jpg, .jpeg, .webp, .mp3, .wav, .m4a, .aac or .flac";
 
 /// What a file of this name must be, when the name is one a plugin may use.
 pub(crate) fn kind(name: &str) -> Result<AssetKind> {
@@ -214,6 +214,8 @@ mod tests {
             "Com1.mp3",
             "lpt9.flac",
             "a€.png",
+            "beep.ogg",
+            "beep.opus",
             "💥.png",
         ] {
             assert!(kind(name).is_err(), "{name}");
