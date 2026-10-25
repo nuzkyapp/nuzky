@@ -484,24 +484,37 @@ pub fn probe(path: &Path, id: String) -> Result<Asset> {
     Ok(asset)
 }
 
+/// The file opened as far as its header, without `avformat_find_stream_info`, which ffmpeg-next's
+/// `input_with_dictionary` runs and which decodes frames.
+fn header(path: &Path) -> Result<ff::format::context::Input> {
+    init();
+    let url = std::ffi::CString::new(path.to_str().context("not a UTF-8 path")?)?;
+    unsafe {
+        let (mut context, mut options) = (std::ptr::null_mut(), input_options().disown());
+        let opened = ff::ffi::avformat_open_input(&mut context, url.as_ptr(), std::ptr::null_mut(), &mut options);
+        ff::Dictionary::own(options);
+        if opened < 0 {
+            return Err(ff::Error::from(opened).into());
+        }
+        Ok(ff::format::context::Input::wrap(context))
+    }
+}
+
+/// Whether the file holds sound and nothing else, read from its header. Run it on a sound from outside before
+/// `probe`, whose `avformat_find_stream_info` would decode a cover picture of any size.
+pub fn sound_only(path: &Path) -> Result<bool> {
+    let input = header(path).with_context(|| format!("Cannot read {} as a sound", path.display()))?;
+    let audio = |stream: ff::format::stream::Stream| stream.parameters().medium() == ff::media::Type::Audio;
+    Ok(input.streams().count() > 0 && input.streams().all(audio))
+}
+
 /// The size of a picture's first frame as FFmpeg decodes it, where FFmpeg refuses every frame of more than
 /// `max_pixels` before making room for it. Run it on a picture from outside before `probe` or a decoder opens it:
 /// their `avformat_find_stream_info` decodes frames of any size, and FFmpeg finds frames that a file's header does not
 /// admit to. Errs when the file is not a picture, any frame fails, there is none, or `cancelled` says so.
 pub fn picture_size(path: &Path, max_pixels: usize, cancelled: impl Fn() -> bool) -> Result<(u32, u32)> {
-    init();
     let cannot = || format!("Cannot read {} as a picture", path.display());
-    let url = std::ffi::CString::new(path.to_str().with_context(cannot)?).with_context(cannot)?;
-    // Without `avformat_find_stream_info`, which ffmpeg-next's `input_with_dictionary` runs.
-    let mut input = unsafe {
-        let (mut context, mut options) = (std::ptr::null_mut(), input_options().disown());
-        let opened = ff::ffi::avformat_open_input(&mut context, url.as_ptr(), std::ptr::null_mut(), &mut options);
-        ff::Dictionary::own(options);
-        if opened < 0 {
-            return Err(ff::Error::from(opened)).with_context(cannot);
-        }
-        ff::format::context::Input::wrap(context)
-    };
+    let mut input = header(path).with_context(cannot)?;
     // A picture's demuxer makes its one stream as it opens, so no stream comes later.
     if !is_image_format(&input) || input.streams().count() != 1 {
         bail!("{} is not a picture", path.display());

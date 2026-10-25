@@ -1,9 +1,9 @@
 //! Pictures and sounds a plugin ships in its own folder, such as a logo or a beep. A plugin names them by file name
-//! only, so it reaches no other file. Each is read without following links, copied into Nuzky's own folder under the
-//! hash of its bytes and probed there as FFmpeg reads any media, so a project never refers to the plugin's folder and
-//! keeps working after the plugin is deleted.
+//! only, so it reaches no other file. Each is read without following links, copied into Nuzky's own folder and
+//! probed there as FFmpeg reads any media. Only a copy the plugin's edits place stays, under the hash of its bytes,
+//! so a project never refers to the plugin's folder and keeps working after the plugin is deleted.
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, ensure};
 use nuzky_engine::edit::new_id;
@@ -28,8 +28,13 @@ pub(crate) fn kind(name: &str) -> Result<AssetKind> {
     } else {
         None
     };
+    let stem = name.split('.').next().unwrap_or_default().to_ascii_uppercase();
+    // Windows opens a device for these names, whatever follows the dot.
+    let device = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || (stem.len() == 4 && ["COM", "LPT"].contains(&&stem[..3]) && stem.as_bytes()[3].is_ascii_digit());
     let plain = (1..=60).contains(&name.len())
         && !name.starts_with('.')
+        && !device
         && name.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'-' | b'_'));
     kind.filter(|_| plain).with_context(|| format!("{name:?} is not a file name a plugin may use: {NAMES}"))
 }
@@ -44,30 +49,65 @@ pub(crate) fn present(folder: &Path, name: &str) -> Result<()> {
     Ok(())
 }
 
-/// The file at `path` as a new asset named `name`, whose path is its copy in Nuzky's own folder. `own` reads a
-/// plugin's file, which must be a plain file and not a link of any kind; an agent's file may be reached through one.
-pub(crate) fn stock(path: &Path, name: &str, own: bool) -> Result<Asset> {
+/// A path on this computer. Windows opens a network path (`\\server\share`) by connecting to that server.
+pub(crate) fn local(path: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        use std::path::{Component, Prefix};
+        let disk = |prefix: Prefix| matches!(prefix, Prefix::Disk(_) | Prefix::VerbatimDisk(_));
+        path.is_absolute() && matches!(path.components().next(), Some(Component::Prefix(p)) if disk(p.kind()))
+    }
+    #[cfg(not(windows))]
+    path.is_absolute()
+}
+
+/// A checked copy that joins Nuzky's folder only when `keep` says so; otherwise dropping it deletes it.
+pub(crate) struct Staged {
+    pub(crate) at: PathBuf,
+    kept: PathBuf,
+}
+
+impl Staged {
+    pub(crate) fn keep(self) -> Result<()> {
+        if !self.kept.is_file() {
+            std::fs::rename(&self.at, &self.kept).context("STORE_WRITE_FAILED: cannot keep the plugin's file")?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for Staged {
+    fn drop(&mut self) {
+        std::fs::remove_file(&self.at).ok();
+    }
+}
+
+/// The file at `path` as a new asset named `name`, whose path is where its copy in Nuzky's own folder stays: there
+/// already, or once its `Staged` copy is kept. `own` reads a plugin's file, which must be a plain file and not a link
+/// of any kind; an agent's file may be reached through one.
+pub(crate) fn stock(
+    path: &Path,
+    name: &str,
+    own: bool,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<(Asset, Option<Staged>)> {
     let kind = kind(name)?;
     let bytes = read(path, own)?;
     let hash: String = Sha256::digest(&bytes).iter().take(16).map(|b| format!("{b:02x}")).collect();
     let ext = name.rsplit_once('.').map(|(_, ext)| ext.to_ascii_lowercase()).unwrap_or_default();
-    let kept = crate::sounds::data_dir().join("plugin-files").join(format!("{hash}.{ext}"));
-    let fresh = !kept.is_file();
-    if fresh {
-        crate::sounds::publish(&kept, |file| Ok(std::io::Write::write_all(file, &bytes)?))?;
-    }
-    match probe(&kept, kind) {
-        Ok(mut asset) => {
-            asset.name = name.to_owned();
-            Ok(asset)
-        }
-        Err(error) => {
-            if fresh {
-                std::fs::remove_file(&kept).ok();
-            }
-            Err(error)
-        }
-    }
+    let dir = crate::sounds::data_dir().join("plugin-files");
+    let kept = dir.join(format!("{hash}.{ext}"));
+    let staged = if kept.is_file() {
+        None
+    } else {
+        let at = dir.join(format!(".{hash}-{}.{ext}", new_id()));
+        crate::sounds::publish(&at, |file| Ok(std::io::Write::write_all(file, &bytes)?))?;
+        Some(Staged { at, kept: kept.clone() })
+    };
+    let mut asset = probe(staged.as_ref().map_or(&kept, |staged| &staged.at), kind, cancelled)?;
+    asset.name = name.to_owned();
+    asset.path = kept.to_string_lossy().into_owned();
+    Ok((asset, staged))
 }
 
 fn read(path: &Path, own: bool) -> Result<Vec<u8>> {
@@ -120,13 +160,20 @@ fn single(file: &std::fs::File, meta: &std::fs::Metadata) -> bool {
     read && info.nNumberOfLinks == 1 && meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0
 }
 
-/// A picture is measured before `probe`, which decodes without a limit, so a header that lies cannot fill memory.
-fn probe(path: &Path, kind: AssetKind) -> Result<Asset> {
+/// A picture is measured, and a sound checked to hold no picture, before `probe`, which decodes pictures without a
+/// limit, so a header that lies cannot fill memory.
+fn probe(path: &Path, kind: AssetKind, cancelled: &dyn Fn() -> bool) -> Result<Asset> {
     let what = if kind == AssetKind::Image { "picture" } else { "sound" };
     let unreadable = || anyhow!("not a {what} Nuzky can read");
-    if kind == AssetKind::Image {
-        let (width, height) =
-            nuzky_engine::media::picture_size(path, DECODE_PIXELS, || false).map_err(|_| unreadable())?;
+    if kind == AssetKind::Audio {
+        ensure!(
+            nuzky_engine::media::sound_only(path).unwrap_or(false),
+            "{}, or one with a picture in it",
+            unreadable()
+        );
+    } else {
+        let (width, height) = nuzky_engine::media::picture_size(path, DECODE_PIXELS, cancelled)
+            .map_err(|_| if cancelled() { anyhow!("CANCELLED: job cancelled") } else { unreadable() })?;
         let (width, height) = (width as usize, height as usize);
         ensure!(
             width <= MAX_SIDE && height <= MAX_SIDE && width * height <= MAX_PIXELS,
@@ -145,7 +192,7 @@ mod tests {
 
     #[test]
     fn a_plugin_names_only_plain_files_of_its_own() {
-        for name in ["logo.png", "Beep_2.WAV", "end-card.v2.jpeg", "a.flac"] {
+        for name in ["logo.png", "Beep_2.WAV", "end-card.v2.jpeg", "a.flac", "console.png", "com.wav", "nullify.mp3"] {
             assert!(kind(name).is_ok(), "{name}");
         }
         for name in [
@@ -162,9 +209,22 @@ mod tests {
             "logo",
             "C:logo.png",
             "logo .png",
+            "NUL.wav",
+            "con.png",
+            "Com1.mp3",
+            "lpt9.flac",
         ] {
             assert!(kind(name).is_err(), "{name}");
         }
         assert!(kind(&format!("{}.png", "a".repeat(57))).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn only_a_disk_of_this_computer_is_local() {
+        assert!(local(Path::new(r"C:\Users\me\logo.png")));
+        for path in [r"\\server\share\logo.png", r"\\?\UNC\server\share\logo.png", r"\\.\pipe\logo", r"C:logo.png"] {
+            assert!(!local(Path::new(path)), "{path}");
+        }
     }
 }

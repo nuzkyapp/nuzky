@@ -2,7 +2,7 @@
 //! apply as one batch of a run. The script runs in QuickJS with no modules, files, network, timers or processes, and
 //! together with the check of its edits in a process of its own (`plugin-sandbox`) with a memory limit.
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -208,7 +208,6 @@ fn manifest(value: &Value) -> Result<Manifest> {
         .and_then(Value::as_u64)
         .context("PLUGIN_BROKEN: plugin.json: nuzkyPlugin must be 1 or 2")?;
     ensure!(api <= API, "PLUGIN_API_NEWER: This plugin needs a newer Nuzky. Update Nuzky.");
-    // Version 2 only added to version 1, so a plugin made for 1 still runs.
     ensure!(api >= 1, "PLUGIN_API_OLD: This plugin was made for an older Nuzky. Ask its author for a new version.");
     let manifest = Manifest::deserialize(value).map_err(|e| anyhow!("PLUGIN_BROKEN: plugin.json: {e}"))?;
     // So a Nuzky that does not know these needs says it is too old instead of calling plugin.json broken.
@@ -226,7 +225,8 @@ fn manifest(value: &Value) -> Result<Manifest> {
     let mut names = HashSet::new();
     for name in &manifest.files {
         plugin_files::kind(name).map_err(|e| anyhow!("PLUGIN_BROKEN: plugin.json: files: {e}"))?;
-        ensure!(names.insert(name), "PLUGIN_BROKEN: plugin.json: files names {name} twice");
+        // macOS and Windows keep LOGO.PNG and logo.png as one file.
+        ensure!(names.insert(name.to_ascii_lowercase()), "PLUGIN_BROKEN: plugin.json: files names {name} twice");
     }
     ensure!(is_id(&manifest.id), "PLUGIN_BROKEN: plugin.json: id is 1 to 40 lowercase letters, digits and dashes");
     let texts = [
@@ -398,10 +398,14 @@ pub fn save_with_files(
     let mut copies = Vec::new();
     for (name, path) in files {
         ensure!(manifest.files.contains(name), "PLUGIN_BROKEN: files: {name} is not one of plugin.json's files");
-        ensure!(path.is_absolute(), "PLUGIN_BROKEN: files: {name}: give the file's absolute path");
-        let asset =
-            plugin_files::stock(path, name, false).map_err(|e| anyhow!("PLUGIN_BROKEN: files: {name}: {e:#}"))?;
-        copies.push((name, asset.path));
+        ensure!(
+            plugin_files::local(path),
+            "PLUGIN_BROKEN: files: {name}: give the absolute path of a file on this computer"
+        );
+        let (asset, staged) = plugin_files::stock(path, name, false, &|| false)
+            .map_err(|e| anyhow!("PLUGIN_BROKEN: files: {name}: {e:#}"))?;
+        let from = staged.as_ref().map_or_else(|| PathBuf::from(&asset.path), |staged| staged.at.clone());
+        copies.push((name, from, staged));
     }
     for name in manifest.files.iter().filter(|name| !files.contains_key(*name)) {
         plugin_files::present(&folder, name)
@@ -409,8 +413,8 @@ pub fn save_with_files(
     }
     std::fs::create_dir_all(&folder).context(failed)?;
     // Replacing a link in the folder replaces the link, never the file it points at.
-    for (name, kept) in copies {
-        let copy = |out: &mut std::fs::File| Ok(std::io::copy(&mut std::fs::File::open(&kept)?, out).map(drop)?);
+    for (name, from, _staged) in copies {
+        let copy = |out: &mut std::fs::File| Ok(std::io::copy(&mut std::fs::File::open(&from)?, out).map(drop)?);
         crate::sounds::publish(&folder.join(name), copy).context(failed)?;
     }
     for (file, previous) in [("plugin.json", "plugin.prev.json"), ("plugin.js", "plugin.prev.js")] {
@@ -436,11 +440,49 @@ pub(crate) struct Prepared {
     ctx: Value,
     /// The project with its media's full paths, for what `needs` finds in the sound.
     media: Project,
-    /// The plugin's files the project does not have yet.
+    folder: PathBuf,
+    /// The plugin's files the project does not have yet, after `stock`.
     files: Vec<Asset>,
+    /// Their copies, by asset id, until the edits place them.
+    staged: HashMap<String, plugin_files::Staged>,
 }
 
 impl Prepared {
+    /// Checks and copies the plugin's files and puts them into `ctx`. Inside the job, as decoding a picture takes a
+    /// while and Stop ends it.
+    fn stock(&mut self, cancel: &AtomicBool) -> Result<()> {
+        let cancelled = || cancel.load(Ordering::Relaxed);
+        let mut shown = Map::new();
+        for name in &self.manifest.files {
+            let (asset, staged) =
+                plugin_files::stock(&self.folder.join(name), name, true, &cancelled).map_err(|e| {
+                    if cancelled() {
+                        anyhow!("CANCELLED: job cancelled")
+                    } else {
+                        anyhow!("PLUGIN_BROKEN: {name}: {e:#}")
+                    }
+                })?;
+            // Run again, the plugin places the copy the project has.
+            let asset = match self.media.assets.iter().find(|a| Path::new(&a.path) == Path::new(&asset.path)) {
+                Some(had) => had.clone(),
+                None => {
+                    if let Some(staged) = staged {
+                        self.staged.insert(asset.id.clone(), staged);
+                    }
+                    self.files.push(asset.clone());
+                    asset
+                }
+            };
+            shown.insert(
+                name.clone(),
+                json!({"assetId": asset.id, "kind": asset.kind, "width": asset.width, "height": asset.height,
+                    "durationUs": asset.duration_us}),
+            );
+        }
+        self.ctx["files"] = Value::Object(shown);
+        Ok(())
+    }
+
     /// Adds what `needs` finds in the sound to `ctx`; see `plugin_data::gather`.
     fn gather(&mut self, cache: &Path, prepare: bool, cancel: &AtomicBool, progress: &dyn Fn(f32)) -> Result<()> {
         let found = crate::plugin_data::gather(&self.media, cache, &self.manifest.needs, prepare, cancel, progress)?;
@@ -463,31 +505,13 @@ pub(crate) fn prepare(
         "PLUGIN_NOT_FOUND: no plugin {id:?}; list_plugins shows the installed ones"
     );
     let (manifest, script) = open(&folder)?;
-    let (mut files, mut shown) = (Vec::new(), Map::new());
-    for name in &manifest.files {
-        let asset =
-            plugin_files::stock(&folder.join(name), name, true).map_err(|e| anyhow!("PLUGIN_BROKEN: {name}: {e:#}"))?;
-        // Run again, the plugin places the copy the project has.
-        let asset = match state.project.assets.iter().find(|a| Path::new(&a.path) == Path::new(&asset.path)) {
-            Some(had) => had.clone(),
-            None => {
-                files.push(asset.clone());
-                asset
-            }
-        };
-        shown.insert(
-            name.clone(),
-            json!({"assetId": asset.id, "kind": asset.kind, "width": asset.width, "height": asset.height,
-                "durationUs": asset.duration_us}),
-        );
-    }
     let mut ctx = json!({
         "api": API,
         "project": crate::tools::state_value(state, crate::params::State { range: None, clip_ids: None })?,
         "inputs": inputs(&manifest, given)?,
         "selection": selection.unwrap_or_else(|| state.selection.clone()),
         "playheadUs": playhead_us.unwrap_or(state.playhead_us),
-        "files": shown,
+        "files": {},
     });
     let dir = host.session.path().parent().map(Path::to_path_buf).unwrap_or_default();
     let mut media = state.project.clone();
@@ -503,7 +527,7 @@ pub(crate) fn prepare(
         );
         ctx["words"] = crate::transcript::summary(&derived, None)?["words"].take();
     }
-    Ok(Prepared { manifest, script, ctx, media, files })
+    Ok(Prepared { manifest, script, ctx, media, folder, files: vec![], staged: HashMap::new() })
 }
 
 #[derive(Serialize, Deserialize)]
@@ -663,6 +687,7 @@ fn apply(
     revision: u64,
     (output, after): Checked,
     files: &[Asset],
+    staged: &mut HashMap<String, plugin_files::Staged>,
     cancel: &AtomicBool,
 ) -> Result<Value> {
     after.map_err(anyhow::Error::msg)?;
@@ -676,6 +701,11 @@ fn apply(
     let count = output.edits.len();
     let add = adds(&output.edits, files);
     let names = added(&add);
+    if let Some(EditCmd::AddAssets { assets }) = &add {
+        for asset in assets {
+            staged.remove(&asset.id).map(plugin_files::Staged::keep).transpose()?;
+        }
+    }
     if count > 0 {
         let expect = Expect { revision: Some(revision), speech_layout_key: None };
         host.session.apply_edits(run_id, &new_id(), add.into_iter().chain(output.edits).collect(), expect)?;
@@ -709,15 +739,17 @@ pub(crate) fn start(
     host.start_job(owner, run.as_deref(), "plugin", state.stamp.clone(), move |cancel, progress| {
         let listening = progress.clone();
         let checked = prepared
-            .gather(&cache, true, &cancel, &|done| listening.set("listening", Some(done)))
+            .stock(&cancel)
+            .and_then(|()| prepared.gather(&cache, true, &cancel, &|done| listening.set("listening", Some(done))))
             .and_then(|()| isolated(&prepared, &project, &cancel, move |done| progress.set("running", Some(done))));
         let host = weak.upgrade().context("APP_CLOSED: project is closed")?;
+        let Prepared { files, staged, .. } = &mut prepared;
         match mode {
-            Mode::DryRun => Ok(dry(checked?, &prepared.files).0),
-            Mode::Apply => apply(&host, &run_id, revision, checked?, &prepared.files, &cancel),
+            Mode::DryRun => Ok(dry(checked?, files).0),
+            Mode::Apply => apply(&host, &run_id, revision, checked?, files, staged, &cancel),
             Mode::App => {
                 let result =
-                    checked.and_then(|checked| apply(&host, &run_id, revision, checked, &prepared.files, &cancel));
+                    checked.and_then(|checked| apply(&host, &run_id, revision, checked, files, staged, &cancel));
                 match &result {
                     Ok(_) => {
                         host.session.end_run(&run_id, EndAction::Keep)?;
@@ -763,6 +795,7 @@ pub fn dry_run_in_app(
 ) -> Result<Value> {
     let state = host.session.state()?;
     let mut prepared = prepare(host, &state, id, inputs, Some(selection), Some(playhead_us))?;
+    prepared.stock(&cancel)?;
     // The app prepares every file's sound in a job of its own, which the user sees; a preview never decodes.
     prepared.gather(&host.cache_dir, false, &cancel, &|_| {})?;
     let (mut answer, after) = dry(isolated(&prepared, &state.project, &cancel, |_| {})?, &prepared.files);

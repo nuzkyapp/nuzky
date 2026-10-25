@@ -551,6 +551,10 @@ fn a_plugin_places_its_own_picture_which_outlives_it() {
     std::fs::write(&text, "not a picture").unwrap();
     let unreadable = save(&manifest, &[("logo.png", &text)]).unwrap_err();
     assert!(unreadable.starts_with("PLUGIN_BROKEN: files: logo.png: not a picture Nuzky can read"), "{unreadable}");
+    let mut twice = manifest.clone();
+    twice["files"] = json!(["logo.png", "LOGO.PNG"]);
+    let twice = save(&twice, &[("logo.png", &logo)]).unwrap_err();
+    assert!(twice.starts_with("PLUGIN_BROKEN: plugin.json: files names LOGO.PNG twice"), "{twice}");
     save(&manifest, &[("logo.png", &logo)]).unwrap();
     let folder = plugins::dir().unwrap().join("logo");
     assert_eq!(std::fs::read(folder.join("logo.png")).unwrap(), std::fs::read(&logo).unwrap());
@@ -575,6 +579,9 @@ fn a_plugin_places_its_own_picture_which_outlives_it() {
         (&json!(true), &json!(["logo.png"]), &json!(["image 64 32"]))
     );
     assert_eq!(f.host.session.state().unwrap().project, before);
+    // Only a copy the edits place stays in Nuzky's folder; saving and previewing keep none.
+    let kept_files = || std::fs::read_dir(data().join("plugin-files")).map_or(0, |dir| dir.count());
+    assert_eq!(kept_files(), 0);
 
     for run in 1..=2 {
         let job = plugins::run_in_app(&f.host, "logo", &Map::new(), vec![], 0).unwrap();
@@ -590,10 +597,62 @@ fn a_plugin_places_its_own_picture_which_outlives_it() {
     let placed =
         placed.filter(|c| matches!(&c.content, ClipContent::Media { asset_id, .. } if *asset_id == added[0].id));
     assert_eq!(placed.count(), 2);
+    assert_eq!(kept_files(), 1);
 
     std::fs::remove_dir_all(&folder).unwrap();
     assert_eq!(std::fs::read(&kept).unwrap(), std::fs::read(&logo).unwrap());
     f.host.session.undo().unwrap();
     f.host.session.undo().unwrap();
+    assert_eq!(f.host.session.state().unwrap().project, before);
+}
+
+/// A plugin's sound may hold no picture: FFmpeg's look at a file decodes a cover of any size, so an MP3 whose cover is
+/// 8192 × 4096 is refused before that.
+#[test]
+fn a_plugins_sound_with_a_huge_cover_is_refused_unread() {
+    let f = project();
+    let beep = f.dir.join("beep.mp3");
+    let made = Command::new("ffmpeg")
+        .args(["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "sine=d=1", "-f", "lavfi", "-i"])
+        .args(["color=s=8192x4096:d=1", "-map", "0", "-map", "1", "-c:a", "libmp3lame", "-c:v", "png"])
+        .args(["-frames:v", "1", "-disposition:v", "attached_pic", "-id3v2_version", "3"])
+        .arg(&beep)
+        .status()
+        .unwrap();
+    assert!(made.success());
+    let manifest = json!({"nuzkyPlugin": 2, "id": "beep", "name": "Beep", "description": "Beeps",
+        "version": "1", "files": ["beep.mp3"]});
+    let files = [("beep.mp3".to_string(), beep)].into_iter().collect();
+    let error =
+        plugins::save_with_files(&manifest, "function run() { return []; }", None, &files).map(drop).unwrap_err();
+    assert!(format!("{error:#}").contains("or one with a picture in it"), "{error:#}");
+}
+
+/// Copying and checking a plugin's files happens in its job: Run answers at once, and Stop ends the check of a picture
+/// file that holds a hundred huge frames within two seconds, with nothing added.
+#[test]
+fn stop_ends_the_check_of_a_plugins_files() {
+    let f = project();
+    let folder = plugins::dir().unwrap().join("frames");
+    std::fs::create_dir_all(&folder).unwrap();
+    let made = Command::new("ffmpeg")
+        .args(["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=s=8192x3000:r=1:d=120"])
+        .args(["-c:v", "png", "-f", "image2pipe"])
+        .arg(folder.join("logo.png"))
+        .status()
+        .unwrap();
+    assert!(made.success());
+    let manifest = json!({"nuzkyPlugin": 2, "id": "frames", "name": "Frames", "description": "Places a logo",
+        "version": "1", "files": ["logo.png"]});
+    std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
+    std::fs::write(folder.join("plugin.js"), "function run() { return []; }").unwrap();
+    let before = f.host.session.state().unwrap().project;
+    let asked = Instant::now();
+    let job = plugins::run_in_app(&f.host, "frames", &Map::new(), vec![], 0).unwrap();
+    assert!(asked.elapsed() < Duration::from_secs(1), "Run waited {:?}", asked.elapsed());
+    std::thread::sleep(Duration::from_millis(300));
+    f.host.stop_run().unwrap();
+    let done = finish(&f.host, &job, Duration::from_secs(2));
+    assert_ne!(done["status"], "done", "{done}");
     assert_eq!(f.host.session.state().unwrap().project, before);
 }
