@@ -78,8 +78,7 @@ export function VersionRow({ showMenu }: { showMenu: ShowMenu }) {
         ) : install ? (
           <>
             <RotateCw size={16} className={`shrink-0 ${blocked ? "text-muted" : "text-accent"}`} />
-            <span className={`min-w-0 flex-1 font-semibold ${blocked ? "text-muted" : "text-fg"}`}>{blocked ? waitFor(blocked) : "Restart to update"}</span>
-            {!blocked && <span className="tabular shrink-0 text-[12px] font-medium text-accent">{latest}</span>}
+            {blocked ? <span className="min-w-0 flex-1 font-semibold text-muted">{waitFor(blocked)}</span> : <VersionLabel label="Restart to update" version={latest} />}
           </>
         ) : checking === "manual" ? (
           <>
@@ -89,8 +88,7 @@ export function VersionRow({ showMenu }: { showMenu: ShowMenu }) {
         ) : found ? (
           <>
             <CircleArrowDown size={16} className="shrink-0 text-accent" />
-            <span className="min-w-0 flex-1 truncate font-semibold text-fg">Update available</span>
-            <span className="tabular shrink-0 text-[12px] font-medium text-accent">{latest}</span>
+            <VersionLabel label="Update available" version={latest} />
           </>
         ) : (
           <span className="min-w-0 flex-1 truncate text-[12px] text-muted">Nuzky {version}</span>
@@ -102,6 +100,16 @@ export function VersionRow({ showMenu }: { showMenu: ShowMenu }) {
         </Button>
       )}
     </div>
+  );
+}
+
+/** The version goes under the label: beside it, one like 0.1.1-alpha leaves the label no room in the sidebar. */
+function VersionLabel({ label, version }: { label: string; version: string | null }) {
+  return (
+    <span className="flex min-w-0 flex-1 flex-col">
+      <span className="truncate font-semibold leading-[17px] text-fg">{label}</span>
+      <span className="tabular truncate text-[12px] font-medium leading-4 text-accent">{version}</span>
+    </span>
   );
 }
 

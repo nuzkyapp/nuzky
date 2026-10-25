@@ -64,6 +64,9 @@ const p = pct.getBoundingClientRect(), s = stop.getBoundingClientRect();
 const at = (r) => document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
 return {text: label.textContent, cut: label.scrollWidth > label.clientWidth, focused: document.activeElement === b, percentShown: at(p) === pct,
         stopShown: getComputedStyle(stop).opacity === '1' && at(s)?.closest('button') === stop, apart: p.right <= s.left};"""
+# The sidebar row's lines of text as drawn, and whether each is cut with an ellipsis.
+ROW_LINES = """const b = document.querySelector('[data-version]');
+return b && [...b.querySelectorAll('span')].filter((s) => !s.children.length).map((s) => ({text: s.textContent, cut: s.scrollWidth > s.clientWidth}));"""
 BUG_TEXT = "const t = document.getElementById('bug-report-text'); return t && t.closest('dialog')?.open ? t.value : null"
 REVISION = 'return window.__nuzky.store.getState().snap.revision'
 
@@ -244,11 +247,18 @@ def updates(r):
         r.check('Esc closes it and focus returns to the button', wait(lambda: not r.s.run(MENU) and (r.s.run(EDITOR_BUTTON) or {}).get('focused'), 3))
         r.s.run("window.__nuzky.store.setState({view: 'home'})")
 
+        server.serve('99.1.0-alpha.12')
+        manual_check(r)
+        r.check('a long pre-release version shows whole under Update available',
+                wait(lambda: r.s.run(ROW_LINES), 5) == [{'text': 'Update available', 'cut': False}, {'text': '99.1.0-alpha.12', 'cut': False}],
+                r.s.run(ROW_LINES))
+        r.shot('update-available-long')
+
         server.serve(version)
         answer = manual_check(r)
         r.check('Check for updates answers that this is the latest version, and the notice goes',
                 answer == {'kind': 'success', 'text': f'Nuzky {version} is the latest version.'}
-                and row(r).get('text') == f'Nuzky {version}' and server.requests == 2, (answer, row(r), server.requests))
+                and row(r).get('text') == f'Nuzky {version}' and server.requests == 3, (answer, row(r), server.requests))
         r.s.run("window.__nuzky.store.setState({view: 'editor'})")
         r.check('and the editor shows no button', wait(lambda: r.s.run("return !document.querySelector('[data-update-button]') && !!document.querySelector('header')"), 3))
         r.s.run("window.__nuzky.store.setState({view: 'home'})")
