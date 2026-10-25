@@ -12,6 +12,7 @@ import { TransitionSettings } from "../panel/TransitionsTab";
 import { AiLock, TabBar, TabPanel } from "../ui";
 import { AnimationSection } from "./AnimationSection";
 import { BackgroundSection } from "./BackgroundSection";
+import { BeatsSection } from "./BeatsSection";
 import { InspectorHeader } from "./Header";
 import { AdjustSection, AudioSection, SpeedSection, VoiceSection } from "./MediaSections";
 import { MotionSection } from "./MotionSection";
@@ -47,7 +48,7 @@ const KIND_ICON = { video: Film, image: ImageIcon, audio: AudioLines, text: Type
 
 type Chosen = Partial<Record<Kind, TabId>>;
 
-function ClipInspector({ clip, kind, asset, chosen, onChoose }: { clip: Clip; kind: Kind; asset?: Asset; chosen: Chosen; onChoose: (c: Chosen) => void }) {
+function ClipInspector({ clip, kind, asset, music, chosen, onChoose }: { clip: Clip; kind: Kind; asset?: Asset; /** A song on a music track, which the video can be cut to. */ music: boolean; chosen: Chosen; onChoose: (c: Chosen) => void }) {
   const c = clip.content;
   const hasSound = kind === "video" && !!asset?.hasAudio;
   const tabs = tabsFor(kind, hasSound);
@@ -82,6 +83,7 @@ function ClipInspector({ clip, kind, asset, chosen, onChoose }: { clip: Clip; ki
           {tab === "audio" && c.type === "media" && (
             <>
               <AudioSection clip={clip} content={c} />
+              {music && asset && <BeatsSection clip={clip} asset={asset} />}
               <VoiceSection clips={[clip]} coalesce={clip.id} />
               {kind === "audio" && <SpeedSection clip={clip} content={c} asset={asset} />}
             </>
@@ -141,7 +143,8 @@ export function Inspector({ width }: { width: number }) {
     const c = clip.content;
     const asset = c.type === "media" ? project.assets.find((a) => a.id === c.assetId) : undefined;
     const kind: Kind = c.type === "text" ? (isCaptionTrack(track) ? "caption" : "text") : track.kind === "audio" ? "audio" : (asset?.kind ?? "video");
-    body = <ClipInspector key={clip.id} clip={clip} kind={kind} asset={asset} chosen={chosen} onChoose={setChosen} />;
+    const music = kind === "audio" && track.keepInPlace && !!asset?.hasAudio;
+    body = <ClipInspector key={clip.id} clip={clip} kind={kind} asset={asset} music={music} chosen={chosen} onChoose={setChosen} />;
   }
 
   return (

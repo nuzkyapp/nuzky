@@ -1,5 +1,6 @@
 import { useMemo, type ReactNode } from "react";
 import { Captions, Check, ChevronDown, Film, ImagePlus, Music, Scissors, ZoomIn, type LucideIcon } from "lucide-react";
+import { musicClipOf, useBeats } from "../../lib/beats";
 import { COVER_FORMATS, openCover, thumbnailOf } from "../../lib/cover";
 import { CAPTION_STYLES, formatLabel, isLook } from "../../lib/presets";
 import { useSounds } from "../../lib/sounds";
@@ -118,6 +119,7 @@ function soundsOf(project: Project) {
 function ProjectStatus({ project }: { project: Project }) {
   const captions = useMemo(() => captionsOf(project), [project]);
   const sounds = useMemo(() => soundsOf(project), [project]);
+  const music = useMemo(() => musicClipOf(project), [project]);
   const covers = COVER_FORMATS.filter((f) => thumbnailOf(project, f.id));
   const { view, error } = useTranscriptView();
   // Suggest zooms waits for every heard clip, as cuts in Transcript do.
@@ -154,6 +156,19 @@ function ProjectStatus({ project }: { project: Project }) {
           </Button>
         </Step>
         <Step icon={Music} done={sounds.length > 0} title="Music" detail={sounds.length === 1 ? sounds[0] : sounds.length ? count(sounds.length, "sound") : "None"}>
+          {music && (
+            <Button
+              className={STEP_BUTTON}
+              aria-label="Cut to beat"
+              title={`Cut the video to the beat of ${music.name}`}
+              onClick={() => {
+                useBeats.setState({ reveal: music.clipId });
+                useEditor.getState().select([music.clipId]);
+              }}
+            >
+              Cut to beat
+            </Button>
+          )}
           {sounds.length ? (
             <Button className={STEP_BUTTON} aria-label="Edit music" title="Open the sounds in the project" onClick={() => openAudio("project")}>
               Edit

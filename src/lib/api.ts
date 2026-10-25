@@ -1,6 +1,6 @@
 import { invoke, type Channel } from "@tauri-apps/api/core";
 import type { ListedPlugin, PluginValues } from "./plugins";
-import type { AgentAccess, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, Boot, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Part, PreviewStarted, Project, ProjectPoster, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFraming, Said, SampleRun, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied } from "./types";
+import type { AgentAccess, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, BeatCutDone, BeatPlans, Boot, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Part, PreviewStarted, Project, ProjectPoster, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFraming, Rhythm, Said, SampleRun, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied } from "./types";
 
 /**
  * The session a change was made for. Mutating commands carry it, so a change still in flight when
@@ -211,6 +211,13 @@ export const api = {
   /** Punch-ins on inclusive word ranges of the view with `key`, as one undo step. */
   applyZooms: (key: string, zooms: { from: number; to: number; scale: number }[], epoch: Epoch) =>
     invoke<ZoomsApplied>("apply_zooms", { key, zooms, expectedEpoch: epoch }),
+  /** Finds the beat of the song under `clipId` as a `beats` job; null when it is known already. */
+  findBeats: (clipId: string, epoch: Epoch) => invoke<string | null>("find_beats", { clipId, expectedEpoch: epoch }),
+  /** What each rhythm would cut; null while the song's beat is not known. Nothing changes. */
+  beatPlans: (clipId: string, epoch: Epoch) => invoke<BeatPlans | null>("beat_plans", { clipId, expectedEpoch: epoch }),
+  /** The main track cut to the song's beat as one undo step, replacing this clip's last cut while that is the newest step. */
+  cutToBeat: (clipId: string, rhythm: Rhythm, keepVideoSound: boolean, epoch: Epoch) =>
+    invoke<BeatCutDone>("cut_to_beat", { clipId, rhythm, keepVideoSound, expectedEpoch: epoch }),
   /** The reel candidate with the words `from` to `to`, measured as making it would cut it; nothing changes. */
   reelBounds: (id: string, from: number, to: number) => invoke<ReelCandidate>("reel_bounds", { id, from, to }),
   /** A project of its own beside this one for each reel candidate, as a `reels` job; marked made here as one undo step. */

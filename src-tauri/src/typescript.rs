@@ -153,6 +153,8 @@ fn generate() -> String {
     types.visit::<crate::sample::SampleRun>();
     types.visit::<crate::zooms::ZoomSuggestions>();
     types.visit::<crate::zooms::ZoomsApplied>();
+    types.visit::<crate::beats::BeatPlans>();
+    types.visit::<crate::beats::BeatCutDone>();
     types.visit::<nuzky_mcp::reels::MadeReel>();
     types.visit::<nuzky_mcp::reels::Framing>();
     types.visit::<crate::connect::Connection>();

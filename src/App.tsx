@@ -33,6 +33,7 @@ import { listenPlugins, usePlugins } from "./lib/plugins";
 import { addProjects, findDrafts, listenStyle, loadStyle, useStyle } from "./lib/style";
 import { closeCover, closeExport, deleteOverlay, deleteText, exportCover, loadModels as loadVisionModels, onCoverJob, selectedOverlay, useCover } from "./lib/cover";
 import { candidateOf, closeReels, onReelsJob, openReelsToFind, playEnding, toggleReelPlay, useReels } from "./lib/reels";
+import { onBeatsFound } from "./lib/beats";
 import { appWindow, toggleFullPreview, toggleMuted, usePreview } from "./lib/preview";
 
 const isMedia = (path: string) => MEDIA_EXTENSIONS.includes(path.split(".").pop()?.toLowerCase() ?? "");
@@ -211,6 +212,8 @@ function onJob(job: JobEvent) {
   if (job.kind === "cover" || job.kind === "vision-models") onCoverJob(job);
   if (job.kind === "reframe") onReframeJob(job);
   if (job.kind === "reels") onReelsJob(job);
+  if (job.kind === "beats" && job.status === "done") onBeatsFound(job.id.slice("beats:".length));
+  if (job.kind === "beats" && job.status === "failed") toast({ kind: "error", text: `The beat could not be found: ${plainError(job.message ?? "")}` });
   if (job.kind === "captions" && job.status === "done") toast({ kind: "success", text: `Added ${job.output ?? "captions"}` });
   // The panel shows the failure too, with Open logs folder. In another project the toast goes.
   const retry = { label: "Try again", run: () => retrySpeech(job.id), valid: () => canRetrySpeech(job.id) };

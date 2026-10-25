@@ -1,6 +1,7 @@
 mod agent_panel;
 mod attachments;
 mod audio_out;
+mod beats;
 mod caption_styles;
 mod chatgpt;
 mod connect;
@@ -77,6 +78,7 @@ pub struct AppState {
     startup_notice: Option<String>,
     library: Arc<library::Library>,
     sounds: sounds::Sounds,
+    beat_cuts: beats::BeatCuts,
     youtube: youtube_videos::YoutubeVideos,
     plugin_preview: Mutex<Arc<AtomicBool>>,
     /// What the last learning from imported timelines learned, by job, until the creator uses it,
@@ -1268,6 +1270,7 @@ pub fn run() {
                 startup_notice,
                 library: Arc::default(),
                 sounds: Default::default(),
+                beat_cuts: Default::default(),
                 youtube: Default::default(),
                 plugin_preview: Mutex::default(),
                 timeline_lessons: Mutex::new(None),
@@ -1393,6 +1396,9 @@ pub fn run() {
             transcripts::remove_retakes,
             zooms::suggest_zooms,
             zooms::apply_zooms,
+            beats::find_beats,
+            beats::beat_plans,
+            beats::cut_to_beat,
             agent_connections,
             agent_status,
             verify_agent,

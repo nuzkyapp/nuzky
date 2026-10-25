@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type ComponentProps, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type ComponentProps, type CSSProperties, type KeyboardEvent, type ReactNode, type Ref } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown, ChevronRight, Minus, Search, X } from "lucide-react";
 import { followPointer } from "../lib/drag";
@@ -431,9 +431,9 @@ export function Slider({
 }
 
 /** Without a title, for a group the inspector's header already names. */
-export function Section({ title, children, actions }: { title?: string; children: ReactNode; actions?: ReactNode }) {
+export function Section({ title, children, actions, ref }: { title?: string; children: ReactNode; actions?: ReactNode; ref?: Ref<HTMLElement> }) {
   return (
-    <section className="flex flex-col gap-3 border-b border-white/[.07] px-4 py-4 last:border-b-0">
+    <section ref={ref} className="flex flex-col gap-3 border-b border-white/[.07] px-4 py-4 last:border-b-0">
       {title && (
         <div className="flex min-h-6 items-center justify-between gap-2">
           <h3 className="text-[13px] font-semibold text-fg">{title}</h3>

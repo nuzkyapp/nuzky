@@ -32,7 +32,7 @@ pub struct JobEvent {
     #[cfg_attr(
         test,
         ts(
-            type = r#""audio" | "proxy" | "matte" | "export" | "captions" | "transcript" | "style" | "vision-models" | "cover" | "reframe" | "reels" | "speech-model" | "agent""#
+            type = r#""audio" | "proxy" | "matte" | "export" | "captions" | "transcript" | "style" | "vision-models" | "cover" | "reframe" | "reels" | "speech-model" | "agent" | "beats""#
         )
     )]
     pub kind: &'static str,

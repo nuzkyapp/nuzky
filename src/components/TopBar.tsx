@@ -94,7 +94,7 @@ export function JobIndicator() {
     running.find((x) => x.kind === "export") ??
     running.find((x) => x.kind === "captions" || x.kind === "transcript") ??
     // Ahead of the audio prepared beside them, so their Stop is there.
-    running.find((x) => x.kind === "proxy" || x.kind === "agent") ??
+    running.find((x) => x.kind === "proxy" || x.kind === "agent" || x.kind === "beats") ??
     running[0];
   const pct = j.progress > 0 ? `${Math.round(j.progress * 100)}%` : null;
   const body = (
@@ -113,14 +113,20 @@ export function JobIndicator() {
         {body}
       </span>
     );
-  if (j.kind === "proxy" || j.kind === "agent")
+  if (j.kind === "proxy" || j.kind === "agent" || j.kind === "beats")
     return (
       <span className="bar flex h-8 items-center gap-1.5 rounded-full pl-3 pr-1 text-[12px] font-medium text-fg" role="status">
         {body}
         <Button
           pill
           className="h-6 shrink-0 px-2.5 text-[12px]"
-          title={j.kind === "agent" ? `Stop ${j.label.toLowerCase()}. The AI sees that it was stopped.` : "Stop preparing the preview. It keeps playing the original file, which can stutter."}
+          title={
+            j.kind === "agent"
+              ? `Stop ${j.label.toLowerCase()}. The AI sees that it was stopped.`
+              : j.kind === "beats"
+                ? "Stop finding the beat. Nothing in the video changes."
+                : "Stop preparing the preview. It keeps playing the original file, which can stutter."
+          }
           onClick={() => void api.cancelJob(j.id)}
         >
           Stop
