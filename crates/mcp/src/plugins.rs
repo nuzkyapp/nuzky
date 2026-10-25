@@ -774,16 +774,15 @@ fn resident(pid: u32) -> Option<u64> {
     Some(pages * unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as u64)
 }
 
-/// macOS sets no limit on a process's memory, so the parent watches it.
+/// macOS sets no limit on a process's memory, so the parent watches it. The footprint also counts memory the system
+/// compressed, which the resident size leaves out once memory runs short.
 #[cfg(target_os = "macos")]
 fn resident(pid: u32) -> Option<u64> {
-    // SAFETY: proc_taskinfo is plain numbers, so zeroes are a valid value.
-    let mut info: libc::proc_taskinfo = unsafe { std::mem::zeroed() };
-    let size = size_of::<libc::proc_taskinfo>() as libc::c_int;
-    // SAFETY: info is the structure PROC_PIDTASKINFO fills, of the size given.
-    let filled =
-        unsafe { libc::proc_pidinfo(pid as libc::c_int, libc::PROC_PIDTASKINFO, 0, (&raw mut info).cast(), size) };
-    (filled == size).then_some(info.pti_resident_size)
+    // SAFETY: rusage_info_v4 is plain numbers, so zeroes are a valid value.
+    let mut info: libc::rusage_info_v4 = unsafe { std::mem::zeroed() };
+    // SAFETY: info is the structure RUSAGE_INFO_V4 fills.
+    let done = unsafe { libc::proc_pid_rusage(pid as libc::c_int, libc::RUSAGE_INFO_V4, (&raw mut info).cast()) };
+    (done == 0).then_some(info.ri_phys_footprint)
 }
 
 /// The job object holds Windows to the limit.

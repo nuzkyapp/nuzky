@@ -2309,10 +2309,12 @@ impl Editor {
         let before = self.project.clone();
         let applied = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mut outcome = EditOutcome::default();
+            // Each edit names every clip it left alone, so a long batch would repeat the same ids by the million.
+            let mut skipped = std::collections::HashSet::new();
             for cmd in cmds {
                 let step = self.project.apply(cmd)?;
                 outcome.select.extend(step.select);
-                outcome.skipped.extend(step.skipped);
+                outcome.skipped.extend(step.skipped.into_iter().filter(|id| skipped.insert(id.clone())));
             }
             check(&self.project)?;
             Ok(outcome)
@@ -2535,6 +2537,28 @@ mod tests {
         let sound_start = p.find_clip(&sound).map(|(ti, ci)| p.tracks[ti].clips[ci].start_us).unwrap();
         assert_eq!((p.tracks[0].clips[0].duration_us, sound_start), (3_000_000, 0));
         assert_eq!((starts(&p), end_start(&p)), ([14_000_000, 0], 19_000_000));
+    }
+
+    /// A batch names each clip it left alone once, however many of its edits left it alone: 200 motions over clips
+    /// that already move would otherwise list every clip 200 times, and thousands of edits over thousands of clips
+    /// would fill memory with the same ids.
+    #[test]
+    fn a_batch_lists_each_skipped_clip_once() {
+        let mut p = project();
+        p.apply(EditCmd::AddClip { asset_id: "a".into(), start_us: None, track_id: None }).unwrap();
+        for at_us in (1..10).map(|i| i * 500_000) {
+            let clip_id =
+                p.tracks[0].clips.iter().find(|c| c.start_us < at_us && c.end_us() > at_us).unwrap().id.clone();
+            p.apply(EditCmd::SplitClip { clip_id, at_us }).unwrap();
+        }
+        let range = Some(TimeRange { start_us: 0, end_us: 5_000_000 });
+        let motion = || EditCmd::ApplyMotion { clip_id: None, range, kind: MotionKind::PushIn, strength: 0.1 };
+        p.apply(motion()).unwrap();
+        let moving = p.tracks[0].clips.iter().filter(|c| !c.keyframes.is_empty()).count();
+        assert!(moving >= 10, "{moving}");
+        let mut editor = Editor::new(p);
+        let outcome = editor.apply_batch((0..200).map(|_| motion()).collect(), None).unwrap();
+        assert_eq!(outcome.skipped.len(), moving);
     }
 
     #[test]
