@@ -25,7 +25,7 @@ export interface AssetDrag {
   y: number;
 }
 
-export type PanelTab = "media" | "audio" | "text" | "captions" | "transcript" | "transitions" | "filters";
+export type PanelTab = "media" | "audio" | "text" | "captions" | "transcript" | "transitions" | "filters" | "plugins";
 
 interface EditorState {
   snap: Snapshot | null;
@@ -45,6 +45,8 @@ interface EditorState {
   toastLift: number;
   /** Label of the AI run editing the project right now, or null. */
   aiRun: string | null;
+  /** Whether the lock of `aiRun` shows; a plugin's run shows it only once it takes a moment. */
+  lockShown: boolean;
   saveState: "saved" | "saving" | "error";
   engineError: string | null;
   thumbs: Record<string, string | null>;
@@ -391,6 +393,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   toasts: [],
   toastLift: 0,
   aiRun: null,
+  lockShown: false,
   saveState: "saved",
   engineError: null,
   thumbs: {},
@@ -563,8 +566,21 @@ useEditor.subscribe((s, prev) => {
   if (s.toasts.some((t) => t.text === AI_EDITING)) useEditor.setState({ toasts: s.toasts.filter((t) => t.text !== AI_EDITING) });
 });
 
+/** The label of the run a plugin started from the Plugins tab. */
+export const PLUGIN_RUN = "Plugin: ";
+
+/** Most plugins finish in a few milliseconds; a lock shown for them would only flash. */
+const PLUGIN_LOCK_DELAY_MS = 400;
+let lockTimer = 0;
+useEditor.subscribe((s, prev) => {
+  if (!!s.aiRun === !!prev.aiRun) return;
+  window.clearTimeout(lockTimer);
+  if (s.aiRun?.startsWith(PLUGIN_RUN)) lockTimer = window.setTimeout(() => useEditor.setState({ lockShown: !!useEditor.getState().aiRun }), PLUGIN_LOCK_DELAY_MS);
+  else useEditor.setState({ lockShown: !!s.aiRun });
+});
+
 /** While an agent's run is open the editing controls are locked. */
-export const useAiLocked = () => useEditor((s) => s.aiRun !== null);
+export const useAiLocked = () => useEditor((s) => s.aiRun !== null && s.lockShown);
 
 /**
  * The playhead for readouts that follow it, such as keyframed values in the inspector: in 0.1 s steps while

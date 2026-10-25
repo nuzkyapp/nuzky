@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AlertCircle, Check, ChevronLeft, Download, FolderOpen, History, Loader2, Redo2, Sparkles, Undo2 } from "lucide-react";
+import { AlertCircle, Check, ChevronLeft, Download, FolderOpen, History, Loader2, Puzzle, Redo2, Sparkles, Undo2 } from "lucide-react";
 import { useAgent } from "../lib/agent";
 import { api, errorText } from "../lib/api";
 import { togglePanel, useDock } from "../lib/dock";
@@ -7,7 +7,7 @@ import { closeCover, exportCover, openCover, useCover } from "../lib/cover";
 import { useReels } from "../lib/reels";
 import { useStyle } from "../lib/style";
 import { when } from "../lib/time";
-import { AI_EDITING, openExport, projectDuration, restoreVersion, stopAiRun, useAiLocked, useEditor, whenIdle } from "../lib/store";
+import { AI_EDITING, PLUGIN_RUN, openExport, projectDuration, restoreVersion, stopAiRun, useAiLocked, useEditor, whenIdle } from "../lib/store";
 import type { ProjectVersion } from "../lib/types";
 import { Button, IconButton, Menu, ProgressBar } from "./ui";
 import { UpdateButton } from "./Updates";
@@ -183,13 +183,22 @@ function AiToggle() {
 
 /** While an agent edits, what it is doing and a way to take over. */
 export function AiRunBar() {
-  const label = useEditor((s) => s.aiRun);
+  const label = useEditor((s) => (s.lockShown ? s.aiRun : null));
   if (!label) return null;
+  const plugin = label.startsWith(PLUGIN_RUN) ? label.slice(PLUGIN_RUN.length) : null;
   return (
     <div data-tour="run-bar" className="bar flex h-8 min-w-0 max-w-[420px] items-center gap-2 rounded-full pl-3 pr-1 text-[12px] font-medium text-fg" role="status">
-      <Sparkles size={14} className="shrink-0 text-accent" />
+      {plugin ? <Puzzle size={14} className="shrink-0 text-accent" /> : <Sparkles size={14} className="shrink-0 text-accent" />}
       <span className="truncate">
-        AI is editing <span className="font-normal text-muted">· {label}</span>
+        {plugin ? (
+          <>
+            {plugin} <span className="font-normal text-muted">is running</span>
+          </>
+        ) : (
+          <>
+            AI is editing <span className="font-normal text-muted">· {label}</span>
+          </>
+        )}
       </span>
       <Button
         pill

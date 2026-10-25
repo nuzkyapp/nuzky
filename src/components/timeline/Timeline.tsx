@@ -25,6 +25,7 @@ import { US, formatDuration, formatTime } from "../../lib/time";
 import type { Clip, EditCmd, Project, Track } from "../../lib/types";
 import { candidateReason, thumbnailOf, useCandidates, useCover } from "../../lib/cover";
 import { describePeek } from "../../lib/peek";
+import { usePlugins } from "../../lib/plugins";
 import { setDropResolver, type DropMedia } from "../panel/assets";
 import { IconButton, RangeInput } from "../ui";
 import { ClipMenu, type MenuAt } from "./ClipMenu";
@@ -273,6 +274,12 @@ export function Timeline({ height }: { height: number }) {
   const peekShown = peek && !locked && !box && project && peek.revision === snap0?.revision ? peek : null;
   const described = useMemo(() => (peekShown && project ? describePeek(project, peekShown.project) : null), [peekShown, project]);
   const drawn = peekShown && described?.draw === "then" ? peekShown.project : project;
+  // While a plugin is open, the clips its run would change are marked where they are now; editing goes on.
+  const pluginPreview = usePlugins((s) => s.preview);
+  const pluginMarks = useMemo(
+    () => (!peekShown && !locked && project && pluginPreview?.project && pluginPreview.revision === snap0?.revision ? describePeek(project, pluginPreview.project).marks : null),
+    [peekShown, locked, project, pluginPreview, snap0?.revision],
+  );
 
   const tracks = useMemo(() => (drawn ? displayTracks(drawn) : []), [drawn]);
   const duration = drawn ? contentEnd(drawn) : 0;
@@ -742,7 +749,7 @@ export function Timeline({ height }: { height: number }) {
                           visible={visible}
                           selected={!peekShown && selection.includes(clip.id)}
                           locked={locked || !!peekShown}
-                          mark={described?.marks.get(clip.id)}
+                          mark={described?.marks.get(clip.id) ?? pluginMarks?.get(clip.id)}
                           replacing={clip.id === replacing?.clipId ? (replacing.short ? "short" : "replace") : undefined}
                           dimmed={!!peekShown && !described?.marks.has(clip.id)}
                           tabbable={!cover && clip.id === tabStop}

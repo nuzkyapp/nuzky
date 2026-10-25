@@ -1,5 +1,6 @@
 import { invoke, type Channel } from "@tauri-apps/api/core";
-import type { AgentAccess, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, Boot, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Part, PreviewStarted, ProjectPoster, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFraming, Said, SampleRun, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied } from "./types";
+import type { ListedPlugin, PluginValues } from "./plugins";
+import type { AgentAccess, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, Boot, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Part, PreviewStarted, Project, ProjectPoster, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFraming, Said, SampleRun, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied } from "./types";
 
 /**
  * The session a change was made for. Mutating commands carry it, so a change still in flight when
@@ -246,6 +247,17 @@ export const api = {
   startTimelineLearning: (paths: string[]) => invoke<string>("start_timeline_learning", { paths }),
   /** Makes what that job learned the style, as it showed it; STYLE_CHANGED when the style changed since. */
   styleUseLearned: (jobId: string) => invoke<StyleView>("style_use_learned", { jobId }),
+  listPlugins: () => invoke<ListedPlugin[]>("list_plugins"),
+  /** The project as the plugin would leave it, without changing it. */
+  previewPlugin: (id: string, values: PluginValues, selection: string[], playheadUs: number) =>
+    invoke<Project>("preview_plugin", { id, values, selection, playheadUs: Math.round(playheadUs) }),
+  /** One undo step; `snapshot` is null when the plugin changed nothing. */
+  runPlugin: (id: string, values: PluginValues, selection: string[], playheadUs: number, epoch: Epoch) =>
+    invoke<{ snapshot: Snapshot | null; message: string | null }>("run_plugin", { id, values, selection, playheadUs: Math.round(playheadUs), expectedEpoch: epoch }),
+  /** Moves the plugin's folder to the Trash. */
+  removePlugin: (id: string) => invoke<void>("remove_plugin", { id }),
+  /** Shows the plugin's folder, or the plugins folder, in the file manager. */
+  showPluginFolder: (id: string | null) => invoke<void>("show_plugin_folder", { id }),
 };
 
 /** The error as the backend sent it, "CODE: detail" included; code checks use this. */

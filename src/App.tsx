@@ -8,7 +8,7 @@ import { setLimits } from "./lib/limits";
 import { onReframeJob } from "./lib/reframe";
 import { canRetrySpeech, retrySpeech, useSpeech } from "./lib/speech";
 import { reportBug } from "./lib/diagnostics";
-import { copySelection, currentEpoch, cutSelection, deleteSelection, deleteSide, duplicateSelection, openExport, pasteAttributes, pasteClips, edgeBeside, projectDuration, runWasDiscarded, splitAtPlayhead, undoAction, useEditor } from "./lib/store";
+import { copySelection, currentEpoch, cutSelection, deleteSelection, deleteSide, duplicateSelection, openExport, pasteAttributes, pasteClips, edgeBeside, PLUGIN_RUN, projectDuration, runWasDiscarded, splitAtPlayhead, undoAction, useEditor } from "./lib/store";
 import { US, formatDuration, lastFrame, nearestFrame, stepFrame } from "./lib/time";
 import type { Asset, JobEvent, ProjectSummary, Snapshot, ModelQuestion, Transport } from "./lib/types";
 import { AGENT_VISION_MODELS } from "./components/ModelQuestionDialog";
@@ -29,6 +29,7 @@ import { newProjectFromMedia, openProject, refreshLibrary, showHome, trashProjec
 import { checkForUpdates, startUpdates, useUpdates } from "./lib/updates";
 import { useSounds } from "./lib/sounds";
 import { useStickers } from "./lib/stickers";
+import { listenPlugins } from "./lib/plugins";
 import { addProjects, findDrafts, listenStyle, loadStyle, useStyle } from "./lib/style";
 import { closeCover, closeExport, deleteOverlay, deleteText, exportCover, loadModels as loadVisionModels, onCoverJob, selectedOverlay, useCover } from "./lib/cover";
 import { candidateOf, closeReels, onReelsJob, openReelsToFind, playEnding, toggleReelPlay, useReels } from "./lib/reels";
@@ -275,6 +276,7 @@ function useBackendEvents() {
     const offStyle = listenStyle();
     void loadStyle();
     offs.push(listen("transcripts-changed", () => useSpeech.setState((s) => ({ stored: s.stored + 1 }))));
+    offs.push(listenPlugins());
     offs.push(
       listen<string>("audio-ready", (e) => {
         useEditor.getState().reloadWaveform(e.payload);
@@ -308,7 +310,8 @@ function useBackendEvents() {
         // The run's last change arrived before this event, so Undo here removes the whole run; a run
         // that changed nothing offers none, as it would undo the step before it.
         const changed = !!snap && snap.revision !== runStart;
-        if (aiRun && !e.payload) {
+        // A plugin run from the Plugins tab says how it went itself.
+        if (aiRun && !e.payload && !aiRun.startsWith(PLUGIN_RUN)) {
           const discarded = runWasDiscarded();
           // A run the AI panel's agent made shows there, with what it changed and Undo; others get a toast.
           // A run the user took back offers no Undo: it would take back the change before it.

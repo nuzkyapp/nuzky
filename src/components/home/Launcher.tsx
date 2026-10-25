@@ -16,10 +16,12 @@ import {
   useSaidSearch,
   whenLabel,
 } from "../../lib/library";
+import { loadPlugins, openPlugin, usePlugins } from "../../lib/plugins";
 import { FORMATS, formatLabel } from "../../lib/presets";
 import { useEditor } from "../../lib/store";
 import { formatLength } from "../../lib/time";
 import type { LibraryProject, SaidHit } from "../../lib/types";
+import { PluginMark } from "../panel/PluginsTab";
 import { Button, trapTab } from "../ui";
 import { FormatShape, Quote, SpeechNote } from "./Home";
 import { Poster } from "./Poster";
@@ -93,8 +95,10 @@ export function Launcher() {
   const input = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
 
+  const plugins = usePlugins((s) => s.list);
   useEffect(() => {
     void refreshLibrary();
+    void loadPlugins();
     const back = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     return () => back?.focus();
   }, []);
@@ -172,8 +176,24 @@ export function Launcher() {
       </div>
     ),
   };
+  // A plugin works on the open project, so it is offered only over the editor.
+  const pluginOptions: Option[] =
+    searching && snap
+      ? (plugins ?? [])
+          .filter((p) => fold(p.name).includes(fold(query.trim())))
+          .map((p) => ({
+            id: `plugin:${p.id}`,
+            run: () => {
+              useEditor.setState({ launcherOpen: false });
+              openPlugin(p.id);
+              showEditor();
+            },
+            node: (on: boolean) => <Row active={on} thumb={<span className="flex w-9 justify-center"><PluginMark plugin={p} size={28} /></span>} title={p.name} sub={p.error ?? p.description} end="Plugin" />,
+          }))
+      : [];
   const groups: { title: string; options: Option[] }[] = searching
     ? [
+        ...(pluginOptions.length ? [{ title: "Plugins", options: pluginOptions }] : []),
         { title: "Projects", options: found.map((p) => projectOption(p)) },
         {
           title: "Said in your videos",
