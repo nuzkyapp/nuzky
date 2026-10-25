@@ -237,6 +237,10 @@ pub(crate) fn label(cmds: &[EditCmd]) -> &'static str {
     if cmds.iter().any(|c| matches!(c, EditCmd::ReplaceClip { .. })) {
         return "Replace clip";
     }
+    // A cut to the beat first keeps the song's track in place.
+    if cmds.iter().any(|c| matches!(c, EditCmd::ReplaceMainClips { .. })) {
+        return "Cut to beat";
+    }
     match cmd {
         EditCmd::AddSticker { .. } => "Sticker",
         EditCmd::AddAssets { .. } => "Import media",
@@ -256,6 +260,7 @@ pub(crate) fn label(cmds: &[EditCmd]) -> &'static str {
         EditCmd::SetKeyframes { .. } => "Keyframes",
         EditCmd::DuplicateClip { .. } => "Duplicate",
         EditCmd::PasteClips { .. } => "Paste",
+        EditCmd::ReplaceMainClips { .. } => "Cut to beat",
         EditCmd::PasteAttributes { .. } => "Paste attributes",
         EditCmd::DetachAudio { .. } => "Detach audio",
         EditCmd::UpdateTrack { .. } => "Change track",

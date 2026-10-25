@@ -7,7 +7,7 @@ use anyhow::{Context, Result, bail, ensure};
 use nuzky_analysis::Beats;
 use nuzky_engine::{
     Project,
-    edit::{CopiedClip, EditCmd, MAIN_TRACK, TimeRange, media, stays_in_place},
+    edit::{EditCmd, MAIN_TRACK, media, stays_in_place},
     export::frame_time_us,
     model::{AssetKind, Clip, ClipContent, Track, TrackKind, Transform},
 };
@@ -350,7 +350,6 @@ pub fn plan(project: &Project, beats: &Beats, options: &Options) -> Result<Plan>
     }
 
     let old_end = main.clips.iter().map(Clip::end_us).max().unwrap_or(0);
-    let length = end_us;
     let mut edits = Vec::new();
     if !music_track.keep_in_place {
         edits.push(EditCmd::UpdateTrack {
@@ -360,63 +359,17 @@ pub fn plan(project: &Project, beats: &Beats, options: &Options) -> Result<Plan>
             keep_in_place: Some(true),
         });
     }
-    edits.push(EditCmd::PasteClips { clips, at_us: old_end });
-    if old_end > 0 {
-        edits.push(EditCmd::RippleDeleteRanges {
-            ranges: vec![TimeRange { start_us: 0, end_us: old_end }],
-            keep_track_ids: Some(
-                project
-                    .tracks
-                    .iter()
-                    .filter(|t| t.id != MAIN_TRACK && !t.is_captions())
-                    .map(|t| t.id.clone())
-                    .collect(),
-            ),
-        });
-    }
-    // Pasting opened the new footage's time at the old end; what was there or after it goes back where it was.
-    let mut moved = Vec::new();
-    let mut split = Vec::new();
-    for track in &project.tracks {
-        if track.id == MAIN_TRACK
-            || track.id == music_track.id
-            || stays_in_place(track)
-            || old_end > 0 && track.is_captions()
-        {
-            continue;
-        }
-        for clip in &track.clips {
-            if clip.start_us >= old_end {
-                moved.push(clip.id.clone());
-            } else if clip.end_us() > old_end {
-                let still = match &clip.content {
-                    ClipContent::Text { .. } => true,
-                    ClipContent::Media { asset_id, .. } => {
-                        project.asset(asset_id).is_some_and(|a| a.kind == AssetKind::Image)
-                    }
-                };
-                if still {
-                    // A title or picture across the old end grew instead.
-                    edits.push(EditCmd::TrimClip {
-                        clip_id: clip.id.clone(),
-                        start_us: clip.start_us,
-                        duration_us: clip.duration_us,
-                        source_in_us: None,
-                    });
-                } else {
-                    split.push(clip.id.clone());
-                }
-            }
-        }
-    }
-    if !moved.is_empty() {
-        edits.push(EditCmd::MoveClips { clip_ids: moved, offset_us: -length });
-    }
-    if !split.is_empty() {
-        warnings.push(format!(
-            "these clips ran across the end of the old main track and were split there; their second part now starts {length} us later: {}",
-            split.join(", ")
-        ));
+    edits.push(EditCmd::ReplaceMainClips { clips });
+    let captions: Vec<String> = project
+        .tracks
+        .iter()
+        .filter(|t| t.is_captions())
+        .flat_map(|t| &t.clips)
+        .filter(|c| c.start_us < old_end)
+        .map(|c| c.id.clone())
+        .collect();
+    if !captions.is_empty() {
+        edits.push(EditCmd::DeleteClips { clip_ids: captions });
     }
     let beat_us = 60e6 / beats.bpm.max(1.0) / speed;
     let (trimmed_to_us, fade_out_us) = if music_end > end_us {
@@ -543,7 +496,7 @@ fn sources(project: &Project, main: &Track, shots: Option<&[Shot]>) -> Result<Ve
 /// Main-track clips for the pieces: the shots in turn, each continuing where it stopped, never the same shot twice
 /// in a row while another can fill the piece. When none can, the same shot goes on; when every shot has run out they
 /// all start again.
-fn fill(sources: &[Source], pieces: &[(i64, i64)], keep_sound: bool) -> Result<(Vec<CopiedClip>, usize, usize, usize)> {
+fn fill(sources: &[Source], pieces: &[(i64, i64)], keep_sound: bool) -> Result<(Vec<Clip>, usize, usize, usize)> {
     let mut cursor: Vec<i64> = sources.iter().map(|s| s.from).collect();
     let (mut next, mut previous, mut wrapped, mut repeated, mut continued) = (0, None, false, 0, 0);
     let mut used = HashSet::new();
@@ -579,12 +532,7 @@ fn fill(sources: &[Source], pieces: &[(i64, i64)], keep_sound: bool) -> Result<(
         continued += usize::from(Some(k) == previous);
         used.insert(k);
         (next, previous) = (k + 1, Some(k));
-        clips.push(CopiedClip {
-            clip: Clip::new(String::new(), start, duration, content),
-            track_id: MAIN_TRACK.into(),
-            track_kind: TrackKind::Video,
-            keep_in_place: false,
-        });
+        clips.push(Clip::new(String::new(), start, duration, content));
     }
     Ok((clips, used.len(), repeated, continued))
 }
@@ -656,7 +604,8 @@ pub fn report(before: &Project, after: &Project, plan: &Plan) -> Result<Value> {
 mod tests {
     use super::*;
     use nuzky_analysis::{BeatDrop, Section};
-    use nuzky_engine::model::{Asset, TextStyle};
+    use nuzky_engine::edit::CaptionSegment;
+    use nuzky_engine::model::{Asset, Ease, Keyframe, TextStyle, Thumbnail};
 
     fn asset(id: &str, kind: AssetKind, duration_us: i64) -> Asset {
         Asset {
@@ -824,6 +773,69 @@ mod tests {
         assert_eq!(after, titles);
     }
 
+    /// A video overlay, a title fading in and a caption run across the end of the old footage at 40 s, and the cover
+    /// shows the frame at 10 s. The cut to 50 s replaces only the main track: everything else keeps its time, its
+    /// keyframes and its length, so the video ends where the cut does. Only the caption of the old footage's speech
+    /// goes.
+    #[test]
+    fn the_cut_leaves_overlays_keyframes_and_the_cover_frame_where_they_are() {
+        let (mut p, titles) = project();
+        let overlay = p
+            .apply(EditCmd::AddPictureInPicture {
+                asset_id: "red".into(),
+                start_us: 39_000_000,
+                duration_us: Some(3_000_000),
+            })
+            .unwrap()
+            .select[0]
+            .clone();
+        let fade = |t_us, opacity| Keyframe {
+            t_us,
+            transform: Transform { opacity, ..Transform::default() },
+            ease: Ease::Linear,
+        };
+        let keyframes = vec![fade(0, 0.0), fade(1_500_000, 1.0)];
+        p.apply(EditCmd::SetKeyframes { clip_id: titles[1].clone(), keyframes: keyframes.clone() }).unwrap();
+        let cover: Thumbnail = serde_json::from_value(json!({"format": "cover_9x16", "timeUs": 10_000_000})).unwrap();
+        p.apply(EditCmd::SetThumbnail { thumbnail: cover }).unwrap();
+        let style: TextStyle = serde_json::from_value(json!({"fontSize": 60.0, "color": "#ffffff"})).unwrap();
+        let segment =
+            |start_us, end_us, text: &str| CaptionSegment { start_us, end_us, text: text.into(), words: vec![] };
+        p.apply(EditCmd::AddCaptions {
+            segments: vec![segment(1_000_000, 3_000_000, "said"), segment(43_000_000, 44_000_000, "later")],
+            style,
+            anim_in: None,
+            anim_out: None,
+            transform: None,
+        })
+        .unwrap();
+        let before = p.clone();
+        let plan = plan(&p, &beats(), &Options { end_us: Some(50_000_000), ..Options::default() }).unwrap();
+        for edit in plan.edits.clone() {
+            p.apply(edit).unwrap();
+        }
+        let main = &p.tracks[0].clips;
+        assert_eq!(main.iter().map(|c| c.start_us).collect::<Vec<_>>(), plan.cut_us);
+        assert_eq!(main.last().unwrap().end_us(), plan.end_us);
+        let clips = |p: &Project| -> Vec<Value> {
+            p.tracks[1..]
+                .iter()
+                .flat_map(|t| &t.clips)
+                .filter(|c| c.id != plan.music_clip_id)
+                .map(|c| serde_json::to_value(c).unwrap())
+                .collect()
+        };
+        let said = before.tracks.iter().find(|t| t.is_captions()).unwrap().clips[0].id.clone();
+        let kept: Vec<Value> = clips(&before).into_iter().filter(|c| c["id"] != json!(said)).collect();
+        assert_eq!(clips(&p), kept);
+        assert!(kept.iter().any(|c| c["id"] == json!(overlay)));
+        assert_eq!(p.thumbnails[0].time_us, 10_000_000);
+        assert_eq!(p.duration_us(), plan.end_us);
+        let report = report(&before, &p, &plan).unwrap();
+        assert_eq!(report["removed"], json!([said]));
+        assert!(report["warnings"].to_string().contains("1 captions of the old footage"), "{report}");
+    }
+
     /// 120 BPM, a bar every 2 s from 0.
     fn steady_beats() -> Beats {
         let beats_us: Vec<i64> = (0..120).map(|i| i * 500_000).collect();
@@ -842,10 +854,10 @@ mod tests {
         plan.edits
             .iter()
             .find_map(|e| match e {
-                EditCmd::PasteClips { clips, .. } => Some(
+                EditCmd::ReplaceMainClips { clips } => Some(
                     clips
                         .iter()
-                        .map(|c| match &c.clip.content {
+                        .map(|c| match &c.content {
                             ClipContent::Media { asset_id, source_in_us, .. } => (asset_id.clone(), *source_in_us),
                             ClipContent::Text { .. } => unreachable!(),
                         })

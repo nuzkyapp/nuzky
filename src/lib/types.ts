@@ -635,6 +635,9 @@ export type EditCmd = {
   clips: Array<CopiedClip>,
   atUs: number,
 } | {
+  "type": "replaceMainClips",
+  clips: Array<Clip>,
+} | {
   "type": "pasteAttributes",
   source: CopiedClip,
   clipIds: Array<string>,

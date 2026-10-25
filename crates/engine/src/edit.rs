@@ -223,6 +223,12 @@ pub enum EditCmd {
         clips: Vec<CopiedClip>,
         at_us: i64,
     },
+    /// Puts these video and picture clips on the main track in place of all its clips, back to back from 0 in the
+    /// order given, with new ids. Nothing else moves: the other tracks, their keyframes and cover frames keep their
+    /// time, as when recutting the video to a song.
+    ReplaceMainClips {
+        clips: Vec<Clip>,
+    },
     /// Gives clips of the source's kind its look. Text: style, font, transform, keyframes and animations, never
     /// the text; a caption keeps its wrap width. Video and images: Adjust, background, crop and shape, motion
     /// (keyframes, moving each clip from its own framing) and animations. Sound: volume, fades, Voice and
@@ -954,6 +960,7 @@ impl Project {
                 self.apply_captions(cmd, &mut out)?
             }
             EditCmd::PasteClips { clips, at_us } => self.paste_clips(clips, at_us, &mut out)?,
+            EditCmd::ReplaceMainClips { clips } => self.replace_main_clips(clips)?,
             EditCmd::PasteAttributes { source, clip_ids } => self.paste_attributes(source, clip_ids, &mut out)?,
             EditCmd::RestyleTrack { track_id, style, transform } => {
                 self.restyle_track(&track_id, style, transform, &mut out)?
@@ -1964,6 +1971,33 @@ impl Project {
                 self.tracks[target].clips.push(clip);
             }
         }
+        Ok(())
+    }
+
+    fn replace_main_clips(&mut self, clips: Vec<Clip>) -> Result<()> {
+        ensure!(!clips.is_empty(), "Give the main track at least one clip");
+        let min = min_duration(self);
+        for clip in &clips {
+            let picture = match &clip.content {
+                ClipContent::Media { asset_id, .. } => self.asset(asset_id).map(|a| a.kind != AssetKind::Audio),
+                ClipContent::Text { .. } => Some(false),
+            };
+            ensure!(picture.is_some(), "The media is no longer in the project");
+            ensure!(picture == Some(true), "The main track takes video and pictures only");
+            ensure!(clip.duration_us >= min, "A main-track clip must be at least one frame long");
+        }
+        let main = self.track_index(MAIN_TRACK).ok_or_else(|| anyhow!("No main track"))?;
+        let mut t = 0;
+        self.tracks[main].clips = clips
+            .into_iter()
+            .enumerate()
+            .map(|(i, clip)| {
+                let transition_in = if i == 0 { None } else { clip.transition_in };
+                let clip = Clip { id: new_id(), start_us: t, transition_in, ..clip };
+                t += clip.duration_us;
+                clip
+            })
+            .collect();
         Ok(())
     }
 
