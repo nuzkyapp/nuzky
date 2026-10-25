@@ -385,3 +385,64 @@ fn a_much_smaller_preview_blends_what_the_export_blends() {
     assert!((exported - blended).abs() < 3.0, "the export blends the columns: {exported}");
     assert!((shown - exported).abs() < 3.0, "the preview shows {shown} where the export shows {exported}");
 }
+
+const ROW_TRIPLES: &str = "fn effect(p: Pixel) -> vec4<f32> {
+    if (u32(floor(p.uv.y * p.size.y)) / 3u) % 2u == 1u {
+        return vec4<f32>(p.color.rgb * 0.25, p.color.a);
+    }
+    return p.color;
+}
+";
+
+/// A clip at half the canvas, its effect drawn on its full-size grid in threes of bright and dark rows, shrinks ten
+/// times for a fifth-size preview. Each preview row then covers one and two thirds of a bright and dark six, so the rows
+/// come out lighter and darker; the steps of the shrink keep that, as the export reduced to the preview's size shows.
+#[test]
+fn a_preview_reduction_in_steps_keeps_what_one_reduction_shows() {
+    if !available() {
+        return;
+    }
+    install("row-triples", "scanlines", ROW_TRIPLES);
+    let d = dir("effects-steps");
+    let grey = d.join("grey.mp4");
+    ff(
+        &["-f", "lavfi", "-i", "color=c=0x909090:size=1920x1080:rate=25:duration=0.12", "-c:v", "libx264", "-crf", "0"],
+        &grey,
+    );
+    let mut p = with_effect(project(&grey, 120_000), "row-triples");
+    p.canvas.fps = 25;
+    let ClipContent::Media { transform, .. } = &mut p.tracks[0].clips[0].content else { unreachable!() };
+    transform.scale = 0.5;
+    let t = 40_000;
+    let out = d.join("export.mp4");
+    let options = ExportOptions { preset: "ultrafast".into(), crf: 0, replace_existing: true, ..Default::default() };
+    export(&p, &d.join("cache"), &out, &options, &AtomicBool::new(false), |_| {}).unwrap();
+    let size = 1920 * 1080 * 4;
+    let index = (t * 25 / 1_000_000) as usize;
+    let frame = &raw(&out, &[])[index * size..(index + 1) * size];
+    // The export's red channel reduced five times by area, as the preview's 384 × 216.
+    let reduced = |x: usize, y: usize| {
+        let pixels = (0..5).flat_map(|dy| (0..5).map(move |dx| ((y * 5 + dy) * 1920 + x * 5 + dx) * 4));
+        pixels.map(|i| frame[i] as f64).sum::<f64>() / 25.0
+    };
+    let mut preview = Renderer::new().unwrap();
+    preview.use_proxies(d.join("cache"));
+    preview.use_mattes(d.join("cache"), Pending::Original);
+    preview.set_gpu_timeout(Duration::from_secs(2));
+    let shown = preview.render(&p, t, 384, 216, Wait::Exact, false).unwrap();
+    // Inside the clip, which covers preview pixels 96..288 × 54..162.
+    let (xs, ys) = (110..270, 60..156);
+    let n = (xs.len() * ys.len()) as f64;
+    let error = ys
+        .flat_map(|y| xs.clone().map(move |x| (x, y)))
+        .map(|(x, y)| (shown[(y * 384 + x) * 4] as f64 - reduced(x, y)).abs())
+        .sum::<f64>()
+        / n;
+    let rows: Vec<f64> = (60..66).map(|y| reduced(150, y)).collect();
+    eprintln!("QA effects: rows reduced from the export {rows:.1?}, preview off by {error:.2} on average");
+    assert!(
+        rows.iter().any(|v| *v > 95.0) && rows.iter().any(|v| *v < 85.0),
+        "the export keeps lighter and darker rows: {rows:?}"
+    );
+    assert!(error < 3.0, "the preview is {error:.2} levels off the export reduced to its size");
+}

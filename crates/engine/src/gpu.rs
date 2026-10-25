@@ -1093,7 +1093,7 @@ impl Gpu {
         let mut spare = passes[layer.effects.len() % 2].clone();
         let mut from = (w, h);
         loop {
-            let to = (from.0.div_ceil(SHRINK_STEP).max(shown.0), from.1.div_ceil(SHRINK_STEP).max(shown.1));
+            let to = (shrink_step(from.0, shown.0), shrink_step(from.1, shown.1));
             let target = if to == shown { &shrunk } else { &spare };
             let uniform: [f32; 4] =
                 [from.0 as f32 / to.0 as f32, from.1 as f32 / to.1 as f32, from.0 as f32, from.1 as f32];
@@ -1363,6 +1363,16 @@ fn wait(device: &wgpu::Device, hung: bool, limit: Option<Duration>, stop: &Atomi
             return Err(GpuFault::Timeout(limit).into());
         }
     }
+}
+
+/// The next size on the way from `from` down to `shown`: the shown size times a power of the step, so every pixel of a
+/// step lies within one shown pixel and the averages of the steps are the average a single reduction would take.
+fn shrink_step(from: u32, shown: u32) -> u32 {
+    let mut to = shown;
+    while to < from.div_ceil(SHRINK_STEP) {
+        to *= SHRINK_STEP;
+    }
+    to
 }
 
 #[cfg(test)]
