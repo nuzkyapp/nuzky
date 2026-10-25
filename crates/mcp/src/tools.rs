@@ -1427,7 +1427,11 @@ impl Backend {
         ensure!(Path::new(&asset.path).is_file(), "MEDIA_MISSING: {}", asset.path);
         self.prepare_assets(vec![asset.clone()], state, "cut_to_beats")?;
         // Stop in the app ends the run, and with it the analysis.
-        let run = args.run_id.as_deref().filter(|run_id| owns_run(state, run_id).is_ok());
+        let run = args
+            .run_id
+            .as_deref()
+            .filter(|run_id| owns_run(state, run_id).is_ok())
+            .or(state.open_run.as_ref().map(|run| run.run_id.as_str()));
         let stopped = || {
             self.closed.load(Ordering::Acquire)
                 || run.is_some_and(|run_id| self.host.session.check_run(run_id).is_err())
