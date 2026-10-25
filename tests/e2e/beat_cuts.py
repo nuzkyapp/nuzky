@@ -1,7 +1,7 @@
 """Beat cuts in the music clip's inspector: Cut to beat in Project status finds the song's beat as a job, the clip shows
 its beats, bars and drop, three rhythms say what each would cut, and cutting is one undo step that agents' cut_to_beats
 plans the same way."""
-import json, subprocess, time
+import json, re, subprocess, time
 
 import numpy as np
 from PIL import Image
@@ -273,10 +273,12 @@ def beat_cuts_states(r):
     r.check('the click track lies on a music track', click, r.state()['tracks'])
     r.check('Cut to beat is offered', reveal(r))
     r.check('the section shows finding the beat with a bar', wait(lambda: finding(r), 10), beats(r))
+    pill = lambda: r.s.run("return [...document.querySelectorAll('[role=status]')].map((s) => s.innerText.replace(/\\s+/g, ' ')).find((t) => t.includes('Finding the beat')) ?? null")
+    r.check('the top bar lists the job', (p := pill()) and 'Finding the beat in Click track' in p, p)
+    counting = wait(lambda: (p := pill()) and re.search(r'\b\d+%', p) and (b := finding(r)) and '%' in b['text'] and p, 10, 0.1)
+    r.check('the top bar and the section count the percentage while the sound is prepared', counting, [pill(), beats(r)])
     r.s.run(f'{SECTION}?.scrollIntoView({{block: "start"}})')
     r.shot('finding')
-    pill = r.s.run("return [...document.querySelectorAll('[role=status]')].map((s) => s.innerText.replace(/\\s+/g, ' ')).find((t) => t.includes('Finding the beat')) ?? null")
-    r.check('the top bar lists the job', pill and 'Finding the beat in Click track' in pill, pill)
     stop = "[...document.querySelectorAll('button')].find((b) => b.textContent === 'Stop' && b.title.startsWith('Stop finding the beat'))"
     r.check('the top bar job has Stop', r.s.run(f'return !!{stop}'))
     asked = time.time()

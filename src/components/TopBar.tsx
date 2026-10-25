@@ -96,7 +96,9 @@ export function JobIndicator() {
     // Ahead of the audio prepared beside them, so their Stop is there.
     running.find((x) => x.kind === "proxy" || x.kind === "agent" || x.kind === "beats") ??
     running[0];
-  const pct = j.progress > 0 ? `${Math.round(j.progress * 100)}%` : null;
+  // Finding the beat waits while the song's sound is prepared by its own job; that is most of the wait.
+  const progress = j.kind === "beats" && j.progress === 0 ? (jobs[j.id.replace("beats:", "audio:")]?.progress ?? 0) * 0.95 : j.progress;
+  const pct = progress > 0 ? `${Math.round(progress * 100)}%` : null;
   const body = (
     <>
       <Loader2 size={14} className="shrink-0 animate-spin text-accent" />
