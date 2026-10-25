@@ -28,10 +28,10 @@ pub(crate) fn kind(name: &str) -> Result<AssetKind> {
     } else {
         None
     };
-    let stem = name.split('.').next().unwrap_or_default().to_ascii_uppercase();
+    let stem = name.split('.').next().unwrap_or_default().as_bytes().to_ascii_uppercase();
     // Windows opens a device for these names, whatever follows the dot.
-    let device = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
-        || (stem.len() == 4 && ["COM", "LPT"].contains(&&stem[..3]) && stem.as_bytes()[3].is_ascii_digit());
+    let device = matches!(stem.as_slice(), b"CON" | b"PRN" | b"AUX" | b"NUL")
+        || matches!(stem.as_slice(), [b'C', b'O', b'M', digit] | [b'L', b'P', b'T', digit] if digit.is_ascii_digit());
     let plain = (1..=60).contains(&name.len())
         && !name.starts_with('.')
         && !device
@@ -213,6 +213,8 @@ mod tests {
             "con.png",
             "Com1.mp3",
             "lpt9.flac",
+            "a€.png",
+            "💥.png",
         ] {
             assert!(kind(name).is_err(), "{name}");
         }

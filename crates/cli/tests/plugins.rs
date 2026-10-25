@@ -607,25 +607,38 @@ fn a_plugin_places_its_own_picture_which_outlives_it() {
 }
 
 /// A plugin's sound may hold no picture: FFmpeg's look at a file decodes a cover of any size, so an MP3 whose cover is
-/// 8192 × 4096 is refused before that.
+/// 8192 × 4096 is refused before that, and so is MPEG-TS named .mp3, which can add a video after its header.
 #[test]
 fn a_plugins_sound_with_a_huge_cover_is_refused_unread() {
     let f = project();
-    let beep = f.dir.join("beep.mp3");
-    let made = Command::new("ffmpeg")
-        .args(["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "sine=d=1", "-f", "lavfi", "-i"])
-        .args(["color=s=8192x4096:d=1", "-map", "0", "-map", "1", "-c:a", "libmp3lame", "-c:v", "png"])
-        .args(["-frames:v", "1", "-disposition:v", "attached_pic", "-id3v2_version", "3"])
-        .arg(&beep)
-        .status()
-        .unwrap();
-    assert!(made.success());
     let manifest = json!({"nuzkyPlugin": 2, "id": "beep", "name": "Beep", "description": "Beeps",
         "version": "1", "files": ["beep.mp3"]});
-    let files = [("beep.mp3".to_string(), beep)].into_iter().collect();
-    let error =
-        plugins::save_with_files(&manifest, "function run() { return []; }", None, &files).map(drop).unwrap_err();
-    assert!(format!("{error:#}").contains("or one with a picture in it"), "{error:#}");
+    let save = |path: &Path| {
+        let files = [("beep.mp3".to_string(), path.to_path_buf())].into_iter().collect();
+        plugins::save_with_files(&manifest, "function run() { return []; }", None, &files).map(drop)
+    };
+    let ffmpeg = |args: &[&str], out: &Path| {
+        let made = Command::new("ffmpeg").args(["-hide_banner", "-loglevel", "error"]).args(args).arg(out).status();
+        assert!(made.unwrap().success());
+    };
+    let plain = f.dir.join("plain.mp3");
+    ffmpeg(&["-f", "lavfi", "-i", "sine=d=1", "-c:a", "libmp3lame"], &plain);
+    save(&plain).unwrap();
+    let stream = f.dir.join("stream.mp3");
+    ffmpeg(&["-f", "lavfi", "-i", "sine=d=1", "-c:a", "aac", "-f", "mpegts"], &stream);
+    let covered = f.dir.join("covered.mp3");
+    ffmpeg(
+        &["-f", "lavfi", "-i", "sine=d=1", "-f", "lavfi", "-i", "color=s=8192x4096:d=1", "-map", "0", "-map", "1"]
+            .into_iter()
+            .chain(["-c:a", "libmp3lame", "-c:v", "png", "-frames:v", "1", "-disposition:v", "attached_pic"])
+            .chain(["-id3v2_version", "3"])
+            .collect::<Vec<_>>(),
+        &covered,
+    );
+    for refused in [stream, covered] {
+        let error = save(&refused).unwrap_err();
+        assert!(format!("{error:#}").contains("or one with a picture in it"), "{refused:?}: {error:#}");
+    }
 }
 
 /// Copying and checking a plugin's files happens in its job: Run answers at once, and Stop ends the check of a picture

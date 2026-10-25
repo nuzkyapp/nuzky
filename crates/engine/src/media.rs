@@ -486,11 +486,15 @@ pub fn probe(path: &Path, id: String) -> Result<Asset> {
 
 /// The file opened as far as its header, without `avformat_find_stream_info`, which ffmpeg-next's
 /// `input_with_dictionary` runs and which decodes frames.
-fn header(path: &Path) -> Result<ff::format::context::Input> {
+fn header(path: &Path, formats: Option<&str>) -> Result<ff::format::context::Input> {
     init();
     let url = std::ffi::CString::new(path.to_str().context("not a UTF-8 path")?)?;
+    let mut options = input_options();
+    if let Some(formats) = formats {
+        options.set("format_whitelist", formats);
+    }
     unsafe {
-        let (mut context, mut options) = (std::ptr::null_mut(), input_options().disown());
+        let (mut context, mut options) = (std::ptr::null_mut(), options.disown());
         let opened = ff::ffi::avformat_open_input(&mut context, url.as_ptr(), std::ptr::null_mut(), &mut options);
         ff::Dictionary::own(options);
         if opened < 0 {
@@ -500,10 +504,12 @@ fn header(path: &Path) -> Result<ff::format::context::Input> {
     }
 }
 
-/// Whether the file holds sound and nothing else, read from its header. Run it on a sound from outside before
-/// `probe`, whose `avformat_find_stream_info` would decode a cover picture of any size.
+/// Whether the file is MP3, WAV, AAC, FLAC, Ogg or MPEG-4 sound and its header shows nothing but sound. Run it on a
+/// sound from outside before `probe`, whose `avformat_find_stream_info` would decode a picture of any size. These
+/// formats name all their streams in the header, unlike MPEG-TS, which can add a video later.
 pub fn sound_only(path: &Path) -> Result<bool> {
-    let input = header(path).with_context(|| format!("Cannot read {} as a sound", path.display()))?;
+    let formats = Some("mp3,wav,aac,flac,ogg,mov");
+    let input = header(path, formats).with_context(|| format!("Cannot read {} as a sound", path.display()))?;
     let audio = |stream: ff::format::stream::Stream| stream.parameters().medium() == ff::media::Type::Audio;
     Ok(input.streams().count() > 0 && input.streams().all(audio))
 }
@@ -514,7 +520,7 @@ pub fn sound_only(path: &Path) -> Result<bool> {
 /// admit to. Errs when the file is not a picture, any frame fails, there is none, or `cancelled` says so.
 pub fn picture_size(path: &Path, max_pixels: usize, cancelled: impl Fn() -> bool) -> Result<(u32, u32)> {
     let cannot = || format!("Cannot read {} as a picture", path.display());
-    let mut input = header(path).with_context(cannot)?;
+    let mut input = header(path, None).with_context(cannot)?;
     // A picture's demuxer makes its one stream as it opens, so no stream comes later.
     if !is_image_format(&input) || input.streams().count() != 1 {
         bail!("{} is not a picture", path.display());
