@@ -594,6 +594,12 @@ export function ExportDialog() {
               <span className="break-all">Saved to {job.output}</span>
             </div>
           )}
+          {job?.status === "done" && job.message && (
+            <div className="flex items-start gap-2 rounded-xl bg-warn/10 p-3 text-[13px] text-fg" role="alert">
+              <AlertTriangle size={16} className="mt-px shrink-0 text-warn" />
+              <span>{job.message}</span>
+            </div>
+          )}
           {asking && (
             <div className="flex items-start gap-2 rounded-xl bg-warn/10 p-3 text-[13px] text-fg" role="alert">
               <AlertTriangle size={16} className="mt-px shrink-0 text-warn" />

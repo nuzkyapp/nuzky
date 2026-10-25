@@ -35,7 +35,7 @@ A plugin is a small JavaScript file that reads the project and returns edits. Th
 }
 ```
 
-- `nuzkyPlugin` is the plugin API, 2; plugins made for 1 still run, but one that ships files or needs silences, loudness or beats needs 2. `list_plugins` gives the `api` this Nuzky runs, and an older Nuzky refuses a plugin for a newer API with PLUGIN_API_NEWER.
+- `nuzkyPlugin` is the plugin API, 2; plugins made for 1 still run, but one that ships files or effects, or needs silences, loudness or beats, needs 2. `list_plugins` gives the `api` this Nuzky runs, and an older Nuzky refuses a plugin for a newer API with PLUGIN_API_NEWER.
 - `id`: 1 to 40 lowercase letters, digits and dashes; also the folder's name. Saving with the same id replaces the plugin and keeps the old files as plugin.prev.json and plugin.prev.js.
 - `name` (at most 40 characters), `description` (300), `version` (20) and `action`, the verb on its button (24, "Run" when left out), or `actions` for several buttons (A richer panel below). Write them in the user's language, plainly, saying what will happen.
 - `needs`: what the plugin reads beyond the project, any of `"words"` (the transcript), `"silences"`, `"loudness"` and `"beats"` (found in the sound; these three need `nuzkyPlugin` 2). Ask only for what `run` uses: finding them in a long video takes a while the first time.
@@ -217,6 +217,85 @@ A logo in the top right corner for the whole video:
 {"type": "addSticker", "assetId": "<ctx.files[\"logo.png\"].assetId>", "startUs": 0, "durationUs": 12000000, "transform": {"x": 0.35, "y": -0.4, "scale": 0.2, "rotation": 0, "opacity": 1}}
 ```
 
+## Effects
+
+A plugin can also add a look, such as VHS or a glitch, that the user puts on a video or image clip in the Adjust tab under Effects. An effect is one WGSL function in `effects/<id>.wgsl` that Nuzky calls for every pixel of the clip's picture before it places the clip; its result replaces the picture, so the clip's position, crop, shape, background, Adjust, animations and transitions work as without it. The project keeps only the effect's name and settings: on a computer without the plugin the clip is drawn and exported without it, and Nuzky says so.
+
+The manifest lists them in `effects`, at most 8, each with `id` (lowercase letters, digits and dashes, also the file's name), `name` (at most 40 characters) and `params`: `number`, `toggle` and `color` entries written as inputs are. A plugin that only adds effects needs no plugin.js, so it has no button and cannot run after import or before export, and its manifest has no `needs`, `inputs`, `sections`, `actions` or `files`, as the VHS example:
+
+```json
+{
+  "nuzkyPlugin": 2,
+  "id": "vhs",
+  "name": "VHS",
+  "description": "Makes a clip look like a worn video tape: bleeding colour, scanlines and grain.",
+  "version": "1.0.0",
+  "effects": [
+    {
+      "id": "vhs",
+      "name": "VHS",
+      "params": [
+        { "type": "number", "id": "amount", "label": "Amount", "min": 0, "max": 1, "step": 0.05, "default": 0.6 },
+        { "type": "toggle", "id": "lines", "label": "Scanlines", "default": true },
+        { "type": "color", "id": "tint", "label": "Tint", "default": "#FFC890" }
+      ]
+    }
+  ]
+}
+```
+
+The function is `fn effect(p: Pixel) -> vec4<f32>` and returns straight-alpha RGBA, 0 to 1; Nuzky clamps it and makes NaN transparent. `Pixel` has:
+
+- `uv`: where in the clip, 0..1 from its top left, upright as the clip shows, also on a rotated or mirrored phone video.
+- `color`: the clip's colour there, straight alpha, already converted from HDR.
+- `size`: the clip's size in canvas pixels, the same in the preview and the export. Work in `p.uv * p.size` for anything measured in pixels, so lines and grain do not change with the preview's size.
+- `time`: seconds since the clip started, on the timeline, so playback, scrubbing and export agree.
+- `seed`: a number of the clip's own, the same wherever it is drawn.
+- `params`: 16 floats, the params in manifest order: a number or toggle (0 or 1) takes one slot, a colour three (red, green, blue, 0..1). Nuzky keeps each value within the manifest's bounds.
+
+Nuzky's helpers: `nuzky_source(uv)` reads the clip's picture at any point, clamped to its edges; `nuzky_hash(vec3<u32>) -> u32`, `nuzky_random(vec3<u32>) -> f32` (0..1) and `nuzky_noise(p: vec2<f32>, seed: u32) -> f32` (smooth, 0..1, one cell per unit) give noise that is the same on every GPU. Use them, not `sin` tricks, for grain.
+
+What Nuzky refuses, so no effect can stall or crash the preview:
+
+- Loops (`for`, `while`, `loop`): write the few steps out, or call a function for each.
+- Textures, buffers, uniforms and every global but `var<private>`; read the picture only through `nuzky_source`, at most 16 times per pixel, counting the calls inside your own functions.
+- More than 4096 operations per pixel with what it calls, variables over 1 KB, `discard`, derivatives (`dpdx`), barriers, atomics, `override` and entry points of its own.
+- Names that start with `nuzky_`, and a struct named `Pixel`: they are Nuzky's.
+- A file over 16 KB.
+
+An effect that passes and still takes the GPU longer than 2 s in the preview (10 s in an export) is dropped for the rest of the session, and the clip is drawn without it. Whole-frame effects, such as one over every clip at once, and wide blurs are out of reach.
+
+The VHS example (`examples/vhs` beside this guide):
+
+```wgsl
+// A worn video tape: red and blue drift apart, every other row is darker, and grain changes every frame.
+// params: 0 amount, 1 scanlines (0 or 1), 2..4 tint (red, green, blue).
+fn effect(p: Pixel) -> vec4<f32> {
+    let amount = p.params[0];
+    let tint = vec3<f32>(p.params[2], p.params[3], p.params[4]);
+    // Up to 4 canvas pixels sideways, so the preview and the export drift alike.
+    let shift = vec2<f32>(4.0 * amount / p.size.x, 0.0);
+    var rgb = vec3<f32>(nuzky_source(p.uv + shift).r, p.color.g, nuzky_source(p.uv - shift).b);
+    // Bands 6 canvas pixels high across the picture as shown.
+    let row = u32(floor(p.uv.y * p.size.y / 6.0));
+    rgb *= 1.0 - p.params[1] * amount * 0.45 * f32(row % 2u);
+    // Grain from the clip's seed and the frame, the same on every GPU.
+    let frame = u32(p.time * 30.0);
+    let cell = vec2<u32>(p.uv * p.size / 2.0);
+    rgb += (nuzky_random(vec3<u32>(cell, frame ^ p.seed)) - 0.5) * 0.15 * amount;
+    rgb = mix(rgb, rgb * tint, 0.4 * amount);
+    return vec4<f32>(rgb, p.color.a);
+}
+```
+
+Save the effects with the manifest: `save_plugin(manifest, effects: {"vhs": "<the WGSL>"})`. PLUGIN_BROKEN names the file, line and column (`effects/vhs.wgsl:12:5: an effect cannot use loops…`). Then put it on a clip in your run and look at it:
+
+```json
+{"type": "setEffects", "clipId": "clip-1", "effects": [{"plugin": "vhs", "effect": "vhs", "name": "VHS", "version": "1.0.0", "params": {"amount": 0.8, "lines": true, "tint": "#FFC890"}}]}
+```
+
+`setEffects` replaces the clip's effects, at most four, drawn in order; an empty list removes them. `inspect_frames` shows the result; `get_state` lists in `effect_issues` an effect the project is drawn without, with why.
+
 ## Try it
 
 1. Read `get_state` so you know the project the plugin will meet, and write the plugin for any project, not only this one.
@@ -229,7 +308,8 @@ A logo in the top right corner for the whole video:
 ## Errors
 
 - PLUGIN_NOT_FOUND: no plugin with that id; `list_plugins`.
-- PLUGIN_BROKEN: plugin.json or plugin.js is invalid, or one of its files is missing, a link or not the picture or sound its name says; the message says where.
+- PLUGIN_BROKEN: plugin.json, plugin.js or an effect's WGSL is invalid, or one of its files is missing, a link or not the picture or sound its name says; the message says where.
+- PLUGIN_NO_SCRIPT: the plugin only adds effects, so there is nothing to run; put its effects on a clip with `setEffects`.
 - PLUGIN_API_NEWER: it needs a newer Nuzky. PLUGIN_API_OLD: it was made for an older one.
 - INVALID_INPUT: `<input> must be …`, outside its bounds or options, or not an input of the plugin; `"<label>": the one you chose is gone. Choose another.`, a dynamic row gone since the preview, named by the input's label; or an action the plugin does not have.
 - TRANSCRIPT_MISSING: it needs the words; `transcribe` first.

@@ -8,13 +8,14 @@ use std::time::Duration;
 use anyhow::{Result, bail};
 
 use crate::effects::{max_animation_scale, source_time, transform_at, transition_at, transition_window};
-use crate::gpu::{Draw, Fill, Gpu, Image, Layer, Mask, Matte};
+use crate::gpu::{Draw, EffectPass, Fill, Gpu, GpuFault, Image, Layer, Mask, Matte};
 use crate::matte::{Mattes, SIDE};
 use crate::media::{RgbaFrame, Transfer, VideoDecoder, decode_size, file_key, orient};
 use crate::model::{
-    Adjust, Asset, AssetKind, Background, Clip, ClipContent, Crop, MAX_BORDER_WIDTH, Project, Track, TrackKind,
-    Transform, TransitionKind, key_words, parse_color, spoken_word,
+    Adjust, Asset, AssetKind, Background, Clip, ClipContent, Crop, MAX_BORDER_WIDTH, MAX_CLIP_EFFECTS, Project, Track,
+    TrackKind, Transform, TransitionKind, key_words, parse_color, spoken_word,
 };
+use crate::plugin_effects::{self, Lookup};
 use crate::text::{TextRenderer, TextStats};
 use crate::worker::VideoWorker;
 
@@ -69,6 +70,14 @@ pub struct Renderer {
     /// Background images, upright, by the file as it is now (`media::file_key`), so an image saved again is read again.
     pictures: HashMap<String, Image>,
     pub late_layers: u64,
+    /// The user's plugins, whose effects clips may name; `None` draws every clip without its effects.
+    plugins: Option<PathBuf>,
+    gpu_timeout: Duration,
+    /// The effects drawn in this frame: key, name and file.
+    frame_effects: Vec<(u64, String, String)>,
+    /// Names of the effects the last frame was drawn without, and of all since the renderer started.
+    skipped: Vec<String>,
+    skipped_ever: Vec<String>,
 }
 
 /// What a renderer draws for a clip with a background whose person matte is not made yet.
@@ -302,7 +311,103 @@ impl Renderer {
             behind: HashMap::new(),
             pictures: HashMap::new(),
             late_layers: 0,
+            plugins: plugin_effects::plugins_dir(),
+            gpu_timeout: Duration::from_secs(10),
+            frame_effects: Vec::new(),
+            skipped: Vec::new(),
+            skipped_ever: Vec::new(),
         })
+    }
+
+    /// Where the plugins whose effects clips name are; Nuzky's own data folder unless set.
+    pub fn use_plugins(&mut self, dir: Option<PathBuf>) {
+        self.plugins = dir;
+    }
+
+    /// How long a frame with plugin effects may take on the GPU before they count as broken: 10 s unless set.
+    pub fn set_gpu_timeout(&mut self, timeout: Duration) {
+        self.gpu_timeout = timeout;
+        self.gpu.effect_timeout = timeout;
+    }
+
+    /// The effects the last frame was drawn without, missing or broken, by name.
+    pub fn skipped_effects(&self) -> &[String] {
+        &self.skipped
+    }
+
+    /// Every effect a frame of this renderer was drawn without, as an export reports it.
+    pub fn effects_drawn_without(&self) -> &[String] {
+        &self.skipped_ever
+    }
+
+    #[doc(hidden)]
+    pub fn lose_gpu(&self) {
+        self.gpu.lose_device();
+    }
+
+    fn skip(&mut self, name: String) {
+        if !self.skipped.contains(&name) {
+            self.skipped.push(name.clone());
+        }
+        if !self.skipped_ever.contains(&name) {
+            self.skipped_ever.push(name);
+        }
+    }
+
+    /// The clip's effects that draw on this computer; the others are skipped by name.
+    fn effect_passes(&mut self, clip: &Clip, size: (f32, f32), t_us: i64) -> Vec<EffectPass> {
+        let mut passes = Vec::new();
+        for effect in clip.effects.iter().take(MAX_CLIP_EFFECTS) {
+            let name = plugin_effects::display_name(effect);
+            let found = self.plugins.as_deref().map(|dir| plugin_effects::lookup(dir, &effect.plugin, &effect.effect));
+            let Some(Lookup::Ready(loaded)) = found else {
+                self.skip(name);
+                continue;
+            };
+            if let Err(why) = self.gpu.prepare_effect(loaded.key, &loaded.shader) {
+                plugin_effects::mark_broken(loaded.key, &format!("effects/{}.wgsl: {why}", effect.effect));
+                self.skip(name);
+                continue;
+            }
+            passes.push(EffectPass {
+                key: loaded.key,
+                size: [size.0, size.1],
+                time: (t_us - clip.start_us).max(0) as f32 / 1e6,
+                seed: plugin_effects::seed(&clip.id),
+                params: loaded.def.pack(&effect.params),
+            });
+            self.frame_effects.push((loaded.key, name, format!("effects/{}.wgsl", effect.effect)));
+        }
+        passes
+    }
+
+    /// Draws the frame; when the GPU fails on it, the device is replaced, and a frame with effects marks them
+    /// broken for every renderer and is drawn again without them.
+    fn composite(&mut self, w: u32, h: u32, background: [f32; 4], draws: &mut [Draw]) -> Result<Vec<u8>> {
+        let error = match self.gpu.render(w, h, background, draws) {
+            Err(error) if error.downcast_ref::<GpuFault>().is_some() => error,
+            done => return done,
+        };
+        log::error!("Drawing a frame failed on the GPU: {error:#}");
+        let mut fresh = Gpu::new()?;
+        fresh.effect_timeout = self.gpu_timeout;
+        let old = std::mem::replace(&mut self.gpu, fresh);
+        // A device stuck on a shader may block while it is dropped; the frame does not wait for it.
+        std::thread::Builder::new().name("gpu-end".into()).spawn(move || drop(old)).ok();
+        if self.frame_effects.is_empty() {
+            return Err(error);
+        }
+        for (key, name, file) in std::mem::take(&mut self.frame_effects) {
+            plugin_effects::mark_broken(key, &format!("{file}: {error}"));
+            self.skip(name);
+        }
+        for draw in draws.iter_mut() {
+            match draw {
+                Draw::Layer(layer) => layer.effects.clear(),
+                Draw::Transition(pair) => pair.iter_mut().for_each(|layer| layer.effects.clear()),
+            }
+        }
+        self.gpu.render(w, h, background, draws)
     }
 
     /// Reads person mattes from `cache_dir`. Without it a clip with a background fails with `MATTE_MISSING`.
@@ -346,6 +451,8 @@ impl Renderer {
     ) -> Result<Vec<u8>> {
         self.drop_stale_workers(project);
         self.needed.clear();
+        self.skipped.clear();
+        self.frame_effects.clear();
         for track in &project.tracks {
             let visible = visible_clips(track, t_us).map(|v| v.clip);
             self.needed.extend(visible.chain(upcoming(track, t_us)).map(|clip| clip.id.clone()));
@@ -411,7 +518,7 @@ impl Renderer {
             .map(|layer| Arc::as_ptr(&layer.image.data) as usize)
             .collect();
         self.behind.retain(|key, _| behind_used.contains(&key.0));
-        self.gpu.render(out_w, out_h, parse_color(&canvas.background), &draws)
+        self.composite(out_w, out_h, parse_color(&canvas.background), &mut draws)
     }
 
     /// Decoders of removed or relinked clips go at once, others after idling. Runs before drawing,
@@ -477,6 +584,7 @@ impl Renderer {
             transfer: layer.transfer,
             mask,
             matte: None,
+            effects: Vec::new(),
         }
     }
 
@@ -543,6 +651,7 @@ impl Renderer {
         let Some(place) = placement(project, visible, t_us, k, &mut self.text) else { return Ok(None) };
         let corners = placement_quad(project, &place, k);
         let mut matte = None;
+        let mut effects = Vec::new();
         let (image, (rotation, mirror), adjust, transfer) = match &clip.content {
             ClipContent::Media { asset_id, adjust, background, .. } => {
                 let Some(asset) = project.asset(asset_id) else { return Ok(None) };
@@ -574,6 +683,7 @@ impl Renderer {
                     matte = self.matte_for(project, asset, &frame, background, place.size)?;
                 }
                 let image = Image { width: frame.width, height: frame.height, data: frame.data };
+                effects = self.effect_passes(clip, place.size, t_us);
                 (image, (asset.rotation, asset.mirror), *adjust, frame.transfer)
             }
             ClipContent::Text { .. } => {
@@ -593,6 +703,7 @@ impl Renderer {
             transfer,
             mask: layer_mask(project, clip, &place.transform, k),
             matte,
+            effects,
         }))
     }
 
@@ -772,6 +883,7 @@ pub(crate) fn solid(image: &Image, w: u32, h: u32) -> Layer {
         transfer: Transfer::Sdr,
         mask: None,
         matte: None,
+        effects: Vec::new(),
     }
 }
 

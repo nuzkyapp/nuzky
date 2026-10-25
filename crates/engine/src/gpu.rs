@@ -1,13 +1,58 @@
 //! Offscreen wgpu compositor shared by preview and export.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::{Context as _, Result};
 use wgpu::util::DeviceExt;
 
 use crate::media::Transfer;
 use crate::model::Adjust;
+
+/// HDR to SDR conversion, shared by the compositor and plugin effects, whose own names never start with `nuzky_`.
+pub(crate) const HDR_WGSL: &str = r#"
+const nuzky_bt2020_luma = vec3<f32>(0.2627, 0.678, 0.0593);
+// Linear BT.2020 to BT.709 primaries; columns are the BT.2020 red, green and blue.
+const nuzky_bt2020_to_bt709 = mat3x3<f32>(
+    vec3<f32>(1.6605, -0.1246, -0.0182),
+    vec3<f32>(-0.5876, 1.1329, -0.1006),
+    vec3<f32>(-0.0728, -0.0083, 1.1187),
+);
+// HDR scene light to SDR: luminance to this power, with a toe that keeps near-black deep.
+const nuzky_hdr_power = 0.93;
+const nuzky_hdr_toe = 0.0014;
+
+fn nuzky_pq_to_nits(e: vec3<f32>) -> vec3<f32> {
+    let p = pow(e, vec3<f32>(1.0 / 78.84375));
+    return 10000.0 * pow(max(p - 0.8359375, vec3<f32>(0.0)) / (18.8515625 - 18.6875 * p), vec3<f32>(1.0 / 0.1593017578125));
+}
+
+// PQ or HLG BT.2020 colour to SDR BT.709, encoded for a BT.1886 display like SDR video.
+//
+// iPhones record HLG, so HDR shows the way Apple's own SDR conversion (AVFoundation) shows HLG, from scene
+// light. The power and the toe are fitted to its output, 2/255 off on average on skin tones. Tone mapping
+// the light of a 1000 nit display instead shows midtones about 17 levels brighter and less saturated than
+// Apple's, so footage looks flat next to the phone. PQ (HDR10 from Android phones) first becomes the scene
+// light it shows on a 1000 nit display, as BT.2100 converts PQ to HLG, so one scene shot on either phone
+// looks the same; it clips above 1000 nits. One gain from luminance scales the colour, so hue and
+// saturation stay.
+fn nuzky_hdr_to_sdr(rgb: vec3<f32>, transfer: f32) -> vec3<f32> {
+    let e = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+    var scene: vec3<f32>;
+    if transfer < 1.5 {
+        // The inverse of HLG's OOTF (system gamma 1.2) on display light relative to 1000 nits.
+        let display = nuzky_pq_to_nits(e) / 1000.0;
+        scene = display * pow(max(dot(display, nuzky_bt2020_luma), 1e-6), -1.0 / 6.0);
+    } else {
+        scene = select((exp((e - 0.55991073) / 0.17883277) + 0.28466892) / 12.0, e * e / 3.0, e <= vec3<f32>(0.5));
+    }
+    let y = max(dot(scene, nuzky_bt2020_luma), 1e-6);
+    let lum = pow(y, nuzky_hdr_power);
+    let sdr = clamp(nuzky_bt2020_to_bt709 * (scene * (lum / y * lum / (lum + nuzky_hdr_toe))), vec3<f32>(0.0), vec3<f32>(1.0));
+    return pow(sdr, vec3<f32>(1.0 / 2.4));
+}
+"#;
 
 const SHADER: &str = r#"
 struct Layer {
@@ -68,47 +113,6 @@ fn fit(rgb: vec3<f32>) -> vec3<f32> {
     let lo = min(min(rgb.r, rgb.g), rgb.b);
     let k = min(1.0, min((1.0 - y) / max(hi - y, 1e-6), y / max(y - lo, 1e-6)));
     return y + (rgb - y) * k;
-}
-
-const BT2020_LUMA = vec3<f32>(0.2627, 0.678, 0.0593);
-// Linear BT.2020 to BT.709 primaries; columns are the BT.2020 red, green and blue.
-const BT2020_TO_BT709 = mat3x3<f32>(
-    vec3<f32>(1.6605, -0.1246, -0.0182),
-    vec3<f32>(-0.5876, 1.1329, -0.1006),
-    vec3<f32>(-0.0728, -0.0083, 1.1187),
-);
-// HDR scene light to SDR: luminance to this power, with a toe that keeps near-black deep.
-const HDR_POWER = 0.93;
-const HDR_TOE = 0.0014;
-
-fn pq_to_nits(e: vec3<f32>) -> vec3<f32> {
-    let p = pow(e, vec3<f32>(1.0 / 78.84375));
-    return 10000.0 * pow(max(p - 0.8359375, vec3<f32>(0.0)) / (18.8515625 - 18.6875 * p), vec3<f32>(1.0 / 0.1593017578125));
-}
-
-// PQ or HLG BT.2020 colour to SDR BT.709, encoded for a BT.1886 display like SDR video.
-//
-// iPhones record HLG, so HDR shows the way Apple's own SDR conversion (AVFoundation) shows HLG, from scene
-// light. The power and the toe are fitted to its output, 2/255 off on average on skin tones. Tone mapping
-// the light of a 1000 nit display instead shows midtones about 17 levels brighter and less saturated than
-// Apple's, so footage looks flat next to the phone. PQ (HDR10 from Android phones) first becomes the scene
-// light it shows on a 1000 nit display, as BT.2100 converts PQ to HLG, so one scene shot on either phone
-// looks the same; it clips above 1000 nits. One gain from luminance scales the colour, so hue and
-// saturation stay.
-fn hdr_to_sdr(rgb: vec3<f32>, transfer: f32) -> vec3<f32> {
-    let e = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
-    var scene: vec3<f32>;
-    if transfer < 1.5 {
-        // The inverse of HLG's OOTF (system gamma 1.2) on display light relative to 1000 nits.
-        let display = pq_to_nits(e) / 1000.0;
-        scene = display * pow(max(dot(display, BT2020_LUMA), 1e-6), -1.0 / 6.0);
-    } else {
-        scene = select((exp((e - 0.55991073) / 0.17883277) + 0.28466892) / 12.0, e * e / 3.0, e <= vec3<f32>(0.5));
-    }
-    let y = max(dot(scene, BT2020_LUMA), 1e-6);
-    let lum = pow(y, HDR_POWER);
-    let sdr = clamp(BT2020_TO_BT709 * (scene * (lum / y * lum / (lum + HDR_TOE))), vec3<f32>(0.0), vec3<f32>(1.0));
-    return pow(sdr, vec3<f32>(1.0 / 2.4));
 }
 
 fn premultiplied_texel(p: vec2<i32>, size: vec2<i32>) -> vec4<f32> {
@@ -229,7 +233,7 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         // Tone mapping and adjustments work on straight colour.
         rgb = select(vec3<f32>(0.0), rgb / c.a, c.a > 0.0);
         if hdr {
-            rgb = hdr_to_sdr(rgb, layer.opacity.y);
+            rgb = nuzky_hdr_to_sdr(rgb, layer.opacity.y);
         }
         if adjusting {
             // Every control scales or bends the picture instead of adding a constant to it, so black stays black
@@ -349,6 +353,64 @@ pub struct Layer {
     pub transfer: Transfer,
     pub mask: Option<Mask>,
     pub matte: Option<Box<Matte>>,
+    /// Plugin effects the image goes through first, in order; each must be prepared (`Gpu::prepare_effect`).
+    pub effects: Vec<EffectPass>,
+}
+
+/// One plugin effect drawn over a layer's image (`crate::plugin_effects`).
+#[derive(Clone)]
+pub struct EffectPass {
+    pub key: u64,
+    /// The layer's upright size in canvas pixels, the same in the preview and the export.
+    pub size: [f32; 2],
+    /// Seconds since the clip started, on the timeline.
+    pub time: f32,
+    pub seed: u32,
+    pub params: [f32; 16],
+}
+
+/// Why a frame failed on the GPU itself, so what it drew must not be drawn again on this device.
+#[derive(Debug)]
+pub enum GpuFault {
+    Timeout(Duration),
+    Lost(String),
+    Error(String),
+}
+
+impl std::fmt::Display for GpuFault {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Timeout(limit) => write!(f, "the GPU took longer than {} s to draw it", limit.as_secs_f32()),
+            Self::Lost(why) => write!(f, "the GPU stopped while drawing it ({why})"),
+            Self::Error(why) => write!(f, "the GPU refused to draw it ({why})"),
+        }
+    }
+}
+
+impl std::error::Error for GpuFault {}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct EffectUniform {
+    to_texture: [f32; 4],
+    to_upright: [f32; 4],
+    offsets: [f32; 4],
+    /// Upright size in canvas pixels, time, transfer of the image read.
+    info: [f32; 4],
+    seed: [u32; 4],
+    params: [[f32; 4]; 4],
+}
+
+/// The affine map from the layer's upright (u, v) to its texture and back, as columns and offsets.
+fn orientation(rotation: u32, mirror: bool) -> ([f32; 4], [f32; 4], [f32; 4]) {
+    let o = texture_uv(0.0, 0.0, rotation, mirror);
+    let x = texture_uv(1.0, 0.0, rotation, mirror);
+    let y = texture_uv(0.0, 1.0, rotation, mirror);
+    let (ax, ay) = ([x[0] - o[0], x[1] - o[1]], [y[0] - o[0], y[1] - o[1]]);
+    // A rotation with a mirror is orthonormal: its inverse is its transpose.
+    let back = [ax[0], ay[0], ax[1], ay[1]];
+    let back_offset = [-(ax[0] * o[0] + ax[1] * o[1]), -(ay[0] * o[0] + ay[1] * o[1])];
+    ([ax[0], ax[1], ay[0], ay[1]], back, [o[0], o[1], back_offset[0], back_offset[1]])
 }
 
 /// The person cut out of a layer by a matte, over a fill.
@@ -409,6 +471,8 @@ pub(crate) fn texture_uv(u: f32, v: f32, rotation: u32, mirror: bool) -> [f32; 2
     }
 }
 
+// A frame has a few draws, built anew each frame; boxing a transition's pair would only add an allocation.
+#[allow(clippy::large_enum_variant)]
 pub enum Draw {
     Layer(Layer),
     /// Both layers contribute premultiplied colour to a transparent intermediate.
@@ -437,6 +501,15 @@ pub struct Gpu {
     additive: wgpu::RenderPipeline,
     transitions: Vec<TransitionTarget>,
     layout: wgpu::BindGroupLayout,
+    effect_layout: wgpu::BindGroupLayout,
+    effect_pipelines: HashMap<u64, wgpu::RenderPipeline>,
+    /// Two textures per layer with effects in a frame, which its passes draw into in turn.
+    effect_targets: Vec<[wgpu::Texture; 2]>,
+    /// How long a frame with effects may take on the GPU.
+    pub effect_timeout: Duration,
+    /// Errors wgpu reported outside an error scope during the frame, which by default would panic.
+    errors: Arc<Mutex<Vec<String>>>,
+    lost: Arc<Mutex<Option<String>>>,
     target: Option<Target>,
     /// Textures from the previous frame, keyed by the image allocation they hold.
     textures: HashMap<usize, (Arc<Vec<u8>>, wgpu::Texture)>,
@@ -477,10 +550,21 @@ impl Gpu {
             adapter.request_device(&wgpu::DeviceDescriptor { label: Some("nuzky"), ..Default::default() }),
         )
         .context("Cannot open GPU device")?;
+        let errors = Arc::new(Mutex::new(Vec::new()));
+        let reported = errors.clone();
+        device.on_uncaptured_error(Arc::new(move |error: wgpu::Error| {
+            log::error!("GPU error: {error}");
+            reported.lock().unwrap().push(error.to_string());
+        }));
+        let lost = Arc::new(Mutex::new(None));
+        let gone = lost.clone();
+        device.set_device_lost_callback(move |reason, message| {
+            *gone.lock().unwrap() = Some(format!("{reason:?}: {message}"));
+        });
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("compositor"),
-            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
+            source: wgpu::ShaderSource::Wgsl(format!("{SHADER}{HDR_WGSL}").into()),
         });
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("layer"),
@@ -542,6 +626,22 @@ impl Gpu {
             operation: wgpu::BlendOperation::Add,
         };
         let additive = make_pipeline(wgpu::BlendState { color: component, alpha: component });
+        let effect_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("effect"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                texture_entry(1),
+            ],
+        });
         let blank = device.create_texture_with_data(
             &queue,
             &wgpu::TextureDescriptor {
@@ -564,6 +664,12 @@ impl Gpu {
             additive,
             transitions: Vec::new(),
             layout,
+            effect_layout,
+            effect_pipelines: HashMap::new(),
+            effect_targets: Vec::new(),
+            effect_timeout: Duration::from_secs(10),
+            errors,
+            lost,
             target: None,
             textures: HashMap::new(),
             blank,
@@ -705,7 +811,13 @@ impl Gpu {
         let uniform = LayerUniform {
             corners,
             local,
-            opacity: [layer.opacity.clamp(0.0, 1.0), layer.transfer as u8 as f32, 0.0, 0.0],
+            // Effects draw SDR.
+            opacity: [
+                layer.opacity.clamp(0.0, 1.0),
+                if layer.effects.is_empty() { layer.transfer as u8 as f32 } else { 0.0 },
+                0.0,
+                0.0,
+            ],
             adjust: [a.brightness, a.contrast, a.saturation, a.temperature],
             effects: [a.vignette, layer.blur, premult as u8 as f32, a.fade],
             grading: [a.exposure, a.tint, a.highlights, a.shadows],
@@ -716,12 +828,20 @@ impl Gpu {
             matte,
             fill,
         };
-        let buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("layer"),
-            contents: bytemuck::bytes_of(&uniform),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let buffer = self.uniform_buffer("layer", bytemuck::bytes_of(&uniform));
         self.bind_group(&buffer, textures.map(|t| t.create_view(&Default::default())))
+    }
+
+    /// Written through the queue: a buffer mapped at creation panics in wgpu on a lost device.
+    fn uniform_buffer(&self, label: &str, contents: &[u8]) -> wgpu::Buffer {
+        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(label),
+            size: contents.len() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        self.queue.write_buffer(&buffer, 0, contents);
+        buffer
     }
 
     fn bind_group(&self, buffer: &wgpu::Buffer, views: [wgpu::TextureView; 3]) -> wgpu::BindGroup {
@@ -738,8 +858,15 @@ impl Gpu {
         })
     }
 
-    /// The textures a layer draws from, keeping each one's image for the next frame.
-    fn layer_textures(&mut self, layer: &Layer, used: &mut Vec<usize>) -> Result<[wgpu::Texture; 3]> {
+    /// The textures a layer draws from, keeping each one's image for the next frame. Its effects draw into the
+    /// next pair of effect textures, whose last one it then draws from.
+    fn layer_textures(
+        &mut self,
+        layer: &Layer,
+        used: &mut Vec<usize>,
+        encoder: &mut wgpu::CommandEncoder,
+        effect_slots: &mut usize,
+    ) -> Result<[wgpu::Texture; 3]> {
         let mut images = [Some(&layer.image), None, None];
         if let Some(matte) = &layer.matte {
             images[1] = Some(&matte.alpha);
@@ -755,7 +882,149 @@ impl Gpu {
                 used.push(Arc::as_ptr(&image.data) as usize);
             }
         }
+        if !layer.effects.is_empty() {
+            textures[0] = self.draw_effects(encoder, layer, textures[0].clone(), *effect_slots)?;
+            *effect_slots += 1;
+        }
         Ok(textures)
+    }
+
+    /// Compiles an effect's shader once per device. A shader the GPU refuses fails here, inside error scopes, so
+    /// wgpu never panics on it.
+    pub fn prepare_effect(&mut self, key: u64, shader: &str) -> std::result::Result<(), String> {
+        if self.effect_pipelines.contains_key(&key) {
+            return Ok(());
+        }
+        let internal = self.device.push_error_scope(wgpu::ErrorFilter::Internal);
+        let memory = self.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+        let validation = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let module = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("effect"),
+            source: wgpu::ShaderSource::Wgsl(shader.into()),
+        });
+        let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("effect"),
+            bind_group_layouts: &[Some(&self.effect_layout)],
+            immediate_size: 0,
+        });
+        let pipeline = self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("effect"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("nuzky_vs"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleStrip, ..Default::default() },
+            depth_stencil: None,
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("nuzky_fs"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let errors = [validation.pop(), memory.pop(), internal.pop()].map(pollster::block_on);
+        if let Some(error) = errors.into_iter().flatten().next() {
+            return Err(format!("the GPU cannot build it: {error}"));
+        }
+        self.effect_pipelines.insert(key, pipeline);
+        Ok(())
+    }
+
+    fn draw_effects(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        layer: &Layer,
+        image: wgpu::Texture,
+        slot: usize,
+    ) -> Result<wgpu::Texture> {
+        let (w, h) = (image.width(), image.height());
+        if self.effect_targets.get(slot).map(|pair| (pair[0].width(), pair[0].height())) != Some((w, h)) {
+            let make = || {
+                self.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("effect"),
+                    size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                })
+            };
+            let pair = [make(), make()];
+            if slot == self.effect_targets.len() {
+                self.effect_targets.push(pair);
+            } else {
+                self.effect_targets[slot] = pair;
+            }
+        }
+        let (to_texture, to_upright, offsets) = orientation(layer.uv_rotation, layer.mirror);
+        let mut source = image;
+        let mut transfer = layer.transfer as u8 as f32;
+        for (i, effect) in layer.effects.iter().enumerate() {
+            let pipeline =
+                self.effect_pipelines.get(&effect.key).context("An effect was drawn before it was prepared")?;
+            let target = self.effect_targets[slot][i % 2].clone();
+            let p = effect.params;
+            let uniform = EffectUniform {
+                to_texture,
+                to_upright,
+                offsets,
+                info: [effect.size[0], effect.size[1], effect.time, transfer],
+                seed: [effect.seed, 0, 0, 0],
+                params: std::array::from_fn(|row| std::array::from_fn(|column| p[row * 4 + column])),
+            };
+            let buffer = self.uniform_buffer("effect", bytemuck::bytes_of(&uniform));
+            let input = source.create_view(&Default::default());
+            let group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("effect"),
+                layout: &self.effect_layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&input) },
+                ],
+            });
+            let view = target.create_view(&Default::default());
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("effect"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &group, &[]);
+            pass.draw(0..4, 0..1);
+            drop(pass);
+            source = target;
+            transfer = 0.0;
+        }
+        Ok(source)
+    }
+
+    /// Ends the device as a crashed driver would, for tests of what happens then.
+    #[doc(hidden)]
+    pub fn lose_device(&self) {
+        self.device.destroy();
     }
 
     fn draw_pass(
@@ -800,16 +1069,17 @@ impl Gpu {
         let mut bind_groups = Vec::new();
         let mut encoder = self.device.create_command_encoder(&Default::default());
         let mut transition_index = 0;
+        let mut effect_slots = 0;
         for draw in layers {
             match draw {
                 Draw::Layer(layer) => {
-                    let textures = self.layer_textures(layer, &mut used)?;
+                    let textures = self.layer_textures(layer, &mut used, &mut encoder, &mut effect_slots)?;
                     bind_groups.push(self.bind(layer, textures.each_ref(), w, h, false));
                 }
                 Draw::Transition(pair) => {
                     let mut groups = Vec::new();
                     for layer in pair {
-                        let textures = self.layer_textures(layer, &mut used)?;
+                        let textures = self.layer_textures(layer, &mut used, &mut encoder, &mut effect_slots)?;
                         groups.push(self.bind(layer, textures.each_ref(), w, h, false));
                     }
                     if self.transitions.get(transition_index).map(|t| (t.texture.width(), t.texture.height()))
@@ -897,8 +1167,25 @@ impl Gpu {
         slice.map_async(wgpu::MapMode::Read, move |r| {
             tx.send(r).ok();
         });
-        self.device.poll(wgpu::PollType::wait_indefinitely()).context("GPU poll failed")?;
-        rx.recv()?.context("Mapping readback buffer failed")?;
+        // A plugin's shader passed Nuzky's checks, but a driver may still take too long on it.
+        let timeout = (effect_slots > 0).then_some(self.effect_timeout);
+        match self.device.poll(wgpu::PollType::Wait { submission_index: None, timeout }) {
+            Err(wgpu::PollError::Timeout) => return Err(GpuFault::Timeout(self.effect_timeout).into()),
+            polled => polled.context("GPU poll failed")?,
+        };
+        if let Some(why) = self.lost.lock().unwrap().clone() {
+            return Err(GpuFault::Lost(why).into());
+        }
+        let errors = std::mem::take(&mut *self.errors.lock().unwrap());
+        if !errors.is_empty() {
+            return Err(GpuFault::Error(errors.join("; ")).into());
+        }
+        let mapped = rx.recv_timeout(timeout.unwrap_or(Duration::from_secs(60)));
+        let mapped = mapped.map_err(|_| GpuFault::Lost("no answer from the GPU".into()))?;
+        if mapped.is_err() && effect_slots > 0 {
+            return Err(GpuFault::Lost("the frame could not be read back".into()).into());
+        }
+        mapped.context("Mapping readback buffer failed")?;
         let mut out = Vec::with_capacity((w * h * 4) as usize);
         {
             let data = slice.get_mapped_range().context("Reading back the frame failed")?;
@@ -932,6 +1219,7 @@ mod tests {
             transfer: Transfer::Sdr,
             mask: None,
             matte: None,
+            effects: Vec::new(),
         };
         let draws = [Draw::Transition([layer.clone(), layer])];
         let first = gpu.render(2, 2, [0.0; 4], &draws).unwrap();
@@ -965,6 +1253,7 @@ mod tests {
             transfer: Transfer::Sdr,
             mask: None,
             matte: None,
+            effects: Vec::new(),
         };
         for adjust in [false, true] {
             layer.adjust.contrast = if adjust { 0.2 } else { 0.0 };
@@ -998,6 +1287,7 @@ mod tests {
                 transfer: Transfer::Sdr,
                 mask: None,
                 matte: None,
+                effects: Vec::new(),
             };
             assert_eq!(gpu.render(1, 1, [0.0; 4], &[Draw::Layer(layer)]).unwrap(), [80, 100, 120, 255]);
         };
@@ -1039,6 +1329,7 @@ mod tests {
             transfer: Transfer::Sdr,
             mask: None,
             matte: None,
+            effects: Vec::new(),
         };
         assert_eq!(gpu.render(2, 2, [0.0; 4], &[Draw::Layer(layer.clone())]).unwrap(), pixels);
         let mut half = layer.clone();

@@ -126,6 +126,8 @@ pub struct Measured {
     pub black: Vec<Range<u64>>,
     pub frozen: Vec<Range<u64>>,
     pub silent: Vec<Range<i64>>,
+    /// Plugin effects the export drew its clips without, missing or broken, by name.
+    pub drawn_without: Vec<String>,
 }
 
 /// Measures the frames and the sound of an export as the writer takes them, in order.
@@ -932,6 +934,7 @@ mod tests {
             black: vec![],
             frozen: vec![],
             silent: vec![0..duration_us * 48_000 / 1_000_000],
+            drawn_without: vec![],
         };
         let started = std::time::Instant::now();
         let stopped = review(&project, &measured, &|| true, &mut |_| {});

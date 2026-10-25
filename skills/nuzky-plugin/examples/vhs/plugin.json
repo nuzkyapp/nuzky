@@ -1,0 +1,18 @@
+{
+  "nuzkyPlugin": 2,
+  "id": "vhs",
+  "name": "VHS",
+  "description": "Makes a clip look like a worn video tape: bleeding colour, scanlines and grain.",
+  "version": "1.0.0",
+  "effects": [
+    {
+      "id": "vhs",
+      "name": "VHS",
+      "params": [
+        { "type": "number", "id": "amount", "label": "Amount", "min": 0, "max": 1, "step": 0.05, "default": 0.6 },
+        { "type": "toggle", "id": "lines", "label": "Scanlines", "default": true },
+        { "type": "color", "id": "tint", "label": "Tint", "default": "#FFC890" }
+      ]
+    }
+  ]
+}

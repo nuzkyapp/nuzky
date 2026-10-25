@@ -89,10 +89,15 @@ pub struct ListPlugins {
 #[serde(deny_unknown_fields)]
 pub struct SavePlugin {
     /// plugin.json: {nuzkyPlugin: 2, id, name, description, version, action? or actions?, needs?, inputs?, sections?,
-    /// files?}.
+    /// files?, effects?}.
     pub manifest: serde_json::Value,
-    /// plugin.js, which defines function run(ctx).
-    pub script: String,
+    /// plugin.js, which defines function run(ctx); left out keeps the plugin's own, and a plugin that only adds
+    /// effects needs none.
+    pub script: Option<String>,
+    /// WGSL of the manifest's effects by effect id, each defining fn effect(p: Pixel) -> vec4<f32>; one left out
+    /// keeps its file.
+    #[serde(default)]
+    pub effects: std::collections::BTreeMap<String, String>,
     /// README.md; left out keeps the plugin's README.
     pub readme: Option<String>,
     /// Pictures and sounds to copy into the plugin's folder: a name from the manifest's files, such as "logo.png",

@@ -78,6 +78,11 @@ impl Reporter {
         }
     }
 
+    /// A sentence the finished job shows beside its output, such as what an export was drawn without.
+    pub(crate) fn note(&mut self, message: Option<String>) {
+        self.event.message = message;
+    }
+
     pub(crate) fn finish(mut self, result: anyhow::Result<Option<String>>, cancelled: bool) {
         match result {
             Ok(output) => {
@@ -493,6 +498,10 @@ pub fn start_export(
             .unwrap_or_else(|p| Err(crashed(&p)));
             let cancelled = cancel.load(Ordering::Relaxed);
             let done = result.is_ok() && !cancelled;
+            let without = result.as_ref().map_or(&[][..], |measured| &measured.drawn_without[..]);
+            if !without.is_empty() {
+                rep.note(Some(nuzky_engine::plugin_effects::exported_without(without)));
+            }
             rep.finish(result.map(|_| Some(out.to_string_lossy().into_owned())), cancelled);
             unregister(&app, &job_id);
             // Learned after the export is over, so it never holds the export up.

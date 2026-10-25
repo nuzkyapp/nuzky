@@ -487,6 +487,7 @@ fn layer(image: Image, [x, y, w, h]: [f32; 4]) -> Layer {
         transfer: Transfer::Sdr,
         mask: None,
         matte: None,
+        effects: Vec::new(),
     }
 }
 

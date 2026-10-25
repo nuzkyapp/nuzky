@@ -3819,6 +3819,7 @@ dependencies = [
  "ffmpeg-sys-next",
  "log",
  "memmap2",
+ "naga",
  "nnnoiseless",
  "png 0.18.1",
  "pollster",

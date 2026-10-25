@@ -5,10 +5,10 @@ use anyhow::{Context, Result, ensure};
 use nuzky_engine::{
     Project,
     model::{
-        Asset, AssetKind, Background, Clip, ClipContent, LETTER_SPACING, LINE_SPACING, MAX_BORDER_WIDTH,
-        MAX_CORRECTION_CHARS, MAX_FONT_HEIGHT_RATIO, MAX_LEFT_OUT, MAX_LEFT_OUT_CHARS, MAX_REEL_HOOK_CHARS,
-        MAX_REEL_TITLE_CHARS, MAX_REEL_WHY_CHARS, MAX_SHADOW, MAX_TEXT_WIDTH_RATIO, PROJECT_VERSION, ReelCandidate,
-        ReelStatus, TextStyle, Thumbnail, TrackKind, Transform, max_stroke_width,
+        Asset, AssetKind, Background, Clip, ClipContent, EffectValue, LETTER_SPACING, LINE_SPACING, MAX_BORDER_WIDTH,
+        MAX_CLIP_EFFECTS, MAX_CORRECTION_CHARS, MAX_FONT_HEIGHT_RATIO, MAX_LEFT_OUT, MAX_LEFT_OUT_CHARS,
+        MAX_REEL_HOOK_CHARS, MAX_REEL_TITLE_CHARS, MAX_REEL_WHY_CHARS, MAX_SHADOW, MAX_TEXT_WIDTH_RATIO,
+        PROJECT_VERSION, ReelCandidate, ReelStatus, TextStyle, Thumbnail, TrackKind, Transform, max_stroke_width,
     },
 };
 
@@ -505,6 +505,7 @@ fn validate_clip(project: &Project, clip: &Clip, kind: TrackKind) -> Result<()> 
             transform(t)?;
         }
     }
+    effects(clip)?;
     // Trimming deliberately preserves out-of-clip keys to preserve interpolation.
     let mut last_key = None;
     for key in &clip.keyframes {
@@ -520,6 +521,50 @@ fn validate_clip(project: &Project, clip: &Clip, kind: TrackKind) -> Result<()> 
     }
     if let Some(transition) = clip.transition_in {
         ensure!(transition.duration_us >= 0, "INVALID_PROJECT: negative transition duration");
+    }
+    Ok(())
+}
+
+/// The shape of a clip's effects only: a project whose plugin is not installed still opens, and draws without it.
+/// Effects on a clip that is not drawn, such as one moved to an audio track, wait there unused.
+fn effects(clip: &Clip) -> Result<()> {
+    ensure!(
+        clip.effects.len() <= MAX_CLIP_EFFECTS,
+        "INVALID_PROJECT: clip {} has more than {MAX_CLIP_EFFECTS} effects",
+        clip.id
+    );
+    let short = |text: &str, max: usize| text.chars().count() <= max && !text.contains(['\n', '\r']);
+    for effect in &clip.effects {
+        ensure!(
+            nuzky_engine::plugin_effects::is_id(&effect.plugin)
+                && nuzky_engine::plugin_effects::is_id(&effect.effect)
+                && !effect.name.trim().is_empty()
+                && short(&effect.name, 40)
+                && short(&effect.version, 20),
+            "INVALID_PROJECT: an effect of {} needs a plugin and effect id of 1 to 40 lowercase letters, digits and dashes, a name of 1 to 40 characters and a version of at most 20",
+            clip.id
+        );
+        ensure!(
+            effect.params.len() <= 32,
+            "INVALID_PROJECT: effect {} of {} has more than 32 params",
+            effect.name,
+            clip.id
+        );
+        for (id, value) in &effect.params {
+            let fits = match value {
+                EffectValue::Toggle(_) => true,
+                EffectValue::Number(n) => n.is_finite(),
+                EffectValue::Color(text) => {
+                    text.len() == 7 && text.starts_with('#') && text[1..].bytes().all(|b| b.is_ascii_hexdigit())
+                }
+            };
+            ensure!(
+                (1..=40).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') && fits,
+                "INVALID_PROJECT: param {id:?} of effect {} on {} must be a finite number, true or false, or a colour written #RRGGBB",
+                effect.name,
+                clip.id
+            );
+        }
     }
     Ok(())
 }
@@ -969,6 +1014,49 @@ mod tests {
                 let error = validate(&changed).unwrap_err().to_string();
                 assert!(error.starts_with("INVALID_PROJECT: clip "), "{error}");
             }
+        }
+    }
+
+    /// Whether the plugin is installed never decides whether a project opens.
+    #[test]
+    fn effects_are_checked_for_shape_only() {
+        let mut project = Project::new("effects");
+        project.assets.push(Asset {
+            id: "take".into(),
+            name: "take".into(),
+            path: std::env::temp_dir().join("take.mp4").to_string_lossy().into(),
+            kind: AssetKind::Video,
+            duration_us: 2_000_000,
+            width: 16,
+            height: 16,
+            fps: 30.0,
+            has_audio: false,
+            rotation: 0,
+            mirror: false,
+            credit: None,
+            part: None,
+        });
+        project.apply(EditCmd::AddClip { asset_id: "take".into(), start_us: None, track_id: None }).unwrap();
+        let effect = serde_json::json!({"plugin": "not-installed", "effect": "vhs", "name": "VHS", "version": "1.0.0",
+            "params": {"amount": 0.5, "lines": true, "tint": "#FF8800"}});
+        let with = |change: &dyn Fn(&mut serde_json::Value)| {
+            let mut value = serde_json::to_value(&project).unwrap();
+            value["tracks"][0]["clips"][0]["effects"] = serde_json::json!([effect]);
+            change(&mut value["tracks"][0]["clips"][0]["effects"]);
+            validate(&serde_json::from_value(value).unwrap())
+        };
+        with(&|_| {}).unwrap();
+        type Break<'a> = &'a dyn Fn(&mut serde_json::Value);
+        let broken: [(&str, Break); 5] = [
+            ("five effects", &|e| *e = serde_json::json!([e[0], e[0], e[0], e[0], e[0]])),
+            ("a path as plugin", &|e| e[0]["plugin"] = "../x".into()),
+            ("an empty name", &|e| e[0]["name"] = " ".into()),
+            ("a colour that is not hex", &|e| e[0]["params"]["tint"] = "orange".into()),
+            ("a param id with a space", &|e| e[0]["params"]["a b"] = 1.into()),
+        ];
+        for (what, change) in broken {
+            let error = with(change).unwrap_err().to_string();
+            assert!(error.starts_with("INVALID_PROJECT"), "{what}: {error}");
         }
     }
 }

@@ -43,6 +43,8 @@ trait Events: Send + 'static {
     fn transport(&self, transport: Transport);
     /// `None` once the preview renders again after an error.
     fn error(&self, error: Option<&str>);
+    /// The plugin effects the preview now draws without, by name, whenever they change.
+    fn effects_skipped(&self, _names: &[String]) {}
 }
 
 impl Events for AppHandle {
@@ -52,6 +54,10 @@ impl Events for AppHandle {
 
     fn error(&self, error: Option<&str>) {
         self.emit("engine-error", error).ok();
+    }
+
+    fn effects_skipped(&self, names: &[String]) {
+        self.emit("effects-skipped", names).ok();
     }
 }
 
@@ -76,11 +82,19 @@ impl Events for Other {
 /// Draws preview frames: the GPU renderer in the app.
 trait Frames {
     fn frame(&mut self, project: &Project, t_us: i64, w: u32, h: u32, wait: Wait, playing: bool) -> Result<Vec<u8>>;
+    /// The plugin effects the last frame was drawn without.
+    fn skipped_effects(&self) -> &[String] {
+        &[]
+    }
 }
 
 impl Frames for Renderer {
     fn frame(&mut self, project: &Project, t_us: i64, w: u32, h: u32, wait: Wait, playing: bool) -> Result<Vec<u8>> {
         self.render(project, t_us, w, h, wait, playing)
+    }
+
+    fn skipped_effects(&self) -> &[String] {
+        Renderer::skipped_effects(self)
     }
 }
 
@@ -142,6 +156,8 @@ fn renderer(cache_dir: PathBuf) -> impl Fn() -> Result<Renderer> + Send + 'stati
         renderer.use_proxies(cache_dir.clone());
         // Clips with a background show as recorded until their person outline is made.
         renderer.use_mattes(cache_dir.clone(), Pending::Original);
+        // A plugin effect that holds the GPU longer is dropped, so the preview keeps going.
+        renderer.set_gpu_timeout(Duration::from_secs(2));
         Ok(renderer)
     }
 }
@@ -193,6 +209,7 @@ fn run<F: Frames>(
         })
     };
     let Ok(mut renderer) = renderer_or_report() else { return };
+    let mut skipped: Vec<String> = Vec::new();
     let mut st = State {
         shared_project: Arc::new(Mutex::new(project.clone())),
         project,
@@ -304,6 +321,10 @@ fn run<F: Frames>(
                 match renderer.frame(&st.project, last_frame_at_end(&st.project, st.t_us), w, h, wait, playing) {
                     Ok(rgba) => {
                         server.publish(w, h, if playing { FLAG_PLAYING } else { 0 }, st.t_us, &rgba);
+                        if renderer.skipped_effects() != skipped.as_slice() {
+                            skipped = renderer.skipped_effects().to_vec();
+                            events.effects_skipped(&skipped);
+                        }
                         if error.lock().unwrap().is_some() {
                             report(None);
                         }

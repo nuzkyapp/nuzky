@@ -15,7 +15,8 @@ const MAC = navigator.userAgent.includes("Mac");
 
 const LOOKING = <span className="text-[12px] text-muted">Looking…</span>;
 
-function Control({ input, value, rows, onChange }: { input: PluginInput; value: PluginValue; rows: PluginRow[] | undefined; onChange: (v: PluginValue) => void }) {
+/** `rows`: what a dynamic list offers, undefined while the plugin is still looking. */
+export function Control({ input, value, rows, onChange }: { input: PluginInput; value: PluginValue; rows?: PluginRow[]; onChange: (v: PluginValue) => void }) {
   const lock = useLockReason();
   if (input.type === "choice" && input.options === "dynamic")
     return (
@@ -303,6 +304,18 @@ export function PluginInspector({ plugin: p }: { plugin: Plugin }) {
                   <Sparkles size={14} className="text-accent" /> Fix with AI
                 </Button>
               )}
+            </section>
+          </div>
+        ) : !p.runs ? (
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <section className="flex flex-col gap-2.5 px-4 py-4">
+              {p.effects.map((e) => (
+                <div key={e.id} className="flex flex-col gap-1">
+                  <span className="text-[13px] font-medium text-fg">{e.name}</span>
+                  {e.error && <p className="text-[12px] text-danger">Can’t draw: {plainDetail(e.error)}</p>}
+                </div>
+              ))}
+              <p className="text-[12px] text-muted">{pluginBlocked(p, false)}</p>
             </section>
           </div>
         ) : (

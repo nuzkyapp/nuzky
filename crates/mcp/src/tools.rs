@@ -276,7 +276,8 @@ impl Backend {
             }
             "save_plugin" => {
                 let a: SavePlugin = parse(arguments)?;
-                Ok(json!({"plugin": plugins::save_with_files(&a.manifest, &a.script, a.readme.as_deref(), &a.files)?}))
+                let (script, readme) = (a.script.as_deref(), a.readme.as_deref());
+                Ok(json!({"plugin": plugins::save_with_files(&a.manifest, script, readme, &a.files, &a.effects)?}))
             }
             "run_plugin" => self.run_plugin(parse(arguments)?, state),
             "suggest_options" => {
@@ -1615,7 +1616,12 @@ impl Backend {
                     }
                 });
                 let check = check_export(&project, &measured, &cancel, &progress);
-                Ok(json!({"path": out, "duration_us": project.duration_us(), "preset": options.delivery, "check": check}))
+                let mut done =
+                    json!({"path": out, "duration_us": project.duration_us(), "preset": options.delivery, "check": check});
+                if !measured.drawn_without.is_empty() {
+                    done["warning"] = json!(nuzky_engine::plugin_effects::exported_without(&measured.drawn_without));
+                }
+                Ok(done)
             },
         )
     }
@@ -1843,6 +1849,14 @@ pub(crate) fn state_value(state: &SessionState, args: State) -> Result<Value> {
     object.insert("duration_us".into(), json!(state.project.duration_us()));
     object.insert("caption_stats".into(), caption_stats(&state.project));
     object.insert("missing_fonts".into(), json!(crate::fonts::missing(crate::fonts::families(&state.project))));
+    let effects = nuzky_engine::plugin_effects::issues(&state.project);
+    if !effects.is_empty() {
+        let issues: Vec<Value> = effects
+            .iter()
+            .map(|i| json!({"plugin": i.plugin, "effect": i.effect, "clip_ids": i.clip_ids, "message": i.sentence()}))
+            .collect();
+        object.insert("effect_issues".into(), json!(issues));
+    }
     object.insert("filtered".into(), json!(args.range.is_some() || args.clip_ids.is_some()));
     Ok(value)
 }

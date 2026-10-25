@@ -85,7 +85,8 @@ fn install(id: &str) {
     let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../skills/nuzky-plugin/examples").join(id);
     let read = |file: &str| std::fs::read_to_string(folder.join(file)).unwrap();
     let manifest: Value = serde_json::from_str(&read("plugin.json")).unwrap();
-    let saved = plugins::save(&manifest, &read("plugin.js"), Some(&read("README.md"))).unwrap();
+    let saved =
+        plugins::save(&manifest, Some(&read("plugin.js")), Some(&read("README.md")), &Default::default()).unwrap();
     assert_eq!(saved.status, "ok", "{:?}", saved.error);
 }
 
@@ -156,8 +157,8 @@ fn the_guide_examples_edit_generated_media() {
 fn stop_ends_a_stuck_plugin_and_a_dry_run_changes_nothing() {
     let f = project();
     install("remove-short-clips");
-    let spin = json!({"nuzkyPlugin": 1, "id": "spin", "name": "Spin", "description": "Never ends", "version": "1"});
-    plugins::save(&spin, "function run(ctx) {\n  while (true) {}\n}\n", None).unwrap();
+    let spin = json!({"nuzkyPlugin": 2, "id": "spin", "name": "Spin", "description": "Never ends", "version": "1"});
+    plugins::save(&spin, Some("function run(ctx) {\n  while (true) {}\n}\n"), None, &Default::default()).unwrap();
     let before = f.host.session.state().unwrap().project;
 
     let dry = plugins::dry_run_in_app(&f.host, "remove-short-clips", &Map::new(), vec![], 0, Arc::default()).unwrap();
@@ -199,10 +200,10 @@ fn a_plugin_cannot_blow_up_the_project_or_write_through_a_link() {
     let style = serde_json::from_value(json!({"fontSize": 60.0, "color": "#FFFFFF"})).unwrap();
     f.host.session.edit(vec![EditCmd::AddText { start_us: 0, text: long, style }], None, Expect::default()).unwrap();
     let copies =
-        json!({"nuzkyPlugin": 1, "id": "copies", "name": "Copies", "description": "Copies the text", "version": "1"});
+        json!({"nuzkyPlugin": 2, "id": "copies", "name": "Copies", "description": "Copies the text", "version": "1"});
     let script = "function run(ctx) {\n  const id = ctx.project.tracks[1].clips[0].id;\n  \
                   return Array.from({length: 100}, () => ({type: 'duplicateClip', clipId: id}));\n}\n";
-    plugins::save(&copies, script, None).unwrap();
+    plugins::save(&copies, Some(script), None, &Default::default()).unwrap();
     let before = f.host.session.state().unwrap().project;
     let dry = plugins::dry_run_in_app(&f.host, "copies", &Map::new(), vec![], 0, Arc::default()).unwrap();
     assert_eq!(dry["valid"], false, "{}", dry["error"]);
@@ -216,7 +217,7 @@ fn a_plugin_cannot_blow_up_the_project_or_write_through_a_link() {
         let folder = plugins::dir().unwrap().join("copies");
         std::fs::remove_file(folder.join("plugin.prev.js")).ok();
         std::os::unix::fs::symlink(&video, folder.join("plugin.prev.js")).unwrap();
-        plugins::save(&copies, script, None).unwrap();
+        plugins::save(&copies, Some(script), None, &Default::default()).unwrap();
         assert_eq!(std::fs::read(&video).unwrap(), original, "saving wrote through the link into the video");
         assert!(!std::fs::symlink_metadata(folder.join("plugin.prev.js")).unwrap().is_symlink());
     }
@@ -233,10 +234,10 @@ fn a_plugin_cannot_spread_a_huge_text_or_read_through_a_link() {
     let captions =
         json!({"type": "addCaptions", "segments": segments, "style": {"fontSize": 60.0, "color": "#FFFFFF"}});
     f.host.session.edit(vec![serde_json::from_value(captions).unwrap()], None, Expect::default()).unwrap();
-    let restyle = json!({"nuzkyPlugin": 1, "id": "restyle", "name": "Restyle", "description": "Restyles captions", "version": "1"});
+    let restyle = json!({"nuzkyPlugin": 2, "id": "restyle", "name": "Restyle", "description": "Restyles captions", "version": "1"});
     let script = "function run(ctx) {\n  const track = ctx.project.tracks.find((t) => t.kind === 'text');\n  \
                   return [{type: 'restyleTrack', trackId: track.id, style: {fontFamily: 'x'.repeat(1 << 20)}}];\n}\n";
-    plugins::save(&restyle, script, None).unwrap();
+    plugins::save(&restyle, Some(script), None, &Default::default()).unwrap();
     let error = match plugins::dry_run_in_app(&f.host, "restyle", &Map::new(), vec![], 0, Arc::default()) {
         Ok(dry) => dry["error"].to_string(),
         Err(error) => format!("{error:#}"),
@@ -266,10 +267,10 @@ fn a_cancelled_plugin_job_applies_nothing() {
         json!({"type": "addCaptions", "segments": segments, "style": {"fontSize": 60.0, "color": "#FFFFFF"}});
     f.host.session.edit(vec![serde_json::from_value(captions).unwrap()], None, Expect::default()).unwrap();
     let renames =
-        json!({"nuzkyPlugin": 1, "id": "renames", "name": "Renames", "description": "Renames a lot", "version": "1"});
+        json!({"nuzkyPlugin": 2, "id": "renames", "name": "Renames", "description": "Renames a lot", "version": "1"});
     let script = "function run(ctx) {\n  const edits = Array.from({length: 5000}, (_, i) => ({type: 'renameProject', name: 'n' + i}));\n  \
                   nuzky.progress(1);\n  return edits;\n}\n";
-    plugins::save(&renames, script, None).unwrap();
+    plugins::save(&renames, Some(script), None, &Default::default()).unwrap();
     let before = f.host.session.state().unwrap().project;
     let job = plugins::run_in_app(&f.host, "renames", &Map::new(), None, vec![], 0).unwrap();
     let id = job["job_id"].as_str().unwrap();
@@ -325,13 +326,13 @@ fn a_plugin_whose_edits_need_gigabytes_runs_out_of_its_own_memory() {
     let captions =
         json!({"type": "addCaptions", "segments": segments, "style": {"fontSize": 60.0, "color": "#FFFFFF"}});
     f.host.session.edit(vec![serde_json::from_value(captions).unwrap()], None, Expect::default()).unwrap();
-    let bomb = json!({"nuzkyPlugin": 1, "id": "bomb", "name": "Bomb", "description": "Pastes a lot", "version": "1"});
+    let bomb = json!({"nuzkyPlugin": 2, "id": "bomb", "name": "Bomb", "description": "Pastes a lot", "version": "1"});
     let script = "function run(ctx) {\n  const track = ctx.project.tracks.find((t) => t.kind === 'text');\n  \
                   const transform = {x: 0, y: 0, scale: 1, rotation: 0, opacity: 1};\n  \
                   const keyframes = Array.from({length: 50000}, (_, i) => ({tUs: i, transform}));\n  \
                   const source = {clip: {...track.clips[0], keyframes}, trackId: track.id, trackKind: 'text'};\n  \
                   return [{type: 'pasteAttributes', source, clipIds: track.clips.map((c) => c.id)}];\n}\n";
-    plugins::save(&bomb, script, None).unwrap();
+    plugins::save(&bomb, Some(script), None, &Default::default()).unwrap();
     let before = f.host.session.state().unwrap().project;
 
     let started = Instant::now();

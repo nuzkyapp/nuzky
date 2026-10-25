@@ -495,7 +495,7 @@ fn encode(
     };
     overlap(total_frames, cancel, render, write)?;
     mp4.finish()?;
-    Ok(watch.finish())
+    Ok(Measured { drawn_without: renderer.effects_drawn_without().to_vec(), ..watch.finish() })
 }
 
 /// Makes items `0..count` in order and hands each to `write` on another thread, so making the next one overlaps

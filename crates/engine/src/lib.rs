@@ -16,6 +16,7 @@ pub mod loudness;
 pub mod matte;
 pub mod media;
 pub mod model;
+pub mod plugin_effects;
 pub mod proxy;
 pub mod recap;
 pub mod render;

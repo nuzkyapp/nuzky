@@ -1440,6 +1440,7 @@ pub fn run() {
             reels::reel_bounds,
             reels::start_make_reels,
             plugins::list_plugins,
+            plugins::effect_issues,
             plugins::preview_plugin,
             plugins::cancel_plugin_preview,
             plugins::run_plugin,

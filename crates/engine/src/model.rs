@@ -460,6 +460,43 @@ pub struct Clip {
     /// Main track only: transition from the previous clip, centred on the cut.
     #[serde(default)]
     pub transition_in: Option<Transition>,
+    /// Looks from plugins drawn over a video or image clip's picture, in order, at most `MAX_CLIP_EFFECTS`. The
+    /// project only names them: the shader is the plugin's, so a clip whose plugin is missing draws without it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects: Vec<Effect>,
+}
+
+pub const MAX_CLIP_EFFECTS: usize = 4;
+
+/// A plugin's effect on a clip.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Effect {
+    /// The plugin's id, its folder in Nuzky's plugins.
+    pub plugin: String,
+    /// The effect's id in the plugin's manifest.
+    pub effect: String,
+    /// Its name when it was put on the clip, to say what is missing on a computer without the plugin.
+    pub name: String,
+    /// The plugin's version when it was put on the clip.
+    #[serde(default)]
+    pub version: String,
+    /// Values by param id. The installed manifest bounds them when drawing; one left out takes its default.
+    #[serde(default)]
+    pub params: std::collections::BTreeMap<String, EffectValue>,
+}
+
+/// A number, a toggle, or a colour written #RRGGBB.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum EffectValue {
+    Toggle(bool),
+    Number(f64),
+    Color(String),
 }
 
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -581,6 +618,7 @@ impl Clip {
             anim_out: None,
             keyframes: Vec::new(),
             transition_in: None,
+            effects: Vec::new(),
         }
     }
 
@@ -1129,6 +1167,7 @@ mod tests {
             anim_out: None,
             keyframes: Vec::new(),
             transition_in: None,
+            effects: Vec::new(),
             content: ClipContent::Text {
                 text: "Ahoj světe".into(),
                 style: TextStyle {

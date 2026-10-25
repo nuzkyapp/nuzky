@@ -1,5 +1,5 @@
 {
-  "nuzkyPlugin": 1,
+  "nuzkyPlugin": 2,
   "id": "remove-short-clips",
   "name": "Remove short clips",
   "description": "Deletes clips shorter than a length you choose, such as stray frames left between cuts.",

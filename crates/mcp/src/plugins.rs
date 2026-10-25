@@ -19,6 +19,7 @@ use nuzky_engine::{
     Project,
     edit::{EditCmd, new_id},
     model::Asset,
+    plugin_effects::{self, EffectDef, Lookup},
 };
 use nuzky_session::{EndAction, Expect, SessionState, host::Host};
 use rquickjs::{
@@ -81,6 +82,9 @@ pub struct Manifest {
     /// Pictures and sounds in the plugin's folder, by file name, that its edits may add to the project.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<String>,
+    /// Looks it adds, each one WGSL function in effects/<id>.wgsl (`nuzky_engine::plugin_effects`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects: Vec<EffectDef>,
 }
 
 fn default_action() -> String {
@@ -221,6 +225,18 @@ pub struct Plugin {
     pub error: Option<String>,
     pub manifest: Option<Manifest>,
     pub readme: Option<String>,
+    /// Whether it has a plugin.js to run; a plugin may only add effects.
+    pub runs: bool,
+    pub effects: Vec<EffectStatus>,
+}
+
+/// One of a plugin's effects as this computer draws it.
+#[derive(Serialize)]
+pub struct EffectStatus {
+    pub id: String,
+    /// "ok", or "broken" with `error` saying why, naming the file and line.
+    pub status: &'static str,
+    pub error: Option<String>,
 }
 
 impl Input {
@@ -361,6 +377,8 @@ fn manifest(value: &Value) -> Result<Manifest> {
         );
     }
     ensure!(manifest.inputs.len() <= 20, "PLUGIN_BROKEN: plugin.json: at most 20 inputs");
+    ensure!(manifest.effects.is_empty() || api >= 2, "PLUGIN_BROKEN: plugin.json: effects needs nuzkyPlugin 2");
+    plugin_effects::check_defs(&manifest.effects).map_err(|e| anyhow!("PLUGIN_BROKEN: plugin.json: {e}"))?;
     let mut ids = HashSet::new();
     for input in &manifest.inputs {
         let id = input.id();
@@ -569,7 +587,8 @@ fn read(path: &Path, max: u64) -> Result<String> {
     std::fs::read_to_string(path).context("unreadable")
 }
 
-fn open(folder: &Path) -> Result<(Manifest, String)> {
+/// The manifest and plugin.js, which a plugin that only adds effects may leave out.
+fn open(folder: &Path) -> Result<(Manifest, Option<String>)> {
     ensure!(
         std::fs::symlink_metadata(folder).is_ok_and(|meta| meta.is_dir()),
         "PLUGIN_BROKEN: the plugin is a link, not a folder"
@@ -583,20 +602,72 @@ fn open(folder: &Path) -> Result<(Manifest, String)> {
         "PLUGIN_BROKEN: plugin.json: id {:?} differs from its folder's name",
         manifest.id
     );
-    let script =
-        read(&folder.join("plugin.js"), MAX_SCRIPT_BYTES).map_err(|e| anyhow!("PLUGIN_BROKEN: plugin.js: {e:#}"))?;
+    let script = match read(&folder.join("plugin.js"), MAX_SCRIPT_BYTES) {
+        Err(_) if !manifest.effects.is_empty() && !folder.join("plugin.js").exists() => None,
+        read => Some(read.map_err(|e| anyhow!("PLUGIN_BROKEN: plugin.js: {e:#}"))?),
+    };
+    if script.is_none() {
+        only_effects(&manifest)?;
+    }
     for name in &manifest.files {
         plugin_files::present(folder, name).map_err(|e| anyhow!("PLUGIN_BROKEN: {name}: {e:#}"))?;
     }
     Ok((manifest, script))
 }
 
+/// A plugin without plugin.js only adds effects, so nothing a run reads or offers may be in its manifest.
+fn only_effects(manifest: &Manifest) -> Result<()> {
+    let ran = [
+        ("needs", manifest.needs.is_empty()),
+        ("inputs", manifest.inputs.is_empty()),
+        ("sections", manifest.sections.is_empty()),
+        ("actions", manifest.actions.is_empty()),
+        ("files", manifest.files.is_empty()),
+    ];
+    match ran.into_iter().find(|(_, empty)| !empty) {
+        Some((field, _)) => bail!("PLUGIN_BROKEN: plugin.json: {field} needs a plugin.js to run; a plugin with only effects has none"),
+        None => Ok(()),
+    }
+}
+
+fn effect_statuses(id: &str, manifest: &Manifest) -> Vec<EffectStatus> {
+    let dir = dir().ok();
+    manifest
+        .effects
+        .iter()
+        .map(|effect| {
+            let error = match dir.as_deref().map(|dir| plugin_effects::lookup(dir, id, &effect.id)) {
+                Some(Lookup::Ready(_)) => None,
+                Some(Lookup::Broken(why)) => Some(why),
+                None | Some(Lookup::Missing) => Some(format!("effects/{}.wgsl: missing", effect.id)),
+            };
+            EffectStatus { id: effect.id.clone(), status: if error.is_some() { "broken" } else { "ok" }, error }
+        })
+        .collect()
+}
+
 fn entry(folder: &Path) -> Plugin {
     let id = folder.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
     let readme = read(&folder.join("README.md"), MAX_TEXT_BYTES).ok();
     match open(folder) {
-        Ok((manifest, _)) => Plugin { id, status: "ok", error: None, manifest: Some(manifest), readme },
-        Err(error) => Plugin { id, status: "broken", error: Some(format!("{error:#}")), manifest: None, readme },
+        Ok((manifest, script)) => Plugin {
+            effects: effect_statuses(&id, &manifest),
+            id,
+            status: "ok",
+            error: None,
+            manifest: Some(manifest),
+            readme,
+            runs: script.is_some(),
+        },
+        Err(error) => Plugin {
+            id,
+            status: "broken",
+            error: Some(format!("{error:#}")),
+            manifest: None,
+            readme,
+            runs: false,
+            effects: Vec::new(),
+        },
     }
 }
 
@@ -618,25 +689,52 @@ pub fn list() -> Result<Vec<Plugin>> {
 
 /// Writes the plugin under plugins/<id>/, keeping the files it replaces as plugin.prev.json and plugin.prev.js.
 pub fn save(manifest: &Value, script: &str, readme: Option<&str>) -> Result<Plugin> {
-    save_with_files(manifest, script, readme, &BTreeMap::new())
+    save_with_files(manifest, Some(script), readme, &BTreeMap::new(), &BTreeMap::new())
 }
 
-/// `save` that also copies pictures and sounds into the plugin's folder: `files` maps a name the manifest lists to a
-/// file the agent has, checked as the plugin's own files are when it runs.
+/// `save` that also copies pictures and sounds into the plugin's folder and writes its effects: `files` maps a name
+/// the manifest lists to a file the agent has, checked as the plugin's own files are when it runs, and `effects` an
+/// effect's id to its WGSL, the replaced one kept as effects/<effect>.prev.wgsl. A script or effect left out keeps the
+/// plugin's own.
 pub fn save_with_files(
     manifest: &Value,
-    script: &str,
+    script: Option<&str>,
     readme: Option<&str>,
     files: &BTreeMap<String, PathBuf>,
+    effects: &BTreeMap<String, String>,
 ) -> Result<Plugin> {
     let manifest = self::manifest(manifest)?;
-    ensure!(script.len() as u64 <= MAX_SCRIPT_BYTES, "PLUGIN_BROKEN: plugin.js is larger than 1 MB");
+    ensure!(
+        script.is_none_or(|script| script.len() as u64 <= MAX_SCRIPT_BYTES),
+        "PLUGIN_BROKEN: plugin.js is larger than 1 MB"
+    );
     ensure!(
         readme.is_none_or(|readme| readme.len() as u64 <= MAX_TEXT_BYTES),
         "PLUGIN_BROKEN: README.md is larger than 64 KB"
     );
-    sandbox(script, "PLUGIN_BROKEN", SAVE_LIMIT, Rc::default(), Rc::new(|_| {}), |_, _| Ok(()))?;
     let folder = dir()?.join(&manifest.id);
+    if script.is_none() && !folder.join("plugin.js").is_file() {
+        ensure!(!manifest.effects.is_empty(), "PLUGIN_BROKEN: plugin.js: a plugin needs a script, effects or both");
+        only_effects(&manifest)?;
+    }
+    if let Some(unknown) = effects.keys().find(|id| !manifest.effects.iter().any(|e| e.id == **id)) {
+        bail!("PLUGIN_BROKEN: effects/{unknown}.wgsl: plugin.json has no effect {unknown:?}");
+    }
+    for effect in &manifest.effects {
+        let file = format!("effects/{}.wgsl", effect.id);
+        let source = match effects.get(&effect.id) {
+            Some(source) => source.clone(),
+            None => read(&folder.join(&file), plugin_effects::MAX_SOURCE_BYTES)
+                .map_err(|e| anyhow!("PLUGIN_BROKEN: {file}: {e:#}; give its WGSL in effects"))?,
+        };
+        plugin_effects::check(&source).map_err(|why| {
+            let separator = if why.starts_with(|c: char| c.is_ascii_digit()) { ":" } else { ": " };
+            anyhow!("PLUGIN_BROKEN: {file}{separator}{why}")
+        })?;
+    }
+    if let Some(script) = script {
+        sandbox(script, "PLUGIN_BROKEN", SAVE_LIMIT, Rc::default(), Rc::new(|_| {}), |_, _| Ok(()))?;
+    }
     let failed = "STORE_WRITE_FAILED: cannot save the plugin";
     // A plugin folder from someone else may hold links; writing through one would overwrite the file it points at.
     ensure!(
@@ -666,15 +764,35 @@ pub fn save_with_files(
         let copy = |out: &mut std::fs::File| Ok(std::io::copy(&mut std::fs::File::open(&from)?, out).map(drop)?);
         crate::sounds::publish(&folder.join(name), copy).context(failed)?;
     }
-    for (file, previous) in [("plugin.json", "plugin.prev.json"), ("plugin.js", "plugin.prev.js")] {
+    let mut previous: Vec<(String, String)> = [("plugin.json", "plugin.prev.json"), ("plugin.js", "plugin.prev.js")]
+        .map(|(a, b)| (a.into(), b.into()))
+        .into();
+    if !effects.is_empty() {
+        ensure!(
+            std::fs::symlink_metadata(folder.join("effects")).map_or(true, |meta| meta.is_dir()),
+            "PLUGIN_BROKEN: plugins/{}/effects is not a folder",
+            manifest.id
+        );
+        std::fs::create_dir_all(folder.join("effects")).context(failed)?;
+        previous.extend(effects.keys().map(|id| (format!("effects/{id}.wgsl"), format!("effects/{id}.prev.wgsl"))));
+    }
+    for (file, previous) in &previous {
         if let Ok(old) = read(&folder.join(file), MAX_SCRIPT_BYTES) {
             crate::sounds::publish(&folder.join(previous), |out| Ok(out.write_all(old.as_bytes())?)).context(failed)?;
         }
     }
+    for (id, source) in effects {
+        crate::sounds::publish(&folder.join("effects").join(format!("{id}.wgsl")), |out| {
+            Ok(out.write_all(source.as_bytes())?)
+        })
+        .context(failed)?;
+    }
     let json = serde_json::to_vec_pretty(&manifest)?;
-    for (file, bytes) in
-        [("plugin.js", Some(script.as_bytes())), ("README.md", readme.map(str::as_bytes)), ("plugin.json", Some(&json))]
-    {
+    for (file, bytes) in [
+        ("plugin.js", script.map(str::as_bytes)),
+        ("README.md", readme.map(str::as_bytes)),
+        ("plugin.json", Some(&json)),
+    ] {
         if let Some(bytes) = bytes {
             crate::sounds::publish(&folder.join(file), |out| Ok(out.write_all(bytes)?)).context(failed)?;
         }
@@ -755,6 +873,9 @@ pub(crate) fn prepare(
         "PLUGIN_NOT_FOUND: no plugin {id:?}; list_plugins shows the installed ones"
     );
     let (manifest, script) = open(&folder)?;
+    let script = script.with_context(|| {
+        format!("PLUGIN_NO_SCRIPT: {} only adds effects; put one on a clip with setEffects", manifest.name)
+    })?;
     let mut ctx = json!({
         "api": API,
         "project": crate::tools::state_value(state, crate::params::State { range: None, clip_ids: None })?,

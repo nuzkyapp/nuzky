@@ -17,6 +17,14 @@ pub async fn list_plugins() -> CmdResult<Vec<plugins::Plugin>> {
     tauri::async_runtime::spawn_blocking(plugins::list).await.map_err(err)?.map_err(err)
 }
 
+/// The plugin effects on the open project's clips that this computer draws without, and why.
+#[tauri::command]
+pub async fn effect_issues(app: AppHandle) -> CmdResult<Vec<nuzky_engine::plugin_effects::EffectIssue>> {
+    let host = app.state::<AppState>().session.lock().unwrap().host.clone();
+    let issues = move || Ok(nuzky_engine::plugin_effects::issues(&host.session.state().map_err(err)?.project));
+    tauri::async_runtime::spawn_blocking(issues).await.map_err(err)?
+}
+
 #[tauri::command]
 pub async fn preview_plugin(
     app: AppHandle,
@@ -131,7 +139,14 @@ pub fn watch(app: AppHandle) {
             .flatten()
             .filter_map(Result::ok)
             // The plugin's own files too: an editor that rewrites plugin.js in place leaves the folder's time alone.
-            .flat_map(|entry| ["", "plugin.json", "plugin.js"].map(|file| entry.path().join(file)))
+            .flat_map(|entry| {
+                let effects =
+                    std::fs::read_dir(entry.path().join("effects")).into_iter().flatten().filter_map(Result::ok);
+                ["", "plugin.json", "plugin.js", "effects"]
+                    .map(|file| entry.path().join(file))
+                    .into_iter()
+                    .chain(effects.map(|effect| effect.path()))
+            })
             .filter_map(|path| Some((path.clone(), path.metadata().ok()?.modified().ok()?)))
             .collect();
         entries.sort();
@@ -145,6 +160,8 @@ pub fn watch(app: AppHandle) {
             if now != last {
                 last = now;
                 app.emit("plugins-changed", ()).ok();
+                // A changed effect shows in the paused preview at once.
+                app.state::<AppState>().engine.send(crate::engine::Msg::Redraw);
             }
         }
     });

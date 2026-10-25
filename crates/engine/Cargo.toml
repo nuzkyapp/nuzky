@@ -27,6 +27,8 @@ nnnoiseless = { version = "0.5.2", default-features = false }
 realfft = "3.5.0"
 uuid = { version = "1", features = ["v4", "serde"] }
 png = "0.18.1"
+# The WGSL front end wgpu builds already, to check plugin effects before any GPU sees them.
+naga = { version = "30.0.1", features = ["wgsl-in"] }
 
 [features]
 schema = ["dep:schemars"]

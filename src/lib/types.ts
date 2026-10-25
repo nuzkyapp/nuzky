@@ -344,6 +344,11 @@ export type Clip = {
    * Main track only: transition from the previous clip, centred on the cut.
    */
   transitionIn: Transition | null,
+  /**
+   * Looks from plugins drawn over a video or image clip's picture, in order, at most `MAX_CLIP_EFFECTS`. The
+   * project only names them: the shader is the plugin's, so a clip whose plugin is missing draws without it.
+   */
+  effects?: Array<Effect>,
 };
 
 export type ClipContent = {
@@ -683,6 +688,10 @@ export type EditCmd = {
   clipId: string,
   keyframes: Array<Keyframe>,
 } | {
+  "type": "setEffects",
+  clipId: string,
+  effects: Array<Effect>,
+} | {
   "type": "duplicateClip",
   clipId: string,
 } | {
@@ -770,6 +779,39 @@ export type EditCmd = {
   "type": "updateReelCandidate",
   candidate: ReelCandidate,
 };
+
+/**
+ * A plugin's effect on a clip.
+ */
+export type Effect = {
+  /**
+   * The plugin's id, its folder in Nuzky's plugins.
+   */
+  plugin: string,
+  /**
+   * The effect's id in the plugin's manifest.
+   */
+  effect: string,
+  /**
+   * Its name when it was put on the clip, to say what is missing on a computer without the plugin.
+   */
+  name: string,
+  /**
+   * The plugin's version when it was put on the clip.
+   */
+  version: string,
+  /**
+   * Values by param id. The installed manifest bounds them when drawing; one left out takes its default.
+   */
+  params: {
+    [key in string]: EffectValue
+  },
+};
+
+/**
+ * A number, a toggle, or a colour written #RRGGBB.
+ */
+export type EffectValue = boolean | number | string;
 
 export type ExportRequest = {
   /**

@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::{
     Adjust, Animation, Asset, AssetKind, Background, CAPTIONS_TRACK, Canvas, CaptionWord, Clip, ClipContent, Ease,
-    Keyframe, Keywords, LetterCase, Project, ReelCandidate, Shape, TextAlign, TextShadow, TextStyle, Thumbnail,
-    ThumbnailFormat, Track, TrackKind, Transform, Transition, WordCorrection,
+    Effect, Keyframe, Keywords, LetterCase, MAX_CLIP_EFFECTS, Project, ReelCandidate, Shape, TextAlign, TextShadow,
+    TextStyle, Thumbnail, ThumbnailFormat, Track, TrackKind, Transform, Transition, WordCorrection,
 };
 
 pub const MAIN_TRACK: &str = "main";
@@ -210,6 +210,12 @@ pub enum EditCmd {
         clip_id: String,
         keyframes: Vec<Keyframe>,
     },
+    /// Plugin effects drawn over a video or image clip, in order, at most four; an empty list removes them.
+    /// `list_plugins` names each plugin's effects and their params.
+    SetEffects {
+        clip_id: String,
+        effects: Vec<Effect>,
+    },
     /// Places a copy right after the clip.
     DuplicateClip {
         clip_id: String,
@@ -230,7 +236,7 @@ pub enum EditCmd {
         clips: Vec<Clip>,
     },
     /// Gives clips of the source's kind its look. Text: style, font, transform, keyframes and animations, never
-    /// the text; a caption keeps its wrap width. Video and images: Adjust, background, crop and shape, motion
+    /// the text; a caption keeps its wrap width. Video and images: Adjust, effects, background, crop and shape, motion
     /// (keyframes, moving each clip from its own framing) and animations. Sound: volume, fades, Voice and
     /// ducking. Keyframes stretch to each clip's length, and what the source lacks the clips lose. Clips of
     /// another kind are left alone and listed in the outcome's `skipped`.
@@ -952,7 +958,8 @@ impl Project {
             EditCmd::UpdateClip { .. }
             | EditCmd::SetAnimation { .. }
             | EditCmd::SetTransition { .. }
-            | EditCmd::SetKeyframes { .. } => self.apply_clip(cmd)?,
+            | EditCmd::SetKeyframes { .. }
+            | EditCmd::SetEffects { .. } => self.apply_clip(cmd)?,
             EditCmd::UpdateTrack { .. } | EditCmd::SetCanvas { .. } | EditCmd::RenameProject { .. } => {
                 self.apply_tracks(cmd)?
             }
@@ -1591,6 +1598,15 @@ impl Project {
                 keyframes.dedup_by_key(|k| k.t_us);
                 self.tracks[ti].clips[ci].keyframes = keyframes;
             }
+            EditCmd::SetEffects { clip_id, effects } => {
+                let (ti, ci) = self.find_clip(&clip_id).ok_or_else(|| anyhow!("Unknown clip"))?;
+                let picture = self.tracks[ti].kind == TrackKind::Video
+                    && matches!(&self.tracks[ti].clips[ci].content, ClipContent::Media { asset_id, .. }
+                        if self.asset(asset_id).is_some_and(|a| a.kind != AssetKind::Audio));
+                ensure!(picture || effects.is_empty(), "Effects go on video and image clips");
+                ensure!(effects.len() <= MAX_CLIP_EFFECTS, "A clip has at most {MAX_CLIP_EFFECTS} effects");
+                self.tracks[ti].clips[ci].effects = effects;
+            }
             _ => unreachable!("command dispatched to the wrong edit group"),
         }
         Ok(())
@@ -2035,6 +2051,7 @@ impl Project {
                     *b = background.clone();
                     *sh = shape.clone();
                     t.crop = transform.crop;
+                    clip.effects = from.effects.clone();
                     let t = &*t;
                     clip.keyframes = from
                         .keyframes

@@ -29,6 +29,20 @@ export interface PluginAction {
   label: string;
 }
 
+/** A setting of an effect: a number, a toggle or a colour, as plugin inputs. */
+export type EffectParam = Extract<PluginInput, { type: "number" | "toggle" | "color" }>;
+
+/** A look a plugin adds, drawn over a clip's picture; `error` says why it does not draw on this computer. */
+export interface PluginEffect {
+  plugin: string;
+  pluginName: string;
+  version: string;
+  id: string;
+  name: string;
+  params: EffectParam[];
+  error: string | null;
+}
+
 /** A plugin in Nuzky's plugins folder; one that cannot load has only its id, a name and `error`. */
 export interface Plugin {
   id: string;
@@ -41,6 +55,9 @@ export interface Plugin {
   /** Headed groups of inputs; the inputs in none come first. */
   sections: { label: string; inputs: string[] }[];
   error: string | null;
+  /** Whether it has a script to run; a plugin may only add effects. */
+  runs: boolean;
+  effects: PluginEffect[];
 }
 
 /** What the plugin would do to the project as it is: `project` after its edits, at `revision`. */
@@ -163,25 +180,51 @@ export function setValue(id: string, input: string, value: PluginValue) {
 export interface ListedPlugin {
   id: string;
   error: string | null;
-  manifest: { name: string; description: string; action: string; actions?: PluginAction[]; needs: string[]; inputs: PluginInput[]; sections?: Plugin["sections"] } | null;
+  manifest: {
+    name: string;
+    description: string;
+    version: string;
+    action: string;
+    actions?: PluginAction[];
+    needs: string[];
+    inputs: PluginInput[];
+    sections?: Plugin["sections"];
+    effects?: { id: string; name: string; params?: EffectParam[] }[];
+  } | null;
+  runs: boolean;
+  effects: { id: string; status: string; error: string | null }[];
 }
 
-const listed = ({ id, error, manifest: m }: ListedPlugin): Plugin => ({
-  id,
-  name: m?.name ?? id.charAt(0).toUpperCase() + id.slice(1).replaceAll("-", " "),
-  description: m?.description ?? "",
-  actions: m?.actions?.length ? m.actions : [{ id: "run", label: m?.action ?? "Run" }],
-  needs: m?.needs ?? [],
-  inputs: m?.inputs ?? [],
-  sections: m?.sections ?? [],
-  error: m ? null : (error ?? "Can't load."),
-});
+const listed = ({ id, error, manifest: m, runs, effects }: ListedPlugin): Plugin => {
+  const name = m?.name ?? id.charAt(0).toUpperCase() + id.slice(1).replaceAll("-", " ");
+  return {
+    id,
+    name,
+    description: m?.description ?? "",
+    actions: m?.actions?.length ? m.actions : [{ id: "run", label: m?.action ?? "Run" }],
+    needs: m?.needs ?? [],
+    inputs: m?.inputs ?? [],
+    sections: m?.sections ?? [],
+    error: m ? null : (error ?? "Can't load."),
+    runs,
+    effects: (m?.effects ?? []).map((e) => ({
+      plugin: id,
+      pluginName: name,
+      version: m?.version ?? "",
+      id: e.id,
+      name: e.name,
+      params: e.params ?? [],
+      error: effects.find((s) => s.id === e.id)?.error ?? null,
+    })),
+  };
+};
 
 export async function loadPlugins() {
   try {
     const list = (await api.listPlugins()).map(listed);
-    // A plugin gone from the folder loses its switches, so another saved later under its name does not run by itself.
-    const kept = (ids: string[]) => ids.filter((id) => list.some((p) => p.id === id));
+    // A plugin gone from the folder loses its switches, so another saved later under its name does not run by itself;
+    // nor does one that only adds effects, as it has nothing to run.
+    const kept = (ids: string[]) => ids.filter((id) => list.some((p) => p.id === id && (p.runs || !!p.error)));
     usePlugins.setState((s) => {
       const auto = { import: kept(s.auto.import), export: kept(s.auto.export) };
       const same = auto.import.length === s.auto.import.length && auto.export.length === s.auto.export.length;
@@ -194,8 +237,75 @@ export async function loadPlugins() {
 }
 
 export function listenPlugins() {
-  return listen("plugins-changed", () => void loadPlugins());
+  return listen("plugins-changed", () => {
+    void loadPlugins();
+    void loadEffectIssues();
+  });
 }
+
+/** An effect on the project's clips that this computer draws without: not installed, or broken. */
+export interface EffectIssue {
+  plugin: string;
+  effect: string;
+  name: string;
+  broken: string | null;
+  clipIds: string[];
+  message: string;
+}
+
+/** `announced`: the effects a warning already named in this project, so each is said once. */
+export const useEffectIssues = create<{ issues: EffectIssue[]; epoch: string | null; announced: string[] }>(() => ({ issues: [], epoch: null, announced: [] }));
+
+/** "Drawn without VHS and Glitch: they are missing on this computer or failed to draw." */
+export function drawnWithout(names: string[]) {
+  const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0];
+  return `Drawn without ${list}: ${names.length > 1 ? "they are" : "it is"} missing on this computer or failed to draw.`;
+}
+
+function announce(names: string[]) {
+  const fresh = names.filter((n) => !useEffectIssues.getState().announced.includes(n));
+  if (fresh.length === 0) return;
+  useEffectIssues.setState((s) => ({ announced: [...s.announced, ...fresh] }));
+  useEditor.getState().toast({ kind: "warning", text: drawnWithout(fresh) });
+}
+
+let issueRequests = 0;
+
+/** Asks which effects of the open project this computer draws without; `announce` warns about each one not named yet. */
+export async function loadEffectIssues(warn = false) {
+  const epoch = useEditor.getState().snap?.sessionEpoch ?? null;
+  const mine = ++issueRequests;
+  try {
+    const issues = await api.effectIssues();
+    if (mine !== issueRequests || useEditor.getState().snap?.sessionEpoch !== epoch) return;
+    useEffectIssues.setState((s) => (s.epoch === epoch ? { issues } : { issues, epoch, announced: [] }));
+    if (warn) announce(issues.map((i) => i.name));
+  } catch {
+    // Without an answer the inspector shows no warnings; the preview still says what it draws without.
+  }
+}
+
+/** The preview says which effects its frame was drawn without whenever that changes. */
+export function listenEffects() {
+  return listen<string[]>("effects-skipped", (e) => {
+    if (e.payload.length === 0) return;
+    announce(e.payload);
+    void loadEffectIssues();
+  });
+}
+
+const effectKey = (project: Project | undefined) =>
+  JSON.stringify(project?.tracks.flatMap((t) => t.clips.flatMap((c) => (c.effects ?? []).map((e) => [c.id, e.plugin, e.effect]))) ?? []);
+
+// A project opened or its effects changed: what it draws without is asked again, and said once when it opens.
+useEditor.subscribe((s, prev) => {
+  if (!s.snap) return;
+  const opened = s.snap.sessionEpoch !== prev.snap?.sessionEpoch;
+  if (opened || effectKey(s.snap.project) !== effectKey(prev.snap?.project)) void loadEffectIssues(opened);
+});
+
+/** The installed effects, from every plugin that loads. */
+export const installedEffects = (list: Plugin[] | null) => (list ?? []).flatMap((p) => p.effects);
 
 // A preview of a plugin no longer shown would only keep a stuck script running.
 usePlugins.subscribe((s, prev) => {
@@ -230,6 +340,7 @@ export function openPlugin(id: string | null) {
 /** Why the plugin cannot run on this project now, or null. */
 export function pluginBlocked(p: Plugin, hasWords: boolean): string | null {
   if (p.error) return "This plugin can't load. Ask the AI to fix it.";
+  if (!p.runs) return "This plugin only adds effects. Select a video clip and add them under Adjust.";
   if (p.needs.includes("words") && !hasWords) return "Needs to know what is said. Transcribe first.";
   return null;
 }

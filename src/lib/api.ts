@@ -1,5 +1,5 @@
 import { invoke, type Channel } from "@tauri-apps/api/core";
-import type { ListedPlugin, PluginRow, PluginValues } from "./plugins";
+import type { EffectIssue, ListedPlugin, PluginRow, PluginValues } from "./plugins";
 import type { AgentAccess, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, BeatCutDone, BeatPlans, Boot, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Part, PreviewStarted, Project, ProjectPoster, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFraming, Rhythm, Said, SampleRun, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied } from "./types";
 
 /**
@@ -255,6 +255,8 @@ export const api = {
   /** Makes what that job learned the style, as it showed it; STYLE_CHANGED when the style changed since. */
   styleUseLearned: (jobId: string) => invoke<StyleView>("style_use_learned", { jobId }),
   listPlugins: () => invoke<ListedPlugin[]>("list_plugins"),
+  /** The plugin effects of the open project this computer draws without, and why. */
+  effectIssues: () => invoke<EffectIssue[]>("effect_issues"),
   /** The project as the plugin's primary action would leave it, without changing it, or why it cannot; with the rows of its dynamic inputs either way. */
   previewPlugin: (id: string, values: PluginValues, selection: string[], playheadUs: number) =>
     invoke<{ project: Project | null; error: string | null; items: Record<string, PluginRow[]> }>("preview_plugin", { id, values, selection, playheadUs: Math.round(playheadUs) }),

@@ -62,6 +62,7 @@ const CLIP_FIELDS: [keyof Clip, string][] = [
   ["animIn", "Animation"],
   ["animOut", "Animation"],
   ["transitionIn", "Transition"],
+  ["effects", "Effects"],
 ];
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);

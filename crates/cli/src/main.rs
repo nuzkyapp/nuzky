@@ -90,6 +90,13 @@ fn frame_size(project: &Project, width: u32) -> Result<(u32, u32)> {
     Ok((width, height))
 }
 
+/// Each plugin effect of the project this computer draws without, and why.
+fn warn_effects(project: &Project) {
+    for issue in nuzky_engine::plugin_effects::issues(project) {
+        eprintln!("Warning: {}", issue.sentence());
+    }
+}
+
 fn write_png(path: &Path, w: u32, h: u32, rgba: &[u8]) -> Result<()> {
     let mut bytes = Vec::new();
     let mut enc = png::Encoder::new(&mut bytes, w, h);
@@ -286,6 +293,9 @@ fn main() -> Result<()> {
             let rgba = renderer.render(&project, t, width, height, Wait::Exact, false)?;
             eprintln!("Rendered {width}x{height} at {secs}s in {:?} on {}", start.elapsed(), renderer.adapter_name());
             write_png(Path::new(out), width, height, &rgba)?;
+            if !renderer.skipped_effects().is_empty() {
+                warn_effects(&project);
+            }
         }
         ["bench", project, rest @ ..] => {
             let project = load(project)?;
@@ -351,7 +361,7 @@ fn main() -> Result<()> {
             let start = Instant::now();
             let cancel = AtomicBool::new(false);
             let mut last = None;
-            export(&project, &cache_dir(), Path::new(out), &options, &cancel, |p| {
+            let measured = export(&project, &cache_dir(), Path::new(out), &options, &cancel, |p| {
                 let pct = (p.fraction * 100.0) as u32;
                 if last.is_none_or(|(phase, at)| phase != p.phase || pct >= at + 10) {
                     last = Some((p.phase, pct));
@@ -359,6 +369,10 @@ fn main() -> Result<()> {
                 }
             })?;
             eprintln!("Exported {out} in {:?}", start.elapsed());
+            if !measured.drawn_without.is_empty() {
+                eprintln!("Warning: {}", nuzky_engine::plugin_effects::exported_without(&measured.drawn_without));
+                warn_effects(&project);
+            }
         }
         ["vision-models"] => install_models(nuzky_vision::models::ALL)?,
         ["thumbnail-frames", project, rest @ ..] => {
