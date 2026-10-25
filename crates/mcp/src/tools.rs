@@ -530,7 +530,15 @@ impl Backend {
             owns_run(state, &run_id)?;
             (Some(run_id), plugins::Mode::Apply)
         };
-        let prepared = plugins::prepare(&self.host, state, &args.id, &args.inputs, args.selection, args.playhead_us)?;
+        let prepared = plugins::prepare(
+            &self.host,
+            state,
+            &args.id,
+            &args.inputs,
+            args.action.as_deref(),
+            args.selection,
+            args.playhead_us,
+        )?;
         self.answer_job(&plugins::start(&self.host, &self.client.id, run, mode, prepared, state)?)
     }
 

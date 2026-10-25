@@ -101,7 +101,7 @@ pub(crate) const TOOLS: &[Rules] = &[
     // Plugins live in Nuzky's data, not the project; saving keeps the files it replaces.
     rules("list_plugins", Always, false, true, false),
     rules("save_plugin", Never, false, false, false),
-    // A dry run applies the edits to a copy; the script runs as a job of the caller's run.
+    // A dry run of any of its actions applies the edits to a copy; the script runs as a job of the caller's run.
     rules("run_plugin", When(|args| args["dry_run"] == true), true, false, true),
 ];
 
@@ -219,7 +219,12 @@ mod tests {
         let edit = find("edit_transcript").unwrap();
         assert!(edit.reads(&json!({"dry_run":true})) && !edit.reads(&json!({})));
         let plugin = find("run_plugin").unwrap();
-        assert!(plugin.reads(&json!({"dry_run":true})) && !plugin.reads(&json!({"run_id":"r"})));
+        // Pressing another of its buttons changes what it does, never what it may touch.
+        assert!(
+            plugin.reads(&json!({"dry_run":true,"action":"remove"}))
+                && !plugin.reads(&json!({"run_id":"r"}))
+                && !plugin.reads(&json!({"run_id":"r","action":"remove"}))
+        );
         let beats = find("cut_to_beats").unwrap();
         assert!(
             beats.reads(&json!({"dry_run":true}))

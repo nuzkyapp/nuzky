@@ -88,7 +88,8 @@ pub struct ListPlugins {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SavePlugin {
-    /// plugin.json: {nuzkyPlugin: 2, id, name, description, version, action?, needs?, inputs?, files?}.
+    /// plugin.json: {nuzkyPlugin: 2, id, name, description, version, action? or actions?, needs?, inputs?, sections?,
+    /// files?}.
     pub manifest: serde_json::Value,
     /// plugin.js, which defines function run(ctx).
     pub script: String,
@@ -112,6 +113,8 @@ pub struct RunPlugin {
     pub selection: Option<Vec<String>>,
     /// ctx.playheadUs; the app's playhead by default.
     pub playhead_us: Option<i64>,
+    /// The id of the manifest's action to run, which the plugin reads as ctx.action; its first action by default.
+    pub action: Option<String>,
     #[serde(default)]
     pub dry_run: bool,
 }

@@ -4,7 +4,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from e2e.harness import CLI, FIXTURES, ROOT, Bridge, export, ffprobe, flow, leave_editor, wait, webdriver
+from e2e.harness import CLI, FIXTURES, ROOT, Bridge, export, ffprobe, flow, leave_editor, press, wait, webdriver
 
 EXAMPLE = ROOT / 'skills/nuzky-plugin/examples/remove-short-clips'
 ROW = "document.querySelector('[data-plugin=\"remove-short-clips\"]')"
@@ -104,9 +104,10 @@ def plugins(r):
             if (ctx.inputs.minSeconds === 3) return [{type: "moveClip", clipId: "missing", trackId: "main", startUs: 0}];
             return {edits: [], message: "Nothing to do"};
         }'''})
-        invalid = r.s.call("window.__nuzky.api.previewPlugin('command-check', {minSeconds: 3}, [], 0)")
-        r.check('an invalid preview rejects with the validation error',
-                not invalid['ok'] and invalid['error'].startswith('PLUGIN_BAD_EDIT:'), invalid)
+        invalid = r.s.call("window.__nuzky.api.previewPlugin('command-check', {minSeconds: 3}, [], 0).then(JSON.stringify)")
+        answer = json.loads(invalid['value']) if invalid['ok'] else {}
+        r.check('an invalid preview answers the validation error and no project',
+                answer.get('project', 0) is None and (answer.get('error') or '').startswith('PLUGIN_BAD_EDIT:'), invalid)
         epoch = r.state()['epoch']
         stale = r.s.call("window.__nuzky.api.runPlugin('command-check', {minSeconds: 4}, [], 0, 'old-project')")
         r.check('a run for an old project is refused', not stale['ok'] and stale['error'].startswith('EPOCH_CHANGED:'), stale)
@@ -188,7 +189,7 @@ def plugin_pauses(r):
     r.check('the inspector says how much shorter the video gets', shown, r.s.run('return document.body.innerText.slice(-600)'))
     r.check('the preview leaves the project unchanged', project(r) == before)
     r.shot('pauses-preview')
-    preview = r.s.call("window.__nuzky.api.previewPlugin('remove-pauses', arguments[0], [], 0).then(JSON.stringify)",
+    preview = r.s.call("window.__nuzky.api.previewPlugin('remove-pauses', arguments[0], [], 0).then((p) => JSON.stringify(p.project))",
                        {'minSeconds': 0.3, 'keepSeconds': 0.05})
     expected = cuts(json.loads(preview['value'])['tracks']) if preview['ok'] else None
     r.check('the preview of these settings cuts pauses out of the main track',
@@ -305,7 +306,7 @@ def plugin_files(r):
     busy = r.s.call("""window.__nuzky.api.previewPlugin('corner-logo', {}, [], 0).then(async (preview) => {
         const {describePeek} = await import('/src/lib/peek.ts');
         const now = window.__nuzky.store.getState().snap.project;
-        const then = structuredClone(preview);
+        const then = structuredClone(preview.project);
         then.tracks[0].clips[0].content.volume = 0.5;
         then.name = 'Branded';
         then.canvas = {...then.canvas, width: then.canvas.height, height: then.canvas.width};
@@ -502,7 +503,7 @@ def plugin_autorun(r):
             len(plain['tracks'][0]['clips']) == 1 and not auto_toasts(r), (cuts(plain['tracks']), auto_toasts(r)))
 
     def preview(values):
-        answer = r.s.call("window.__nuzky.api.previewPlugin('remove-pauses', arguments[0], [], 0).then(JSON.stringify)", values)
+        answer = r.s.call("window.__nuzky.api.previewPlugin('remove-pauses', arguments[0], [], 0).then((p) => JSON.stringify(p.project))", values)
         return answer['ok'] and main_cuts(json.loads(answer['value']))
     expected = wait(lambda: preview({'minSeconds': 0.3, 'keepSeconds': 0.05}), 30)
     r.check('the settings set cut pauses out of this video', expected and len(expected[0]) > 1, expected)
@@ -703,4 +704,227 @@ def plugin_autorun(r):
     time.sleep(2)
     r.check('the cancelled export never starts when that pass ends',
             not waited.exists() and not r.s.run('return window.__nuzky.store.getState().exportJobId'))
+    r.check('no error toast', not r.errors(), r.errors())
+
+
+HOSTILE_TEXT = '<img src=x onerror="window.__p=1">'
+PANEL_MANIFEST = {
+    'nuzkyPlugin': 2, 'id': 'title-tools', 'name': 'Title tools', 'version': '1.0.0',
+    'description': 'Names the project after one of its texts, or marks it.',
+    'actions': [{'id': 'name', 'label': 'Name after text'}, {'id': 'mark', 'label': 'Mark project'},
+                {'id': 'clear', 'label': 'Clear name to how it was'}, {'id': 'count', 'label': 'Count texts'}],
+    'inputs': [
+        {'type': 'choice', 'id': 'text', 'label': 'Text', 'options': 'dynamic'},
+        {'type': 'toggle', 'id': 'custom', 'label': 'Own ending', 'default': False},
+        {'type': 'text', 'id': 'ending', 'label': 'Ending', 'default': '!', 'when': {'input': 'custom', 'equals': True}},
+        {'type': 'multi', 'id': 'marks', 'label': 'Marks', 'default': ['star'],
+         'options': [{'value': 'star', 'label': 'Star'}, {'value': 'dot', 'label': 'Dot'}]},
+        {'type': 'choice', 'id': 'size', 'label': 'Size', 'default': 'm',
+         'options': [{'value': v, 'label': v.upper()} for v in ('xs', 's', 'm', 'l', 'xl')]},
+    ],
+    'sections': [{'label': 'Ending', 'inputs': ['custom', 'ending']}, {'label': 'Style', 'inputs': ['marks', 'size']}],
+}
+PANEL_SCRIPT = '''function run(ctx) {
+  // A project named Slow keeps the plugin busy, so the panel's waiting states stay long enough to see.
+  if (ctx.project.name.startsWith("Slow")) { const end = Date.now() + 1500; while (Date.now() < end) {} }
+  const texts = ctx.project.tracks.flatMap((t) => t.clips).filter((c) => c.content.type === "text");
+  const items = {text: texts.map((c) => ({value: c.id, label: c.content.text}))};
+  if (ctx.action === "mark") return {edits: [{type: "renameProject", name: "Marked " + ctx.inputs.marks.join("+")}], items};
+  if (ctx.action === "clear") return {edits: [{type: "renameProject", name: "Cleared"}], items};
+  if (ctx.action === "count") return {edits: [], message: texts.length + " texts.", items};
+  const chosen = texts.find((c) => c.id === ctx.inputs.text);
+  if (!chosen) return {edits: [], message: "Choose a text.", items};
+  return {edits: [{type: "renameProject", name: "Named " + chosen.id + (ctx.inputs.custom ? ctx.inputs.ending : "")}], items};
+}'''
+INSPECTOR = "document.querySelector('aside[aria-label=\"Inspector\"]')"
+# What the open plugin's panel shows: its headings, which settings show, its rows, and what is off and why.
+PANEL = """const panel = document.querySelector('aside[aria-label="Inspector"]');
+const select = panel.querySelector('select[aria-label="Text"]');
+const label = (text) => [...panel.querySelectorAll('span')].find((s) => s.textContent === text);
+const button = (id) => panel.querySelector(`[data-plugin-action="${id}"]`);
+const off = (el) => !el || el.disabled || el.getAttribute('aria-disabled') === 'true';
+const why = (el) => el && (el.getAttribute('title') ?? el.closest('[title]')?.getAttribute('title') ?? null);
+return {
+  headings: [...panel.querySelectorAll('h3')].map((h) => h.textContent),
+  ending: !!label('Ending'),
+  rows: select ? [...select.options].map((o) => ({value: o.value, text: o.textContent, html: o.innerHTML})) : null,
+  chosen: select?.value ?? null,
+  images: panel.querySelectorAll('img').length,
+  hacked: window.__p ?? null,
+  controls: [select, panel.querySelector('select[aria-label="Size"]'), ...panel.querySelectorAll('input[type=checkbox]'),
+             panel.querySelector('[role=switch][aria-label="Own ending"]')]
+    .map((el) => ({off: off(el), title: why(el)})),
+  actions: ['name', 'mark', 'clear', 'count'].map((id) => ({off: off(button(id)), title: why(button(id)), text: button(id)?.textContent,
+    keys: button(id)?.getAttribute('aria-keyshortcuts') ?? null, width: button(id)?.getBoundingClientRect().width,
+    cut: ((s) => !!s && s.scrollWidth > s.clientWidth)(button(id)?.querySelector('span'))})),
+  looking: !!label('Looking…'),
+  footer: button('name')?.parentElement.getBoundingClientRect().height,
+};"""
+CHOOSE = """const select = document.querySelector('aside[aria-label="Inspector"] select[aria-label="Text"]');
+Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, arguments[0]);
+select.dispatchEvent(new Event('change', {bubbles: true}));"""
+
+
+ACTION = "document.querySelector(`aside[aria-label=\"Inspector\"] [data-plugin-action=\"${arguments[0]}\"]`)"
+
+
+def prepare_panel(r):
+    folder = r.work / 'data/nuzky/plugins/title-tools'
+    folder.mkdir(parents=True)
+    (folder / 'plugin.json').write_text(json.dumps(PANEL_MANIFEST))
+    (folder / 'plugin.js').write_text(PANEL_SCRIPT)
+
+
+@flow('plugin_panel', 'A plugin with sections, a setting shown only while another is on, checkboxes, a list of the '
+      "project's texts and four buttons pinned in view at both window sizes: a text that looks like markup shows as "
+      'plain text and runs nothing, the AI lock turns every control off and Ctrl+Enter does nothing, Tab and Enter press '
+      'the second button as one undo step, Ctrl+Enter presses the first and its tooltip says so, a text deleted just '
+      'before a run fails it with a toast that names the list, and another project starts the list over, also for a '
+      'plugin that runs after import, saying Looking… and None found. while the footer keeps its height during a run',
+      before=prepare_panel)
+def plugin_panel(r):
+    r.import_media(FIXTURES / 'talk.mp4')
+    r.add_clip('talk.mp4')
+    added = r.s.call('window.__nuzky.store.getState().edit(arguments[0])',
+                     {'type': 'addText', 'startUs': 0, 'text': HOSTILE_TEXT, 'style': {'fontSize': 80, 'color': '#FFFFFF'}})
+    text = wait(lambda: next((c for t in project(r)['tracks'] for c in t['clips'] if c['content']['type'] == 'text'), None), 5)
+    if not r.check('the project has a text that looks like markup', added['ok'] and text, added):
+        return
+    r.s.run('window.__nuzky.store.getState().select([])')
+    r.s.run("[...document.querySelectorAll('[role=tab]')].find((b) => b.textContent === 'Plugins').click()")
+    if not wait(lambda: r.s.run("return !!document.querySelector('[data-plugin=\"title-tools\"]')"), 10):
+        raise RuntimeError('the Plugins tab does not list Title tools')
+    r.s.run("document.querySelector('[data-plugin=\"title-tools\"]').click()")
+    panel = wait(lambda: (p := r.s.run(PANEL)) and p['rows'] and len(p['rows']) == 2 and p, 15) or r.s.run(PANEL)
+    r.check("the list offers Choose… and the project's text, from the plugin's preview",
+            panel['rows'] and [o['value'] for o in panel['rows']] == ['', text['id']], panel['rows'])
+    r.check('the text shows as the characters it is, never as markup',
+            panel['rows'] and panel['rows'][1]['text'] == HOSTILE_TEXT and '<img' not in panel['rows'][1]['html'], panel['rows'])
+    r.check('no picture appears in the inspector and its onerror never runs', panel['images'] == 0 and panel['hacked'] is None, panel)
+    r.check('the sections show under their headings', panel['headings'] == ['Ending', 'Style'], panel['headings'])
+    for width, height, suffix in ((1024, 640, '-1024'), (1440, 900, '')):
+        resize(r, width, height)
+        r.check(f'at {width} x {height}, before any run, all four buttons show whole without scrolling',
+                wait(lambda: all(r.s.run(SHOWN % ACTION, id) for id in ('name', 'mark', 'clear', 'count')), 5))
+        time.sleep(1)
+        r.shot(f'panel-actions{suffix}')
+        if width == 1024:
+            actions = r.s.run(PANEL)['actions']
+            r.check('the buttons after the first go two to a row, the one alone in its row as wide as the others',
+                    abs(actions[1]['width'] - actions[2]['width']) < 1 and abs(actions[3]['width'] - actions[1]['width']) < 1, actions)
+            r.check('at 1024 x 640 a label too long for its button is cut and whole in its tooltip',
+                    actions[2]['cut'] and actions[2]['title'] == 'Clear name to how it was', actions[2])
+    r.check('Ending is hidden while Own ending is off', not panel['ending'])
+    r.s.run(f'{SWITCH}.click()', 'Own ending')
+    r.check('turning on Own ending shows Ending', wait(lambda: r.s.run(PANEL)['ending'], 5))
+    time.sleep(0.5)
+    r.shot('panel-when')
+    r.s.run(f'{SWITCH}.click()', 'Own ending')
+    r.check('turning it off hides Ending again', wait(lambda: not r.s.run(PANEL)['ending'], 5))
+    r.check('with no text chosen, the plugin would change nothing',
+            wait(lambda: 'Nothing left to change.' in r.s.run(f'return {INSPECTOR}.textContent'), 10))
+
+    r.s.run(CHOOSE, text['id'])
+    ready = wait(lambda: (p := r.s.run(PANEL)) and p['chosen'] == text['id'] and not p['actions'][0]['off'] and p, 10)
+    r.check('choosing the text turns on Name after text', ready, r.s.run(PANEL))
+    first = r.s.run(PANEL)['actions'][0]
+    r.check('its tooltip and its shortcut name Ctrl+Enter, Cmd+Enter on macOS',
+            (first['title'], first['keys']) in (('Name after text (Ctrl+Enter)', 'Control+Enter'), ('Name after text (Cmd+Enter)', 'Meta+Enter')), first)
+    sizes(r, 'panel')
+
+    before = project(r)
+    saved_before = wait(lambda: (s := saved(r))['tracks'] == before['tracks'] and s, 5)
+    r.check('the saved project has the text before any run', saved_before)
+    bridge = Bridge(r, r.saved_project())
+    try:
+        run = bridge.call('begin_run', {'label': 'Agent'})['run_id']
+        locked = wait(lambda: (p := r.s.run(PANEL)) and all(c['off'] for c in p['controls'] + p['actions']) and p, 10)
+        r.check('under the AI lock every setting and button of the panel is off', locked, r.s.run(PANEL))
+        r.check('each says the AI is editing',
+                locked and all('AI is editing' in (c['title'] or '') for c in locked['controls'] + locked['actions']), locked)
+        r.shot('panel-locked')
+        r.s.run("document.querySelector('[aria-label=\"Close plugin\"]').focus()")
+        toasts = r.state()['toasts']
+        r.s.run("window.pluginTried = false; window.__nuzky.plugins.subscribe((s) => { if (s.running) window.pluginTried = true; })")
+        r.key('Enter', ctrlKey=True)
+        time.sleep(1)
+        r.check('Ctrl+Enter during the lock tries no run, changes nothing and says nothing',
+                project(r) == before and not r.s.run('return window.pluginTried') and r.state()['toasts'] == toasts,
+                (project(r)['name'], r.state()['toasts']))
+        bridge.call('end_run', {'run_id': run, 'action': 'keep'})
+    finally:
+        bridge.close()
+    wait(lambda: not r.s.run(PANEL)['actions'][0]['off'], 10)
+    wait(lambda: r.s.run('return window.__nuzky.store.getState().toasts.some((t) => t.text.startsWith("AI edit done"))'), 5)
+    r.s.run('const s = window.__nuzky.store.getState(); '
+            's.toasts.filter((t) => t.text.startsWith("AI edit done")).forEach((t) => s.dismissToast(t.id))')
+
+    r.s.run('document.querySelector(\'[data-plugin-action="name"]\').focus()')
+    press('Tab')
+    focused = wait(lambda: r.s.run('return document.activeElement?.dataset.pluginAction ?? null') == 'mark', 3, 0.05)
+    r.check('Tab from the first button reaches the second', focused, r.s.run('return document.activeElement?.outerHTML.slice(0, 160)'))
+    press('Return')
+    r.check('Enter on it runs the second action with the checkboxes as set',
+            wait(lambda: project(r)['name'] == 'Marked star', 10), project(r)['name'])
+    r.check('the saved project has it', wait(lambda: saved(r)['name'] == 'Marked star', 5))
+    r.shot('panel-marked')
+    r.s.call('window.__nuzky.store.getState().undo()')
+    r.check('one undo restores the open project exactly', wait(lambda: project(r) == before, 5), project(r)['name'])
+    r.check('and the saved project exactly', wait(lambda: saved(r) == saved_before, 5))
+
+    wait(lambda: not r.s.run(PANEL)['actions'][0]['off'], 10)
+    r.s.run('document.querySelector(\'[data-plugin-action="mark"]\').focus()')
+    r.key('Enter', ctrlKey=True)
+    r.check('Ctrl+Enter in the inspector runs the first action',
+            wait(lambda: project(r)['name'] == f"Named {text['id']}", 10), project(r)['name'])
+    r.s.call('window.__nuzky.store.getState().undo()')
+    r.check('one undo takes it back', wait(lambda: project(r) == before, 5))
+
+    # A text deleted just before the click: the run fails, naming the list by its label, never by an id.
+    dismiss_toasts(r)
+    wait(lambda: (p := r.s.run(PANEL)) and p['chosen'] == text['id'] and not p['actions'][0]['off'], 10)
+    r.s.call("""window.__nuzky.store.getState().edit({type: 'deleteClips', clipIds: [arguments[0]]})
+        .then(() => document.querySelector('[data-plugin-action="name"]').click())""", text['id'])
+    gone = wait(lambda: next((t['text'] for t in r.state()['toasts'] if t['kind'] == 'warning'), None), 10)
+    r.check('the run fails with a toast that names the list and says what to do',
+            gone == 'Title tools failed: "Text": the one you chose is gone. Choose another. Nothing changed.', r.state()['toasts'])
+    r.check('the toast names no id', gone and text['id'] not in gone, gone)
+    r.shot('panel-gone')
+    r.s.call('window.__nuzky.store.getState().undo()')
+    r.check('undo brings the text back', wait(lambda: project(r)['tracks'] == before['tracks'], 5))
+
+    # Another project: the text chosen here is not there, so the list starts over, also for a run after import.
+    r.check('the text is chosen again', wait(lambda: r.s.run(PANEL)['chosen'] == text['id'], 10), r.s.run(PANEL))
+    r.s.run(f'{SWITCH}.click()', 'Run after import')
+    r.check('Run after import turns on', wait(lambda: switched_on(r, 'Run after import'), 5))
+    dismiss_toasts(r)
+    new_project(r, FIXTURES / 'talk.mp4')
+    ran = wait(lambda: [t for t in auto_toasts(r) if 'Title tools' in t['text']], 30)
+    r.check('after the import, Title tools runs with no text chosen and fails nothing',
+            [(t['kind'], t['text']) for t in ran or []] == [('info', 'Title tools ran after import: choose a text.')], auto_toasts(r))
+    r.check('the text chosen in the other project is no longer remembered',
+            r.s.run("return window.__nuzky.plugins.getState().values['title-tools']?.text") == '',
+            r.s.run("return window.__nuzky.plugins.getState().values['title-tools']"))
+    renamed = r.s.call('window.__nuzky.store.getState().edit(arguments[0])', {'type': 'renameProject', 'name': 'Slow project'})
+    r.check('the new project is named so the plugin takes its time', renamed['ok'], renamed)
+    r.s.run("[...document.querySelectorAll('[role=tab]')].find((b) => b.textContent === 'Plugins').click()")
+    wait(lambda: r.s.run("return !!document.querySelector('[data-plugin=\"title-tools\"]')"), 10)
+    r.s.run("document.querySelector('[data-plugin=\"title-tools\"]').click()")
+    r.check('until the plugin answers, the list says Looking…', wait(lambda: r.s.run(PANEL)['looking'], 2, 0.05), r.s.run(PANEL))
+    r.shot('panel-looking')
+    empty = wait(lambda: (p := r.s.run(PANEL)) and p['rows'] is not None and p, 10) or r.s.run(PANEL)
+    r.check('a project without texts lists none: the select says None found. and is off with that reason',
+            empty['rows'] == [{'value': '', 'text': 'None found.', 'html': 'None found.'}] and empty['controls'][0] == {'off': True, 'title': 'None found.'}
+            and not empty['looking'], empty)
+    r.shot('panel-none')
+
+    wait(lambda: not r.s.run(PANEL)['actions'][1]['off'], 10)
+    resting = r.s.run(PANEL)['footer']
+    r.s.run('document.querySelector(\'[data-plugin-action="mark"]\').click()')
+    running = wait(lambda: (p := r.s.run(PANEL)) and p['actions'][1]['text'] == 'Running…' and p, 5)
+    r.check('while it runs, the button says Running… and the footer keeps its height',
+            running and abs(running['footer'] - resting) < 0.5, (resting, running and running['footer']))
+    time.sleep(0.6)
+    r.shot('panel-running')
+    r.check('the run ends', wait(lambda: project(r)['name'] == 'Marked star', 10), project(r)['name'])
     r.check('no error toast', not r.errors(), r.errors())

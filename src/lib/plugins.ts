@@ -6,26 +6,40 @@ import { useDock } from "./dock";
 import { PLUGIN_RUN, aiLocked, enqueue, stopAiRun, undoAction, useEditor, type Toast } from "./store";
 import type { Project, Snapshot } from "./types";
 
-export type PluginInput = { id: string; label: string } & (
+/** A choice's option, or a row the plugin found in the project; plain text, shown as it is. */
+export type PluginRow = { value: string; label: string };
+
+/** Options listed in the manifest, or "dynamic": the rows the plugin's preview returns. */
+type Options = PluginRow[] | "dynamic";
+
+export type PluginInput = { id: string; label: string; when?: { input: string; equals: string | boolean | (string | boolean)[] } } & (
   | { type: "number"; min: number; max: number; step: number; default: number; unit?: string }
   | { type: "toggle"; default: boolean }
-  | { type: "choice"; options: { value: string; label: string }[]; default: string }
+  | { type: "choice"; options: Options; default: string }
+  | { type: "multi"; options: Options; default: string[] }
   | { type: "text"; default: string }
   | { type: "color"; default: string }
 );
 
-export type PluginValue = number | boolean | string;
+export type PluginValue = number | boolean | string | string[];
 export type PluginValues = Record<string, PluginValue>;
+
+export interface PluginAction {
+  id: string;
+  label: string;
+}
 
 /** A plugin in Nuzky's plugins folder; one that cannot load has only its id, a name and `error`. */
 export interface Plugin {
   id: string;
   name: string;
   description: string;
-  /** The verb on its button, "Run" unless the plugin names one. */
-  action: string;
+  /** Its buttons, the first the primary one: "Run" unless the plugin names its own. */
+  actions: PluginAction[];
   needs: string[];
   inputs: PluginInput[];
+  /** Headed groups of inputs; the inputs in none come first. */
+  sections: { label: string; inputs: string[] }[];
   error: string | null;
 }
 
@@ -53,7 +67,11 @@ interface PluginsState {
   /** The plugins the user turned on for each trigger. Only the user turns them on, here; never a plugin or the project. */
   auto: Record<Trigger, string[]>;
   preview: PluginPreview | null;
+  /** The rows each plugin's last preview found for its dynamic inputs, by plugin and input. */
+  rows: Record<string, Record<string, PluginRow[]>>;
   running: string | null;
+  /** The action of the run going on. */
+  pressed: string | null;
   /** The automatic runs going on now; an export waits for its own. */
   pass: Trigger | null;
   /** An export waits for plugins: its own, or a pass still running before it. */
@@ -82,7 +100,9 @@ export const usePlugins = create<PluginsState>(() => ({
   open: null,
   ...savedSettings(),
   preview: null,
+  rows: {},
   running: null,
+  pressed: null,
   pass: null,
   exportWaits: false,
   step: null,
@@ -97,16 +117,39 @@ export function setAuto(id: string, trigger: Trigger, on: boolean) {
   usePlugins.setState((s) => ({ auto: { ...s.auto, [trigger]: [...s.auto[trigger].filter((i) => i !== id), ...(on ? [id] : [])] } }));
 }
 
-/** The values last set that the plugin still takes; a setting the AI removed or retyped since goes back to its default. */
-export function valuesFor(p: Plugin, set: PluginValues | undefined): PluginValues {
-  const fits = (input: PluginInput, v: PluginValue | undefined) =>
-    typeof v === typeof input.default &&
-    (input.type !== "choice" || input.options.some((o) => o.value === v)) &&
-    (input.type !== "number" || ((v as number) >= input.min && (v as number) <= input.max));
-  return Object.fromEntries(p.inputs.map((input) => [input.id, fits(input, set?.[input.id]) ? set![input.id] : input.default]));
+/**
+ * The values last set that the plugin still takes; a setting the AI removed or retyped since goes back to its default,
+ * and a row of a dynamic input that its last preview on this project did not find, or before any, is no longer chosen.
+ */
+export function valuesFor(p: Plugin, set: PluginValues | undefined, rows: Record<string, PluginRow[]> | undefined): PluginValues {
+  const offered = (input: PluginInput & { options: Options }, v: string) => (input.options === "dynamic" ? !!rows && (rows[input.id] ?? []).some((r) => r.value === v) : input.options.some((o) => o.value === v));
+  const value = (input: PluginInput, v: PluginValue | undefined): PluginValue => {
+    if (input.type === "multi") return Array.isArray(v) ? v.filter((one) => typeof one === "string" && offered(input, one)) : input.default;
+    const fits =
+      typeof v === typeof input.default &&
+      (input.type !== "choice" || v === "" || offered(input, v as string)) &&
+      (input.type !== "number" || ((v as number) >= input.min && (v as number) <= input.max));
+    return fits ? v! : input.default;
+  };
+  return Object.fromEntries(p.inputs.map((input) => [input.id, value(input, set?.[input.id])]));
 }
 
-export const valuesOf = (p: Plugin): PluginValues => valuesFor(p, usePlugins.getState().values[p.id]);
+export const valuesOf = (p: Plugin): PluginValues => valuesFor(p, usePlugins.getState().values[p.id], usePlugins.getState().rows[p.id]);
+
+const dynamic = (input: PluginInput) => "options" in input && input.options === "dynamic";
+
+/** What an automatic run uses: the values last set, with every list the plugin fills at its default, as nobody chose from it in this project. */
+const autoValues = (p: Plugin): PluginValues => ({ ...valuesOf(p), ...Object.fromEntries(p.inputs.filter(dynamic).map((input) => [input.id, input.default])) });
+
+/** The inputs shown for these values: those without `when`, and those whose earlier input is shown with that value. */
+export function shownInputs(p: Plugin, values: PluginValues): Set<string> {
+  const shown = new Set<string>();
+  for (const input of p.inputs) {
+    const w = input.when;
+    if (!w || (shown.has(w.input) && [w.equals].flat().includes(values[w.input] as string | boolean))) shown.add(input.id);
+  }
+  return shown;
+}
 
 export function setValue(id: string, input: string, value: PluginValue) {
   usePlugins.setState((s) => ({ values: { ...s.values, [id]: { ...s.values[id], [input]: value } } }));
@@ -116,16 +159,17 @@ export function setValue(id: string, input: string, value: PluginValue) {
 export interface ListedPlugin {
   id: string;
   error: string | null;
-  manifest: { name: string; description: string; action: string; needs: string[]; inputs: PluginInput[] } | null;
+  manifest: { name: string; description: string; action: string; actions?: PluginAction[]; needs: string[]; inputs: PluginInput[]; sections?: Plugin["sections"] } | null;
 }
 
 const listed = ({ id, error, manifest: m }: ListedPlugin): Plugin => ({
   id,
   name: m?.name ?? id.charAt(0).toUpperCase() + id.slice(1).replaceAll("-", " "),
   description: m?.description ?? "",
-  action: m?.action ?? "Run",
+  actions: m?.actions?.length ? m.actions : [{ id: "run", label: m?.action ?? "Run" }],
   needs: m?.needs ?? [],
   inputs: m?.inputs ?? [],
+  sections: m?.sections ?? [],
   error: m ? null : (error ?? "Can't load."),
 });
 
@@ -159,6 +203,20 @@ useEditor.subscribe((s, prev) => {
   if (usePlugins.getState().open && (s.panelTab !== "plugins" || s.snap?.sessionEpoch !== prev.snap?.sessionEpoch)) usePlugins.setState({ open: null, preview: null });
 });
 
+// The rows a plugin found, and the one chosen from them, belong to the project it looked at.
+useEditor.subscribe((s, prev) => {
+  if (s.snap?.sessionEpoch === prev.snap?.sessionEpoch) return;
+  usePlugins.setState(({ list, values }) => ({
+    rows: {},
+    values: Object.fromEntries(
+      Object.entries(values).map(([id, set]) => {
+        const lists = list?.find((p) => p.id === id)?.inputs.filter(dynamic) ?? [];
+        return [id, lists.length ? { ...set, ...Object.fromEntries(lists.map((input) => [input.id, input.default])) } : set];
+      }),
+    ),
+  }));
+});
+
 /** Shows the plugin in the inspector, from the Plugins tab or the launcher. */
 export function openPlugin(id: string | null) {
   usePlugins.setState({ open: id, preview: null });
@@ -185,9 +243,11 @@ export async function previewPlugin(p: Plugin, values: PluginValues, key: string
   if (!snap) return;
   const mine = ++previews;
   let preview: PluginPreview;
+  let rows: Record<string, PluginRow[]> | null = null;
   try {
-    const project = await api.previewPlugin(p.id, values, selection, timeUs);
-    preview = { key, revision: snap.revision, project, error: null, waiting: false };
+    const answer = await api.previewPlugin(p.id, values, selection, timeUs);
+    rows = answer.items;
+    preview = { key, revision: snap.revision, project: answer.project, error: answer.error && plainDetail(answer.error), waiting: false };
   } catch (e) {
     const text = errorText(e);
     // A newer request cancelled it.
@@ -195,7 +255,8 @@ export async function previewPlugin(p: Plugin, values: PluginValues, key: string
     preview = { key, revision: snap.revision, project: null, error: plainDetail(text), waiting: text.startsWith("AUDIO_NOT_READY") };
   }
   // An older answer arriving late, a closed plugin or a run that started meanwhile keeps what is shown.
-  if (mine === previews && usePlugins.getState().open === p.id && !usePlugins.getState().running) usePlugins.setState({ preview });
+  if (mine === previews && usePlugins.getState().open === p.id && !usePlugins.getState().running)
+    usePlugins.setState((s) => ({ preview, rows: rows ? { ...s.rows, [p.id]: rows } : s.rows }));
 }
 
 const sentence = (text: string) => (/[.!?]$/.test(text) ? text : `${text}.`);
@@ -227,16 +288,18 @@ export interface PassReport {
   done: boolean;
 }
 
-/** Runs it in a run of its own: the AI lock with Stop while it runs, and one undo step. `epoch` keeps it to that project. */
-async function execute(p: Plugin, selection: string[], timeUs: number, epoch?: string): Promise<Ran> {
-  const values = valuesOf(p);
+/**
+ * Runs its `action`, the primary one when null, in a run of its own: the AI lock with Stop while it runs, and one undo
+ * step. `epoch` keeps it to that project.
+ */
+async function execute(p: Plugin, values: PluginValues, selection: string[], timeUs: number, action: string | null = null, epoch?: string): Promise<Ran> {
   // The last preview stays, dimmed, so the panel keeps its height while the run goes on.
-  usePlugins.setState({ running: p.id });
+  usePlugins.setState({ running: p.id, pressed: action ?? p.actions[0].id });
   const out: { failure?: string; message?: string | null; from?: number } = {};
   const snap = await enqueue(async (current) => {
     out.from = useEditor.getState().snap?.revision;
     try {
-      const done = await api.runPlugin(p.id, values, selection, timeUs, epoch ?? current);
+      const done = await api.runPlugin(p.id, values, selection, timeUs, epoch ?? current, action);
       out.message = done.message;
       return done.snapshot;
     } catch (e) {
@@ -244,18 +307,21 @@ async function execute(p: Plugin, selection: string[], timeUs: number, epoch?: s
       return null;
     }
   });
-  usePlugins.setState({ running: null });
+  usePlugins.setState({ running: null, pressed: null });
   if (out.failure !== undefined)
     return out.failure.startsWith("CANCELLED") || out.failure.startsWith("RUN_STOPPED") ? { plugin: p, did: "stopped" } : { plugin: p, did: "failed", error: out.failure, loaded: true };
   const message = out.message ?? null;
   return snap ? { plugin: p, did: "changed", message, snap, from: out.from } : { plugin: p, did: "nothing", message };
 }
 
-/** The run a person started from the inspector, on the selection and at the playhead, and a toast that says what it did. */
-export async function runPlugin(p: Plugin) {
+/**
+ * The run a person started from one of the plugin's buttons in the inspector, `action` or the primary one, on the
+ * selection and at the playhead, and a toast that says what it did.
+ */
+export async function runPlugin(p: Plugin, action: string | null = null) {
   if (aiLocked() || usePlugins.getState().running) return;
   const { selection, timeUs } = useEditor.getState();
-  const ran = await execute(p, selection, timeUs);
+  const ran = await execute(p, valuesOf(p), selection, timeUs, action);
   const toast = useEditor.getState().toast;
   if (ran.did === "stopped") return toast({ kind: "info", text: `${p.name} stopped. Nothing changed.` });
   if (ran.did === "failed") return toast(failureToast(ran, null));
@@ -401,7 +467,7 @@ async function runPass(pass: Pass): Promise<PassReport> {
         break;
       }
       usePlugins.setState({ step: { index: i + 1, total: chosen.length } });
-      const ran: Ran = p.error ? { plugin: p, did: "failed", error: p.error, loaded: false } : await execute(p, [], 0, pass.epoch);
+      const ran: Ran = p.error ? { plugin: p, did: "failed", error: p.error, loaded: false } : await execute(p, autoValues(p), [], 0, null, pass.epoch);
       publish({ results: [...report.results, ran] });
     }
   } finally {

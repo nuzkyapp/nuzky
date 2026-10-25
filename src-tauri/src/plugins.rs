@@ -31,15 +31,17 @@ pub async fn preview_plugin(
     let host = state.session.lock().unwrap().host.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut preview = plugins::dry_run_in_app(&host, &id, &values, selection, playhead_us, cancel).map_err(err)?;
+        // The rows come also with an error, so the panel can offer them again when a chosen one is gone.
+        let items = preview["items"].take();
         if preview["valid"] != true {
-            return Err(preview["error"].as_str().unwrap().to_owned());
+            return Ok(json!({"project": null, "error": preview["error"], "items": items}));
         }
         // As the snapshot draws it, so the app compares the two like for like.
         let mut project = preview["project"].take();
         let safe_area =
             serde_json::from_value::<nuzky_engine::Project>(project.clone()).map_err(err)?.canvas.safe_area();
         project["canvas"]["safeArea"] = json!(safe_area);
-        Ok(project)
+        Ok(json!({"project": project, "error": null, "items": items}))
     })
     .await
     .map_err(err)?
@@ -56,6 +58,7 @@ pub async fn run_plugin(
     app: AppHandle,
     id: String,
     values: Map<String, Value>,
+    action: Option<String>,
     selection: Vec<String>,
     playhead_us: i64,
     expected_epoch: Option<String>,
@@ -66,7 +69,8 @@ pub async fn run_plugin(
             let current = lock_session(&state.session, expected_epoch.as_deref())?;
             let host = current.host.clone();
             let epoch = host.session.stamp().session_epoch;
-            let job = plugins::run_in_app(&host, &id, &values, selection, playhead_us).map_err(err)?;
+            let job =
+                plugins::run_in_app(&host, &id, &values, action.as_deref(), selection, playhead_us).map_err(err)?;
             (host, epoch, job)
         };
         let job_id = job["job_id"].as_str().unwrap().to_owned();

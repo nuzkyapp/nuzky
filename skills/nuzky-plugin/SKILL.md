@@ -37,7 +37,7 @@ A plugin is a small JavaScript file that reads the project and returns edits. Th
 
 - `nuzkyPlugin` is the plugin API, 2; plugins made for 1 still run, but one that ships files or needs silences, loudness or beats needs 2. `list_plugins` gives the `api` this Nuzky runs, and an older Nuzky refuses a plugin for a newer API with PLUGIN_API_NEWER.
 - `id`: 1 to 40 lowercase letters, digits and dashes; also the folder's name. Saving with the same id replaces the plugin and keeps the old files as plugin.prev.json and plugin.prev.js.
-- `name` (at most 40 characters), `description` (300), `version` (20) and `action`, the verb on its button (24, "Run" when left out). Write them in the user's language, plainly, saying what will happen.
+- `name` (at most 40 characters), `description` (300), `version` (20) and `action`, the verb on its button (24, "Run" when left out), or `actions` for several buttons (A richer panel below). Write them in the user's language, plainly, saying what will happen.
 - `needs`: what the plugin reads beyond the project, any of `"words"` (the transcript), `"silences"`, `"loudness"` and `"beats"` (found in the sound; these three need `nuzkyPlugin` 2). Ask only for what `run` uses: finding them in a long video takes a while the first time.
 - `inputs`, at most 20, each with `id` (letters, digits and `_`), `label` (at most 40 characters), `type` and `default`:
   - `number`: `min`, `max`, `step`, `default`, optional `unit` such as `"s"` or `"%"`.
@@ -45,9 +45,37 @@ A plugin is a small JavaScript file that reads the project and returns edits. Th
   - `choice`: `options` `[{"value": "main", "label": "Main track"}]`, `default` one of the values.
   - `text`: `default`, at most 500 characters.
   - `color`: `default` such as `"#FFCC00"`.
+  - `multi` (API 2): checkboxes, `options` as for `choice` and `default` a list of the values checked, such as `[]`. Its value is that list.
 - `files`: the plugin's own pictures and sounds by file name, such as `["logo.png"]` (Pictures and sounds below).
 
 Ask the user only for what changes between runs. A value the plugin can work out from the project is not an input.
+
+### A richer panel
+
+With `"nuzkyPlugin": 2` a plugin with many inputs can group them, show some only when they matter, offer rows it finds in the project and have more than one button. The panel is data: Nuzky draws it with its own controls and shows every text as plain text, so markup, links and styles in a label show as the characters they are. There is no HTML and no script in the panel, and an unknown field such as `html` makes plugin.json invalid.
+
+```json
+{
+  "nuzkyPlugin": 2,
+  "id": "title-cards",
+  "name": "Title cards",
+  "description": "Puts a title card before the clips you choose.",
+  "version": "1.0.0",
+  "actions": [{ "id": "add", "label": "Add cards" }, { "id": "remove", "label": "Remove cards" }],
+  "inputs": [
+    { "type": "choice", "id": "clip", "label": "Before", "options": "dynamic" },
+    { "type": "toggle", "id": "custom", "label": "Own text", "default": false },
+    { "type": "text", "id": "text", "label": "Text", "default": "Part 1", "when": { "input": "custom", "equals": true } },
+    { "type": "multi", "id": "look", "label": "Look", "options": [{ "value": "bold", "label": "Bold" }, { "value": "shadow", "label": "Shadow" }], "default": ["bold"] }
+  ],
+  "sections": [{ "label": "Text", "inputs": ["custom", "text"] }, { "label": "Style", "inputs": ["look"] }]
+}
+```
+
+- `actions`: 1 to 4 buttons `{id, label}`, the first the prominent one. They replace `action`. `ctx.action` is the `id` of the one the user pressed, so `run` can do something else for each, such as add or remove. The preview shows what the first one would do. A plugin without `actions` has one, `run`, with `action` as its label. `id` is 1 to 40 letters, digits, `-` and `_`; `label` at most 24 characters.
+- `sections`: at most 10 groups `{label, inputs}` with a heading of at most 40 characters, in this order, each input in at most one. Inputs in no section come first, without a heading.
+- `when: {input, equals}` on an input shows it only while an earlier `toggle` or `choice` with listed options has that value, or one of a list of values (`"equals": ["fast", "faster"]`). A hidden input still has its value in `ctx.inputs`, so check the same condition in `run`.
+- `"options": "dynamic"` on a `choice` or `multi`: the rows come from the project, such as its clips or texts. Leave out `default`; the choice starts with none, `""`, and the checkboxes with `[]`. Return the rows from `run` in `items`, every time it runs: `{edits, message, items: {clip: [{value: "clip-2", label: "Interview"}]}}`, at most 500 rows an input, `value` and `label` plain text of at most 100 characters without line breaks, values distinct. The preview's run gives the panel its rows. The real run gets them again from `run`, and a value that is no longer one of them, such as a clip deleted since, fails with INVALID_INPUT and changes nothing.
 
 ## plugin.js
 
@@ -59,13 +87,14 @@ function run(ctx) {
 }
 ```
 
-`run(ctx)` returns an array of edits, or `{edits, message}`, where `message` is one sentence for the user, at most 500 characters, such as "Removed 6 clips." Return no edits and a message saying why when there is nothing to do.
+`run(ctx)` returns an array of edits, or `{edits, message, items}`, where `message` is one sentence for the user, at most 500 characters, such as "Removed 6 clips.", and `items` the rows of dynamic inputs (A richer panel above). Return no edits and a message saying why when there is nothing to do.
 
 `ctx`:
 
 - `api`: 2.
 - `project`: what `get_state` answers: `canvas`, `assets`, `tracks` (bottom to top; `tracks[0]` is the main track, id `"main"`), each with `clips` `{id, startUs, durationUs, content, animIn, animOut, keyframes, transitionIn}`, `duration_us`, `thumbnails`, `selection`, `playhead_us`. `content.type` is `"media"` (`assetId`, `sourceInUs`, `speed`, `volume`, `transform`…) or `"text"` (`text`, `style`, `transform`).
 - `inputs`: every input's value by id, checked against the manifest; those the user did not set have their default.
+- `action`: the `id` of the button pressed, `"run"` for a plugin without `actions`.
 - `selection`: ids of the clips the user selected, maybe none.
 - `playheadUs`: where the playhead is.
 - `files`: each of the manifest's files by name, `{assetId, kind, width, height, durationUs}`, such as `ctx.files["logo.png"].assetId`. `kind` is `"image"` or `"audio"`; a picture has `durationUs` 0, a sound `width` and `height` 0.
@@ -192,7 +221,7 @@ A logo in the top right corner for the whole video:
 
 1. Read `get_state` so you know the project the plugin will meet, and write the plugin for any project, not only this one.
 2. `save_plugin(manifest, script, readme, files)`. PLUGIN_BROKEN names the field of plugin.json, or the line and column of plugin.js (`plugin.js:3:1: SyntaxError: …`). Fix it and save again.
-3. `run_plugin(id, inputs, dry_run: true)` changes nothing. Check `edits`, `adds`, `message` and `logs`; `valid: false` with `error` says which edit would fail. Try the inputs the user will use, and an edge such as no selection.
+3. `run_plugin(id, inputs, dry_run: true)` changes nothing. Check `edits`, `adds`, `message`, `logs` and `items`; `valid: false` with `error` says which edit would fail. Give `action` to try another of its buttons. Try the inputs the user will use, and an edge such as no selection.
 4. `begin_run`, then `run_plugin(id, inputs, run_id)`. Its edits join your run. A long run answers with a job: wait with `job` action `wait`. A plugin that needs silences, loudness or beats first prepares the sound of each file Nuzky has not prepared yet, as part of that job.
 5. `inspect_frames` where it changed something, and `get_state`. If it is wrong, `end_run` with discard, or keep and `undo_run`, fix the plugin and try again.
 6. Tell the user the plugin is in their Plugins panel, what it does and what its inputs mean. When they want it every time, tell them to turn on Run after import or Run before export there.
@@ -202,7 +231,7 @@ A logo in the top right corner for the whole video:
 - PLUGIN_NOT_FOUND: no plugin with that id; `list_plugins`.
 - PLUGIN_BROKEN: plugin.json or plugin.js is invalid, or one of its files is missing, a link or not the picture or sound its name says; the message says where.
 - PLUGIN_API_NEWER: it needs a newer Nuzky. PLUGIN_API_OLD: it was made for an older one.
-- INVALID_INPUT: `<input> must be …`, outside its bounds or options, or not an input of the plugin.
+- INVALID_INPUT: `<input> must be …`, outside its bounds or options, or not an input of the plugin; `"<label>": the one you chose is gone. Choose another.`, a dynamic row gone since the preview, named by the input's label; or an action the plugin does not have.
 - TRANSCRIPT_MISSING: it needs the words; `transcribe` first.
 - MEDIA_MISSING: it needs the sound of a file that is missing; the user relinks it.
 - PLUGIN_FAILED: the script threw, with `plugin.js:<line>:<column>`, or returned something that is not edits; the last lines of its log follow.

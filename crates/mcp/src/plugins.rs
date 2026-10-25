@@ -36,6 +36,10 @@ pub const GUIDE: &str = include_str!("../../../skills/nuzky-plugin/SKILL.md");
 const MAX_SCRIPT_BYTES: u64 = 1 << 20;
 const MAX_TEXT_BYTES: u64 = 64 << 10;
 const MAX_TEXT_INPUT: usize = 500;
+/// The rows a plugin may give a dynamic choice, and the characters of each row's value and label.
+const MAX_ROWS: usize = 500;
+const MAX_ROW_CHARS: usize = 100;
+const MAX_ACTIONS: usize = 4;
 const MAX_EDITS: usize = 5_000;
 /// What `run` may return, and how big its edits may make the project: a get_state answer must still fit a message.
 const MAX_RESULT_BYTES: usize = 8 << 20;
@@ -61,13 +65,19 @@ pub struct Manifest {
     pub name: String,
     pub description: String,
     pub version: String,
-    /// The verb on the plugin's button.
+    /// The verb on the plugin's button; with `actions`, the first one's label.
     #[serde(default = "default_action")]
     pub action: String,
+    /// The plugin's buttons, the first the primary one, from API 2 on; `ctx.action` says which was pressed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<Action>,
     #[serde(default)]
     pub needs: Vec<Need>,
     #[serde(default)]
     pub inputs: Vec<Input>,
+    /// Headed groups of inputs in the panel, from API 2 on; inputs in none come first, without a heading.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sections: Vec<Section>,
     /// Pictures and sounds in the plugin's folder, by file name, that its edits may add to the project.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<String>,
@@ -88,6 +98,28 @@ pub enum Need {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Action {
+    pub id: String,
+    pub label: String,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Section {
+    pub label: String,
+    pub inputs: Vec<String>,
+}
+
+/// Shows an input only while an earlier toggle or choice has this value, or one of these values.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct When {
+    pub input: String,
+    pub equals: Value,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase", rename_all_fields = "camelCase", deny_unknown_fields)]
 pub enum Input {
     Number {
@@ -99,27 +131,49 @@ pub enum Input {
         default: f64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         unit: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        when: Option<When>,
     },
     Toggle {
         id: String,
         label: String,
         default: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        when: Option<When>,
     },
     Choice {
         id: String,
         label: String,
-        options: Vec<Choice>,
+        options: Options,
+        /// A dynamic choice starts with none chosen, "".
+        #[serde(default)]
         default: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        when: Option<When>,
+    },
+    /// Checkboxes, from API 2 on; its value is the list of values checked.
+    Multi {
+        id: String,
+        label: String,
+        options: Options,
+        #[serde(default)]
+        default: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        when: Option<When>,
     },
     Text {
         id: String,
         label: String,
         default: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        when: Option<When>,
     },
     Color {
         id: String,
         label: String,
         default: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        when: Option<When>,
     },
 }
 
@@ -128,6 +182,33 @@ pub enum Input {
 pub struct Choice {
     pub value: String,
     pub label: String,
+}
+
+/// A choice's options: listed in the manifest, or `"dynamic"`, the rows the plugin's `run` returns in `items`.
+#[derive(Clone)]
+pub enum Options {
+    Fixed(Vec<Choice>),
+    Dynamic,
+}
+
+impl Serialize for Options {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Options::Fixed(options) => options.serialize(serializer),
+            Options::Dynamic => serializer.serialize_str("dynamic"),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Options {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match Value::deserialize(deserializer)? {
+            Value::String(text) if text == "dynamic" => Ok(Options::Dynamic),
+            value => Vec::<Choice>::deserialize(value).map(Options::Fixed).map_err(|e| {
+                serde::de::Error::custom(format!("options must be a list of {{value, label}} or \"dynamic\": {e}"))
+            }),
+        }
+    }
 }
 
 /// An installed plugin as the app and list_plugins show it.
@@ -148,6 +229,7 @@ impl Input {
             Input::Number { id, .. }
             | Input::Toggle { id, .. }
             | Input::Choice { id, .. }
+            | Input::Multi { id, .. }
             | Input::Text { id, .. }
             | Input::Color { id, .. } => id,
         }
@@ -158,15 +240,32 @@ impl Input {
             Input::Number { label, .. }
             | Input::Toggle { label, .. }
             | Input::Choice { label, .. }
+            | Input::Multi { label, .. }
             | Input::Text { label, .. }
             | Input::Color { label, .. } => label,
         }
+    }
+
+    fn when(&self) -> Option<&When> {
+        match self {
+            Input::Number { when, .. }
+            | Input::Toggle { when, .. }
+            | Input::Choice { when, .. }
+            | Input::Multi { when, .. }
+            | Input::Text { when, .. }
+            | Input::Color { when, .. } => when.as_ref(),
+        }
+    }
+
+    fn dynamic(&self) -> bool {
+        matches!(self, Input::Choice { options: Options::Dynamic, .. } | Input::Multi { options: Options::Dynamic, .. })
     }
 
     fn default(&self) -> Value {
         match self {
             Input::Number { default, .. } => json!(default),
             Input::Toggle { default, .. } => json!(default),
+            Input::Multi { default, .. } => json!(default),
             Input::Choice { default, .. } | Input::Text { default, .. } | Input::Color { default, .. } => {
                 json!(default)
             }
@@ -174,14 +273,28 @@ impl Input {
     }
 
     fn check(&self, value: &Value) -> Result<()> {
+        let listed = |options: &[Choice]| options.iter().map(|o| o.value.as_str()).collect::<Vec<_>>().join(", ");
         let (valid, expected) = match self {
             Input::Number { min, max, .. } => {
                 (value.as_f64().is_some_and(|v| (*min..=*max).contains(&v)), format!("a number from {min} to {max}"))
             }
             Input::Toggle { .. } => (value.is_boolean(), "true or false".into()),
-            Input::Choice { options, .. } => (
-                options.iter().any(|option| *value == option.value),
-                format!("one of {}", options.iter().map(|o| o.value.as_str()).collect::<Vec<_>>().join(", ")),
+            Input::Choice { options: Options::Fixed(options), .. } => {
+                (options.iter().any(|option| *value == option.value), format!("one of {}", listed(options)))
+            }
+            Input::Choice { options: Options::Dynamic, .. } => (
+                value.as_str().is_some_and(|text| text.chars().count() <= MAX_ROW_CHARS),
+                "the value of one of its rows, or \"\" for none".into(),
+            ),
+            Input::Multi { options: Options::Fixed(options), .. } => (
+                picks(value).is_some_and(|picks| picks.iter().all(|v| options.iter().any(|o| o.value == *v))),
+                format!("a list of distinct values from {}", listed(options)),
+            ),
+            Input::Multi { options: Options::Dynamic, .. } => (
+                picks(value).is_some_and(|picks| {
+                    picks.len() <= MAX_ROWS && picks.iter().all(|v| v.chars().count() <= MAX_ROW_CHARS)
+                }),
+                "a list of distinct values of its rows".into(),
             ),
             Input::Text { .. } => (
                 value.as_str().is_some_and(|text| text.chars().count() <= MAX_TEXT_INPUT),
@@ -192,6 +305,12 @@ impl Input {
         ensure!(valid, "INVALID_INPUT: {} must be {expected}", self.id());
         Ok(())
     }
+}
+
+/// The values of a `multi` input, when they are distinct texts.
+fn picks(value: &Value) -> Option<Vec<&str>> {
+    let picks = value.as_array()?.iter().map(Value::as_str).collect::<Option<Vec<_>>>()?;
+    (picks.iter().collect::<HashSet<_>>().len() == picks.len()).then_some(picks)
 }
 
 fn is_color(text: &str) -> bool {
@@ -209,7 +328,7 @@ fn manifest(value: &Value) -> Result<Manifest> {
         .context("PLUGIN_BROKEN: plugin.json: nuzkyPlugin must be 1 or 2")?;
     ensure!(api <= API, "PLUGIN_API_NEWER: This plugin needs a newer Nuzky. Update Nuzky.");
     ensure!(api >= 1, "PLUGIN_API_OLD: This plugin was made for an older Nuzky. Ask its author for a new version.");
-    let manifest = Manifest::deserialize(value).map_err(|e| anyhow!("PLUGIN_BROKEN: plugin.json: {e}"))?;
+    let mut manifest = Manifest::deserialize(value).map_err(|e| anyhow!("PLUGIN_BROKEN: plugin.json: {e}"))?;
     // So a Nuzky that does not know these needs says it is too old instead of calling plugin.json broken.
     ensure!(
         api >= 2 || manifest.needs.iter().all(|need| *need == Need::Words),
@@ -265,7 +384,8 @@ fn manifest(value: &Value) -> Result<Manifest> {
                     && unit.as_ref().is_none_or(|unit| unit.chars().count() <= 12),
                 "PLUGIN_BROKEN: plugin.json: input {id} needs min below max, a positive step and a unit of at most 12 characters"
             ),
-            Input::Choice { options, .. } => {
+            Input::Choice { options: Options::Fixed(options), .. }
+            | Input::Multi { options: Options::Fixed(options), .. } => {
                 let values: HashSet<_> = options.iter().map(|o| o.value.as_str()).collect();
                 ensure!(
                     (1..=20).contains(&options.len())
@@ -278,6 +398,14 @@ fn manifest(value: &Value) -> Result<Manifest> {
                     "PLUGIN_BROKEN: plugin.json: input {id} needs 1 to 20 options with distinct values and labels of 1 to 40 characters"
                 )
             }
+            Input::Choice { options: Options::Dynamic, default, .. } => ensure!(
+                default.is_empty(),
+                "PLUGIN_BROKEN: plugin.json: input {id} has dynamic options, so it starts with none: leave out its default"
+            ),
+            Input::Multi { options: Options::Dynamic, default, .. } => ensure!(
+                default.is_empty(),
+                "PLUGIN_BROKEN: plugin.json: input {id} has dynamic options, so it starts with none: leave out its default"
+            ),
             _ => {}
         }
         input.check(&input.default()).map_err(|e| {
@@ -287,7 +415,128 @@ fn manifest(value: &Value) -> Result<Manifest> {
             )
         })?;
     }
+    panel(api, &mut manifest)?;
     Ok(manifest)
+}
+
+/// Checks what API 2 adds to the panel: buttons, headed sections, inputs shown for another's value, checkboxes and
+/// rows the plugin gives. Nuzky draws all of it with its own controls; no text of a plugin is ever markup.
+fn panel(api: u64, manifest: &mut Manifest) -> Result<()> {
+    let newer = !manifest.actions.is_empty()
+        || !manifest.sections.is_empty()
+        || manifest
+            .inputs
+            .iter()
+            .any(|input| matches!(input, Input::Multi { .. }) || input.when().is_some() || input.dynamic());
+    ensure!(
+        api >= 2 || !newer,
+        "PLUGIN_BROKEN: plugin.json: actions, sections, when, multi and dynamic options need nuzkyPlugin 2"
+    );
+    ensure!(manifest.actions.len() <= MAX_ACTIONS, "PLUGIN_BROKEN: plugin.json: at most {MAX_ACTIONS} actions");
+    let mut ids = HashSet::new();
+    for action in &manifest.actions {
+        let id = &action.id;
+        ensure!(
+            (1..=40).contains(&id.len())
+                && id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
+                && ids.insert(id),
+            "PLUGIN_BROKEN: plugin.json: action id {id:?} must be distinct, 1 to 40 letters, digits, - and _"
+        );
+        ensure!(
+            !action.label.trim().is_empty() && action.label.chars().count() <= 24,
+            "PLUGIN_BROKEN: plugin.json: the label of action {id} needs 1 to 24 characters"
+        );
+    }
+    if let Some(primary) = manifest.actions.first() {
+        manifest.action = primary.label.clone();
+    }
+    for (at, input) in manifest.inputs.iter().enumerate() {
+        let Some(when) = input.when() else { continue };
+        let id = input.id();
+        // Only an earlier input, so no two inputs can hide each other.
+        let other = manifest.inputs[..at].iter().find(|other| other.id() == when.input).with_context(|| {
+            format!(
+                "PLUGIN_BROKEN: plugin.json: when of input {id} names {:?}, which is not an input before it",
+                when.input
+            )
+        })?;
+        let fits = |value: &Value| match other {
+            Input::Toggle { .. } => value.is_boolean(),
+            Input::Choice { options: Options::Fixed(options), .. } => options.iter().any(|o| *value == o.value),
+            _ => false,
+        };
+        let equals = match &when.equals {
+            Value::Array(values) => !values.is_empty() && values.len() <= 20 && values.iter().all(fits),
+            value => fits(value),
+        };
+        ensure!(
+            equals,
+            "PLUGIN_BROKEN: plugin.json: when of input {id} needs a toggle or a choice with listed options, and equals one of its values or a list of them"
+        );
+    }
+    ensure!(manifest.sections.len() <= 10, "PLUGIN_BROKEN: plugin.json: at most 10 sections");
+    let mut placed = HashSet::new();
+    for section in &manifest.sections {
+        let label = &section.label;
+        ensure!(
+            !label.trim().is_empty() && label.chars().count() <= 40 && !section.inputs.is_empty(),
+            "PLUGIN_BROKEN: plugin.json: a section needs a label of 1 to 40 characters and at least one input"
+        );
+        for id in &section.inputs {
+            ensure!(
+                manifest.inputs.iter().any(|input| input.id() == id),
+                "PLUGIN_BROKEN: plugin.json: section {label:?} names {id:?}, which is not an input"
+            );
+            ensure!(placed.insert(id), "PLUGIN_BROKEN: plugin.json: input {id} is in two sections");
+        }
+    }
+    Ok(())
+}
+
+/// The plugin's buttons; one without `actions` has one, `run`, labelled with its `action`.
+fn actions(manifest: &Manifest) -> Vec<Action> {
+    if manifest.actions.is_empty() {
+        vec![Action { id: "run".into(), label: manifest.action.clone() }]
+    } else {
+        manifest.actions.clone()
+    }
+}
+
+/// The action pressed, the primary one when none is named.
+fn action(manifest: &Manifest, pressed: Option<&str>) -> Result<String> {
+    let actions = actions(manifest);
+    match pressed {
+        None => Ok(actions[0].id.clone()),
+        Some(id) if actions.iter().any(|action| action.id == id) => Ok(id.to_owned()),
+        Some(id) => bail!(
+            "INVALID_INPUT: {id} is not an action of this plugin; its actions are {}",
+            actions.iter().map(|a| a.id.as_str()).collect::<Vec<_>>().join(", ")
+        ),
+    }
+}
+
+/// The plugin's rows checked against its dynamic inputs: they name no other input, and every value given is still
+/// one of them, so a run never acts on a row that is gone since the preview showed it.
+fn rows(manifest: &Manifest, values: &Value, items: &BTreeMap<String, Vec<Choice>>) -> Result<()> {
+    if let Some(id) = items.keys().find(|id| !manifest.inputs.iter().any(|input| input.id() == *id && input.dynamic()))
+    {
+        bail!("PLUGIN_FAILED: items names {id}, which is not an input with \"options\": \"dynamic\"");
+    }
+    for input in manifest.inputs.iter().filter(|input| input.dynamic()) {
+        let id = input.id();
+        let rows = items.get(id).map(Vec::as_slice).unwrap_or_default();
+        let value = &values[id];
+        let given = match value.as_str() {
+            Some("") => vec![],
+            Some(value) => vec![value],
+            None => picks(value).unwrap_or_default(),
+        };
+        // Named by its label, as the user reads it in the panel; the row's value is an id they never see.
+        if given.iter().any(|value| !rows.iter().any(|row| row.value == *value)) {
+            bail!("INVALID_INPUT: \"{}\": the one you chose is gone. Choose another.", input.label());
+        }
+    }
+    Ok(())
 }
 
 /// Each input's value, checked against the manifest; those not given take their default.
@@ -496,6 +745,7 @@ pub(crate) fn prepare(
     state: &SessionState,
     id: &str,
     given: &Map<String, Value>,
+    action: Option<&str>,
     selection: Option<Vec<String>>,
     playhead_us: Option<i64>,
 ) -> Result<Prepared> {
@@ -509,6 +759,7 @@ pub(crate) fn prepare(
         "api": API,
         "project": crate::tools::state_value(state, crate::params::State { range: None, clip_ids: None })?,
         "inputs": inputs(&manifest, given)?,
+        "action": self::action(&manifest, action)?,
         "selection": selection.unwrap_or_else(|| state.selection.clone()),
         "playheadUs": playhead_us.unwrap_or(state.playhead_us),
         "files": {},
@@ -535,6 +786,8 @@ struct Output {
     edits: Vec<EditCmd>,
     message: Option<String>,
     logs: Vec<String>,
+    /// The rows of each dynamic input, for the panel to offer.
+    items: BTreeMap<String, Vec<Choice>>,
 }
 
 /// What the plugin's process answers: the plugin's edits, message and log, and the project after the edits or why
@@ -550,28 +803,34 @@ fn execute(script: &str, input: String, progress: impl Fn(f32) + 'static) -> Res
         ctx.json_stringify(returned)?.map(|json| json.to_string()).transpose()
     });
     let logs: Vec<String> = logs.take().into();
-    let (edits, message) = result.and_then(|json| edits(json.as_deref())).map_err(|error| {
+    let (edits, message, items) = result.and_then(|json| edits(json.as_deref())).map_err(|error| {
         let tail = &logs[logs.len().saturating_sub(20)..];
         if tail.is_empty() { error } else { anyhow!("{error:#}\nLast lines of its log:\n{}", tail.join("\n")) }
     })?;
-    Ok(Output { edits, message, logs })
+    Ok(Output { edits, message, logs, items })
 }
 
-fn edits(json: Option<&str>) -> Result<(Vec<EditCmd>, Option<String>)> {
-    let shape = "PLUGIN_FAILED: run(ctx) must return an array of edits or {edits, message}";
+type Returned = (Vec<EditCmd>, Option<String>, BTreeMap<String, Vec<Choice>>);
+
+fn edits(json: Option<&str>) -> Result<Returned> {
+    let shape = "PLUGIN_FAILED: run(ctx) must return an array of edits or {edits, message, items}";
     let json = json.context(shape)?;
     ensure!(
         json.len() <= MAX_RESULT_BYTES,
         "PLUGIN_TOO_BIG: the plugin returned more than {} MB of edits",
         MAX_RESULT_BYTES >> 20
     );
-    let (list, message) = match serde_json::from_str(json)? {
-        Value::Array(list) => (list, None),
+    let (list, message, items) = match serde_json::from_str(json)? {
+        Value::Array(list) => (list, None, None),
         Value::Object(mut object) => match object.remove("edits") {
-            Some(Value::Array(list)) => (list, object.remove("message")),
+            Some(Value::Array(list)) => (list, object.remove("message"), object.remove("items")),
             _ => bail!(shape),
         },
         _ => bail!(shape),
+    };
+    let items = match items {
+        None | Some(Value::Null) => BTreeMap::new(),
+        Some(items) => self::items(items)?,
     };
     ensure!(
         list.len() <= MAX_EDITS,
@@ -595,7 +854,32 @@ fn edits(json: Option<&str>) -> Result<(Vec<EditCmd>, Option<String>)> {
             serde_json::from_value(edit).map_err(|e| anyhow!("PLUGIN_BAD_EDIT: edit {i} ({kind}): {e}"))
         })
         .collect::<Result<_>>()?;
-    Ok((edits, message))
+    Ok((edits, message, items))
+}
+
+/// `items`: `{inputId: [{value, label}]}`, plain texts the panel shows as they are.
+fn items(items: Value) -> Result<BTreeMap<String, Vec<Choice>>> {
+    let Value::Object(items) = items else { bail!("PLUGIN_FAILED: items must be {{inputId: [{{value, label}}]}}") };
+    let fits = |text: &str| text.chars().count() <= MAX_ROW_CHARS && !text.chars().any(char::is_control);
+    let mut all = BTreeMap::new();
+    for (id, rows) in items {
+        let rows: Vec<Choice> = serde_json::from_value(rows)
+            .map_err(|e| anyhow!("PLUGIN_FAILED: items.{id} must be a list of {{value, label}}: {e}"))?;
+        ensure!(rows.len() <= MAX_ROWS, "PLUGIN_FAILED: items.{id} has more than {MAX_ROWS} rows");
+        let mut values = HashSet::new();
+        for (i, row) in rows.iter().enumerate() {
+            ensure!(
+                fits(&row.value) && !row.value.is_empty() && values.insert(row.value.clone()),
+                "PLUGIN_FAILED: items.{id}[{i}]: value needs 1 to {MAX_ROW_CHARS} characters without line breaks, distinct"
+            );
+            ensure!(
+                fits(&row.label) && !row.label.trim().is_empty(),
+                "PLUGIN_FAILED: items.{id}[{i}]: label needs 1 to {MAX_ROW_CHARS} characters without line breaks"
+            );
+        }
+        all.insert(id, rows);
+    }
+    Ok(all)
 }
 
 fn has_long_string(value: &Value) -> bool {
@@ -677,7 +961,8 @@ fn dry((output, after): Checked, files: &[Asset]) -> (Value, Option<Project>) {
         Err(error) => (None, Some(error)),
     };
     let answer = json!({"dry_run": true, "valid": after.is_some(), "error": error, "edits": output.edits,
-        "adds": added(&adds(&output.edits, files)), "message": output.message, "logs": output.logs});
+        "adds": added(&adds(&output.edits, files)), "message": output.message, "logs": output.logs,
+        "items": output.items});
     (answer, after)
 }
 
@@ -768,16 +1053,18 @@ pub(crate) fn start(
 }
 
 /// Runs the plugin from the app's UI in a run of its own labelled after it, so the AI lock and Stop apply and its
-/// edits are one undo step. Answers the job, whose `run_id` is that run.
+/// edits are one undo step. `action` is the button pressed, the primary one when None. Answers the job, whose `run_id`
+/// is that run.
 pub fn run_in_app(
     host: &Arc<Host>,
     id: &str,
     inputs: &Map<String, Value>,
+    action: Option<&str>,
     selection: Vec<String>,
     playhead_us: i64,
 ) -> Result<Value> {
     let state = host.session.state()?;
-    let prepared = prepare(host, &state, id, inputs, Some(selection), Some(playhead_us))?;
+    let prepared = prepare(host, &state, id, inputs, action, Some(selection), Some(playhead_us))?;
     let run = host.session.begin_run(format!("Plugin: {}", prepared.manifest.name))?;
     // Edits the user made since `state` was read fail the batch with STALE_REVISION.
     let started = start(host, "app", Some(run.run_id.clone()), Mode::App, prepared, &state);
@@ -787,8 +1074,8 @@ pub fn run_in_app(
     started
 }
 
-/// What the plugin would do with these inputs, without touching the project: its edits, message and log, and the
-/// project after the edits when they apply. Setting `cancel` stops it.
+/// What the plugin's primary action would do with these inputs, without touching the project: its edits, message, log
+/// and rows, and the project after the edits when they apply. Setting `cancel` stops it.
 pub fn dry_run_in_app(
     host: &Host,
     id: &str,
@@ -798,7 +1085,7 @@ pub fn dry_run_in_app(
     cancel: Arc<AtomicBool>,
 ) -> Result<Value> {
     let state = host.session.state()?;
-    let mut prepared = prepare(host, &state, id, inputs, Some(selection), Some(playhead_us))?;
+    let mut prepared = prepare(host, &state, id, inputs, None, Some(selection), Some(playhead_us))?;
     prepared.stock(&cancel)?;
     // The app prepares every file's sound in a job of its own, which the user sees; a preview never decodes.
     prepared.gather(&host.cache_dir, false, &cancel, &|_| {})?;
@@ -894,7 +1181,12 @@ fn isolated(
     if let Some(Ok(checked)) = answer {
         drop(child);
         said.join().ok();
-        return checked.map_err(anyhow::Error::msg);
+        let (output, after) = checked.map_err(anyhow::Error::msg)?;
+        let after = match rows(&prepared.manifest, &prepared.ctx["inputs"], &output.items) {
+            Ok(()) => after,
+            Err(error) => Err(format!("{error:#}")),
+        };
+        return Ok((output, after));
     }
     let status = child.0.wait()?;
     let said = said.join().unwrap_or_default();

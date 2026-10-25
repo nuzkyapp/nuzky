@@ -115,8 +115,8 @@ fn the_guide_examples_edit_generated_media() {
     install("follow-end-card");
     let before = f.host.session.state().unwrap().project;
 
-    let job =
-        plugins::run_in_app(&f.host, "remove-short-clips", &inputs(json!({"minSeconds": 0.6})), vec![], 0).unwrap();
+    let job = plugins::run_in_app(&f.host, "remove-short-clips", &inputs(json!({"minSeconds": 0.6})), None, vec![], 0)
+        .unwrap();
     let done = finish(&f.host, &job, Duration::from_secs(10));
     assert_eq!(done["status"], "done", "{done}");
     assert_eq!(done["result"]["message"], "Removed 2 clips.");
@@ -133,6 +133,7 @@ fn the_guide_examples_edit_generated_media() {
         &f.host,
         "follow-end-card",
         &inputs(json!({"text": "Follow me", "seconds": 2, "color": "#FFCC00"})),
+        None,
         vec![],
         0,
     )
@@ -166,7 +167,7 @@ fn stop_ends_a_stuck_plugin_and_a_dry_run_changes_nothing() {
     assert_eq!(after.tracks[0].clips.len(), 1);
     assert_eq!(f.host.session.state().unwrap().project, before);
 
-    let job = plugins::run_in_app(&f.host, "spin", &Map::new(), vec![], 0).unwrap();
+    let job = plugins::run_in_app(&f.host, "spin", &Map::new(), None, vec![], 0).unwrap();
     std::thread::sleep(Duration::from_millis(300));
     assert_eq!(f.host.session.state().unwrap().open_run.unwrap().label, "Plugin: Spin");
     let stopping = Instant::now();
@@ -270,7 +271,7 @@ fn a_cancelled_plugin_job_applies_nothing() {
                   nuzky.progress(1);\n  return edits;\n}\n";
     plugins::save(&renames, script, None).unwrap();
     let before = f.host.session.state().unwrap().project;
-    let job = plugins::run_in_app(&f.host, "renames", &Map::new(), vec![], 0).unwrap();
+    let job = plugins::run_in_app(&f.host, "renames", &Map::new(), None, vec![], 0).unwrap();
     let id = job["job_id"].as_str().unwrap();
     while f.host.jobs.get(id, false).unwrap()["progress"] != 1.0 {
         std::thread::sleep(Duration::from_millis(1));
@@ -278,6 +279,39 @@ fn a_cancelled_plugin_job_applies_nothing() {
     f.host.jobs.get(id, true).unwrap();
     assert_eq!(finish(&f.host, &job, Duration::from_secs(10))["status"], "cancelled");
     assert_eq!(f.host.session.state().unwrap().project, before, "the cancelled job's edits landed");
+}
+
+/// A plugin's script never runs in the app's webview, so it cannot reach the app's commands or the network: each of
+/// these fails as PLUGIN_FAILED from the panel's button, and the rename after it never lands.
+#[test]
+fn a_plugin_reaches_neither_the_app_nor_the_network() {
+    let f = project();
+    let reaches = ["tauri", "window", "fetch", "xhr", "socket"];
+    let options: Vec<_> = reaches.iter().map(|id| json!({"value": id, "label": id})).collect();
+    let hostile = json!({"nuzkyPlugin": 2, "id": "hostile", "name": "Hostile", "description": "Reaches out",
+        "version": "1", "inputs": [{"type": "choice", "id": "reach", "label": "Reach", "options": options, "default": "tauri"}]});
+    let script = r#"function run(ctx) {
+  const reach = {
+    tauri: () => __TAURI_INTERNALS__.invoke("plugin:fs|write_file", {path: "/tmp/x"}),
+    window: () => window.__TAURI_INTERNALS__.invoke("save_project"),
+    fetch: () => fetch("http://127.0.0.1:9/"),
+    xhr: () => new XMLHttpRequest().open("GET", "http://127.0.0.1:9/"),
+    socket: () => new WebSocket("ws://127.0.0.1:9/"),
+  }[ctx.inputs.reach];
+  reach();
+  return [{type: "renameProject", name: "Reached " + ctx.inputs.reach}];
+}"#;
+    plugins::save(&hostile, script, None).unwrap();
+    let before = f.host.session.state().unwrap().project;
+    for reach in reaches {
+        let job = plugins::run_in_app(&f.host, "hostile", &inputs(json!({"reach": reach})), None, vec![], 0).unwrap();
+        let done = finish(&f.host, &job, Duration::from_secs(10));
+        let error = done["error"].as_str().unwrap_or_default();
+        assert!(error.starts_with("PLUGIN_FAILED: plugin.js:") && error.contains("is not defined"), "{reach}: {done}");
+        let state = f.host.session.state().unwrap();
+        assert!(state.open_run.is_none());
+        assert_eq!(state.project, before, "{reach} changed the project");
+    }
 }
 
 /// Pasting a clip with 50,000 keyframes onto 1,500 captions would copy about 4 GB before any check of the project's
@@ -305,7 +339,7 @@ fn a_plugin_whose_edits_need_gigabytes_runs_out_of_its_own_memory() {
     assert!(format!("{error:#}").starts_with("PLUGIN_OUT_OF_MEMORY"), "{error:#}");
     assert!(started.elapsed() < Duration::from_secs(10), "stopped after {:?}", started.elapsed());
 
-    let job = plugins::run_in_app(&f.host, "bomb", &Map::new(), vec![], 0).unwrap();
+    let job = plugins::run_in_app(&f.host, "bomb", &Map::new(), None, vec![], 0).unwrap();
     let failed = finish(&f.host, &job, Duration::from_secs(10));
     assert_eq!(failed["status"], "failed", "{failed}");
     assert!(failed["error"].as_str().unwrap().starts_with("PLUGIN_OUT_OF_MEMORY"), "{failed}");
@@ -391,7 +425,7 @@ fn remove_pauses_cuts_the_silences_where_the_timeline_has_them() {
     let early = plugins::dry_run_in_app(&f.host, "remove-pauses", &Map::new(), vec![], 0, Arc::default()).unwrap_err();
     assert!(format!("{early:#}").starts_with("AUDIO_NOT_READY: "), "{early:#}");
 
-    let job = plugins::run_in_app(&f.host, "remove-pauses", &Map::new(), vec![], 0).unwrap();
+    let job = plugins::run_in_app(&f.host, "remove-pauses", &Map::new(), None, vec![], 0).unwrap();
     let done = finish(&f.host, &job, Duration::from_secs(20));
     assert_eq!(done["status"], "done", "{done}");
     assert_eq!(done["result"]["message"], "Removed 1 pause, 0.8\u{a0}s in all.");
@@ -468,7 +502,7 @@ fn beats_and_loudness_arrive_in_timeline_time() {
   return [];
 }"#;
     plugins::save(&reads, script, None).unwrap();
-    let job = plugins::run_in_app(&f.host, "reads", &Map::new(), vec![], 0).unwrap();
+    let job = plugins::run_in_app(&f.host, "reads", &Map::new(), None, vec![], 0).unwrap();
     let done = finish(&f.host, &job, Duration::from_secs(20));
     assert_eq!(done["status"], "done", "{done}");
     let logs = done["result"]["logs"].as_array().unwrap();
@@ -501,7 +535,7 @@ fn stop_ends_a_plugin_while_it_prepares_the_sound() {
         "version": "1", "needs": ["beats"]});
     plugins::save(&waits, "function run(ctx) {\n  return [];\n}\n", None).unwrap();
     let before = f.host.session.state().unwrap().project;
-    let job = plugins::run_in_app(&f.host, "waits", &Map::new(), vec![], 0).unwrap();
+    let job = plugins::run_in_app(&f.host, "waits", &Map::new(), None, vec![], 0).unwrap();
     let id = job["job_id"].as_str().unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     while f.host.jobs.get(id, false).unwrap()["progress"].as_f64().is_none_or(|p| p == 0.0) {
@@ -566,7 +600,7 @@ fn a_plugin_places_its_own_picture_which_outlives_it() {
     for link in links {
         std::fs::remove_file(folder.join("logo.png")).unwrap();
         link(&logo, &folder.join("logo.png")).unwrap();
-        let error = format!("{:#}", plugins::run_in_app(&f.host, "logo", &Map::new(), vec![], 0).unwrap_err());
+        let error = format!("{:#}", plugins::run_in_app(&f.host, "logo", &Map::new(), None, vec![], 0).unwrap_err());
         assert!(error.starts_with("PLUGIN_BROKEN: logo.png: "), "{error}");
         save(&manifest, &[("logo.png", &logo)]).unwrap();
         assert!(!std::fs::symlink_metadata(folder.join("logo.png")).unwrap().is_symlink());
@@ -584,7 +618,7 @@ fn a_plugin_places_its_own_picture_which_outlives_it() {
     assert_eq!(kept_files(), 0);
 
     for run in 1..=2 {
-        let job = plugins::run_in_app(&f.host, "logo", &Map::new(), vec![], 0).unwrap();
+        let job = plugins::run_in_app(&f.host, "logo", &Map::new(), None, vec![], 0).unwrap();
         let done = finish(&f.host, &job, Duration::from_secs(10));
         assert_eq!(done["result"]["added"], if run == 1 { json!(["logo.png"]) } else { json!([]) }, "{done}");
     }

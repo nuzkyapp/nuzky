@@ -4358,6 +4358,83 @@ fn a_plugin_is_saved_listed_tried_run_and_undone_over_stdio() {
     c.finish();
 }
 
+/// A plugin with a panel of API 2: its buttons as actions the script tells apart, checkboxes, and rows it finds in
+/// the project, which a run checks again, so a row deleted since the preview changes nothing. A manifest that would
+/// put markup in the panel never saves.
+#[test]
+fn a_plugin_panel_runs_its_actions_and_rows_over_stdio() {
+    let mut c = Client::start(true, None, Some(None));
+    let manifest = json!({"nuzkyPlugin": 2, "id": "cards", "name": "Cards", "description": "Names after a text",
+        "version": "1.0.0", "actions": [{"id": "name", "label": "Name"}, {"id": "clear", "label": "Clear"}],
+        "inputs": [{"type": "choice", "id": "clip", "label": "Text", "options": "dynamic"},
+            {"type": "toggle", "id": "styled", "label": "Styled", "default": false},
+            {"type": "multi", "id": "look", "label": "Look", "default": ["bold"], "when": {"input": "styled", "equals": true},
+                "options": [{"value": "bold", "label": "Bold"}, {"value": "shadow", "label": "Shadow"}]}],
+        "sections": [{"label": "Style", "inputs": ["styled", "look"]}]});
+    let script = r#"function run(ctx) {
+  const texts = ctx.project.tracks.flatMap((t) => t.clips).filter((c) => c.content.type === "text");
+  const items = {clip: texts.map((c) => ({value: c.id, label: c.content.text}))};
+  if (ctx.action === "clear") return {edits: [{type: "renameProject", name: "Cleared"}], items};
+  return {edits: [{type: "renameProject", name: (ctx.inputs.clip || "none") + " " + ctx.inputs.look.join("+")}], items};
+}"#;
+    let save = |c: &mut Client, manifest: &Value| {
+        plugin_error(c.error("save_plugin", json!({"manifest": manifest, "script": script})))
+    };
+    let mut html = manifest.clone();
+    html["html"] = json!("<img src=x onerror=alert(1)>");
+    assert!(save(&mut c, &html).starts_with("PLUGIN_BROKEN: plugin.json: unknown field `html`"));
+    let mut html = manifest.clone();
+    html["actions"][1]["html"] = json!("<b>Clear</b>");
+    assert!(save(&mut c, &html).contains("unknown field `html`"));
+    let mut old = manifest.clone();
+    old["nuzkyPlugin"] = json!(1);
+    assert!(save(&mut c, &old).contains("need nuzkyPlugin 2"));
+    let mut later = manifest.clone();
+    later["inputs"][1]["when"] = json!({"input": "look", "equals": "bold"});
+    assert!(save(&mut c, &later).contains("which is not an input before it"));
+    let saved = c.call("save_plugin", json!({"manifest": manifest, "script": script}));
+    assert_eq!(saved["plugin"]["status"], "ok", "{saved}");
+    assert_eq!(saved["plugin"]["manifest"]["action"], "Name");
+
+    let run = c.call("begin_run", json!({"label": "Texts"}))["run_id"].clone();
+    let text =
+        json!({"type": "addText", "startUs": 0, "text": "Intro", "style": {"fontSize": 80.0, "color": "#ffffff"}});
+    c.call("apply_edits", json!({"run_id": run, "request_id": "intro", "edits": [text]}));
+    c.call("end_run", json!({"run_id": run, "action": "keep"}));
+    let state = c.call("get_state", json!({}));
+    let id = state["tracks"][1]["clips"][0]["id"].as_str().unwrap().to_owned();
+
+    let dry =
+        |c: &mut Client, args: Value| c.call("run_plugin", json!({"id": "cards", "dry_run": true, "inputs": args}));
+    let first = dry(&mut c, json!({}));
+    assert_eq!(first["items"], json!({"clip": [{"value": id, "label": "Intro"}]}), "{first}");
+    assert_eq!(first["edits"][0]["name"], "none bold");
+    let chosen = dry(&mut c, json!({"clip": id, "look": ["bold", "shadow"]}));
+    assert_eq!(chosen["edits"][0]["name"], format!("{id} bold+shadow"));
+    let clear = c.call("run_plugin", json!({"id": "cards", "dry_run": true, "action": "clear"}));
+    assert_eq!(clear["edits"][0]["name"], "Cleared");
+    let unknown = plugin_error(c.error("run_plugin", json!({"id": "cards", "dry_run": true, "action": "nope"})));
+    assert!(unknown.starts_with("INVALID_INPUT: nope is not an action of this plugin; its actions are name, clear"));
+    let glow =
+        plugin_error(c.error("run_plugin", json!({"id": "cards", "dry_run": true, "inputs": {"look": ["glow"]}})));
+    assert!(glow.starts_with("INVALID_INPUT: look must be a list of distinct values from bold, shadow"), "{glow}");
+
+    let run = c.call("begin_run", json!({"label": "Agent"}))["run_id"].clone();
+    c.call(
+        "apply_edits",
+        json!({"run_id": run, "request_id": "gone", "edits": [{"type": "deleteClips", "clipIds": [id]}]}),
+    );
+    let before = c.call("get_state", json!({}));
+    let stale = plugin_error(c.error("run_plugin", json!({"id": "cards", "run_id": run, "inputs": {"clip": id}})));
+    assert_eq!(stale, "INVALID_INPUT: \"Text\": the one you chose is gone. Choose another.");
+    assert_eq!(c.call("get_state", json!({}))["name"], before["name"]);
+    let cleared = c.call("run_plugin", json!({"id": "cards", "run_id": run, "action": "clear"}));
+    assert_eq!(cleared["applied"], 1, "{cleared}");
+    assert_eq!(c.call("get_state", json!({}))["name"], "Cleared");
+    c.call("end_run", json!({"run_id": run, "action": "keep"}));
+    c.finish();
+}
+
 /// A plugin that tries to add a file changes nothing, and one stuck in a loop stops at once when cancelled.
 #[test]
 fn a_plugin_cannot_add_a_file_and_a_stuck_one_stops_over_stdio() {
