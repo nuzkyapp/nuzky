@@ -1,7 +1,10 @@
 //! Plugins as the app runs them, on generated media: the guide's examples, Stop and the dry run.
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::{Arc, OnceLock};
+use std::sync::{
+    Arc, OnceLock,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::{Duration, Instant};
 
 use nuzky_engine::{
@@ -22,6 +25,7 @@ fn data() -> &'static Path {
         std::fs::create_dir_all(&dir).unwrap();
         // SAFETY: every test calls this first, before anything reads the environment, and only the first sets it.
         unsafe { std::env::set_var("NUZKY_DATA_DIR", &dir) };
+        plugins::use_sandbox_program(env!("CARGO_BIN_EXE_nuzky").into());
         dir
     })
 }
@@ -145,8 +149,8 @@ fn the_guide_examples_edit_generated_media() {
     assert_eq!(f.host.session.state().unwrap().project, before);
 }
 
-/// Stop in the AI bar ends a plugin stuck in a loop within two seconds and nothing changes; a dry run answers the
-/// project the edits would make and leaves the real one alone.
+/// Stop in the AI bar ends a plugin stuck in a loop within two seconds and nothing changes, as closing the plugin ends
+/// its preview; a dry run answers the project the edits would make and leaves the real one alone.
 #[test]
 fn stop_ends_a_stuck_plugin_and_a_dry_run_changes_nothing() {
     let f = project();
@@ -173,6 +177,16 @@ fn stop_ends_a_stuck_plugin_and_a_dry_run_changes_nothing() {
     let state = f.host.session.state().unwrap();
     assert!(state.open_run.is_none());
     assert_eq!(state.project, before);
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let (host, stop) = (f.host.clone(), cancel.clone());
+    let preview = std::thread::spawn(move || plugins::dry_run_in_app(&host, "spin", &Map::new(), vec![], 0, stop));
+    std::thread::sleep(Duration::from_millis(300));
+    let closing = Instant::now();
+    cancel.store(true, Ordering::Relaxed);
+    let error = preview.join().unwrap().unwrap_err();
+    assert!(format!("{error:#}").starts_with("CANCELLED"), "{error:#}");
+    assert!(closing.elapsed() < Duration::from_secs(1), "stopped after {:?}", closing.elapsed());
 }
 
 /// A plugin cannot grow the project without bound by copying a long text, which would take all memory already in
@@ -264,4 +278,45 @@ fn a_cancelled_plugin_job_applies_nothing() {
     f.host.jobs.get(id, true).unwrap();
     assert_eq!(finish(&f.host, &job, Duration::from_secs(10))["status"], "cancelled");
     assert_eq!(f.host.session.state().unwrap().project, before, "the cancelled job's edits landed");
+}
+
+/// Pasting a clip with 50,000 keyframes onto 1,500 captions would copy about 4 GB before any check of the project's
+/// size sees it; the plugin's own process hits its limit instead, and the app keeps its memory and the project.
+#[test]
+fn a_plugin_whose_edits_need_gigabytes_runs_out_of_its_own_memory() {
+    let f = project();
+    let segments: Vec<_> = (0..1500)
+        .map(|i| json!({"startUs": i * 50_000, "endUs": i * 50_000 + 50_000, "text": format!("w{i}")}))
+        .collect();
+    let captions =
+        json!({"type": "addCaptions", "segments": segments, "style": {"fontSize": 60.0, "color": "#FFFFFF"}});
+    f.host.session.edit(vec![serde_json::from_value(captions).unwrap()], None, Expect::default()).unwrap();
+    let bomb = json!({"nuzkyPlugin": 1, "id": "bomb", "name": "Bomb", "description": "Pastes a lot", "version": "1"});
+    let script = "function run(ctx) {\n  const track = ctx.project.tracks.find((t) => t.kind === 'text');\n  \
+                  const transform = {x: 0, y: 0, scale: 1, rotation: 0, opacity: 1};\n  \
+                  const keyframes = Array.from({length: 50000}, (_, i) => ({tUs: i, transform}));\n  \
+                  const source = {clip: {...track.clips[0], keyframes}, trackId: track.id, trackKind: 'text'};\n  \
+                  return [{type: 'pasteAttributes', source, clipIds: track.clips.map((c) => c.id)}];\n}\n";
+    plugins::save(&bomb, script, None).unwrap();
+    let before = f.host.session.state().unwrap().project;
+
+    let started = Instant::now();
+    let error = plugins::dry_run_in_app(&f.host, "bomb", &Map::new(), vec![], 0, Arc::default()).unwrap_err();
+    assert!(format!("{error:#}").starts_with("PLUGIN_OUT_OF_MEMORY"), "{error:#}");
+    assert!(started.elapsed() < Duration::from_secs(10), "stopped after {:?}", started.elapsed());
+
+    let job = plugins::run_in_app(&f.host, "bomb", &Map::new(), vec![], 0).unwrap();
+    let failed = finish(&f.host, &job, Duration::from_secs(10));
+    assert_eq!(failed["status"], "failed", "{failed}");
+    assert!(failed["error"].as_str().unwrap().starts_with("PLUGIN_OUT_OF_MEMORY"), "{failed}");
+    let state = f.host.session.state().unwrap();
+    assert!(state.open_run.is_none());
+    assert_eq!(state.project, before);
+    #[cfg(target_os = "linux")]
+    {
+        let status = std::fs::read_to_string("/proc/self/status").unwrap();
+        let peak = status.lines().find_map(|line| line.strip_prefix("VmHWM:")).unwrap();
+        let peak: u64 = peak.trim().trim_end_matches(" kB").parse().unwrap();
+        assert!(peak < 512 << 10, "the test process took {} MB", peak >> 10);
+    }
 }

@@ -239,6 +239,7 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
         ["mcp", ..] => nuzky_mcp::bridge::run_args(&args[1..], cache_dir())?,
+        ["plugin-sandbox"] => nuzky_mcp::plugins::sandbox_main()?,
         ["probe", media] => {
             println!("{}", serde_json::to_string_pretty(&probe(Path::new(media), new_id())?)?);
         }

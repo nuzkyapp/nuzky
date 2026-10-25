@@ -1,13 +1,16 @@
 //! The user's plugins: a folder in Nuzky's data with plugin.json and plugin.js, whose `run(ctx)` returns edits that
-//! apply as one batch of a run. The script runs in QuickJS with no modules, files, network, timers or processes.
-use std::cell::RefCell;
+//! apply as one batch of a run. The script runs in QuickJS with no modules, files, network, timers or processes, and
+//! together with the check of its edits in a process of its own (`plugin-sandbox`) with a memory limit.
+use std::cell::{Cell, RefCell};
 use std::collections::{HashSet, VecDeque};
-use std::io::Write;
+use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
 use std::rc::Rc;
 use std::sync::{
-    Arc,
+    Arc, OnceLock,
     atomic::{AtomicBool, Ordering},
+    mpsc::RecvTimeoutError,
 };
 use std::time::{Duration, Instant};
 
@@ -40,6 +43,12 @@ const MAX_LOG_LINES: usize = 200;
 const RUN_LIMIT: Duration = Duration::from_secs(60);
 /// Saving runs the script's top level once, to report syntax errors and a missing `run`.
 const SAVE_LIMIT: Duration = Duration::from_secs(5);
+/// What the plugin's process may take: QuickJS's 256 MB, the project and its copy at the 64 MB size limit, with room
+/// to spare. One small batch of edits can copy gigabytes before any check sees it, which would end the app.
+const MEMORY_LIMIT: u64 = 1 << 30;
+const OUT_OF_MEMORY: &str = "PLUGIN_OUT_OF_MEMORY: the plugin took more than 1 GB of memory and was stopped";
+const PROGRESS: &str = "progress ";
+static PROGRAM: OnceLock<PathBuf> = OnceLock::new();
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -335,7 +344,7 @@ pub fn save(manifest: &Value, script: &str, readme: Option<&str>) -> Result<Plug
         readme.is_none_or(|readme| readme.len() as u64 <= MAX_TEXT_BYTES),
         "PLUGIN_BROKEN: README.md is larger than 64 KB"
     );
-    sandbox(script, "PLUGIN_BROKEN", SAVE_LIMIT, Arc::default(), Rc::default(), Rc::new(|_| {}), |_, _| Ok(()))?;
+    sandbox(script, "PLUGIN_BROKEN", SAVE_LIMIT, Rc::default(), Rc::new(|_| {}), |_, _| Ok(()))?;
     let folder = dir()?.join(&manifest.id);
     let failed = "STORE_WRITE_FAILED: cannot save the plugin";
     // A plugin folder from someone else may hold links; writing through one would overwrite the file it points at.
@@ -406,21 +415,25 @@ pub(crate) fn prepare(
     Ok(Prepared { manifest, script, ctx: ctx.to_string() })
 }
 
+#[derive(Serialize, Deserialize)]
 struct Output {
     edits: Vec<EditCmd>,
     message: Option<String>,
     logs: Vec<String>,
 }
 
+/// What the plugin's process answers: the plugin's edits, message and log, and the project after the edits or why
+/// they do not apply.
+type Checked = (Output, Result<Project, String>);
+
 type Logs = Rc<RefCell<VecDeque<String>>>;
 
-fn execute(prepared: &Prepared, cancel: Arc<AtomicBool>, progress: impl Fn(f32) + 'static) -> Result<Output> {
+fn execute(script: &str, input: String, progress: impl Fn(f32) + 'static) -> Result<Output> {
     let logs = Logs::default();
-    let result =
-        sandbox(&prepared.script, "PLUGIN_FAILED", RUN_LIMIT, cancel, logs.clone(), Rc::new(progress), |ctx, run| {
-            let returned: rquickjs::Value = run.call((ctx.json_parse(prepared.ctx.clone())?,))?;
-            ctx.json_stringify(returned)?.map(|json| json.to_string()).transpose()
-        });
+    let result = sandbox(script, "PLUGIN_FAILED", RUN_LIMIT, logs.clone(), Rc::new(progress), |ctx, run| {
+        let returned: rquickjs::Value = run.call((ctx.json_parse(input)?,))?;
+        ctx.json_stringify(returned)?.map(|json| json.to_string()).transpose()
+    });
     let logs: Vec<String> = logs.take().into();
     let (edits, message) = result.and_then(|json| edits(json.as_deref())).map_err(|error| {
         let tail = &logs[logs.len().saturating_sub(20)..];
@@ -487,12 +500,11 @@ fn kind(edit: &EditCmd) -> String {
 
 /// The project after the edits, applied one by one to a copy as the session applies a batch. A plugin never adds a
 /// file or points the project at one, so a project it edited opens anywhere without it.
-fn check(project: &Project, edits: &[EditCmd], cancel: &AtomicBool) -> Result<Project> {
+fn check(project: &Project, edits: &[EditCmd]) -> Result<Project> {
     let made: HashSet<_> = project.reel_candidates.iter().filter_map(|c| c.project_path.as_ref()).collect();
     let new_path = |path: &Option<String>| path.as_ref().is_some_and(|path| !made.contains(path));
     let mut after = project.clone();
     for (i, edit) in edits.iter().enumerate() {
-        ensure!(!cancel.load(Ordering::Relaxed), "CANCELLED: job cancelled");
         let forbidden = match edit {
             EditCmd::AddAssets { .. } => true,
             EditCmd::SetReelCandidates { candidates } => candidates.iter().any(|c| new_path(&c.project_path)),
@@ -523,25 +535,18 @@ fn check(project: &Project, edits: &[EditCmd], cancel: &AtomicBool) -> Result<Pr
 }
 
 /// The answer of a dry run, and the project after the edits when they apply.
-fn dry(project: &Project, output: Output, cancel: &AtomicBool) -> (Value, Option<Project>) {
-    let (after, error) = match check(project, &output.edits, cancel) {
+fn dry((output, after): Checked) -> (Value, Option<Project>) {
+    let (after, error) = match after {
         Ok(after) => (Some(after), None),
-        Err(error) => (None, Some(format!("{error:#}"))),
+        Err(error) => (None, Some(error)),
     };
     let answer = json!({"dry_run": true, "valid": after.is_some(), "error": error, "edits": output.edits,
         "message": output.message, "logs": output.logs});
     (answer, after)
 }
 
-fn apply(
-    host: &Host,
-    run_id: &str,
-    project: &Project,
-    revision: u64,
-    output: Output,
-    cancel: &AtomicBool,
-) -> Result<Value> {
-    check(project, &output.edits, cancel)?;
+fn apply(host: &Host, run_id: &str, revision: u64, (output, after): Checked, cancel: &AtomicBool) -> Result<Value> {
+    after.map_err(anyhow::Error::msg)?;
     // A cancelled job reports no result, so its edits must not land either.
     ensure!(!cancel.load(Ordering::Relaxed), "CANCELLED: job cancelled");
     let count = output.edits.len();
@@ -574,13 +579,13 @@ pub(crate) fn start(
     let revision = state.stamp.revision;
     let run_id = run.clone().unwrap_or_default();
     host.start_job(owner, run.as_deref(), "plugin", state.stamp.clone(), move |cancel, progress| {
-        let output = execute(&prepared, cancel.clone(), move |done| progress.set("running", Some(done)));
+        let checked = isolated(&prepared, &project, &cancel, move |done| progress.set("running", Some(done)));
         let host = weak.upgrade().context("APP_CLOSED: project is closed")?;
         match mode {
-            Mode::DryRun => Ok(dry(&project, output?, &cancel).0),
-            Mode::Apply => apply(&host, &run_id, &project, revision, output?, &cancel),
+            Mode::DryRun => Ok(dry(checked?).0),
+            Mode::Apply => apply(&host, &run_id, revision, checked?, &cancel),
             Mode::App => {
-                let result = output.and_then(|output| apply(&host, &run_id, &project, revision, output, &cancel));
+                let result = checked.and_then(|checked| apply(&host, &run_id, revision, checked, &cancel));
                 match &result {
                     Ok(_) => {
                         host.session.end_run(&run_id, EndAction::Keep)?;
@@ -626,9 +631,195 @@ pub fn dry_run_in_app(
 ) -> Result<Value> {
     let state = host.session.state()?;
     let prepared = prepare(host, &state, id, inputs, Some(selection), Some(playhead_us))?;
-    let (mut answer, after) = dry(&state.project, execute(&prepared, cancel.clone(), |_| {})?, &cancel);
+    let (mut answer, after) = dry(isolated(&prepared, &state.project, &cancel, |_| {})?);
     answer["project"] = json!(after);
     Ok(answer)
+}
+
+/// Tests run plugins from their own binary, which has no `plugin-sandbox`, so they name Nuzky's.
+#[doc(hidden)]
+pub fn use_sandbox_program(program: PathBuf) {
+    PROGRAM.set(program).ok();
+}
+
+/// Kills the plugin's process however its run ends.
+struct Sandboxed(Child);
+
+impl Drop for Sandboxed {
+    fn drop(&mut self) {
+        self.0.kill().ok();
+        self.0.wait().ok();
+    }
+}
+
+/// Runs the plugin and checks its edits on a copy of `project` in Nuzky's own executable started as
+/// `plugin-sandbox`, killed once it takes more than `MEMORY_LIMIT`, runs too long or `cancel` is set, so neither the
+/// script nor edits that would copy gigabytes can take the app's memory. Nothing it does reaches the project.
+fn isolated(
+    prepared: &Prepared,
+    project: &Project,
+    cancel: &AtomicBool,
+    progress: impl Fn(f32) + Send + 'static,
+) -> Result<Checked> {
+    let program = match PROGRAM.get() {
+        Some(program) => program.clone(),
+        None => std::env::current_exe().context("PLUGIN_FAILED: cannot find Nuzky to run the plugin")?,
+    };
+    let mut command = Command::new(program);
+    command.arg("plugin-sandbox").env_clear().stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    // Where the loader finds the libraries Nuzky itself was started with, such as an FFmpeg outside the system's.
+    #[cfg(target_os = "linux")]
+    if let Some(paths) = std::env::var_os("LD_LIBRARY_PATH") {
+        command.env("LD_LIBRARY_PATH", paths);
+    }
+    #[cfg(windows)]
+    {
+        // Windows programs expect it even with nothing else in their environment.
+        if let Some(root) = std::env::var_os("SystemRoot") {
+            command.env("SystemRoot", root);
+        }
+        std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let mut child = Sandboxed(command.spawn().context("PLUGIN_FAILED: cannot start the plugin's process")?);
+    // It waits for its input, so the limit holds before it does anything.
+    #[cfg(windows)]
+    let _job = limit_memory(&child.0)?;
+    let input = serde_json::to_vec(&(&prepared.script, &prepared.ctx, project))?;
+    let mut stdin = child.0.stdin.take().context("PLUGIN_FAILED: no input")?;
+    std::thread::spawn(move || stdin.write_all(&input));
+    let stdout = std::io::BufReader::new(child.0.stdout.take().context("PLUGIN_FAILED: no output")?);
+    let (send, answered) = std::sync::mpsc::channel();
+    // Read as it arrives, so the answer counts once it is whole rather than once the process has ended.
+    std::thread::spawn(move || {
+        send.send(serde_json::Deserializer::from_reader(stdout).into_iter::<Result<Checked, String>>().next()).ok()
+    });
+    let stderr = std::io::BufReader::new(child.0.stderr.take().context("PLUGIN_FAILED: no output")?);
+    let said = std::thread::spawn(move || {
+        let mut said = String::new();
+        for line in stderr.lines().map_while(Result::ok) {
+            match line.strip_prefix(PROGRESS).and_then(|done| done.parse().ok()) {
+                Some(done) => progress(done),
+                None if said.len() < 4096 => said += &(line + "\n"),
+                None => {}
+            }
+        }
+        said
+    });
+    let deadline = Instant::now() + RUN_LIMIT + Duration::from_secs(1);
+    let answer = loop {
+        match answered.recv_timeout(Duration::from_millis(10)) {
+            Ok(answer) => break answer,
+            Err(RecvTimeoutError::Disconnected) => break None,
+            Err(RecvTimeoutError::Timeout) => {}
+        }
+        ensure!(!cancel.load(Ordering::Relaxed), "CANCELLED: job cancelled");
+        ensure!(
+            Instant::now() < deadline,
+            "PLUGIN_TIMEOUT: the plugin ran longer than {} seconds and was stopped",
+            RUN_LIMIT.as_secs()
+        );
+        ensure!(resident(child.0.id()).is_none_or(|bytes| bytes <= MEMORY_LIMIT), OUT_OF_MEMORY);
+    };
+    if let Some(Ok(checked)) = answer {
+        drop(child);
+        said.join().ok();
+        return checked.map_err(anyhow::Error::msg);
+    }
+    let status = child.0.wait()?;
+    let said = said.join().unwrap_or_default();
+    // The allocator's own words when the operating system's limit refused it more memory.
+    ensure!(!said.contains("memory allocation of"), OUT_OF_MEMORY);
+    log::error!("The plugin's process ended with {status}: {said}");
+    bail!("PLUGIN_FAILED: the plugin's process stopped unexpectedly ({status})")
+}
+
+/// The `plugin-sandbox` command: the script, its ctx and the project come on stdin, the answer leaves on stdout as
+/// `Result<Checked, String>`, the progress on stderr. It touches no file.
+pub fn sandbox_main() -> Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        let limit = libc::rlimit { rlim_cur: MEMORY_LIMIT, rlim_max: MEMORY_LIMIT };
+        // SAFETY: setrlimit only reads the structure given.
+        unsafe { libc::setrlimit(libc::RLIMIT_DATA, &limit) };
+    }
+    // Should the app die without killing it.
+    std::thread::spawn(|| {
+        std::thread::sleep(RUN_LIMIT + Duration::from_secs(5));
+        std::process::exit(1);
+    });
+    let (script, input, project): (String, String, Project) = serde_json::from_reader(std::io::stdin().lock())?;
+    let shown = Cell::new(-1.0);
+    let progress = move |done: f32| {
+        let done = (done * 100.0).round() / 100.0;
+        if shown.replace(done) != done {
+            eprintln!("{PROGRESS}{done}");
+        }
+    };
+    let answer = execute(&script, input, progress)
+        .map(|output| {
+            let after = check(&project, &output.edits).map_err(|error| format!("{error:#}"));
+            (output, after)
+        })
+        .map_err(|error| format!("{error:#}"));
+    let mut out = std::io::BufWriter::new(std::io::stdout().lock());
+    serde_json::to_writer(&mut out, &answer)?;
+    Ok(out.flush()?)
+}
+
+#[cfg(target_os = "linux")]
+fn resident(pid: u32) -> Option<u64> {
+    let statm = std::fs::read_to_string(format!("/proc/{pid}/statm")).ok()?;
+    let pages: u64 = statm.split_whitespace().nth(1)?.parse().ok()?;
+    // SAFETY: sysconf only reads a setting.
+    Some(pages * unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as u64)
+}
+
+/// macOS sets no limit on a process's memory, so the parent watches it.
+#[cfg(target_os = "macos")]
+fn resident(pid: u32) -> Option<u64> {
+    // SAFETY: proc_taskinfo is plain numbers, so zeroes are a valid value.
+    let mut info: libc::proc_taskinfo = unsafe { std::mem::zeroed() };
+    let size = size_of::<libc::proc_taskinfo>() as libc::c_int;
+    // SAFETY: info is the structure PROC_PIDTASKINFO fills, of the size given.
+    let filled =
+        unsafe { libc::proc_pidinfo(pid as libc::c_int, libc::PROC_PIDTASKINFO, 0, (&raw mut info).cast(), size) };
+    (filled == size).then_some(info.pti_resident_size)
+}
+
+/// The job object holds Windows to the limit.
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn resident(_: u32) -> Option<u64> {
+    None
+}
+
+/// A job that refuses the process memory above `MEMORY_LIMIT` and kills it once the handle closes.
+#[cfg(windows)]
+fn limit_memory(child: &Child) -> Result<std::os::windows::io::OwnedHandle> {
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        JOB_OBJECT_LIMIT_PROCESS_MEMORY, JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+        SetInformationJobObject,
+    };
+    // SAFETY: a job without a name or attributes; OwnedHandle closes the handle CreateJobObjectW returns.
+    let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+    ensure!(!handle.is_null(), "PLUGIN_FAILED: cannot limit the plugin's memory");
+    let job = unsafe { OwnedHandle::from_raw_handle(handle) };
+    let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_PROCESS_MEMORY;
+    limits.ProcessMemoryLimit = MEMORY_LIMIT as usize;
+    // SAFETY: limits is the structure this information class names, and both handles are open.
+    let set = unsafe {
+        SetInformationJobObject(
+            handle,
+            JobObjectExtendedLimitInformation,
+            (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+            size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        ) != 0
+            && AssignProcessToJobObject(handle, child.as_raw_handle()) != 0
+    };
+    ensure!(set, "PLUGIN_FAILED: cannot limit the plugin's memory");
+    Ok(job)
 }
 
 /// Evaluates the script in a fresh runtime, then hands `run` to `body`. Errors thrown in the script read
@@ -637,7 +828,6 @@ fn sandbox<T>(
     script: &str,
     failed: &str,
     limit: Duration,
-    cancel: Arc<AtomicBool>,
     logs: Logs,
     progress: Rc<dyn Fn(f32)>,
     body: impl for<'js> FnOnce(&Ctx<'js>, Function<'js>) -> rquickjs::Result<T>,
@@ -646,8 +836,7 @@ fn sandbox<T>(
     runtime.set_memory_limit(256 << 20);
     runtime.set_max_stack_size(1 << 20);
     let deadline = Instant::now() + limit;
-    let stop = cancel.clone();
-    runtime.set_interrupt_handler(Some(Box::new(move || stop.load(Ordering::Relaxed) || Instant::now() >= deadline)));
+    runtime.set_interrupt_handler(Some(Box::new(move || Instant::now() >= deadline)));
     let context = rquickjs::Context::full(&runtime).context("PLUGIN_FAILED: cannot start the script engine")?;
     let result = context.with(|ctx| {
         let run = || {
@@ -667,7 +856,6 @@ fn sandbox<T>(
     });
     match result {
         Ok(value) => Ok(value),
-        Err(_) if cancel.load(Ordering::Relaxed) => bail!("CANCELLED: job cancelled"),
         Err(_) if Instant::now() >= deadline => {
             bail!("PLUGIN_TIMEOUT: the plugin ran longer than {} seconds and was stopped", limit.as_secs())
         }

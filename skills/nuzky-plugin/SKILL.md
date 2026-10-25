@@ -13,7 +13,7 @@ A plugin is a small JavaScript file that reads the project and returns edits. Th
 - It returns edits, the same EditCmd JSON as `apply_edits`. Nuzky applies them as ONE batch: all of them or none. The user undoes them in one step.
 - It cannot read or write files, reach the network, start processes, use timers or import modules. There is no `fetch`, `require`, `import`, `setTimeout` or `process`. `Math`, `Date`, `JSON`, strings, arrays and regular expressions work. `run` must return its result, not a Promise.
 - It cannot add media: `addAssets` is refused, so are reel candidates pointing at a new project file. It works with the assets the project already has (`addClip`, `replaceClip` with an existing `assetId`).
-- It runs at most 60 seconds, with 256 MB of memory. plugin.js is at most 1 MB and a run returns at most 5000 edits.
+- It runs at most 60 seconds, with 256 MB of memory for the script. It runs in a process of its own, where Nuzky also applies its edits to a copy of the project first; that process may take at most 1 GB. plugin.js is at most 1 MB and a run returns at most 5000 edits.
 
 ## Files
 
@@ -185,6 +185,7 @@ Mute or hide a track, and rename the project.
 - TRANSCRIPT_MISSING: it needs the words; `transcribe` first.
 - PLUGIN_FAILED: the script threw, with `plugin.js:<line>:<column>`, or returned something that is not edits; the last lines of its log follow.
 - PLUGIN_TIMEOUT: it ran longer than 60 seconds. CANCELLED or RUN_STOPPED: the user stopped it.
+- PLUGIN_OUT_OF_MEMORY: the script, or its edits applied to the copy of the project, took more than 1 GB. Make it change less at once, such as fewer clips or fewer keyframes per clip.
 - PLUGIN_TOO_MANY_EDITS: more than 5000 edits.
 - PLUGIN_FORBIDDEN_EDIT: `edit <index> (<type>)` would add a file.
 - PLUGIN_BAD_EDIT: `edit <index> (<type>): …` is not a valid edit or does not apply (index counts from 0), or the edits together leave the project invalid.
