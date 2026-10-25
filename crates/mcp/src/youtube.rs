@@ -114,8 +114,7 @@ fn locate(dirs: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
 /// Nuzky's own yt-dlp first, as Nuzky keeps it up to date, then the one the user installed.
 /// `NUZKY_YTDLP` stands in for the user's, such as the tests' fake one.
 pub fn find() -> Option<PathBuf> {
-    let own = own_copy();
-    if executable(&own) {
+    if let Some(own) = own() {
         return Some(own);
     }
     if let Some(path) = std::env::var_os("NUZKY_YTDLP") {
@@ -145,10 +144,12 @@ const TEST_SERVER: &str = "http://127.0.0.1:";
 const REFRESH: Duration = Duration::from_secs(7 * 24 * 3600);
 const RETRY: Duration = Duration::from_secs(10 * 60);
 
-/// The file of yt-dlp's release that runs on this computer, as yt-dlp names it.
+/// The file of yt-dlp's release that runs on this computer, as yt-dlp names it. On macOS it is the unpacked
+/// build: the single file unpacks itself into a new folder on every run, and macOS scans all of it each
+/// time, which took 10 to 45 s before yt-dlp started (github.com/yt-dlp/yt-dlp/issues/10425).
 fn release_file() -> Option<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("macos", _) => Some("yt-dlp_macos"),
+        ("macos", _) => Some("yt-dlp_macos.zip"),
         ("linux", "x86_64") => Some("yt-dlp_linux"),
         ("linux", "aarch64") => Some("yt-dlp_linux_aarch64"),
         ("windows", "x86_64") => Some("yt-dlp.exe"),
@@ -159,16 +160,35 @@ fn release_file() -> Option<&'static str> {
 
 /// Whether Nuzky has its own yt-dlp.
 pub fn downloaded() -> bool {
-    executable(&own_copy())
+    own().is_some()
+}
+
+fn tools_dir() -> PathBuf {
+    crate::sounds::data_dir().join("tools")
+}
+
+fn own_copy_in(tools: &Path) -> PathBuf {
+    if cfg!(target_os = "macos") {
+        tools.join("yt-dlp_macos").join("yt-dlp_macos")
+    } else {
+        tools.join(if cfg!(windows) { "yt-dlp.exe" } else { "yt-dlp" })
+    }
 }
 
 fn own_copy() -> PathBuf {
-    crate::sounds::data_dir().join("tools").join(if cfg!(windows) { "yt-dlp.exe" } else { "yt-dlp" })
+    own_copy_in(&tools_dir())
+}
+
+/// Nuzky's own yt-dlp, which on macOS may still be the single file older versions downloaded, until the
+/// next update replaces it.
+fn own() -> Option<PathBuf> {
+    let single_file = cfg!(target_os = "macos").then(|| tools_dir().join("yt-dlp"));
+    std::iter::once(own_copy()).chain(single_file).find(|path| executable(path))
 }
 
 /// When Nuzky last checked its yt-dlp against the newest release.
 fn checked_stamp() -> PathBuf {
-    own_copy().with_file_name("yt-dlp.checked")
+    tools_dir().join("yt-dlp.checked")
 }
 
 #[derive(Deserialize)]
@@ -230,8 +250,8 @@ fn newest(file: &str) -> Result<(String, u64, String)> {
 }
 
 /// Downloads the newest yt-dlp for this computer from yt-dlp's GitHub releases to `path`, checked
-/// against the size and SHA-256 GitHub gives for it, unless `path` already is that file.
-fn install_to(path: &Path, cancel: &AtomicBool, progress: impl FnMut(f32)) -> Result<()> {
+/// against the size and SHA-256 GitHub gives for it, unless `path` already is that file. Returns its SHA-256.
+fn install_to(path: &Path, cancel: &AtomicBool, progress: impl FnMut(f32)) -> Result<String> {
     let file = release_file().context(UNSUPPORTED)?;
     // The lookup runs on its own thread, so Stop is felt at once even while GitHub keeps silent.
     let (tx, rx) = mpsc::channel();
@@ -254,16 +274,59 @@ fn install_to(path: &Path, cancel: &AtomicBool, progress: impl FnMut(f32)) -> Re
             anyhow!("YTDLP_DOWNLOAD_FAILED: yt-dlp didn't download. Check your internet connection and free disk space, then try again. ({text})")
         }
     })?;
-    #[cfg(unix)]
-    std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o755))?;
-    Ok(())
+    Ok(sha256)
 }
 
 /// Downloads yt-dlp for Nuzky's own use; `cancel` stops it within 100 ms.
 pub fn install(cancel: &AtomicBool, progress: impl FnMut(f32)) -> Result<()> {
-    install_to(&own_copy(), cancel, progress)?;
+    install_in(&tools_dir(), cancel, progress)?;
     std::fs::write(checked_stamp(), b"")?;
     Ok(())
+}
+
+fn install_in(tools: &Path, cancel: &AtomicBool, progress: impl FnMut(f32)) -> Result<()> {
+    let program = own_copy_in(tools);
+    if cfg!(target_os = "macos") {
+        let zip = tools.join("yt-dlp_macos.zip");
+        let sha256 = install_to(&zip, cancel, progress)?;
+        unpack(&zip, &sha256, program.parent().context("yt-dlp needs a folder")?)?;
+        std::fs::remove_file(tools.join("yt-dlp")).ok();
+    } else {
+        install_to(&program, cancel, progress)?;
+        #[cfg(unix)]
+        std::fs::set_permissions(&program, std::os::unix::fs::PermissionsExt::from_mode(0o755))?;
+    }
+    Ok(())
+}
+
+/// Unpacks yt-dlp's macOS build from `zip` into `dir`, unless `dir` came from that zip already.
+fn unpack(zip: &Path, sha256: &str, dir: &Path) -> Result<()> {
+    if std::fs::read_to_string(dir.join(".sha256")).is_ok_and(|sum| sum == sha256)
+        && executable(&dir.join("yt-dlp_macos"))
+    {
+        return Ok(());
+    }
+    let tools = dir.parent().context("yt-dlp needs a folder")?;
+    let part = tools.join(format!(".nuzky-part-{}", new_id()));
+    let result = (|| {
+        // ditto ships with macOS and keeps the files' permissions.
+        let output = Command::new("/usr/bin/ditto").args(["-x", "-k"]).arg(zip).arg(&part).output()?;
+        ensure!(
+            output.status.success() && executable(&part.join("yt-dlp_macos")),
+            "YTDLP_CORRUPT: yt-dlp did not unpack. Try again. ({})",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+        std::fs::write(part.join(".sha256"), sha256)?;
+        let old = tools.join(format!(".nuzky-old-{}", new_id()));
+        std::fs::rename(dir, &old).ok();
+        std::fs::rename(&part, dir)?;
+        std::fs::remove_dir_all(old).ok();
+        Ok(())
+    })();
+    if result.is_err() {
+        std::fs::remove_dir_all(&part).ok();
+    }
+    result
 }
 
 /// Once a week, after yt-dlp has run, Nuzky's own copy is brought up to date in the background, so
@@ -271,10 +334,12 @@ pub fn install(cancel: &AtomicBool, progress: impl FnMut(f32)) -> Result<()> {
 /// after ten minutes of use; a finished download is then only moved into place.
 fn refresh() {
     static TRIED: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
-    let stale = std::fs::metadata(checked_stamp())
-        .and_then(|m| m.modified())
-        .map_or(true, |at| at.elapsed().unwrap_or_default() > REFRESH);
-    if !executable(&own_copy()) || !stale {
+    let Some(own) = own() else { return };
+    let stale = own != own_copy()
+        || std::fs::metadata(checked_stamp())
+            .and_then(|m| m.modified())
+            .map_or(true, |at| at.elapsed().unwrap_or_default() > REFRESH);
+    if !stale {
         return;
     }
     let mut tried = TRIED.lock().unwrap();
@@ -437,7 +502,7 @@ pub fn video(id: &str, format: &str, max_bytes: u64, cancel: &AtomicBool) -> Res
     };
     let stderr = stderr.join().unwrap_or_default();
     refresh();
-    ensure!(status.success(), failure(&stderr, !executable(&own_copy())));
+    ensure!(status.success(), failure(&stderr, own().is_none()));
     let bytes = reader.join().map_err(|_| anyhow!("yt-dlp output was lost"))??;
     let video: Video = serde_json::from_slice(&bytes)
         .map_err(|e| anyhow!("SOURCE_FAILED: yt-dlp sent something unexpected. Updating yt-dlp often helps. ({e})"))?;
@@ -519,7 +584,7 @@ pub fn download(
         };
         let stderr = stderr.join().unwrap_or_default();
         refresh();
-        ensure!(status.success(), failure(&stderr, !executable(&own_copy())));
+        ensure!(status.success(), failure(&stderr, own().is_none()));
         // Over --max-filesize yt-dlp skips the download and still succeeds.
         let size = part.metadata().map(|m| m.len()).unwrap_or(0);
         ensure!(size > 0, "SOUND_UNAVAILABLE: this video is too long to download");
@@ -660,14 +725,14 @@ mod tests {
     #[ignore]
     fn downloads_yt_dlp_from_its_releases() {
         let dir = std::env::temp_dir().join(format!("nuzky-ytdlp-{}", new_id()));
-        let path = dir.join(if cfg!(windows) { "yt-dlp.exe" } else { "yt-dlp" });
+        let path = own_copy_in(&dir);
         let mut steps = Vec::new();
-        install_to(&path, &AtomicBool::new(false), |p| steps.push(p)).unwrap();
+        install_in(&dir, &AtomicBool::new(false), |p| steps.push(p)).unwrap();
         let version = Command::new(&path).arg("--version").output().unwrap();
         eprintln!("yt-dlp {} at {path:?}", String::from_utf8_lossy(&version.stdout).trim());
         assert!(version.status.success() && steps.last() == Some(&1.0), "{version:?} {:?}", steps.last());
         assert!(executable(&path));
-        install_to(&path, &AtomicBool::new(false), |_| panic!("an up-to-date copy is downloaded again")).unwrap();
+        install_in(&dir, &AtomicBool::new(false), |_| panic!("an up-to-date copy is downloaded again")).unwrap();
         std::fs::remove_dir_all(dir).ok();
     }
 

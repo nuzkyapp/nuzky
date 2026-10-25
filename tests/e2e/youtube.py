@@ -1,11 +1,11 @@
 """YouTube music stays behind the rights notice, previews and adds without credit, and ducks in the export.
 All yt-dlp lookups and downloads are served by the executable fake, without contacting YouTube."""
-import hashlib, json, platform, statistics, subprocess, threading, time
+import hashlib, io, json, platform, statistics, subprocess, threading, time, zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from e2e.ducking import CHECKBOX, SOURCE, TONE, WINDOW, RATE, decode, speech_levels, tone_levels
-from e2e.harness import WINDOWS, Bridge, flow, export, press, program, running_with, wait
+from e2e.harness import MACOS, WINDOWS, Bridge, flow, export, press, program, running_with, wait
 from e2e.layout import resize
 
 SONG = 'yt_Song0001'
@@ -27,11 +27,27 @@ def prepare(r):
                  NUZKY_FAKE_YTDLP_AUDIO=str(audio), NUZKY_FAKE_YTDLP_LOG=str(r.log))
 
 
+def own_ytdlp(r):
+    """Nuzky's own yt-dlp in this run's data folder; on macOS it is unpacked from the release's zip."""
+    tools = r.work / 'data/nuzky/tools'
+    if MACOS:
+        return tools / 'yt-dlp_macos' / 'yt-dlp_macos'
+    return tools / ('yt-dlp.exe' if WINDOWS else 'yt-dlp')
+
+
 def missing(r):
     prepare(r)
     r.env['NUZKY_YTDLP'] = str(r.work / 'not-installed')
-    r.release = {'Darwin': 'yt-dlp_macos', 'Windows': 'yt-dlp.exe'}.get(platform.system(), 'yt-dlp_linux')
-    r.tool = program(r, Path(__file__).with_name('fake_ytdlp'), 'yt-dlp').read_bytes()
+    r.release = {'Darwin': 'yt-dlp_macos.zip', 'Windows': 'yt-dlp.exe'}.get(platform.system(), 'yt-dlp_linux')
+    r.program = program(r, Path(__file__).with_name('fake_ytdlp'), 'yt-dlp').read_bytes()
+    r.tool = r.program
+    if MACOS:
+        packed = io.BytesIO()
+        with zipfile.ZipFile(packed, 'w') as release:
+            entry = zipfile.ZipInfo('yt-dlp_macos')
+            entry.external_attr = 0o100755 << 16
+            release.writestr(entry, r.program)
+        r.tool = packed.getvalue()
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -311,7 +327,7 @@ def youtube_missing(r):
                 and r.s.run(label, button) == 'Download yt-dlp'
                 and not any(text in offer for text in ('brew', 'winget', 'pipx', 'YTDLP_MISSING:')), offer)
         tools = r.work / 'data/nuzky/tools'
-        own = tools / ('yt-dlp.exe' if WINDOWS else 'yt-dlp')
+        own = own_ytdlp(r)
         project = r.s.run(PROJECT)
         r.check('the offer downloads nothing and adds no asset or clip',
                 list(tools.glob('*')) == [] and r.releases.requests == [] and invocations(r) == []
@@ -350,7 +366,7 @@ def youtube_missing(r):
         r.check('the download fetched the release and its file from the local release server',
                 r.releases.requests == ['/latest', '/' + r.release], r.releases.requests.copy())
         r.check('the installed tool is executable, matches the release bytes and has a checked stamp',
-                own.exists() and own.read_bytes() == r.tool and (WINDOWS or own.stat().st_mode & 0o777 == 0o755)
+                own.exists() and own.read_bytes() == r.program and (WINDOWS or own.stat().st_mode & 0o777 == 0o755)
                 and (tools / 'yt-dlp.checked').is_file())
         r.check('automatic lookup runs the downloaded tool despite the missing override and adds nothing',
                 len(invocations(r)) == 1 and '--skip-download' in invocations(r)[0] and r.s.run(PROJECT) == project,
@@ -425,10 +441,10 @@ row.dispatchEvent(new MouseEvent('dblclick', {bubbles: true, detail: 2}));""", f
         r.check('after Download yt-dlp the double-clicked song is added by itself, once, where it was asked',
                 added and len(placed) == 1 and asset['kind'] == 'audio' and placed[0]['startUs'] == 1_000_000
                 and Path(asset['path']).read_bytes() == (r.work / 'tone.m4a').read_bytes(), placed)
-        own = r.work / 'data/nuzky/tools' / ('yt-dlp.exe' if WINDOWS else 'yt-dlp')
+        own = own_ytdlp(r)
         downloads = [args for args in invocations(r) if '-o' in args]
         r.check("Nuzky's own copy came from the release server and did the second download",
-                r.releases.requests == ['/latest', '/' + r.release] and own.read_bytes() == r.tool and len(downloads) >= 2,
+                r.releases.requests == ['/latest', '/' + r.release] and own.read_bytes() == r.program and len(downloads) >= 2,
                 (r.releases.requests, len(downloads)))
         r.shot('song-added-after-download')
         r.check('no error toasts', not r.errors(), r.errors())
