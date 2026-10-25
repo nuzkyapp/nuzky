@@ -4,7 +4,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from e2e.harness import CLI, FIXTURES, ROOT, Bridge, export, flow, leave_editor, wait
+from e2e.harness import CLI, FIXTURES, ROOT, Bridge, export, flow, leave_editor, wait, webdriver
 
 EXAMPLE = ROOT / 'skills/nuzky-plugin/examples/remove-short-clips'
 ROW = "document.querySelector('[data-plugin=\"remove-short-clips\"]')"
@@ -218,6 +218,21 @@ LOGO_SCRIPT = '''function run(ctx) {
 LOGO_TRANSFORM = {'x': 0.35, 'y': -0.35, 'scale': 0.2}
 
 
+# The inspector's line saying what the open plugin would do, and whether it is dimmed while a newer check runs.
+OUTCOME = """const line = document.querySelector('.lucide-eye')?.parentElement;
+    return line ? {text: line.innerText, stale: line.classList.contains('opacity-50')} : null;"""
+
+
+def outcome(r, text, timeout=10):
+    """Waits for the inspector to say `text`, from a check of the current project and settings."""
+    return wait(lambda: (o := r.s.run(OUTCOME)) and not o['stale'] and o['text'] == text, timeout) or r.s.run(OUTCOME)
+
+
+def resize(r, width, height):
+    webdriver('POST', r.s.path + '/window/rect', {'width': width, 'height': height})
+    return wait(lambda: r.s.run('return [window.innerWidth, window.innerHeight]') == [width, height], 5)
+
+
 def white(image, box):
     """Share of the box in the logo's white; the test pattern's bars are all saturated colours."""
     import numpy as np
@@ -244,7 +259,8 @@ def exported_frame(r, video, name):
     return Image.open(path)
 
 
-@flow('plugin_files', 'A plugin an agent saved with its own logo previews "Adds logo.png" without changing anything, '
+@flow('plugin_files', 'A plugin an agent saved with its own logo previews in one line that it adds the logo to the '
+      'video and Media without changing anything, '
       'puts the logo in the top right corner as one undo step and the export shows it there; after the plugin is '
       'deleted the project opens again and still exports the logo')
 def plugin_files(r):
@@ -277,10 +293,26 @@ def plugin_files(r):
     row = "document.querySelector('[data-plugin=\"corner-logo\"]')"
     r.check('the Plugins tab lists the plugin', wait(lambda: r.s.run(f'return !!{row}'), 10))
     r.s.run(f'{row}.click()')
-    said = wait(lambda: (t := r.s.run("return document.body.textContent")) and 'Puts logo.png in Media' in t and t, 10)
-    r.check('the preview says it adds the logo to the video and to Media', said and 'Adds logo.png' in said and 'Marked on the timeline' not in said)
+    said = outcome(r, "Adds the plugin's logo.png to the video and Media.")
+    r.check('the preview says in one line that the plugin\'s logo goes into the video and Media', said is True, said)
     r.check('the preview changes nothing in the project', project(r) == before)
     r.shot('preview')
+    r.check('the window goes to its smallest size', resize(r, 1024, 640))
+    time.sleep(0.5)
+    r.shot('preview-1024')
+    resize(r, 1440, 900)
+    # The inspector shows the first three lines, so the plugin's file leads even when its clips are not all it changes.
+    busy = r.s.call("""window.__nuzky.api.previewPlugin('corner-logo', {}, [], 0).then(async (preview) => {
+        const {describePeek} = await import('/src/lib/peek.ts');
+        const now = window.__nuzky.store.getState().snap.project;
+        const then = structuredClone(preview);
+        then.tracks[0].clips[0].content.volume = 0.5;
+        then.name = 'Branded';
+        then.canvas = {...then.canvas, width: then.canvas.height, height: then.canvas.width};
+        return JSON.stringify(describePeek(now, then, true).lines);
+    })""")
+    r.check('with other changes too, the line about the plugin\'s logo comes first',
+            busy['ok'] and json.loads(busy['value'])[0].startswith("Adds the plugin's logo.png to "), busy)
 
     r.s.run("[...document.querySelectorAll('button')].find((b) => b.textContent === 'Add logo').click()")
     logo = wait(lambda: next((a for a in project(r)['assets'] if a['name'] == 'logo.png'), None), 10)
@@ -296,7 +328,15 @@ def plugin_files(r):
     r.check('the plugin message reaches the success toast', wait(lambda: any(
         t['kind'] == 'success' and t['text'] == 'Added the logo.' for t in r.state()['toasts']), 5), r.state()['toasts'])
     r.s.run('window.__nuzky.store.getState().select([])')
+    again = outcome(r, 'Adds logo.png.')
+    r.check('run again, the preview adds the logo the project already has, not a second copy in Media', again is True, again)
     r.shot('done')
+    r.s.run("[...document.querySelectorAll('[role=tab]')].find((b) => b.textContent === 'Media').click()")
+    tile = """const add = document.querySelector('[aria-label="Add logo.png at playhead"]');
+        return add?.closest('.group')?.querySelector('img')?.naturalWidth > 0;"""
+    r.check('Media shows the copied logo with its thumbnail', wait(lambda: r.s.run(tile), 10))
+    r.shot('media')
+    r.s.run("[...document.querySelectorAll('[role=tab]')].find((b) => b.textContent === 'Plugins').click()")
     r.s.call('window.__nuzky.store.getState().undo()')
     r.check('one undo takes away the logo and its media', wait(lambda: project(r) == before, 5))
     r.s.call('window.__nuzky.store.getState().redo()')
@@ -306,7 +346,6 @@ def plugin_files(r):
     share = white(frame, logo_box(frame, canvas))
     r.check('the export shows the logo in the top right corner', share > 0.9, f'{share:.0%} of the box is the logo')
 
-    r.s.run("document.querySelector('[aria-label=\"Close plugin\"]').click()")
     shutil.rmtree(folder)
     r.check('the deleted plugin leaves the list', wait(lambda: r.s.run(f'return !{row}'), 5))
     leave_editor(r)
