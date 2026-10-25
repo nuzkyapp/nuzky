@@ -157,11 +157,7 @@ impl TextRenderer {
             db.push_face_info(cosmic_text::fontdb::FaceInfo { weight: Weight::BOLD, ..face });
         }
         db.set_sans_serif_family(DEFAULT_FAMILY);
-        let families = db
-            .faces()
-            .flat_map(|face| face.families.iter().map(|(name, _)| name.clone()))
-            .filter(|name| name != EMOJI_FAMILY)
-            .collect();
+        let families = db.faces().flat_map(|face| face.families.iter().map(|(name, _)| name.clone())).collect();
         let fonts = FontSystem::new_with_locale_and_db_and_fallback(locale, db, EmojiFirst::new());
         Self {
             fonts,

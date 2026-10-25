@@ -19,12 +19,14 @@ let bundles;
 let ffmpegSource;
 // ONNX Runtime ships beside the app and is opened only when covers run (crates/vision/src/runtime.rs).
 const ort = await fetchOnnxRuntime();
-// The emoji and stickers (assets/stickers) and the CC BY sample video (assets/sample) are built into the binary;
-// their licences, and the sample's attribution, go with it.
+// The emoji and stickers (assets/stickers), the CC BY sample video (assets/sample) and the fonts (assets/fonts) are
+// built into the binary; their licences, and the sample's attribution, go with it.
 const notices = Object.fromEntries([
   ...ort.notices.map((n) => [n, `licenses/onnxruntime/${path.basename(n)}`]),
   ...['stickers', 'sample'].flatMap((dir) => readdirSync(`assets/${dir}`).filter((n) => n.endsWith('.txt'))
     .map((n) => [path.join(root, 'assets', dir, n), `licenses/${dir}/${n}`])),
+  ...readdirSync('assets/fonts', { withFileTypes: true }).filter((d) => d.isDirectory())
+    .map((d) => [path.join(root, 'assets', 'fonts', d.name, 'OFL.txt'), `licenses/fonts/${d.name}/OFL.txt`]),
 ]);
 
 switch (process.platform) {

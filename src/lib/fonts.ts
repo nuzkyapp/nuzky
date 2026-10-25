@@ -6,8 +6,13 @@ import manifest from "../../assets/fonts/manifest.json";
 /** What the engine draws when a text has no font set. */
 export const DEFAULT_FONT = "Inter";
 
-// The engine embeds the same files from the same manifest, so pickers and swatches show the real face.
-const URLS = import.meta.glob<string>("../../assets/fonts/**/*.ttf", { query: "?url", import: "default", eager: true });
+// The engine embeds the same files from the same manifest, so pickers and swatches show the real face. The emoji
+// font is no family to pick, so it stays out of the app's files.
+const URLS = import.meta.glob<string>(["../../assets/fonts/**/*.ttf", "!../../assets/fonts/notocoloremoji/**"], {
+  query: "?url",
+  import: "default",
+  eager: true,
+});
 const FACES = manifest.map(({ family, file, weight }) => ({ family, weight, url: URLS[`../../assets/fonts/${file}`] }));
 const BUNDLED = new Set(FACES.map((face) => face.family));
 
