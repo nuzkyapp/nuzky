@@ -468,7 +468,7 @@ fn loudness_of_a_trimmed_clip_leaves_out_what_it_does_not_play() {
         "version": "1", "needs": ["loudness"]});
     let script = "function run(ctx) { nuzky.log(JSON.stringify(ctx.loudness[0])); return []; }";
     plugins::save(&reads, script, None).unwrap();
-    let job = plugins::run_in_app(&f.host, "loud", &Map::new(), vec![], 0).unwrap();
+    let job = plugins::run_in_app(&f.host, "loud", &Map::new(), None, vec![], 0).unwrap();
     let done = finish(&f.host, &job, Duration::from_secs(20));
     assert_eq!(done["status"], "done", "{done}");
     let loudness: Value = serde_json::from_str(done["result"]["logs"][0].as_str().unwrap()).unwrap();
@@ -695,7 +695,7 @@ fn stop_ends_the_check_of_a_plugins_files() {
     std::fs::write(folder.join("plugin.js"), "function run() { return []; }").unwrap();
     let before = f.host.session.state().unwrap().project;
     let asked = Instant::now();
-    let job = plugins::run_in_app(&f.host, "frames", &Map::new(), vec![], 0).unwrap();
+    let job = plugins::run_in_app(&f.host, "frames", &Map::new(), None, vec![], 0).unwrap();
     assert!(asked.elapsed() < Duration::from_secs(1), "Run waited {:?}", asked.elapsed());
     std::thread::sleep(Duration::from_millis(300));
     f.host.stop_run().unwrap();
@@ -713,7 +713,7 @@ fn a_plugin_whose_edits_change_nothing_says_so() {
     let same = json!({"nuzkyPlugin": 1, "id": "same", "name": "Same", "description": "Renames to the same name", "version": "1"});
     let script = format!("function run() {{ return [{{type: 'renameProject', name: {}}}]; }}", json!(name));
     plugins::save(&same, &script, None).unwrap();
-    let job = plugins::run_in_app(&f.host, "same", &Map::new(), vec![], 0).unwrap();
+    let job = plugins::run_in_app(&f.host, "same", &Map::new(), None, vec![], 0).unwrap();
     let done = finish(&f.host, &job, Duration::from_secs(10));
     assert_eq!((&done["result"]["applied"], &done["result"]["changed"]), (&json!(1), &json!(false)), "{done}");
 }
