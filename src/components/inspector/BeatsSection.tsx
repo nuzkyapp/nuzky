@@ -18,8 +18,12 @@ function Warning({ children }: { children: string }) {
   );
 }
 
+/** A file's name in a sentence: "City walk", not "City walk.m4a". */
+const songName = (name: string) => name.replace(/\.[a-z0-9]{2,4}$/i, "");
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const seconds = (us: number) => `${(us / US).toFixed(1)} s`;
+/** Where the beat comes in after an intro worth naming; a beat from the first second has none. */
+const intro = (beatFromUs: number | null) => (beatFromUs !== null && beatFromUs >= US ? beatFromUs : null);
 
 function footage(plans: BeatPlans) {
   const { videos, pictures } = plans;
@@ -35,15 +39,15 @@ function describe(plan: RhythmPlan, plans: BeatPlans, song: string) {
   const other = RHYTHMS.find((r) => r.id === plan.sameAs)!.label;
   if (plan.rhythm === "builds" && plans.buildsDropUs === null) {
     const at = plans.beatFromUs;
-    const why = plans.song.drops.some((d) => d.beatStarts) && at !== null ? `${song} drops where its beat starts, at ${formatTime(at, false)}` : `${song} has no drop after its intro`;
+    const why = plans.song.drops.some((d) => d.beatStarts) && at !== null ? `${song} drops where its beat starts, at ${formatTime(at, false)}` : `${song} has no drop${intro(at) ? " after its intro" : ""}`;
     return `${does} ${why}, so here this is the same as ${other}.`;
   }
   return `${does} Here it cuts the same as ${other}.`;
 }
 
 /**
- * What cutting in this rhythm will do, before it is done: one line and the Cut row first, so both show in the smallest
- * window, then what the rhythm does, the warnings and the rest on demand.
+ * What cutting in this rhythm will do, before it is done: one line, its warnings and the Cut row first, so they show
+ * in the smallest window, then what the rhythm does and the rest on demand.
  */
 function Consequences({ plan, plans, song, keepSound, children }: { plan: RhythmPlan; plans: BeatPlans; song: string; keepSound: boolean; children: ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -52,14 +56,15 @@ function Consequences({ plan, plans, song, keepSound, children }: { plan: Rhythm
     `${plural(plan.clips, "clip")} from ${footage(plans)}`,
     keepSound ? "their own sound kept" : "their sound muted",
     plan.captionsRemoved > 0 && `${plural(plan.captionsRemoved, "speech caption")} removed`,
-    plan.repeated > 0 && `${plan.repeated} ${plan.repeated === 1 ? "repeats" : "repeat"} footage`,
+    plan.repeated > 0 && `${plural(plan.repeated, "clip")} ${plan.repeated === 1 ? "repeats" : "repeat"} footage`,
   ]
     .filter(Boolean)
     .join(" · ");
-  const intro = plans.beatFromUs !== null && plans.beatFromUs > 0 ? `The first ${seconds(plans.beatFromUs)}, before the beat,` : null;
+  const until = intro(plans.beatFromUs);
+  const before = until !== null ? `The first ${seconds(until)}, before the beat,` : null;
   const details = [
     plan.repeated > 0 && `Your videos run out, so ${plan.repeated} of the ${plan.clips} clips show footage again. More videos avoid it.`,
-    intro && (plan.introCut ? `${intro} change shot on bar lines, as no video is that long.` : `${intro} stay one shot.`),
+    before && (plan.introCut ? `${before} change shot on bar lines, as no video is that long.` : `${before} stay one shot.`),
     plan.captionsRemoved > 0 ? "The captions of the old speech go with it. Titles and stickers keep their time." : "Titles and stickers keep their time.",
     !shorter && `Ends on the bar at ${formatTime(plan.endUs)}.${plan.endUs < plans.songEndUs ? ` ${song} fades out over it.` : ""}`,
     plans.coverFrame && "Your cover shows a frame of the video. Choose it again after cutting.",
@@ -67,10 +72,10 @@ function Consequences({ plan, plans, song, keepSound, children }: { plan: Rhythm
   return (
     <>
       {plan.repeated > 0 ? <Warning>{line}</Warning> : <p className={`tabular ${LINE}`}>{line}</p>}
-      {children}
-      <p className={LINE}>{describe(plan, plans, song)}</p>
       {shorter && <Warning>{`${song} is shorter. The video ends with it on the bar at ${formatTime(plan.endUs)}, ${seconds(plans.footageEndUs - plan.endUs)} shorter.`}</Warning>}
       {plans.videos + plans.pictures === 1 && plan.clips > 1 && <Warning>Only one video, so each clip goes on where the last stopped and the cuts hardly show.</Warning>}
+      {children}
+      <p className={LINE}>{describe(plan, plans, song)}</p>
       <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="-my-1 self-start rounded-md py-0.5 text-[12px] font-medium text-accent hover:underline">
         {open ? "Fewer details" : "Details"}
       </button>
@@ -103,7 +108,7 @@ export function BeatsSection({ clip, asset }: { clip: Clip; asset: Asset }) {
   const cutting = useBeats((s) => s.cutting);
   const reveal = useBeats((s) => s.reveal === clip.id);
   const section = useRef<HTMLElement>(null);
-  const song = asset.name;
+  const song = songName(asset.name);
   const finding = job?.status === "running";
   // Finding starts by itself until it failed or was stopped; then it waits for Try again.
   const find = !job || job.status === "done";
@@ -119,17 +124,26 @@ export function BeatsSection({ clip, asset }: { clip: Clip; asset: Asset }) {
     section.current?.scrollIntoView({ block: "start" });
     if (!ready) return;
     const row = section.current?.querySelector<HTMLElement>("[data-rhythm][aria-pressed=true]") ?? section.current?.querySelector<HTMLElement>("[data-rhythm]");
-    row?.focus({ preventScroll: true });
+    // Only when the focus went nowhere else meanwhile, as when Project status's button left with the selection.
+    const focus = document.activeElement;
+    if (!focus || focus === document.body || section.current?.closest("aside")?.contains(focus)) row?.focus({ preventScroll: true });
     // In the smallest window the section is taller than the inspector: the Cut row stays in view, the header may not.
     section.current?.querySelector("[data-cut-to-beat]")?.scrollIntoView({ block: "nearest" });
     useBeats.setState({ reveal: null });
   }, [reveal, ready]);
 
   const current = plans?.current ?? null;
+  // A cut picked from a row: the focus moves to the row now checked, so only one row looks chosen.
+  const currentRhythm = current?.rhythm;
+  useEffect(() => {
+    const focus = document.activeElement;
+    if (currentRhythm && focus instanceof HTMLElement && focus.dataset.rhythm && section.current?.contains(focus))
+      section.current.querySelector<HTMLElement>(`[data-rhythm="${currentRhythm}"]`)?.focus();
+  }, [currentRhythm]);
   const usable = plans?.rhythms.filter((r) => !r.error) ?? [];
   const pick: Rhythm | undefined = current?.rhythm ?? (usable.some((r) => r.rhythm === chosen) ? chosen : (usable.find((r) => r.rhythm === "builds") ?? usable[0])?.rhythm);
   const plan = plans?.rhythms.find((r) => r.rhythm === pick);
-  const header = plans?.steady ? `${plans.bpm} BPM${plans.beatFromUs !== null ? ` · beat from ${formatTime(plans.beatFromUs, false)}` : ""}` : undefined;
+  const header = plans?.steady ? `${plans.bpm} BPM${intro(plans.beatFromUs) !== null ? ` · beat from ${formatTime(plans.beatFromUs!, false)}` : ""}` : undefined;
   const choose = (r: RhythmPlan) => {
     if (cutting || r.error) return;
     // After a cut, picking is cutting: it replaces that cut, or recuts the clips as they are.

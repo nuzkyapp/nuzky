@@ -209,6 +209,8 @@ def beat_cuts(r):
             after and 'Current' in next(row for row in after['rows'] if row['rhythm'] == 'fast')['text']
             and 'Picking another rhythm replaces this cut.' in after['text'], beats(r))
     fit(r)
+    focused = r.s.run('return document.activeElement?.dataset.rhythm ?? null')
+    r.check('the keyboard moves to the current rhythm', focused == 'fast', focused)
     t = ticks(r, song['id'])
     r.check('the ticks stay on the song after the cut', t['ticks'] and t['ticks'][0] > 20, t)
     label = r.s.call('window.__nuzky.api.peekHistory(window.__nuzky.store.getState().snap.sessionEpoch, false).then((p) => p?.label ?? null)')['value']
@@ -290,15 +292,16 @@ def beat_cuts_states(r):
 
     # Trimmed to 20 s, the song is shorter than the 24 s of videos: the section says where the video ends.
     r.s.call("window.__nuzky.store.getState().edit({type: 'trimClip', clipId: arguments[0], startUs: 0, durationUs: 20000000, sourceInUs: null})", click['id'])
-    shorter = wait(lambda: (b := beats(r)) and 'Click track.opus is shorter. The video ends with it on the bar at' in b['text'] and b, 10)
+    shorter = wait(lambda: (b := beats(r)) and 'Click track is shorter. The video ends with it on the bar at' in b['text'] and b, 10)
     r.check('a shorter song says where the video will end', shorter, beats(r))
+    r.check('a beat from the first second names no intro', shorter and 'beat from' not in shorter['text'] and 'after its intro' not in shorter['text'], shorter and shorter['text'][:200])
     r.shot('shorter')
 
     r.s.call("window.__nuzky.store.getState().edit({type: 'deleteClips', clipIds: [arguments[0]]})", click['id'])
     walk = add_song(r, 'City walk.m4a')
     r.check('City walk lies on a music track', walk)
     r.check('Cut to beat is offered for it', reveal(r))
-    plain = wait(lambda: (b := beats(r)) and 'No steady beat in City walk.m4a' in b['text'] and b, 30)
+    plain = wait(lambda: (b := beats(r)) and 'No steady beat in City walk,' in b['text'] and b, 30)
     r.check('a sound without a steady beat says so and offers no rhythm or Cut', plain and not plain['rows'] and not plain['cut']
             and 'Add a song with drums' in plain['text'], beats(r))
     ticks_now = ticks(r, walk['id'])

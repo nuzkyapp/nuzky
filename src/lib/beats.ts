@@ -103,7 +103,7 @@ export async function cutToBeat(clipId: string, assetId: string, songName: strin
   const text = `Cut ${done.clips} clips to the beat of ${songName}`;
   useEditor.getState().toast(
     done.repeated > 0
-      ? { kind: "warning", text: `${text}. Your videos ran out, so ${done.repeated === 1 ? "1 of them shows" : `${done.repeated} of them show`} footage again.`, action: undoAction(done.snapshot) }
+      ? { kind: "warning", text: `${text}. Your videos ran out, so ${done.repeated === 1 ? "1 clip shows" : `${done.repeated} clips show`} footage again.`, action: undoAction(done.snapshot) }
       : { kind: "info", text, action: undoAction(done.snapshot) },
   );
   await loadBeats(clipId, assetId, false);
