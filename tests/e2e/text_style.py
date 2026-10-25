@@ -321,3 +321,45 @@ def several(r, first, font):
     r.check('a picked box colour goes on all three, each keeping its own opacity',
             wait(lambda: boxes()[first] == '#2050ffb3' and all(boxes()[i] == '#2050ff80' for i in others), 5), boxes())
     r.check('and the dash gives way to the picked colour', wait(lambda: r.s.run(BOX_LABEL) == '#2050FF', 5), r.s.run(BOX_LABEL))
+
+
+EMOJI_TEXT = """window.__nuzky.store.getState().edit({type: 'addText', startUs: 0, text: '😀',
+  style: {fontSize: 300, color: '#00ff00', bold: false, strokeWidth: 12, strokeColor: '#ff0000', background: null,
+          shadow: {color: '#ff0000', opacity: 1, blur: 0, distance: 10, angle: -45}}})"""
+
+
+def emoji_colours(image):
+    """The share of the picture in the grinning face's yellow, and in the text's green fill or red outline and shadow."""
+    from PIL import Image
+    pixels = list((Image.open(image) if not hasattr(image, 'convert') else image).convert('RGB').getdata())
+    yellow = sum(r > 200 and g > 140 and b < 90 for r, g, b in pixels)
+    styled = sum((g > 200 and r < 80 and b < 80) or (r > 200 and g < 60 and b < 60) for r, g, b in pixels)
+    return {'yellow': yellow / len(pixels), 'style': styled / len(pixels)}
+
+
+@flow('text-emoji', 'An emoji in a text keeps its own colours in the preview, the frame and the export: the text\'s green '
+      'fill, red outline and red shadow never reach it', before=grey)
+def text_emoji(r):
+    r.import_media(r.grey)
+    r.add_clip('grey.png')
+    r.check('a green text with a red outline and shadow holding only an emoji is added', r.s.call(EMOJI_TEXT)['ok'])
+    wait(lambda: r.s.run(STYLE), 5)
+    r.seek(1_000_000)
+    r.s.run('window.__nuzky.store.getState().select([])')
+    time.sleep(1.5)
+    r.shot('preview-emoji')
+    looks = {'preview': emoji_colours(frame(r.work / 'preview-emoji.png', preview_rect(r)))}
+    time.sleep(1.5)  # Saved about a second after the edit; `nuzky frame` reads the saved file.
+    engine = engine_frame(r, 'engine-emoji')
+    looks['engine'] = emoji_colours(engine)
+    target = export(r, 'text-emoji.mp4')
+    exported = r.work / 'export-emoji.png'
+    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', str(target), '-vf', 'select=eq(n\\,30)', '-frames:v', '1', '-update', '1',
+                    str(exported)], check=True)
+    r.shots.append(exported.name)
+    looks['export'] = emoji_colours(exported)
+    r.check('the preview, the frame and the export draw the yellow face and none of the text\'s colours',
+            all(look['yellow'] > 0.01 and look['style'] < 0.0005 for look in looks.values()), looks)
+    changed = changed_share(engine, exported)
+    r.check('the exported frame matches the frame the renderer draws for the preview', changed < 0.005, f'{changed:.3%} of pixels differ')
+    r.check('no error toast', not r.errors(), r.errors())

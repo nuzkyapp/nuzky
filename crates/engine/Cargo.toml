@@ -18,6 +18,8 @@ wgpu = "30.0.1"
 pollster = "0.4"
 bytemuck = { version = "1", features = ["derive"] }
 cosmic-text = "0.19.0"
+# The script type of cosmic-text's font fallback.
+unicode-script = "0.5.8"
 memmap2 = "0.9"
 # RNNoise in Rust (BSD-3-Clause) for Clean voice; the default features only add its command-line tool.
 nnnoiseless = { version = "0.5.2", default-features = false }

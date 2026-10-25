@@ -3827,6 +3827,7 @@ dependencies = [
  "serde",
  "serde_json",
  "ts-rs",
+ "unicode-script",
  "uuid",
  "wgpu",
 ]

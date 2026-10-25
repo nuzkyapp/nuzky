@@ -7,8 +7,8 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use cosmic_text::{
-    Align, Attrs, Buffer, CacheKey, Color, Family, FeatureTag, FontFeatures, FontSystem, LineIter, Metrics, Shaping,
-    SwashCache, Weight,
+    Align, Attrs, Buffer, CacheKey, Color, Fallback, Family, FeatureTag, FontFeatures, FontSystem, LineIter, Metrics,
+    PlatformFallback, Shaping, SwashCache, SwashContent, Weight,
 };
 
 use crate::gpu::Image;
@@ -79,6 +79,37 @@ static BUNDLED_FONTS: std::sync::LazyLock<Vec<&'static [u8]>> = std::sync::LazyL
         .collect()
 });
 
+const EMOJI_FONT: &[u8] = include_bytes!("../../../assets/fonts/notocoloremoji/NotoColorEmoji.ttf");
+const EMOJI_FAMILY: &str = "Noto Color Emoji";
+
+/// Emoji come from the bundled emoji font before any installed one, so they look the same on every machine and
+/// never come from a monochrome symbol font. Installed emoji fonts also come in formats swash cannot draw.
+struct EmojiFirst {
+    common: Vec<&'static str>,
+}
+
+impl EmojiFirst {
+    fn new() -> Self {
+        Self {
+            common: std::iter::once(EMOJI_FAMILY).chain(PlatformFallback.common_fallback().iter().copied()).collect(),
+        }
+    }
+}
+
+impl Fallback for EmojiFirst {
+    fn common_fallback(&self) -> &[&'static str] {
+        &self.common
+    }
+
+    fn forbidden_fallback(&self) -> &[&'static str] {
+        PlatformFallback.forbidden_fallback()
+    }
+
+    fn script_fallback(&self, script: unicode_script::Script, locale: &str) -> &[&'static str] {
+        PlatformFallback.script_fallback(script, locale)
+    }
+}
+
 /// Text without a chosen font, or with one this computer lacks, uses this bundled family, so a project
 /// looks the same on every machine.
 pub const DEFAULT_FAMILY: &str = "Inter";
@@ -103,22 +134,30 @@ impl Default for TextRenderer {
 
 impl TextRenderer {
     pub fn new() -> Self {
-        let mut fonts = FontSystem::new();
+        let (locale, db) = FontSystem::new().into_locale_and_db();
+        Self::with_fonts(locale, db)
+    }
+
+    /// A renderer with the installed fonts in `db` and the bundled ones.
+    fn with_fonts(locale: String, mut db: cosmic_text::fontdb::Database) -> Self {
         // An installed copy of a bundled family, often another version, would draw instead of ours.
-        let installed: Vec<_> = fonts
-            .db()
-            .faces()
-            .filter(|face| face.families.iter().any(|(name, _)| BUNDLED_FONT_FAMILIES.contains(&name.as_str())))
-            .map(|face| face.id)
-            .collect();
+        let bundled = |name: &str| name == EMOJI_FAMILY || BUNDLED_FONT_FAMILIES.contains(&name);
+        let installed: Vec<_> =
+            db.faces().filter(|face| face.families.iter().any(|(name, _)| bundled(name))).map(|face| face.id).collect();
         for id in installed {
-            fonts.db_mut().remove_face(id);
+            db.remove_face(id);
         }
         for data in BUNDLED_FONTS.iter() {
-            fonts.db_mut().load_font_data(data.to_vec());
+            db.load_font_data(data.to_vec());
         }
-        fonts.db_mut().set_sans_serif_family(DEFAULT_FAMILY);
-        let families = fonts.db().faces().flat_map(|face| face.families.iter().map(|(name, _)| name.clone())).collect();
+        db.load_font_source(cosmic_text::fontdb::Source::Binary(Arc::new(EMOJI_FONT)));
+        db.set_sans_serif_family(DEFAULT_FAMILY);
+        let families = db
+            .faces()
+            .flat_map(|face| face.families.iter().map(|(name, _)| name.clone()))
+            .filter(|name| name != EMOJI_FAMILY)
+            .collect();
+        let fonts = FontSystem::new_with_locale_and_db_and_fallback(locale, db, EmojiFirst::new());
         Self {
             fonts,
             families,
@@ -341,6 +380,7 @@ impl TextRenderer {
         let h = h.clamp(1, MAX_RASTER_SIDE.min(MAX_RASTER_PIXELS / w));
 
         let mut fill = vec![0u8; w * h];
+        let mut colour = Vec::new();
         // Glyph positions name the byte of their line; lines start where cosmic-text split the text.
         let line_starts: Vec<usize> = LineIter::new(&text).map(|(range, _)| range.start).collect();
         let mut glyphs = Vec::new();
@@ -353,6 +393,7 @@ impl TextRenderer {
                 let start = shown_to_typed.as_ref().map_or(shown, |typed| typed.get(shown).copied().unwrap_or(shown));
                 let placed = Placed { start, key: physical.cache_key, x: physical.x, y: physical.y };
                 stamp(&mut self.swash, &mut self.fonts, &placed, &mut fill, w, h);
+                stamp_colour(&mut self.swash, &mut self.fonts, &placed, &mut colour, w, h);
                 glyphs.push(placed);
             }
         }
@@ -366,14 +407,15 @@ impl TextRenderer {
         let inset = room * scale;
         let radius =
             (finite_clamp(style.box_radius, 0.0, 1.0) * size * scale).min((w.min(h) as f32 - 2.0 * inset) / 2.0);
-        Layout { w, h, scale, radius: radius.max(0.0), inset, fill, outline, shadow, glyphs }
+        let colour = (!colour.is_empty()).then_some(colour);
+        Layout { w, h, scale, radius: radius.max(0.0), inset, fill, colour, outline, shadow, glyphs }
     }
 
     /// Colours a layout: box, outline, then the fill, with the key words' coverage in the keyword colour and
     /// the spoken word's in the highlight.
     fn paint(&mut self, layout: &Layout, style: &TextStyle, keys: Option<&[u8]>, spoken: Option<&[u8]>) -> TextImage {
         self.stats.paints += 1;
-        let Layout { w, h, scale, radius, inset, ref fill, ref outline, ref shadow, .. } = *layout;
+        let Layout { w, h, scale, radius, inset, ref fill, ref colour, ref outline, ref shadow, .. } = *layout;
         let fill_c = parse_color(&style.color);
         let shadow_c = style.shadow.as_ref().map(|shadow| {
             let [r, g, b, a] = parse_color(&shadow.color);
@@ -420,6 +462,12 @@ impl TextRenderer {
                     });
                     over(c, fill[i] as f32 / 255.0);
                 }
+                if let Some(c) = colour
+                    && let [r, g, b, a] = c[i * 4..i * 4 + 4]
+                    && a > 0
+                {
+                    over([r, g, b, 255].map(|v| v as f32 / 255.0), a as f32 / 255.0);
+                }
                 if acc[3] > 0.0 {
                     let o = &mut out[i * 4..i * 4 + 4];
                     for k in 0..3 {
@@ -444,6 +492,8 @@ struct Layout {
     inset: f32,
     /// Glyph coverage.
     fill: Vec<u8>,
+    /// Colour glyphs such as emoji in their own colours, straight-alpha RGBA, when the text has any.
+    colour: Option<Vec<u8>>,
     /// Glyph coverage dilated by the outline width.
     outline: Option<Vec<u8>>,
     /// The outline's coverage, or the glyphs' without one, moved and blurred.
@@ -454,7 +504,7 @@ struct Layout {
 impl Layout {
     fn bytes(&self) -> usize {
         let masks = 1 + usize::from(self.outline.is_some()) + usize::from(self.shadow.is_some());
-        self.fill.len() * masks + self.glyphs.len() * size_of::<Placed>()
+        self.fill.len() * masks + self.colour.as_ref().map_or(0, Vec::len) + self.glyphs.len() * size_of::<Placed>()
     }
 }
 
@@ -552,16 +602,51 @@ pub struct TextStats {
     pub paints: u64,
 }
 
-/// Draws one glyph's coverage into `mask`, keeping the higher value where glyphs overlap.
-fn stamp(swash: &mut SwashCache, fonts: &mut FontSystem, glyph: &Placed, mask: &mut [u8], w: usize, h: usize) {
+fn is_colour(swash: &mut SwashCache, fonts: &mut FontSystem, glyph: &Placed) -> bool {
     if swash.image_cache.values().flatten().map(|image| image.data.len()).sum::<usize>() > MAX_GLYPH_CACHE_BYTES {
         swash.image_cache.clear();
+    }
+    swash.get_image(fonts, glyph.key).as_ref().is_some_and(|image| image.content == SwashContent::Color)
+}
+
+/// Draws one glyph's coverage into `mask`, keeping the higher value where glyphs overlap. Colour glyphs such as
+/// emoji stay out of it, so the text's fill, outline, shadow and highlight never paint over them.
+fn stamp(swash: &mut SwashCache, fonts: &mut FontSystem, glyph: &Placed, mask: &mut [u8], w: usize, h: usize) {
+    if is_colour(swash, fonts, glyph) {
+        return;
     }
     swash.with_pixels(fonts, glyph.key, Color::rgb(255, 255, 255), |x, y, color| {
         let (px, py) = (x + glyph.x, y + glyph.y);
         if px >= 0 && py >= 0 && (px as usize) < w && (py as usize) < h {
             let i = py as usize * w + px as usize;
             mask[i] = mask[i].max(color.a());
+        }
+    });
+}
+
+/// Draws a colour glyph into `layer`, RGBA of `w` × `h` made on its first colour glyph, keeping the more opaque
+/// pixel where glyphs overlap.
+fn stamp_colour(
+    swash: &mut SwashCache,
+    fonts: &mut FontSystem,
+    glyph: &Placed,
+    layer: &mut Vec<u8>,
+    w: usize,
+    h: usize,
+) {
+    if !is_colour(swash, fonts, glyph) {
+        return;
+    }
+    if layer.is_empty() {
+        layer.resize(w * h * 4, 0);
+    }
+    swash.with_pixels(fonts, glyph.key, Color::rgb(0, 0, 0), |x, y, color| {
+        let (px, py) = (x + glyph.x, y + glyph.y);
+        if px >= 0 && py >= 0 && (px as usize) < w && (py as usize) < h {
+            let i = (py as usize * w + px as usize) * 4;
+            if color.a() > layer[i + 3] {
+                layer[i..i + 4].copy_from_slice(&color.as_rgba());
+            }
         }
     });
 }
@@ -1021,28 +1106,15 @@ mod tests {
     }
 
     fn bundled_renderer() -> TextRenderer {
-        let mut db = cosmic_text::fontdb::Database::new();
-        for data in BUNDLED_FONTS.iter() {
-            db.load_font_data(data.to_vec());
-        }
-        db.set_sans_serif_family("Inter");
-        let fonts = FontSystem::new_with_locale_and_db("cs-CZ".into(), db);
-        let families = fonts.db().faces().flat_map(|face| face.families.iter().map(|(name, _)| name.clone())).collect();
-        TextRenderer {
-            fonts,
-            families,
-            bold: HashMap::new(),
-            swash: SwashCache::new(),
-            cache: HashMap::new(),
-            layouts: HashMap::new(),
-            stats: TextStats::default(),
-        }
+        TextRenderer::with_fonts("cs-CZ".into(), cosmic_text::fontdb::Database::new())
     }
 
     #[test]
     fn bundled_fonts_cover_and_render_czech_without_fallback() {
         let mut renderer = bundled_renderer();
-        for face in renderer.fonts.db().faces() {
+        for face in
+            renderer.fonts.db().faces().filter(|face| face.families.iter().all(|(name, _)| name != EMOJI_FAMILY))
+        {
             let covered = renderer.fonts.db().with_face_data(face.id, |data, index| {
                 let font = FontRef::from_index(data, index).unwrap();
                 let cmap = font.charmap();
@@ -1115,5 +1187,41 @@ mod tests {
         default.font_family = None;
         let fallback = renderer.render("Ahoj", &default, 1.0, 1000.0).image;
         assert_eq!(missing.data, fallback.data);
+    }
+
+    #[test]
+    fn emoji_keep_their_own_colours_on_every_machine() {
+        let look = style("Inter");
+        let mut other = look.clone();
+        other.color = "#00ff00".into();
+        other.stroke_color = "#ff0000".into();
+        other.highlight = Some("#0000ff".into());
+        other.shadow =
+            Some(TextShadow { color: "#ff00ff".into(), opacity: 1.0, distance: 10.0, angle: 45.0, blur: 0.0 });
+        let mut bundled = bundled_renderer();
+        let mut installed = TextRenderer::new();
+        // The skull is grey; the others have a colour the white text with a black outline does not.
+        for (emoji, coloured) in [("😀", true), ("💀", false), ("👍🏽", true), ("🇨🇿", true)] {
+            let image = bundled.render(emoji, &look, 1.0, 2000.0).image;
+            let colour = |p: &&[u8; 4]| p[3] == 255 && p[0].abs_diff(p[2]) > 80;
+            assert_eq!(image.data.as_chunks::<4>().0.iter().any(|p| colour(&p)), coloured, "{emoji}");
+            // No outline or shadow around it either: the same pixels, only the room kept for them differs.
+            let restyled = bundled.render_spoken(emoji, &other, 1.0, 2000.0, Some(0..emoji.len()), &[]).image;
+            assert!(opaque(&restyled) == opaque(&image), "{emoji} takes no colour, outline or shadow from the style");
+            assert!(
+                installed.render(emoji, &look, 1.0, 2000.0).image.data == image.data,
+                "{emoji} ignores installed fonts"
+            );
+        }
+    }
+
+    /// The pixels of `image`, cropped to what is visible.
+    fn opaque(image: &Image) -> Vec<Vec<[u8; 4]>> {
+        let px = image.data.as_chunks::<4>().0;
+        let rows: Vec<&[[u8; 4]]> =
+            px.chunks(image.width as usize).filter(|row| row.iter().any(|p| p[3] > 0)).collect();
+        let first = rows.iter().filter_map(|row| row.iter().position(|p| p[3] > 0)).min().unwrap_or(0);
+        let last = rows.iter().filter_map(|row| row.iter().rposition(|p| p[3] > 0)).max().unwrap_or(0);
+        rows.iter().map(|row| row[first..=last].to_vec()).collect()
     }
 }
