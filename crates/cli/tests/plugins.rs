@@ -394,7 +394,7 @@ fn remove_pauses_cuts_the_silences_where_the_timeline_has_them() {
     let job = plugins::run_in_app(&f.host, "remove-pauses", &Map::new(), vec![], 0).unwrap();
     let done = finish(&f.host, &job, Duration::from_secs(20));
     assert_eq!(done["status"], "done", "{done}");
-    assert_eq!(done["result"]["message"], "Removed 1 pause, 0.8 s in all.");
+    assert_eq!(done["result"]["message"], "Removed 1 pause, 0.8\u{a0}s in all.");
     // The pause is 1.0-2.0 s of the timeline, so 1.1-1.9 s goes.
     let clips = main(&f.host);
     assert_eq!(clips.len(), 2, "{clips:?}");

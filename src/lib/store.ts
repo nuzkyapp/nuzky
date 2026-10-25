@@ -271,8 +271,8 @@ async function drain() {
  * the newest one, so a later edit is never undone in its place, and the toast hides it once the
  * history moved on.
  */
-export function undoAction(snap: Snapshot): NonNullable<Toast["action"]> {
-  return { label: "Undo", valid: () => isNewest(snap), run: () => void undoStep(snap) };
+export function undoAction(snap: Snapshot, steps = 1): NonNullable<Toast["action"]> {
+  return { label: "Undo", valid: () => isNewest(snap), run: () => void undoStep(snap, steps) };
 }
 
 function isNewest({ revision, sessionEpoch }: Snapshot) {
@@ -280,11 +280,27 @@ function isNewest({ revision, sessionEpoch }: Snapshot) {
   return !!now && now.revision === revision && now.sessionEpoch === sessionEpoch && now.canUndo;
 }
 
-/** Undoes the step that produced `snap` if it is still the newest; resolves whether it did. */
-export function undoStep(snap: Snapshot): Promise<boolean> {
+/**
+ * Undoes the step that produced `snap` if it is still the newest, and with `steps` the ones right before it too;
+ * resolves whether it did.
+ */
+export function undoStep(snap: Snapshot, steps = 1): Promise<boolean> {
   if (aiLocked()) return Promise.resolve(false);
   // Checked again when its turn in the queue comes, after any edit made before it.
-  return enqueue(async (epoch) => (isNewest(snap) ? api.undo(epoch) : null)).then((done) => !!done);
+  return enqueue(async (epoch) => {
+    if (!isNewest(snap)) return null;
+    let done: Snapshot | null = null;
+    for (let i = 0; i < steps; i++) {
+      try {
+        done = await api.undo(epoch);
+      } catch (e) {
+        if (!done) throw e;
+        useEditor.getState().toast({ kind: "error", text: errorText(e) });
+        break;
+      }
+    }
+    return done;
+  }).then((done) => !!done);
 }
 
 /** Restores a kept version as one undo step, after the edits queued before it; a toast offers Undo. */

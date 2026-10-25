@@ -19,6 +19,6 @@ function run(ctx) {
   const seconds = ranges.reduce((sum, r) => sum + r.endUs - r.startUs, 0) / 1000000;
   return {
     edits: [{ type: "rippleDeleteRanges", ranges }],
-    message: `Removed ${ranges.length} pause${ranges.length === 1 ? "" : "s"}, ${seconds.toFixed(1)} s in all.`,
+    message: `Removed ${ranges.length} pause${ranges.length === 1 ? "" : "s"}, ${seconds.toFixed(1)}\u00a0s in all.`,
   };
 }

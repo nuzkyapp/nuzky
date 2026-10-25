@@ -200,7 +200,7 @@ def plugin_pauses(r):
     end = r.track()[-1]['startUs'] + r.track()[-1]['durationUs']
     toast = next((t['text'] for t in r.state()['toasts'] if t['kind'] == 'success'), '')
     r.check('the toast says how many pauses went and how long they were',
-            toast.startswith('Removed ') and f'{(length - end) / 1e6:.1f} s in all.' in toast, (toast, length - end))
+            toast.startswith('Removed ') and f'{(length - end) / 1e6:.1f}\u00a0s in all.' in toast, (toast, length - end))
     r.check('the saved project has the cut', cut and wait(lambda: cuts(saved(r)['tracks']) == expected, 5))
     r.shot('pauses-done')
     r.s.call('window.__nuzky.store.getState().undo()')
@@ -361,25 +361,43 @@ def plugin_files(r):
     r.check('no error toast', not r.errors(), r.errors())
 
 
+TITLE_JS = """function run(ctx) {
+  const has = ctx.project.tracks.some((t) => t.clips.some((c) => c.content.type === "text" && c.content.text === "Title card"));
+  if (has) return { edits: [], message: "The title is already there." };
+  return { edits: [{ type: "addText", startUs: 0, text: "Title card", style: { fontSize: 120, color: "#FFFFFF", bold: true } }],
+           message: "Added a title." };
+}"""
+# Neutral descriptions, so the Plugins list says when they run only where the switches say so.
 AUTO_PLUGINS = {
-    'broken-export': ('Broken export', 'function run(ctx) { throw new Error("the logo file is missing"); }'),
-    'stuck-export': ('Stuck export', 'function run(ctx) { while (true) {} }'),
+    'add-logo': ('Add logo', 'Puts your logo in the corner.', 'function run(ctx) { throw new Error("the logo file is missing"); }'),
+    'slow-check': ('Slow check', 'Checks every frame.', 'function run(ctx) { while (true) {} }'),
+    'title-card': ('Title card', 'Puts a title at the start.', TITLE_JS),
 }
 UNDO_IN_TOAST = """const toast = [...document.querySelectorAll('[data-toast]')].find((t) => t.textContent.includes(arguments[0]));
 const undo = toast && [...toast.querySelectorAll('button')].find((b) => b.textContent === 'Undo');
 if (undo) undo.click();
 return !!undo;"""
 DIALOG_TEXT = "return document.querySelector('[role=dialog]')?.textContent ?? ''"
+DIALOG_BUTTONS = "return [...document.querySelectorAll('[role=dialog] button')].map((b) => b.getAttribute('aria-label') || b.textContent)"
+CLICK_IN_DIALOG = """const b = [...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent === arguments[0]);
+if (b) b.click();
+return !!b;"""
 SWITCH = "document.querySelector(`[role=switch][aria-label=\"${arguments[0]}\"]`)"
+ROW_TEXT = "return document.querySelector(`[data-plugin=\"${arguments[0]}\"]`)?.innerText ?? ''"
+# Where the switch is and whether the inspector shows it without scrolling.
+SWITCH_SHOWN = f"""const s = {SWITCH};
+const pane = s && s.closest('.overflow-y-auto').getBoundingClientRect();
+const box = s && s.getBoundingClientRect();
+return !!s && box.top >= pane.top && box.bottom <= pane.bottom && box.bottom <= window.innerHeight;"""
 
 
 def prepare_autorun(r):
     plugins = r.work / 'data/nuzky/plugins'
     shutil.copytree(PAUSES, plugins / 'remove-pauses')
-    for id, (name, script) in AUTO_PLUGINS.items():
+    for id, (name, description, script) in AUTO_PLUGINS.items():
         (plugins / id).mkdir()
         (plugins / id / 'plugin.json').write_text(json.dumps({'nuzkyPlugin': 2, 'id': id, 'name': name, 'version': '1.0.0',
-                                                              'description': 'Runs before an export.'}))
+                                                              'description': description}))
         (plugins / id / 'plugin.js').write_text(script)
 
 
@@ -389,12 +407,19 @@ def open_plugin(r, id):
     if not wait(lambda: r.s.run(f'return !!{row}'), 10):
         raise RuntimeError(f'the Plugins tab does not list {id}')
     r.s.run(f'{row}.click()')
-    if not wait(lambda: r.s.run(f'return !!{SWITCH}', 'Run after import'), 5):
+    if not wait(lambda: r.s.run(f'return !!{SWITCH} && document.querySelector("[aria-label=Inspector]").textContent.includes(arguments[1])',
+                                'Run after import', AUTO_PLUGINS.get(id, ('Remove pauses',))[0]), 5):
         raise RuntimeError(f'{id} did not open in the inspector')
 
 
 def switched_on(r, label):
     return r.s.run(f"return {SWITCH}.getAttribute('aria-checked')", label) == 'true'
+
+
+def turn_on(r, id, label):
+    open_plugin(r, id)
+    r.s.run(f'{SWITCH}.click()', label)
+    r.check(f'{id}: {label} turns on', wait(lambda: switched_on(r, label), 5))
 
 
 def new_project(r, video):
@@ -410,11 +435,18 @@ def auto_toasts(r):
             or t['text'].startswith('AI edit done')]
 
 
+def main_cuts(p):
+    return cuts([t for t in p['tracks'] if t['id'] == 'main'])
+
+
+def titles(p):
+    return [c['content']['text'] for t in p['tracks'] for c in t['clips'] if c['content']['type'] == 'text']
+
+
 def sizes(r, name):
     """A screenshot at the smallest window, 1024 x 640, then at 1440 x 900, where the flow goes on."""
     for width, height, suffix in ((1024, 640, '-1024'), (1440, 900, '')):
-        webdriver('POST', r.s.path + '/window/rect', {'width': width, 'height': height})
-        wait(lambda: r.s.run('return window.innerWidth') == width, 5)
+        resize(r, width, height)
         time.sleep(1)
         r.shot(f'{name}{suffix}')
 
@@ -423,10 +455,34 @@ def saved_open(r):
     return json.loads(Path(r.s.run('return window.__nuzky.store.getState().snap.path')).read_text())
 
 
-@flow('plugin_autorun', 'A plugin the user turned on runs by itself after a new project is made of a video, with the '
-      'settings last set, and says what it did with Undo that takes back exactly its step; plugins left off do not '
-      'run; one that fails before an export and one stopped from the export dialog let the export finish with the '
-      'project as it was', before=prepare_autorun)
+def start_export(r, target):
+    """Started as Export… does after the save panel, which cannot be driven; resolves to whether the export started."""
+    r.s.run("window.autorunExport = window.__nuzky.exportVideo(arguments[0], arguments[1], arguments[2], true, false)"
+            ".then(String, String)", str(target), {'resolution': 720, 'fps': 30, 'quality': 'small'}, r.state()['epoch'])
+
+
+def open_dialog(r):
+    r.key('e', ctrlKey=True)
+    shown = wait(lambda: r.s.run(DIALOG_TEXT), 5)
+    time.sleep(0.5)  # the dialog fades in over 200 ms
+    return shown
+
+
+def dismiss_toasts(r):
+    r.s.run('const s = window.__nuzky.store.getState(); s.toasts.forEach((t) => s.dismissToast(t.id))')
+
+
+def finished_export(r):
+    started = wait(lambda: r.s.run('return window.__nuzky.store.getState().exportJobId'), 15)
+    return started and wait(lambda: (j := r.s.run('return window.__nuzky.store.getState().jobs[arguments[0]] ?? null', started))
+                            and j['status'] != 'running' and j, 180)
+
+
+@flow('plugin_autorun', 'Plugins the user turned on run by themselves after a new project is made of a video, with the '
+      'settings last set; one toast says what the pass did with one Undo for all of it, and a failure its own; the '
+      'Plugins list marks them; before an export the dialog says what each did, Cancel export writes no file, Skip '
+      'lets the export go on, the switches stay usable while a plugin runs, and while the AI edits one toast says '
+      'they did not run', before=prepare_autorun)
 def plugin_autorun(r):
     video = FIXTURES / 'talk.mp4'
     open_plugin(r, 'remove-pauses')
@@ -442,7 +498,7 @@ def plugin_autorun(r):
 
     def preview(values):
         answer = r.s.call("window.__nuzky.api.previewPlugin('remove-pauses', arguments[0], [], 0).then(JSON.stringify)", values)
-        return answer['ok'] and cuts(json.loads(answer['value'])['tracks'])
+        return answer['ok'] and main_cuts(json.loads(answer['value']))
     expected = wait(lambda: preview({'minSeconds': 0.3, 'keepSeconds': 0.05}), 30)
     r.check('the settings set cut pauses out of this video', expected and len(expected[0]) > 1, expected)
     defaults = preview({'minSeconds': 0.6, 'keepSeconds': 0.1})
@@ -452,60 +508,149 @@ def plugin_autorun(r):
     open_plugin(r, 'remove-pauses')
     shown = r.s.run("return document.querySelector('input[type=range][aria-label=\"Longer than\"]').value")
     r.check('the settings stay as last set in the next project', shown == '0.3', shown)
+    r.check('no line about automatic runs while both switches are off',
+            'Runs on the whole project' not in r.s.run("return document.querySelector('[aria-label=Inspector]').textContent"))
     r.s.run(f'{SWITCH}.click()', 'Run after import')
     r.check('Run after import turns on', wait(lambda: switched_on(r, 'Run after import'), 5))
     r.check('Run before export stays off', not switched_on(r, 'Run before export'))
-    sizes(r, 'autorun-switch')
+    r.check('a line says it runs on the whole project with these settings',
+            'Runs on the whole project with these settings.' in r.s.run("return document.querySelector('[aria-label=Inspector]').textContent"))
+    resize(r, 1024, 640)
+    r.check('at 1024 x 640 the switches show without scrolling, for a plugin with settings and a long description',
+            wait(lambda: r.s.run(SWITCH_SHOWN, 'Run before export'), 5))
+    time.sleep(1)
+    r.shot('autorun-switch-1024')
+    resize(r, 1440, 900)
+    time.sleep(1)
+    r.shot('autorun-switch')
+    turn_on(r, 'title-card', 'Run after import')
+    turn_on(r, 'add-logo', 'Run after import')
+    rows = {id: r.s.run(ROW_TEXT, id) for id in ('remove-pauses', 'title-card', 'slow-check')}
+    r.check('the Plugins list marks the plugins that run after import, and only them',
+            'After import · Cuts out the quiet' in rows['remove-pauses'] and 'After import · Puts a title' in rows['title-card']
+            and 'After import' not in rows['slow-check'] and 'Before export' not in rows['remove-pauses'], rows)
 
     new_project(r, video)
-    ran = wait(lambda: cuts(project(r)['tracks']) == expected, 30)
-    r.check('after the import the plugin cut the pauses exactly as its preview with the settings set does',
-            ran, cuts(project(r)['tracks']))
-    toast = wait(lambda: next((t['text'] for t in auto_toasts(r) if t['kind'] == 'success'), None), 5)
-    r.check('a toast says the plugin ran after import and what it did',
-            toast and toast.startswith('Remove pauses ran after import: removed ') and toast.endswith(' s in all.'), auto_toasts(r))
-    r.check('the run gets that one toast only', len(auto_toasts(r)) == 1, auto_toasts(r))
-    r.check('the saved project has the cut', ran and wait(lambda: cuts(saved_open(r)['tracks']) == expected, 5))
+    ran = wait(lambda: main_cuts(project(r)) == expected and titles(project(r)) == ['Title card'], 30)
+    r.check('after the import the plugins cut the pauses exactly as the preview with the settings set does, and added the title',
+            ran, (main_cuts(project(r)), titles(project(r))))
+    passed = wait(lambda: next((t['text'] for t in auto_toasts(r) if t['kind'] == 'success'), None), 5)
+    r.check('one toast says both plugins ran after import and what each did',
+            passed and passed.startswith('Plugins ran after import. Remove pauses: removed ') and passed.endswith(' s in all. Title card: added a title.'),
+            auto_toasts(r))
+    failed = [t['text'] for t in auto_toasts(r) if t['kind'] == 'warning']
+    r.check('the plugin that threw says it failed after import and why, without the place in its script',
+            failed == ['Add logo failed after import: the logo file is missing. Nothing changed.'], auto_toasts(r))
+    r.check('the pass gets those two toasts only', len(auto_toasts(r)) == 2, auto_toasts(r))
+    r.check('the saved project has the cut and the title', ran and wait(lambda: main_cuts(saved_open(r)) == expected and titles(saved_open(r)) == ['Title card'], 5))
     r.shot('autorun-import')
-    r.check('the toast offers Undo', r.s.run(UNDO_IN_TOAST, 'ran after import'))
-    r.check('Undo takes back exactly the plugin\'s step: the whole video as one clip again',
+    r.check('the toast offers one Undo', r.s.run(UNDO_IN_TOAST, 'Plugins ran after import'))
+    r.check('Undo takes back the whole pass: the whole video as one clip again, without the title',
             wait(lambda: cuts(project(r)['tracks']) == cuts(plain['tracks']), 5), cuts(project(r)['tracks']))
+    time.sleep(1)
+    r.shot('autorun-undo')
 
     for id in AUTO_PLUGINS:
-        open_plugin(r, id)
-        r.s.run(f'{SWITCH}.click()', 'Run before export')
-        r.check(f'{id} turns on for export', wait(lambda: switched_on(r, 'Run before export'), 5))
+        turn_on(r, id, 'Run before export')
+    rows = {id: r.s.run(ROW_TEXT, id) for id in AUTO_PLUGINS}
+    r.check('the Plugins list says when each runs',
+            'After import · Before export · Puts a title' in rows['title-card'] and 'Before export · Checks every frame' in rows['slow-check'], rows)
+    r.shot('autorun-list')
+    dismiss_toasts(r)
     before = project(r)
     length = max(c['startUs'] + c['durationUs'] for c in before['tracks'][0]['clips'])
-    r.key('e', ctrlKey=True)
-    r.check('Ctrl+E opens the export dialog', wait(lambda: r.s.run(DIALOG_TEXT), 5))
-    time.sleep(0.5)  # the dialog fades in over 200 ms
-    target = r.work / 'after-plugins.mp4'
-    # Started as Export… does after the save panel, which cannot be driven.
-    r.s.run("window.autorunExport = window.__nuzky.exportVideo(arguments[0], arguments[1], arguments[2], true, false)"
-            ".then(() => 'ok', String)", str(target), {'resolution': 720, 'fps': 30, 'quality': 'small'}, r.state()['epoch'])
-    waiting = wait(lambda: 'Stuck export runs before export' in r.s.run(DIALOG_TEXT), 10)
-    r.check('the dialog says which plugin the export waits for, with Stop plugin',
-            waiting and 'Stop plugin' in r.s.run(DIALOG_TEXT), r.s.run(DIALOG_TEXT))
+
+    # Cancel export: the plugin stops, the rest are skipped, and no file is written.
+    r.check('Ctrl+E opens the export dialog', open_dialog(r))
+    cancelled = r.work / 'cancelled.mp4'
+    start_export(r, cancelled)
+    waiting = wait(lambda: 'Waiting for Slow check…' in r.s.run(DIALOG_TEXT), 10)
+    text = r.s.run(DIALOG_TEXT)
+    r.check('the dialog says which plugin the export waits for, which of the three it is, and that the export starts after it',
+            waiting and '2 of 3' in text and "The export starts when it's done." in text, text)
+    r.check('the dialog says why Add logo failed, with Copy error, and no toast hides behind it',
+            'Add logo failed: the logo file is missing. Nothing changed.' in text and 'Copy error' in r.s.run(DIALOG_BUTTONS)
+            and not auto_toasts(r), (text, auto_toasts(r)))
+    buttons = r.s.run(DIALOG_BUTTONS)
+    r.check('the footer offers Cancel export, Skip Slow check and Hide, and × hides',
+            {'Cancel export', 'Skip Slow check', 'Hide', 'Hide (export keeps running)'} <= set(buttons), buttons)
     r.check('the export has not started meanwhile', not r.s.run('return window.__nuzky.store.getState().exportJobId'))
-    broken = next((t['text'] for t in auto_toasts(r) if t['kind'] == 'warning'), '')
-    r.check('the broken plugin, first by name, says it did not run and why, and that the export goes on',
-            broken.startswith("Broken export didn't run before export: ") and 'the logo file is missing. Nothing changed.' in broken
-            and broken.endswith('The export goes on without it.'), auto_toasts(r))
     sizes(r, 'autorun-export-waits')
-    r.s.run("[...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent === 'Stop plugin').click()")
-    started = wait(lambda: r.s.run('return window.__nuzky.store.getState().exportJobId'), 15)
-    r.check('Stop plugin ends the plugin and the export starts', started)
-    job = started and wait(lambda: (j := r.s.run('return window.__nuzky.store.getState().jobs[arguments[0]] ?? null', started))
-                           and j['status'] != 'running' and j, 180)
-    r.check('the export finishes; Stop did not cancel it', job and job['status'] == 'done', job)
-    r.check('exportVideo resolves', r.s.call('window.autorunExport') == {'ok': True, 'value': 'ok'})
-    stopped = [t['text'] for t in auto_toasts(r) if t['text'].startswith('Stuck export')]
-    r.check('a toast says the stuck plugin was stopped and the export goes on',
-            stopped == ['Stuck export was stopped before export. Nothing changed. The export goes on without it.'], auto_toasts(r))
-    r.check('the plugins left the project as it was, and the one off for export did not run', project(r) == before)
+    r.check('Cancel export is there to click', r.s.run(CLICK_IN_DIALOG, 'Cancel export'))
+    r.check('Cancel export resolves without starting the export', wait(lambda: r.s.call('window.autorunExport') == {'ok': True, 'value': 'false'}, 10),
+            r.s.call('window.autorunExport'))
+    time.sleep(2)
+    text = r.s.run(DIALOG_TEXT)
+    r.check('Cancel export writes no file and starts no export job',
+            not cancelled.exists() and not r.s.run('return window.__nuzky.store.getState().exportJobId')
+            and not any(j['kind'] == 'export' for j in r.s.run('return Object.values(window.__nuzky.store.getState().jobs)')),
+            (cancelled.exists(), r.s.run('return window.__nuzky.store.getState().exportJobId')))
+    r.check('the dialog says the export was cancelled and the plugin stopped',
+            'Export cancelled. No file was written.' in text and 'Slow check was stopped. Nothing changed.' in text, text)
+    r.check('the plugin after it was skipped: the project is as it was', project(r) == before, titles(project(r)))
+    r.shot('autorun-export-cancelled')
+
+    # Skip: the export goes on without the stuck plugin; Hide leaves the switches usable while it runs.
+    target = r.work / 'after-plugins.mp4'
+    start_export(r, target)
+    r.check('Export again runs the plugins again', wait(lambda: 'Waiting for Slow check…' in r.s.run(DIALOG_TEXT), 10), r.s.run(DIALOG_TEXT))
+    r.check('Hide is there to click', r.s.run(CLICK_IN_DIALOG, 'Hide'))
+    r.check('Hide closes the dialog while the plugin keeps running',
+            wait(lambda: not r.s.run(DIALOG_TEXT), 5) and r.s.run('return window.__nuzky.plugins.getState().pass') == 'export')
+    open_plugin(r, 'slow-check')
+    usable = r.s.run(f"const s = {SWITCH}; return s.getAttribute('aria-disabled') !== 'true' && !s.title.includes('AI is editing')", 'Run after import')
+    r.s.run(f'{SWITCH}.click()', 'Run after import')
+    turned = wait(lambda: switched_on(r, 'Run after import'), 5)
+    r.s.run(f'{SWITCH}.click()', 'Run after import')
+    r.check('while the plugin runs, its switches still turn on and off',
+            usable and turned and wait(lambda: not switched_on(r, 'Run after import'), 5) and switched_on(r, 'Run before export'))
+    r.check('the export dialog opens again on the plugin it waits for',
+            open_dialog(r) and 'Waiting for Slow check…' in r.s.run(DIALOG_TEXT), r.s.run(DIALOG_TEXT))
+    r.check('Skip Slow check is there to click', r.s.run(CLICK_IN_DIALOG, 'Skip Slow check'))
+    job = finished_export(r)
+    r.check('the export finishes after the skipped plugin and the one after it', job and job['status'] == 'done', job)
+    r.check('exportVideo resolves that the export started', r.s.call('window.autorunExport') == {'ok': True, 'value': 'true'})
+    text = r.s.run(DIALOG_TEXT)
+    r.check('the dialog lists all three: the failure, the skipped plugin and the one that ran',
+            all(line in text for line in ('Add logo failed: the logo file is missing. Nothing changed.',
+                                          'Slow check was stopped. Nothing changed.', 'Title card ran: added a title.')), text)
+    r.check('no toast while the dialog is open', not auto_toasts(r), auto_toasts(r))
+    after = project(r)
+    r.check('only Title card changed the project', main_cuts(after) == main_cuts(before) and titles(after) == ['Title card'], titles(after))
     duration = ffprobe(target)[0] if target.exists() else 0
-    r.check('the exported file has the length of the unchanged project', abs(duration - length / 1e6) < 0.1,
-            (duration, length / 1e6))
+    r.check('the exported file has the length of the project', abs(duration - length / 1e6) < 0.1, (duration, length / 1e6))
     r.shot('autorun-export-done')
+    r.check('Done is there to click', r.s.run(CLICK_IN_DIALOG, 'Done'))
+    toasts = wait(lambda: len(t := auto_toasts(r)) == 2 and t, 5) or auto_toasts(r)
+    texts = {t['kind']: t['text'] for t in toasts}
+    r.check('once the dialog closes, one toast says what the pass did and one why Add logo failed, without "the export goes on"',
+            texts.get('success') == 'Plugins ran before export. Slow check: stopped, nothing changed. Title card: added a title.'
+            and texts.get('warning') == 'Add logo failed before export: the logo file is missing. Nothing changed.', toasts)
+    r.shot('autorun-export-toasts')
+    r.check('its Undo takes the title back', r.s.run(UNDO_IN_TOAST, 'Plugins ran before export')
+            and wait(lambda: project(r)['tracks'] == before['tracks'], 5), titles(project(r)))
+
+    # While the AI edits, the export goes on without the plugins and says so once.
+    dismiss_toasts(r)
+    bridge = Bridge(r, Path(r.s.run('return window.__nuzky.store.getState().snap.path')))
+    try:
+        run = bridge.call('begin_run', {'label': 'Tighten the intro'})['run_id']
+        r.check('the AI run holds the lock', wait(lambda: r.s.run('return window.__nuzky.store.getState().aiRun') == 'Tighten the intro', 10),
+                r.s.run('return window.__nuzky.store.getState().aiRun'))
+        r.check('the export dialog opens', open_dialog(r))
+        start_export(r, r.work / 'while-ai-edits.mp4')
+        job = finished_export(r)
+        r.check('the export finishes without the plugins', job and job['status'] == 'done', job)
+        text = r.s.run(DIALOG_TEXT)
+        r.check('the dialog says once that the plugins did not run', text.count("didn't run") == 1
+                and "Plugins didn't run: the AI is editing." in text, text)
+        r.check('Done is there to click', r.s.run(CLICK_IN_DIALOG, 'Done'))
+        skipped = wait(lambda: [t['text'] for t in auto_toasts(r) if "didn't run" in t['text']], 5)
+        r.check('one toast for the pass says the plugins did not run before export',
+                skipped == ["Plugins didn't run before export: the AI is editing."], auto_toasts(r))
+        r.check('the project is as it was', project(r)['tracks'] == before['tracks'])
+        r.shot('autorun-skipped')
+        bridge.call('end_run', {'run_id': run, 'action': 'keep'})
+    finally:
+        bridge.close()
     r.check('no error toast', not r.errors(), r.errors())

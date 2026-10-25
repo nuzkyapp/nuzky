@@ -149,6 +149,18 @@ function AutoSwitch({ plugin: p, trigger, label }: { plugin: Plugin; trigger: Tr
   );
 }
 
+/** Nuzky's own settings, not an edit of the project, so the AI lock leaves them free: a stuck plugin can be turned off. */
+function AutoSwitches({ plugin: p }: { plugin: Plugin }) {
+  const on = usePlugins((s) => s.auto.import.includes(p.id) || s.auto.export.includes(p.id));
+  return (
+    <section className="flex flex-col gap-2 border-b border-white/[.07] px-4 py-3">
+      <AutoSwitch plugin={p} trigger="import" label="Run after import" />
+      <AutoSwitch plugin={p} trigger="export" label="Run before export" />
+      {on && <p className="text-[12px] text-muted">{p.inputs.length ? "Runs on the whole project with these settings." : "Runs on the whole project."}</p>}
+    </section>
+  );
+}
+
 /** The chosen plugin's settings, what it would change, and its button. Closing it brings back what the inspector showed. */
 export function PluginInspector({ plugin: p }: { plugin: Plugin }) {
   const [menu, setMenu] = useState<{ x: number; y: number; keyboard: boolean } | null>(null);
@@ -173,6 +185,7 @@ export function PluginInspector({ plugin: p }: { plugin: Plugin }) {
         {menu && <Menu items={pluginMenu(p)} at={{ x: menu.x, y: menu.y, align: "end" }} label={p.name} keyboard={menu.keyboard} onClose={() => setMenu(null)} />}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto border-t border-white/[.07]">
+        <AutoSwitches plugin={p} />
         {p.error ? (
           <section className="flex flex-col items-start gap-3 px-4 py-4">
             <p className="text-[12px] text-danger">Can’t load: {plainDetail(p.error)}</p>
@@ -187,12 +200,6 @@ export function PluginInspector({ plugin: p }: { plugin: Plugin }) {
             <PluginBody key={p.id} plugin={p} />
           </AiLock>
         )}
-        <AiLock>
-          <section className="flex flex-col gap-3 border-t border-white/[.07] px-4 py-4">
-            <AutoSwitch plugin={p} trigger="import" label="Run after import" />
-            <AutoSwitch plugin={p} trigger="export" label="Run before export" />
-          </section>
-        </AiLock>
       </div>
     </>
   );

@@ -6,7 +6,7 @@ import { AlertCircle, AlertTriangle, AudioLines, CheckCircle2, ChevronDown, X } 
 import { api, errorText, plainError } from "../lib/api";
 import { formatLabel } from "../lib/presets";
 import { closeExport, useCover } from "../lib/cover";
-import { runBeforeExport, usePlugins } from "../lib/plugins";
+import { cancelExport, copyError, failedText, ranText, runBeforeExport, skippedText, usePlugins, type PassReport } from "../lib/plugins";
 import { currentEpoch, projectDuration, stopAiRun, useEditor } from "../lib/store";
 import { CoverExport } from "./cover/CoverExport";
 import { LogsButton } from "./Feedback";
@@ -99,24 +99,62 @@ function loadOptions(canvas: Canvas, asked: Delivery | null): ExportRequest {
   }
 }
 
-/** Export… after the save panel: the plugins the user turned on for export run first, then the video exports what they left. */
+/**
+ * Export… after the save panel: the plugins the user turned on for export run first, then the video exports what they
+ * left. Resolves whether the export started; Cancel export while the plugins run starts none.
+ */
 export async function exportVideo(path: string, options: ExportRequest, epoch: string | undefined, replace: boolean, credits: boolean) {
-  await runBeforeExport();
+  useEditor.setState({ exportJobId: null });
+  if (!(await runBeforeExport())) return false;
   useEditor.setState({ exportJobId: await api.startExport(path, options, epoch, replace, credits) });
+  return true;
 }
 
-/** The plugin an export waits for, and how far its run is. */
+/** The plugin an export waits for, which of how many it is, and how far its run is. */
 function usePluginBeforeExport() {
   const name = usePlugins((s) => (s.pass === "export" ? (s.list?.find((p) => p.id === s.running)?.name ?? "") : null));
+  const index = usePlugins((s) => s.step?.index ?? 0);
+  const total = usePlugins((s) => s.step?.total ?? 0);
   const progress = useEditor((s) =>
     name ? (Object.values(s.jobs).find((j) => j.kind === "agent" && j.status === "running" && j.label === "Running a plugin")?.progress ?? 0) : 0,
   );
-  return name === null ? null : { name, progress };
+  return name === null ? null : { name, index, total, progress };
+}
+
+/** How each plugin before the export went: failures and plugins kept from running as warnings with their error to copy. */
+function PassNotes({ report }: { report: PassReport }) {
+  if (!report.results.length && !report.skipped) return null;
+  return (
+    <ul className="flex flex-col gap-1.5" aria-label="Plugins before export">
+      {report.results.map((r, i) =>
+        r.did === "failed" ? (
+          <li key={i} className="flex items-start gap-1.5 text-[12px] text-fg">
+            <AlertTriangle size={14} className="mt-px shrink-0 text-warn" />
+            <span className="min-w-0 flex-1">{failedText(r, "")}</span>
+            <Button variant="ghost" className="-my-1 h-6 shrink-0 px-1.5 text-[12px] text-accent! hover:text-accent!" onClick={() => copyError(r.error)}>
+              Copy error
+            </Button>
+          </li>
+        ) : (
+          <li key={i} className="pl-5 text-[12px] text-muted">
+            {ranText(r, "")}
+          </li>
+        ),
+      )}
+      {report.skipped && (
+        <li className="flex items-start gap-1.5 text-[12px] text-fg">
+          <AlertTriangle size={14} className="mt-px shrink-0 text-warn" />
+          {skippedText(report.skipped, "")}
+        </li>
+      )}
+    </ul>
+  );
 }
 
 export function ExportDialog() {
   const open = useEditor((s) => s.exportOpen);
   const before = usePluginBeforeExport();
+  const report = usePlugins((s) => s.report);
   const project = useEditor((s) => s.snap?.project);
   const jobId = useEditor((s) => s.exportJobId);
   const job = useEditor((s) => (s.exportJobId ? s.jobs[s.exportJobId] : undefined));
@@ -276,8 +314,7 @@ export function ExportDialog() {
         startedAt.current = Date.now();
         useEditor.setState({ exportJobId: await api.startRecap(path, recapRun, endCard, epoch, replace) });
       } else {
-        await exportVideo(path, options, epoch, replace, credits);
-        startedAt.current = Date.now();
+        if (await exportVideo(path, options, epoch, replace, credits)) startedAt.current = Date.now();
       }
     } catch (e) {
       const text = errorText(e);
@@ -358,7 +395,7 @@ export function ExportDialog() {
                   : coverFacts}
             </p>
           </div>
-          <IconButton label={running ? "Hide (export keeps running)" : "Close"} round className="-mr-2 -mt-1" onClick={close}>
+          <IconButton label={running || before ? "Hide (export keeps running)" : "Close"} round className="-mr-2 -mt-1" onClick={close}>
             <X size={16} />
           </IconButton>
         </div>
@@ -522,16 +559,25 @@ export function ExportDialog() {
           </fieldset>
           )}
 
+          {report && what === "video" && <PassNotes report={report} />}
           {before && (
             <div className="flex flex-col gap-2" role="status">
-              <span className="tabular text-[12px] text-fg">
-                {before.name ? `${before.name} runs before export…` : "Plugins run before export…"}
-                {before.progress > 0 && ` ${Math.round(before.progress * 100)}%`}
-              </span>
-              <ProgressBar value={before.progress} label={`${before.name} before export`} />
-              <p className="text-[12px] text-muted">Stop plugin exports the project as it was.</p>
+              <div className="flex justify-between gap-3 text-[12px]">
+                <span className="tabular min-w-0 truncate text-fg">
+                  {before.name ? `Waiting for ${before.name}…` : "Waiting for plugins…"}
+                  {before.progress > 0 && ` ${Math.round(before.progress * 100)}%`}
+                </span>
+                {before.total > 1 && (
+                  <span className="tabular shrink-0 text-muted">
+                    {before.index} of {before.total}
+                  </span>
+                )}
+              </div>
+              <ProgressBar value={before.progress} label={`${before.name || "Plugins"} before export`} />
+              <p className="text-[12px] text-muted">The export starts when it's done.</p>
             </div>
           )}
+          {report?.cancelled && !before && !job && what === "video" && <p className="text-[12px] text-muted">Export cancelled. No file was written.</p>}
           {job && running && (
             <div className="flex flex-col gap-2" role="status">
               <div className="flex justify-between text-[12px]">
@@ -578,18 +624,23 @@ export function ExportDialog() {
               )}
             </span>
           ) : (
-            <span className={`tabular min-w-0 text-[13px] text-muted ${settingsLocked ? "opacity-50" : ""}`} title="Estimate; scenes with a lot of motion come out larger">
+            <span className={`tabular min-w-0 text-[13px] text-muted ${before ? "invisible" : settingsLocked ? "opacity-50" : ""}`} title="Estimate; scenes with a lot of motion come out larger">
               about <span className="font-semibold text-fg">{formatBytes(estimateBytes(size.w, size.h, options.fps, options.quality, duration))}</span>
             </span>
           )}
           <div className="flex shrink-0 gap-2.5">
             {before ? (
               <>
-                <Button pill disabled={!before.name} title={`Stop ${before.name || "the plugin"} and export the project as it was`} onClick={() => void stopAiRun()}>
-                  Stop plugin
+                <Button pill onClick={cancelExport}>
+                  Cancel export
                 </Button>
+                {before.name && (
+                  <Button pill className="max-w-[170px]" title="The export goes on without its changes." onClick={() => void stopAiRun()}>
+                    <span className="truncate">Skip {before.name}</span>
+                  </Button>
+                )}
                 <Button pill variant="primary" data-autofocus onClick={close}>
-                  Keep editing
+                  Hide
                 </Button>
               </>
             ) : running ? (
