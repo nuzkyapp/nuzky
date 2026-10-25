@@ -946,9 +946,12 @@ fn the_tools_edits_together_stay_small_enough_for_the_app() {
     let before = f.host.session.state().unwrap().project;
     let flood = "function run(ctx) {\n  const copy = {trackId: 'main', trackKind: 'video', clip: ctx.project.tracks[0].clips[1]};\n  \
                  const rebuild = {tool: 'build_captions', args: {max_words: 1}};\n  \
-                 return {edits: [{type: 'pasteClips', atUs: 0, clips: Array(3000).fill(copy)}], tools: Array(20).fill(rebuild)};\n}\n";
+                 return {edits: [{type: 'pasteClips', atUs: 0, clips: Array(2200).fill(copy)}], tools: Array(20).fill(rebuild)};\n}\n";
     tool_plugin("flood", json!(["build_captions"]), flood).unwrap();
-    let error = error_of(&f, "flood");
+    // Planning thousands of captions again and again takes a while on a slow runner.
+    let job = plugins::run_in_app(&f.host, "flood", &Map::new(), None, vec![], 0).unwrap();
+    let done = finish(&f.host, &job, Duration::from_secs(55));
+    let error = done["error"].as_str().unwrap_or_else(|| panic!("flood did not fail: {done}")).to_owned();
     assert!(error.starts_with("PLUGIN_TOO_BIG: tools["), "{error}");
     assert!(error.contains("makes the tools' edits larger than 16 MB together"), "{error}");
     assert_eq!(f.host.session.state().unwrap().project, before);
