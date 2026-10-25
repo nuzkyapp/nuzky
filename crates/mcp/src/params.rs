@@ -264,6 +264,8 @@ pub enum AnalysisKind {
     Emphasis,
     /// Frames of the whole timeline worth a cover or thumbnail, as a job.
     ThumbnailFrames,
+    /// Tempo, beats, bars, drops and sections of a song, as a job.
+    Beats,
 }
 #[derive(Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -282,7 +284,7 @@ pub struct AnalysisParams {
 #[serde(deny_unknown_fields)]
 pub struct Analyze {
     pub kind: AnalysisKind,
-    /// Required for silences, loudness and scenes; with fillers it reads that asset only. Omit for retakes, emphasis and thumbnail_frames.
+    /// Required for silences, loudness, scenes and beats; with fillers it reads that asset only. Omit for retakes, emphasis and thumbnail_frames.
     pub asset_id: Option<String>,
     #[serde(default)]
     pub params: AnalysisParams,
@@ -369,6 +371,46 @@ pub struct ApplyZooms {
     pub transcript_key: String,
     /// Punch-ins on INCLUSIVE word ranges, such as analyze(kind: "emphasis").zooms.
     pub zooms: Vec<crate::zooms::WordZoom>,
+}
+#[derive(Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CutToBeats {
+    /// Required unless dry_run is true.
+    pub run_id: Option<String>,
+    /// Reuse this id with identical arguments to retry a failed save without cutting twice.
+    pub request_id: Option<String>,
+    #[serde(default)]
+    pub dry_run: bool,
+    /// The song's clip; by default the only clip on an audio track that keeps its place.
+    pub music_clip_id: Option<String>,
+    /// How often the picture changes from where the beat is steady; the intro before it stays one piece.
+    pub every: Option<crate::beats::Every>,
+    /// Later changes of rhythm, each from a beat on: {from: "drop" or a beat index, every}.
+    pub changes: Option<Vec<crate::beats::Change>>,
+    /// The footage, used in turn; the main track's clips in order when left out.
+    pub shots: Option<Vec<crate::beats::Shot>>,
+    /// Where the video ends, timeline microseconds; by default the last bar line before the song or the footage ends.
+    pub end_us: Option<i64>,
+    /// The footage's own sound: mute (the default) or keep.
+    pub video_sound: Option<VideoSound>,
+}
+#[derive(Clone, Copy, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum VideoSound {
+    Mute,
+    Keep,
+}
+impl CutToBeats {
+    pub fn options(&self) -> crate::beats::Options {
+        crate::beats::Options {
+            music_clip_id: self.music_clip_id.clone(),
+            every: self.every,
+            changes: self.changes.clone().unwrap_or_default(),
+            shots: self.shots.clone(),
+            end_us: self.end_us,
+            keep_video_sound: self.video_sound == Some(VideoSound::Keep),
+        }
+    }
 }
 #[derive(Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

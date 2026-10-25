@@ -3714,6 +3714,7 @@ dependencies = [
  "nuzky-engine",
  "nuzky-interchange",
  "rayon",
+ "realfft",
  "serde",
  "serde_json",
  "unicode-normalization",

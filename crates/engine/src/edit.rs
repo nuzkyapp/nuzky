@@ -599,7 +599,8 @@ pub fn stays_in_place(track: &Track) -> bool {
     track.keep_in_place && track.kind == TrackKind::Audio
 }
 
-pub(crate) fn media(asset: &Asset, transform: Transform, shape: Option<Shape>) -> ClipContent {
+/// A new clip's media: the whole file, or the part the user chose, at full volume and speed.
+pub fn media(asset: &Asset, transform: Transform, shape: Option<Shape>) -> ClipContent {
     ClipContent::Media {
         asset_id: asset.id.clone(),
         source_in_us: source_span(asset).0,

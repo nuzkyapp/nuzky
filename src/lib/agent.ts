@@ -238,6 +238,7 @@ const TITLES: Record<string, string> = {
   correct_words: "Correcting words",
   apply_zooms: "Adding zooms",
   apply_motion: "Adding motion",
+  cut_to_beats: "Cutting to the beat",
   build_captions: "Adding captions",
   inspect_frames: "Checking frames",
   activity: "Scanning picture and sound",
@@ -257,6 +258,7 @@ const ANALYSES: Record<string, string> = {
   fillers: "Finding filler words",
   retakes: "Finding retakes",
   emphasis: "Finding sentences to zoom",
+  beats: "Finding the beat",
 };
 
 const JOBS: Record<string, string> = {

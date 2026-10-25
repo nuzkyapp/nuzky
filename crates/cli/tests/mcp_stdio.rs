@@ -958,7 +958,12 @@ fn initialize_list_state_edit_end_undo_over_stdio() {
     let mut c = Client::new(true);
     let list = c.rpc("tools/list", json!({}));
     let tools = list["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 40);
+    assert_eq!(tools.len(), 41);
+    let beats = tools.iter().find(|t| t["name"] == "cut_to_beats").unwrap();
+    assert_eq!(
+        (&beats["annotations"]["readOnlyHint"], &beats["annotations"]["destructiveHint"]),
+        (&json!(false), &json!(true))
+    );
     let search = tools.iter().find(|t| t["name"] == "search_sounds").unwrap();
     assert_eq!(search["annotations"]["openWorldHint"], true);
     assert_eq!(search["annotations"]["readOnlyHint"], true);
@@ -4374,5 +4379,212 @@ fn a_plugin_cannot_add_a_file_and_a_stuck_one_stops_over_stdio() {
         (&after["name"], &after["assets"], &after["tracks"]),
         (&before["name"], &before["assets"], &before["tracks"])
     );
+    c.finish();
+}
+
+/// The frame index whose time `t_us` is, at 30 fps, as export draws frames.
+fn frame_at_30(t_us: i64) -> i64 {
+    (t_us as f64 * 30.0 / 1e6).round() as i64
+}
+
+/// A user's red and blue takes, a song with a beat on a music track and a title: an agent recuts the takes to the
+/// beat. The plan reads the same for a read-only client, every cut lands on the frame export draws, the takes take
+/// turns without sound, the title and song keep their time, a retry changes nothing and one undo takes it back.
+#[test]
+fn cut_to_beats_recuts_the_main_track_on_frames_and_undoes_over_stdio() {
+    let mut c = Client::start(true, None, Some(None));
+    let red = ffmpeg_media(
+        &c,
+        "red.mov",
+        &["color=red:s=180x320:r=30:d=80", "sine=frequency=440:sample_rate=48000:duration=80"],
+        &["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le"],
+    );
+    let blue = ffmpeg_media(
+        &c,
+        "blue.mov",
+        &["color=blue:s=180x320:r=30:d=80", "sine=frequency=660:sample_rate=48000:duration=80"],
+        &["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le"],
+    );
+    // 128 BPM: quiet ticks, then from 7.5 s (beat 16, the first of a bar) a kick on every beat, louder on each bar.
+    let beat = "mod(t,0.46875)";
+    let song = ffmpeg_media(
+        &c,
+        "song.wav",
+        &[&format!(
+            "aevalsrc='if(lt(t,7.5), 0.03*exp(-200*{beat})*sin(2*PI*2000*t), \
+             if(eq(mod(floor(t/0.46875+1e-9),4),0),0.9,0.45)*(exp(-20*{beat})*sin(2*PI*60*{beat})+0.3*exp(-300*{beat})*sin(2*PI*3000*{beat})))':s=48000:d=130"
+        )],
+        &["-ac", "2", "-c:a", "pcm_s16le"],
+    );
+    let run = c.call("begin_run", json!({"label":"place"}))["run_id"].clone();
+    let ids = c.call("import_media", json!({"run_id":run,"paths":[red, blue, song]}))["asset_ids"].clone();
+    let edits = json!([{"type":"addClip","assetId":ids[0]},{"type":"addClip","assetId":ids[1]},
+        {"type":"addClip","assetId":ids[2],"startUs":0},
+        {"type":"addText","startUs":5_000_000,"text":"Summer","style":{"fontSize":60.0,"color":"#ffffff"}}]);
+    c.call("apply_edits", json!({"run_id":run,"request_id":"place","edits":edits}));
+    c.call("end_run", json!({"run_id":run,"action":"keep"}));
+    let before = c.call("get_state", json!({}));
+    let clip_on = |state: &Value, kind: &str| {
+        state["tracks"].as_array().unwrap().iter().find(|t| t["kind"] == kind).unwrap()["clips"][0].clone()
+    };
+    let (title, music) = (clip_on(&before, "text"), clip_on(&before, "audio"));
+
+    // Nothing prepared the song's sound yet: a job does, then the plan answers.
+    let waiting: Value = serde_json::from_str(&c.error("cut_to_beats", json!({"dry_run":true}))).unwrap();
+    let waiting = waiting["error"].as_str().unwrap();
+    assert!(waiting.starts_with("AUDIO_NOT_READY") && waiting.contains("song.wav"), "{waiting}");
+    let job_id = waiting.split("as job ").nth(1).and_then(|rest| rest.split(';').next()).unwrap();
+    assert_eq!(wait_job(&mut c, &json!({"job_id":job_id}), Duration::from_secs(60), |_| false)["status"], "done");
+    let job = c.call("analyze", json!({"kind":"beats","asset_id":ids[2]}));
+    let found = wait_job(&mut c, &job, Duration::from_secs(60), |_| false);
+    let beats = &found["result"]["analysis"];
+    assert!((beats["bpm"].as_f64().unwrap() - 128.0).abs() <= 0.1, "{beats}");
+    let beats_us: Vec<i64> = serde_json::from_value(beats["beats_us"].clone()).unwrap();
+    let steady = beats_us.iter().position(|&b| json!(b) == beats["steady_from_us"]).unwrap();
+    let down = beats["first_downbeat"].as_u64().unwrap() as usize;
+    assert_eq!(steady % 4, down % 4, "{beats}");
+
+    // Every beat from where it is steady; the video ends on the last bar line of the 130 s song.
+    let frame_time = |f: i64| (f as f64 * 1e6 / 30.0).round() as i64;
+    let end =
+        frame_time(frame_at_30(beats_us.iter().skip(down).step_by(4).copied().rfind(|&b| b <= 130_000_000).unwrap()));
+    let mut expected = vec![0];
+    expected.extend(beats_us[steady..].iter().map(|&b| frame_time(frame_at_30(b))).filter(|&t| t < end));
+
+    let args = json!({"every":"beat"});
+    let mut reader = Client::spawn_at(c.dir.clone(), &c.dir.join("project.nuzky"), false, Some(None));
+    let mut dry = args.clone();
+    dry["dry_run"] = json!(true);
+    let planned = reader.call("cut_to_beats", dry.clone());
+    reader.finish();
+    reader.dir = PathBuf::new();
+    assert_eq!(planned["cut_us"], json!(expected), "{planned}");
+    assert_eq!(planned["end_us"], json!(end));
+    assert!(expected.iter().any(|&t| t > 120_000_000));
+    assert_eq!(planned["repeated"], 0);
+    assert_eq!(c.call("get_state", json!({}))["revision"], before["revision"]);
+
+    let run = c.call("begin_run", json!({"label":"beat cut"}))["run_id"].clone();
+    let mut apply = args.clone();
+    apply["run_id"] = run.clone();
+    apply["request_id"] = json!("cut");
+    let applied = c.call("cut_to_beats", apply.clone());
+    assert_eq!(applied["cut_us"], planned["cut_us"]);
+    let after = c.call("get_state", json!({}));
+    let main = after["tracks"][0]["clips"].as_array().unwrap();
+    assert_eq!(
+        main.iter().map(|m| m["startUs"].clone()).collect::<Vec<_>>(),
+        expected.iter().map(|&t| json!(t)).collect::<Vec<_>>()
+    );
+    let takes: Vec<&Value> = main.iter().map(|m| &m["content"]["assetId"]).collect();
+    assert!(takes.iter().enumerate().all(|(i, &take)| take == &ids[i % 2]), "the takes do not take turns");
+    assert!(main.iter().all(|m| m["content"]["volume"] == 0.0));
+    let (title_after, music_after) = (clip_on(&after, "text"), clip_on(&after, "audio"));
+    assert_eq!((&title_after["startUs"], &title_after["durationUs"]), (&title["startUs"], &title["durationUs"]));
+    assert_eq!(
+        (&music_after["startUs"], &music_after["content"]["sourceInUs"]),
+        (&music["startUs"], &music["content"]["sourceInUs"])
+    );
+    assert_eq!(music_after["startUs"].as_i64().unwrap() + music_after["durationUs"].as_i64().unwrap(), end);
+    assert_eq!(applied["music"]["fade_out_us"], 1_875_000);
+    // A retry finds the cut already made; other arguments under the same id are refused.
+    let revision = after["revision"].clone();
+    assert_eq!(c.call("cut_to_beats", apply.clone())["cut_us"], applied["cut_us"]);
+    assert_eq!(c.call("get_state", json!({}))["revision"], revision);
+    let mut other = apply.clone();
+    other["every"] = json!("bar");
+    assert!(c.error("cut_to_beats", other).contains("REQUEST_CONFLICT"));
+    c.call("end_run", json!({"run_id":run,"action":"keep"}));
+
+    // The exported picture changes colour exactly on the frame of each cut.
+    let out = c.dir.join("beats.mp4");
+    let job = c.call("export_video", json!({"path":out,"resolution":360,"fps":30}));
+    assert_eq!(wait_job(&mut c, &job, Duration::from_secs(300), |_| false)["status"], "done");
+    let decoded = Command::new("ffmpeg")
+        .args(["-hide_banner", "-loglevel", "error", "-i"])
+        .arg(&out)
+        .args(["-vf", "scale=4:4", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+        .output()
+        .unwrap();
+    assert!(decoded.status.success());
+    let colour = |f: i64| {
+        let p = &decoded.stdout[f as usize * 48 + 21..f as usize * 48 + 24];
+        match (p[0] > 150 && p[2] < 100, p[2] > 150 && p[0] < 100) {
+            (true, false) => "red",
+            (false, true) => "blue",
+            _ => "other",
+        }
+    };
+    assert_eq!(decoded.stdout.len() as i64 / 48, frame_at_30(end));
+    for (i, &cut) in expected.iter().enumerate() {
+        let f = frame_at_30(cut);
+        let (now, was) = (if i % 2 == 0 { "red" } else { "blue" }, if i % 2 == 0 { "blue" } else { "red" });
+        assert_eq!(colour(f), now, "frame {f} at the cut {cut} us");
+        if f > 0 {
+            assert_eq!(colour(f - 1), was, "frame {} before the cut {cut} us", f - 1);
+        }
+    }
+
+    c.call("undo_run", json!({"run_id":run}));
+    let undone = c.call("get_state", json!({}));
+    assert_eq!(undone["tracks"], before["tracks"]);
+    c.finish();
+}
+
+/// The built-in song under eleven 12 s phone takes, cut with the default rhythm: Dancing builds for 18 s before its
+/// beat comes in, longer than any take, and comes in loud at once, then fades out from 127 s. The intro changes on
+/// bar lines with a warning instead of failing, the beat coming in is no drop to cut every beat from, so the rest
+/// changes every bar, and the video ends where the fade starts.
+#[test]
+fn cut_to_beats_fits_short_takes_to_the_built_in_song_over_stdio() {
+    let mut c = Client::start(true, None, Some(None));
+    let take = |c: &Client, name: &str, colour: &str| {
+        ffmpeg_media(
+            c,
+            name,
+            &[&format!("color={colour}:s=180x320:r=30:d=12")],
+            &["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p"],
+        )
+    };
+    let (red, blue) = (take(&c, "red.mov", "red"), take(&c, "blue.mov", "blue"));
+    let run = c.call("begin_run", json!({"label":"place"}))["run_id"].clone();
+    let ids = c.call("import_media", json!({"run_id":run,"paths":[red, blue]}))["asset_ids"].clone();
+    let edits: Vec<Value> = (0..11).map(|i| json!({"type":"addClip","assetId":ids[i % 2]})).collect();
+    c.call("apply_edits", json!({"run_id":run,"request_id":"place","edits":edits}));
+    let song = c.call("add_sound", json!({"run_id":run,"id":"nuzky:dancing","at_us":0}))["asset_id"].clone();
+    c.call("end_run", json!({"run_id":run,"action":"keep"}));
+
+    let waiting: Value = serde_json::from_str(&c.error("cut_to_beats", json!({"dry_run":true}))).unwrap();
+    let waiting = waiting["error"].as_str().unwrap();
+    let job_id = waiting.split("as job ").nth(1).and_then(|rest| rest.split(';').next()).unwrap();
+    assert_eq!(wait_job(&mut c, &json!({"job_id":job_id}), Duration::from_secs(120), |_| false)["status"], "done");
+    let job = c.call("analyze", json!({"kind":"beats","asset_id":song}));
+    let found = wait_job(&mut c, &job, Duration::from_secs(120), |_| false);
+    let beats = &found["result"]["analysis"];
+    let beats_us: Vec<i64> = serde_json::from_value(beats["beats_us"].clone()).unwrap();
+    let steady = beats_us.iter().position(|&b| json!(b) == beats["steady_from_us"]).unwrap();
+    let down = beats["first_downbeat"].as_u64().unwrap() as usize;
+    assert_eq!(beats["drops"][0]["beat"], json!(steady), "{beats}");
+    let fade = beats["sections"].as_array().unwrap().last().unwrap()["at_us"].as_i64().unwrap();
+
+    let planned = c.call("cut_to_beats", json!({"dry_run":true}));
+    let cuts: Vec<i64> = serde_json::from_value(planned["cut_us"].clone()).unwrap();
+    let end = planned["end_us"].as_i64().unwrap();
+    // Measured on the decoded file: -18 dBFS in the bar before 127.03 s, -36 in the bar from it.
+    assert!((fade - 127_030_000).abs() < 300_000, "{beats}");
+    assert!(end <= fade && fade - end < 1_000_000 / 30, "end {end}, fade {fade}");
+    let frame_time = |t: i64| (frame_at_30(t) as f64 * 1e6 / 30.0).round() as i64;
+    let bar_lines: Vec<i64> = beats_us.iter().skip(down).step_by(4).map(|&b| frame_time(b)).collect();
+    let steady_at = frame_time(beats_us[steady]);
+    let (intro, rest): (Vec<i64>, Vec<i64>) = cuts.iter().partition(|&&t| t < steady_at);
+    let every_bar: Vec<i64> = bar_lines.iter().copied().filter(|&t| t >= steady_at && t < end).collect();
+    assert_eq!(rest, every_bar, "{planned}");
+    assert!(intro.len() > 1 && intro[1..].iter().all(|t| bar_lines.contains(t)), "{planned}");
+    let bounds: Vec<i64> = intro.iter().copied().chain([steady_at]).collect();
+    let pieces: Vec<i64> = bounds.windows(2).map(|w| w[1] - w[0]).collect();
+    assert!(pieces.iter().all(|&p| p <= 12_000_000), "{pieces:?}");
+    let warnings = planned["warnings"].as_array().unwrap();
+    assert!(warnings.iter().any(|w| w.as_str().unwrap().contains("the intro")), "{warnings:?}");
+    assert_eq!(planned["music"]["trimmed_to_us"], json!(end));
     c.finish();
 }

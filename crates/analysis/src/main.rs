@@ -6,12 +6,13 @@ use nuzky_analysis::{
     transcribe_words,
 };
 
-const USAGE: &str = "nuzky-analyze <media> <loudness|silences|scenes|words|fillers> [--lang auto|cs|en] [--model path] [--vad-model path] [--cache path]";
+const USAGE: &str = "nuzky-analyze <media> <loudness|silences|scenes|beats|words|fillers> [--lang auto|cs|en] [--model path] [--vad-model path] [--cache path]";
 
 enum Command {
     Loudness,
     Silences,
     Scenes,
+    Beats,
     Words,
     Fillers,
 }
@@ -25,6 +26,7 @@ fn main() -> Result<()> {
         Some("loudness") => Command::Loudness,
         Some("silences") => Command::Silences,
         Some("scenes") => Command::Scenes,
+        Some("beats") => Command::Beats,
         Some("words") => Command::Words,
         Some("fillers") => Command::Fillers,
         _ => bail!(USAGE),
@@ -55,6 +57,7 @@ fn main() -> Result<()> {
         }
         Command::Silences => serde_json::to_value(silences(&asset, &cache, SilenceParams::default())?)?,
         Command::Scenes => serde_json::to_value(scene_cuts(&asset, SceneParams::default())?)?,
+        Command::Beats => serde_json::to_value(nuzky_analysis::beats_cancellable(&asset, &cache, || false)?)?,
         Command::Words | Command::Fillers => {
             let model = model
                 .or_else(|| find_model("ggml-small.bin"))

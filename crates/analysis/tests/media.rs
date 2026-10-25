@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::{Context, Result, ensure};
 use nuzky_analysis::{
-    AudioSource, Range, SceneParams, SilenceParams, loudness, scene_cuts, scene_cuts_in, silences,
+    AudioSource, Range, SceneParams, SilenceParams, beats_cancellable, loudness, scene_cuts, scene_cuts_in, silences,
     silences_cancellable, transcribe_words_cancellable,
 };
 use nuzky_engine::media::probe;
@@ -202,6 +202,114 @@ fn cancelled_analysis_stops_preparing_audio_and_leaves_no_partial_cache() -> Res
     assert!(left.iter().all(|name| name.ends_with(".lock")), "partial cache left behind: {left:?}");
     // The next request prepares the audio from the start.
     assert!(silences(&asset, &cache, SilenceParams::default())?.is_empty());
+    Ok(())
+}
+
+/// A song that ticks quietly for 30 s, then comes in loud with a kick on every beat and a louder first beat in
+/// each bar: the grid an editor cuts to, its bars, where the beat is steady and the drop.
+#[test]
+fn a_click_track_gives_its_tempo_beats_bars_and_drop() -> Result<()> {
+    let dir = directory("beats")?;
+    let path = dir.join("click128.wav");
+    // A beat every 0.46875 s (128 BPM); bars start at beat 0, 4, 8 and so on, and beat 64 is at 30 s.
+    let beat = "mod(t,0.46875)";
+    let source = format!(
+        "aevalsrc='if(lt(t,30), 0.03*exp(-200*{beat})*sin(2*PI*2000*t), \
+         if(eq(mod(floor(t/0.46875+1e-9),4),0),0.9,0.45)*(exp(-20*{beat})*sin(2*PI*60*{beat})+0.3*exp(-300*{beat})*sin(2*PI*3000*{beat})))':s=48000:d=150"
+    );
+    ffmpeg(&["-f", "lavfi", "-i", &source, "-ac", "2", "-c:a", "pcm_s16le"], &path)?;
+    let asset = probe(&path, "click128".into())?;
+    let found = beats_cancellable(&asset, &dir, || false)?;
+    assert!((found.bpm - 128.0).abs() <= 0.1, "{}", found.bpm);
+    let grid = 468_750.0;
+    let numbers: Vec<i64> = found.beats_us.iter().map(|&t| (t as f64 / grid).round() as i64).collect();
+    let worst = found.beats_us.iter().zip(&numbers).map(|(&t, &n)| (t - n * grid as i64).abs()).max().unwrap();
+    assert!(worst <= 10_000, "a beat is {worst} us off the grid");
+    // Every beat of the file but the one at 0 s, which the grid places a hair before the start.
+    assert!(
+        numbers.windows(2).all(|w| w[1] == w[0] + 1) && numbers[0] <= 1 && numbers.last() == Some(&319),
+        "{numbers:?}"
+    );
+    assert_eq!(numbers[found.first_downbeat] % 4, 0, "bars start on beat {}", numbers[found.first_downbeat]);
+    assert!((found.steady_from_us - 30_000_000).abs() <= 10_000, "{}", found.steady_from_us);
+    assert_eq!(found.drops.len(), 1, "{:?}", found.drops);
+    let drop = &found.drops[0];
+    assert!((drop.at_us - 30_000_000).abs() <= 10_000 && drop.rise_db >= 6.0, "{drop:?}");
+    assert_eq!(found.beats_us[drop.beat], drop.at_us);
+    assert_eq!(found.sections.iter().map(|s| s.beat).collect::<Vec<_>>(), [0, drop.beat]);
+    // The prepared sound is read every ten seconds of audio for a cancellation.
+    let polls = AtomicUsize::new(0);
+    let error = beats_cancellable(&asset, &dir, || polls.fetch_add(1, Ordering::Relaxed) >= 2).unwrap_err();
+    assert!(format!("{error:#}").starts_with("CANCELLED"), "{error:#}");
+    assert_eq!(polls.load(Ordering::Relaxed), 3);
+    Ok(())
+}
+
+/// A 90 BPM kick is not reported at double time, and noise has no beat to cut to.
+#[test]
+fn a_slow_beat_keeps_its_tempo_and_noise_has_none() -> Result<()> {
+    let dir = directory("beats-90")?;
+    let path = dir.join("click90.wav");
+    let beat = "mod(t,0.6666666667)";
+    ffmpeg(
+        &["-f", "lavfi", "-i", &format!("aevalsrc='0.6*exp(-25*{beat})*sin(2*PI*80*{beat})':s=48000:d=60"), "-ac", "2"],
+        &path,
+    )?;
+    let found = beats_cancellable(&probe(&path, "click90".into())?, &dir, || false)?;
+    assert!((found.bpm - 90.0).abs() <= 0.1 && found.confidence >= 0.9, "{} {}", found.bpm, found.confidence);
+    let noise = dir.join("noise.wav");
+    ffmpeg(&["-f", "lavfi", "-i", "anoisesrc=d=60:c=pink:r=48000:a=0.3:seed=7", "-ac", "2"], &noise)?;
+    let found = beats_cancellable(&probe(&noise, "noise".into())?, &dir, || false)?;
+    assert!(found.confidence < 0.3, "{}", found.confidence);
+    Ok(())
+}
+
+/// The song built into Nuzky against an independent beat tracker. It fades in without a beat for 18 s.
+#[test]
+fn the_built_in_song_matches_an_independent_beat_tracker() -> Result<()> {
+    let dir = directory("beats-song")?;
+    let root = dir.ancestors().nth(4).context("Missing workspace root")?;
+    let asset = probe(&root.join("assets/sounds/dancing.ogg"), "dancing".into())?;
+    let found = beats_cancellable(&asset, &dir, || false)?;
+    let reference: Vec<i64> =
+        std::fs::read_to_string(root.join("crates/analysis/tests/data/dancing-beats-librosa.tsv"))?
+            .lines()
+            .filter(|line| !line.starts_with('#'))
+            .map(|line| line.trim().parse::<f64>().map(|s| (s * 1e6).round() as i64))
+            .collect::<Result<_, _>>()?;
+    let offsets: Vec<i64> = reference
+        .iter()
+        .filter(|&&r| r > 18_400_000)
+        .map(|&r| found.beats_us.iter().map(|&b| b - r).min_by_key(|d| d.abs()).unwrap())
+        .collect();
+    let matched = offsets.iter().filter(|d| d.abs() <= 50_000).count() as f64 / offsets.len() as f64;
+    let mut sizes: Vec<i64> = offsets.iter().map(|d| d.abs()).collect();
+    sizes.sort();
+    eprintln!(
+        "bpm {} confidence {}: {:.1} % of {} reference beats within 50 ms, median {} us, max {} us, steady from {} us, drops {:?}",
+        found.bpm,
+        found.confidence,
+        100.0 * matched,
+        offsets.len(),
+        sizes[sizes.len() / 2],
+        sizes.last().unwrap(),
+        found.steady_from_us,
+        found.drops
+    );
+    assert!((found.bpm - 99.0).abs() <= 0.99 && found.confidence >= 0.5, "{} {}", found.bpm, found.confidence);
+    assert!(matched >= 0.9, "{matched}");
+    let beat = (60e6 / found.bpm) as i64;
+    assert!((found.steady_from_us - 18_300_000).abs() <= beat, "{}", found.steady_from_us);
+    let drop = found.drops.first().context("no drop where the beat comes in")?;
+    assert!((drop.at_us - 18_300_000).abs() <= beat, "{drop:?}");
+    // It fades out in two steps: the bar from 127.03 s is at -36 dBFS after -18 before it, the next at -45. The quiet
+    // ending starts with the first.
+    let [.., before, ending] = found.sections.as_slice() else { panic!("{:?}", found.sections) };
+    assert!(
+        (ending.at_us - 127_030_000).abs() <= beat / 2 && ending.level_db <= before.level_db - 12.0,
+        "{:?}",
+        found.sections
+    );
     Ok(())
 }
 

@@ -2,6 +2,7 @@
 //! relative to the media/container origin, or to the supplied timeline audio.
 mod align;
 mod audio;
+mod beats;
 mod boundaries;
 mod captions;
 mod emphasis;
@@ -17,6 +18,7 @@ pub use audio::{
     ProgramLoudness, SilenceParams, loudness, loudness_cancellable, program_loudness, program_loudness_cancellable,
     silences, silences_cancellable,
 };
+pub use beats::{BeatDrop, Beats, Section, beats_cancellable, beats_in};
 pub use boundaries::{align_to_sound, align_words};
 pub use captions::{CaptionGrouping, group_words};
 pub use emphasis::{Energy, Zoom, emphasis, key_words, prepared_word_energy, word_energy};

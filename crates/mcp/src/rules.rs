@@ -81,6 +81,8 @@ pub(crate) const TOOLS: &[Rules] = &[
     ),
     rules("build_captions", Never, true, false, false),
     rules("apply_zooms", Never, true, false, false),
+    // A dry run only reads the song and plans; preparing its sound runs as a job.
+    rules("cut_to_beats", When(|args| args["dry_run"] == true), true, false, true),
     // Leaves clips that already move alone, so the same call again changes nothing.
     rules("apply_motion", Never, false, true, false),
     // Proposing replaces the reels proposed before; making only adds new projects beside the source.
@@ -163,6 +165,7 @@ mod tests {
                 "undo_to",
                 "build_captions",
                 "apply_zooms",
+                "cut_to_beats",
                 "propose_reels",
                 "reframe",
                 "resolve_recovery",
@@ -201,6 +204,7 @@ mod tests {
                 "inspect_thumbnail",
                 "transcribe",
                 "reframe",
+                "cut_to_beats",
                 "export_video",
                 "export_thumbnail",
                 "run_plugin"
@@ -216,7 +220,14 @@ mod tests {
         assert!(edit.reads(&json!({"dry_run":true})) && !edit.reads(&json!({})));
         let plugin = find("run_plugin").unwrap();
         assert!(plugin.reads(&json!({"dry_run":true})) && !plugin.reads(&json!({"run_id":"r"})));
+        let beats = find("cut_to_beats").unwrap();
+        assert!(
+            beats.reads(&json!({"dry_run":true}))
+                && !beats.reads(&json!({"dry_run":false}))
+                && !beats.reads(&json!({}))
+        );
         let analyze = find("analyze").unwrap();
+        assert!(!analyze.reads(&json!({"kind":"beats","asset_id":"a"})));
         assert!(analyze.reads(&json!({"kind":"retakes"})) && !analyze.reads(&json!({"kind":"silences"})));
         assert!(analyze.reads(&json!({"kind":"emphasis"})) && analyze.reads(&json!({"kind":"thumbnail_frames"})));
         assert!(analyze.reads(&json!({"kind":"fillers"})) && !analyze.reads(&json!({"kind":"fillers","asset_id":"a"})));

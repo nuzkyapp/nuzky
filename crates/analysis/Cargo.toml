@@ -23,6 +23,7 @@ candle-nn = { version = "0.11.0", default-features = false }
 unicode-normalization = "0.1.25"
 rayon = "1"
 libm = "0.2"
+realfft = "3.5"
 
 # Speech recognition on the GPU through Metal. whisper.cpp embeds its shaders in the binary.
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -13,7 +13,7 @@ use nuzky_engine::{
     edit::{EditCmd, TimeRange, new_id},
     export::{ExportOptions, ExportPhase, Quality, check_options, export},
     media::probe,
-    model::{ReelStatus, Thumbnail, ThumbnailFormat},
+    model::{ClipContent, ReelStatus, Thumbnail, ThumbnailFormat},
     thumbnail::ImageKind,
 };
 use nuzky_session::{
@@ -332,6 +332,7 @@ impl Backend {
             }
             "build_captions" => self.captions(parse(arguments)?, state),
             "apply_zooms" => self.apply_zooms(parse(arguments)?, state),
+            "cut_to_beats" => self.cut_to_beats(parse(arguments)?, state),
             "apply_motion" => self.apply_motion(parse(arguments)?, state),
             "propose_reels" => self.propose_reels(parse(arguments)?, state),
             "make_reels" => self.make_reels(parse(arguments)?, state),
@@ -873,6 +874,7 @@ impl Backend {
                     let hesitations: Vec<_> = nuzky_analysis::hesitations(&peaks, &gaps).into_iter().flatten().collect();
                     json!({"ranges": nuzky_analysis::filler_words(&t, &t.language), "hesitations": hesitations})
                 }
+                AnalysisKind::Beats => serde_json::to_value(nuzky_analysis::beats_cancellable(&asset, &cache, || cancel.load(Ordering::Relaxed))?)?,
                 AnalysisKind::Retakes | AnalysisKind::Emphasis | AnalysisKind::ThumbnailFrames => {
                     anyhow::bail!("This kind is not an asset analysis")
                 }
@@ -1035,14 +1037,16 @@ impl Backend {
     /// Without the app nothing prepares the sound of files whose words were stored earlier, and
     /// decoding a whole file inside a tool call could not be stopped, so it becomes a job.
     fn prepare_sound(&self, project: &Project, state: &SessionState, tool: &str) -> Result<()> {
-        let cache = self.host.cache_dir.clone();
         let heard = transcript::heard_assets(project);
-        let missing: Vec<_> = project
-            .assets
-            .iter()
-            .filter(|a| heard.contains(&a.id))
+        self.prepare_assets(project.assets.iter().filter(|a| heard.contains(&a.id)).cloned().collect(), state, tool)
+    }
+
+    /// Prepares the sound of those `assets` that have sound and no prepared sound yet, as one job.
+    fn prepare_assets(&self, assets: Vec<nuzky_engine::model::Asset>, state: &SessionState, tool: &str) -> Result<()> {
+        let cache = self.host.cache_dir.clone();
+        let missing: Vec<_> = assets
+            .into_iter()
             .filter(|a| nuzky_engine::audio::has_audio(a) && !nuzky_engine::audio::pcm_path(&cache, a).exists())
-            .cloned()
             .collect();
         if missing.is_empty() {
             return Ok(());
@@ -1391,6 +1395,62 @@ impl Backend {
                 "transcript_key": transcript::word_key(&preview, &words)}),
         });
         self.apply_transcript_edit(&args.run_id, &request_id, prepared)
+    }
+
+    /// Recuts the main track to the song's beat as one edit of the run. The beat is found again from the prepared
+    /// sound on every call, so a dry run and the cut it shows read the same song.
+    fn cut_to_beats(&self, args: CutToBeats, state: &SessionState) -> Result<Value> {
+        let run_id = match (&args.run_id, args.dry_run) {
+            (_, true) => None,
+            (Some(run_id), false) => Some(run_id.clone()),
+            (None, false) => anyhow::bail!("INVALID_ARGUMENTS: run_id is required unless dry_run is true"),
+        };
+        let arguments = json!({ "cut_to_beats": &args });
+        let mut requests = self.transcript_requests.lock().unwrap();
+        let key = run_id.as_ref().map(|run_id| (run_id.clone(), args.request_id.clone().unwrap_or_else(new_id)));
+        if let Some((run_id, request_id)) = &key {
+            owns_run(state, run_id)?;
+            requests.retain(|(run, _), _| run == run_id);
+            if let Some(prepared) = requests.get(&(run_id.clone(), request_id.clone())) {
+                ensure!(
+                    prepared.arguments == arguments,
+                    "REQUEST_CONFLICT: request_id was used with different arguments"
+                );
+                return self.apply_transcript_edit(run_id, request_id, prepared);
+            }
+        }
+        let project = self.media_project(&state.project);
+        let options = args.options();
+        let (_, music) = crate::beats::music_clip(&project, options.music_clip_id.as_deref())?;
+        let ClipContent::Media { asset_id, .. } = &music.content else { unreachable!("music_clip returns media") };
+        let asset = project.asset(asset_id).with_context(|| format!("UNKNOWN_ASSET: {asset_id}"))?.clone();
+        ensure!(Path::new(&asset.path).is_file(), "MEDIA_MISSING: {}", asset.path);
+        self.prepare_assets(vec![asset.clone()], state, "cut_to_beats")?;
+        let beats =
+            nuzky_analysis::beats_cancellable(&asset, &self.host.cache_dir, || self.closed.load(Ordering::Acquire))?;
+        ensure!(
+            beats.confidence >= crate::beats::MIN_CONFIDENCE,
+            "NO_STEADY_BEAT: this sound has no steady beat to cut to (confidence {}); choose another song",
+            beats.confidence
+        );
+        let plan = crate::beats::plan(&state.project, &beats, &options)?;
+        let mut preview = state.project.clone();
+        for edit in plan.edits.clone() {
+            preview.apply(edit).map_err(|e| anyhow!("EDIT_REJECTED: {e:#}"))?;
+        }
+        nuzky_session::validate(&preview)?;
+        let mut response = crate::beats::report(&state.project, &preview, &plan)?;
+        response["dry_run"] = json!(args.dry_run);
+        let Some((run_id, request_id)) = key else {
+            return Ok(response);
+        };
+        let prepared = requests.entry((run_id.clone(), request_id.clone())).or_insert(PreparedTranscriptEdit {
+            arguments,
+            edits: plan.edits,
+            expect: Expect { revision: Some(state.stamp.revision), speech_layout_key: None },
+            response,
+        });
+        self.apply_transcript_edit(&run_id, &request_id, prepared)
     }
 
     fn apply_motion(&self, args: ApplyMotion, state: &SessionState) -> Result<Value> {
