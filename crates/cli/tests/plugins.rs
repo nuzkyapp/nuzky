@@ -668,6 +668,8 @@ fn stop_ends_the_check_of_a_plugins_files() {
     let done = finish(&f.host, &job, Duration::from_secs(2));
     assert_ne!(done["status"], "done", "{done}");
     assert_eq!(f.host.session.state().unwrap().project, before);
+}
+
 /// Edits that leave the project as it was make no undo step, and the run says it changed nothing, so the app's Undo for
 /// a pass of plugins never takes back an edit made before it.
 #[test]
