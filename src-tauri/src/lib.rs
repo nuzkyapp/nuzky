@@ -12,6 +12,7 @@ mod file_dialogs;
 mod jobs;
 mod library;
 mod model_question;
+mod plugins;
 mod preview_server;
 mod recap;
 mod reels;
@@ -77,6 +78,7 @@ pub struct AppState {
     library: Arc<library::Library>,
     sounds: sounds::Sounds,
     youtube: youtube_videos::YoutubeVideos,
+    plugin_preview: Mutex<Arc<AtomicBool>>,
     /// What the last learning from imported timelines learned, by job, until the creator uses it,
     /// with the version of the style its EDIT.md was shown over.
     timeline_lessons: Mutex<Option<(String, Vec<nuzky_mcp::style::Evidence>, u64)>>,
@@ -1267,6 +1269,7 @@ pub fn run() {
                 library: Arc::default(),
                 sounds: Default::default(),
                 youtube: Default::default(),
+                plugin_preview: Mutex::default(),
                 timeline_lessons: Mutex::new(None),
             };
             // Jobs look the state up from their threads, so it must be managed first.
@@ -1275,6 +1278,7 @@ pub fn run() {
             app.state::<AppState>().session.lock().unwrap().start_pump(app.handle().clone(), events);
             jobs::prepare_media(&app.state::<AppState>(), &project);
             style::watch(app.handle().clone());
+            plugins::watch(app.handle().clone());
             app.emit("ready", ()).ok();
             #[cfg(target_os = "macos")]
             if let Err(error) = file_dialogs::watch(app) {
@@ -1409,6 +1413,11 @@ pub fn run() {
             transcripts::correct_words,
             reels::reel_bounds,
             reels::start_make_reels,
+            plugins::list_plugins,
+            plugins::preview_plugin,
+            plugins::run_plugin,
+            plugins::remove_plugin,
+            plugins::show_plugin_folder,
             style::style_view,
             style::style_act,
             style::start_style_learning,

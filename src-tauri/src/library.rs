@@ -1076,7 +1076,7 @@ pub fn set_collection(state: State<'_, AppState>, paths: Vec<String>, collection
 
 /// The system Trash. The UI flows on macOS and Windows use the Trash of their own home, since Finder and the
 /// Recycle Bin would put their projects in the person's own.
-fn to_trash(path: &Path) -> Result<()> {
+pub(crate) fn to_trash(path: &Path) -> Result<()> {
     #[cfg(all(target_os = "macos", debug_assertions))]
     if let Some(moved) = crate::test_bridge::trash(path) {
         return moved;

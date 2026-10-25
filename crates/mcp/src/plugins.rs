@@ -343,14 +343,6 @@ pub fn save(manifest: &Value, script: &str, readme: Option<&str>) -> Result<Plug
     Ok(entry(&folder))
 }
 
-/// Deletes the plugin's folder; `id` is a name from `list`.
-pub fn remove(id: &str) -> Result<()> {
-    ensure!(Path::new(id).file_name().is_some_and(|name| *name == *id), "PLUGIN_NOT_FOUND: no plugin {id:?}");
-    let folder = dir()?.join(id);
-    ensure!(folder.is_dir(), "PLUGIN_NOT_FOUND: no plugin {id:?}");
-    std::fs::remove_dir_all(folder).context("STORE_WRITE_FAILED: cannot remove the plugin")
-}
-
 /// A plugin with its checked inputs and the `ctx` its `run` gets, read from the project as it is.
 pub(crate) struct Prepared {
     manifest: Manifest,
