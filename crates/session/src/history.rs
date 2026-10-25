@@ -233,12 +233,6 @@ pub(crate) fn label(cmds: &[EditCmd]) -> &'static str {
     if cmds.iter().any(|c| matches!(c, EditCmd::AddSticker { .. })) {
         return "Sticker";
     }
-    // A beat cut pastes the new footage and cuts the old out in one batch; a paste alone never cuts.
-    if cmds.iter().any(|c| matches!(c, EditCmd::PasteClips { .. }))
-        && cmds.iter().any(|c| matches!(c, EditCmd::RippleDeleteRanges { .. }))
-    {
-        return "Cut to beat";
-    }
     // So does media picked to replace a clip.
     if cmds.iter().any(|c| matches!(c, EditCmd::ReplaceClip { .. })) {
         return "Replace clip";
