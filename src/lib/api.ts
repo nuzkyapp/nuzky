@@ -1,4 +1,5 @@
 import { invoke, type Channel } from "@tauri-apps/api/core";
+import type { GalleryPlugin, GalleryState } from "./gallery";
 import type { EffectIssue, ListedPlugin, PluginRow, PluginValues } from "./plugins";
 import type { AgentAccess, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, BeatCutDone, BeatPlans, Boot, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Part, PreviewStarted, Project, ProjectPoster, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFraming, Rhythm, Said, SampleRun, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied } from "./types";
 
@@ -268,6 +269,12 @@ export const api = {
   removePlugin: (id: string) => invoke<void>("remove_plugin", { id }),
   /** Shows the plugin's folder, or the plugins folder, in the file manager. */
   showPluginFolder: (id: string | null) => invoke<void>("show_plugin_folder", { id }),
+  /** The plugin gallery's plugins and what installing each would do here; `refresh` reads its list from GitHub again. */
+  galleryPlugins: (refresh: boolean) => invoke<GalleryPlugin[]>("gallery_plugins", { refresh }),
+  /** Installs it without running it; `replacing` is the state the user agreed to replace, whose folder goes to the Trash. */
+  installGalleryPlugin: (id: string, key: string, replacing: GalleryState | null, progress: Channel<number>) =>
+    invoke<GalleryPlugin[]>("install_gallery_plugin", { id, key, replacing, progress }),
+  cancelGalleryInstall: () => invoke<void>("cancel_gallery_install"),
 };
 
 /** The error as the backend sent it, "CODE: detail" included; code checks use this. */

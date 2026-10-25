@@ -12,6 +12,7 @@ pub mod model_download;
 mod params;
 mod plugin_data;
 mod plugin_files;
+pub mod plugin_gallery;
 pub mod plugins;
 pub mod recap;
 pub mod reels;

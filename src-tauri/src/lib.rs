@@ -85,6 +85,7 @@ pub struct AppState {
     beat_cuts: beats::BeatCuts,
     youtube: youtube_videos::YoutubeVideos,
     plugin_preview: Mutex<Arc<AtomicBool>>,
+    gallery: plugins::GalleryState,
     /// What the last learning from imported timelines learned, by job, until the creator uses it,
     /// with the version of the style its EDIT.md was shown over.
     timeline_lessons: Mutex<Option<(String, Vec<nuzky_mcp::style::Evidence>, u64)>>,
@@ -1293,6 +1294,7 @@ pub fn run() {
                 beat_cuts: Default::default(),
                 youtube: Default::default(),
                 plugin_preview: Mutex::default(),
+                gallery: Default::default(),
                 timeline_lessons: Mutex::new(None),
             };
             // Jobs look the state up from their threads, so it must be managed first.
@@ -1446,6 +1448,9 @@ pub fn run() {
             plugins::run_plugin,
             plugins::remove_plugin,
             plugins::show_plugin_folder,
+            plugins::gallery_plugins,
+            plugins::install_gallery_plugin,
+            plugins::cancel_gallery_install,
             style::style_view,
             style::style_act,
             style::start_style_learning,

@@ -5,7 +5,7 @@ description: Write, try and fix a Nuzky plugin, a small script that adds an edit
 
 # Write a Nuzky plugin
 
-A plugin is a small JavaScript file that reads the project and returns edits. The user asks for an edit Nuzky does not have ("delete every clip shorter than a second", "put my end card on every video"), you write it once, and it becomes a button in the app's Plugins panel that they can run on any project, with inputs they set. Plugins live in Nuzky's own data folder, so they survive updates, and a project a plugin edited opens anywhere without it.
+A plugin is a small JavaScript file that reads the project and returns edits. The user asks for an edit Nuzky does not have ("delete every clip shorter than a second", "put my end card on every video"), you write it once, and it becomes a button in the app's Plugins panel that they can run on any project, with inputs they set. A plugin can also add looks, such as VHS, that the user puts on clips (Effects below). Plugins live in Nuzky's own data folder, so they survive updates, and a project a plugin edited opens anywhere without it.
 
 ## What a plugin can and cannot do
 
@@ -14,11 +14,12 @@ A plugin is a small JavaScript file that reads the project and returns edits. Th
 - It cannot read or write files, reach the network, start processes, use timers or import modules. There is no `fetch`, `require`, `import`, `setTimeout` or `process`. `Math`, `Date`, `JSON`, strings, arrays and regular expressions work. `run` must return its result, not a Promise.
 - It cannot add media of its own choosing: `addAssets` is refused, so are reel candidates pointing at a new project file. It works with the assets the project already has (`addClip`, `replaceClip` with an existing `assetId`) and with its own pictures and sounds, such as a logo or a beep (Pictures and sounds below).
 - The user can turn it on to run by itself after every import they make in the app, or before every export, with the inputs they last set. Only the user turns that on, in the app; you and the plugin cannot. Such a run gets no selection and the playhead at 0, and may meet the same project again, after another import or the next export. Write a plugin meant for that to change nothing when its work is already done, such as a logo already in the corner, and say so in `message`.
+- Its effects, if it has any, are WGSL functions Nuzky checks and draws per pixel of a clip; a plugin that only adds effects has no plugin.js, no button and nothing to run (Effects below).
 - It runs at most 60 seconds, with 256 MB of memory for the script. It runs in a process of its own, where Nuzky also applies its edits to a copy of the project first; that process may take at most 1 GB. plugin.js is at most 1 MB and a run returns at most 5000 edits.
 
 ## Files
 
-`save_plugin` writes them into `plugins/<id>/` of Nuzky's data folder: `plugin.json` (the manifest), `plugin.js` and an optional `README.md` the app shows. Never write them yourself.
+`save_plugin` writes them into `plugins/<id>/` of Nuzky's data folder: `plugin.json` (the manifest), `plugin.js`, an optional `README.md` the app shows, and `effects/<id>.wgsl` for each effect. Never write them yourself.
 
 ```json
 {
@@ -36,7 +37,7 @@ A plugin is a small JavaScript file that reads the project and returns edits. Th
 ```
 
 - `nuzkyPlugin` is the plugin API, 2; plugins made for 1 still run, but one that ships files or effects, or needs silences, loudness or beats, needs 2. `list_plugins` gives the `api` this Nuzky runs, and an older Nuzky refuses a plugin for a newer API with PLUGIN_API_NEWER.
-- `id`: 1 to 40 lowercase letters, digits and dashes; also the folder's name. Saving with the same id replaces the plugin and keeps the old files as plugin.prev.json and plugin.prev.js.
+- `id`: 1 to 40 lowercase letters, digits and dashes; also the folder's name. Saving with the same id replaces the plugin and keeps the old files as plugin.prev.json, plugin.prev.js and effects/<id>.prev.wgsl.
 - `name` (at most 40 characters), `description` (300), `version` (20) and `action`, the verb on its button (24, "Run" when left out), or `actions` for several buttons (A richer panel below). Write them in the user's language, plainly, saying what will happen.
 - `needs`: what the plugin reads beyond the project, any of `"words"` (the transcript), `"silences"`, `"loudness"` and `"beats"` (found in the sound; these three need `nuzkyPlugin` 2). Ask only for what `run` uses: finding them in a long video takes a while the first time.
 - `inputs`, at most 20, each with `id` (letters, digits and `_`), `label` (at most 40 characters), `type` and `default`:
@@ -304,6 +305,8 @@ Save the effects with the manifest: `save_plugin(manifest, effects: {"vhs": "<th
 4. `begin_run`, then `run_plugin(id, inputs, run_id)`. Its edits join your run. A long run answers with a job: wait with `job` action `wait`. A plugin that needs silences, loudness or beats first prepares the sound of each file Nuzky has not prepared yet, as part of that job.
 5. `inspect_frames` where it changed something, and `get_state`. If it is wrong, `end_run` with discard, or keep and `undo_run`, fix the plugin and try again.
 6. Tell the user the plugin is in their Plugins panel, what it does and what its inputs mean. When they want it every time, tell them to turn on Run after import or Run before export there.
+
+To share a plugin, the user proposes its folder to github.com/nuzkyapp/nuzky-plugins, whose Gallery other people install it from. The Gallery installs only `plugin.json`, `plugin.js` (which a plugin that only adds effects leaves out), a `README.md` beside them, the files the manifest's `files` names and `effects/<id>.wgsl` for each of its effects, each of those names in lowercase letters, digits, dots, dashes and `_`, and refuses an effect whose WGSL does not pass the check `save_plugin` makes. The Gallery tells people what the plugin reads and does from its `needs`, `files`, `effects` and `actions`, so list exactly what `run` uses. Installing from the Gallery turns off the plugin's Run after import and Run before export.
 
 ## Errors
 

@@ -1,14 +1,16 @@
 import { useEffect, useState, type MouseEvent } from "react";
-import { AlertTriangle, FolderOpen, MoreHorizontal, Puzzle, Sparkles, Trash2 } from "lucide-react";
+import { AlertTriangle, FolderOpen, MoreHorizontal, Puzzle, Sparkles, Store, Trash2 } from "lucide-react";
 import { api, errorText } from "../../lib/api";
 import { askAi, brokenEffects, changeWithAi, fixable, fixWithAi, loadPlugins, makeWithAi, openPlugin, plainDetail, removePlugin, usePlugins, type Plugin } from "../../lib/plugins";
+import { showTab, useGallery } from "../../lib/gallery";
 import { useEditor } from "../../lib/store";
-import { Button, IconButton, Menu, lockedProps, useLockReason, type MenuEntry } from "../ui";
+import { Button, IconButton, Menu, TabBar, TabPanel, lockedProps, useLockReason, type MenuEntry } from "../ui";
+import { GalleryList } from "./GalleryList";
 
 const SUGGESTIONS = ["Make a plugin that removes clips shorter than half a second", "Make a plugin that adds a “Follow for more” text at the end", "Make a plugin that puts a title on every new topic"];
 
 /** A plugin has no picture of its own: its first letter on a quiet tile tells the rows apart without colour. */
-export function PluginMark({ plugin, size = 30 }: { plugin: Plugin; size?: number }) {
+export function PluginMark({ plugin, size = 30 }: { plugin: Pick<Plugin, "name" | "error">; size?: number }) {
   if (plugin.error)
     return (
       <span className="flex shrink-0 items-center justify-center rounded-lg bg-raised text-danger" style={{ width: size, height: size }} aria-hidden>
@@ -110,15 +112,20 @@ function Empty() {
           </li>
         ))}
       </ul>
-      <Button variant="ghost" className="mt-3 h-7 gap-1.5 px-2 text-[12px] text-accent! hover:text-accent!" onClick={() => void showFolder(null)}>
-        <FolderOpen size={13} /> Show plugins folder
-      </Button>
+      <div className="mt-3 flex flex-wrap justify-center gap-1">
+        <Button variant="ghost" className="h-7 gap-1.5 px-2 text-[12px] text-accent! hover:text-accent!" onClick={() => showTab("gallery")}>
+          <Store size={13} /> Browse the gallery
+        </Button>
+        <Button variant="ghost" className="h-7 gap-1.5 px-2 text-[12px] text-accent! hover:text-accent!" onClick={() => void showFolder(null)}>
+          <FolderOpen size={13} /> Show plugins folder
+        </Button>
+      </div>
     </div>
   );
 }
 
 /** The plugins in Nuzky's plugins folder; the one chosen opens in the inspector. */
-export function PluginsTab() {
+function Installed() {
   const list = usePlugins((s) => s.list);
   const open = usePlugins((s) => s.open);
   useEffect(() => {
@@ -127,9 +134,9 @@ export function PluginsTab() {
   if (!list) return null;
   if (list.length === 0) return <Empty />;
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <>
       <div className="flex h-10 shrink-0 items-center justify-between px-3.5">
-        <h3 className="text-[13px] font-semibold text-fg">Plugins</h3>
+        <h3 className="text-[13px] font-semibold text-fg">Your plugins</h3>
         <Button variant="ghost" className="h-7 gap-1 px-2 text-[12px] text-accent! hover:text-accent!" onClick={makeWithAi}>
           <Sparkles size={13} /> Make a plugin
         </Button>
@@ -139,6 +146,24 @@ export function PluginsTab() {
           <Row key={p.id} plugin={p} open={p.id === open} />
         ))}
       </ul>
+    </>
+  );
+}
+
+const TABS = [
+  { id: "installed" as const, label: "Installed" },
+  { id: "gallery" as const, label: "Gallery" },
+];
+
+/** The user's plugins, and the gallery of plugins other people wrote. */
+export function PluginsTab() {
+  const tab = useGallery((s) => s.tab);
+  return (
+    <div className="flex min-h-0 flex-1 flex-col pt-3">
+      <TabBar group="plugins" label="Plugins" tabs={TABS} value={tab} onChange={showTab} />
+      <TabPanel group="plugins" id={tab} className="flex min-h-0 flex-1 flex-col">
+        {tab === "installed" ? <Installed /> : <GalleryList />}
+      </TabPanel>
     </div>
   );
 }

@@ -1,14 +1,14 @@
 use std::path::{Path, PathBuf};
 use std::sync::{
-    Arc,
+    Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
 use std::time::Duration;
 
 use anyhow::{Result, ensure};
-use nuzky_mcp::plugins;
+use nuzky_mcp::{plugin_gallery, plugins};
 use serde_json::{Map, Value, json};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, ipc::Channel};
 
 use crate::{AppState, CmdResult, err, lock_session};
 
@@ -112,10 +112,105 @@ fn folder(id: &str) -> Result<PathBuf> {
 pub async fn remove_plugin(app: AppHandle, id: String) -> CmdResult<()> {
     tauri::async_runtime::spawn_blocking(move || {
         crate::library::to_trash(&folder(&id).map_err(err)?).map_err(err)?;
+        if let Err(error) = plugin_gallery::forget(&plugins::dir().map_err(err)?, &id) {
+            log::warn!("The gallery's record still names {id}: {error:#}");
+        }
         app.emit("plugins-changed", ()).map_err(err)
     })
     .await
     .map_err(err)?
+}
+
+/// The gallery as last read while the user had it open, and the install that runs.
+#[derive(Default)]
+pub struct GalleryState {
+    last: Mutex<Option<Arc<plugin_gallery::Gallery>>>,
+    install: Mutex<Option<Arc<AtomicBool>>>,
+}
+
+/// The gallery's plugins and what installing each would do here. `refresh` reads the gallery's list again, which the
+/// Gallery does each time it opens; otherwise the list read last is shown again.
+#[tauri::command]
+pub async fn gallery_plugins(app: AppHandle, refresh: bool) -> CmdResult<Vec<plugin_gallery::Entry>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let cached = state.gallery.last.lock().unwrap().clone();
+        let gallery = match cached {
+            Some(gallery) if !refresh => gallery,
+            _ => {
+                let gallery = Arc::new(plugin_gallery::fetch().map_err(|error| {
+                    log::warn!("Reading the plugin gallery failed: {error:#}");
+                    err(error)
+                })?);
+                *state.gallery.last.lock().unwrap() = Some(gallery.clone());
+                gallery
+            }
+        };
+        Ok(plugin_gallery::entries(&gallery, &plugins::dir().map_err(err)?))
+    })
+    .await
+    .map_err(err)?
+}
+
+/// Installs a plugin of the gallery as last read, if its entry is still the one with `key` the user saw, its old
+/// folder to the Trash when `replacing` names the state the user agreed to replace. `progress` gets the percentage
+/// downloaded. Runs none of the plugin's code.
+#[tauri::command]
+pub async fn install_gallery_plugin(
+    app: AppHandle,
+    id: String,
+    key: String,
+    replacing: Option<plugin_gallery::State>,
+    progress: Channel<u32>,
+) -> CmdResult<Vec<plugin_gallery::Entry>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let gallery = state.gallery.last.lock().unwrap().clone().ok_or("GALLERY_GONE: Open the Gallery again.")?;
+        let cancel = Arc::new(AtomicBool::new(false));
+        {
+            let mut running = state.gallery.install.lock().unwrap();
+            if running.is_some() {
+                return Err("GALLERY_INSTALLING: Another plugin is installing. Wait for it to finish.".into());
+            }
+            *running = Some(cancel.clone());
+        }
+        let installed = plugins::dir().and_then(|dir| {
+            let mut shown = 0;
+            let send = |done: f32| {
+                let percent = (done * 100.0) as u32;
+                if percent > shown {
+                    shown = percent;
+                    progress.send(percent).ok();
+                }
+            };
+            let trash = Arc::new(crate::library::to_trash);
+            plugin_gallery::install(
+                &gallery,
+                &id,
+                &key,
+                replacing,
+                &dir,
+                trash,
+                || cancel.load(Ordering::Relaxed),
+                send,
+            )?;
+            Ok(plugin_gallery::entries(&gallery, &dir))
+        });
+        *state.gallery.install.lock().unwrap() = None;
+        if installed.is_ok() {
+            app.emit("plugins-changed", ()).ok();
+        }
+        installed.map_err(err)
+    })
+    .await
+    .map_err(err)?
+}
+
+#[tauri::command]
+pub fn cancel_gallery_install(app: AppHandle) {
+    if let Some(cancel) = &*app.state::<AppState>().gallery.install.lock().unwrap() {
+        cancel.store(true, Ordering::Relaxed);
+    }
 }
 
 #[tauri::command]

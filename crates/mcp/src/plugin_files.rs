@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use crate::web_image::{DECODE_PIXELS, MAX_PIXELS, MAX_SIDE};
 
 pub(crate) const MAX_FILES: usize = 20;
-const MAX_BYTES: u64 = 20 << 20;
+pub(crate) const MAX_BYTES: u64 = 20 << 20;
 const PICTURES: [&str; 4] = ["png", "jpg", "jpeg", "webp"];
 const SOUNDS: [&str; 5] = ["mp3", "wav", "m4a", "aac", "flac"];
 const NAMES: &str = "1 to 60 letters, digits, dots, dashes and _, not starting with a dot, ending in .png, .jpg, .jpeg, .webp, .mp3, .wav, .m4a, .aac or .flac";

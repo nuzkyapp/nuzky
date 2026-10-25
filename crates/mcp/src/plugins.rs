@@ -34,8 +34,8 @@ use crate::plugin_files;
 
 pub const API: u64 = 2;
 pub const GUIDE: &str = include_str!("../../../skills/nuzky-plugin/SKILL.md");
-const MAX_SCRIPT_BYTES: u64 = 1 << 20;
-const MAX_TEXT_BYTES: u64 = 64 << 10;
+pub(crate) const MAX_SCRIPT_BYTES: u64 = 1 << 20;
+pub(crate) const MAX_TEXT_BYTES: u64 = 64 << 10;
 const MAX_TEXT_INPUT: usize = 500;
 /// The rows a plugin may give a dynamic choice, and the characters of each row's value and label.
 const MAX_ROWS: usize = 500;
@@ -333,11 +333,11 @@ fn is_color(text: &str) -> bool {
     text.len() == 7 && text.starts_with('#') && text[1..].chars().all(|c| c.is_ascii_hexdigit())
 }
 
-fn is_id(id: &str) -> bool {
+pub(crate) fn is_id(id: &str) -> bool {
     (1..=40).contains(&id.len()) && id.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
 }
 
-fn manifest(value: &Value) -> Result<Manifest> {
+pub(crate) fn manifest(value: &Value) -> Result<Manifest> {
     let api = value
         .get("nuzkyPlugin")
         .and_then(Value::as_u64)
@@ -615,8 +615,17 @@ fn open(folder: &Path) -> Result<(Manifest, Option<String>)> {
     Ok((manifest, script))
 }
 
+/// What is wrong with an effect's WGSL as the renderer checks it, starting with its file and, when it has one, the line
+/// and column. It only reads the source; nothing runs.
+pub(crate) fn effect_problem(file: &str, source: &str) -> Result<(), String> {
+    plugin_effects::check(source).map_err(|why| {
+        let separator = if why.starts_with(|c: char| c.is_ascii_digit()) { ":" } else { ": " };
+        format!("{file}{separator}{why}")
+    })
+}
+
 /// A plugin without plugin.js only adds effects, so nothing a run reads or offers may be in its manifest.
-fn only_effects(manifest: &Manifest) -> Result<()> {
+pub(crate) fn only_effects(manifest: &Manifest) -> Result<()> {
     let ran = [
         ("needs", manifest.needs.is_empty()),
         ("inputs", manifest.inputs.is_empty()),
@@ -729,10 +738,7 @@ pub fn save_with_files(
             None => read(&folder.join(&file), plugin_effects::MAX_SOURCE_BYTES)
                 .map_err(|e| anyhow!("PLUGIN_BROKEN: {file}: {e:#}; give its WGSL in effects"))?,
         };
-        plugin_effects::check(&source).map_err(|why| {
-            let separator = if why.starts_with(|c: char| c.is_ascii_digit()) { ":" } else { ": " };
-            anyhow!("PLUGIN_BROKEN: {file}{separator}{why}")
-        })?;
+        effect_problem(&file, &source).map_err(|why| anyhow!("PLUGIN_BROKEN: {why}"))?;
     }
     if let Some(script) = script {
         sandbox(script, "PLUGIN_BROKEN", SAVE_LIMIT, Rc::default(), Rc::new(|_| {}), |_, _| Ok(()))?;

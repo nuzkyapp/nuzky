@@ -3,6 +3,7 @@ import { useShallow } from "zustand/react/shallow";
 import { AudioLines, Blend, Captions, Film, Image as ImageIcon, Type } from "lucide-react";
 import { TRANSITIONS } from "../../lib/presets";
 import { useCover } from "../../lib/cover";
+import { useGallery } from "../../lib/gallery";
 import { usePlugins } from "../../lib/plugins";
 import { findClip, isCaptionTrack, mainCuts, useEditor } from "../../lib/store";
 import { formatDuration, formatTime } from "../../lib/time";
@@ -18,6 +19,7 @@ import { InspectorHeader } from "./Header";
 import { AdjustSection, AudioSection, SpeedSection, VoiceSection } from "./MediaSections";
 import { MotionSection } from "./MotionSection";
 import { MultiInspector } from "./MultiInspector";
+import { GalleryInspector } from "./GalleryInspector";
 import { PluginInspector } from "./PluginInspector";
 import { ProjectSection } from "./ProjectSection";
 import { ShapeSection } from "./ShapeSection";
@@ -127,6 +129,7 @@ export function Inspector({ width }: { width: number }) {
   const cut = useEditor((s) => s.cut);
   const cover = useCover((s) => s.open);
   const plugin = usePlugins((s) => s.list?.find((p) => p.id === s.open));
+  const shared = useGallery((s) => s.list?.find((p) => p.id === s.open));
   // Remembered per clip kind, so picking another clip keeps the tab you were on, like CapCut.
   const [chosen, setChosen] = useState<Chosen>({});
   const found = project && selection.length === 1 ? findClip(project, selection[0]) : null;
@@ -136,6 +139,7 @@ export function Inspector({ width }: { width: number }) {
   else if (cover) body = <CoverInspector format={cover} />;
   // Clips stay selectable while it shows, so a plugin can work on the selected ones.
   else if (plugin) body = <PluginInspector key={plugin.id} plugin={plugin} />;
+  else if (shared) body = <GalleryInspector key={shared.id} plugin={shared} />;
   else if (cut) body = <CutInspector clipId={cut} />;
   else if (selection.length > 1)
     body = (

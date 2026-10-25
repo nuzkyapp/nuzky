@@ -467,11 +467,16 @@ export interface PassReport {
  * Runs its `action`, the primary one when null, in a run of its own: the AI lock with Stop while it runs, and one undo
  * step. `epoch` keeps it to that project.
  */
-async function execute(p: Plugin, values: PluginValues, selection: string[], timeUs: number, action: string | null = null, epoch?: string): Promise<Ran> {
+/** `still`, for an automatic run, says right before the run starts whether its switch is still on; null when it is not. */
+async function execute(p: Plugin, values: PluginValues, selection: string[], timeUs: number, action: string | null = null, epoch?: string, still?: () => boolean): Promise<Ran | null> {
   // The last preview stays, dimmed, so the panel keeps its height while the run goes on.
   usePlugins.setState({ running: p.id, pressed: action ?? p.actions[0].id });
-  const out: { failure?: string; message?: string | null; from?: number } = {};
+  const out: { failure?: string; message?: string | null; from?: number; skipped?: boolean } = {};
   const snap = await enqueue(async (current) => {
+    if (still && !still()) {
+      out.skipped = true;
+      return null;
+    }
     out.from = useEditor.getState().snap?.revision;
     try {
       const done = await api.runPlugin(p.id, values, selection, timeUs, epoch ?? current, action);
@@ -483,6 +488,7 @@ async function execute(p: Plugin, values: PluginValues, selection: string[], tim
     }
   });
   usePlugins.setState({ running: null, pressed: null });
+  if (out.skipped) return null;
   if (out.failure !== undefined)
     return out.failure.startsWith("CANCELLED") || out.failure.startsWith("RUN_STOPPED") ? { plugin: p, did: "stopped" } : { plugin: p, did: "failed", error: out.failure, loaded: true };
   const message = out.message ?? null;
@@ -497,6 +503,7 @@ export async function runPlugin(p: Plugin, action: string | null = null) {
   if (aiLocked() || usePlugins.getState().running) return;
   const { selection, timeUs } = useEditor.getState();
   const ran = await execute(p, valuesOf(p), selection, timeUs, action);
+  if (!ran) return;
   const toast = useEditor.getState().toast;
   if (ran.did === "stopped") return toast({ kind: "info", text: `${p.name} stopped. Nothing changed.` });
   if (ran.did === "failed") return toast(failureToast(ran, null));
@@ -630,8 +637,9 @@ async function runPass(pass: Pass): Promise<PassReport> {
     const chosen = (list ?? []).filter((p) => auto[trigger].includes(p.id)).sort((a, b) => a.name.localeCompare(b.name, "en") || a.id.localeCompare(b.id, "en"));
     for (const [i, p] of chosen.entries()) {
       if (pass.cancelled) break;
-      // Turned off while an earlier one ran.
-      if (!usePlugins.getState().auto[trigger].includes(p.id)) continue;
+      // Turned off while an earlier one ran, as installing a new version from the gallery does.
+      const on = () => usePlugins.getState().auto[trigger].includes(p.id);
+      if (!on()) continue;
       const { aiRun, snap } = useEditor.getState();
       // A plugin run that has ended may not have said so yet; the backend refuses a run while another is open.
       const agent = !!aiRun && !aiRun.startsWith(PLUGIN_RUN);
@@ -642,7 +650,8 @@ async function runPass(pass: Pass): Promise<PassReport> {
         break;
       }
       usePlugins.setState({ step: { index: i + 1, total: chosen.length } });
-      const ran: Ran = p.error ? { plugin: p, did: "failed", error: p.error, loaded: false } : await execute(p, autoValues(p), [], 0, null, pass.epoch);
+      const ran = p.error ? { plugin: p, did: "failed" as const, error: p.error, loaded: false } : await execute(p, autoValues(p), [], 0, null, pass.epoch, on);
+      if (!ran) continue;
       publish({ results: [...report.results, ran] });
     }
   } finally {

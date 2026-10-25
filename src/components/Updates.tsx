@@ -103,6 +103,29 @@ export function VersionRow({ showMenu }: { showMenu: ShowMenu }) {
   );
 }
 
+/** For a gallery or plugin made for a newer Nuzky: the way to update while a newer version is out, as its menus offer it. */
+export function UpdateNuzkyButton({ className = "" }: { className?: string }) {
+  const { enabled, latest, canInstall, install } = useUpdates();
+  if (!enabled || !latest) return null;
+  if (install?.stage === "downloading" || install?.stage === "installing")
+    return (
+      <Button pill disabled disabledReason="The update is on its way." className={className}>
+        {install.stage === "downloading" ? `Downloading update…${install.percent !== null ? ` ${install.percent}%` : ""}` : "Installing update…"}
+      </Button>
+    );
+  if (install)
+    return (
+      <Button variant="primary" pill className={className} onClick={() => void restartToUpdate()}>
+        Restart to update
+      </Button>
+    );
+  return (
+    <Button variant="primary" pill className={className} onClick={() => void installUpdate()}>
+      {canInstall ? `Update to Nuzky ${latest}` : `Download Nuzky ${latest}…`}
+    </Button>
+  );
+}
+
 /** The version goes under the label: beside it, one like 0.1.1-alpha leaves the label no room in the sidebar. */
 function VersionLabel({ label, version }: { label: string; version: string | null }) {
   return (
