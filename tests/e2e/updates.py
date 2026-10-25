@@ -64,7 +64,6 @@ const p = pct.getBoundingClientRect(), s = stop.getBoundingClientRect();
 const at = (r) => document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
 return {text: label.textContent, cut: label.scrollWidth > label.clientWidth, focused: document.activeElement === b, percentShown: at(p) === pct,
         stopShown: getComputedStyle(stop).opacity === '1' && at(s)?.closest('button') === stop, apart: p.right <= s.left};"""
-# The sidebar row's lines of text as drawn, and whether each is cut with an ellipsis.
 ROW_LINES = """const b = document.querySelector('[data-version]');
 return b && [...b.querySelectorAll('span')].filter((s) => !s.children.length).map((s) => ({text: s.textContent, cut: s.scrollWidth > s.clientWidth}));"""
 BUG_TEXT = "const t = document.getElementById('bug-report-text'); return t && t.closest('dialog')?.open ? t.value : null"
