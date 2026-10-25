@@ -9,11 +9,16 @@ return {left: r.left, right: r.left + el.clientWidth, scrollLeft: el.scrollLeft,
   headers: [...el.querySelectorAll('[role=listbox]')].map((l) => l.previousElementSibling.getBoundingClientRect().left),
   labels: [...ruler.querySelectorAll('span.tabular')].map((s) => s.getBoundingClientRect().left),
   clipEnd: el.querySelector('[data-clip-id]').getBoundingClientRect().right};"""
+# Ctrl + one wheel notch out, with the pointer arguments[0] px into the lanes; returns where the scroll and zoom ended up.
+ZOOM_OUT = """const el = document.querySelector('[data-ruler]').closest('.overflow-auto'); const r = el.getBoundingClientRect();
+el.dispatchEvent(new WheelEvent('wheel', {bubbles: true, cancelable: true, ctrlKey: true, deltaY: 100, deltaMode: 0, clientX: r.left + 140 + arguments[0], clientY: r.top + 60}));"""
+SCROLL_ZOOM = "return [document.querySelector('[data-ruler]').closest('.overflow-auto').scrollLeft, window.__nuzky.store.getState().zoom]"
 TO_END = "const el = document.querySelector('[data-ruler]').closest('.overflow-auto'); el.scrollLeft = el.scrollWidth"
 
 
 @flow('timeline_scroll', 'Scrolling the timeline to its end again and again stops where the lanes end: the ruler does not '
-      'stretch it, the last clip ends in the middle of the lanes, the track headers stay put and the ruler has its times up to the right edge')
+      'stretch it, the last clip ends in the middle of the lanes, the track headers stay put, the ruler has its times up to the right edge '
+      'and zooming out there keeps the moment under the pointer')
 def timeline_scroll(r):
     r.import_media(FIXTURES / 'talk.mp4')
     r.add_clip('talk.mp4')
@@ -33,3 +38,10 @@ def timeline_scroll(r):
     # Ticks every 2 s at 60 px per second: one label within the last 120 px before the right edge.
     r.check('the ruler has its times up to the right edge', any(v['right'] - 130 <= x < v['right'] for x in v['labels']), (v['labels'], v['right']))
     r.shot('end')
+
+    left, zoom = r.s.run(SCROLL_ZOOM)
+    r.s.run(ZOOM_OUT, 100)
+    clock.sleep(0.3)
+    after, zoomed = r.s.run(SCROLL_ZOOM)
+    r.check('zooming out at the end keeps the moment under the pointer',
+            zoomed < zoom and abs((after + 100) / zoomed - (left + 100) / zoom) * zoomed < 1.5, (left, zoom, after, zoomed))

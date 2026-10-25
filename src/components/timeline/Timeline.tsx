@@ -283,9 +283,10 @@ export function Timeline({ height }: { height: number }) {
 
   const tracks = useMemo(() => (drawn ? displayTracks(drawn) : []), [drawn]);
   const duration = drawn ? contentEnd(drawn) : 0;
-  // A shorter preview never narrows the lanes, so the scroll position survives it.
+  // A shorter preview never narrows the lanes, so the scroll position survives it. Nor does anything narrow them
+  // under what is on screen: zooming out at the end keeps its anchor, and a clip dragged past the end has the ruler above it.
   const lanesShown = view.width - HEADER_W;
-  const laneWidth = Math.max(lanesShown, (Math.max(duration, project ? contentEnd(project) : 0) / US) * zoom + lanesShown / 2);
+  const laneWidth = Math.max(view.left + lanesShown, (Math.max(duration, project ? contentEnd(project) : 0) / US) * zoom + lanesShown / 2);
   // Clips get the window they draw filmstrip tiles in. It moves in steps, with at least 200 px of margin on
   // each side, so scrolling re-renders the clips once per step instead of on every scroll event.
   const windowFrom = Math.floor(view.left / VISIBLE_STEP) * VISIBLE_STEP;
