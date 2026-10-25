@@ -13,7 +13,7 @@ import { LogsButton } from "./Feedback";
 import { FormatShape } from "./home/Home";
 import { US, formatTime } from "../lib/time";
 import type { Canvas, Delivery, ExportRequest, RecapInfo } from "../lib/types";
-import { Button, Checkbox, IconButton, Menu, type MenuEntry, ProgressBar, Segmented, trapTab } from "./ui";
+import { Button, Checkbox, IconButton, Menu, type MenuEntry, Notice, ProgressBar, Segmented, trapTab } from "./ui";
 
 const RESOLUTIONS = [
   { id: 720, label: "720p" },
@@ -594,17 +594,11 @@ export function ExportDialog() {
               <span className="break-all">Saved to {job.output}</span>
             </div>
           )}
-          {job?.status === "done" && job.message && (
-            <div className="flex items-start gap-2 rounded-xl bg-warn/10 p-3 text-[13px] text-fg" role="alert">
-              <AlertTriangle size={16} className="mt-px shrink-0 text-warn" />
-              <span>{job.message}</span>
-            </div>
-          )}
+          {job?.status === "done" && job.message && <Notice kind="warn">{job.message}</Notice>}
           {asking && (
-            <div className="flex items-start gap-2 rounded-xl bg-warn/10 p-3 text-[13px] text-fg" role="alert">
-              <AlertTriangle size={16} className="mt-px shrink-0 text-warn" />
-              <span className="break-all">{asking} already exists. Replace it?</span>
-            </div>
+            <Notice kind="warn" className="break-all">
+              {asking} already exists. Replace it?
+            </Notice>
           )}
           {failed && (
             <div className="flex items-start gap-2 rounded-xl bg-danger/10 p-3 text-[13px] text-danger" role="alert">

@@ -1619,7 +1619,8 @@ impl Backend {
                 let mut done =
                     json!({"path": out, "duration_us": project.duration_us(), "preset": options.delivery, "check": check});
                 if !measured.drawn_without.is_empty() {
-                    done["warning"] = json!(nuzky_engine::plugin_effects::exported_without(&measured.drawn_without));
+                    let issues = nuzky_engine::plugin_effects::issues(&project);
+                    done["warning"] = json!(nuzky_engine::plugin_effects::exported_without(&measured.drawn_without, &issues));
                 }
                 Ok(done)
             },

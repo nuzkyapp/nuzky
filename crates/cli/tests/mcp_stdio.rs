@@ -4693,6 +4693,17 @@ fn a_plugin_effect_is_saved_checked_and_put_on_a_clip_over_stdio() {
     assert!(error.starts_with("PLUGIN_BROKEN: effects/vhs.wgsl:3:5: an effect cannot use loops"), "{error}");
     let dim =
         "fn effect(p: Pixel) -> vec4<f32> {\n    return vec4<f32>(p.color.rgb * (1.0 - p.params[0]), p.color.a);\n}\n";
+    // Without a script nothing would read a button or a file, so a manifest naming one is refused.
+    for (field, value) in [("actions", json!([{"id": "go", "label": "Go"}])), ("files", json!(["logo.png"]))] {
+        let mut runs = manifest.clone();
+        runs[field] = value;
+        let error = plugin_error(c.error("save_plugin", json!({"manifest": runs, "effects": {"vhs": dim}})));
+        assert!(error.starts_with(&format!("PLUGIN_BROKEN: plugin.json: {field} needs a plugin.js")), "{error}");
+    }
+    let mut old = manifest.clone();
+    old["nuzkyPlugin"] = json!(1);
+    let error = plugin_error(c.error("save_plugin", json!({"manifest": old, "effects": {"vhs": dim}})));
+    assert!(error.starts_with("PLUGIN_BROKEN: plugin.json: effects needs nuzkyPlugin 2"), "{error}");
     let saved = c.call("save_plugin", json!({"manifest": manifest, "effects": {"vhs": dim}}));
     assert_eq!(saved["plugin"]["status"], "ok", "{saved}");
     assert_eq!(saved["plugin"]["runs"], false, "{saved}");

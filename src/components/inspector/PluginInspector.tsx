@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type RefObject } from "react";
 import { Eye, MoreHorizontal, Sparkles, X } from "lucide-react";
 import { describePeek } from "../../lib/peek";
-import { fixable, fixWithAi, own, plainDetail, pluginBlocked, previewPlugin, runPlugin, setAuto, setValue, shownInputs, usePlugins, valuesFor, type Plugin, type PluginInput, type PluginRow, type PluginValue, type Trigger } from "../../lib/plugins";
+import { ADD_EFFECTS, fixable, fixWithAi, own, plainDetail, pluginBlocked, previewPlugin, runPlugin, setAuto, setValue, shownInputs, usePlugins, valuesFor, type Plugin, type PluginInput, type PluginRow, type PluginValue, type Trigger } from "../../lib/plugins";
 import { useSpeech, useTranscriptView } from "../../lib/speech";
 import { useEditor } from "../../lib/store";
 import { Select } from "../panel/SpeechControls";
@@ -182,6 +182,7 @@ function PluginBody({ plugin: p, primary }: { plugin: Plugin; primary: RefObject
           </Section>
         ))}
         <LockReason.Provider value={null}>
+          {p.effects.length > 0 && <PluginEffects plugin={p} />}
           <AutoSwitches plugin={p} />
         </LockReason.Provider>
       </div>
@@ -260,6 +261,28 @@ function AutoSwitches({ plugin: p }: { plugin: Plugin }) {
   );
 }
 
+/** The looks the plugin adds, each saying when it can't draw, and where they are added. */
+function PluginEffects({ plugin: p }: { plugin: Plugin }) {
+  return (
+    <Section title="Effects">
+      {p.effects.map((e) => (
+        <div key={e.id} data-plugin-effect={e.id} className="flex flex-col items-start gap-1">
+          <span className="text-[12px] font-medium text-fg/80">{e.name}</span>
+          {e.error && (
+            <>
+              <p className="text-[12px] text-warn">Can’t draw: {plainDetail(e.error)}</p>
+              <Button variant="ghost" className="-ml-2 h-7 gap-1 px-2 text-[12px] text-accent! hover:text-accent!" onClick={() => fixWithAi(p, e.error ?? "")}>
+                <Sparkles size={13} /> Fix with AI
+              </Button>
+            </>
+          )}
+        </div>
+      ))}
+      <p className="text-[12px] text-muted">{p.runs ? ADD_EFFECTS : pluginBlocked(p, false)}</p>
+    </Section>
+  );
+}
+
 /** The chosen plugin's settings, what it would change, and its button. Closing it brings back what the inspector showed. */
 export function PluginInspector({ plugin: p }: { plugin: Plugin }) {
   const [menu, setMenu] = useState<{ x: number; y: number; keyboard: boolean } | null>(null);
@@ -308,15 +331,7 @@ export function PluginInspector({ plugin: p }: { plugin: Plugin }) {
           </div>
         ) : !p.runs ? (
           <div className="min-h-0 flex-1 overflow-y-auto">
-            <section className="flex flex-col gap-2.5 px-4 py-4">
-              {p.effects.map((e) => (
-                <div key={e.id} className="flex flex-col gap-1">
-                  <span className="text-[13px] font-medium text-fg">{e.name}</span>
-                  {e.error && <p className="text-[12px] text-danger">Can’t draw: {plainDetail(e.error)}</p>}
-                </div>
-              ))}
-              <p className="text-[12px] text-muted">{pluginBlocked(p, false)}</p>
-            </section>
+            <PluginEffects plugin={p} />
           </div>
         ) : (
           <AiLock>

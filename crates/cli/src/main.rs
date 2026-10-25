@@ -370,7 +370,11 @@ fn main() -> Result<()> {
             })?;
             eprintln!("Exported {out} in {:?}", start.elapsed());
             if !measured.drawn_without.is_empty() {
-                eprintln!("Warning: {}", nuzky_engine::plugin_effects::exported_without(&measured.drawn_without));
+                let issues = nuzky_engine::plugin_effects::issues(&project);
+                eprintln!(
+                    "Warning: {}",
+                    nuzky_engine::plugin_effects::exported_without(&measured.drawn_without, &issues)
+                );
                 warn_effects(&project);
             }
         }

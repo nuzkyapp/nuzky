@@ -1,7 +1,7 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { AlertTriangle, FolderOpen, MoreHorizontal, Puzzle, Sparkles, Trash2 } from "lucide-react";
 import { api, errorText } from "../../lib/api";
-import { askAi, changeWithAi, fixable, fixWithAi, loadPlugins, makeWithAi, openPlugin, plainDetail, removePlugin, usePlugins, type Plugin } from "../../lib/plugins";
+import { askAi, brokenEffects, changeWithAi, fixable, fixWithAi, loadPlugins, makeWithAi, openPlugin, plainDetail, removePlugin, usePlugins, type Plugin } from "../../lib/plugins";
 import { useEditor } from "../../lib/store";
 import { Button, IconButton, Menu, lockedProps, useLockReason, type MenuEntry } from "../ui";
 
@@ -36,6 +36,7 @@ export function pluginMenu(p: Plugin): MenuEntry[] {
 
 function Row({ plugin: p, open }: { plugin: Plugin; open: boolean }) {
   const runs = usePlugins((s) => [s.auto.import.includes(p.id) && "After import", s.auto.export.includes(p.id) && "Before export"].filter(Boolean).join(" · "));
+  const broken = brokenEffects(p);
   const [menu, setMenu] = useState<{ x: number; y: number; keyboard: boolean } | null>(null);
   const showMenu = (e: MouseEvent<HTMLButtonElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
@@ -57,6 +58,10 @@ function Row({ plugin: p, open }: { plugin: Plugin; open: boolean }) {
             <span className="line-clamp-2 text-[12px] text-danger">
               {runs && <span className="text-muted">{runs} · </span>}Can’t load: {plainDetail(p.error)}
             </span>
+          ) : broken.length > 0 ? (
+            <span className="truncate text-[12px] text-warn">
+              {runs && <span className="text-muted">{runs} · </span>}Can’t draw {broken.map((e) => e.name).join(", ")}
+            </span>
           ) : (
             <span className="truncate text-[12px] text-muted">{[runs, p.description].filter(Boolean).join(" · ")}</span>
           )}
@@ -64,6 +69,11 @@ function Row({ plugin: p, open }: { plugin: Plugin; open: boolean }) {
       </button>
       {p.error && fixable(p.error) && (
         <Button variant="ghost" className="h-7 shrink-0 gap-1 px-2 text-[12px] text-accent! hover:text-accent!" onClick={() => fixWithAi(p, p.error ?? "")}>
+          <Sparkles size={13} /> Fix with AI
+        </Button>
+      )}
+      {!p.error && broken.length > 0 && (
+        <Button variant="ghost" className="h-7 shrink-0 gap-1 px-2 text-[12px] text-accent! hover:text-accent!" onClick={() => fixWithAi(p, broken.map((e) => e.error).join("\n"))}>
           <Sparkles size={13} /> Fix with AI
         </Button>
       )}

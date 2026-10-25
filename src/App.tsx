@@ -29,7 +29,7 @@ import { newProjectFromMedia, openProject, refreshLibrary, showHome, trashProjec
 import { checkForUpdates, startUpdates, useUpdates } from "./lib/updates";
 import { useSounds } from "./lib/sounds";
 import { useStickers } from "./lib/stickers";
-import { listenEffects, listenPlugins, usePlugins } from "./lib/plugins";
+import { listenEffects, listenPlugins, usePlugins, warnExported } from "./lib/plugins";
 import { exportVideo } from "./components/ExportDialog";
 import { addProjects, findDrafts, listenStyle, loadStyle, useStyle } from "./lib/style";
 import { closeCover, closeExport, deleteOverlay, deleteText, exportCover, loadModels as loadVisionModels, onCoverJob, selectedOverlay, useCover } from "./lib/cover";
@@ -216,8 +216,8 @@ function onJob(job: JobEvent) {
   if (job.kind === "beats" && job.status === "done") onBeatsFound(job.id.slice("beats:".length));
   if (job.kind === "beats" && job.status === "failed") toast({ kind: "error", text: `The beat could not be found: ${plainError(job.message ?? "")}` });
   if (job.kind === "captions" && job.status === "done") toast({ kind: "success", text: `Added ${job.output ?? "captions"}` });
-  // An export drawn without a missing or broken plugin effect says so, also when its dialog is closed.
-  if (job.kind === "export" && job.status === "done" && job.message) toast({ kind: "warning", text: job.message });
+  // The dialog says what an export was drawn without; with it closed a toast does, unless one already names it.
+  if (job.kind === "export" && job.status === "done" && job.message && !exportOpen) warnExported(job.message);
   // The panel shows the failure too, with Open logs folder. In another project the toast goes.
   const retry = { label: "Try again", run: () => retrySpeech(job.id), valid: () => canRetrySpeech(job.id) };
   if (job.kind === "captions" && job.status === "failed") toast({ kind: "error", text: `Captions failed: ${plainError(job.message ?? "")}`, action: retry });

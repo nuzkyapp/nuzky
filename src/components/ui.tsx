@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type ComponentProps, type CSSProperties, type KeyboardEvent, type ReactNode, type Ref } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronDown, ChevronRight, Minus, Search, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, ChevronRight, Minus, Search, X } from "lucide-react";
 import { followPointer } from "../lib/drag";
 import { fontCss } from "../lib/fonts";
 import { AI_EDITING, useAiLocked } from "../lib/store";
@@ -442,6 +442,18 @@ export function Section({ title, children, actions, ref }: { title?: string; chi
       )}
       {children}
     </section>
+  );
+}
+
+const NOTICES = { warn: { box: "bg-warn/10", icon: <AlertTriangle size={16} className="mt-px shrink-0 text-warn" /> } };
+
+/** A tinted box with an icon for what a dialog reports, such as what an export was drawn without. `className` is for the text. */
+export function Notice({ kind, children, className = "" }: { kind: keyof typeof NOTICES; children: ReactNode; className?: string }) {
+  return (
+    <div className={`flex items-start gap-2 rounded-xl p-3 text-[13px] text-fg ${NOTICES[kind].box}`} role="alert">
+      {NOTICES[kind].icon}
+      <span className={className}>{children}</span>
+    </div>
   );
 }
 

@@ -625,7 +625,9 @@ fn only_effects(manifest: &Manifest) -> Result<()> {
         ("files", manifest.files.is_empty()),
     ];
     match ran.into_iter().find(|(_, empty)| !empty) {
-        Some((field, _)) => bail!("PLUGIN_BROKEN: plugin.json: {field} needs a plugin.js to run; a plugin with only effects has none"),
+        Some((field, _)) => {
+            bail!("PLUGIN_BROKEN: plugin.json: {field} needs a plugin.js to run; a plugin with only effects has none")
+        }
         None => Ok(()),
     }
 }

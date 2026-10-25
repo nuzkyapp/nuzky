@@ -105,7 +105,7 @@ fn a_project_whose_plugin_is_missing_saves_frames_and_exports_without_the_effect
     };
     let (exported_plain, _) = export(&plain, "plain.mp4");
     let (exported, said) = export(&with, "missing.mp4");
-    assert!(said.contains("Warning: Exported without Scanlines"), "{said}");
+    assert!(said.contains("Warning: Exported without Scanlines: it isn't installed on this computer."), "{said}");
     let error = mae(&exported, &exported_plain);
     assert!(error < 0.5, "the export without the plugin is the export without the effect: MAE {error}");
 

@@ -8,7 +8,7 @@ import { COVER_FORMATS, coverFormat, openCover, thumbnailOf, useCover } from "..
 import { currentEpoch, useEditor } from "../../lib/store";
 import { formatTime } from "../../lib/time";
 import type { ThumbnailFormat } from "../../lib/types";
-import { Button, ProgressBar, Segmented } from "../ui";
+import { Button, Notice, ProgressBar, Segmented } from "../ui";
 
 type Kind = "png" | "jpg";
 const KIND_KEY = "nuzky.coverExport";
@@ -154,10 +154,9 @@ export function CoverExport({ close, onFacts }: { close: () => void; onFacts: (f
           </div>
         )}
         {replacing && (
-          <div className="flex items-start gap-2 rounded-xl bg-warn/10 p-3 text-[13px] text-fg" role="alert">
-            <AlertTriangle size={16} className="mt-px shrink-0 text-warn" />
-            <span className="break-all">{fileName(replacing)} already exists. Replace it?</span>
-          </div>
+          <Notice kind="warn" className="break-all">
+            {fileName(replacing)} already exists. Replace it?
+          </Notice>
         )}
         {failed && (
           <div className="flex items-start gap-2 rounded-xl bg-danger/10 p-3 text-[13px] text-danger" role="alert">

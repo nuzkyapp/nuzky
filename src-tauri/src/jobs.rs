@@ -500,7 +500,8 @@ pub fn start_export(
             let done = result.is_ok() && !cancelled;
             let without = result.as_ref().map_or(&[][..], |measured| &measured.drawn_without[..]);
             if !without.is_empty() {
-                rep.note(Some(nuzky_engine::plugin_effects::exported_without(without)));
+                let issues = nuzky_engine::plugin_effects::issues(&project);
+                rep.note(Some(nuzky_engine::plugin_effects::exported_without(without, &issues)));
             }
             rep.finish(result.map(|_| Some(out.to_string_lossy().into_owned())), cancelled);
             unregister(&app, &job_id);

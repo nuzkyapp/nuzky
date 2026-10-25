@@ -821,15 +821,38 @@ pub fn issues_in(project: &Project, dir: Option<&Path>) -> Vec<EffectIssue> {
     out
 }
 
-/// "Exported without VHS and Glitch: they are missing on this computer or failed to draw."
-pub fn exported_without(names: &[String]) -> String {
-    let list = match names {
-        [] => return String::new(),
-        [one] => one.clone(),
-        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+/// "Exported without VHS: it isn't installed on this computer.", from the names an export was drawn without and
+/// the project's `issues`; a name they no longer list failed while it drew.
+pub fn exported_without(names: &[String], issues: &[EffectIssue]) -> String {
+    if names.is_empty() {
+        return String::new();
+    }
+    let (missing, broken): (Vec<&String>, Vec<&String>) =
+        names.iter().partition(|name| issues.iter().any(|i| &i.name == *name && i.broken.is_none()));
+    let all: Vec<&String> = names.iter().collect();
+    let why = match (missing.len(), broken.len()) {
+        (1, 0) => "it isn't installed on this computer".to_owned(),
+        (_, 0) => "they aren't installed on this computer".to_owned(),
+        (0, 1) => "it has an error".to_owned(),
+        (0, _) => "they have errors".to_owned(),
+        (m, b) => format!(
+            "{} {} installed on this computer, and {} {}",
+            listed(&missing),
+            if m == 1 { "isn't" } else { "aren't" },
+            listed(&broken),
+            if b == 1 { "has an error" } else { "have errors" }
+        ),
     };
-    let (they, are) = if names.len() == 1 { ("it", "is") } else { ("they", "are") };
-    format!("Exported without {list}: {they} {are} missing on this computer or failed to draw.")
+    format!("Exported without {}: {why}.", listed(&all))
+}
+
+/// "VHS, Glitch and Grain".
+fn listed(names: &[&String]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => one.to_string(),
+        [rest @ .., last] => format!("{} and {last}", rest.iter().map(|n| n.as_str()).collect::<Vec<_>>().join(", ")),
+    }
 }
 
 /// What to call an effect in a message.
@@ -1025,5 +1048,29 @@ fn effect(p: Pixel) -> vec4<f32> {
             ..def
         };
         assert!(check_defs(&[too_many]).unwrap_err().contains("18 floats"));
+    }
+
+    #[test]
+    fn an_export_says_which_effects_are_missing_and_which_have_errors() {
+        let issue = |name: &str, broken: Option<&str>| EffectIssue {
+            plugin: name.to_lowercase(),
+            effect: name.to_lowercase(),
+            name: name.into(),
+            broken: broken.map(Into::into),
+            clip_ids: vec![],
+            message: String::new(),
+        };
+        let issues = [issue("VHS", None), issue("Grain", None), issue("Glitch", Some("effects/glitch.wgsl: time-out"))];
+        let said = |names: &[&str]| exported_without(&names.iter().map(|n| n.to_string()).collect::<Vec<_>>(), &issues);
+        assert_eq!(said(&["VHS"]), "Exported without VHS: it isn't installed on this computer.");
+        assert_eq!(said(&["VHS", "Grain"]), "Exported without VHS and Grain: they aren't installed on this computer.");
+        assert_eq!(said(&["Glitch"]), "Exported without Glitch: it has an error.");
+        // A name the issues no longer list stopped drawing during the export.
+        assert_eq!(said(&["Glitch", "Fixed"]), "Exported without Glitch and Fixed: they have errors.");
+        assert_eq!(
+            said(&["VHS", "Grain", "Glitch"]),
+            "Exported without VHS, Grain and Glitch: VHS and Grain aren't installed on this computer, and Glitch has an error."
+        );
+        assert_eq!(said(&[]), "");
     }
 }
