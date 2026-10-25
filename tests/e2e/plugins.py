@@ -1,7 +1,10 @@
 import json
 import shutil
+import subprocess
+import time
+from pathlib import Path
 
-from e2e.harness import FIXTURES, ROOT, Bridge, flow, wait
+from e2e.harness import CLI, FIXTURES, ROOT, Bridge, export, flow, leave_editor, wait
 
 EXAMPLE = ROOT / 'skills/nuzky-plugin/examples/remove-short-clips'
 ROW = "document.querySelector('[data-plugin=\"remove-short-clips\"]')"
@@ -202,4 +205,118 @@ def plugin_pauses(r):
     r.shot('pauses-done')
     r.s.call('window.__nuzky.store.getState().undo()')
     r.check('one undo brings the pauses back', wait(lambda: project(r) == before, 5), project(r))
+    r.check('no error toast', not r.errors(), r.errors())
+
+
+LOGO_SCRIPT = '''function run(ctx) {
+  const logo = ctx.files["logo.png"];
+  const end = ctx.project.duration_us;
+  if (end === 0) return {edits: [], message: "Add a video first."};
+  return {edits: [{type: "addSticker", assetId: logo.assetId, startUs: 0, durationUs: end,
+    transform: {x: 0.35, y: -0.35, scale: 0.2, rotation: 0, opacity: 1}}], message: "Added the logo."};
+}'''
+LOGO_TRANSFORM = {'x': 0.35, 'y': -0.35, 'scale': 0.2}
+
+
+def white(image, box):
+    """Share of the box in the logo's white; the test pattern's bars are all saturated colours."""
+    import numpy as np
+    a = np.asarray(image.convert('RGB').crop(tuple(round(v) for v in box)), dtype=int)
+    return float(((a > 215).all(axis=-1)).mean())
+
+
+def logo_box(image, canvas):
+    """The middle half of where the logo lies in a frame of `canvas`'s shape: a square logo at scale 0.2 is a fifth of
+    the canvas's shorter side."""
+    k = image.width / canvas['width']
+    side = LOGO_TRANSFORM['scale'] * min(canvas['width'], canvas['height']) * k
+    cx = (0.5 + LOGO_TRANSFORM['x']) * image.width
+    cy = (0.5 + LOGO_TRANSFORM['y']) * image.height
+    return (cx - side / 4, cy - side / 4, cx + side / 4, cy + side / 4)
+
+
+def exported_frame(r, video, name):
+    from PIL import Image
+    path = r.work / f'{name}.png'
+    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-ss', '1', '-i', str(video), '-frames:v', '1', '-update', '1', str(path)],
+                   check=True)
+    r.shots.append(path.name)
+    return Image.open(path)
+
+
+@flow('plugin_files', 'A plugin an agent saved with its own logo previews "Adds logo.png" without changing anything, '
+      'puts the logo in the top right corner as one undo step and the export shows it there; after the plugin is '
+      'deleted the project opens again and still exports the logo')
+def plugin_files(r):
+    from PIL import Image
+    r.import_media(FIXTURES / 'talk.mp4')
+    r.add_clip('talk.mp4')
+    canvas = project(r)['canvas']
+    source = r.work / 'brand-logo.png'
+    Image.new('RGB', (256, 256), (255, 255, 255)).save(source)
+    time.sleep(1.5)  # `nuzky frame` reads the saved file, written about a second after an edit.
+    plain = r.work / 'plain.png'
+    subprocess.run([str(CLI), 'frame', str(r.saved_project()), '1', str(plain), '720'], env=r.launch_env(), check=True,
+                   capture_output=True)
+    r.check('the video alone has no white where the logo will go',
+            white(Image.open(plain), logo_box(Image.open(plain), canvas)) < 0.01)
+
+    manifest = {'nuzkyPlugin': 2, 'id': 'corner-logo', 'name': 'Corner logo', 'version': '1.0.0', 'action': 'Add logo',
+                'description': 'Puts your logo in the top right corner for the whole video.', 'files': ['logo.png']}
+    bridge = Bridge(r, r.saved_project())
+    try:
+        saved = bridge.call('save_plugin', {'manifest': manifest, 'script': LOGO_SCRIPT, 'files': {'logo.png': str(source)}})
+    finally:
+        bridge.close()
+    folder = r.work / 'data/nuzky/plugins/corner-logo'
+    r.check('save_plugin copies the agent\'s logo into the plugin\'s folder',
+            saved['plugin']['status'] == 'ok' and (folder / 'logo.png').read_bytes() == source.read_bytes(), saved)
+
+    before = project(r)
+    r.s.run("[...document.querySelectorAll('[role=tab]')].find((b) => b.textContent === 'Plugins').click()")
+    row = "document.querySelector('[data-plugin=\"corner-logo\"]')"
+    r.check('the Plugins tab lists the plugin', wait(lambda: r.s.run(f'return !!{row}'), 10))
+    r.s.run(f'{row}.click()')
+    said = wait(lambda: (t := r.s.run("return document.body.textContent")) and 'Puts logo.png in Media' in t and t, 10)
+    r.check('the preview says it adds the logo to the video and to Media', said and 'Adds logo.png' in said and 'Marked on the timeline' not in said)
+    r.check('the preview changes nothing in the project', project(r) == before)
+    r.shot('preview')
+
+    r.s.run("[...document.querySelectorAll('button')].find((b) => b.textContent === 'Add logo').click()")
+    logo = wait(lambda: next((a for a in project(r)['assets'] if a['name'] == 'logo.png'), None), 10)
+    if not r.check('running adds logo.png to the project', logo, project(r)['assets']):
+        return
+    kept = Path(logo['path'])
+    r.check('the project keeps its own copy of the logo, outside the plugin\'s folder',
+            kept.is_file() and kept.parent.name == 'plugin-files' and 'plugins' not in kept.parts, logo['path'])
+    placed = [c for t in project(r)['tracks'][1:] for c in t['clips'] if c['content'].get('assetId') == logo['id']]
+    r.check('the logo lies over the whole video in the top right corner',
+            len(placed) == 1 and placed[0]['startUs'] == 0 and placed[0]['durationUs'] == r.track()[0]['durationUs']
+            and all(abs(placed[0]['content']['transform'][k] - v) < 1e-6 for k, v in LOGO_TRANSFORM.items()), placed)
+    r.check('the plugin message reaches the success toast', wait(lambda: any(
+        t['kind'] == 'success' and t['text'] == 'Added the logo.' for t in r.state()['toasts']), 5), r.state()['toasts'])
+    r.s.run('window.__nuzky.store.getState().select([])')
+    r.shot('done')
+    r.s.call('window.__nuzky.store.getState().undo()')
+    r.check('one undo takes away the logo and its media', wait(lambda: project(r) == before, 5))
+    r.s.call('window.__nuzky.store.getState().redo()')
+    r.check('redo brings both back', wait(lambda: any(a['id'] == logo['id'] for a in project(r)['assets']), 5))
+
+    frame = exported_frame(r, export(r, 'with-logo.mp4'), 'export-with-logo')
+    share = white(frame, logo_box(frame, canvas))
+    r.check('the export shows the logo in the top right corner', share > 0.9, f'{share:.0%} of the box is the logo')
+
+    r.s.run("document.querySelector('[aria-label=\"Close plugin\"]').click()")
+    shutil.rmtree(folder)
+    r.check('the deleted plugin leaves the list', wait(lambda: r.s.run(f'return !{row}'), 5))
+    leave_editor(r)
+    path = str(r.saved_project())
+    r.s.run('window.__nuzky.openProject({path: arguments[0], name: "reopened"})', path)
+    reopened = wait(lambda: r.s.run("const s = window.__nuzky.store.getState(); return s.view === 'editor' && s.snap?.project",
+                                    retries=3), 20)
+    r.check('the project opens again without the plugin, with its logo', reopened and any(
+        a['id'] == logo['id'] and a['path'] == logo['path'] for a in reopened['assets']), reopened and reopened['assets'])
+    frame = exported_frame(r, export(r, 'after-delete.mp4'), 'export-after-delete')
+    share = white(frame, logo_box(frame, canvas))
+    r.check('it still exports the logo in the corner', share > 0.9, f'{share:.0%} of the box is the logo')
     r.check('no error toast', not r.errors(), r.errors())

@@ -88,12 +88,16 @@ pub struct ListPlugins {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SavePlugin {
-    /// plugin.json: {nuzkyPlugin: 2, id, name, description, version, action?, needs?, inputs?}.
+    /// plugin.json: {nuzkyPlugin: 2, id, name, description, version, action?, needs?, inputs?, files?}.
     pub manifest: serde_json::Value,
     /// plugin.js, which defines function run(ctx).
     pub script: String,
     /// README.md; left out keeps the plugin's README.
     pub readme: Option<String>,
+    /// Pictures and sounds to copy into the plugin's folder: a name from the manifest's files, such as "logo.png",
+    /// to the absolute path of a file you have. A file the folder already has can be left out.
+    #[serde(default)]
+    pub files: std::collections::BTreeMap<String, std::path::PathBuf>,
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

@@ -24,11 +24,11 @@ use url::Url;
 
 const MAX_URL_CHARS: usize = 2048;
 const MAX_BYTES: usize = 20 << 20;
-const MAX_SIDE: usize = 8192;
-const MAX_PIXELS: usize = 25_000_000;
+pub(crate) const MAX_SIDE: usize = 8192;
+pub(crate) const MAX_PIXELS: usize = 25_000_000;
 /// FFmpeg counts a frame's pixels with its width rounded up to a multiple of as much as 64, so a picture within the
 /// limits can count a little more.
-const DECODE_PIXELS: usize = MAX_PIXELS + 64 * MAX_SIDE;
+pub(crate) const DECODE_PIXELS: usize = MAX_PIXELS + 64 * MAX_SIDE;
 /// The long side an SVG is drawn at.
 const SVG_PX: u32 = 2048;
 const MAX_PICTURES: usize = 12;

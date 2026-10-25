@@ -70,18 +70,20 @@ function useOutcome(p: Plugin, key: string) {
   const { view } = useTranscriptView();
   const blocked = pluginBlocked(p, !!view?.words.length);
   // Undo's words do not name every change (a background, a thumbnail), so "nothing" means the same project.
-  const lines = useMemo(() => {
-    if (!preview?.project || !snap) return null;
-    if (JSON.stringify(preview.project) === JSON.stringify(snap.project)) return [];
-    const said = describePeek(snap.project, preview.project).lines;
-    return said.length ? said : ["Changes the project"];
+  const { lines, marked } = useMemo(() => {
+    if (!preview?.project || !snap) return { lines: null, marked: false };
+    if (JSON.stringify(preview.project) === JSON.stringify(snap.project)) return { lines: [], marked: false };
+    const said = describePeek(snap.project, preview.project, true);
+    // The timeline marks only clips it already shows, never ones the plugin would add.
+    const shown = new Set(snap.project.tracks.flatMap((t) => t.clips.map((c) => c.id)));
+    return { lines: said.lines.length ? said.lines : ["Changes the project"], marked: [...said.marks.keys()].some((id) => shown.has(id)) };
   }, [preview, snap]);
-  if (blocked) return { blocked, lines: null, stale: false, waiting: false };
-  if (!preview) return { blocked: null, lines: null, stale: true, waiting: false };
+  if (blocked) return { blocked, lines: null, marked, stale: false, waiting: false };
+  if (!preview) return { blocked: null, lines: null, marked, stale: true, waiting: false };
   const stale = preview.key !== key || preview.revision !== snap?.revision;
-  if (preview.error) return { blocked: preview.error, lines: null, stale, waiting: preview.waiting };
-  if (lines && lines.length === 0) return { blocked: "Nothing left to change.", lines: null, stale, waiting: false };
-  return { blocked: null, lines, stale, waiting: false };
+  if (preview.error) return { blocked: preview.error, lines: null, marked, stale, waiting: preview.waiting };
+  if (lines && lines.length === 0) return { blocked: "Nothing left to change.", lines: null, marked, stale, waiting: false };
+  return { blocked: null, lines, marked, stale, waiting: false };
 }
 
 function PluginBody({ plugin: p }: { plugin: Plugin }) {
@@ -117,7 +119,7 @@ function PluginBody({ plugin: p }: { plugin: Plugin }) {
           <div className={`flex gap-2 text-[12px] text-fg/85 transition-opacity duration-[120ms] ${outcome.stale ? "opacity-50" : ""}`}>
             <Eye size={14} className="mt-px shrink-0 text-muted" aria-hidden />
             <span>
-              {outcome.lines.slice(0, 3).join(". ")}. <span className="text-muted">Marked on the timeline.</span>
+              {outcome.lines.slice(0, 3).join(". ")}.{outcome.marked && <span className="text-muted"> Marked on the timeline.</span>}
             </span>
           </div>
         )}

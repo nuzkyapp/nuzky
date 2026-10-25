@@ -276,7 +276,7 @@ impl Backend {
             }
             "save_plugin" => {
                 let a: SavePlugin = parse(arguments)?;
-                Ok(json!({"plugin": plugins::save(&a.manifest, &a.script, a.readme.as_deref())?}))
+                Ok(json!({"plugin": plugins::save_with_files(&a.manifest, &a.script, a.readme.as_deref(), &a.files)?}))
             }
             "run_plugin" => self.run_plugin(parse(arguments)?, state),
             "suggest_options" => {
