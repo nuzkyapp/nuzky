@@ -35,9 +35,6 @@ function Confidence({ c }: { c: StyleConfidence }) {
 
 const MOMENTS_SHOWN = 4;
 
-/** A value as a change shows it; the whole rule is in Show moments and EDIT.md. */
-const short = (value: string | null) => (value === null ? "none" : value.length > 60 ? `${value.slice(0, 59)}…` : value);
-
 function SuggestionCard({ s, busy }: { s: Suggestion; busy: boolean }) {
   const [open, setOpen] = useState(false);
   const [all, setAll] = useState(false);
@@ -56,7 +53,13 @@ function SuggestionCard({ s, busy }: { s: Suggestion; busy: boolean }) {
               {s.changes.map((c, i) => (
                 <span key={c.name}>
                   {i > 0 && " · "}
-                  {c.name}: {short(c.from)} → <span className="text-fg">{short(c.to)}</span>
+                  {c.to === null ? (
+                    `${c.name} removed`
+                  ) : (
+                    <>
+                      {c.name}: {c.from ?? "none"} → <span className="text-fg">{c.to}</span>
+                    </>
+                  )}
                 </span>
               ))}
             </p>

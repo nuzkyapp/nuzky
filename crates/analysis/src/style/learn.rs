@@ -1424,7 +1424,13 @@ fn spelling(sources: &[Source], say: &dyn Fn(&[Example]) -> String) -> Option<Ru
     }
     let mut left = std::collections::HashMap::new();
     for word in sources.iter().flat_map(|s| s.cut_words) {
-        *left.entry(bare(&word.text).to_lowercase()).or_insert(0) += 1;
+        *left.entry(bare(&word.text).to_lowercase()).or_insert(0_usize) += 1;
+    }
+    // A corrected word reads its correction in the cut, which is not the word left as heard.
+    for (_, text, _) in &found {
+        if let Some(n) = left.get_mut(&text.to_lowercase()) {
+            *n = n.saturating_sub(1);
+        }
     }
     // The rule corrects a word wherever it is heard, so it takes only words misheard: corrected to
     // the same word every time and more often than left as heard. A word corrected for its
@@ -1442,7 +1448,7 @@ fn spelling(sources: &[Source], say: &dyn Fn(&[Example]) -> String) -> Option<Ru
     }
     let mut rows: Vec<(String, String, usize)> = Vec::new();
     for (heard, text, _) in &found {
-        match rows.iter_mut().find(|r| &r.0 == heard && &r.1 == text) {
+        match rows.iter_mut().find(|r| &r.0 == heard) {
             Some(row) => row.2 += 1,
             None => rows.push((heard.clone(), text.clone(), 1)),
         }
@@ -1778,11 +1784,18 @@ mod tests {
 
     #[test]
     fn spelling_takes_only_misheard_words() {
-        let (words, cut_words, alignment, picture) = fixture();
+        let (words, mut cut_words, alignment, picture) = fixture();
+        for text in ["there", "their"] {
+            cut_words.push(Word { start_us: 29_000_000, end_us: 29_200_000, text: text.into(), probability: 1.0 });
+        }
         let fix = |heard: &str, text: &str| Correction { time_us: 1_000_000, heard: heard.into(), text: text.into() };
         let corrections = [
             fix("grogbot", "Grokbot."),
             fix("Grogbot", "Grokbot"),
+            fix("grogbot", "grokbot"),
+            // Their only "their" in the cut is the correction of "they're".
+            fix("their", "there"),
+            fix("they're", "their"),
             fix("nahrane", "na hraně"),
             fix("A", "a"),
             fix("bota", ""),
@@ -1805,10 +1818,21 @@ mod tests {
             corrections: &corrections,
         };
         let rule = spelling(&[source], &|_| String::new()).expect("three misheard words are a rule");
-        assert_eq!(rule.summary, r#"Write "grogbot" as "Grokbot", "nahrane" as "na hraně""#);
+        assert_eq!(
+            rule.summary,
+            r#"Write "grogbot" as "Grokbot", "nahrane" as "na hraně", "their" as "there" and 1 more"#
+        );
         let choices: Vec<_> = rule.choices.iter().map(|c| (c.name.as_str(), c.value.as_str())).collect();
-        assert_eq!(choices, [(r#""grogbot""#, r#""Grokbot""#), (r#""nahrane""#, r#""na hraně""#)]);
-        assert_eq!(rule.moments.len(), 3);
+        assert_eq!(
+            choices,
+            [
+                (r#""grogbot""#, r#""Grokbot""#),
+                (r#""nahrane""#, r#""na hraně""#),
+                (r#""their""#, r#""there""#),
+                (r#""they're""#, r#""their""#)
+            ]
+        );
+        assert_eq!(rule.moments.len(), 6);
     }
 
     #[test]

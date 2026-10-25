@@ -55,7 +55,26 @@ pub enum Frozen {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 struct Accepted {
     summary: String,
+    #[serde(deserialize_with = "choices")]
     choices: Vec<Choice>,
+}
+
+/// Spelling once held every word in one "Corrections" choice; read as a choice per word, a
+/// Spelling accepted then still matches what learning finds now.
+fn choices<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Vec<Choice>, D::Error> {
+    let mut choices = Vec::<Choice>::deserialize(d)?;
+    if let [one] = choices.as_slice()
+        && one.name == "Corrections"
+        && let Some(pairs) = one.value.strip_prefix('"').and_then(|v| v.strip_suffix('"'))
+    {
+        choices = pairs
+            .split("\", \"")
+            .filter_map(|pair| pair.split_once("\" as \""))
+            .map(|(heard, text)| Choice { name: format!("\"{heard}\""), value: format!("\"{text}\""), number: None })
+            .collect();
+        choices.sort_by(|a, b| a.name.cmp(&b.name).then(a.value.cmp(&b.value)));
+    }
+    Ok(choices)
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -2149,6 +2168,12 @@ mod tests {
         let rules = learning::learned(&[evidence.source()]).rules;
         let rule = rules.iter().find(|r| r.title == "Spelling").unwrap();
         assert_eq!(rule.summary, r#"Write "w00" as "Nuzky", "w01" as "Nuzky", "w02" as "Nuzky""#);
+        let before = r#"{"summary":"","choices":[{"name":"Corrections","value":"\"w00\" as \"Nuzky\", \"w01\" as \"Nuzky\", \"w02\" as \"Nuzky\""}]}"#;
+        let before: Accepted = serde_json::from_str(before).unwrap();
+        assert!(
+            Rule::same(&before.choices, &rule.choices),
+            "Spelling accepted as one list is the same rule: {before:?}"
+        );
         // The look most captions have, as build_captions takes it: sizes for a frame 1080 pixels across.
         let captions = rules.iter().find(|r| r.title == "Captions").unwrap();
         let row = &captions.settings.iter().find(|(name, _)| name == "build_captions style").unwrap().1;
