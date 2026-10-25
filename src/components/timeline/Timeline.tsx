@@ -777,9 +777,10 @@ export function Timeline({ height }: { height: number }) {
                     {drag?.moved && ghostTiming && ghostTrackId === track.id && (
                       <ClipView clip={drag.clip} track={track} project={project} zoom={zoom} height={h} visible={visible} selected ghost timing={ghostTiming} />
                     )}
-                    {/* The group's ghosts keep their own times and shift together, so they do not re-render as the pointer moves. */}
+                    {/* The group's ghosts keep their own times and shift together, so they do not re-render as the pointer moves.
+                        The layer has no width of its own, so shifting it does not widen the lanes. */}
                     {drag?.moved && ghostTiming && drag.group && (
-                      <div className="pointer-events-none absolute inset-0 z-30" style={{ transform: `translateX(${((ghostTiming.startUs - drag.clip.startUs) / US) * zoom}px)` }}>
+                      <div className="pointer-events-none absolute inset-y-0 left-0 z-30" style={{ transform: `translateX(${((ghostTiming.startUs - drag.clip.startUs) / US) * zoom}px)` }}>
                         {track.clips
                           .filter((clip) => groupIds.has(clip.id))
                           .map((clip) => (
