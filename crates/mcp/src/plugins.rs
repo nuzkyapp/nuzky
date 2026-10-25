@@ -34,6 +34,8 @@ const MAX_EDITS: usize = 5_000;
 /// What `run` may return, and how big its edits may make the project: a get_state answer must still fit a message.
 const MAX_RESULT_BYTES: usize = 8 << 20;
 const MAX_PROJECT_BYTES: usize = crate::limits::MAX_TOOL_BYTES;
+/// Restyling a track copies one value into every clip, so no single text may be long enough to multiply into gigabytes.
+const MAX_STRING_CHARS: usize = 10_000;
 const MAX_LOG_LINES: usize = 200;
 const RUN_LIMIT: Duration = Duration::from_secs(60);
 /// Saving runs the script's top level once, to report syntax errors and a missing `run`.
@@ -272,13 +274,20 @@ pub fn dir() -> Result<PathBuf> {
     Ok(nuzky_engine::data_dir().context("STORE_UNAVAILABLE: no data directory for plugins")?.join("plugins"))
 }
 
+/// A plugin's own file; a link is refused, since a folder from someone else could point it at the user's files.
 fn read(path: &Path, max: u64) -> Result<String> {
-    let size = std::fs::metadata(path).context("missing")?.len();
+    let meta = std::fs::symlink_metadata(path).context("missing")?;
+    ensure!(meta.is_file(), "not a plain file");
+    let size = meta.len();
     ensure!(size <= max, "larger than {} KB", max >> 10);
     std::fs::read_to_string(path).context("unreadable")
 }
 
 fn open(folder: &Path) -> Result<(Manifest, String)> {
+    ensure!(
+        std::fs::symlink_metadata(folder).is_ok_and(|meta| meta.is_dir()),
+        "PLUGIN_BROKEN: the plugin is a link, not a folder"
+    );
     let text =
         read(&folder.join("plugin.json"), MAX_TEXT_BYTES).map_err(|e| anyhow!("PLUGIN_BROKEN: plugin.json: {e:#}"))?;
     let value = serde_json::from_str(&text).map_err(|e| anyhow!("PLUGIN_BROKEN: plugin.json: {e}"))?;
@@ -311,7 +320,7 @@ pub fn list() -> Result<Vec<Plugin>> {
     let mut plugins: Vec<_> = entries
         .filter_map(Result::ok)
         .map(|e| e.path())
-        .filter(|path| path.is_dir())
+        .filter(|path| std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_dir()))
         .map(|path| entry(&path))
         .collect();
     plugins.sort_by(|a, b| a.id.cmp(&b.id));
@@ -451,10 +460,25 @@ fn edits(json: Option<&str>) -> Result<(Vec<EditCmd>, Option<String>)> {
         .enumerate()
         .map(|(i, edit)| {
             let kind = edit["type"].as_str().unwrap_or("no type").to_owned();
+            ensure!(
+                !has_long_string(&edit),
+                "PLUGIN_TOO_BIG: edit {i} ({kind}) has a text longer than {MAX_STRING_CHARS} characters"
+            );
             serde_json::from_value(edit).map_err(|e| anyhow!("PLUGIN_BAD_EDIT: edit {i} ({kind}): {e}"))
         })
         .collect::<Result<_>>()?;
     Ok((edits, message))
+}
+
+fn has_long_string(value: &Value) -> bool {
+    match value {
+        Value::String(text) => text.len() > MAX_STRING_CHARS && text.chars().count() > MAX_STRING_CHARS,
+        Value::Array(items) => items.iter().any(has_long_string),
+        Value::Object(fields) => {
+            fields.iter().any(|(key, value)| key.len() > MAX_STRING_CHARS || has_long_string(value))
+        }
+        _ => false,
+    }
 }
 
 fn kind(edit: &EditCmd) -> String {
@@ -463,11 +487,12 @@ fn kind(edit: &EditCmd) -> String {
 
 /// The project after the edits, applied one by one to a copy as the session applies a batch. A plugin never adds a
 /// file or points the project at one, so a project it edited opens anywhere without it.
-fn check(project: &Project, edits: &[EditCmd]) -> Result<Project> {
+fn check(project: &Project, edits: &[EditCmd], cancel: &AtomicBool) -> Result<Project> {
     let made: HashSet<_> = project.reel_candidates.iter().filter_map(|c| c.project_path.as_ref()).collect();
     let new_path = |path: &Option<String>| path.as_ref().is_some_and(|path| !made.contains(path));
     let mut after = project.clone();
     for (i, edit) in edits.iter().enumerate() {
+        ensure!(!cancel.load(Ordering::Relaxed), "CANCELLED: job cancelled");
         let forbidden = match edit {
             EditCmd::AddAssets { .. } => true,
             EditCmd::SetReelCandidates { candidates } => candidates.iter().any(|c| new_path(&c.project_path)),
@@ -480,9 +505,10 @@ fn check(project: &Project, edits: &[EditCmd]) -> Result<Project> {
             kind(edit)
         );
         after.apply(edit.clone()).map_err(|e| anyhow!("PLUGIN_BAD_EDIT: edit {i} ({}): {e:#}", kind(edit)))?;
-        // Duplicating a clip copies its text, so a few edits can grow the project without bound; measured often enough
-        // that the copies between two checks stay small.
-        if i % 16 == 15 || i + 1 == edits.len() {
+        // Duplicating a clip copies its text and restyling a track copies a style into every clip, so the project is
+        // measured often enough that what grows between two checks stays small.
+        let spreads = matches!(edit, EditCmd::RestyleTrack { .. } | EditCmd::PasteAttributes { .. });
+        if spreads || i % 16 == 15 || i + 1 == edits.len() {
             ensure!(
                 serde_json::to_vec(&after)?.len() <= MAX_PROJECT_BYTES,
                 "PLUGIN_TOO_BIG: edit {i} ({}) makes the project larger than {} MB",
@@ -497,8 +523,8 @@ fn check(project: &Project, edits: &[EditCmd]) -> Result<Project> {
 }
 
 /// The answer of a dry run, and the project after the edits when they apply.
-fn dry(project: &Project, output: Output) -> (Value, Option<Project>) {
-    let (after, error) = match check(project, &output.edits) {
+fn dry(project: &Project, output: Output, cancel: &AtomicBool) -> (Value, Option<Project>) {
+    let (after, error) = match check(project, &output.edits, cancel) {
         Ok(after) => (Some(after), None),
         Err(error) => (None, Some(format!("{error:#}"))),
     };
@@ -507,8 +533,17 @@ fn dry(project: &Project, output: Output) -> (Value, Option<Project>) {
     (answer, after)
 }
 
-fn apply(host: &Host, run_id: &str, project: &Project, revision: u64, output: Output) -> Result<Value> {
-    check(project, &output.edits)?;
+fn apply(
+    host: &Host,
+    run_id: &str,
+    project: &Project,
+    revision: u64,
+    output: Output,
+    cancel: &AtomicBool,
+) -> Result<Value> {
+    check(project, &output.edits, cancel)?;
+    // A cancelled job reports no result, so its edits must not land either.
+    ensure!(!cancel.load(Ordering::Relaxed), "CANCELLED: job cancelled");
     let count = output.edits.len();
     if count > 0 {
         let expect = Expect { revision: Some(revision), speech_layout_key: None };
@@ -539,13 +574,13 @@ pub(crate) fn start(
     let revision = state.stamp.revision;
     let run_id = run.clone().unwrap_or_default();
     host.start_job(owner, run.as_deref(), "plugin", state.stamp.clone(), move |cancel, progress| {
-        let output = execute(&prepared, cancel, move |done| progress.set("running", Some(done)));
+        let output = execute(&prepared, cancel.clone(), move |done| progress.set("running", Some(done)));
         let host = weak.upgrade().context("APP_CLOSED: project is closed")?;
         match mode {
-            Mode::DryRun => Ok(dry(&project, output?).0),
-            Mode::Apply => apply(&host, &run_id, &project, revision, output?),
+            Mode::DryRun => Ok(dry(&project, output?, &cancel).0),
+            Mode::Apply => apply(&host, &run_id, &project, revision, output?, &cancel),
             Mode::App => {
-                let result = output.and_then(|output| apply(&host, &run_id, &project, revision, output));
+                let result = output.and_then(|output| apply(&host, &run_id, &project, revision, output, &cancel));
                 match &result {
                     Ok(_) => {
                         host.session.end_run(&run_id, EndAction::Keep)?;
@@ -591,7 +626,7 @@ pub fn dry_run_in_app(
 ) -> Result<Value> {
     let state = host.session.state()?;
     let prepared = prepare(host, &state, id, inputs, Some(selection), Some(playhead_us))?;
-    let (mut answer, after) = dry(&state.project, execute(&prepared, cancel, |_| {})?);
+    let (mut answer, after) = dry(&state.project, execute(&prepared, cancel.clone(), |_| {})?, &cancel);
     answer["project"] = json!(after);
     Ok(answer)
 }

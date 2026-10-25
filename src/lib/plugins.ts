@@ -49,9 +49,16 @@ interface PluginsState {
 
 export const usePlugins = create<PluginsState>(() => ({ list: null, open: null, values: {}, preview: null, running: null }));
 
-export const defaults = (p: Plugin): PluginValues => Object.fromEntries(p.inputs.map((i) => [i.id, i.default]));
+/** The values set this session that the plugin still takes; a setting the AI removed or retyped since goes back to its default. */
+export function valuesFor(p: Plugin, set: PluginValues | undefined): PluginValues {
+  const fits = (input: PluginInput, v: PluginValue | undefined) =>
+    typeof v === typeof input.default &&
+    (input.type !== "choice" || input.options.some((o) => o.value === v)) &&
+    (input.type !== "number" || ((v as number) >= input.min && (v as number) <= input.max));
+  return Object.fromEntries(p.inputs.map((input) => [input.id, fits(input, set?.[input.id]) ? set![input.id] : input.default]));
+}
 
-export const valuesOf = (p: Plugin): PluginValues => ({ ...defaults(p), ...usePlugins.getState().values[p.id] });
+export const valuesOf = (p: Plugin): PluginValues => valuesFor(p, usePlugins.getState().values[p.id]);
 
 export function setValue(id: string, input: string, value: PluginValue) {
   usePlugins.setState((s) => ({ values: { ...s.values, [id]: { ...s.values[id], [input]: value } } }));
@@ -117,18 +124,24 @@ export const plainDetail = (text: string) => text.replace(/^[A-Z][A-Z_]+: ?/, ""
 /** Whether the AI can fix the error by changing the plugin; a plugin made for a newer Nuzky needs an update instead. */
 export const fixable = (error: string) => !error.startsWith("PLUGIN_API_NEWER");
 
+let previews = 0;
+
 export async function previewPlugin(p: Plugin, values: PluginValues, key: string) {
   const { snap, selection, timeUs } = useEditor.getState();
   if (!snap) return;
+  const mine = ++previews;
   let preview: PluginPreview;
   try {
     const project = await api.previewPlugin(p.id, values, selection, timeUs);
     preview = { key, revision: snap.revision, project, error: null };
   } catch (e) {
-    preview = { key, revision: snap.revision, project: null, error: plainDetail(errorText(e)) };
+    const text = errorText(e);
+    // A newer request cancelled it.
+    if (text.startsWith("CANCELLED")) return;
+    preview = { key, revision: snap.revision, project: null, error: plainDetail(text) };
   }
-  // A newer preview or a closed plugin wins.
-  if (usePlugins.getState().open === p.id && !usePlugins.getState().running) usePlugins.setState({ preview });
+  // An older answer arriving late, a closed plugin or a run that started meanwhile keeps what is shown.
+  if (mine === previews && usePlugins.getState().open === p.id && !usePlugins.getState().running) usePlugins.setState({ preview });
 }
 
 export async function runPlugin(p: Plugin) {

@@ -206,3 +206,62 @@ fn a_plugin_cannot_blow_up_the_project_or_write_through_a_link() {
         assert!(!std::fs::symlink_metadata(folder.join("plugin.prev.js")).unwrap().is_symlink());
     }
 }
+
+/// One edit that copies a value into every caption cannot take all memory before the size check sees it, and a
+/// README that is a link to another file never reaches the agent.
+#[test]
+fn a_plugin_cannot_spread_a_huge_text_or_read_through_a_link() {
+    let f = project();
+    let segments: Vec<_> = (0..200)
+        .map(|i| json!({"startUs": i * 20_000, "endUs": i * 20_000 + 20_000, "text": format!("w{i}")}))
+        .collect();
+    let captions =
+        json!({"type": "addCaptions", "segments": segments, "style": {"fontSize": 60.0, "color": "#FFFFFF"}});
+    f.host.session.edit(vec![serde_json::from_value(captions).unwrap()], None, Expect::default()).unwrap();
+    let restyle = json!({"nuzkyPlugin": 1, "id": "restyle", "name": "Restyle", "description": "Restyles captions", "version": "1"});
+    let script = "function run(ctx) {\n  const track = ctx.project.tracks.find((t) => t.kind === 'text');\n  \
+                  return [{type: 'restyleTrack', trackId: track.id, style: {fontFamily: 'x'.repeat(1 << 20)}}];\n}\n";
+    plugins::save(&restyle, script, None).unwrap();
+    let error = match plugins::dry_run_in_app(&f.host, "restyle", &Map::new(), vec![], 0, Arc::default()) {
+        Ok(dry) => dry["error"].to_string(),
+        Err(error) => format!("{error:#}"),
+    };
+    assert!(error.contains("text longer than"), "{error}");
+
+    #[cfg(unix)]
+    {
+        let secret = f.dir.join("secret.env");
+        std::fs::write(&secret, "TOKEN=hunter2").unwrap();
+        let folder = plugins::dir().unwrap().join("restyle");
+        std::os::unix::fs::symlink(&secret, folder.join("README.md")).unwrap();
+        let listed = plugins::list().unwrap().into_iter().find(|p| p.id == "restyle").unwrap();
+        assert!(listed.readme.is_none_or(|readme| !readme.contains("hunter2")), "the README link was read");
+    }
+}
+
+/// Cancelling the job after the script returned, while its edits are still checked, applies none of them: a
+/// cancelled job reports no result, so nothing it did may land.
+#[test]
+fn a_cancelled_plugin_job_applies_nothing() {
+    let f = project();
+    let segments: Vec<_> = (0..3000)
+        .map(|i| json!({"startUs": i * 1_000, "endUs": i * 1_000 + 1_000, "text": format!("caption number {i}")}))
+        .collect();
+    let captions =
+        json!({"type": "addCaptions", "segments": segments, "style": {"fontSize": 60.0, "color": "#FFFFFF"}});
+    f.host.session.edit(vec![serde_json::from_value(captions).unwrap()], None, Expect::default()).unwrap();
+    let renames =
+        json!({"nuzkyPlugin": 1, "id": "renames", "name": "Renames", "description": "Renames a lot", "version": "1"});
+    let script = "function run(ctx) {\n  const edits = Array.from({length: 5000}, (_, i) => ({type: 'renameProject', name: 'n' + i}));\n  \
+                  nuzky.progress(1);\n  return edits;\n}\n";
+    plugins::save(&renames, script, None).unwrap();
+    let before = f.host.session.state().unwrap().project;
+    let job = plugins::run_in_app(&f.host, "renames", &Map::new(), vec![], 0).unwrap();
+    let id = job["job_id"].as_str().unwrap();
+    while f.host.jobs.get(id, false).unwrap()["progress"] != 1.0 {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    f.host.jobs.get(id, true).unwrap();
+    assert_eq!(finish(&f.host, &job, Duration::from_secs(10))["status"], "cancelled");
+    assert_eq!(f.host.session.state().unwrap().project, before, "the cancelled job's edits landed");
+}

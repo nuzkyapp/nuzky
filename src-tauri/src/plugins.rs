@@ -30,11 +30,16 @@ pub async fn preview_plugin(
     std::mem::replace(&mut *state.plugin_preview.lock().unwrap(), cancel.clone()).store(true, Ordering::Relaxed);
     let host = state.session.lock().unwrap().host.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let preview = plugins::dry_run_in_app(&host, &id, &values, selection, playhead_us, cancel).map_err(err)?;
+        let mut preview = plugins::dry_run_in_app(&host, &id, &values, selection, playhead_us, cancel).map_err(err)?;
         if preview["valid"] != true {
             return Err(preview["error"].as_str().unwrap().to_owned());
         }
-        Ok(preview["project"].clone())
+        // As the snapshot draws it, so the app compares the two like for like.
+        let mut project = preview["project"].take();
+        let safe_area =
+            serde_json::from_value::<nuzky_engine::Project>(project.clone()).map_err(err)?.canvas.safe_area();
+        project["canvas"]["safeArea"] = json!(safe_area);
+        Ok(project)
     })
     .await
     .map_err(err)?
@@ -121,7 +126,9 @@ pub fn watch(app: AppHandle) {
             .into_iter()
             .flatten()
             .filter_map(Result::ok)
-            .filter_map(|entry| Some((entry.file_name(), entry.metadata().ok()?.modified().ok()?)))
+            // The plugin's own files too: an editor that rewrites plugin.js in place leaves the folder's time alone.
+            .flat_map(|entry| ["", "plugin.json", "plugin.js"].map(|file| entry.path().join(file)))
+            .filter_map(|path| Some((path.clone(), path.metadata().ok()?.modified().ok()?)))
             .collect();
         entries.sort();
         entries

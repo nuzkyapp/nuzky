@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { Eye, MoreHorizontal, Sparkles, X } from "lucide-react";
 import { describePeek } from "../../lib/peek";
-import { defaults, fixable, fixWithAi, plainDetail, pluginBlocked, previewPlugin, runPlugin, setValue, usePlugins, type Plugin, type PluginInput, type PluginValue } from "../../lib/plugins";
+import { fixable, fixWithAi, plainDetail, pluginBlocked, previewPlugin, runPlugin, setValue, usePlugins, valuesFor, type Plugin, type PluginInput, type PluginValue } from "../../lib/plugins";
 import { useTranscriptView } from "../../lib/speech";
 import { useEditor } from "../../lib/store";
 import { Select } from "../panel/SpeechControls";
@@ -69,7 +69,13 @@ function useOutcome(p: Plugin, key: string) {
   const snap = useEditor((s) => s.snap);
   const { view } = useTranscriptView();
   const blocked = pluginBlocked(p, !!view?.words.length);
-  const lines = useMemo(() => (preview?.project && snap ? describePeek(snap.project, preview.project).lines : null), [preview, snap]);
+  // Undo's words do not name every change (a background, a thumbnail), so "nothing" means the same project.
+  const lines = useMemo(() => {
+    if (!preview?.project || !snap) return null;
+    if (JSON.stringify(preview.project) === JSON.stringify(snap.project)) return [];
+    const said = describePeek(snap.project, preview.project).lines;
+    return said.length ? said : ["Changes the project"];
+  }, [preview, snap]);
   if (blocked) return { blocked, lines: null, stale: false };
   if (!preview) return { blocked: null, lines: null, stale: true };
   const stale = preview.key !== key || preview.revision !== snap?.revision;
@@ -80,7 +86,7 @@ function useOutcome(p: Plugin, key: string) {
 
 function PluginBody({ plugin: p }: { plugin: Plugin }) {
   const stored = usePlugins((s) => s.values[p.id]);
-  const all = useMemo(() => ({ ...defaults(p), ...stored }), [p, stored]);
+  const all = useMemo(() => valuesFor(p, stored), [p, stored]);
   const revision = useEditor((s) => s.snap?.revision);
   const selection = useEditor((s) => s.selection);
   const running = usePlugins((s) => s.running === p.id);
@@ -89,7 +95,6 @@ function PluginBody({ plugin: p }: { plugin: Plugin }) {
   const key = JSON.stringify([p.id, all, selection, playhead]);
   const outcome = useOutcome(p, key);
 
-  // Runs it without changing anything once the settings, the selection or the project rest.
   useEffect(() => {
     if (p.error || running) return;
     const timer = window.setTimeout(() => void previewPlugin(p, all, key), PREVIEW_DELAY_MS);
