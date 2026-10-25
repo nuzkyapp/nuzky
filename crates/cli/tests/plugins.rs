@@ -417,7 +417,7 @@ fn remove_pauses_cuts_the_silences_where_the_timeline_has_them() {
     // A cut in the middle of the long pause gives one silence per clip; it is still one pause.
     edit(&f.host, json!({"type": "splitClip", "clipId": clip, "atUs": 1_500_000}));
     let split = plugins::dry_run_in_app(&f.host, "remove-pauses", &Map::new(), vec![], 0, Arc::default()).unwrap();
-    assert_eq!(split["message"], "Removed 1 pause, 0.8 s in all.", "{split}");
+    assert_eq!(split["message"], "Removed 1 pause, 0.8\u{a0}s in all.", "{split}");
 }
 
 /// A clip that starts inside a loudness window hears only what it plays: the file is loud for its first 50 ms, the
