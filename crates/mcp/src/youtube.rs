@@ -299,8 +299,7 @@ fn install_in(tools: &Path, cancel: &AtomicBool, progress: impl FnMut(f32)) -> R
     Ok(())
 }
 
-/// Unpacks yt-dlp's macOS build from `zip` into `dir`, unless `dir` came from that zip already. The copy it
-/// replaces is removed only by the next update, as a yt-dlp still running from it loads its files as it goes.
+/// Unpacks yt-dlp's macOS build from `zip` into `dir`, unless `dir` came from that zip already.
 fn unpack(zip: &Path, sha256: &str, dir: &Path, cancel: &AtomicBool) -> Result<()> {
     if std::fs::read_to_string(dir.join(".sha256")).is_ok_and(|sum| sum == sha256)
         && executable(&dir.join("yt-dlp_macos"))
@@ -308,11 +307,6 @@ fn unpack(zip: &Path, sha256: &str, dir: &Path, cancel: &AtomicBool) -> Result<(
         return Ok(());
     }
     let tools = dir.parent().context("yt-dlp needs a folder")?;
-    for entry in std::fs::read_dir(tools)?.flatten() {
-        if entry.file_name().to_string_lossy().starts_with(".nuzky-old-") {
-            std::fs::remove_dir_all(entry.path()).ok();
-        }
-    }
     let part = tools.join(format!(".nuzky-part-{}", new_id()));
     let result = (|| {
         // ditto ships with macOS and keeps the files' permissions.
@@ -341,8 +335,10 @@ fn unpack(zip: &Path, sha256: &str, dir: &Path, cancel: &AtomicBool) -> Result<(
         );
         std::fs::write(part.join(".sha256"), sha256)?;
         nuzky_session::jobs::check_cancel(cancel)?;
-        std::fs::rename(dir, tools.join(format!(".nuzky-old-{}", new_id()))).ok();
+        let old = tools.join(format!(".nuzky-old-{}", new_id()));
+        std::fs::rename(dir, &old).ok();
         std::fs::rename(&part, dir)?;
+        std::fs::remove_dir_all(old).ok();
         Ok(())
     })();
     if result.is_err() {
