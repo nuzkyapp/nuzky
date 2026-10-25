@@ -65,6 +65,8 @@ export interface PluginPreview {
   key: string;
   revision: number;
   project: Project | null;
+  /** Nuzky's tools the plugin would run after its edits, which the preview names without running. */
+  tools: string[];
   error: string | null;
   /** The app is still preparing the sound the plugin needs; a run prepares it itself. */
   waiting: boolean;
@@ -411,6 +413,14 @@ export const plainDetail = (text: string) => text.replace(/^[A-Z][A-Z_]+: ?/, ""
 /** Whether the AI can fix the error by changing the plugin; a plugin made for a newer Nuzky needs an update instead. */
 export const fixable = (error: string) => !error.startsWith("PLUGIN_API_NEWER");
 
+const TOOL_WORDS: Record<string, string> = { build_captions: "captions", apply_zooms: "zooms", apply_motion: "motion" };
+
+/** What the tools a plugin runs after its edits add, such as "Then adds captions and zooms"; null for none. */
+export function toolsLine(tools: string[], after: boolean): string | null {
+  const words = [...new Set(tools.map((t) => TOOL_WORDS[t] ?? t))];
+  return words.length ? `${after ? "Then adds" : "Adds"} ${names(words)}` : null;
+}
+
 let previews = 0;
 
 export async function previewPlugin(p: Plugin, values: PluginValues, key: string) {
@@ -422,12 +432,12 @@ export async function previewPlugin(p: Plugin, values: PluginValues, key: string
   try {
     const answer = await api.previewPlugin(p.id, values, selection, timeUs);
     rows = answer.items;
-    preview = { key, revision: snap.revision, project: answer.project, error: answer.error && plainDetail(answer.error), waiting: false };
+    preview = { key, revision: snap.revision, project: answer.project, tools: answer.tools, error: answer.error && plainDetail(answer.error), waiting: false };
   } catch (e) {
     const text = errorText(e);
     // A newer request cancelled it.
     if (text.startsWith("CANCELLED")) return;
-    preview = { key, revision: snap.revision, project: null, error: plainDetail(text), waiting: text.startsWith("AUDIO_NOT_READY") };
+    preview = { key, revision: snap.revision, project: null, tools: [], error: plainDetail(text), waiting: text.startsWith("AUDIO_NOT_READY") };
   }
   // An older answer arriving late, a closed plugin or a run that started meanwhile keeps what is shown.
   if (mine === previews && usePlugins.getState().open === p.id && !usePlugins.getState().running)

@@ -30,7 +30,8 @@ use rquickjs::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-use crate::plugin_files;
+use crate::{plugin_files, plugin_tools};
+pub use plugin_tools::slow_tools_for_tests;
 
 pub const API: u64 = 2;
 pub const GUIDE: &str = include_str!("../../../skills/nuzky-plugin/SKILL.md");
@@ -44,6 +45,9 @@ const MAX_ACTIONS: usize = 4;
 const MAX_EDITS: usize = 5_000;
 /// What `run` may return, and how big its edits may make the project: a get_state answer must still fit a message.
 const MAX_RESULT_BYTES: usize = 8 << 20;
+/// What the plugin's process may answer: its result, the project after its edits and its tools' edits.
+const MAX_ANSWER_BYTES: u64 =
+    (MAX_RESULT_BYTES + MAX_PROJECT_BYTES + plugin_tools::MAX_PLANNED_BYTES + (1 << 20)) as u64;
 const MAX_PROJECT_BYTES: usize = crate::limits::MAX_TOOL_BYTES;
 /// Restyling a track copies one value into every clip, so no single text may be long enough to multiply into gigabytes.
 const MAX_STRING_CHARS: usize = 10_000;
@@ -56,6 +60,7 @@ const SAVE_LIMIT: Duration = Duration::from_secs(5);
 const MEMORY_LIMIT: u64 = 1 << 30;
 const OUT_OF_MEMORY: &str = "PLUGIN_OUT_OF_MEMORY: the plugin took more than 1 GB of memory and was stopped";
 const PROGRESS: &str = "progress ";
+const TOOLS_PROGRESS: &str = "tools ";
 static PROGRAM: OnceLock<PathBuf> = OnceLock::new();
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -85,6 +90,9 @@ pub struct Manifest {
     /// Looks it adds, each one WGSL function in effects/<id>.wgsl (`nuzky_engine::plugin_effects`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<EffectDef>,
+    /// Nuzky's tools its `run` may ask for after its edits, so Nuzky can say what the plugin does before it runs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<String>,
 }
 
 fn default_action() -> String {
@@ -362,6 +370,20 @@ pub(crate) fn manifest(value: &Value) -> Result<Manifest> {
         plugin_files::kind(name).map_err(|e| anyhow!("PLUGIN_BROKEN: plugin.json: files: {e}"))?;
         // macOS and Windows keep LOGO.PNG and logo.png as one file.
         ensure!(names.insert(name.to_ascii_lowercase()), "PLUGIN_BROKEN: plugin.json: files names {name} twice");
+    }
+    ensure!(manifest.tools.is_empty() || api >= 2, "PLUGIN_BROKEN: plugin.json: tools needs nuzkyPlugin 2");
+    let mut tools = HashSet::new();
+    for tool in &manifest.tools {
+        ensure!(
+            plugin_tools::TOOLS.contains(&tool.as_str()),
+            "PLUGIN_BROKEN: plugin.json: tools: {tool} is not a tool plugins can use; they can use {}",
+            plugin_tools::TOOLS.join(", ")
+        );
+        ensure!(tools.insert(tool), "PLUGIN_BROKEN: plugin.json: tools names {tool} twice");
+        ensure!(
+            !plugin_tools::READ_WORDS.contains(&tool.as_str()) || manifest.needs.contains(&Need::Words),
+            "PLUGIN_BROKEN: plugin.json: {tool} reads the transcript, so needs must include \"words\""
+        );
     }
     ensure!(is_id(&manifest.id), "PLUGIN_BROKEN: plugin.json: id is 1 to 40 lowercase letters, digits and dashes");
     let texts = [
@@ -816,6 +838,8 @@ pub(crate) struct Prepared {
     /// The project with its media's full paths, for what `needs` finds in the sound.
     media: Project,
     folder: PathBuf,
+    /// The project's folder, which its media's paths start from.
+    dir: PathBuf,
     /// The plugin's files the project does not have yet, after `stock`.
     files: Vec<Asset>,
     /// Their copies, by asset id, until the edits place them.
@@ -906,8 +930,9 @@ pub(crate) fn prepare(
             manifest.name
         );
         ctx["words"] = crate::transcript::summary(&derived, None)?["words"].take();
+        ctx["transcriptKey"] = json!(crate::transcript::word_key(&state.project, &derived.words));
     }
-    Ok(Prepared { manifest, script, ctx, media, folder, files: vec![], staged: HashMap::new() })
+    Ok(Prepared { manifest, script, ctx, media, folder, dir, files: vec![], staged: HashMap::new() })
 }
 
 #[derive(Serialize, Deserialize)]
@@ -917,6 +942,11 @@ struct Output {
     logs: Vec<String>,
     /// The rows of each dynamic input, for the panel to offer.
     items: BTreeMap<String, Vec<Choice>>,
+    /// The tools `run` asked for, which run after its edits.
+    tools: Vec<plugin_tools::Call>,
+    /// Their edits, planned in the plugin's process after its own.
+    #[serde(default)]
+    planned: Vec<EditCmd>,
 }
 
 /// What the plugin's process answers: the plugin's edits, message and log, and the project after the edits or why
@@ -932,27 +962,29 @@ fn execute(script: &str, input: String, progress: impl Fn(f32) + 'static) -> Res
         ctx.json_stringify(returned)?.map(|json| json.to_string()).transpose()
     });
     let logs: Vec<String> = logs.take().into();
-    let (edits, message, items) = result.and_then(|json| edits(json.as_deref())).map_err(|error| {
+    let (edits, message, items, tools) = result.and_then(|json| edits(json.as_deref())).map_err(|error| {
         let tail = &logs[logs.len().saturating_sub(20)..];
         if tail.is_empty() { error } else { anyhow!("{error:#}\nLast lines of its log:\n{}", tail.join("\n")) }
     })?;
-    Ok(Output { edits, message, logs, items })
+    Ok(Output { edits, message, logs, items, tools, planned: Vec::new() })
 }
 
-type Returned = (Vec<EditCmd>, Option<String>, BTreeMap<String, Vec<Choice>>);
+type Returned = (Vec<EditCmd>, Option<String>, BTreeMap<String, Vec<Choice>>, Vec<plugin_tools::Call>);
 
 fn edits(json: Option<&str>) -> Result<Returned> {
-    let shape = "PLUGIN_FAILED: run(ctx) must return an array of edits or {edits, message, items}";
+    let shape = "PLUGIN_FAILED: run(ctx) must return an array of edits or {edits, message, items, tools}";
     let json = json.context(shape)?;
     ensure!(
         json.len() <= MAX_RESULT_BYTES,
         "PLUGIN_TOO_BIG: the plugin returned more than {} MB of edits",
         MAX_RESULT_BYTES >> 20
     );
-    let (list, message, items) = match serde_json::from_str(json)? {
-        Value::Array(list) => (list, None, None),
+    let (list, message, items, tools) = match serde_json::from_str(json)? {
+        Value::Array(list) => (list, None, None, None),
         Value::Object(mut object) => match object.remove("edits") {
-            Some(Value::Array(list)) => (list, object.remove("message"), object.remove("items")),
+            Some(Value::Array(list)) => {
+                (list, object.remove("message"), object.remove("items"), object.remove("tools"))
+            }
             _ => bail!(shape),
         },
         _ => bail!(shape),
@@ -960,6 +992,21 @@ fn edits(json: Option<&str>) -> Result<Returned> {
     let items = match items {
         None | Some(Value::Null) => BTreeMap::new(),
         Some(items) => self::items(items)?,
+    };
+    let tools = match tools {
+        None | Some(Value::Null) => vec![],
+        Some(Value::Array(calls)) => calls
+            .into_iter()
+            .enumerate()
+            .map(|(i, call)| {
+                ensure!(
+                    !has_long_string(&call),
+                    "PLUGIN_TOO_BIG: tools[{i}] has a text longer than {MAX_STRING_CHARS} characters"
+                );
+                serde_json::from_value(call).map_err(|e| anyhow!("PLUGIN_BAD_TOOL: tools[{i}]: {e}"))
+            })
+            .collect::<Result<_>>()?,
+        Some(_) => bail!("PLUGIN_BAD_TOOL: tools must be an array of {{tool, args}}"),
     };
     ensure!(
         list.len() <= MAX_EDITS,
@@ -983,7 +1030,7 @@ fn edits(json: Option<&str>) -> Result<Returned> {
             serde_json::from_value(edit).map_err(|e| anyhow!("PLUGIN_BAD_EDIT: edit {i} ({kind}): {e}"))
         })
         .collect::<Result<_>>()?;
-    Ok((edits, message, items))
+    Ok((edits, message, items, tools))
 }
 
 /// `items`: `{inputId: [{value, label}]}`, plain texts the panel shows as they are.
@@ -1090,9 +1137,13 @@ fn dry((output, after): Checked, files: &[Asset]) -> (Value, Option<Project>) {
         Err(error) => (None, Some(error)),
     };
     let answer = json!({"dry_run": true, "valid": after.is_some(), "error": error, "edits": output.edits,
-        "adds": added(&adds(&output.edits, files)), "message": output.message, "logs": output.logs,
-        "items": output.items});
+        "adds": added(&adds(&output.edits, files)), "tools": tool_names(&output), "message": output.message,
+        "logs": output.logs, "items": output.items});
     (answer, after)
+}
+
+fn tool_names(output: &Output) -> Vec<&str> {
+    output.tools.iter().map(|call| call.tool.as_str()).collect()
 }
 
 fn apply(
@@ -1112,7 +1163,7 @@ fn apply(
         !output.edits.iter().any(|edit| matches!(edit, EditCmd::AddAssets { .. })),
         "PLUGIN_FORBIDDEN_EDIT: a plugin cannot add files to the project"
     );
-    let count = output.edits.len();
+    let count = output.edits.len() + output.planned.len();
     let add = adds(&output.edits, files);
     let names = added(&add);
     if let Some(EditCmd::AddAssets { assets }) = &add {
@@ -1121,14 +1172,18 @@ fn apply(
         }
     }
     let mut changed = false;
+    let tools: Vec<String> = tool_names(&output).into_iter().map(str::to_owned).collect();
     if count > 0 {
         let before = host.session.state()?.project;
         let expect = Expect { revision: Some(revision), speech_layout_key: None };
-        host.session.apply_edits(run_id, &new_id(), add.into_iter().chain(output.edits).collect(), expect)?;
+        let edits = add.into_iter().chain(output.edits).chain(output.planned).collect();
+        host.session.apply_edits(run_id, &new_id(), edits, expect)?;
         // Edits that leave the project as it was make no undo step.
         changed = host.session.state()?.project != before;
     }
-    Ok(json!({"applied": count, "changed": changed, "added": names, "message": output.message, "logs": output.logs}))
+    Ok(
+        json!({"applied": count, "changed": changed, "added": names, "tools": tools, "message": output.message, "logs": output.logs}),
+    )
 }
 
 pub(crate) enum Mode {
@@ -1153,13 +1208,16 @@ pub(crate) fn start(
     let revision = state.stamp.revision;
     let run_id = run.clone().unwrap_or_default();
     let cache = host.cache_dir.clone();
+    let reach = plugin_tools::Reach::new(host, &prepared.manifest, &prepared.dir, &state.project);
     let mut prepared = prepared;
     host.start_job(owner, run.as_deref(), "plugin", state.stamp.clone(), move |cancel, progress| {
         let listening = progress.clone();
         let checked = prepared
             .stock(&cancel)
             .and_then(|()| prepared.gather(&cache, true, &cancel, &|done| listening.set("listening", Some(done))))
-            .and_then(|()| isolated(&prepared, &project, &cancel, move |done| progress.set("running", Some(done))));
+            .and_then(|()| {
+                isolated(&prepared, &project, &cancel, move |phase, done| progress.set(phase, Some(done)), Some(&reach))
+            });
         let host = weak.upgrade().context("APP_CLOSED: project is closed")?;
         let Prepared { files, staged, .. } = &mut prepared;
         match mode {
@@ -1204,7 +1262,9 @@ pub fn run_in_app(
 }
 
 /// What the plugin's primary action would do with these inputs, without touching the project: its edits, message, log
-/// and rows, and the project after the edits when they apply. Setting `cancel` stops it.
+/// and rows, the tools it would run after them, and the project after its own edits when they apply. Setting `cancel`
+/// stops it. The tools are checked but run only when the plugin does, so a preview costs the same however long the
+/// transcript is.
 pub fn dry_run_in_app(
     host: &Host,
     id: &str,
@@ -1218,7 +1278,12 @@ pub fn dry_run_in_app(
     prepared.stock(&cancel)?;
     // The app prepares every file's sound in a job of its own, which the user sees; a preview never decodes.
     prepared.gather(&host.cache_dir, false, &cancel, &|_| {})?;
-    let (mut answer, after) = dry(isolated(&prepared, &state.project, &cancel, |_| {})?, &prepared.files);
+    // The preview names the tools without planning them.
+    let (output, after) = isolated(&prepared, &state.project, &cancel, |_, _| {}, None)?;
+    let after = after.and_then(|after| {
+        plugin_tools::names(&prepared.manifest.tools, &output.tools).map(|_| after).map_err(|e| format!("{e:#}"))
+    });
+    let (mut answer, after) = dry((output, after), &prepared.files);
     answer["project"] = json!(after);
     Ok(answer)
 }
@@ -1246,7 +1311,8 @@ fn isolated(
     prepared: &Prepared,
     project: &Project,
     cancel: &AtomicBool,
-    progress: impl Fn(f32) + Send + 'static,
+    progress: impl Fn(&'static str, f32) + Send + 'static,
+    tools: Option<&plugin_tools::Reach>,
 ) -> Result<Checked> {
     let program = match PROGRAM.get() {
         Some(program) => program.clone(),
@@ -1254,6 +1320,10 @@ fn isolated(
     };
     let mut command = Command::new(program);
     command.arg("plugin-sandbox").env_clear().stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    // The tools read the creator's style and saved caption styles from there.
+    if let Some(data) = nuzky_engine::data_dir() {
+        command.env("NUZKY_DATA_DIR", data);
+    }
     // Where the loader finds the libraries Nuzky itself was started with, such as an FFmpeg outside the system's.
     #[cfg(target_os = "linux")]
     if let Some(paths) = std::env::var_os("LD_LIBRARY_PATH") {
@@ -1271,21 +1341,24 @@ fn isolated(
     // It waits for its input, so the limit holds before it does anything.
     #[cfg(windows)]
     let _job = limit_memory(&child.0)?;
-    let input = serde_json::to_vec(&(&prepared.script, prepared.ctx.to_string(), project, &prepared.files))?;
+    let input = serde_json::to_vec(&(&prepared.script, prepared.ctx.to_string(), project, &prepared.files, tools))?;
     let mut stdin = child.0.stdin.take().context("PLUGIN_FAILED: no input")?;
     std::thread::spawn(move || stdin.write_all(&input));
     let stdout = std::io::BufReader::new(child.0.stdout.take().context("PLUGIN_FAILED: no output")?);
     let (send, answered) = std::sync::mpsc::channel();
     // Read as it arrives, so the answer counts once it is whole rather than once the process has ended.
     std::thread::spawn(move || {
+        let stdout = std::io::Read::take(stdout, MAX_ANSWER_BYTES);
         send.send(serde_json::Deserializer::from_reader(stdout).into_iter::<Result<Checked, String>>().next()).ok()
     });
     let stderr = std::io::BufReader::new(child.0.stderr.take().context("PLUGIN_FAILED: no output")?);
     let said = std::thread::spawn(move || {
         let mut said = String::new();
         for line in stderr.lines().map_while(Result::ok) {
-            match line.strip_prefix(PROGRESS).and_then(|done| done.parse().ok()) {
-                Some(done) => progress(done),
+            let running = line.strip_prefix(PROGRESS).map(|done| ("running", done));
+            let phase = running.or(line.strip_prefix(TOOLS_PROGRESS).map(|done| ("tools", done)));
+            match phase.and_then(|(phase, done)| Some((phase, done.parse().ok()?))) {
+                Some((phase, done)) => progress(phase, done),
                 None if said.len() < 4096 => said += &(line + "\n"),
                 None => {}
             }
@@ -1340,18 +1413,31 @@ pub fn sandbox_main() -> Result<()> {
         std::thread::sleep(RUN_LIMIT + Duration::from_secs(5));
         std::process::exit(1);
     });
-    let (script, input, project, files): (String, String, Project, Vec<Asset>) =
+    let (script, input, project, files, tools): (String, String, Project, Vec<Asset>, Option<plugin_tools::Reach>) =
         serde_json::from_reader(std::io::stdin().lock())?;
-    let shown = Cell::new(-1.0);
-    let progress = move |done: f32| {
-        let done = (done * 100.0).round() / 100.0;
-        if shown.replace(done) != done {
-            eprintln!("{PROGRESS}{done}");
+    let reporter = |prefix: &'static str| {
+        let shown = Cell::new(-1.0);
+        move |done: f32| {
+            let done = (done * 100.0).round() / 100.0;
+            if shown.replace(done) != done {
+                eprintln!("{prefix}{done}");
+            }
         }
     };
-    let answer = execute(&script, input, progress)
-        .map(|output| {
+    let answer = execute(&script, input, reporter(PROGRESS))
+        .map(|mut output| {
             let after = check(&project, &output.edits, &files).map_err(|error| format!("{error:#}"));
+            let after = match (after, &tools) {
+                (Ok(after), Some(reach)) if !output.tools.is_empty() => {
+                    plugin_tools::plan(reach, &output.tools, after, &reporter(TOOLS_PROGRESS))
+                        .map(|(planned, after)| {
+                            output.planned = planned;
+                            after
+                        })
+                        .map_err(|error| format!("{error:#}"))
+                }
+                (after, _) => after,
+            };
             (output, after)
         })
         .map_err(|error| format!("{error:#}"));

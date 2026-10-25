@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type RefObject } from "react";
 import { Eye, MoreHorizontal, Sparkles, X } from "lucide-react";
 import { describePeek } from "../../lib/peek";
-import { ADD_EFFECTS, fixable, fixWithAi, own, plainDetail, pluginBlocked, previewPlugin, runPlugin, setAuto, setValue, shownInputs, usePlugins, valuesFor, type Plugin, type PluginInput, type PluginRow, type PluginValue, type Trigger } from "../../lib/plugins";
+import { ADD_EFFECTS, fixable, fixWithAi, own, plainDetail, pluginBlocked, previewPlugin, runPlugin, setAuto, setValue, shownInputs, toolsLine, usePlugins, valuesFor, type Plugin, type PluginInput, type PluginRow, type PluginValue, type Trigger } from "../../lib/plugins";
 import { useSpeech, useTranscriptView } from "../../lib/speech";
 import { useEditor } from "../../lib/store";
 import { Select } from "../panel/SpeechControls";
@@ -115,11 +115,15 @@ function useOutcome(p: Plugin, key: string, running: boolean) {
   // Undo's words do not name every change (a background, a thumbnail), so "nothing" means the same project.
   const { lines, marked } = useMemo(() => {
     if (!preview?.project || !snap) return { lines: null, marked: false };
-    if (JSON.stringify(preview.project) === JSON.stringify(snap.project)) return { lines: [], marked: false };
+    // The preview applies only the plugin's own edits; the tools it asks for run when it does.
+    const own = JSON.stringify(preview.project) !== JSON.stringify(snap.project);
+    const tools = toolsLine(preview.tools, own);
+    if (!own) return { lines: tools ? [tools] : [], marked: false };
     const said = describePeek(snap.project, preview.project, true);
     // The timeline marks only clips it already shows, never ones the plugin would add.
     const shown = new Set(snap.project.tracks.flatMap((t) => t.clips.map((c) => c.id)));
-    return { lines: said.lines.length ? said.lines : ["Changes the project"], marked: [...said.marks.keys()].some((id) => shown.has(id)) };
+    const lines = [...(said.lines.length ? said.lines.slice(0, 3) : ["Changes the project"]), ...(tools ? [tools] : [])];
+    return { lines, marked: [...said.marks.keys()].some((id) => shown.has(id)) };
   }, [preview, snap]);
   if (blocked) return { blocked, lines: null, marked, stale: false, waiting: false, cannotRun: true };
   if (!preview) return { blocked: null, lines: null, marked, stale: true, waiting: false };
@@ -170,7 +174,7 @@ function PluginBody({ plugin: p, primary }: { plugin: Plugin; primary: RefObject
     .map((g) => ({ label: g.label, inputs: p.inputs.filter((i) => g.ids.includes(i.id) && shown.has(i.id)) }))
     .filter((g) => g.inputs.length > 0);
 
-  const said = outcome.lines && `${outcome.lines.slice(0, 3).join(". ")}.`;
+  const said = outcome.lines && `${outcome.lines.join(". ")}.`;
   return (
     <>
       <div className="min-h-0 flex-1 overflow-y-auto">

@@ -258,9 +258,9 @@ export const api = {
   listPlugins: () => invoke<ListedPlugin[]>("list_plugins"),
   /** The plugin effects of the open project this computer draws without, and why. */
   effectIssues: () => invoke<EffectIssue[]>("effect_issues"),
-  /** The project as the plugin's primary action would leave it, without changing it, or why it cannot; with the rows of its dynamic inputs either way. */
+  /** The project as the plugin's primary action's own edits would leave it, without changing it, or why it cannot; with the rows of its dynamic inputs and the tools it would run after its edits either way. */
   previewPlugin: (id: string, values: PluginValues, selection: string[], playheadUs: number) =>
-    invoke<{ project: Project | null; error: string | null; items: Record<string, PluginRow[]> }>("preview_plugin", { id, values, selection, playheadUs: Math.round(playheadUs) }),
+    invoke<{ project: Project | null; error: string | null; items: Record<string, PluginRow[]>; tools: string[] }>("preview_plugin", { id, values, selection, playheadUs: Math.round(playheadUs) }),
   cancelPluginPreview: () => invoke<void>("cancel_plugin_preview"),
   /** One undo step; `snapshot` is null when the plugin changed nothing. `action` is the button pressed, the primary one when null. */
   runPlugin: (id: string, values: PluginValues, selection: string[], playheadUs: number, epoch: Epoch, action: string | null = null) =>

@@ -4471,6 +4471,66 @@ fn a_plugin_cannot_add_a_file_and_a_stuck_one_stops_over_stdio() {
     c.finish();
 }
 
+/// An agent's plugin adds captions and a zoom with Nuzky's own tools: a dry run plans them and changes nothing, the
+/// run puts the plugin's edit and theirs into the agent's run as one batch, a call the manifest does not declare
+/// keeps nothing of the plugin, and undo_run takes everything back.
+#[test]
+fn a_plugin_uses_captions_and_zooms_over_stdio() {
+    let mut c = Client::start(true, None, Some(None));
+    let asset = transcribed_take(&c);
+    let initial = c.call("get_state", json!({}));
+    let run = c.call("begin_run", json!({"label": "Agent"}))["run_id"].clone();
+    c.call(
+        "apply_edits",
+        json!({"run_id": run, "request_id": "place",
+        "edits": [{"type": "addAssets", "assets": [asset]}, {"type": "addClip", "assetId": "take"}]}),
+    );
+    let script = r#"function run(ctx) {
+  const tools = [{tool: "build_captions", args: {max_words: 4}},
+    {tool: "apply_zooms", args: {transcript_key: ctx.transcriptKey, zooms: [{from: 1, to: 1, scale: 1.25}]}}];
+  if (ctx.inputs.motion) tools.push({tool: "apply_motion", args: {kind: "pushIn", strength: 0.1, range_us: [0, 1000000]}});
+  return {edits: [{type: "renameProject", name: "Plugged"}], tools};
+}"#;
+    let saved = c.call(
+        "save_plugin",
+        json!({"manifest": {"nuzkyPlugin": 2, "id": "captions-zoom", "name": "Captions and zoom",
+            "description": "Captions the video and zooms on the number", "version": "1", "needs": ["words"],
+            "tools": ["build_captions", "apply_zooms"],
+            "inputs": [{"type": "toggle", "id": "motion", "label": "Motion", "default": false}]}, "script": script}),
+    );
+    assert_eq!(saved["plugin"]["manifest"]["tools"], json!(["build_captions", "apply_zooms"]), "{saved}");
+    let before = c.call("get_state", json!({}));
+    let dry = c.call("run_plugin", json!({"id": "captions-zoom", "dry_run": true}));
+    assert_eq!((&dry["valid"], &dry["tools"]), (&json!(true), &json!(["build_captions", "apply_zooms"])), "{dry}");
+    assert_eq!(c.call("get_state", json!({})), before);
+
+    let refused =
+        plugin_error(c.error("run_plugin", json!({"id": "captions-zoom", "run_id": run, "inputs": {"motion": true}})));
+    assert!(refused.starts_with("PLUGIN_FORBIDDEN_TOOL: tools[2] (apply_motion) is not in plugin.json's tools"));
+    assert_eq!(c.call("get_state", json!({}))["tracks"], before["tracks"], "a refused call kept the plugin's edits");
+    let ran = c.call("run_plugin", json!({"id": "captions-zoom", "run_id": run}));
+    assert_eq!((&ran["applied"], &ran["tools"]), (&json!(3), &json!(["build_captions", "apply_zooms"])), "{ran}");
+    let after = c.call("get_state", json!({}));
+    let captions = after["tracks"].as_array().unwrap().iter().find(|t| t["name"] == "Captions").unwrap();
+    let texts: Vec<_> =
+        captions["clips"].as_array().unwrap().iter().map(|c| c["content"]["text"].as_str().unwrap()).collect();
+    assert_eq!(texts.join(" "), "Save 450 every month.");
+    let scale = |at_us: i64| {
+        let clips = after["tracks"][0]["clips"].as_array().unwrap();
+        let clip = clips.iter().find(|c| {
+            let start = c["startUs"].as_i64().unwrap();
+            start <= at_us && at_us < start + c["durationUs"].as_i64().unwrap()
+        });
+        clip.unwrap()["content"]["transform"]["scale"].as_f64().unwrap()
+    };
+    assert_eq!((scale(400_000), scale(1_250_000), scale(3_000_000)), (1.0, 1.25, 1.0), "the zoom is not on 450");
+    c.call("end_run", json!({"run_id": run, "action": "keep"}));
+    c.call("undo_run", json!({"run_id": run}));
+    let undone = c.call("get_state", json!({}));
+    assert_eq!((&undone["name"], &undone["tracks"]), (&initial["name"], &initial["tracks"]));
+    c.finish();
+}
+
 /// The frame index whose time `t_us` is, at 30 fps, as export draws frames.
 fn frame_at_30(t_us: i64) -> i64 {
     (t_us as f64 * 30.0 / 1e6).round() as i64

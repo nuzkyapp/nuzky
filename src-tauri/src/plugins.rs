@@ -40,16 +40,16 @@ pub async fn preview_plugin(
     tauri::async_runtime::spawn_blocking(move || {
         let mut preview = plugins::dry_run_in_app(&host, &id, &values, selection, playhead_us, cancel).map_err(err)?;
         // The rows come also with an error, so the panel can offer them again when a chosen one is gone.
-        let items = preview["items"].take();
+        let (items, tools) = (preview["items"].take(), preview["tools"].take());
         if preview["valid"] != true {
-            return Ok(json!({"project": null, "error": preview["error"], "items": items}));
+            return Ok(json!({"project": null, "error": preview["error"], "items": items, "tools": tools}));
         }
         // As the snapshot draws it, so the app compares the two like for like.
         let mut project = preview["project"].take();
         let safe_area =
             serde_json::from_value::<nuzky_engine::Project>(project.clone()).map_err(err)?.canvas.safe_area();
         project["canvas"]["safeArea"] = json!(safe_area);
-        Ok(json!({"project": project, "error": null, "items": items}))
+        Ok(json!({"project": project, "error": null, "items": items, "tools": tools}))
     })
     .await
     .map_err(err)?

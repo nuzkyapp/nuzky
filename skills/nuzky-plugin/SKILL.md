@@ -11,6 +11,7 @@ A plugin is a small JavaScript file that reads the project and returns edits. Th
 
 - It reads: the project as `get_state` gives it, the clips the user selected, the playhead, the values of its inputs and, when it asks for them, the words of the transcript and the silences, loudness and beats Nuzky finds in the sound.
 - It returns edits, the same EditCmd JSON as `apply_edits`. Nuzky applies them as ONE batch: all of them or none. The user undoes them in one step.
+- After its edits it may ask for three of Nuzky's own tools: captions, zooms and motion (Nuzky's tools below). They join the same batch and the same undo step.
 - It cannot read or write files, reach the network, start processes, use timers or import modules. There is no `fetch`, `require`, `import`, `setTimeout` or `process`. `Math`, `Date`, `JSON`, strings, arrays and regular expressions work. `run` must return its result, not a Promise.
 - It cannot add media of its own choosing: `addAssets` is refused, so are reel candidates pointing at a new project file. It works with the assets the project already has (`addClip`, `replaceClip` with an existing `assetId`) and with its own pictures and sounds, such as a logo or a beep (Pictures and sounds below).
 - The user can turn it on to run by itself after every import they make in the app, or before every export, with the inputs they last set. Only the user turns that on, in the app; you and the plugin cannot. Such a run gets no selection and the playhead at 0, and may meet the same project again, after another import or the next export. Write a plugin meant for that to change nothing when its work is already done, such as a logo already in the corner, and say so in `message`.
@@ -48,6 +49,7 @@ A plugin is a small JavaScript file that reads the project and returns edits. Th
   - `color`: `default` such as `"#FFCC00"`.
   - `multi` (API 2): checkboxes, `options` as for `choice` and `default` a list of the values checked, such as `[]`. Its value is that list.
 - `files`: the plugin's own pictures and sounds by file name, such as `["logo.png"]` (Pictures and sounds below).
+- `tools`: Nuzky's tools `run` may ask for, any of `"build_captions"`, `"apply_zooms"` and `"apply_motion"`, with `"nuzkyPlugin": 2` (Nuzky's tools below). The first two read the transcript, so they need `"needs": ["words"]`. List only the ones `run` uses: the app tells the user what the plugin does from them.
 
 Ask the user only for what changes between runs. A value the plugin can work out from the project is not an input.
 
@@ -88,7 +90,7 @@ function run(ctx) {
 }
 ```
 
-`run(ctx)` returns an array of edits, or `{edits, message, items}`, where `message` is one sentence for the user, at most 500 characters, such as "Removed 6 clips.", and `items` the rows of dynamic inputs (A richer panel above). Return no edits and a message saying why when there is nothing to do.
+`run(ctx)` returns an array of edits, or `{edits, message, items, tools}`, where `message` is one sentence for the user, at most 500 characters, such as "Removed 6 clips.", `items` the rows of dynamic inputs (A richer panel above) and `tools` the calls of Nuzky's tools to make after the edits (Nuzky's tools below). Return no edits and a message saying why when there is nothing to do.
 
 `ctx`:
 
@@ -100,6 +102,7 @@ function run(ctx) {
 - `playheadUs`: where the playhead is.
 - `files`: each of the manifest's files by name, `{assetId, kind, width, height, durationUs}`, such as `ctx.files["logo.png"].assetId`. `kind` is `"image"` or `"audio"`; a picture has `durationUs` 0, a sound `width` and `height` 0.
 - `words`: only with `"needs": ["words"]`, the timeline's words as `get_transcript` gives them: `{i, start_us, end_us, text, p}`. Without a transcript the run fails with TRANSCRIPT_MISSING, so the user transcribes first.
+- `transcriptKey`: with `words`, the `transcript_key` that numbers them, for `apply_zooms`.
 - `silences`, `loudness`, `beats`: only when `needs` names them. Nuzky finds them in the sound of every media clip whose file has sound, on every track, muted or not, and places them on the timeline through the clip: times are timeline microseconds within the clip, a sped-up clip's are shorter, and the part of the file a clip does not play is left out. Each entry names its `clip_id`, `track_id` and `asset_id`, so keep the clips you want, such as `track_id === "main"` for the main track's own sound. The levels are the file's, before the clip's volume and fades.
   - `silences`: `[{clip_id, track_id, asset_id, start_us, end_us}]` in timeline order, every quiet stretch of at least 0.1 s of the file, unpadded. Quiet is at most 6 dB above the level the quietest tenth of the file stays under, and never above -35 dBFS, so it follows the room's own noise. Choose your own minimum length, and keep a margin on each side so speech does not start abruptly.
   - `loudness`: one `{clip_id, track_id, asset_id, start_us, end_us, times_us, dbfs}` per clip, in track and clip order. `dbfs[i]` is the RMS level in dBFS of the window starting at `times_us[i]` and lasting until `times_us[i + 1]`, the last one until `end_us`; -120 is digital silence. A window is 0.1 s of the file, longer for files of many hours, counted from where the clip starts playing it, so the first and last measure what the clip plays to within a tenth of a window.
@@ -218,6 +221,30 @@ A logo in the top right corner for the whole video:
 {"type": "addSticker", "assetId": "<ctx.files[\"logo.png\"].assetId>", "startUs": 0, "durationUs": 12000000, "transform": {"x": 0.35, "y": -0.4, "scale": 0.2, "rotation": 0, "opacity": 1}}
 ```
 
+## Nuzky's tools
+
+A plugin can use three of the tools you have, so it need not work out captions or zooms itself:
+
+- `build_captions`: captions from the transcript, in the creator's style or a `style_preset`.
+- `apply_zooms`: punch-ins on word ranges of `ctx.words`, with `transcript_key: ctx.transcriptKey`.
+- `apply_motion`: a push-in, pull-out or Ken Burns move on a clip or a range.
+
+Name them in the manifest's `tools`, then return the calls in `tools`, each `{tool, args}` with the same arguments as the MCP tool, but without `run_id` and `request_id`: the calls join the plugin's run. Nuzky makes them after the plugin's edits, in order, each on the project the ones before left, and applies everything as one batch, so the user undoes it in one step. When any call fails, nothing applies, the plugin's own edits included. At most 20 calls.
+
+- None of them transcribes, downloads or prepares sound. Without a transcript, a plugin that needs words fails with TRANSCRIPT_MISSING before it runs, so the user transcribes first.
+- Word numbers are those of `ctx.words`, so `apply_zooms` needs the plugin's own edits to leave the words where they are. After a cut on the main track it fails with SPEECH_CHANGED.
+- A call the manifest's `tools` does not name is refused with PLUGIN_FORBIDDEN_TOOL, and so is every tool not listed here.
+- `run_plugin` with `dry_run` makes the calls on the copy, so `valid` and `error` cover them too. The app's preview only names them ("Then adds captions and zooms"); they run when the user runs the plugin.
+
+```js
+function run(ctx) {
+  const loud = ctx.words.filter((w) => w.text.endsWith("!")).map((w) => ({ from: w.i, to: w.i, scale: 1.2 }));
+  const tools = [{ tool: "build_captions", args: { style_preset: "hormozi" } }];
+  if (loud.length) tools.push({ tool: "apply_zooms", args: { transcript_key: ctx.transcriptKey, zooms: loud } });
+  return { edits: [], tools, message: "Added captions and zoomed in on every exclamation." };
+}
+```
+
 ## Effects
 
 A plugin can also add a look, such as VHS or a glitch, that the user puts on a video or image clip in the Adjust tab under Effects. An effect is one WGSL function in `effects/<id>.wgsl` that Nuzky calls for every pixel of the clip's picture before it places the clip; its result replaces the picture, so the clip's position, crop, shape, background, Adjust, animations and transitions work as without it. The project keeps only the effect's name and settings: on a computer without the plugin the clip is drawn and exported without it, and Nuzky says so.
@@ -301,7 +328,7 @@ Save the effects with the manifest: `save_plugin(manifest, effects: {"vhs": "<th
 
 1. Read `get_state` so you know the project the plugin will meet, and write the plugin for any project, not only this one.
 2. `save_plugin(manifest, script, readme, files)`. PLUGIN_BROKEN names the field of plugin.json, or the line and column of plugin.js (`plugin.js:3:1: SyntaxError: …`). Fix it and save again.
-3. `run_plugin(id, inputs, dry_run: true)` changes nothing. Check `edits`, `adds`, `message`, `logs` and `items`; `valid: false` with `error` says which edit would fail. Give `action` to try another of its buttons. Try the inputs the user will use, and an edge such as no selection.
+3. `run_plugin(id, inputs, dry_run: true)` changes nothing. Check `edits`, `adds`, `tools`, `message`, `logs` and `items`; `valid: false` with `error` says which edit or tool call would fail. Give `action` to try another of its buttons. Try the inputs the user will use, and an edge such as no selection.
 4. `begin_run`, then `run_plugin(id, inputs, run_id)`. Its edits join your run. A long run answers with a job: wait with `job` action `wait`. A plugin that needs silences, loudness or beats first prepares the sound of each file Nuzky has not prepared yet, as part of that job.
 5. `inspect_frames` where it changed something, and `get_state`. If it is wrong, `end_run` with discard, or keep and `undo_run`, fix the plugin and try again.
 6. Tell the user the plugin is in their Plugins panel, what it does and what its inputs mean. When they want it every time, tell them to turn on Run after import or Run before export there.
@@ -323,5 +350,8 @@ To share a plugin, the user proposes its folder to github.com/nuzkyapp/nuzky-plu
 - PLUGIN_TOO_MANY_EDITS: more than 5000 edits.
 - PLUGIN_FORBIDDEN_EDIT: `edit <index> (<type>)` would add a file; place the plugin's own files by their `assetId` in `ctx.files`.
 - PLUGIN_BAD_EDIT: `edit <index> (<type>): …` is not a valid edit or does not apply (index counts from 0), or the edits together leave the project invalid.
+- PLUGIN_FORBIDDEN_TOOL: `tools[<index>] (<tool>)` is not in the manifest's `tools`, or not a tool plugins can use.
+- PLUGIN_BAD_TOOL: `tools[<index>] (<tool>): …` has arguments the tool does not take or longer than 16 KB, a text in them over 200 characters, or its result does not apply; `build_captions` makes captions once a run, so a second call, or one after the plugin's own `addCaptions`, is refused. A call that fails inside the tool keeps the tool's own code first, such as `SPEECH_CHANGED: tools[1] (apply_zooms): …`.
+- PLUGIN_TOO_MANY_TOOLS: more than 20 calls. PLUGIN_TOO_BIG: a tool's result would make the project too large. The tools are planned in the plugin's own process, so they count toward its 1 GB, its 60 seconds and Stop.
 
 After any error nothing was applied.

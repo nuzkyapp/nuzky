@@ -4,7 +4,8 @@ import subprocess
 import time
 from pathlib import Path
 
-from e2e.harness import CLI, FIXTURES, ROOT, Bridge, export, ffprobe, flow, leave_editor, press, wait, webdriver
+from e2e.harness import CLI, FIXTURES, ROOT, Bridge, export, ffprobe, flow, leave_editor, link_models, press, wait, webdriver
+from e2e.zooms import poll
 
 EXAMPLE = ROOT / 'skills/nuzky-plugin/examples/remove-short-clips'
 ROW = "document.querySelector('[data-plugin=\"remove-short-clips\"]')"
@@ -940,4 +941,73 @@ def plugin_panel(r):
             wait(lambda: 'Picks a text.' in (r.s.run("return document.querySelector('[aria-label=Inspector]')?.textContent ?? ''") or ''), 5)
             and wait(lambda: 'None found.' in r.s.run("return document.querySelector('[aria-label=Inspector]').textContent"), 10),
             r.s.run("return document.body.innerText.slice(0, 300)"))
+    r.check('no error toast', not r.errors(), r.errors())
+
+
+TOOLS_SCRIPT = '''function run(ctx) {
+  const end = ctx.words.findIndex((w) => /[.!?]$/.test(w.text.trim()));
+  return {edits: [], message: "Added captions and zoomed in on the first sentence.", tools: [
+    {tool: "build_captions", args: {}},
+    {tool: "apply_zooms", args: {transcript_key: ctx.transcriptKey, zooms: [{from: 0, to: end, scale: 1.2}]}},
+  ]};
+}'''
+
+
+@flow('plugin_tools', 'A plugin that uses Nuzky\'s captions and zooms names them in its preview without running them, '
+      'then adds both from the transcript as one undo step', before=link_models)
+def plugin_tools(r):
+    r.import_media(FIXTURES / 'talk.mp4')
+    r.add_clip('talk.mp4')
+    manifest = {'nuzkyPlugin': 2, 'id': 'caption-zoom', 'name': 'Caption and zoom', 'version': '1.0.0',
+                'description': 'Captions the video and zooms in on its first sentence.', 'action': 'Caption',
+                'needs': ['words'], 'tools': ['build_captions', 'apply_zooms']}
+    bridge = Bridge(r, r.saved_project())
+    try:
+        job = poll(bridge, bridge.call('transcribe', {'language': 'en', 'model': 'small'}), 300)
+        r.check('the speech is recognised', job['status'] == 'done', job)
+        words = bridge.call('get_transcript', {})['words']
+        stored = bridge.call('save_plugin', {'manifest': manifest, 'script': TOOLS_SCRIPT})
+    finally:
+        bridge.close()
+    r.check('the plugin saves with its tools', stored['plugin']['manifest']['tools'] == manifest['tools'], stored)
+    first = next(i for i, w in enumerate(words) if w['text'].strip()[-1:] in '.!?')
+    before = project(r)
+    r.s.run("[...document.querySelectorAll('[role=tab]')].find((b) => b.textContent === 'Plugins').click()")
+    row = "document.querySelector('[data-plugin=\"caption-zoom\"]')"
+    r.check('the Plugins tab lists the plugin', wait(lambda: r.s.run(f'return !!{row}'), 10))
+    r.s.run(f'{row}.click()')
+    said = wait(lambda: r.s.run("return document.body.textContent.includes('Adds captions and zooms.')"), 10)
+    r.check('the preview names the captions and zooms it would add', said, r.s.run('return document.body.innerText.slice(-400)'))
+    r.check('the preview runs neither tool', project(r) == before)
+    r.shot('tools-preview')
+
+    r.s.run("[...document.querySelectorAll('button')].find((b) => b.textContent === 'Caption').click()")
+    captions = wait(lambda: next((t for t in project(r)['tracks'] if t['name'] == 'Captions'), None), 20)
+    if not r.check('running adds a Captions track', captions, project(r)['tracks']):
+        return
+    shown = ' '.join(c['content']['text'] for c in captions['clips']).split()
+    r.check('the captions say every recognised word in order', shown == [w['text'].strip() for w in words], (shown, words))
+    sentence = (words[0]['start_us'] + words[first]['end_us']) // 2
+
+    def zooms(tracks):
+        return [(c['startUs'], round(c['content']['transform']['scale'], 4)) for c in tracks[0]['clips']]
+
+    def texts(tracks):
+        return [c['content']['text'] for t in tracks if t['name'] == 'Captions' for c in t['clips']]
+
+    after = project(r)['tracks']
+    scales = zooms(after)
+    zoomed = [scale for start, scale in scales if start <= sentence]
+    r.check('the first sentence is zoomed in to 1.2 and the rest is not',
+            zoomed[-1:] == [1.2] and scales[-1][1] == 1.0 and len(scales) == 2, scales)
+    r.check('the plugin message reaches the success toast', wait(lambda: any(
+        t['kind'] == 'success' and t['text'] == 'Added captions and zoomed in on the first sentence.'
+        for t in r.state()['toasts']), 5), r.state()['toasts'])
+    r.check('the saved project has the captions and the zoom', wait(
+        lambda: zooms(saved(r)['tracks']) == scales and texts(saved(r)['tracks']) == texts(after), 5),
+        (zooms(saved(r)['tracks']), texts(saved(r)['tracks'])))
+    r.s.run('window.__nuzky.store.getState().select([])')
+    r.shot('tools-done')
+    r.s.call('window.__nuzky.store.getState().undo()')
+    r.check('one undo takes away the captions and the zoom', wait(lambda: project(r) == before, 5), project(r))
     r.check('no error toast', not r.errors(), r.errors())

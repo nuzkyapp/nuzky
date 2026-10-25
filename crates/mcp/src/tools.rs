@@ -1345,20 +1345,9 @@ impl Backend {
 
     fn captions(&self, args: Captions, state: &SessionState) -> Result<Value> {
         owns_run(state, &args.run_id)?;
-        let project = self.media_project(&state.project);
-        let derived = transcript::derive(&project, &self.host.transcripts)?;
-        ensure!(derived.untranscribed.is_empty(), "TRANSCRIPT_MISSING: transcribe all heard assets before captions");
-        let mut from = crate::style::Defaults::read();
-        let grouping = args.grouping(&mut from);
-        let look = args.look(&mut from, (state.project.canvas.width, state.project.canvas.height))?;
-        let energy =
-            nuzky_analysis::prepared_word_energy(&project, &derived.words, &derived.sources, &self.host.cache_dir)?;
-        let keys = nuzky_analysis::key_words(&derived.words, &energy);
-        let (mut edit, _) = transcript::caption_edit(&derived.words, &keys, &state.project, look, grouping)?;
-        // Without a place of their own, captions made again stay where the ones they replace were.
-        if let EditCmd::AddCaptions { transform, .. } | EditCmd::ReplaceCaptions { transform, .. } = &mut edit {
-            *transform = args.transform.or(*transform);
-        }
+        let media = self.media_project(&state.project);
+        let (edit, from) =
+            caption_plan(&args, &state.project, &media, (&self.host.transcripts, &self.host.cache_dir), &|| false)?;
         let warnings = crate::fonts::warnings(crate::fonts::edit_families(&edit));
         let result = self.host.session.apply_edits(
             &args.run_id,
@@ -1820,6 +1809,33 @@ impl Backend {
         }
         project
     }
+}
+
+/// The captions build_captions makes from the stored words of `project` (`media` is the same with full paths), and
+/// the creator's style it read. It never transcribes and never waits for sound: it reads only the stored transcripts,
+/// the prepared sound, the creator's style and the saved caption styles, so a plugin may ask for it too.
+pub(crate) fn caption_plan(
+    args: &Captions,
+    project: &Project,
+    media: &Project,
+    (transcripts, cache): (&nuzky_session::transcripts::TranscriptStore, &Path),
+    stopped: &dyn Fn() -> bool,
+) -> Result<(EditCmd, crate::style::Defaults)> {
+    let derived = transcript::derive(media, transcripts)?;
+    ensure!(derived.untranscribed.is_empty(), "TRANSCRIPT_MISSING: transcribe all heard assets before captions");
+    ensure!(!stopped(), "CANCELLED: job cancelled");
+    let mut from = crate::style::Defaults::read();
+    let grouping = args.grouping(&mut from);
+    let look = args.look(&mut from, (project.canvas.width, project.canvas.height))?;
+    let energy = nuzky_analysis::prepared_word_energy(media, &derived.words, &derived.sources, cache)?;
+    ensure!(!stopped(), "CANCELLED: job cancelled");
+    let keys = nuzky_analysis::key_words(&derived.words, &energy);
+    let (mut edit, _) = transcript::caption_edit(&derived.words, &keys, project, look, grouping)?;
+    // Without a place of their own, captions made again stay where the ones they replace were.
+    if let EditCmd::AddCaptions { transform, .. } | EditCmd::ReplaceCaptions { transform, .. } = &mut edit {
+        *transform = args.transform.or(*transform);
+    }
+    Ok((edit, from))
 }
 
 /// get_state's answer, which is also the project a plugin reads.

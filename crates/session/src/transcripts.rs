@@ -61,6 +61,10 @@ impl TranscriptStore {
         Self::at(data.join("transcripts"))
     }
 
+    pub fn directory(&self) -> &Path {
+        &self.directory
+    }
+
     pub fn at(directory: PathBuf) -> Result<Self> {
         fs::create_dir_all(&directory).context("STORE_UNAVAILABLE: creating transcript directory")?;
         Ok(Self { directory, events: None, fingerprints: Arc::default() })

@@ -719,3 +719,237 @@ fn a_plugin_whose_edits_change_nothing_says_so() {
     let done = finish(&f.host, &job, Duration::from_secs(10));
     assert_eq!((&done["result"]["applied"], &done["result"]["changed"]), (&json!(1), &json!(false)), "{done}");
 }
+
+/// The words "Save 450 every month." said 0.6 to 2.5 s into the take, put in the transcript store as transcribing
+/// leaves them.
+fn transcribe(f: &Fixture) {
+    use nuzky_session::transcripts::{Record, VERSION};
+    let asset = f.host.session.state().unwrap().project.assets[0].clone();
+    let store = &f.host.transcripts;
+    let words = ["Save", "450", "every", "month."].iter().enumerate().map(|(i, text)| nuzky_engine::speech::Word {
+        start_us: 600_000 + i as i64 * 500_000,
+        end_us: 1_000_000 + i as i64 * 500_000,
+        text: (*text).into(),
+        probability: 0.9,
+    });
+    let record = Record {
+        version: VERSION,
+        fingerprint: store.fingerprint(&asset).unwrap(),
+        duration_us: asset.duration_us,
+        model: "fixture".into(),
+        language: "en".into(),
+        words: words.collect(),
+        segments: vec![],
+        alignment: None,
+    };
+    store.put(&asset, &record).unwrap();
+}
+
+const CAPTION_AND_ZOOM: &str = "function run(ctx) {\n  return {\n    edits: [{type: 'renameProject', name: 'Captioned'}],\n    \
+    tools: [\n      {tool: 'build_captions', args: {max_words: 2, style_preset: 'clean'}},\n      \
+    {tool: 'apply_zooms', args: {transcript_key: ctx.transcriptKey, zooms: [{from: 0, to: 1, scale: 1.2}]}},\n    ],\n    \
+    message: 'Added captions and a zoom.',\n  };\n}\n";
+
+fn tool_plugin(id: &str, tools: Value, script: &str) -> Result<(), String> {
+    let manifest = json!({"nuzkyPlugin": 2, "id": id, "name": id, "description": "Uses Nuzky's tools", "version": "1",
+        "needs": ["words"], "tools": tools});
+    plugins::save(&manifest, script, None).map(drop).map_err(|e| format!("{e:#}"))
+}
+
+fn error_of(f: &Fixture, id: &str) -> String {
+    match plugins::run_in_app(&f.host, id, &Map::new(), None, vec![], 0) {
+        Ok(job) => {
+            let done = finish(&f.host, &job, Duration::from_secs(10));
+            done["error"].as_str().unwrap_or_else(|| panic!("{id} did not fail: {done}")).to_owned()
+        }
+        Err(error) => format!("{error:#}"),
+    }
+}
+
+/// One run of a plugin adds captions from the transcript and zooms in on its first two words after its own edit,
+/// as one undo step; the preview names the tools without running them.
+#[test]
+fn a_plugin_adds_captions_and_zooms_in_one_undo_step() {
+    let f = project();
+    transcribe(&f);
+    tool_plugin("caption-zoom", json!(["build_captions", "apply_zooms"]), CAPTION_AND_ZOOM).unwrap();
+    let before = f.host.session.state().unwrap().project;
+
+    let dry = plugins::dry_run_in_app(&f.host, "caption-zoom", &Map::new(), vec![], 0, Arc::default()).unwrap();
+    assert_eq!((&dry["valid"], &dry["tools"]), (&json!(true), &json!(["build_captions", "apply_zooms"])), "{dry}");
+    let previewed: Project = serde_json::from_value(dry["project"].clone()).unwrap();
+    assert_eq!((previewed.name.as_str(), previewed.tracks.len()), ("Captioned", 1), "the preview ran the tools");
+
+    let job = plugins::run_in_app(&f.host, "caption-zoom", &Map::new(), None, vec![], 0).unwrap();
+    let done = finish(&f.host, &job, Duration::from_secs(10));
+    assert_eq!(done["status"], "done", "{done}");
+    assert_eq!(done["result"]["tools"], json!(["build_captions", "apply_zooms"]));
+    let after = f.host.session.state().unwrap().project;
+    assert_eq!(after.name, "Captioned");
+    let captions = after.tracks.iter().find(|t| t.name == "Captions").expect("a Captions track");
+    let texts: Vec<_> = captions
+        .clips
+        .iter()
+        .map(|c| match &c.content {
+            ClipContent::Text { text, .. } => (c.start_us, text.as_str()),
+            _ => panic!("a caption that is not text"),
+        })
+        .collect();
+    assert_eq!(texts, [(600_000, "Save 450"), (1_600_000, "every month.")]);
+    let scale = |at_us: i64| {
+        let clip = after.tracks[0].clips.iter().find(|c| c.start_us <= at_us && c.end_us() > at_us).unwrap();
+        match &clip.content {
+            ClipContent::Media { transform, .. } => transform.scale,
+            _ => unreachable!(),
+        }
+    };
+    assert!((scale(800_000) - 1.2).abs() < 1e-9 && (scale(2_200_000) - 1.0).abs() < 1e-9);
+    assert_eq!(f.host.session.list_history(1).unwrap().versions[0].label, "Plugin: caption-zoom");
+    f.host.session.undo().unwrap();
+    assert_eq!(f.host.session.state().unwrap().project, before, "one undo left part of the run");
+}
+
+/// The button the user presses decides the tool calls too: a plugin's second action can add captions while its
+/// first only renames, and the preview, which shows the first, names no tool.
+#[test]
+fn a_plugins_second_button_calls_nuzkys_tools() {
+    let f = project();
+    transcribe(&f);
+    let manifest = json!({"nuzkyPlugin": 2, "id": "two-buttons", "name": "Two buttons", "description": "Captions",
+        "version": "1", "needs": ["words"], "tools": ["build_captions"],
+        "actions": [{"id": "rename", "label": "Rename"}, {"id": "caption", "label": "Caption"}]});
+    let script = "function run(ctx) {\n  if (ctx.action !== 'caption') return [{type: 'renameProject', name: 'Renamed'}];\n  \
+        return {edits: [], tools: [{tool: 'build_captions', args: {}}]};\n}\n";
+    plugins::save(&manifest, script, None).unwrap();
+
+    let dry = plugins::dry_run_in_app(&f.host, "two-buttons", &Map::new(), vec![], 0, Arc::default()).unwrap();
+    assert_eq!(dry["tools"], json!([]), "{dry}");
+    let job = plugins::run_in_app(&f.host, "two-buttons", &Map::new(), Some("caption"), vec![], 0).unwrap();
+    let done = finish(&f.host, &job, Duration::from_secs(10));
+    assert_eq!(done["result"]["tools"], json!(["build_captions"]), "{done}");
+    let after = f.host.session.state().unwrap().project;
+    assert!(after.tracks.iter().any(|t| t.name == "Captions"), "the second button added no captions");
+}
+
+/// A plugin may call only the tools its manifest names from Nuzky's fixed list, with the MCP tool's own arguments,
+/// and any call that fails keeps nothing, its own edits included. Without a transcript it fails at once instead of
+/// transcribing or fetching a model.
+#[test]
+fn a_plugin_calls_only_the_tools_it_declares_and_never_transcribes() {
+    // A file of its own: transcripts belong to a file's content, which project() makes the same for every test.
+    let f = with_sound("0.3*sin(2*PI*523*t)", 4, "aac");
+    let script = |tool: &str, args: &str| {
+        format!(
+            "function run(ctx) {{\n  return {{edits: [{{type: 'renameProject', name: 'Changed'}}], tools: [{{tool: '{tool}', args: {args}}}]}};\n}}\n"
+        )
+    };
+    let saved = tool_plugin("export", json!(["export_video"]), &script("build_captions", "{}")).unwrap_err();
+    assert!(saved.starts_with("PLUGIN_BROKEN: plugin.json: tools: export_video is not a tool"), "{saved}");
+    let manifest = json!({"nuzkyPlugin": 2, "id": "no-words", "name": "No words", "description": "d", "version": "1",
+        "tools": ["build_captions"]});
+    let saved = plugins::save(&manifest, &script("build_captions", "{}"), None).map(drop).unwrap_err();
+    assert!(format!("{saved:#}").contains("build_captions reads the transcript"), "{saved:#}");
+
+    tool_plugin("captions", json!(["build_captions"]), &script("build_captions", "{}")).unwrap();
+    let models = data().join("models");
+    let missing = error_of(&f, "captions");
+    assert!(missing.starts_with("TRANSCRIPT_MISSING: "), "{missing}");
+    assert!(!models.exists(), "a plugin run made the models folder");
+    transcribe(&f);
+    let before = f.host.session.state().unwrap().project;
+
+    let motion = script("apply_motion", "{kind: 'pushIn', strength: 0.1}");
+    tool_plugin("motion", json!(["build_captions"]), &motion).unwrap();
+    let undeclared = error_of(&f, "motion");
+    assert!(
+        undeclared.starts_with("PLUGIN_FORBIDDEN_TOOL: tools[0] (apply_motion) is not in plugin.json's tools"),
+        "{undeclared}"
+    );
+    tool_plugin("exporter", json!(["build_captions"]), &script("export_video", "{path: '/tmp/x.mp4'}")).unwrap();
+    let unlisted = error_of(&f, "exporter");
+    assert!(
+        unlisted.starts_with("PLUGIN_FORBIDDEN_TOOL: tools[0] (export_video): a plugin can use only"),
+        "{unlisted}"
+    );
+    tool_plugin("typo", json!(["build_captions"]), &script("build_captions", "{max_word: 2}")).unwrap();
+    let typo = error_of(&f, "typo");
+    assert!(typo.starts_with("PLUGIN_BAD_TOOL: tools[0] (build_captions): unknown field `max_word`"), "{typo}");
+    tool_plugin("run-id", json!(["build_captions"]), &script("build_captions", "{run_id: 'other'}")).unwrap();
+    let run_id = error_of(&f, "run-id");
+    assert!(run_id.starts_with("PLUGIN_BAD_TOOL: tools[0] (build_captions): leave out run_id"), "{run_id}");
+    // A caption style is copied into every caption, so its texts stay short.
+    let font = format!("{{style: {{fontFamily: '{}', fontSize: 80, color: '#FFFFFF'}}}}", "x".repeat(300));
+    tool_plugin("long-font", json!(["build_captions"]), &script("build_captions", &font)).unwrap();
+    let long = error_of(&f, "long-font");
+    assert!(long.starts_with("PLUGIN_BAD_TOOL: tools[0] (build_captions): its arguments are at most"), "{long}");
+    // The second call would replace the captions the first makes, whose track gets another id when the batch applies.
+    let twice = "function run(ctx) {\n  const c = {tool: 'build_captions', args: {}};\n  return {edits: [], tools: [c, c]};\n}\n";
+    tool_plugin("twice", json!(["build_captions"]), twice).unwrap();
+    let again = error_of(&f, "twice");
+    assert!(
+        again.starts_with("PLUGIN_BAD_TOOL: tools[1] (build_captions): the captions it would make again"),
+        "{again}"
+    );
+    // Deleting a clip moves the words, so zooms on ctx.words' numbers would land on others.
+    let stale = "function run(ctx) {\n  return {edits: [{type: 'deleteClips', clipIds: [ctx.project.tracks[0].clips[0].id]}],\n    \
+                 tools: [{tool: 'apply_zooms', args: {transcript_key: ctx.transcriptKey, zooms: [{from: 0, to: 0, scale: 1.2}]}}]};\n}\n";
+    tool_plugin("stale", json!(["apply_zooms"]), stale).unwrap();
+    let moved = error_of(&f, "stale");
+    assert!(moved.starts_with("SPEECH_CHANGED: tools[0] (apply_zooms): "), "{moved}");
+    let dry = plugins::dry_run_in_app(&f.host, "motion", &Map::new(), vec![], 0, Arc::default()).unwrap();
+    assert_eq!(dry["valid"], false);
+    assert!(dry["error"].as_str().unwrap().starts_with("PLUGIN_FORBIDDEN_TOOL: "), "{dry}");
+    assert_eq!(f.host.session.state().unwrap().project, before, "a refused tool kept the plugin's own edit");
+    assert!(!models.exists(), "a plugin run made the models folder");
+}
+
+/// Stop while one of the tools a plugin asked for is planned ends the run within a second, and nothing it did is kept.
+#[test]
+fn stop_ends_a_plugin_while_its_tools_run() {
+    let f = project();
+    let script = "function run(ctx) {\n  const clip = ctx.project.tracks[0].clips[1].id;\n  \
+                  const push = {tool: 'apply_motion', args: {clip_id: clip, kind: 'pushIn', strength: 0.1}};\n  \
+                  return {edits: [{type: 'renameProject', name: 'Moving'}], tools: [push]};\n}\n";
+    let manifest = json!({"nuzkyPlugin": 2, "id": "slow-tools", "name": "Slow tools", "description": "d", "version": "1",
+        "tools": ["apply_motion"]});
+    plugins::save(&manifest, script, None).unwrap();
+    plugins::slow_tools_for_tests("slow-tools", Duration::from_secs(30));
+    let before = f.host.session.state().unwrap().project;
+    let job = plugins::run_in_app(&f.host, "slow-tools", &Map::new(), None, vec![], 0).unwrap();
+    let id = job["job_id"].as_str().unwrap();
+    let started = Instant::now();
+    while f.host.jobs.get(id, false).unwrap()["phase"] != "tools" {
+        assert!(started.elapsed() < Duration::from_secs(10), "the tools never started");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    std::thread::sleep(Duration::from_millis(400));
+    let stopping = Instant::now();
+    f.host.stop_run().unwrap();
+    let stopped = finish(&f.host, &job, Duration::from_secs(5));
+    assert_eq!(stopped["status"], "cancelled", "{stopped}");
+    assert!(stopping.elapsed() < Duration::from_secs(1), "stopped after {:?}", stopping.elapsed());
+    let state = f.host.session.state().unwrap();
+    assert!(state.open_run.is_none());
+    assert_eq!(state.project, before);
+}
+
+/// The tools' edits together are bounded in the plugin's process, since the app applies them as one batch: twenty
+/// rebuilds of the captions of a talk pasted thousands of times are refused, and nothing changes.
+#[test]
+fn the_tools_edits_together_stay_small_enough_for_the_app() {
+    let f = project();
+    transcribe(&f);
+    let once = "function run() {\n  return {edits: [], tools: [{tool: 'build_captions', args: {}}]};\n}\n";
+    tool_plugin("captions-once", json!(["build_captions"]), once).unwrap();
+    let job = plugins::run_in_app(&f.host, "captions-once", &Map::new(), None, vec![], 0).unwrap();
+    assert_eq!(finish(&f.host, &job, Duration::from_secs(10))["status"], "done");
+    let before = f.host.session.state().unwrap().project;
+    let flood = "function run(ctx) {\n  const copy = {trackId: 'main', trackKind: 'video', clip: ctx.project.tracks[0].clips[1]};\n  \
+                 const rebuild = {tool: 'build_captions', args: {max_words: 1}};\n  \
+                 return {edits: [{type: 'pasteClips', atUs: 0, clips: Array(3000).fill(copy)}], tools: Array(20).fill(rebuild)};\n}\n";
+    tool_plugin("flood", json!(["build_captions"]), flood).unwrap();
+    let error = error_of(&f, "flood");
+    assert!(error.starts_with("PLUGIN_TOO_BIG: tools["), "{error}");
+    assert!(error.contains("makes the tools' edits larger than 16 MB together"), "{error}");
+    assert_eq!(f.host.session.state().unwrap().project, before);
+}
