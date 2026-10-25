@@ -375,17 +375,23 @@ fn cut(cuts: &BeatCuts, host: &Host, clip_id: &str, rhythm: Rhythm, keep_sound: 
     let epoch = state.stamp.session_epoch.clone();
     let replace = cuts.last(host, &state.project, &epoch, clip_id).filter(|l| l.1).map(|l| l.0);
     let base = replace.as_ref().map_or(&state.project, |l| &l.before);
-    let (plan, after) = dry_run(base, &beats, clip_id, rhythm, keep_sound)?;
+    let (plan, planned) = dry_run(base, &beats, clip_id, rhythm, keep_sound)?;
     let expect = Expect { revision: Some(state.stamp.revision), speech_layout_key: None };
-    match &replace {
+    let done = match &replace {
         Some(last) => session.replace_newest(&last.before, plan.edits.clone(), expect)?,
         None => session.edit(plan.edits.clone(), None, expect)?,
     };
-    let captions = captions_removed(base, &after);
-    let main = after.tracks.iter().find(|t| t.id == MAIN_TRACK).context("INVALID_PROJECT: no main track")?;
-    let made = main.clips.iter().map(|c| c.id.clone()).collect();
-    let before = base.clone();
-    *cuts.last.lock().unwrap() = Some(LastCut { epoch, clip_id: clip_id.into(), rhythm, before, after, made });
+    let captions = captions_removed(base, &planned);
+    // The cut gives its clips new ids, so it is known by the project it made, unless an edit came in after it.
+    let made = session.state()?;
+    *cuts.last.lock().unwrap() = (made.stamp.revision == done.stamp.revision)
+        .then(|| {
+            let main = made.project.tracks.iter().find(|t| t.id == MAIN_TRACK)?;
+            let made_ids = main.clips.iter().map(|c| c.id.clone()).collect();
+            let before = base.clone();
+            Some(LastCut { epoch, clip_id: clip_id.into(), rhythm, before, after: made.project, made: made_ids })
+        })
+        .flatten();
     Ok((plan.cut_us.len(), plan.repeated, captions))
 }
 
@@ -514,8 +520,7 @@ mod tests {
 
     /// The planner's own case: two 20 s takes, where the second goes on across the last three cuts, a 60 s song and
     /// titles at 2 s, 39 s and 45 s, the last two past where the cut ends.
-    #[test]
-    fn the_plan_counts_cuts_that_do_not_show_and_titles_that_keep_the_video_going() {
+    fn case() -> (Project, String, Beats) {
         let mut p = Project::new("beats");
         let assets = vec![
             asset("red", AssetKind::Video, 20_000_000),
@@ -543,6 +548,12 @@ mod tests {
             sections: vec![Section { beat: 0, at_us: beats_us[0], level_db: -20.0 }],
             beats_us,
         };
+        (p, song, beats)
+    }
+
+    #[test]
+    fn the_plan_counts_cuts_that_do_not_show_and_titles_that_keep_the_video_going() {
+        let (p, song, beats) = case();
         let (plan, after) = dry_run(&p, &beats, &song, Rhythm::Builds, false).unwrap();
         assert!(
             plan.warnings.iter().any(|w| w.starts_with("no other shot was long enough, so 3 of")),
@@ -554,5 +565,37 @@ mod tests {
         assert_eq!((past.titles, past.captions, past.overlays), (2, 0, 0));
         assert_eq!(after.duration_us(), 48_000_000);
         assert!(plan.end_us < 39_000_000, "{}", plan.end_us);
+    }
+
+    /// Another rhythm takes the place of the cut it follows, so one undo leads back to the video before both.
+    #[test]
+    fn another_rhythm_replaces_the_cut_so_one_undo_leads_back() {
+        let dir = std::env::temp_dir().join(format!("app-beats-{}", nuzky_engine::edit::new_id()));
+        std::fs::create_dir_all(dir.join("cache")).unwrap();
+        let (mut p, song, beats) = case();
+        for asset in &mut p.assets {
+            let path = dir.join(&asset.id);
+            std::fs::write(&path, &asset.id).unwrap();
+            asset.path = path.to_string_lossy().into();
+        }
+        let file = dir.join("project.nuzky");
+        std::fs::write(&file, serde_json::to_vec(&p).unwrap()).unwrap();
+        let session = nuzky_session::ProjectSession::open(&file, nuzky_session::Mode::Write, None).unwrap();
+        let transcripts = nuzky_session::transcripts::TranscriptStore::at(dir.join("transcripts")).unwrap();
+        let host = Host { session, jobs: Default::default(), transcripts, cache_dir: dir.join("cache") };
+        let cuts = BeatCuts::default();
+        let asset = p.asset("song").unwrap().clone();
+        cuts.found.lock().unwrap().insert(pcm_path(&host.cache_dir, &asset), Arc::new(beats));
+        let main = |p: &Project| p.tracks.iter().find(|t| t.id == MAIN_TRACK).unwrap().clips.clone();
+        let original = main(&host.session.state().unwrap().project);
+
+        cut(&cuts, &host, &song, Rhythm::Fast, false).unwrap();
+        let fast = main(&host.session.state().unwrap().project);
+        cut(&cuts, &host, &song, Rhythm::Calm, false).unwrap();
+        let calm = main(&host.session.state().unwrap().project);
+        assert!(calm.len() < fast.len(), "Calm cuts less often than Fast: {} and {}", calm.len(), fast.len());
+        host.session.undo().unwrap();
+        assert_eq!(main(&host.session.state().unwrap().project), original);
+        std::fs::remove_dir_all(dir).ok();
     }
 }
