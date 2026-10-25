@@ -220,7 +220,7 @@ LOGO_TRANSFORM = {'x': 0.35, 'y': -0.35, 'scale': 0.2}
 
 # The inspector's line saying what the open plugin would do, and whether it is dimmed while a newer check runs.
 OUTCOME = """const line = document.querySelector('.lucide-eye')?.parentElement;
-    return line ? {text: line.innerText, stale: line.classList.contains('opacity-50')} : null;"""
+    return line ? {text: line.innerText, stale: !!line.closest('.opacity-50')} : null;"""
 
 
 def outcome(r, text, timeout=10):
@@ -384,11 +384,16 @@ if (b) b.click();
 return !!b;"""
 SWITCH = "document.querySelector(`[role=switch][aria-label=\"${arguments[0]}\"]`)"
 ROW_TEXT = "return document.querySelector(`[data-plugin=\"${arguments[0]}\"]`)?.innerText ?? ''"
-# Where the switch is and whether the inspector shows it without scrolling.
-SWITCH_SHOWN = f"""const s = {SWITCH};
-const pane = s && s.closest('.overflow-y-auto').getBoundingClientRect();
-const box = s && s.getBoundingClientRect();
-return !!s && box.top >= pane.top && box.bottom <= pane.bottom && box.bottom <= window.innerHeight;"""
+INSPECTOR_BUTTON = "[...document.querySelectorAll('[aria-label=Inspector] button')].find((b) => b.textContent === arguments[0])"
+# Whether the element is wholly on screen in the inspector: neither scrolled away, cut off nor covered. Hit testing
+# follows rounded corners, so it probes the middle of the top and bottom edges.
+SHOWN = """const e = %s;
+if (!e) return false;
+const box = e.getBoundingClientRect();
+const pane = document.querySelector('[aria-label=Inspector]').getBoundingClientRect();
+const hits = (x, y) => { const hit = document.elementFromPoint(x, y); return !!hit && (hit === e || e.contains(hit)); };
+return box.height > 0 && box.top >= pane.top && box.bottom <= pane.bottom && box.bottom <= window.innerHeight
+    && hits(box.left + box.width / 2, box.top + 1) && hits(box.left + box.width / 2, box.bottom - 1);"""
 
 
 def prepare_autorun(r):
@@ -515,14 +520,29 @@ def plugin_autorun(r):
     r.check('Run before export stays off', not switched_on(r, 'Run before export'))
     r.check('a line says it runs on the whole project with these settings',
             'Runs on the whole project with these settings.' in r.s.run("return document.querySelector('[aria-label=Inspector]').textContent"))
+    r.check('the switches follow the settings',
+            r.s.run(f"return {SWITCH}.getBoundingClientRect().top > document.querySelector('input[type=range][aria-label=\"Keep on each side\"]').getBoundingClientRect().bottom",
+                    'Run after import'))
+    description = r.s.run("""const d = [...document.querySelectorAll('[aria-label=Inspector] div')].find((e) => e.textContent.startsWith('Cuts out the quiet') && !e.children.length);
+        const style = d && getComputedStyle(d);
+        return d && {lines: Math.round(d.getBoundingClientRect().height / (parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.25)), title: d.title};""")
+    for width, height, suffix in ((1024, 640, '-1024'), (1440, 900, '')):
+        resize(r, width, height)
+        r.check(f'at {width} x {height} Remove pauses shows whole without scrolling, under two sliders and a long description',
+                wait(lambda: r.s.run(SHOWN % INSPECTOR_BUTTON, 'Remove pauses'), 5))
+        time.sleep(1)
+        r.shot(f'autorun-settings{suffix}')
+    r.check('the description takes at most two lines and keeps all of it in its tooltip',
+            description and description['lines'] <= 2 and description['title'].startswith('Cuts out the quiet')
+            and description['title'].endswith('on each side.'), description)
     resize(r, 1024, 640)
-    r.check('at 1024 x 640 the switches show without scrolling, for a plugin with settings and a long description',
-            wait(lambda: r.s.run(SWITCH_SHOWN, 'Run before export'), 5))
+    r.s.run(f'{SWITCH}.scrollIntoView({{block: "nearest"}})', 'Run before export')
+    r.check('at 1024 x 640 the switches scroll into view above the button, which stays',
+            wait(lambda: r.s.run(SHOWN % SWITCH, 'Run after import') and r.s.run(SHOWN % SWITCH, 'Run before export')
+                 and r.s.run(SHOWN % INSPECTOR_BUTTON, 'Remove pauses'), 5))
     time.sleep(1)
     r.shot('autorun-switch-1024')
     resize(r, 1440, 900)
-    time.sleep(1)
-    r.shot('autorun-switch')
     turn_on(r, 'title-card', 'Run after import')
     turn_on(r, 'add-logo', 'Run after import')
     rows = {id: r.s.run(ROW_TEXT, id) for id in ('remove-pauses', 'title-card', 'slow-check')}
@@ -604,6 +624,8 @@ def plugin_autorun(r):
     r.s.run(f'{SWITCH}.click()', 'Run after import')
     r.check('while the plugin runs, its switches still turn on and off',
             usable and turned and wait(lambda: not switched_on(r, 'Run after import'), 5) and switched_on(r, 'Run before export'))
+    r.check('while it runs, its button shows whole and says so', r.s.run(SHOWN % INSPECTOR_BUTTON, 'Running…'))
+    r.shot('autorun-running')
     r.check('the export dialog opens again on the plugin it waits for',
             open_dialog(r) and 'Waiting for Slow check…' in r.s.run(DIALOG_TEXT), r.s.run(DIALOG_TEXT))
     r.check('Skip Slow check is there to click', r.s.run(CLICK_IN_DIALOG, 'Skip Slow check'))

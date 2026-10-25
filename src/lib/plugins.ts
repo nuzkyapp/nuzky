@@ -212,7 +212,8 @@ export interface PassReport {
 /** Runs it in a run of its own: the AI lock with Stop while it runs, and one undo step. */
 async function execute(p: Plugin, selection: string[], timeUs: number): Promise<Ran> {
   const values = valuesOf(p);
-  usePlugins.setState({ running: p.id, preview: null });
+  // The last preview stays, dimmed, so the panel keeps its height while the run goes on.
+  usePlugins.setState({ running: p.id });
   const out: { failure?: string; message?: string | null; from?: number } = {};
   const snap = await enqueue(async (epoch) => {
     out.from = useEditor.getState().snap?.revision;

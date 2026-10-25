@@ -6,7 +6,7 @@ import { useSpeech, useTranscriptView } from "../../lib/speech";
 import { useEditor } from "../../lib/store";
 import { Select } from "../panel/SpeechControls";
 import { PluginMark, pluginMenu } from "../panel/PluginsTab";
-import { AiLock, Button, ColorInput, IconButton, Menu, Section, Segmented, Slider, Switch, useLockReason } from "../ui";
+import { AiLock, Button, ColorInput, IconButton, LockReason, Menu, Section, Segmented, Slider, Switch, useLockReason } from "../ui";
 
 /** How long the settings rest before the plugin runs again without changing anything, so dragging a slider does not run it per pixel. */
 const PREVIEW_DELAY_MS = 300;
@@ -64,7 +64,7 @@ function Control({ input, value, onChange }: { input: PluginInput; value: Plugin
  * What running it would do, from the preview, or why it cannot run. While a newer preview is on its way the last one
  * stays, `stale`, so the panel does not jump on every change.
  */
-function useOutcome(p: Plugin, key: string) {
+function useOutcome(p: Plugin, key: string, running: boolean) {
   const preview = usePlugins((s) => s.preview);
   const snap = useEditor((s) => s.snap);
   const { view } = useTranscriptView();
@@ -80,7 +80,7 @@ function useOutcome(p: Plugin, key: string) {
   }, [preview, snap]);
   if (blocked) return { blocked, lines: null, marked, stale: false, waiting: false };
   if (!preview) return { blocked: null, lines: null, marked, stale: true, waiting: false };
-  const stale = preview.key !== key || preview.revision !== snap?.revision;
+  const stale = running || preview.key !== key || preview.revision !== snap?.revision;
   if (preview.error) return { blocked: preview.error, lines: null, marked, stale, waiting: preview.waiting };
   if (lines && lines.length === 0) return { blocked: "Nothing left to change.", lines: null, marked, stale, waiting: false };
   return { blocked: null, lines, marked, stale, waiting: false };
@@ -95,7 +95,7 @@ function PluginBody({ plugin: p }: { plugin: Plugin }) {
   // The playhead counts once it rests: a plugin may work where it is, but playback must not run it every frame.
   const playhead = useEditor((s) => (s.playing ? null : s.timeUs));
   const key = JSON.stringify([p.id, all, selection, playhead]);
-  const outcome = useOutcome(p, key);
+  const outcome = useOutcome(p, key, running);
   // Prepared sound and new words change what a plugin that needs them finds.
   const heard = useSpeech((s) => (p.needs.length ? s.stored : 0));
 
@@ -105,24 +105,38 @@ function PluginBody({ plugin: p }: { plugin: Plugin }) {
     return () => window.clearTimeout(timer);
   }, [p, all, key, revision, running, heard]);
 
+  const said = outcome.lines && `${outcome.lines.slice(0, 3).join(". ")}.`;
   return (
     <>
-      {p.inputs.length > 0 && (
-        <Section>
-          {p.inputs.map((input) => (
-            <Control key={input.id} input={input} value={all[input.id]} onChange={(v) => setValue(p.id, input.id, v)} />
-          ))}
-        </Section>
-      )}
-      <section className="flex flex-col gap-2.5 px-4 py-4">
-        {outcome.lines && (
-          <div className={`flex gap-2 text-[12px] text-fg/85 transition-opacity duration-[120ms] ${outcome.stale ? "opacity-50" : ""}`}>
-            <Eye size={14} className="mt-px shrink-0 text-muted" aria-hidden />
-            <span>
-              {outcome.lines.slice(0, 3).join(". ")}.{outcome.marked && <span className="text-muted"> Marked on the timeline.</span>}
-            </span>
-          </div>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {p.inputs.length > 0 && (
+          <Section>
+            {p.inputs.map((input) => (
+              <Control key={input.id} input={input} value={all[input.id]} onChange={(v) => setValue(p.id, input.id, v)} />
+            ))}
+          </Section>
         )}
+        <LockReason.Provider value={null}>
+          <AutoSwitches plugin={p} />
+        </LockReason.Provider>
+      </div>
+      {/* Pinned under the settings, so the button is in view however many there are. */}
+      <div className="flex shrink-0 flex-col gap-2.5 border-t border-white/[.07] px-4 py-3.5">
+        <div className={`text-[12px] transition-opacity duration-[120ms] ${outcome.stale ? "opacity-50" : ""}`}>
+          {outcome.blocked ? (
+            <p className="text-muted">{outcome.blocked}</p>
+          ) : said ? (
+            <div className="flex gap-2 text-fg/85" title={outcome.marked ? `${said} Marked on the timeline.` : said}>
+              <Eye size={14} className="mt-px shrink-0 text-muted" aria-hidden />
+              <span className="line-clamp-2">
+                {said}
+                {outcome.marked && <span className="text-muted"> Marked on the timeline.</span>}
+              </span>
+            </div>
+          ) : (
+            <p className="text-muted">{running ? "\u00a0" : "Checking…"}</p>
+          )}
+        </div>
         <Button
           variant="primary"
           pill
@@ -133,8 +147,7 @@ function PluginBody({ plugin: p }: { plugin: Plugin }) {
         >
           {running ? "Running…" : p.action}
         </Button>
-        {outcome.blocked && <p className={`text-[12px] text-muted ${outcome.stale ? "opacity-50" : ""}`}>{outcome.blocked}</p>}
-      </section>
+      </div>
     </>
   );
 }
@@ -153,7 +166,7 @@ function AutoSwitch({ plugin: p, trigger, label }: { plugin: Plugin; trigger: Tr
 function AutoSwitches({ plugin: p }: { plugin: Plugin }) {
   const on = usePlugins((s) => s.auto.import.includes(p.id) || s.auto.export.includes(p.id));
   return (
-    <section className="flex flex-col gap-2 border-b border-white/[.07] px-4 py-3">
+    <section className="flex flex-col gap-2 border-b border-white/[.07] px-4 py-3 last:border-b-0">
       <AutoSwitch plugin={p} trigger="import" label="Run after import" />
       <AutoSwitch plugin={p} trigger="export" label="Run before export" />
       {on && <p className="text-[12px] text-muted">{p.inputs.length ? "Runs on the whole project with these settings." : "Runs on the whole project."}</p>}
@@ -174,7 +187,11 @@ export function PluginInspector({ plugin: p }: { plugin: Plugin }) {
         <PluginMark plugin={p} />
         <div className="min-w-0 flex-1">
           <div className="truncate text-[15px] leading-5 font-semibold tracking-[-0.015em] text-fg">{p.name}</div>
-          {p.description && <div className="mt-[3px] text-[12px] text-muted">{p.description}</div>}
+          {p.description && (
+            <div className="mt-[3px] line-clamp-2 text-[12px] text-muted" title={p.description}>
+              {p.description}
+            </div>
+          )}
         </div>
         <IconButton label={`More for ${p.name}`} className="size-7 shrink-0" onClick={showMenu}>
           <MoreHorizontal size={16} />
@@ -184,17 +201,19 @@ export function PluginInspector({ plugin: p }: { plugin: Plugin }) {
         </IconButton>
         {menu && <Menu items={pluginMenu(p)} at={{ x: menu.x, y: menu.y, align: "end" }} label={p.name} keyboard={menu.keyboard} onClose={() => setMenu(null)} />}
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto border-t border-white/[.07]">
-        <AutoSwitches plugin={p} />
+      <div className="flex min-h-0 flex-1 flex-col border-t border-white/[.07]">
         {p.error ? (
-          <section className="flex flex-col items-start gap-3 px-4 py-4">
-            <p className="text-[12px] text-danger">Can’t load: {plainDetail(p.error)}</p>
-            {fixable(p.error) && (
-              <Button className="h-8 gap-1.5 px-3" onClick={() => fixWithAi(p, p.error ?? "")}>
-                <Sparkles size={14} className="text-accent" /> Fix with AI
-              </Button>
-            )}
-          </section>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <AutoSwitches plugin={p} />
+            <section className="flex flex-col items-start gap-3 px-4 py-4">
+              <p className="text-[12px] text-danger">Can’t load: {plainDetail(p.error)}</p>
+              {fixable(p.error) && (
+                <Button className="h-8 gap-1.5 px-3" onClick={() => fixWithAi(p, p.error ?? "")}>
+                  <Sparkles size={14} className="text-accent" /> Fix with AI
+                </Button>
+              )}
+            </section>
+          </div>
         ) : (
           <AiLock>
             <PluginBody key={p.id} plugin={p} />
