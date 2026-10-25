@@ -81,6 +81,38 @@ pub struct ChangeStyle {
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct ListPlugins {
+    /// Also return the guide to writing plugins (nuzky://plugin-guide).
+    pub guide: Option<bool>,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SavePlugin {
+    /// plugin.json: {nuzkyPlugin: 1, id, name, description, version, action?, needs?, inputs?}.
+    pub manifest: serde_json::Value,
+    /// plugin.js, which defines function run(ctx).
+    pub script: String,
+    /// README.md; left out keeps the plugin's README.
+    pub readme: Option<String>,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RunPlugin {
+    pub id: String,
+    /// Values by input id; inputs left out take their default.
+    #[serde(default)]
+    pub inputs: serde_json::Map<String, serde_json::Value>,
+    /// Required unless dry_run is true.
+    pub run_id: Option<String>,
+    /// Clip ids for ctx.selection; the app's selection by default.
+    pub selection: Option<Vec<String>>,
+    /// ctx.playheadUs; the app's playhead by default.
+    pub playhead_us: Option<i64>,
+    #[serde(default)]
+    pub dry_run: bool,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct UndoTo {
     /// The version's index from list_history. Give index or hash.
     pub index: Option<u64>,

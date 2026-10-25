@@ -1,0 +1,14 @@
+{
+  "nuzkyPlugin": 1,
+  "id": "follow-end-card",
+  "name": "Follow end card",
+  "description": "Puts a line of text over the last seconds of the video, such as a call to follow.",
+  "version": "1.0.0",
+  "action": "Add end card",
+  "inputs": [
+    { "type": "text", "id": "text", "label": "Text", "default": "Follow for more" },
+    { "type": "number", "id": "seconds", "label": "Last", "min": 1, "max": 10, "step": 0.5, "default": 3, "unit": "s" },
+    { "type": "color", "id": "color", "label": "Colour", "default": "#FFFFFF" },
+    { "type": "toggle", "id": "bold", "label": "Bold", "default": true }
+  ]
+}

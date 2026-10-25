@@ -25,7 +25,7 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
-use crate::{activity, media, params::*, reels, transcript, vision_models, waveform};
+use crate::{activity, media, params::*, plugins, reels, transcript, vision_models, waveform};
 
 const PREVIEW_CHARS: usize = 400;
 /// apply_edits leaves out clips longer than this: restyling 117 captions once answered 64 thousand characters,
@@ -200,7 +200,7 @@ impl Backend {
 
     fn dispatch(&self, name: &str, arguments: Value, state: &SessionState) -> Result<Value> {
         match name {
-            "get_state" => self.get_state(parse(arguments)?, state),
+            "get_state" => state_value(state, parse(arguments)?),
             "begin_run" => {
                 let a: Begin = parse(arguments)?;
                 Ok(serde_json::to_value(self.host.session.begin_run(a.label)?)?)
@@ -266,6 +266,19 @@ impl Backend {
                 let a: ChangeStyle = parse(arguments)?;
                 crate::style::for_agent(&crate::style::Store::default().act_for_agent(a.action)?)
             }
+            "list_plugins" => {
+                let a: ListPlugins = parse(arguments)?;
+                let mut result = json!({"plugins": plugins::list()?, "api": plugins::API});
+                if a.guide == Some(true) {
+                    result["guide"] = json!(plugins::GUIDE);
+                }
+                Ok(result)
+            }
+            "save_plugin" => {
+                let a: SavePlugin = parse(arguments)?;
+                Ok(json!({"plugin": plugins::save(&a.manifest, &a.script, a.readme.as_deref())?}))
+            }
+            "run_plugin" => self.run_plugin(parse(arguments)?, state),
             "suggest_options" => {
                 let a: SuggestOptions = parse(arguments)?;
                 ensure!((2..=6).contains(&a.options.len()), "INVALID_ARGUMENTS: offer 2 to 6 options");
@@ -488,6 +501,11 @@ impl Backend {
                 })
             },
         )?;
+        self.answer_job(&job)
+    }
+
+    /// The job's result when it finishes within a few seconds, else the job to wait for.
+    fn answer_job(&self, job: &Value) -> Result<Value> {
         let id = job["job_id"].as_str().context("Job has no id")?.to_owned();
         let deadline = std::time::Instant::now() + ANSWER_WAIT;
         loop {
@@ -503,35 +521,16 @@ impl Backend {
         }
     }
 
-    fn get_state(&self, args: State, state: &SessionState) -> Result<Value> {
-        if let Some(range) = args.range {
-            ensure!(
-                range.start_us >= 0 && range.end_us > range.start_us,
-                "INVALID_RANGE: invalid half-open timeline range"
-            );
-        }
-        let mut project = state.project.clone();
-        for track in &mut project.tracks {
-            track.clips.retain(|clip| {
-                args.range.is_none_or(|r| clip.start_us < r.end_us && clip.end_us() > r.start_us)
-                    && args.clip_ids.as_ref().is_none_or(|ids| ids.contains(&clip.id))
-            });
-        }
-        let mut value = serde_json::to_value(state)?;
-        let object = value.as_object_mut().context("Invalid state")?;
-        object.remove("project");
-        object.insert("name".into(), json!(project.name));
-        object.insert("canvas".into(), json!(project.canvas));
-        object.insert("assets".into(), json!(project.assets));
-        object.insert("tracks".into(), json!(project.tracks));
-        object.insert("thumbnails".into(), json!(project.thumbnails));
-        object.insert("reel_candidates".into(), json!(project.reel_candidates));
-        object.insert("imported".into(), json!(project.imported));
-        object.insert("duration_us".into(), json!(state.project.duration_us()));
-        object.insert("caption_stats".into(), caption_stats(&state.project));
-        object.insert("missing_fonts".into(), json!(crate::fonts::missing(crate::fonts::families(&state.project))));
-        object.insert("filtered".into(), json!(args.range.is_some() || args.clip_ids.is_some()));
-        Ok(value)
+    fn run_plugin(&self, args: RunPlugin, state: &SessionState) -> Result<Value> {
+        let (run, mode) = if args.dry_run {
+            (state.open_run.as_ref().map(|run| run.run_id.clone()), plugins::Mode::DryRun)
+        } else {
+            let run_id = args.run_id.context("INVALID_ARGUMENTS: run_id is required unless dry_run is true")?;
+            owns_run(state, &run_id)?;
+            (Some(run_id), plugins::Mode::Apply)
+        };
+        let prepared = plugins::prepare(&self.host, state, &args.id, &args.inputs, args.selection, args.playhead_us)?;
+        self.answer_job(&plugins::start(&self.host, &self.client.id, run, mode, prepared, state)?)
     }
 
     fn import(&self, args: Import, state: &SessionState) -> Result<Value> {
@@ -1737,6 +1736,38 @@ impl Backend {
         }
         project
     }
+}
+
+/// get_state's answer, which is also the project a plugin reads.
+pub(crate) fn state_value(state: &SessionState, args: State) -> Result<Value> {
+    if let Some(range) = args.range {
+        ensure!(
+            range.start_us >= 0 && range.end_us > range.start_us,
+            "INVALID_RANGE: invalid half-open timeline range"
+        );
+    }
+    let mut project = state.project.clone();
+    for track in &mut project.tracks {
+        track.clips.retain(|clip| {
+            args.range.is_none_or(|r| clip.start_us < r.end_us && clip.end_us() > r.start_us)
+                && args.clip_ids.as_ref().is_none_or(|ids| ids.contains(&clip.id))
+        });
+    }
+    let mut value = serde_json::to_value(state)?;
+    let object = value.as_object_mut().context("Invalid state")?;
+    object.remove("project");
+    object.insert("name".into(), json!(project.name));
+    object.insert("canvas".into(), json!(project.canvas));
+    object.insert("assets".into(), json!(project.assets));
+    object.insert("tracks".into(), json!(project.tracks));
+    object.insert("thumbnails".into(), json!(project.thumbnails));
+    object.insert("reel_candidates".into(), json!(project.reel_candidates));
+    object.insert("imported".into(), json!(project.imported));
+    object.insert("duration_us".into(), json!(state.project.duration_us()));
+    object.insert("caption_stats".into(), caption_stats(&state.project));
+    object.insert("missing_fonts".into(), json!(crate::fonts::missing(crate::fonts::families(&state.project))));
+    object.insert("filtered".into(), json!(args.range.is_some() || args.clip_ids.is_some()));
+    Ok(value)
 }
 
 /// An hour in 10 ms windows; longer media needs wider windows so results stay bounded.

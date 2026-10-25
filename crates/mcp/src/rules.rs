@@ -96,6 +96,11 @@ pub(crate) const TOOLS: &[Rules] = &[
     // The creator's style, not the project: every change is a version they can restore.
     rules("get_style", Always, false, true, false),
     rules("change_style", Never, false, false, false),
+    // Plugins live in Nuzky's data, not the project; saving keeps the files it replaces.
+    rules("list_plugins", Always, false, true, false),
+    rules("save_plugin", Never, false, false, false),
+    // A dry run applies the edits to a copy; the script runs as a job of the caller's run.
+    rules("run_plugin", When(|args| args["dry_run"] == true), true, false, true),
 ];
 
 /// Tools that reach the internet.
@@ -144,7 +149,8 @@ mod tests {
                 "suggest_options",
                 "list_history",
                 "get_style",
-                "search_sounds"
+                "search_sounds",
+                "list_plugins"
             ])
         );
         assert_eq!(
@@ -159,7 +165,8 @@ mod tests {
                 "apply_zooms",
                 "propose_reels",
                 "reframe",
-                "resolve_recovery"
+                "resolve_recovery",
+                "run_plugin"
             ])
         );
         assert_eq!(
@@ -179,7 +186,8 @@ mod tests {
                 "list_history",
                 "undo_to",
                 "get_style",
-                "search_sounds"
+                "search_sounds",
+                "list_plugins"
             ])
         );
         assert_eq!(
@@ -194,7 +202,8 @@ mod tests {
                 "transcribe",
                 "reframe",
                 "export_video",
-                "export_thumbnail"
+                "export_thumbnail",
+                "run_plugin"
             ])
         );
         let job = find("job").unwrap();
@@ -205,6 +214,8 @@ mod tests {
         );
         let edit = find("edit_transcript").unwrap();
         assert!(edit.reads(&json!({"dry_run":true})) && !edit.reads(&json!({})));
+        let plugin = find("run_plugin").unwrap();
+        assert!(plugin.reads(&json!({"dry_run":true})) && !plugin.reads(&json!({"run_id":"r"})));
         let analyze = find("analyze").unwrap();
         assert!(analyze.reads(&json!({"kind":"retakes"})) && !analyze.reads(&json!({"kind":"silences"})));
         assert!(analyze.reads(&json!({"kind":"emphasis"})) && analyze.reads(&json!({"kind":"thumbnail_frames"})));

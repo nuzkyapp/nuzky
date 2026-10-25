@@ -958,7 +958,7 @@ fn initialize_list_state_edit_end_undo_over_stdio() {
     let mut c = Client::new(true);
     let list = c.rpc("tools/list", json!({}));
     let tools = list["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 37);
+    assert_eq!(tools.len(), 40);
     let search = tools.iter().find(|t| t["name"] == "search_sounds").unwrap();
     assert_eq!(search["annotations"]["openWorldHint"], true);
     assert_eq!(search["annotations"]["readOnlyHint"], true);
@@ -1300,7 +1300,9 @@ fn readonly_resources_prompts_and_clear_errors() {
     assert_eq!(error["result"]["isError"], true);
     assert!(error["result"]["content"][0]["text"].as_str().unwrap().contains("READ_ONLY"));
     let resources = c.rpc("resources/list", json!({}));
-    assert_eq!(resources["result"]["resources"].as_array().unwrap().len(), 2);
+    assert_eq!(resources["result"]["resources"].as_array().unwrap().len(), 3);
+    let plugins = c.rpc("resources/read", json!({"uri":"nuzky://plugin-guide"}));
+    assert!(plugins["result"]["contents"][0]["text"].as_str().unwrap().contains("# Write a Nuzky plugin"));
     let guide = c.rpc("resources/read", json!({"uri":"nuzky://guide"}));
     let guide = guide["result"]["contents"][0]["text"].as_str().unwrap();
     assert!(
@@ -1396,7 +1398,7 @@ fn a_creator_style_reaches_the_agent_and_without_one_nothing_changes() {
     let guide = include_str!("../../../skills/nuzky-edit/SKILL.md");
     let mut plain = Client::with_style(None);
     assert_eq!(plain.init["result"]["instructions"], guide);
-    assert_eq!(plain.rpc("resources/list", json!({}))["result"]["resources"].as_array().unwrap().len(), 2);
+    assert_eq!(plain.rpc("resources/list", json!({}))["result"]["resources"].as_array().unwrap().len(), 3);
     assert_eq!(plain.rpc("resources/read", json!({"uri":"nuzky://guide"}))["result"]["contents"][0]["text"], guide);
     assert!(
         plain.rpc("resources/read", json!({"uri":"nuzky://style"}))["error"]["message"]
@@ -1420,7 +1422,7 @@ fn a_creator_style_reaches_the_agent_and_without_one_nothing_changes() {
     let resources = styled.rpc("resources/list", json!({}));
     let uris: Vec<&str> =
         resources["result"]["resources"].as_array().unwrap().iter().map(|r| r["uri"].as_str().unwrap()).collect();
-    assert_eq!(uris, ["nuzky://guide", "nuzky://schema", "nuzky://style"]);
+    assert_eq!(uris, ["nuzky://guide", "nuzky://schema", "nuzky://plugin-guide", "nuzky://style"]);
     assert_eq!(styled.rpc("resources/read", json!({"uri":"nuzky://style"}))["result"]["contents"][0]["text"], style);
     let read = styled.rpc("resources/read", json!({"uri":"nuzky://guide"}));
     assert_eq!(read["result"]["contents"][0]["text"], instructions);
@@ -4242,5 +4244,135 @@ fn stopping_an_export_while_it_is_checked_keeps_the_video_over_stdio() {
     assert_eq!(done["result"]["check"], json!({"skipped": "the check was stopped"}), "{done}");
     assert!(took < Duration::from_secs(3), "the check stopped after {took:?}");
     assert!(checked.is_file());
+    c.finish();
+}
+
+fn plugin_error(text: String) -> String {
+    serde_json::from_str::<Value>(&text).unwrap()["error"].as_str().unwrap().to_owned()
+}
+
+fn save_plugin(c: &mut Client, id: &str, script: &str, inputs: Value) -> Value {
+    c.call(
+        "save_plugin",
+        json!({"manifest": {"nuzkyPlugin": 1, "id": id, "name": format!("Test {id}"), "description": "A test plugin",
+            "version": "1.0.0", "inputs": inputs}, "script": script}),
+    )
+}
+
+/// The way an agent makes a plugin: save, fix the syntax error it reports, try it with a dry run, then run it in its
+/// own run, whose single undo step takes the plugin's edits back with its own.
+#[test]
+fn a_plugin_is_saved_listed_tried_run_and_undone_over_stdio() {
+    let mut c = Client::start(true, None, Some(None));
+    let typo = plugin_error(c.error(
+        "save_plugin",
+        json!({"manifest": {"nuzkyPlugin": 1, "id": "rename", "name": "Rename", "description": "Renames",
+            "version": "1.0.0"}, "script": "function run(ctx) {\n  return [\n}\n"}),
+    ));
+    assert!(typo.starts_with("PLUGIN_BROKEN: plugin.js:3:1: SyntaxError"), "{typo}");
+    let rename = r#"function run(ctx) {
+  nuzky.log("renaming", ctx.project.name, ctx.inputs);
+  return {edits: [{type: "renameProject", name: ctx.inputs.name + " " + ctx.inputs.times}], message: "Renamed"};
+}"#;
+    let saved = save_plugin(
+        &mut c,
+        "rename",
+        rename,
+        json!([{"type": "text", "id": "name", "label": "Name", "default": "Renamed"},
+            {"type": "number", "id": "times", "label": "Times", "min": 0, "max": 10, "step": 1, "default": 5}]),
+    );
+    assert_eq!(saved["plugin"]["status"], "ok", "{saved}");
+    let folder = c.dir.join("data/nuzky/plugins");
+    for (id, manifest) in [
+        ("broken", json!({"nuzkyPlugin": 1, "id": "broken"})),
+        ("future", json!({"nuzkyPlugin": 2, "id": "future", "somethingNew": true})),
+    ] {
+        std::fs::create_dir_all(folder.join(id)).unwrap();
+        std::fs::write(folder.join(id).join("plugin.json"), manifest.to_string()).unwrap();
+    }
+    let list = c.call("list_plugins", json!({"guide": true}));
+    let plugin = |id: &str| list["plugins"].as_array().unwrap().iter().find(|p| p["id"] == id).unwrap().clone();
+    assert_eq!(plugin("rename")["status"], "ok");
+    assert_eq!(plugin("rename")["manifest"]["action"], "Run");
+    assert_eq!(plugin("rename")["manifest"]["inputs"][1]["max"], 10.0);
+    assert_eq!(plugin("broken")["status"], "broken");
+    let broken = plugin("broken")["error"].as_str().unwrap().to_owned();
+    assert!(broken.starts_with("PLUGIN_BROKEN: plugin.json: missing field `name`"), "{broken}");
+    assert!(
+        plugin("future")["error"].as_str().unwrap().starts_with("PLUGIN_API_NEWER: This plugin needs a newer Nuzky.")
+    );
+    assert!(list["guide"].as_str().unwrap().contains("function run(ctx)"));
+    let out_of_range =
+        plugin_error(c.error("run_plugin", json!({"id": "rename", "dry_run": true, "inputs": {"times": 11}})));
+    assert!(out_of_range.starts_with("INVALID_INPUT: times must be a number from 0 to 10"), "{out_of_range}");
+    save_plugin(
+        &mut c,
+        "throws",
+        "function run(ctx) {\n  nuzky.log('looking');\n  return ctx.nothing.here;\n}\n",
+        json!([]),
+    );
+    let thrown = plugin_error(c.error("run_plugin", json!({"id": "throws", "dry_run": true})));
+    assert!(thrown.starts_with("PLUGIN_FAILED: plugin.js:3:"), "{thrown}");
+    assert!(
+        thrown.ends_with("TypeError: cannot read property 'here' of undefined\nLast lines of its log:\nlooking"),
+        "{thrown}"
+    );
+    let before = c.call("get_state", json!({}));
+    let dry = c.call("run_plugin", json!({"id": "rename", "dry_run": true, "inputs": {"name": "Plugged"}}));
+    assert_eq!(dry["valid"], true, "{dry}");
+    assert_eq!(dry["edits"], json!([{"type": "renameProject", "name": "Plugged 5"}]));
+    assert_eq!(
+        (&dry["message"], &dry["logs"]),
+        (&json!("Renamed"), &json!([r#"renaming Original {"name":"Plugged","times":5}"#]))
+    );
+    assert_eq!(c.call("get_state", json!({})), before);
+
+    let run = c.call("begin_run", json!({"label": "Agent"}))["run_id"].clone();
+    let square = json!([{"type": "setCanvas", "width": 1080, "height": 1080}]);
+    c.call("apply_edits", json!({"run_id": run, "request_id": "square", "edits": square}));
+    let ran = c.call("run_plugin", json!({"id": "rename", "run_id": run}));
+    assert_eq!((&ran["applied"], &ran["message"]), (&json!(1), &json!("Renamed")), "{ran}");
+    let after = c.call("get_state", json!({}));
+    assert_eq!((&after["name"], &after["canvas"]["height"]), (&json!("Renamed 5"), &json!(1080)));
+    c.call("end_run", json!({"run_id": run, "action": "keep"}));
+    c.call("undo_run", json!({"run_id": run}));
+    let undone = c.call("get_state", json!({}));
+    assert_eq!((&undone["name"], &undone["canvas"]), (&before["name"], &before["canvas"]));
+    c.finish();
+}
+
+/// A plugin that tries to add a file changes nothing, and one stuck in a loop stops at once when cancelled.
+#[test]
+fn a_plugin_cannot_add_a_file_and_a_stuck_one_stops_over_stdio() {
+    let mut c = Client::start(true, None, Some(None));
+    let adds_file = r#"function run(ctx) {
+  return [{type: "renameProject", name: "Changed"}, {type: "addAssets", assets: [{id: "x", name: "x",
+    path: "/etc/hostname", kind: "image", durationUs: 0, width: 1, height: 1, fps: 0, hasAudio: false, rotation: 0,
+    mirror: false}]}];
+}"#;
+    save_plugin(&mut c, "adds-file", adds_file, json!([]));
+    save_plugin(&mut c, "spin", "function run(ctx) {\n  while (true) {}\n}\n", json!([]));
+    let before = c.call("get_state", json!({}));
+    let dry = c.call("run_plugin", json!({"id": "adds-file", "dry_run": true}));
+    assert_eq!(dry["valid"], false);
+    assert!(dry["error"].as_str().unwrap().starts_with("PLUGIN_FORBIDDEN_EDIT: edit 1 (addAssets)"), "{dry}");
+    let run = c.call("begin_run", json!({"label": "Agent"}))["run_id"].clone();
+    let refused = plugin_error(c.error("run_plugin", json!({"id": "adds-file", "run_id": run})));
+    assert!(refused.starts_with("PLUGIN_FORBIDDEN_EDIT: edit 1 (addAssets)"), "{refused}");
+    assert_eq!((&c.call("get_state", json!({}))["name"], &before["assets"]), (&before["name"], &json!([])));
+
+    let job = c.call("run_plugin", json!({"id": "spin", "run_id": run}));
+    assert_eq!(job["status"], "running", "{job}");
+    let stopping = std::time::Instant::now();
+    c.call("job", json!({"job_id": job["job_id"], "action": "cancel"}));
+    let stopped = wait_job(&mut c, &job, Duration::from_secs(2), |_| false);
+    assert_eq!(stopped["status"], "cancelled", "{stopped}");
+    assert!(stopping.elapsed() < Duration::from_secs(2), "stopped after {:?}", stopping.elapsed());
+    c.call("end_run", json!({"run_id": run, "action": "keep"}));
+    let after = c.call("get_state", json!({}));
+    assert_eq!(
+        (&after["name"], &after["assets"], &after["tracks"]),
+        (&before["name"], &before["assets"], &before["tracks"])
+    );
     c.finish();
 }

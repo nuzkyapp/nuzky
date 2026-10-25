@@ -9,6 +9,7 @@ mod limits;
 mod media;
 pub mod model_download;
 mod params;
+pub mod plugins;
 pub mod recap;
 pub mod reels;
 mod rules;
@@ -245,6 +246,18 @@ fn catalog() -> Result<Vec<Tool>> {
             "change_style",
             "Change the creator's editing style, which every agent follows in all their videos, once the creator agreed to that exact change. action.type: setOwn {text} keeps an instruction in the creator's own words as their rule, the way to keep anything they tell you about how to edit; with index it changes their rule there, and empty text removes it. accept {titles} or reject {title} a suggestion from get_style; remove {title} or revert {title} a learned rule; learnAgain {title} lets learning suggest it again; setText {text, baseVersion} replaces the whole EDIT.md, so keep everything you do not mean to change (STYLE_CHANGED when the style changed since get_style; read it again); restore {index} brings back a version. The app shows each change at once as a version starting with AI: that the creator can undo; going back to the default style is theirs to do in the app. Needs --allow-write; no run, and no project changes. Returns the style as get_style does.",
         )?,
+        tool::<params::ListPlugins>(
+            "list_plugins",
+            "List the user's plugins: small scripts that add an edit Nuzky lacks, kept in Nuzky's plugins folder and shown in the app's Plugins panel. Each has id, status (\"ok\", or \"broken\" with error saying why), manifest (name, description, action, version, needs, inputs with their types, bounds and defaults) and readme. api is the plugin API this Nuzky runs (manifest nuzkyPlugin). guide: true also returns the guide to writing one (nuzky://plugin-guide); read it before save_plugin.",
+        )?,
+        tool::<params::SavePlugin>(
+            "save_plugin",
+            "Save a plugin the user asked for, or a fix of one, into Nuzky's plugins folder as plugins/<manifest.id>/ (plugin.json, plugin.js, README.md); the files it replaces stay as plugin.prev.json and plugin.prev.js. Requires --allow-write; no run, the project is not touched. Checks the manifest (PLUGIN_BROKEN: plugin.json: …) and runs the script's top level once to report a syntax error or a missing function run(ctx) as PLUGIN_BROKEN: plugin.js:<line>:<column>: …. Follow nuzky://plugin-guide. Then try it with run_plugin dry_run.",
+        )?,
+        tool::<params::RunPlugin>(
+            "run_plugin",
+            "Run a plugin from list_plugins on this project. inputs by input id, checked against its manifest (INVALID_INPUT: <id> …); those left out take their default. selection and playhead_us default to the app's. dry_run: true applies its edits to a copy and changes nothing: it answers edits, message, logs (its nuzky.log lines) and valid with error when they would not apply. Otherwise requires run_id: its edits apply as one batch of your run, all or nothing, and undo with it; it answers applied (the number of edits), message and logs. Runs as a job of your run, which Stop ends; it answers at once when it finishes within 10 s, else gives the job to wait for with job action wait. Errors: PLUGIN_NOT_FOUND, PLUGIN_BROKEN, PLUGIN_API_NEWER, PLUGIN_API_OLD, PLUGIN_FAILED: plugin.js:<line>:<column>: … (with the last lines of its log), PLUGIN_TIMEOUT (60 s), PLUGIN_TOO_MANY_EDITS (5000), PLUGIN_FORBIDDEN_EDIT (a plugin cannot add files), PLUGIN_BAD_EDIT: edit <index> (<type>): …, TRANSCRIPT_MISSING (needs words; transcribe first).",
+        )?,
         tool::<params::SuggestOptions>(
             "suggest_options",
             "Only when you run as Nuzky's AI panel (your instructions say so): offer the user 2-6 choices when a decision is theirs to make, e.g. which take to keep, cut tight or loose, which caption style. They show as buttons under your message, and the label picked arrives as the user's next message. Labels are short and distinct, at most 80 characters, in the user's language; detail is one optional line on what each choice does. Call it as the last thing in your turn, end the turn right after, and do not repeat the options in text. Anywhere else, such as a terminal, nobody sees the buttons: ask in plain text instead. Never offer choices for something you can decide from the guide or the user's style.",
@@ -292,6 +305,7 @@ impl ServerHandler for Server {
         let mut resources = vec![
             Resource::new("nuzky://guide", "Editing guide").with_mime_type("text/markdown"),
             Resource::new("nuzky://schema", "Project JSON schema").with_mime_type("application/schema+json"),
+            Resource::new("nuzky://plugin-guide", "Writing plugins").with_mime_type("text/markdown"),
         ];
         if style().is_some() {
             resources
@@ -308,6 +322,7 @@ impl ServerHandler for Server {
         let text = match request.uri.as_str() {
             "nuzky://guide" => guide(),
             "nuzky://schema" => schema_for!(nuzky_engine::Project).to_value().to_string(),
+            "nuzky://plugin-guide" => plugins::GUIDE.to_owned(),
             "nuzky://style" => style().ok_or_else(|| {
                 ErrorData::invalid_params("No EDIT.md yet: Nuzky writes one as it learns from the creator's videos (Your style in the app, or nuzky style learn)", None)
             })?,
