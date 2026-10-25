@@ -1,9 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main editor window",
-  "windows": ["main"],
+  "description": "The editor's own page. A webview added to its window later gets none of this.",
+  "webviews": ["main"],
   "permissions": [
+    "main-ui",
     "core:default",
     "core:window:allow-set-fullscreen",
     "dialog:allow-open",

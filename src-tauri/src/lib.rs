@@ -1,9 +1,13 @@
+#[cfg(test)]
+mod acl_tests;
 mod agent_panel;
 mod attachments;
 mod audio_out;
 mod beats;
 mod caption_styles;
 mod chatgpt;
+#[cfg(test)]
+mod commands;
 mod connect;
 mod cover;
 mod diagnostics;

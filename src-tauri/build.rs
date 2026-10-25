@@ -1,5 +1,7 @@
 use std::process::Command;
 
+include!("src/commands.rs");
+
 fn main() {
     let git = |args: &[&str]| {
         Command::new("git")
@@ -23,5 +25,22 @@ fn main() {
         println!("cargo:rustc-link-arg=/DELAYLOAD:vulkan-1.dll");
         println!("cargo:rustc-link-arg=delayimp.lib");
     }
-    tauri_build::build()
+    println!("cargo:rerun-if-changed=src/commands.rs");
+    // Without an app manifest Tauri lets every local webview call every app command. The permission is written here
+    // and not through `AppManifest::commands`, which writes a file per command into src-tauri/permissions; left
+    // there, they would give an older checkout an app manifest without the permission and refuse its every command.
+    let permissions =
+        std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("cargo sets OUT_DIR")).join("app-acl");
+    std::fs::create_dir_all(&permissions).expect("creating the app permissions folder");
+    let commands: Vec<String> = COMMANDS.iter().map(|command| format!("{command:?}")).collect();
+    let permission = format!(
+        "[[permission]]\nidentifier = \"main-ui\"\ndescription = \"Every app command, for the editor's own page.\"\n\
+         commands.allow = [{}]\n",
+        commands.join(", ")
+    );
+    std::fs::write(permissions.join("main-ui.toml"), permission).expect("writing the main-ui permission");
+    let pattern = permissions.join("*.toml").to_string_lossy().into_owned().leak();
+    let manifest = tauri_build::AppManifest::new().permissions_path_pattern(pattern);
+    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest))
+        .unwrap_or_else(|error| panic!("{error:#}"))
 }

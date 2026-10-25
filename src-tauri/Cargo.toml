@@ -53,6 +53,9 @@ trash = "5.2.9"
 unicode-normalization = "0.1.25"
 
 [dev-dependencies]
+# The mock runtime of the ACL tests (src/acl_tests.rs). Not `unstable`: `cargo build --all-targets` would give the
+# app it too, and it changes how wry makes the window's webview.
+tauri = { version = "2.12.1", features = ["test"] }
 ts-rs.workspace = true
 minisign-verify = "0.3.0"
 nuzky-engine = { workspace = true, features = ["ts"] }
