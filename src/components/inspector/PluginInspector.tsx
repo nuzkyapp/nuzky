@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type RefObject } from "react";
 import { Eye, MoreHorizontal, Sparkles, X } from "lucide-react";
 import { describePeek } from "../../lib/peek";
-import { fixable, fixWithAi, plainDetail, pluginBlocked, previewPlugin, runPlugin, setAuto, setValue, shownInputs, usePlugins, valuesFor, type Plugin, type PluginInput, type PluginRow, type PluginValue, type Trigger } from "../../lib/plugins";
+import { fixable, fixWithAi, own, plainDetail, pluginBlocked, previewPlugin, runPlugin, setAuto, setValue, shownInputs, usePlugins, valuesFor, type Plugin, type PluginInput, type PluginRow, type PluginValue, type Trigger } from "../../lib/plugins";
 import { useSpeech, useTranscriptView } from "../../lib/speech";
 import { useEditor } from "../../lib/store";
 import { Select } from "../panel/SpeechControls";
@@ -129,9 +129,9 @@ function useOutcome(p: Plugin, key: string, running: boolean) {
 }
 
 function PluginBody({ plugin: p, primary }: { plugin: Plugin; primary: RefObject<(() => void) | null> }) {
-  const stored = usePlugins((s) => s.values[p.id]);
+  const stored = usePlugins((s) => own(s.values, p.id));
   // By content, so a preview that finds the same rows again does not start another one.
-  const rowsJson = usePlugins((s) => JSON.stringify(s.rows[p.id] ?? null));
+  const rowsJson = usePlugins((s) => JSON.stringify(own(s.rows, p.id) ?? null));
   const rows = useMemo(() => JSON.parse(rowsJson) as Record<string, PluginRow[]> | null, [rowsJson]);
   const all = useMemo(() => valuesFor(p, stored, rows ?? undefined), [p, stored, rows]);
   const revision = useEditor((s) => s.snap?.revision);
@@ -176,7 +176,7 @@ function PluginBody({ plugin: p, primary }: { plugin: Plugin; primary: RefObject
         {groups.map((g, i) => (
           <Section key={i} title={g.label}>
             {g.inputs.map((input) => (
-              <Control key={input.id} input={input} value={all[input.id]} rows={rows ? (rows[input.id] ?? []) : undefined} onChange={(v) => setValue(p.id, input.id, v)} />
+              <Control key={input.id} input={input} value={all[input.id]} rows={rows ? (own(rows, input.id) ?? []) : undefined} onChange={(v) => setValue(p.id, input.id, v)} />
             ))}
           </Section>
         ))}
@@ -267,7 +267,6 @@ export function PluginInspector({ plugin: p }: { plugin: Plugin }) {
     const r = e.currentTarget.getBoundingClientRect();
     setMenu({ x: r.right, y: r.bottom + 4, keyboard: e.detail === 0 });
   };
-  // Mod+Enter anywhere in the inspector presses the primary button, only while it can be pressed.
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== "Enter" || !(e.metaKey || e.ctrlKey)) return;
     e.preventDefault();

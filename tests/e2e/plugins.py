@@ -359,6 +359,12 @@ def plugin_files(r):
     frame = exported_frame(r, export(r, 'after-delete.mp4'), 'export-after-delete')
     share = white(frame, logo_box(frame, canvas))
     r.check('it still exports the logo in the corner', share > 0.9, f'{share:.0%} of the box is the logo')
+    row = "document.querySelector('[data-plugin=\"constructor\"]')"
+    r.s.run(f'{row}.click()')
+    r.check('a plugin and an input called constructor open in the inspector without taking the editor down',
+            wait(lambda: 'Picks a text.' in (r.s.run("return document.querySelector('[aria-label=Inspector]')?.textContent ?? ''") or ''), 5)
+            and wait(lambda: 'None found.' in r.s.run("return document.querySelector('[aria-label=Inspector]').textContent"), 10),
+            r.s.run("return document.body.innerText.slice(0, 300)"))
     r.check('no error toast', not r.errors(), r.errors())
 
 
@@ -773,6 +779,13 @@ def prepare_panel(r):
     folder.mkdir(parents=True)
     (folder / 'plugin.json').write_text(json.dumps(PANEL_MANIFEST))
     (folder / 'plugin.js').write_text(PANEL_SCRIPT)
+    # Every JavaScript object has a `constructor`, so a plugin and an input of that name test the panel's lookups.
+    named = r.work / 'data/nuzky/plugins/constructor'
+    named.mkdir()
+    (named / 'plugin.json').write_text(json.dumps({
+        'nuzkyPlugin': 2, 'id': 'constructor', 'name': 'Constructor', 'version': '1.0.0', 'description': 'Picks a text.',
+        'inputs': [{'type': 'choice', 'id': 'constructor', 'label': 'Text', 'options': 'dynamic'}]}))
+    (named / 'plugin.js').write_text('function run(ctx) { return {edits: [], items: {constructor: []}}; }')
 
 
 @flow('plugin_panel', 'A plugin with sections, a setting shown only while another is on, checkboxes, a list of the '

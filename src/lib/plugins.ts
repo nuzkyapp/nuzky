@@ -117,24 +117,28 @@ export function setAuto(id: string, trigger: Trigger, on: boolean) {
   usePlugins.setState((s) => ({ auto: { ...s.auto, [trigger]: [...s.auto[trigger].filter((i) => i !== id), ...(on ? [id] : [])] } }));
 }
 
+/** `table[key]` when the table has it itself: a plugin or input may be called `constructor`, which every object has. */
+export const own = <T>(table: Record<string, T> | null | undefined, key: string): T | undefined =>
+  table && Object.hasOwn(table, key) ? table[key] : undefined;
+
 /**
  * The values last set that the plugin still takes; a setting the AI removed or retyped since goes back to its default,
  * and a row of a dynamic input that its last preview on this project did not find, or before any, is no longer chosen.
  */
 export function valuesFor(p: Plugin, set: PluginValues | undefined, rows: Record<string, PluginRow[]> | undefined): PluginValues {
-  const offered = (input: PluginInput & { options: Options }, v: string) => (input.options === "dynamic" ? !!rows && (rows[input.id] ?? []).some((r) => r.value === v) : input.options.some((o) => o.value === v));
+  const offered = (input: PluginInput & { options: Options }, v: string) => (input.options === "dynamic" ? !!rows && (own(rows, input.id) ?? []).some((r) => r.value === v) : input.options.some((o) => o.value === v));
   const value = (input: PluginInput, v: PluginValue | undefined): PluginValue => {
     if (input.type === "multi") return Array.isArray(v) ? v.filter((one) => typeof one === "string" && offered(input, one)) : input.default;
     const fits =
       typeof v === typeof input.default &&
-      (input.type !== "choice" || v === "" || offered(input, v as string)) &&
+      (input.type !== "choice" || (input.options === "dynamic" && v === "") || offered(input, v as string)) &&
       (input.type !== "number" || ((v as number) >= input.min && (v as number) <= input.max));
     return fits ? v! : input.default;
   };
-  return Object.fromEntries(p.inputs.map((input) => [input.id, value(input, set?.[input.id])]));
+  return Object.fromEntries(p.inputs.map((input) => [input.id, value(input, own(set, input.id))]));
 }
 
-export const valuesOf = (p: Plugin): PluginValues => valuesFor(p, usePlugins.getState().values[p.id], usePlugins.getState().rows[p.id]);
+export const valuesOf = (p: Plugin): PluginValues => valuesFor(p, own(usePlugins.getState().values, p.id), own(usePlugins.getState().rows, p.id));
 
 const dynamic = (input: PluginInput) => "options" in input && input.options === "dynamic";
 
@@ -152,7 +156,7 @@ export function shownInputs(p: Plugin, values: PluginValues): Set<string> {
 }
 
 export function setValue(id: string, input: string, value: PluginValue) {
-  usePlugins.setState((s) => ({ values: { ...s.values, [id]: { ...s.values[id], [input]: value } } }));
+  usePlugins.setState((s) => ({ values: { ...s.values, [id]: { ...own(s.values, id), [input]: value } } }));
 }
 
 /** A plugin as the backend lists it: the manifest of one that loads, else why it does not. */
