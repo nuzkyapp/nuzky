@@ -187,7 +187,7 @@ pub fn plan(project: &Project, beats: &Beats, options: &Options) -> Result<Plan>
         let drop = beats.drops.iter().map(|d| d.beat).find(|&beat| beat >= steady + 4);
         rhythm.extend(drop.map(|beat| (beat, Every::Beat, true)));
     } else {
-        rhythm.push((steady, options.every.unwrap_or(Every::Bar), true));
+        let mut changes = Vec::new();
         for change in &options.changes {
             let beat = match change.from {
                 ChangeAt::Beat(beat) => {
@@ -198,8 +198,13 @@ pub fn plan(project: &Project, beats: &Beats, options: &Options) -> Result<Plan>
                     first_drop.context("NO_DROP: the song has no drop; start the change at a beat index")?
                 }
             };
-            rhythm.push((beat, change.every, true));
+            changes.push((beat, change.every, true));
         }
+        // A change holds until the next one, so the rhythm from where the beat is steady only leads up to the first.
+        if changes.iter().all(|c| c.0 > steady) {
+            rhythm.push((steady, options.every.unwrap_or(Every::Bar), true));
+        }
+        rhythm.extend(changes);
     }
     rhythm.sort_by_key(|r| r.0);
     let cuts_at = |i: usize| {
@@ -822,6 +827,36 @@ mod tests {
             .map(|c| (c.start_us, c.duration_us))
             .collect();
         assert_eq!(after, titles);
+    }
+
+    #[test]
+    fn a_change_from_the_first_beat_holds_past_where_the_beat_is_steady() {
+        let (p, _) = project();
+        let b = beats().beats_us;
+        let options = Options {
+            changes: vec![Change { from: ChangeAt::Beat(0), every: Every::Beat }],
+            end_us: Some(9_000_000),
+            ..Options::default()
+        };
+        let cut = plan(&p, &beats(), &options).unwrap();
+        let end = at_frame(9_000_000);
+        let every_beat: Vec<i64> =
+            std::iter::once(0).chain(b.iter().map(|&t| at_frame(t)).filter(|&t| t < end)).collect();
+        assert_eq!(cut.cut_us, every_beat);
+        // A later change still takes over from where it starts.
+        let options = Options {
+            changes: vec![
+                Change { from: ChangeAt::Beat(0), every: Every::Beat },
+                Change { from: ChangeAt::Beat(8), every: Every::Bar },
+            ],
+            end_us: Some(9_000_000),
+            ..Options::default()
+        };
+        let cut = plan(&p, &beats(), &options).unwrap();
+        let bars_from_8: Vec<i64> = std::iter::once(0)
+            .chain((0..8).chain((8..90).step_by(4)).map(|i| at_frame(b[i])).filter(|&t| t < end))
+            .collect();
+        assert_eq!(cut.cut_us, bars_from_8);
     }
 
     fn plan_error(p: &Project, options: Options) -> String {
