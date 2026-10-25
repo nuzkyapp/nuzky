@@ -12,7 +12,7 @@ use anyhow::{Result, bail, ensure};
 use nuzky_analysis::{Beats, Range, SilenceParams};
 use nuzky_engine::{
     Project,
-    audio::{ensure_pcm, has_audio, pcm_path},
+    audio::{ensure_pcm, has_audio, pcm_path, us_to_samples},
     model::{Asset, Clip, ClipContent},
 };
 use serde_json::{Map, Value, json};
@@ -52,11 +52,12 @@ fn keep(need: Need, pcm: PathBuf, found: Found) -> Arc<Found> {
     found
 }
 
-/// Forgets other files' results once there are many, never the open project's, so its previews find them all.
-fn forget_others(used: &HashSet<PathBuf>) {
+/// Once there are many results, forgets those of files the project does not play, never its own, so its previews
+/// find them all.
+fn forget_others(project: &HashSet<PathBuf>) {
     let mut all = FOUND.lock().unwrap();
     if let Some(all) = all.as_mut().filter(|all| all.len() > KEPT) {
-        all.retain(|(_, pcm), _| used.contains(pcm));
+        all.retain(|(_, pcm), _| project.contains(pcm));
     }
 }
 
@@ -92,8 +93,8 @@ pub(crate) fn gather(
         }
     }
     let stopped = || cancel.load(Ordering::Relaxed);
+    forget_others(&assets.iter().map(|asset| pcm_path(cache, asset)).collect());
     let mut found: HashMap<(Need, &str), Arc<Found>> = HashMap::new();
-    let mut used = HashSet::new();
     for (i, asset) in assets.iter().enumerate() {
         ensure!(Path::new(&asset.path).is_file(), "MEDIA_MISSING: {} is missing; relink it", asset.name);
         let pcm = pcm_path(cache, asset);
@@ -133,10 +134,8 @@ pub(crate) fn gather(
             };
             found.insert((need, asset.id.as_str()), result);
         }
-        used.insert(pcm);
         part(1.0);
     }
-    forget_others(&used);
     for need in needs {
         let mut entries: Vec<Value> = Vec::new();
         for &(track, clip, asset) in &clips {
@@ -210,11 +209,14 @@ impl<'a> Place<'a> {
 
     /// Windows of the file from where the clip starts playing it, each the mean power of the steps it plays.
     fn loudness(&self, window_us: i64, step_us: i64, dbfs: &[f32]) -> Value {
+        // The analysis measures whole samples, so a step of a long file is a little shorter than `step_us`.
+        let step = us_to_samples(step_us).max(1);
         let (mut times, mut levels) = (Vec::new(), Vec::new());
         let mut start = self.source_in;
         while start < self.source_end {
             let end = (start + window_us).min(self.source_end);
-            let (first, last) = ((start / step_us) as usize, ((end + step_us - 1) / step_us) as usize);
+            let (first, last) = (us_to_samples(start) / step, (us_to_samples(end) + step - 1) / step);
+            let (first, last) = (first as usize, last as usize);
             let steps = &dbfs[first.min(dbfs.len())..last.min(dbfs.len())];
             if steps.is_empty() {
                 break;
