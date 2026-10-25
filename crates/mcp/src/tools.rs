@@ -1426,8 +1426,13 @@ impl Backend {
         let asset = project.asset(asset_id).with_context(|| format!("UNKNOWN_ASSET: {asset_id}"))?.clone();
         ensure!(Path::new(&asset.path).is_file(), "MEDIA_MISSING: {}", asset.path);
         self.prepare_assets(vec![asset.clone()], state, "cut_to_beats")?;
-        let beats =
-            nuzky_analysis::beats_cancellable(&asset, &self.host.cache_dir, || self.closed.load(Ordering::Acquire))?;
+        // Stop in the app ends the run, and with it the analysis.
+        let run = args.run_id.as_deref().filter(|run_id| owns_run(state, run_id).is_ok());
+        let stopped = || {
+            self.closed.load(Ordering::Acquire)
+                || run.is_some_and(|run_id| self.host.session.check_run(run_id).is_err())
+        };
+        let beats = nuzky_analysis::beats_cancellable(&asset, &self.host.cache_dir, stopped)?;
         ensure!(
             beats.confidence >= crate::beats::MIN_CONFIDENCE,
             "NO_STEADY_BEAT: this sound has no steady beat to cut to (confidence {}); choose another song",
