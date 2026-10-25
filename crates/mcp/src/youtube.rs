@@ -289,7 +289,7 @@ fn install_in(tools: &Path, cancel: &AtomicBool, progress: impl FnMut(f32)) -> R
     if cfg!(target_os = "macos") {
         let zip = tools.join("yt-dlp_macos.zip");
         let sha256 = install_to(&zip, cancel, progress)?;
-        unpack(&zip, &sha256, program.parent().context("yt-dlp needs a folder")?)?;
+        unpack(&zip, &sha256, program.parent().context("yt-dlp needs a folder")?, cancel)?;
         std::fs::remove_file(tools.join("yt-dlp")).ok();
     } else {
         install_to(&program, cancel, progress)?;
@@ -299,28 +299,50 @@ fn install_in(tools: &Path, cancel: &AtomicBool, progress: impl FnMut(f32)) -> R
     Ok(())
 }
 
-/// Unpacks yt-dlp's macOS build from `zip` into `dir`, unless `dir` came from that zip already.
-fn unpack(zip: &Path, sha256: &str, dir: &Path) -> Result<()> {
+/// Unpacks yt-dlp's macOS build from `zip` into `dir`, unless `dir` came from that zip already. The copy it
+/// replaces is removed only by the next update, as a yt-dlp still running from it loads its files as it goes.
+fn unpack(zip: &Path, sha256: &str, dir: &Path, cancel: &AtomicBool) -> Result<()> {
     if std::fs::read_to_string(dir.join(".sha256")).is_ok_and(|sum| sum == sha256)
         && executable(&dir.join("yt-dlp_macos"))
     {
         return Ok(());
     }
     let tools = dir.parent().context("yt-dlp needs a folder")?;
+    for entry in std::fs::read_dir(tools)?.flatten() {
+        if entry.file_name().to_string_lossy().starts_with(".nuzky-old-") {
+            std::fs::remove_dir_all(entry.path()).ok();
+        }
+    }
     let part = tools.join(format!(".nuzky-part-{}", new_id()));
     let result = (|| {
         // ditto ships with macOS and keeps the files' permissions.
-        let output = Command::new("/usr/bin/ditto").args(["-x", "-k"]).arg(zip).arg(&part).output()?;
+        let mut child = Command::new("/usr/bin/ditto")
+            .args(["-x", "-k"])
+            .arg(zip)
+            .arg(&part)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()?;
+        let status = loop {
+            if let Some(status) = child.try_wait()? {
+                break status;
+            }
+            if cancel.load(Ordering::Relaxed) {
+                child.kill().ok();
+                child.wait().ok();
+                bail!("CANCELLED: the download stopped");
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
         ensure!(
-            output.status.success() && executable(&part.join("yt-dlp_macos")),
-            "YTDLP_CORRUPT: yt-dlp did not unpack. Try again. ({})",
-            String::from_utf8_lossy(&output.stderr).trim()
+            status.success() && executable(&part.join("yt-dlp_macos")),
+            "YTDLP_CORRUPT: yt-dlp did not unpack. Try again."
         );
         std::fs::write(part.join(".sha256"), sha256)?;
-        let old = tools.join(format!(".nuzky-old-{}", new_id()));
-        std::fs::rename(dir, &old).ok();
+        nuzky_session::jobs::check_cancel(cancel)?;
+        std::fs::rename(dir, tools.join(format!(".nuzky-old-{}", new_id()))).ok();
         std::fs::rename(&part, dir)?;
-        std::fs::remove_dir_all(old).ok();
         Ok(())
     })();
     if result.is_err() {
