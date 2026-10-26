@@ -37,7 +37,7 @@ import { HistoryButton, type Peek } from "./HistoryButton";
 import { TrackHeader } from "./TrackHeader";
 import { SNAP_PX, dragFade, dragResult, isFade, snap, useTimelineGestures, type Drag } from "./useTimelineGestures";
 
-const HEADER_W = 140;
+const HEADER_W = 152;
 const RULER_H = 28;
 /** Space between lanes. It belongs to the rows, so the track header column runs unbroken. */
 const ROW_GAP = 4;
@@ -216,7 +216,7 @@ function Playhead({ zoom, scroller, follow }: { zoom: number; scroller: RefObjec
   return (
     <div className="pointer-events-none absolute bottom-0 top-0 z-[45] will-change-transform" style={{ left: HEADER_W, transform: `translateX(${(timeUs / US) * zoom}px)` }}>
       <div className="absolute -left-[0.75px] bottom-0 top-2 w-[1.5px] bg-white shadow-[0_0_0_0.5px_rgb(0_0_0/.4)]" />
-      <div className="absolute -left-1.5 top-0.5 h-3.5 w-3 rounded-[3px_3px_6px_6px] bg-white shadow-[0_0_0_0.5px_rgb(0_0_0/.45)]" />
+      <div className="absolute -left-1.5 top-0.5 h-[15px] w-3 rounded-t-[2px] bg-white [clip-path:polygon(0_0,100%_0,100%_60%,50%_100%,0_60%)]" />
     </div>
   );
 }
@@ -440,7 +440,7 @@ export function Timeline({ height }: { height: number }) {
     setMenu({ clipId: clip.id, x: e.clientX, y: e.clientY });
   }, []);
 
-  if (!project || !drawn) return <section className="pane shrink-0" style={{ height }} />;
+  if (!project || !drawn) return <section className="pane shrink-0 bg-well" style={{ height }} />;
 
   // The video ends at its last picture or text; music running past it is cut on export.
   const videoEnd = projectDuration(drawn);
@@ -563,7 +563,7 @@ export function Timeline({ height }: { height: number }) {
   const lockedLabel = (action: string) => `${action}: the AI is editing`;
 
   return (
-    <section className="pane flex shrink-0 flex-col overflow-hidden" style={{ height }} aria-label="Timeline">
+    <section className="pane flex shrink-0 flex-col overflow-hidden bg-well" style={{ height }} aria-label="Timeline">
       <div className="flex h-11 shrink-0 items-center gap-1.5 px-2.5">
         {cover ? (
           <p className="truncate pl-1.5 text-[12px] text-muted">
@@ -672,7 +672,7 @@ export function Timeline({ height }: { height: number }) {
           <div className="sticky top-0 z-40 flex shrink-0" style={{ height: RULER_H }}>
             <div className="shrink-0" style={{ width: HEADER_W }} />
             {/* Clipped, or labels past the lanes' end would widen the scroll, which draws more labels, without end. */}
-            <div data-ruler className="relative flex-1 cursor-pointer overflow-x-clip border-b border-white/[.07] bg-panel" onPointerDown={startScrub}>
+            <div data-ruler className="relative flex-1 cursor-pointer overflow-x-clip border-b border-white/[.07] bg-well" onPointerDown={startScrub}>
               {ticks.map((t) => (
                 <div key={t} className="absolute top-0 h-full" style={{ left: t * zoom }}>
                   <span className="tabular absolute left-1 top-[5px] text-[11px] leading-[13px] text-muted">{formatTime(t * US, step < 1)}</span>
@@ -714,7 +714,7 @@ export function Timeline({ height }: { height: number }) {
             // A removed element fires no blur, so a deleted clip keeps its place for the effect below.
             onBlur={(e) => e.target.isConnected && (focusPlace.current = null)}
           >
-            {drag?.moved && drag.target === null && dragKind !== "audio" && <div className="ml-[140px] h-0.5 rounded-full bg-accent" title="Drop to create a new track" />}
+            {drag?.moved && drag.target === null && dragKind !== "audio" && <div className="ml-[152px] h-0.5 rounded-full bg-accent" title="Drop to create a new track" />}
             {tracks.map((track) => {
               const h = rowHeight(track);
               const isMain = track.id === MAIN_TRACK;
@@ -809,7 +809,7 @@ export function Timeline({ height }: { height: number }) {
                 </div>
               );
             })}
-            {drag?.moved && drag.target === null && dragKind === "audio" && <div className="ml-[140px] h-0.5 rounded-full bg-accent" />}
+            {drag?.moved && drag.target === null && dragKind === "audio" && <div className="ml-[152px] h-0.5 rounded-full bg-accent" />}
             {/* The header column runs on below the last track, so nothing scrolled under it shows through. */}
             <div data-lane className="flex flex-1">
               <div className="sticky left-0 z-[47] shrink-0 border-r border-white/[.07] bg-panel" style={{ width: HEADER_W }} />

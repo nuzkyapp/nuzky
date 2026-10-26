@@ -230,7 +230,7 @@ export const ClipView = memo(function ClipView({
                   ? "inset-ring-2 inset-ring-accent"
                 : selected
                   ? "inset-ring-2 inset-ring-accent"
-                  : "inset-ring inset-ring-white/10 group-hover:inset-ring-white/30"
+                  : "shadow-[inset_0_1px_0_rgb(255_255_255/.2),inset_0_-1px_0_rgb(0_0_0/.35)] inset-ring inset-ring-white/10 group-hover:inset-ring-white/30"
         }`}
       />
 

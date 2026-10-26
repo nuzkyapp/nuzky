@@ -1,6 +1,6 @@
 import { memo, type ReactNode } from "react";
 import { AudioLines, Captions, Eye, EyeOff, Film, Type, Volume2, VolumeX } from "lucide-react";
-import { MAIN_TRACK, isCaptionTrack, useEditor } from "../../lib/store";
+import { MAIN_TRACK, isCaptionTrack, pictureAssets, useEditor } from "../../lib/store";
 import { CoverTile } from "../cover/CoverTile";
 import type { Track } from "../../lib/types";
 
@@ -30,8 +30,14 @@ function TrackToggle({ off, label, onIcon, offIcon, onClick, locked }: { off: bo
 export const TrackHeader = memo(function TrackHeader({ track, width, locked }: { track: Track; width: number; locked: boolean }) {
   const { edit } = useEditor.getState();
   const KindIcon = track.kind === "audio" ? AudioLines : track.kind === "text" ? (isCaptionTrack(track) ? Captions : Type) : Film;
+  // The colour of the track's clips: a video track holding only pictures takes the pictures' colour.
+  const pictures = useEditor((s) => {
+    const ids = s.snap && track.kind === "video" && track.clips.length > 0 ? pictureAssets(s.snap.project) : null;
+    return !!ids && track.clips.every((c) => c.content.type === "media" && ids.has(c.content.assetId));
+  });
+  const tone = track.kind === "audio" ? "bg-clip-audio" : track.kind === "text" ? (isCaptionTrack(track) ? "bg-clip-captions" : "bg-clip-title") : pictures ? "bg-clip-image" : "bg-clip-video";
   return (
-    // 22 px toggles leave the name about 50 px, enough for "Captions" and "Overlay".
+    // 22 px toggles and the 24 px tile leave the name about 50 px, enough for "Captions" and "Overlay".
     <div className="sticky left-0 z-[47] flex shrink-0 items-center gap-0.5 border-r border-white/[.07] bg-panel pl-2 pr-1" style={{ width }}>
       {/* The main track starts with the Cover tile, where CapCut has it; the toggles keep their columns. */}
       {track.id === MAIN_TRACK ? (
@@ -40,7 +46,9 @@ export const TrackHeader = memo(function TrackHeader({ track, width, locked }: {
         </span>
       ) : (
         <>
-          <KindIcon size={14} className="mr-1 shrink-0 text-muted" />
+          <span aria-hidden className={`mr-1.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] text-fg shadow-[inset_0_1px_0_rgb(255_255_255/.18)] ${tone}`}>
+            <KindIcon size={13} />
+          </span>
           <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-fg">{track.name || track.kind}</span>
         </>
       )}

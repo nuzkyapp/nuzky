@@ -14,7 +14,7 @@ RATE, PER_SECOND = 48_000, 50
 # Waveform.tsx: a bar every PITCH px, its height RANGE_DB under full scale.
 PITCH, RANGE_DB = 3, 42
 BUCKET = RATE // PER_SECOND
-HEADER_W = 140
+HEADER_W = 152
 # The first screen (about 20 s of sound) decodes in a few milliseconds, and the timeline asks again every 250 ms
 # while what it shows is still being decoded. 1 s leaves room for a slow machine; the whole hour takes 1.5 to 3 s.
 FIRST_WAVEFORM_S = 1.0
@@ -156,7 +156,7 @@ class Memory(threading.Thread):
 
 
 LANE = """const clip = document.querySelector(`[data-clip-id='${arguments[0]}']`);
-return Math.floor(clip.closest('.overflow-auto').clientWidth - 140);"""
+return Math.floor(clip.closest('.overflow-auto').clientWidth - 152);"""
 LOADED = "return Object.keys(window.__nuzky.store.getState().waveforms[arguments[0]] ?? {}).map(Number)"
 # Blocks the store keeps beyond those on screen (src/lib/store.ts), and the blocks of the hour.
 KEPT_BLOCKS, HOUR_BLOCKS = 256, 3600 * PER_SECOND // 512 + 1

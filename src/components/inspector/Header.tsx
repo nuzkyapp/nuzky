@@ -3,15 +3,19 @@ import type { LucideIcon } from "lucide-react";
 /** The quiet 24 px icon buttons of a section header: keyframes and reset. */
 export const QUIET = "size-6 rounded-md";
 
-/** What the inspector shows: kind icon and name, with a tabular detail line below. */
-export function InspectorHeader({ icon: Icon, title, detail }: { icon: LucideIcon; title: string; detail: string }) {
+const TONES = { video: "bg-clip-video", image: "bg-clip-image", audio: "bg-clip-audio", text: "bg-clip-title", caption: "bg-clip-captions" };
+
+/** What the inspector shows: kind icon on a tile, in the colour of its clips on the timeline, and the name over a tabular detail line. */
+export function InspectorHeader({ icon: Icon, title, detail, tone }: { icon: LucideIcon; title: string; detail: string; tone?: keyof typeof TONES }) {
   return (
-    <div className="shrink-0 px-4 pb-3 pt-4">
-      <div className="flex items-center gap-2 text-[15px] font-semibold leading-5 tracking-[-0.015em] text-fg">
-        <Icon size={16} className="shrink-0 text-muted" />
-        <span className="truncate">{title}</span>
+    <div className="flex shrink-0 items-center gap-2.5 px-2.5 pb-3 pt-3">
+      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-fg shadow-[inset_0_0_0_1px_rgb(255_255_255/.12)] ${tone ? TONES[tone] : "bg-raised"}`}>
+        <Icon size={16} />
+      </span>
+      <div className="min-w-0">
+        <div className="truncate text-[15px] font-semibold leading-5 tracking-[-0.015em] text-fg">{title}</div>
+        <div className="tabular mt-px truncate text-[12px] text-muted">{detail}</div>
       </div>
-      <div className="tabular mt-[3px] text-[12px] text-muted">{detail}</div>
     </div>
   );
 }

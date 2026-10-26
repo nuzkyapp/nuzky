@@ -52,7 +52,7 @@ function Step({ icon: Icon, done, title, detail, children }: { icon: LucideIcon;
           {title}
           {done && <span className="sr-only">, done</span>}
         </span>
-        {detail && <span className="tabular truncate text-[12px] text-muted">{detail}</span>}
+        {detail && <span className="tabular line-clamp-2 text-[12px] text-muted">{detail}</span>}
       </div>
       {children}
     </li>
@@ -226,7 +226,7 @@ function ProjectSettings() {
   const blur = canvas.backgroundBlur > 0;
   return (
     <>
-      <Section title="Format">
+      <Section title="Format" bare>
         {/* Opens Ratio under the preview, which stays the one control for the format. */}
         <button
           type="button"

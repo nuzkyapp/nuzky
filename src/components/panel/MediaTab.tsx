@@ -1,6 +1,6 @@
 import { useEffect } from "react";
-import { AudioLines, Film, Link2, PictureInPicture2, Plus, Trash2 } from "lucide-react";
-import { useEditor } from "../../lib/store";
+import { AudioLines, Check, Film, Link2, PictureInPicture2, Plus, Trash2 } from "lucide-react";
+import { usedAssets, useEditor } from "../../lib/store";
 import { formatDuration } from "../../lib/time";
 import { openYoutube } from "../../lib/youtube";
 import type { Asset } from "../../lib/types";
@@ -23,6 +23,7 @@ function MediaItem({ asset }: { asset: Asset }) {
   const job = useEditor((s) => s.jobs[`audio:${asset.id}`]);
   const epoch = useEditor((s) => s.snap?.sessionEpoch);
   useEffect(() => useEditor.getState().loadThumb(asset.id), [asset.id, asset.path, epoch]);
+  const used = useEditor((s) => !!s.snap && usedAssets(s.snap.project).has(asset.id));
   const preparing = job?.status === "running";
   const lock = useLockReason();
 
@@ -31,7 +32,7 @@ function MediaItem({ asset }: { asset: Asset }) {
       onPointerDown={assetDragHandler(asset.id)}
       onDoubleClick={() => addAtPlayhead(asset.id)}
       className="group flex min-w-0 cursor-grab flex-col gap-1.5 active:cursor-grabbing"
-      title={`${asset.name}${credit(asset)}\nDrag onto the timeline, or press + to add at the playhead`}
+      title={`${asset.name}${credit(asset)}${used ? "\nIn the timeline" : ""}\nDrag onto the timeline, or press + to add at the playhead`}
     >
       {/* The hairline is an outline, so it draws over the thumbnail rather than under it. */}
       <div className="relative aspect-square overflow-hidden rounded-[10px] bg-bg outline-1 -outline-offset-1 outline-white/[.08] group-hover:outline-white/[.22]">
@@ -56,6 +57,11 @@ function MediaItem({ asset }: { asset: Asset }) {
         <span className="tabular absolute right-1 bottom-1 rounded-[4px] bg-black/60 px-1 text-[11px] leading-[15px] font-semibold text-white group-focus-within:opacity-0 group-hover:opacity-0">
           {asset.kind === "image" ? "Image" : formatDuration(asset.part ? asset.part.endUs - asset.part.startUs : asset.durationUs)}
         </span>
+        {used && !preparing && (
+          <span aria-hidden className="absolute top-1.5 left-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/60 text-white shadow-[inset_0_0_0_1px_rgb(255_255_255/.2)]">
+            <Check size={10} strokeWidth={3} />
+          </span>
+        )}
         <div className="absolute inset-x-0 bottom-0 flex items-end gap-1.5 bg-linear-to-b from-transparent to-black/45 p-1.5 pt-6 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100">
           <button
             type="button"

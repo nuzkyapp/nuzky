@@ -285,7 +285,7 @@ export function BeatsSection({ clip, asset }: { clip: Clip; asset: Asset }) {
                 {...lockedProps(lock)}
                 aria-disabled={inert || undefined}
                 className={`flex h-8 min-w-0 items-center gap-2 rounded-lg px-2.5 text-left text-[13px] transition-colors duration-[120ms] ease-out aria-disabled:cursor-not-allowed aria-disabled:opacity-40 ${
-                  on ? "bg-accent/15 font-medium text-fg shadow-[inset_0_0_0_1px_var(--color-accent)]" : `bg-white/[.055] text-fg shadow-[inset_0_0_0_1px_rgb(255_255_255/.06)] ${inert ? "" : "hover:bg-white/[.09]"}`
+                  on ? "bg-accent/15 font-medium text-fg shadow-[inset_0_0_0_1px_var(--color-accent)]" : `bg-white/[.055] text-fg ${inert ? "" : "hover:bg-white/[.09]"}`
                 }`}
               >
                 <span className="flex w-3.5 shrink-0 justify-center">{on && <Check size={14} className="text-accent" aria-hidden />}</span>

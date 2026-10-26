@@ -106,10 +106,13 @@ export function useFrameStream(url: string, canvas: React.RefObject<HTMLCanvasEl
 
 /** Playhead time and length; the only part of the preview that follows playback frame by frame. */
 function Timecode({ duration }: { duration: number }) {
-  const timeUs = useEditor((s) => s.timeUs);
+  const now = formatTime(useEditor((s) => s.timeUs));
   return (
     <span className="tabular truncate text-[13px]">
-      <span className="font-medium text-fg">{formatTime(timeUs)}</span>
+      <span className="text-[15px] font-semibold text-fg @max-[560px]:text-[13px]">
+        {now.slice(0, -3)}
+        <span className="font-medium text-muted">{now.slice(-3)}</span>
+      </span>
       <span className="text-muted @max-[560px]:hidden"> / {formatTime(duration)}</span>
     </span>
   );
@@ -238,7 +241,7 @@ export function Preview() {
               title={playing ? "Pause (Space)" : "Play (Space)"}
               disabled={empty}
               onClick={togglePlay}
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-fg text-black shadow-[0_1px_3px_rgb(0_0_0/.4)] transition-transform duration-[120ms] ease-out active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex h-[38px] w-[38px] items-center justify-center rounded-full bg-fg text-black shadow-[0_1px_3px_rgb(0_0_0/.4)] transition-transform duration-[120ms] ease-out active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {playing ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" className="translate-x-px" />}
             </button>

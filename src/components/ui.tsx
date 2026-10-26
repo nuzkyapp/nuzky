@@ -430,17 +430,20 @@ export function Slider({
   );
 }
 
-/** Without a title, for a group the inspector's header already names. */
-export function Section({ title, children, actions, ref }: { title?: string; children: ReactNode; actions?: ReactNode; ref?: Ref<HTMLElement> }) {
+/** The inset group a section's controls sit in, like a grouped list in macOS Settings. */
+export const GROUP = "flex flex-col gap-3 rounded-[10px] bg-white/[.035] p-2 shadow-[inset_0_0_0_1px_rgb(255_255_255/.05)]";
+
+/** The title above the group; without one, for a group the inspector's header already names. */
+export function Section({ title, children, actions, bare = false, ref }: { title?: string; children: ReactNode; actions?: ReactNode; /** One quiet control that needs no group around it, such as Format's menu. */ bare?: boolean; ref?: Ref<HTMLElement> }) {
   return (
-    <section ref={ref} className="flex flex-col gap-3 border-b border-white/[.07] px-4 py-4 last:border-b-0">
+    <section ref={ref} className="flex flex-col gap-2 px-2.5 py-2 first:pt-3 last:pb-4">
       {title && (
-        <div className="flex min-h-6 items-center justify-between gap-2">
+        <div className="flex min-h-6 items-center justify-between gap-2 px-2">
           <h3 className="text-[13px] font-semibold text-fg">{title}</h3>
           {actions && <div className="flex items-center gap-0.5">{actions}</div>}
         </div>
       )}
-      {children}
+      {bare ? <div className="flex flex-col gap-3 px-2">{children}</div> : <div className={GROUP}>{children}</div>}
     </section>
   );
 }
@@ -463,18 +466,18 @@ export function Notice({ kind, children, className = "" }: { kind: keyof typeof 
  */
 export function Disclosure({ title, summary, open, onToggle, flush = false, children }: { title: string; summary: string; open: boolean; onToggle: () => void; flush?: boolean; children: ReactNode }) {
   return (
-    <section className={`flex flex-col gap-3 ${flush ? "" : "border-b border-white/[.07] px-4 py-2 last:border-b-0"}`}>
+    <section className={`flex flex-col ${flush ? "gap-3" : "gap-2 px-2.5 py-2 first:pt-3 last:pb-4"}`}>
       <button
         type="button"
         aria-expanded={open}
         onClick={onToggle}
-        className="-mx-2 flex h-8 min-w-0 items-center gap-1.5 rounded-md px-2 text-left text-[13px] font-semibold text-fg transition-colors duration-[120ms] ease-out hover:bg-white/[.05]"
+        className={`flex h-8 min-w-0 items-center gap-1.5 rounded-md text-left text-[13px] font-semibold text-fg transition-colors duration-[120ms] ease-out hover:bg-white/[.05] ${flush ? "-mx-2 px-2" : "px-2"}`}
       >
         {open ? <ChevronDown size={14} className="shrink-0 text-muted" /> : <ChevronRight size={14} className="shrink-0 text-muted" />}
         <span className="shrink-0">{title}</span>
         {!open && <span className="truncate text-[12px] font-normal text-muted">{summary}</span>}
       </button>
-      {open && <div className={`flex flex-col gap-3 ${flush ? "" : "pb-2"}`}>{children}</div>}
+      {open && <div className={flush ? "flex flex-col gap-3" : GROUP}>{children}</div>}
     </section>
   );
 }

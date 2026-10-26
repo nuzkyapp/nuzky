@@ -12,9 +12,11 @@
 }
 
 @theme {
-  --color-bg: #0c0c0e;
-  --color-stage: #121214;
-  --color-panel: #1c1c1f;
+  --color-bg: #060607;
+  --color-stage: #000000;
+  --color-panel: #18181b;
+  /* The timeline's lanes and ruler, a step below the panes. */
+  --color-well: #111113;
   --color-raised: #2c2c30;
   --color-line: #36363b;
   --color-fg: #f2f2f5;
@@ -26,11 +28,11 @@
   --color-warn: #ff9f0a;
   --color-ok: #30d158;
   /* "clip-text" would collide with Tailwind's bg-clip-text (background-clip: text). */
-  --color-clip-video: #20466d;
-  --color-clip-image: #3a3d72;
-  --color-clip-audio: #144a31;
-  --color-clip-title: #6a4314;
-  --color-clip-captions: #4a3478;
+  --color-clip-video: #245891;
+  --color-clip-image: #43468e;
+  --color-clip-audio: #17603c;
+  --color-clip-title: #865316;
+  --color-clip-captions: #5a3f9a;
   --font-sans: "Inter UI", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
@@ -96,7 +98,7 @@ select {
   .pane {
     background: var(--color-panel);
     border-radius: 12px;
-    outline: 1px solid rgb(255 255 255 / 0.06);
+    outline: 1px solid rgb(255 255 255 / 0.07);
     outline-offset: -1px;
   }
   .bar {

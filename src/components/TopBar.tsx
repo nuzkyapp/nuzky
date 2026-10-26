@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AlertCircle, Check, ChevronLeft, Download, FolderOpen, History, Loader2, Puzzle, Redo2, Sparkles, Undo2 } from "lucide-react";
+import { AlertCircle, ChevronLeft, Download, FolderOpen, History, Loader2, Puzzle, Redo2, Sparkles, Undo2 } from "lucide-react";
 import { useAgent } from "../lib/agent";
 import { api, errorText } from "../lib/api";
 import { togglePanel, useDock } from "../lib/dock";
@@ -28,8 +28,8 @@ function SaveStatus() {
       </span>
     );
   return (
-    <span className="flex shrink-0 items-center gap-1 text-[12px] text-muted" role="status">
-      <Check size={12} /> Saved
+    <span className="flex shrink-0 items-center gap-1.5 text-[12px] text-muted" role="status">
+      <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-ok" /> Saved
     </span>
   );
 }

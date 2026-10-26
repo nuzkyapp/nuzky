@@ -3,7 +3,7 @@ import time as clock
 from e2e.harness import FIXTURES, flow, wait
 from e2e.timeline_select import PRESS, RECT, RELEASE
 
-HEADER_W = 140
+HEADER_W = 152
 # The scroller and its lanes, the track headers' left edges and the ruler labels' left edges on screen.
 VIEW = """const ruler = document.querySelector('[data-ruler]'); const el = ruler.closest('.overflow-auto'); const r = el.getBoundingClientRect();
 return {left: r.left, right: r.left + el.clientWidth, scrollLeft: el.scrollLeft, scrollWidth: el.scrollWidth, content: ruler.parentElement.parentElement.offsetWidth,
@@ -12,7 +12,7 @@ return {left: r.left, right: r.left + el.clientWidth, scrollLeft: el.scrollLeft,
   clipEnd: el.querySelector('[data-clip-id]').getBoundingClientRect().right};"""
 # Ctrl + one wheel notch out, with the pointer arguments[0] px into the lanes; returns where the scroll and zoom ended up.
 ZOOM_OUT = """const el = document.querySelector('[data-ruler]').closest('.overflow-auto'); const r = el.getBoundingClientRect();
-el.dispatchEvent(new WheelEvent('wheel', {bubbles: true, cancelable: true, ctrlKey: true, deltaY: 100, deltaMode: 0, clientX: r.left + 140 + arguments[0], clientY: r.top + 60}));"""
+el.dispatchEvent(new WheelEvent('wheel', {bubbles: true, cancelable: true, ctrlKey: true, deltaY: 100, deltaMode: 0, clientX: r.left + 152 + arguments[0], clientY: r.top + 60}));"""
 SCROLL_ZOOM = "return [document.querySelector('[data-ruler]').closest('.overflow-auto').scrollLeft, window.__nuzky.store.getState().zoom]"
 SCROLL_TO = "document.querySelector('[data-ruler]').closest('.overflow-auto').scrollLeft = arguments[0]"
 TO_END = "const el = document.querySelector('[data-ruler]').closest('.overflow-auto'); el.scrollLeft = el.scrollWidth"

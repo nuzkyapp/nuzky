@@ -623,6 +623,12 @@ function perProject<T>(derive: (project: Project) => T): (project: Project) => T
 }
 
 export const allClips: (project: Project) => Clip[] = perProject((project) => project.tracks.flatMap((t) => t.clips));
+/** Assets the timeline shows, as a clip or as the picture behind a person. */
+export const usedAssets: (project: Project) => Set<string> = perProject(
+  (project) => new Set(allClips(project).flatMap((c) => (c.content.type === "media" ? [c.content.assetId, ...(c.content.background?.type === "image" ? [c.content.background.assetId] : [])] : []))),
+);
+/** Ids of the project's pictures. */
+export const pictureAssets: (project: Project) => Set<string> = perProject((project) => new Set(project.assets.filter((a) => a.kind === "image").map((a) => a.id)));
 
 /**
  * Where the video ends: at the last picture or text, or at the last sound when there is no

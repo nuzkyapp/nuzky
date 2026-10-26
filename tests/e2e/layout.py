@@ -26,6 +26,24 @@ return [...inspector.querySelectorAll('input[type=range]')].map((range) => {
 });"""
 
 
+# A 4 px square of the stage beside the frame, and the mark of media the timeline uses.
+LOOK = """const box = (r) => ({left: r.left, top: r.top, width: r.width, height: r.height, viewport: window.innerWidth});
+const stage = document.querySelector('section[aria-label=Preview]').getBoundingClientRect();
+const canvas = document.querySelector('section[aria-label=Preview] canvas').getBoundingClientRect();
+const beside = canvas.left - stage.left >= 12 ? {left: (stage.left + canvas.left) / 2 - 2, top: canvas.top + canvas.height / 2}
+                                              : {left: canvas.left + canvas.width / 2, top: (stage.top + canvas.top) / 2 - 2};
+const name = [...document.querySelectorAll('[role=tablist][aria-label=Library] ~ [role=tabpanel] span')].find((e) => e.textContent === 'talk.mp4');
+const tile = name.closest('.group');
+const dot = [...document.querySelectorAll('[role=status]')].find((s) => s.textContent.trim() === 'Saved')?.querySelector('span[aria-hidden]');
+return {stage: box({...beside, width: 4, height: 4}), saved: dot ? getComputedStyle(dot).backgroundColor : null,
+        used: (tile.title || '').includes('In the timeline') && !!tile.querySelector('span[aria-hidden] > svg')};"""
+# The inspector's header tile and the group behind the first slider.
+HEADER = """const tile = document.querySelector('aside[aria-label=Inspector] > div:first-child > span').getBoundingClientRect();
+const group = document.querySelector('aside[aria-label=Inspector] input[type=range]').closest('section > div');
+return {tile: {left: tile.left + 2, top: tile.top + 2, width: 4, height: 4, viewport: window.innerWidth},
+        group: getComputedStyle(group).backgroundColor, radius: getComputedStyle(group).borderRadius};"""
+
+
 COLUMNS = """const tile = [...document.querySelectorAll('[role=tablist][aria-label=Library] ~ [role=tabpanel] *')].find((e) => e.textContent === 'talk.mp4');
 return getComputedStyle(tile.closest('.grid')).gridTemplateColumns.split(' ').length;"""
 
@@ -63,6 +81,11 @@ def layout(r):
     r.check("by default the library and the inspector take 28 % of the window's width and the timeline 35 % of its height",
             first['library'] == round(w * 0.28) and first['inspector'] == round(w * 0.28) and first['timeline'] == round(h * 0.35), first)
     r.shot('default')
+    look = r.s.run(LOOK)
+    stage = preview_crop(r.work / 'default.png', look['stage']).getpixel((1, 1))
+    r.check('the preview is black around the frame, so the video is the brightest thing there', max(stage) <= 2, stage)
+    r.check('the media tile of a video the timeline uses carries a check and says so in its tooltip', look['used'], look)
+    r.check('Saved in the top bar starts with a green dot', look['saved'] == 'rgb(48, 209, 88)', look['saved'])
     zoom = r.s.run("""const b = document.querySelector('input[aria-label="Timeline zoom"]').getBoundingClientRect();
         return {left: b.left, top: b.top, width: b.width, height: b.height, viewport: window.innerWidth};""")
     track = preview_crop(r.work / 'default.png', zoom)
@@ -129,6 +152,11 @@ def layout(r):
             len(sliders) == 10 and all(s['above'] and s['whole'] for s in sliders), sliders)
     r.check('the sliders run across most of the inspector', all(s['share'] >= 0.7 for s in sliders), [s['share'] for s in sliders])
     r.shot('adjust')
+    header = r.s.run(HEADER)
+    tile = preview_crop(r.work / 'adjust.png', header['tile']).getpixel((1, 1))
+    r.check("the inspector's header shows the clip's kind on a tile in the video clips' blue",
+            all(abs(a - b) <= 6 for a, b in zip(tile, (0x24, 0x58, 0x91))), tile)
+    r.check("the Adjust sliders sit in a section's rounded group", header['group'] not in ('rgba(0, 0, 0, 0)', 'transparent') and header['radius'] == '10px', header)
 
     r.s.run("[...document.querySelectorAll('[role=tablist][aria-label=Library] [role=tab]')].find((t) => t.textContent.trim() === 'Text').click()")
     wait(lambda: r.s.run("const b = document.querySelector('button[title$=\"text at the playhead\"]'); if (!b) return false; b.click(); return true"), 5)
@@ -142,4 +170,15 @@ def layout(r):
     r.s.run("[...document.querySelectorAll('aside[aria-label=Inspector] h3')].find((h) => h.textContent === 'Style').scrollIntoView()")
     time.sleep(0.3)
     r.shot('text')
+
+    # A track of only pictures takes the pictures' colour in its header, as its clips have.
+    r.import_media(FIXTURES / 'face-open.png')
+    r.s.call("""(() => { const st = window.__nuzky.store.getState();
+        const asset = st.snap.project.assets.find((a) => a.name === 'face-open.png');
+        return st.edit({type: 'addPictureInPicture', assetId: asset.id, startUs: 0, durationUs: null}); })()""")
+    tone = lambda: r.s.run("""const lane = [...document.querySelectorAll('[data-lane]')].find((l) => l.querySelector('[aria-label^="face-open.png"]'));
+        const tile = lane?.querySelector('span[aria-hidden]');
+        return tile ? getComputedStyle(tile).backgroundColor : null;""")
+    r.check("a track holding only a picture shows its tile in the pictures' indigo",
+            wait(lambda: tone() == 'rgb(67, 70, 142)', 5), tone())
     r.check('no error toast', not r.errors(), r.errors())

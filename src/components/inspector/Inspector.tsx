@@ -70,8 +70,8 @@ function ClipInspector({ clip, kind, asset, music, chosen, onChoose }: { clip: C
 
   return (
     <>
-      <InspectorHeader icon={KIND_ICON[kind]} title={title} detail={detail} />
-      <TabBar group="clip" label="Clip settings" tabs={tabs} value={tab} onChange={(id) => onChoose({ ...chosen, [kind]: id })} />
+      <InspectorHeader icon={KIND_ICON[kind]} title={title} detail={detail} tone={kind} />
+      <TabBar group="clip" label="Clip settings" className="mx-2.5 mb-1" tabs={tabs} value={tab} onChange={(id) => onChoose({ ...chosen, [kind]: id })} />
       <TabPanel group="clip" id={tab} className="min-h-0 flex-1 overflow-y-auto">
         <AiLock>
           {(tab === "video" || tab === "transform") && <TransformSection clip={clip} asset={asset} caption={kind === "caption"} />}
