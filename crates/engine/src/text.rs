@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use cosmic_text::{
     Align, Attrs, AttrsList, Buffer, CacheKey, Color, Fallback, Family, FeatureTag, FontFeatures, FontSystem, LineIter,
-    Metrics, PlatformFallback, Shaping, SwashCache, SwashContent, Weight,
+    Metrics, PlatformFallback, Shaping, SwashCache, SwashContent, Weight, Wrap,
 };
 
 use crate::gpu::Image;
@@ -295,6 +295,7 @@ impl TextRenderer {
     /// Shapes `text`, rasterises its glyphs into one coverage mask and dilates it for the outline.
     fn lay_out(&mut self, text: &str, style: &TextStyle, scale: f32, max_width: f32) -> Layout {
         self.stats.layouts += 1;
+        let (typed, requested_width) = (text, max_width);
         // Layout stays in canvas pixels; only glyph rasterisation uses the output scale.
         let wanted = finite_clamp(scale, MIN_RASTER_SCALE, MAX_RASTER_SCALE);
         let size = finite_clamp(style.font_size, 1.0, MAX_GLYPH_PX / MIN_RASTER_SCALE);
@@ -330,6 +331,7 @@ impl TextRenderer {
             TextAlign::Center => Align::Center,
             TextAlign::Right => Align::Right,
         };
+        buffer.set_wrap(Wrap::Word);
         buffer.set_text(&text, &attrs, Shaping::Advanced, Some(align));
         let requests = emoji_requests(&text);
         if !requests.is_empty() {
@@ -355,6 +357,14 @@ impl TextRenderer {
                 right = right.max(glyph.x + glyph.w - letter_spacing * size);
             }
             text_h = text_h.max(run.line_top + size * 1.2);
+        }
+        // A word never breaks inside: one wider than the wrap width shrinks the whole text until it fits.
+        let fit = wrap / line_w;
+        if fit < 0.999 && size * fit >= 1.0 {
+            let mut fitted = style.clone();
+            fitted.font_size = size * fit;
+            fitted.stroke_width = stroke * fit;
+            return self.lay_out(typed, &fitted, scale, requested_width);
         }
         // Glyphs line up inside `wrap`, so crop to the widest line. Every line ends in the letter spacing
         // after its last letter, which is not drawn. Pulled closer than their own width, letters reach past the
@@ -1042,6 +1052,21 @@ mod tests {
         }
         lines.extend(current);
         lines
+    }
+
+    #[test]
+    fn a_word_wider_than_the_wrap_width_shrinks_instead_of_breaking() {
+        let mut renderer = bundled_renderer();
+        let look = TextStyle { bold: true, stroke_width: 7.5, ..style("Inter") };
+        let word = renderer.render("necenzurovanýma", &look, 1.0, 720.0);
+        assert_eq!(line_edges(&word).len(), 1, "one line");
+        assert!(word.image.width <= 720, "{} px wide", word.image.width);
+        let full = renderer.render("necenzurovanýma", &look, 1.0, 4000.0);
+        assert!(word.image.height < full.image.height, "{} vs {}", word.image.height, full.image.height);
+        // Words that fit still wrap between them at full size.
+        let words = renderer.render("nic moc", &look, 1.0, 300.0);
+        assert_eq!(line_edges(&words).len(), 2);
+        assert_eq!(words.image.height, renderer.render("nic\nmoc", &look, 1.0, 4000.0).image.height);
     }
 
     #[test]
