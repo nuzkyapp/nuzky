@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { followPointer } from "../../lib/drag";
 import { NO_CROP } from "../../lib/presets";
-import { findClip, setClipTransform, transformAtPlayhead, useAiLocked, useEditor } from "../../lib/store";
+import { findClip, isCaptionTrack, placeCaptions, setClipTransform, transformAtPlayhead, useAiLocked, useEditor } from "../../lib/store";
 import type { Crop, LayerBounds, Project, Transform } from "../../lib/types";
 import { withEdge } from "../inspector/ShapeSection";
+import { useStyleUi } from "../inspector/TextSection";
 
 type Pt = [number, number];
 type Edge = keyof Crop;
@@ -221,7 +222,12 @@ export function LayerOverlay({ width, height, bleed }: { width: number; height: 
     },
     // The store builds the edit from the latest confirmed clip, so a keyframe written earlier
     // in this gesture is updated, not duplicated, and other fields are never reverted.
-    change: (id, patch, key) => setClipTransform(id, patch, key),
+    // On All captions a caption takes every caption of its track with it, as Position does; one with keyframes moves alone.
+    change: (id, patch, key) => {
+      const found = findClip(project(), id);
+      const everyCaption = found && isCaptionTrack(found.track) && found.clip.keyframes.length === 0 && useStyleUi.getState().allCaptions;
+      return everyCaption ? placeCaptions(patch, key, found.track.id) : setClipTransform(id, patch, key);
+    },
     croppable: (id) => id === selection[0] && media,
     radius: (id) => shapeRadius(project(), id),
     locked: () => !!useEditor.getState().aiRun,

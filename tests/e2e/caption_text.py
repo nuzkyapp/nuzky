@@ -1,12 +1,14 @@
 """A caption's text style goes to every caption unless Apply to says This caption, as CapCut's Apply to all captions:
 All caps from one caption's inspector capitalises every caption and survives picking another style, This caption keeps
 a colour to one caption, More style stays folded until opened and then aligns every caption and gives them a box with
-its opacity and fully round corners, and Position moves every caption at once and undoes in one step. The Captions tab
+its opacity and fully round corners, Position moves every caption at once and undoes in one step, and a caption dragged
+in the preview takes every caption with it, or only itself on This caption. The Captions tab
 shows the same controls for every caption. Apply to stays usable while an AI run locks the style. What the user sees is
 checked in the project, the saved file and the engine's frame."""
 import json, time
 
 from e2e.harness import AI_EDITING, Bridge, flow, press, wait, webdriver
+from e2e.snap import FRAME, POINTER
 from e2e.text_style import engine_frame, grey, type_value
 
 SECTION = 'aside[aria-label=Inspector]'
@@ -84,9 +86,29 @@ def box_corner(path):
     return sum(1 for px in patch if all(abs(c - 128) < 20 for c in px)) / len(patch)
 
 
+def drag_up(r, clip_id, by, shot):
+    """Drags the clip shown at the playhead `by` canvas pixels up from its middle in the preview, shooting it before
+    the release."""
+    found = r.s.call('window.__nuzky.api.layerBounds(window.__nuzky.store.getState().timeUs).then((b) => JSON.stringify(b))')
+    bounds = next((b for b in json.loads(found['value']) if b['clipId'] == clip_id), None) if found['ok'] else None
+    if not bounds:
+        return False
+    frame = r.s.run(FRAME)
+    k = frame['width'] / r.s.run('return window.__nuzky.store.getState().snap.project.canvas.width')
+    x = frame['left'] + sum(p[0] for p in bounds['corners']) / 4 * k
+    y = frame['top'] + sum(p[1] for p in bounds['corners']) / 4 * k
+    r.s.run(POINTER, 'pointerdown', x, y)
+    time.sleep(0.4)  # A press on the picture asks the engine where its layers are before the drag starts.
+    r.s.run(POINTER, 'pointermove', x, y - by * k)
+    time.sleep(0.6)  # The engine draws the caption where it moved.
+    r.shot(shot)
+    r.s.run(POINTER, 'pointerup', x, y - by * k)
+    return True
+
+
 @flow('caption-text', 'A caption\'s text style goes to every caption unless Apply to says This caption: All caps, a style '
-      'that keeps the caps, one caption\'s own colour, More style\'s alignment, box opacity and round corners, and Position '
-      'for every caption, in the project and the engine\'s frame, with the same controls in the Captions tab', before=grey)
+      'that keeps the caps, one caption\'s own colour, More style\'s alignment, box opacity and round corners, Position '
+      'and a drag in the preview for every caption, in the project and the engine\'s frame, with the same controls in the Captions tab', before=grey)
 def caption_text(r):
     r.import_media(r.grey)
     r.add_clip('grey.png')
@@ -161,6 +183,27 @@ def caption_text(r):
     r.key('z', ctrlKey=True)
     r.check('one Ctrl+Z puts every caption back where captions start and keeps their look',
             every(r, lambda c: abs(c['y'] - 0.15) < 1e-6 and abs(c['style'].get('boxRadius', 0.25) - 1) < 1e-6), captions(r))
+
+    # Dragging a caption up in the preview takes every caption with it on All captions, and only that one on This caption.
+    r.seek(1_500_000)
+    height = r.s.run('return window.__nuzky.store.getState().snap.project.canvas.height')
+    # The box may snap to a line of the frame, up to 6 screen pixels away.
+    up = lambda y: abs(y - (0.15 - 200 / height)) < 0.02
+    ys = lambda: [round(c['y'], 3) for c in captions(r)]
+    r.check('a caption is dragged 200 px up in the preview', drag_up(r, second, 200, 'drag-all-captions'))
+    r.check('on All captions every caption goes up with it', wait(lambda: len(set(y := ys())) == 1 and up(y[0]), 5), ys())
+    r.s.run('document.activeElement?.blur()')
+    r.key('z', ctrlKey=True)
+    r.check('one Ctrl+Z puts every caption back', every(r, lambda c: abs(c['y'] - 0.15) < 1e-6), ys())
+    r.s.run(f'{segment(SECTION, "Apply style to", "This caption")}.click()')
+    wait(lambda: pressed(r, SECTION, 'Apply style to') == 'This caption', 5)
+    r.check('on This caption the caption is dragged up again', drag_up(r, second, 200, 'drag-this-caption'))
+    r.check('and only it goes up', wait(lambda: (y := ys())[0] == y[2] == 0.15 and up(y[1]), 5), ys())
+    r.s.run('document.activeElement?.blur()')
+    r.key('z', ctrlKey=True)
+    r.check('Ctrl+Z puts it back', every(r, lambda c: abs(c['y'] - 0.15) < 1e-6), ys())
+    r.s.run(f'{segment(SECTION, "Apply style to", "All captions")}.click()')
+    wait(lambda: pressed(r, SECTION, 'Apply style to') == 'All captions', 5)
 
     time.sleep(1.5)  # Saved about a second after the edit; `nuzky frame` reads the saved file.
     saved = [c['content'] for t in json.loads(r.saved_project().read_text())['tracks'] if t.get('name') == 'Captions' for c in t['clips']]
