@@ -90,3 +90,82 @@ jobs:
           fi
           gh release upload "$RELEASE_TAG" ./*.AppImage ./*.deb ./*.dmg ./*.app.tar.gz ./*-setup.exe latest.json --clobber
           gh release upload "$SOURCE_TAG" ./build-info-*.txt --clobber
+  # After the drafts, so its gigabytes never hold them up. An archive whose build-info matches the last published
+  # source release is that release's source again (docs/BUILDING.md, Redistribution).
+  reuse-third-party-source:
+    needs: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: nuzky-*
+          path: artifacts
+          merge-multiple: true
+      - name: Copy unchanged third-party source archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          SOURCE_TAG="third-party-source-${RELEASE_TAG#v}"
+          test "$(gh release view "$SOURCE_TAG" --json isDraft --jq .isDraft)" = true
+          previous=$(gh api --paginate "repos/$GH_REPO/releases?per_page=100" |
+            jq -sr '[.[][] | select(.draft == false and (.tag_name | startswith("third-party-source-")))] | max_by(.published_at) | .tag_name // empty')
+          mkdir -p previous transfer
+          : > previous/assets
+          if [ -n "$previous" ]; then
+            gh release view "$previous" --json assets --jq '.assets[].name' > previous/assets
+            gh release download "$previous" --pattern 'build-info-*.txt' --dir previous || true
+          fi
+          echo "Third-party source comparison: ${previous:-no published source release}." >> "$GITHUB_STEP_SUMMARY"
+          onnx_match=true
+          for platform in linux darwin win32; do
+            for side in artifacts previous; do
+              file=$(find "$side" -type f -name "build-info-$platform.txt" -print -quit)
+              if [ -n "$file" ]; then
+                sed '1{/^Nuzky .*, commit/d;}; /^rustc /d; /^macOS signature:/d' "$file" > "$side/$platform.normalized"
+                grep '^ONNX Runtime ' "$file" > "$side/$platform.onnx" || onnx_match=false
+              else
+                : > "$side/$platform.normalized"
+                onnx_match=false
+              fi
+            done
+            if ! cmp -s "artifacts/$platform.onnx" "previous/$platform.onnx"; then
+              onnx_match=false
+            fi
+          done
+          for archive in linux macos windows onnxruntime; do
+            case "$archive" in
+              macos) platform=darwin ;;
+              windows) platform=win32 ;;
+              *) platform=$archive ;;
+            esac
+            reusable=false
+            if [ "$archive" = onnxruntime ]; then
+              reusable=$onnx_match
+            elif [ -s "previous/$platform.normalized" ] && [ -s "artifacts/$platform.normalized" ] &&
+                 cmp -s "previous/$platform.normalized" "artifacts/$platform.normalized"; then
+              reusable=true
+            fi
+            asset=$(grep -E "_third-party-source-${archive}\.tar\.gz$" previous/assets | sed -n '1p' || true)
+            if [ "$reusable" = true ] && [ -n "$asset" ] &&
+               gh release download "$previous" --pattern "$asset" --dir transfer; then
+              test "$(gh release view "$SOURCE_TAG" --json isDraft --jq .isDraft)" = true
+              gh release upload "$SOURCE_TAG" "transfer/$asset" --clobber
+              rm -f "transfer/$asset"
+              echo "- Copied \`$asset\` from \`$previous\` to \`$SOURCE_TAG\`." >> "$GITHUB_STEP_SUMMARY"
+            else
+              if [ -n "$asset" ]; then rm -f "transfer/$asset"; fi
+              {
+                echo "- Collect the $archive archive by hand (build-info differs or is missing, or no archive is available)."
+                if [ "$archive" != onnxruntime ]; then
+                  echo '```diff'
+                  diff -u "previous/$platform.normalized" "artifacts/$platform.normalized" || true
+                  echo '```'
+                fi
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done

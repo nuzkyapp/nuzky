@@ -7,3 +7,5 @@ The source code of the third-party libraries inside the [Nuzky vVERSION](https:/
 - `…-third-party-source-onnxruntime.tar.gz`: ONNX Runtime with its dependencies.
 
 Nuzky's own source is the Source code archive of the vVERSION release. Each archive has a README that says how it matches the build.
+
+An archive named after an earlier version is that version's source unchanged: the libraries in this version's installers, which the build-info files list, did not change.
