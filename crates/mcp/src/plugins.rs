@@ -1337,6 +1337,10 @@ fn isolated(
         if let Some(root) = std::env::var_os("SystemRoot") {
             command.env("SystemRoot", root);
         }
+        // Windows loads DLLs from PATH, where a build outside the installer finds FFmpeg's.
+        if let Some(paths) = std::env::var_os("PATH") {
+            command.env("PATH", paths);
+        }
         std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000); // CREATE_NO_WINDOW
     }
     let mut child = Sandboxed(command.spawn().context("PLUGIN_FAILED: cannot start the plugin's process")?);

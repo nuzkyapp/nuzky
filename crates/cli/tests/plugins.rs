@@ -273,7 +273,13 @@ fn a_cancelled_plugin_job_applies_nothing() {
     let before = f.host.session.state().unwrap().project;
     let job = plugins::run_in_app(&f.host, "renames", &Map::new(), None, vec![], 0).unwrap();
     let id = job["job_id"].as_str().unwrap();
-    while f.host.jobs.get(id, false).unwrap()["progress"] != 1.0 {
+    let started = Instant::now();
+    loop {
+        let state = f.host.jobs.get(id, false).unwrap();
+        if state["progress"] == 1.0 {
+            break;
+        }
+        assert!(state["status"] == "running" && started.elapsed() < Duration::from_secs(60), "{state}");
         std::thread::sleep(Duration::from_millis(1));
     }
     f.host.jobs.get(id, true).unwrap();
