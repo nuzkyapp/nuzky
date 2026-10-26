@@ -141,8 +141,9 @@ def plugins(r):
     for plugin in (None, 'remove-short-clips'):
         r.s.call('window.__nuzky.api.showPluginFolder(arguments[0])', plugin)
     folders = (r.work / 'opened-folders.txt').read_text().splitlines()
-    base = r.work / 'data/nuzky/plugins'
-    r.check('Show folder opens the plugins folder or the chosen plugin folder', folders == [str(base), str(base / 'remove-short-clips')], folders)
+    base = (r.work / 'data/nuzky/plugins').resolve()
+    r.check('Show folder opens the plugins folder or the chosen plugin folder',
+            [Path(folder).resolve() for folder in folders] == [base, base / 'remove-short-clips'], folders)
     r.check('no error toast', not r.errors(), r.errors())
 
 

@@ -17,8 +17,8 @@ def step(r, title):
     return r.s.run(DETAIL, title)
 
 
-def press_step(r, title):
-    r.s.run(f'{STEP}.querySelector("button").click()', title)
+def press_step(r, title, button='button'):
+    r.s.run(f'{STEP}.querySelector(arguments[1]).click()', title, button)
 
 
 def lands(r, tab, attr):
@@ -87,7 +87,7 @@ def project_status(r):
     r.s.run('window.__nuzky.store.getState().select([])')
     r.check('Music names the sound on the timeline', wait(lambda: step(r, 'Music') == 'music.wav', 10), step(r, 'Music'))
     r.s.run('window.__nuzky.sounds.setState({tab: "effects"})')
-    press_step(r, 'Music')
+    press_step(r, 'Music', '[aria-label="Edit music"]')
     landed = lands(r, 'audio', lambda f: f['attrs'] and r.s.run('return window.__nuzky.sounds.getState().tab') == 'project')
     r.check('Edit opens the sounds in the project', landed is True, landed)
 
