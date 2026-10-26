@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail, ensure};
 use nuzky_engine::{
@@ -36,6 +36,12 @@ pub(crate) fn speech_rate(samples: &[f32]) -> Vec<f32> {
 }
 
 pub(crate) fn open_pcm(asset: &Asset, cache: &Path, cancelled: &dyn Fn() -> bool) -> Result<Pcm> {
+    let path = pcm_file(asset, cache, cancelled)?;
+    Pcm::open(&path).with_context(|| format!("Mapping PCM {}", path.display()))
+}
+
+/// The prepared cache of the asset's sound, made first when it is missing.
+pub(crate) fn pcm_file(asset: &Asset, cache: &Path, cancelled: &dyn Fn() -> bool) -> Result<PathBuf> {
     ensure!(has_audio(asset), "Asset {} has no audio", asset.name);
     let path = ensure_pcm(cache, asset, |_| {
         if cancelled() {
@@ -46,7 +52,7 @@ pub(crate) fn open_pcm(asset: &Asset, cache: &Path, cancelled: &dyn Fn() -> bool
     .context("Preparing analysis PCM")?;
     let size = std::fs::metadata(&path).context("Reading PCM metadata")?.len();
     ensure!(size > 0 && size % (CHANNELS * 4) as u64 == 0, "PCM must contain complete stereo f32 frames");
-    Pcm::open(&path).with_context(|| format!("Mapping PCM {}", path.display()))
+    Ok(path)
 }
 
 /// Non-overlapping RMS windows in dBFS, NOT LUFS. Includes a final partial window.

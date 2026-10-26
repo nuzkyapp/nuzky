@@ -1,14 +1,14 @@
 //! The beat of music, for cutting video to a song: tempo, every beat, the bars, the drops and how
 //! loud each section is. Times are source microseconds of the file. Same samples, same result.
 
-use std::path::Path;
+use std::{fs::File, io::Read, path::Path};
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use nuzky_engine::model::{Asset, CHANNELS, SAMPLE_RATE};
 use realfft::{RealFftPlanner, num_complex::Complex};
 use serde::{Deserialize, Serialize};
 
-use crate::audio::open_pcm;
+use crate::audio::pcm_file;
 
 const HOP: usize = 480;
 const WINDOW: usize = 2048;
@@ -22,6 +22,8 @@ const LOW_BINS: std::ops::Range<usize> = 1..7;
 const ONSET_LATENCY_US: f64 = 8_000.0;
 /// About ten seconds of audio between cancel checks.
 const CANCEL_FRAMES: usize = 1_000;
+/// Frames read from the cache at a time.
+const READ_FRAMES: usize = 1 << 16;
 /// How strongly the beat tracker holds the tempo against the onsets (Ellis 2007).
 const TIGHTNESS: f64 = 100.0;
 /// Tempi are reported in [78, 160) BPM, so half and double time always resolve the same way.
@@ -63,13 +65,50 @@ pub struct Section {
     pub level_db: f64,
 }
 
+/// Reads the cache in order rather than mapping it: an hour of sound is 1.4 GB, which a mapping read through would
+/// keep in the app's memory until the end.
 pub fn beats_cancellable(asset: &Asset, cache: &Path, cancelled: impl Fn() -> bool) -> Result<Beats> {
-    let pcm = open_pcm(asset, cache, &cancelled)?;
-    beats_in(pcm.samples(), &cancelled)
+    let path = pcm_file(asset, cache, &cancelled)?;
+    let mut file = File::open(&path).with_context(|| format!("Opening PCM {}", path.display()))?;
+    let mut bytes = vec![0; READ_FRAMES * CHANNELS * 4];
+    let frames = Envelope::read(
+        |samples| {
+            let bytes = &mut bytes[..samples.len() * 4];
+            let mut filled = 0;
+            while filled < bytes.len() {
+                match file.read(&mut bytes[filled..]) {
+                    Ok(0) => break,
+                    Ok(n) => filled += n,
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                    Err(error) => return Err(error).context("Reading PCM"),
+                }
+            }
+            for (sample, bytes) in samples.iter_mut().zip(bytes[..filled].as_chunks::<4>().0) {
+                *sample = f32::from_ne_bytes(*bytes);
+            }
+            Ok(filled / 4)
+        },
+        &cancelled,
+    )?;
+    beats_of(frames, &cancelled)
 }
 
 /// Beats of interleaved stereo 48 kHz samples.
 pub fn beats_in(samples: &[f32], cancelled: &dyn Fn() -> bool) -> Result<Beats> {
+    let mut rest = samples;
+    let frames = Envelope::read(
+        |chunk| {
+            let n = chunk.len().min(rest.len());
+            chunk[..n].copy_from_slice(&rest[..n]);
+            rest = &rest[n..];
+            Ok(n)
+        },
+        cancelled,
+    )?;
+    beats_of(frames, cancelled)
+}
+
+fn beats_of(frames: Envelope, cancelled: &dyn Fn() -> bool) -> Result<Beats> {
     let none = Beats {
         bpm: 0.0,
         confidence: 0.0,
@@ -79,7 +118,6 @@ pub fn beats_in(samples: &[f32], cancelled: &dyn Fn() -> bool) -> Result<Beats> 
         drops: vec![],
         sections: vec![],
     };
-    let frames = Envelope::of(samples, cancelled)?;
     let onset = combined_onsets(&frames.flux, &frames.low);
     let lags = lag(FASTEST_SEARCH)..=lag(SLOWEST_SEARCH);
     if onset.len() < 3 * *lags.end() || onset.iter().all(|&o| o == 0.0) {
@@ -203,10 +241,9 @@ struct Envelope {
 }
 
 impl Envelope {
-    fn of(samples: &[f32], cancelled: &dyn Fn() -> bool) -> Result<Self> {
-        let count = samples.len() / CHANNELS;
-        let mono = |i: usize| (samples[i * CHANNELS] + samples[i * CHANNELS + 1]) as f64 / 2.0;
-        let n = count / HOP + 1;
+    /// `read` fills the start of its buffer with the next interleaved samples, fewer only at the end, and says how
+    /// many. Only the samples around the hop being measured stay in memory.
+    fn read(mut read: impl FnMut(&mut [f32]) -> Result<usize>, cancelled: &dyn Fn() -> bool) -> Result<Self> {
         let window: Vec<f64> =
             (0..WINDOW).map(|i| 0.5 - 0.5 * (2.0 * std::f64::consts::PI * i as f64 / WINDOW as f64).cos()).collect();
         // A sine at full scale reads 0.5.
@@ -215,16 +252,28 @@ impl Envelope {
         let (mut input, mut spectrum, mut scratch) =
             (fft.make_input_vec(), fft.make_output_vec(), fft.make_scratch_vec());
         let mut previous = vec![0.0; WINDOW / 2 + 1];
-        let (mut flux, mut low) = (Vec::with_capacity(n), Vec::with_capacity(n));
-        for k in 0..n {
+        let (mut flux, mut low, mut energy) = (Vec::new(), Vec::new(), Vec::new());
+        let mut chunk = vec![0.0; READ_FRAMES * CHANNELS];
+        // The mono samples from `first` on, until `ended` says there are no more.
+        let (mut mono, mut first, mut ended) = (Vec::<f64>::new(), 0usize, false);
+        for k in 0.. {
             if k % CANCEL_FRAMES == 0 && cancelled() {
                 bail!("CANCELLED: analysis cancelled");
             }
             // Each window is centred on its frame time, k hops from the start.
             let start = (k * HOP) as isize - (WINDOW / 2) as isize;
+            while !ended && first + mono.len() < k * HOP + WINDOW / 2 {
+                let n = read(&mut chunk)?;
+                ended = n < chunk.len();
+                mono.extend(chunk[..n].as_chunks::<CHANNELS>().0.iter().map(|s| (s[0] + s[1]) as f64 / 2.0));
+            }
+            let count = first + mono.len();
+            if ended && k > count / HOP {
+                break;
+            }
             for (i, value) in input.iter_mut().enumerate() {
                 let at = start + i as isize;
-                *value = if (0..count as isize).contains(&at) { mono(at as usize) * window[i] } else { 0.0 };
+                *value = if (0..count as isize).contains(&at) { mono[at as usize - first] * window[i] } else { 0.0 };
             }
             fft.process_with_scratch(&mut input, &mut spectrum, &mut scratch)?;
             let (mut all, mut bass) = (0.0, 0.0);
@@ -241,13 +290,16 @@ impl Envelope {
             }
             flux.push(all);
             low.push(bass);
-        }
-        let energy = (0..count.div_ceil(HOP))
-            .map(|k| {
+            if k * HOP < count {
                 let block = k * HOP..((k + 1) * HOP).min(count);
-                block.clone().map(|i| mono(i).powi(2)).sum::<f64>() / block.len() as f64
-            })
-            .collect();
+                energy.push(block.clone().map(|i| mono[i - first].powi(2)).sum::<f64>() / block.len() as f64);
+            }
+            let next = ((k + 1) * HOP).saturating_sub(WINDOW / 2);
+            if next - first >= READ_FRAMES {
+                mono.drain(..next - first);
+                first = next;
+            }
+        }
         Ok(Self { flux, low, energy })
     }
 }
