@@ -176,6 +176,8 @@ fn a_lost_device_or_a_timeout_marks_the_effect_broken_and_draws_without_it() {
         if lose {
             renderer.lose_gpu();
         } else {
+            // A real GPU can finish the frame before a zero limit is first checked, as lavapipe did on CI.
+            renderer.hang_gpu(1);
             renderer.set_gpu_timeout(Duration::ZERO);
         }
         let after = renderer.render(&p, 0, w, h, Wait::Exact, false).unwrap();
