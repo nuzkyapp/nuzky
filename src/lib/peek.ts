@@ -1,3 +1,4 @@
+import { ADJUST_ROWS, FILTERS, sameAdjust } from "./presets";
 import { isCaptionTrack, projectDuration } from "./store";
 import { formatDuration, formatTime } from "./time";
 import type { Clip, ClipContent, Project, Transform } from "./types";
@@ -42,7 +43,6 @@ const TRANSFORM: [keyof Transform, string, ((v: number) => string) | null][] = [
 const FIELDS: Record<string, string> = {
   text: "Text",
   style: "Style",
-  adjust: "Adjust",
   volume: "Volume",
   speed: "Speed",
   keepPitch: "Speed",
@@ -68,7 +68,7 @@ const CLIP_FIELDS: [keyof Clip, string][] = [
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 /** What changes on one clip, as "Opacity 40 % → 100 %" when one value says it, else the names of what changes. */
-function changeText(name: string, now: Clip, then: Clip) {
+function changeText(now: Clip, then: Clip) {
   const a = now.content as ClipContent & Record<string, unknown>;
   const b = then.content as ClipContent & Record<string, unknown>;
   const names = new Set<string>();
@@ -78,11 +78,19 @@ function changeText(name: string, now: Clip, then: Clip) {
       names.add(label);
       value = format ? `${label} ${format(a.transform[k] as number)} → ${format(b.transform[k] as number)}` : null;
     }
-  if (a.type === "media" && b.type === "media" && a.volume !== b.volume) value = `Volume ${percent(a.volume)} → ${percent(b.volume)}`;
+  if (a.type === "media" && b.type === "media") {
+    if (a.volume !== b.volume) value = `Volume ${percent(a.volume)} → ${percent(b.volume)}`;
+    const rows = ADJUST_ROWS.filter((r) => Math.round(a.adjust[r.key] * 100) !== Math.round(b.adjust[r.key] * 100));
+    const filter = FILTERS.find((f) => f.id !== "none" && sameAdjust(b.adjust, f.adjust));
+    if (rows.length === 1) {
+      const [r] = rows;
+      names.add(r.label);
+      value = `${r.label} ${Math.round(a.adjust[r.key] * 100)} → ${Math.round(b.adjust[r.key] * 100)}`;
+    } else if (rows.length) names.add(filter ? `Filter ${filter.label}` : "Adjust");
+  }
   for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) if (FIELDS[k] && !same(a[k], b[k])) names.add(FIELDS[k]);
   for (const [k, label] of CLIP_FIELDS) if (!same(now[k], then[k])) names.add(label);
-  if (names.size === 1 && value) return `${name}: ${value}`;
-  return names.size ? `${name}: ${[...names].join(", ")}` : `${name} changes`;
+  return names.size === 1 && value ? value : [...names].join(", ");
 }
 
 /**
@@ -138,7 +146,13 @@ export function describePeek(now: Project, then: Project, ahead = false): { draw
   for (const [a, b] of trimmed) lines.push(`${clipName(then, b)} length ${formatDuration(a.durationUs)} → ${formatDuration(b.durationUs)}`);
   for (const c of moved) lines.push(`${clipName(then, c)} moves to ${formatTime(c.startUs)}`);
   if (shifted.length && !back.length && !gone.length && !trimmed.length && !moved.length) lines.push(`Moves ${some(then, shifted)}`);
-  for (const [a, b] of changed) lines.push(changeText(clipName(then, b), a, b));
+  // The same change on many clips, as a multi-selection makes, is one line; the timeline marks which clips.
+  const alike = new Map<string, Placed[]>();
+  for (const [a, b] of changed) {
+    const what = changeText(a, b);
+    alike.set(what, [...(alike.get(what) ?? []), after.get(b.id)!]);
+  }
+  for (const [what, items] of alike) lines.push(what ? `${some(then, items)}: ${what}` : `${some(then, items)} ${items.length === 1 ? "changes" : "change"}`);
   if (now.name !== then.name) lines.push(`Name “${now.name}” → “${then.name}”`);
   if (now.canvas.width !== then.canvas.width || now.canvas.height !== then.canvas.height)
     lines.push(`Format ${now.canvas.width} × ${now.canvas.height} → ${then.canvas.width} × ${then.canvas.height}`);

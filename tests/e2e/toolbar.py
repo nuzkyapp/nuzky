@@ -222,6 +222,19 @@ def undo_preview(r):
             [r.s.run(MARKS), r.s.run(first_width, first)])
     r.s.run(HOVER, 'undo', False)
 
+    # One slider moved on every selected clip is one line naming the slider; the timeline marks the clips.
+    ids = [c['id'] for c in r.track()]
+    r.s.call("""window.__nuzky.store.getState().edit((p) => p.tracks[0].clips.map((c) =>
+        ({type: 'updateClip', clipId: c.id, adjust: {...c.content.adjust, vignette: 0.3}})))""")
+    vignettes = "return window.__nuzky.store.getState().snap.project.tracks[0].clips.map((c) => c.content.adjust.vignette)"
+    wait(lambda: r.s.run(vignettes) == [0.3] * len(ids), 5)
+    r.s.run(HOVER, 'undo', True)
+    tip = wait(lambda: r.s.run(TIP_TEXT), 5)
+    r.check('Undo of a slider moved on many clips says it once, with the values', tip and [l for l in tip.splitlines() if ':' in l] == ['3 clips: Vignette 30 → 0'], tip)
+    r.check('and marks every clip it changes', r.s.run(MARKS) == {i: 'changed' for i in ids}, r.s.run(MARKS))
+    r.shot('undo-hover-many')
+    r.s.run(HOVER, 'undo', False)
+
     bridge = Bridge(r, r.saved_project())
     try:
         run = bridge.call('begin_run', {'label': 'Look at undo'})
