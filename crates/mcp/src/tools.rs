@@ -307,7 +307,7 @@ impl Backend {
                     ensure!(seen.insert(label.to_lowercase()), "INVALID_ARGUMENTS: labels must differ");
                 }
                 Ok(
-                    json!({"shown": a.options.len(), "next": "End your turn now. The label the user picks arrives as their next message."}),
+                    json!({"shown": a.options.len(), "next": "End your turn with a short message in the user's language: first say what you changed this turn, if anything, then that the choices are below. The label the user picks arrives as their next message."}),
                 )
             }
             "import_media" => self.import(parse(arguments)?, state),
