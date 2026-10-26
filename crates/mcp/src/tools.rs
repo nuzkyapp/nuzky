@@ -1280,13 +1280,20 @@ impl Backend {
         };
         let mut from = crate::style::Defaults::read();
         let pause = args.shorten_pauses_us.or_else(|| from.pause_us()).unwrap_or(transcript::DEFAULT_PAUSE_US);
-        let ranges = transcript::edit_ranges(
+        let keep_before = args.keep_before_word_us.or_else(|| from.keep_before_word_us());
+        let keep_after = args.keep_after_word_us.or_else(|| from.keep_after_word_us());
+        ensure!(
+            keep_before.into_iter().chain(keep_after).all(|us| (0..=1_000_000).contains(&us)),
+            "INVALID_ARGUMENTS: keep_before_word_us and keep_after_word_us must be from 0 to 1000000"
+        );
+        let (ranges, _) = transcript::speech_cut(
             &state.project,
             &derived,
             args.delete.as_deref(),
             args.keep.as_deref(),
             Some(pause),
             &hesitations,
+            [keep_before, keep_after],
         )?;
         let cut = transcript::plan_cut(&state.project, &derived, ranges)?;
         let after = cut.preview.duration_us();

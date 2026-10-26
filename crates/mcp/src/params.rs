@@ -362,6 +362,10 @@ pub struct EditTranscript {
     /// after_word of hesitations from analyze fillers, cut as deleted words would be.
     pub delete_hesitations: Option<Vec<usize>>,
     pub shorten_pauses_us: Option<i64>,
+    /// Maximum silence before a kept word at a cut, 0-1000000 us; overrides EDIT.md Settings.
+    pub keep_before_word_us: Option<i64>,
+    /// Maximum silence after a kept word at a cut, 0-1000000 us; overrides EDIT.md Settings.
+    pub keep_after_word_us: Option<i64>,
     #[serde(default)]
     pub dry_run: bool,
 }

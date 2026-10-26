@@ -895,6 +895,21 @@ impl Defaults {
         })
     }
 
+    pub fn keep_before_word_us(&mut self) -> Option<i64> {
+        self.take(
+            "edit_transcript keep_before_word_us",
+            "keep_before_word_us",
+            "a whole number from 0 to 1000000",
+            |v| v.parse().ok().filter(|us| (0..=1_000_000).contains(us)),
+        )
+    }
+
+    pub fn keep_after_word_us(&mut self) -> Option<i64> {
+        self.take("edit_transcript keep_after_word_us", "keep_after_word_us", "a whole number from 0 to 1000000", |v| {
+            v.parse().ok().filter(|us| (0..=1_000_000).contains(us))
+        })
+    }
+
     pub fn max_words(&mut self) -> Option<usize> {
         self.take("build_captions max_words", "max_words", "a whole number above 0", |v| {
             v.parse().ok().filter(|&n| n > 0)
@@ -964,6 +979,11 @@ fn replacing(current: &Version, learned: &Learned) -> String {
     if let Some(own) = old.get(doc::OWN) {
         doc.set(doc::OWN, own.to_owned());
     }
+    let mut rows = doc.settings();
+    rows.extend(old.settings().into_iter().filter(|(name, _)| {
+        matches!(name.as_str(), "edit_transcript keep_before_word_us" | "edit_transcript keep_after_word_us")
+    }));
+    doc.set(doc::SETTINGS_HEADING, learning::settings_block(&rows));
     doc.text()
 }
 
@@ -1783,8 +1803,10 @@ mod tests {
         let text = file(&dir).unwrap();
         assert!(text.find("## Your rules").unwrap() < text.find("## Settings").unwrap(), "{text}");
 
-        // The creator sets a pause by hand: learning leaves that rule alone from then on.
-        let edited = text.replace(
+        // The creator sets a pause and the silence around cuts by hand: learning leaves those rules alone from then on.
+        let padding =
+            "| edit_transcript keep_before_word_us | 30000 |\n| edit_transcript keep_after_word_us | 40000 |\n";
+        let edited = text.replace("|---|---|\n", &format!("|---|---|\n{padding}")).replace(
             "| edit_transcript shorten_pauses_us | 120000 |",
             "| edit_transcript shorten_pauses_us | 250000 |",
         );
@@ -1809,6 +1831,7 @@ mod tests {
         let view = store.replace(&learned, "Learned with nuzky style learn", Some(view.version)).unwrap();
         let text = file(&dir).unwrap();
         assert_eq!(text, preview, "what was shown is what is written");
+        assert!(text.contains(padding), "{text}");
         assert!(text.contains("- Never cut the product name.") && text.contains("| 120000 |"), "{text}");
         assert_eq!(view.versions[0].label, "Learned with nuzky style learn");
         fs::remove_dir_all(dir).unwrap();

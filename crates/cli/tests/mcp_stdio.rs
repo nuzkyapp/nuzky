@@ -1927,6 +1927,78 @@ fn plan_cut(c: &mut Client, pause: Option<i64>) -> Value {
     c.call("edit_transcript", args)
 }
 
+#[test]
+fn transcript_cut_padding_uses_style_and_argument_overrides_over_stdio() {
+    let style = "## Settings\n\n| Setting | Value |\n|---|---|\n| edit_transcript keep_before_word_us | 30000 |\n| edit_transcript keep_after_word_us | 40000 |\n";
+    let mut c = Client::start(true, None, Some(Some(style)));
+    let run = c.call("begin_run", json!({"label": "padding"}))["run_id"].clone();
+    place_take(
+        &mut c,
+        4_000_000,
+        &[
+            ("One", 500_000, 800_000),
+            ("gone", 1_100_000, 1_400_000),
+            ("two", 1_700_000, 2_000_000),
+            ("three.", 3_000_000, 3_300_000),
+        ],
+        &run,
+    );
+    c.call("end_run", json!({"run_id": run, "action": "keep"}));
+    let key = c.call("get_transcript", json!({}))["transcript_key"].clone();
+    let args = json!({"transcript_key": key, "delete": [[1, 1]], "shorten_pauses_us": 190001, "dry_run": true});
+    let planned = c.call("edit_transcript", args.clone());
+    assert_eq!(
+        planned["ranges"],
+        json!([
+        {"startUs": 0, "endUs": 470_000},
+        {"startUs": 840_000, "endUs": 1_670_000},
+        {"startUs": 2_040_000, "endUs": 2_970_000},
+        {"startUs": 3_340_000, "endUs": 4_000_000}])
+    );
+    assert_eq!(planned["from_style"], json!({"keep_before_word_us": 30_000, "keep_after_word_us": 40_000}));
+    let mut slower = args.clone();
+    slower["shorten_pauses_us"] = json!(800_000);
+    assert_eq!(c.call("edit_transcript", slower)["ranges"], planned["ranges"]);
+    let mut explicit = args.clone();
+    explicit["keep_before_word_us"] = json!(20_000);
+    assert_eq!(c.call("edit_transcript", explicit.clone())["from_style"], json!({"keep_after_word_us": 40_000}));
+    explicit["keep_after_word_us"] = json!(1_000_000);
+    let overridden = c.call("edit_transcript", explicit.clone());
+    assert_eq!(overridden["ranges"][1], json!({"startUs": 950_000, "endUs": 1_680_000}));
+    assert_eq!(overridden["ranges"][2], json!({"startUs": 2_095_000, "endUs": 2_980_000}));
+    assert!(overridden.get("from_style").is_none());
+    explicit["keep_before_word_us"] = json!(0);
+    assert_eq!(c.call("edit_transcript", explicit.clone())["ranges"][1]["endUs"], 1_700_000);
+    for invalid in [json!(-1), json!(1_000_001), json!(1.5)] {
+        for field in ["keep_before_word_us", "keep_after_word_us"] {
+            let mut invalid_args = explicit.clone();
+            invalid_args[field] = invalid.clone();
+            c.error("edit_transcript", invalid_args);
+        }
+    }
+    std::fs::write(c.dir.join("data/nuzky/EDIT.md"), style.replace("30000", "fast").replace("40000", "1000001"))
+        .unwrap();
+    let warned = c.call("edit_transcript", args.clone());
+    let warnings = warned["style_warnings"].to_string();
+    assert!(warnings.contains("keep_before_word_us") && warnings.contains("keep_after_word_us"), "{warned}");
+    assert!(warned.get("from_style").is_none());
+    std::fs::remove_file(c.dir.join("data/nuzky/EDIT.md")).unwrap();
+    assert_eq!(warned["ranges"], c.call("edit_transcript", args.clone())["ranges"]);
+    std::fs::write(c.dir.join("data/nuzky/EDIT.md"), style).unwrap();
+    let run = c.call("begin_run", json!({"label": "join"}))["run_id"].clone();
+    let clip = c.call("get_state", json!({}))["tracks"][0]["clips"][0]["id"].clone();
+    c.call(
+        "apply_edits",
+        json!({"run_id": run, "request_id": "split", "edits": [
+        {"type": "splitClip", "clipId": clip, "atUs": 3_000_000}]}),
+    );
+    let mut args = args;
+    args["transcript_key"] = c.call("get_transcript", json!({}))["transcript_key"].clone();
+    assert_eq!(c.call("edit_transcript", args)["ranges"][2], json!({"startUs": 2_040_000, "endUs": 3_000_000}));
+    c.call("end_run", json!({"run_id": run, "action": "keep"}));
+    c.finish();
+}
+
 /// The reel of both sentences, proposed and made.
 fn whole_reel(c: &mut Client, run: &Value) -> (Value, Value) {
     let key = c.call("get_transcript", json!({}))["transcript_key"].clone();

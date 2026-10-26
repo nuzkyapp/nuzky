@@ -471,22 +471,23 @@ pub fn edit_ranges(
     pause: Option<i64>,
     hesitations: &[Hesitation],
 ) -> Result<Vec<TimeRange>> {
-    Ok(speech_cut(project, derived, delete, keep, pause, hesitations)?.0)
+    Ok(speech_cut(project, derived, delete, keep, pause, hesitations, [None, None])?.0)
 }
 
 /// The ranges of `edit_ranges` and where speech is.
-fn speech_cut(
+pub(crate) fn speech_cut(
     project: &Project,
     derived: &Derived,
     delete: Option<&[[usize; 2]]>,
     keep: Option<&[[usize; 2]]>,
     pause: Option<i64>,
     hesitations: &[Hesitation],
+    padding: [Option<i64>; 2],
 ) -> Result<(Vec<TimeRange>, Vec<TimeRange>)> {
     let (bounds, unnumbered, speech) = editing_bounds(project, derived);
     let hesitations: Vec<_> =
         hesitations.iter().map(|h| TimeRange { start_us: h.start_us, end_us: h.end_us }).collect();
-    let mut ranges = deletion_ranges(&bounds, &speech, delete, keep, pause, &hesitations)?;
+    let mut ranges = deletion_ranges_with_padding(&bounds, &speech, delete, keep, pause, &hesitations, padding)?;
     // A surviving fragment whose midpoint was cut away has no selectable index. Keep it audible.
     for &protected in &unnumbered {
         ranges = ranges
@@ -506,7 +507,7 @@ fn speech_cut(
             })
             .collect();
     }
-    Ok((without_slivers(project, &bounds, &unnumbered, ranges), speech))
+    Ok((without_slivers(project, &bounds, &unnumbered, ranges, padding), speech))
 }
 
 /// Where the first heard piece of a word starts on the timeline and where the last one ends.
@@ -526,12 +527,14 @@ pub const SLIVER_US: i64 = 400_000;
 /// the end of the take before it, cut off from that take's last word: a sliver of a clip on the
 /// timeline. That silence moves next to the last word instead, so the pause keeps its length and
 /// the takes meet at one cut; when the cut also removes words there, the sliver just goes. The
-/// same holds the other way round, for a take that ends speaking at once.
+/// same holds the other way round, for a take that ends speaking at once. Explicit padding limits
+/// drop that silence instead, so moving it cannot exceed the opposite limit.
 fn without_slivers(
     project: &Project,
     words: &[TimelineWord],
     fragments: &[TimeRange],
     mut ranges: Vec<TimeRange>,
+    padding: [Option<i64>; 2],
 ) -> Vec<TimeRange> {
     let joins: Vec<i64> = project
         .tracks
@@ -558,7 +561,7 @@ fn without_slivers(
         if let Some(&join) = joins.iter().filter(|&&t| t > range.end_us && t <= next).min() {
             let kept = join - range.end_us;
             if kept < SLIVER_US && silent(range.end_us, join) {
-                if silent(range.start_us, range.start_us + kept) {
+                if padding[1].is_none() && silent(range.start_us, range.start_us + kept) {
                     range.start_us += kept;
                 }
                 range.end_us = join;
@@ -569,7 +572,7 @@ fn without_slivers(
         if let Some(&join) = joins.iter().filter(|&&t| t < range.start_us && t >= previous).max() {
             let kept = range.start_us - join;
             if kept < SLIVER_US && silent(join, range.start_us) {
-                if silent(range.end_us - kept, range.end_us) {
+                if padding[0].is_none() && silent(range.end_us - kept, range.end_us) {
                     range.end_us -= kept;
                 }
                 range.start_us = join;
@@ -593,7 +596,7 @@ pub struct Pause {
 
 /// What shortening every pause to `pause_us` cuts, in timeline order.
 pub fn pauses(project: &Project, derived: &Derived, pause_us: i64) -> Result<Vec<Pause>> {
-    let (ranges, speech) = speech_cut(project, derived, None, None, Some(pause_us), &[])?;
+    let (ranges, speech) = speech_cut(project, derived, None, None, Some(pause_us), &[], [None, None])?;
     Ok(ranges
         .into_iter()
         .map(|r| {
@@ -702,6 +705,20 @@ pub fn deletion_ranges(
     pause: Option<i64>,
     hesitations: &[TimeRange],
 ) -> Result<Vec<TimeRange>> {
+    deletion_ranges_with_padding(words, speech, delete, keep, pause, hesitations, [None, None])
+}
+
+fn deletion_ranges_with_padding(
+    words: &[TimelineWord],
+    speech: &[TimeRange],
+    delete: Option<&[[usize; 2]]>,
+    keep: Option<&[[usize; 2]]>,
+    pause: Option<i64>,
+    hesitations: &[TimeRange],
+    [keep_before, keep_after]: [Option<i64>; 2],
+) -> Result<Vec<TimeRange>> {
+    let before = keep_before.unwrap_or(BEFORE_WORD_US);
+    let after = keep_after.unwrap_or(AFTER_WORD_US);
     ensure!(delete.is_none() || keep.is_none(), "INVALID_SELECTION: use delete OR keep");
     ensure!(pause.is_none_or(|p| p >= 0), "INVALID_PAUSE: shorten_pauses_us must be nonnegative");
     let (Some(first_span), Some(last_span)) = (speech.first(), speech.last()) else {
@@ -735,32 +752,35 @@ pub fn deletion_ranges(
     };
     if first > 0 {
         let (_, gone_end) = gone(&words[..first], start, words[first].start_us).unwrap_or_default();
-        add(start, words[first].start_us - BEFORE_WORD_US.min((words[first].start_us - gone_end).max(0) / 2));
-    } else if let Some(pause) = pause
-        && words[0].start_us - start > pause
+        add(start, words[first].start_us - before.min((words[first].start_us - gone_end).max(0) / 2));
+    } else if pause.is_some_and(|p| words[0].start_us - start > p)
+        || keep_before.is_some_and(|p| words[0].start_us - start > p)
     {
-        add(start, words[0].start_us - BEFORE_WORD_US.min(pause));
+        add(start, words[0].start_us - before.min(pause.unwrap_or(before)));
     }
     for pair in retained.windows(2) {
         let (a, b) = (pair[0], pair[1]);
         let (gap_start, gap_end) = (words[a].end_us, words[b].start_us);
         if let Some((gone_start, gone_end)) = gone(&words[a + 1..b], gap_start, gap_end) {
-            let after = AFTER_WORD_US.min((gone_start - gap_start).max(0) / 2);
-            let before = BEFORE_WORD_US.min((gap_end - gone_end).max(0) / 2);
+            let after = after.min((gone_start - gap_start).max(0) / 2);
+            let before = before.min((gap_end - gone_end).max(0) / 2);
             add(gap_start + after, gap_end - before);
         } else if let Some(pause) = pause
             && gap_end - gap_start > pause
         {
-            add(gap_start + pause / 2, gap_end - (pause - pause / 2));
+            add(
+                gap_start + (pause / 2).min(keep_after.unwrap_or(pause)),
+                gap_end - (pause - pause / 2).min(keep_before.unwrap_or(pause)),
+            );
         }
     }
     if last + 1 < words.len() {
         let (gone_start, _) = gone(&words[last + 1..], words[last].end_us, end).unwrap_or_default();
-        add(words[last].end_us + AFTER_WORD_US.min((gone_start - words[last].end_us).max(0) / 2), end);
-    } else if let Some(pause) = pause
-        && end - words[last].end_us > pause
+        add(words[last].end_us + after.min((gone_start - words[last].end_us).max(0) / 2), end);
+    } else if pause.is_some_and(|p| end - words[last].end_us > p)
+        || keep_after.is_some_and(|p| end - words[last].end_us > p)
     {
-        add(words[last].end_us + AFTER_WORD_US.min(pause), end);
+        add(words[last].end_us + after.min(pause.unwrap_or(after)), end);
     }
     let ranges: Vec<_> = ranges
         .into_iter()
