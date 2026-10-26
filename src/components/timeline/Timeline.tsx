@@ -538,7 +538,10 @@ export function Timeline({ height }: { height: number }) {
     const off = (n: number, side: string) => `${n} changed clip${n === 1 ? "" : "s"} off screen, to the ${side}`;
     return [...described.lines, ...(before ? [off(before, "left")] : []), ...(after ? [off(after, "right")] : [])];
   })();
-  const dragKind = drag ? project.tracks.find((t) => t.id === drag.trackId)?.kind : null;
+  const dragTrack = drag ? project.tracks.find((t) => t.id === drag.trackId) : undefined;
+  const dragKind = dragTrack?.kind ?? null;
+  // A sound clip's name has its own row, so its ghost needs an audio row's height to keep its waveform.
+  const ghostHeight = dragKind === "audio" ? rowHeight(dragTrack!) : 44;
   const picked = selection.flatMap((id) => {
     const found = findClip(project, id);
     return found ? [found] : [];
@@ -818,13 +821,13 @@ export function Timeline({ height }: { height: number }) {
 
           {/* Ghost for a drag onto a new track follows the pointer row-less. */}
           {drag?.moved && drag.target === null && ghostTiming && (
-            <div className="pointer-events-none absolute z-30" style={{ left: HEADER_W, top: RULER_H, height: 44, width: laneWidth }}>
+            <div className="pointer-events-none absolute z-30" style={{ left: HEADER_W, top: RULER_H, height: ghostHeight, width: laneWidth }}>
               <ClipView
                 clip={drag.clip}
-                track={project.tracks.find((t) => t.id === drag.trackId)!}
+                track={dragTrack!}
                 project={project}
                 zoom={zoom}
-                height={44}
+                height={ghostHeight}
                 visible={visible}
                 selected
                 ghost
