@@ -253,6 +253,7 @@ pub(crate) fn label(cmds: &[EditCmd]) -> &'static str {
         EditCmd::MoveClips { .. } => "Move clips",
         EditCmd::TrimClip { .. } => "Trim clip",
         EditCmd::SplitClip { .. } => "Split",
+        EditCmd::FreezeFrame { .. } => "Freeze frame",
         EditCmd::DeleteClips { .. } => "Delete",
         EditCmd::UpdateClip { .. } => "Change clip",
         EditCmd::SetAnimation { .. } => "Animation",

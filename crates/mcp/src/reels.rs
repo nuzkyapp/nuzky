@@ -141,7 +141,7 @@ fn cut(
 /// FFmpeg cannot read has none, so the reel's edges stay where its words put them.
 fn picture_cuts(project: &Project, windows: &[TimeRange], cancelled: &dyn Fn() -> bool) -> Result<Vec<i64>> {
     let mut cuts = Vec::new();
-    for clip in project.tracks.iter().filter(|t| t.id == MAIN_TRACK).flat_map(|t| &t.clips) {
+    for clip in project.tracks.iter().filter(|t| t.id == MAIN_TRACK).flat_map(|t| &t.clips).filter(|c| !c.is_freeze()) {
         let ClipContent::Media { asset_id, source_in_us, speed, .. } = &clip.content else { continue };
         let Some(asset) = project.assets.iter().find(|a| &a.id == asset_id && a.kind == AssetKind::Video) else {
             continue;

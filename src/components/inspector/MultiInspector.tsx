@@ -20,7 +20,7 @@ function facts(project: Project, { clip, track }: Found) {
   return {
     transform: !onAudioTrack,
     adjust: c.type === "media" && !onAudioTrack && asset?.kind !== "audio",
-    sound: c.type === "media" && (onAudioTrack || !!asset?.hasAudio),
+    sound: c.type === "media" && c.speed !== 0 && (onAudioTrack || !!asset?.hasAudio),
     text: c.type === "text",
     kind: c.type === "text" ? (isCaptionTrack(track) ? "caption" : "text") : onAudioTrack ? "audio" : (asset?.kind ?? "video"),
   };

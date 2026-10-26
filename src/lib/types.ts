@@ -358,7 +358,8 @@ export type ClipContent = {
   volume: number,
   transform: Transform,
   /**
-   * Playback speed; the clip covers `duration_us * speed` of source. Sound follows it.
+   * Playback speed; the clip covers `duration_us * speed` of source. Sound follows it. 0 is a freeze
+   * frame (`Clip::is_freeze`), always at volume 0.
    */
   speed: number,
   /**
@@ -618,6 +619,11 @@ export type EditCmd = {
   "type": "splitClip",
   clipId: string,
   atUs: number,
+} | {
+  "type": "freezeFrame",
+  clipId: string,
+  atUs: number,
+  durationUs?: number | null,
 } | {
   "type": "deleteClips",
   clipIds: Array<string>,

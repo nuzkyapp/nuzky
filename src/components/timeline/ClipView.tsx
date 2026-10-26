@@ -1,5 +1,5 @@
 import { memo, useEffect } from "react";
-import { AudioLines, Film, Gauge, Image as ImageIcon, Type } from "lucide-react";
+import { AudioLines, Film, Gauge, Image as ImageIcon, Snowflake, Type } from "lucide-react";
 import { MAIN_TRACK, isCaptionTrack, useEditor } from "../../lib/store";
 import { US, formatDuration } from "../../lib/time";
 import { PEEK_WORDS, type PeekMark } from "../../lib/peek";
@@ -125,9 +125,9 @@ export const ClipView = memo(function ClipView({
   const innerH = height - 8;
   const isCaption = c.type === "text" && isCaptionTrack(track);
   const bg = c.type === "text" ? (isCaption ? "bg-clip-captions" : "bg-clip-title") : sound ? "bg-clip-audio" : asset?.kind === "image" ? "bg-clip-image" : "bg-clip-video";
-  const Icon = c.type === "text" ? Type : sound ? AudioLines : asset?.kind === "image" ? ImageIcon : Film;
-  const label = c.type === "text" ? c.text : (asset?.name ?? "Missing media");
   const speed = c.type === "media" ? c.speed : 1;
+  const Icon = c.type === "text" ? Type : sound ? AudioLines : asset?.kind === "image" ? ImageIcon : speed === 0 ? Snowflake : Film;
+  const label = c.type === "text" ? c.text : (asset?.name ?? "Missing media");
   const sourceInUs = timing?.sourceInUs ?? (c.type === "media" ? c.sourceInUs : 0);
   const soundStrip = visual && c.type === "media" && asset.kind === "video" && asset.hasAudio && c.volume > 0;
   const local: [number, number] = [visible[0] - left, visible[1] - left];
@@ -202,7 +202,7 @@ export const ClipView = memo(function ClipView({
             <span className="truncate">{label}</span>
             {width > 110 && <span className="tabular shrink-0 pl-0.5 font-normal text-fg/80">{formatDuration(durationUs)}</span>}
           </span>
-          {speed !== 1 && width > 40 && (
+          {speed !== 1 && speed !== 0 && width > 40 && (
             <span className={`tabular ml-auto flex h-[17px] shrink-0 items-center gap-0.5 rounded-[5px] ${sound ? "bg-black/80" : "bg-black/60"} px-1 font-semibold`}>
               <Gauge size={11} />
               {Number(speed.toFixed(2))}x

@@ -629,6 +629,11 @@ impl Clip {
     pub fn contains(&self, t_us: i64) -> bool {
         t_us >= self.start_us && t_us < self.end_us()
     }
+
+    /// A freeze frame: a video clip at speed 0, showing the frame at `source_in_us` for its whole length, silent.
+    pub fn is_freeze(&self) -> bool {
+        matches!(self.content, ClipContent::Media { speed, .. } if speed == 0.0)
+    }
 }
 
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -644,7 +649,8 @@ pub enum ClipContent {
         volume: f32,
         #[serde(default)]
         transform: Transform,
-        /// Playback speed; the clip covers `duration_us * speed` of source. Sound follows it.
+        /// Playback speed; the clip covers `duration_us * speed` of source. Sound follows it. 0 is a freeze
+        /// frame (`Clip::is_freeze`), always at volume 0.
         #[serde(default = "one")]
         speed: f32,
         /// Sound at another speed keeps its pitch; off, it gets higher when faster and lower

@@ -110,7 +110,7 @@ fn main_track(project: &Project) -> Project {
 fn build(before: Project, after: Project, derived: &Derived) -> Recap {
     let change = summary::cut(&before, &after);
     let mut ranges = Vec::new();
-    for clip in before.tracks.iter().filter(|t| t.id == MAIN_TRACK).flat_map(|t| &t.clips) {
+    for clip in before.tracks.iter().filter(|t| t.id == MAIN_TRACK).flat_map(|t| &t.clips).filter(|c| !c.is_freeze()) {
         let ClipContent::Media { asset_id, source_in_us, speed, .. } = &clip.content else { continue };
         let gone = change.gone_assets.contains(asset_id);
         let whole = [(0, before.asset(asset_id).map_or(0, |a| a.duration_us))];

@@ -8,7 +8,7 @@ import { setLimits } from "./lib/limits";
 import { onReframeJob } from "./lib/reframe";
 import { canRetrySpeech, retrySpeech, useSpeech } from "./lib/speech";
 import { reportBug } from "./lib/diagnostics";
-import { copySelection, currentEpoch, cutSelection, deleteSelection, deleteSide, duplicateSelection, openExport, pasteAttributes, pasteClips, edgeBeside, PLUGIN_RUN, projectDuration, runWasDiscarded, splitAtPlayhead, undoAction, useEditor } from "./lib/store";
+import { copySelection, currentEpoch, cutSelection, deleteSelection, deleteSide, duplicateSelection, freezeAtPlayhead, openExport, pasteAttributes, pasteClips, edgeBeside, PLUGIN_RUN, projectDuration, runWasDiscarded, splitAtPlayhead, undoAction, useEditor } from "./lib/store";
 import { US, formatDuration, lastFrame, nearestFrame, stepFrame } from "./lib/time";
 import type { Asset, JobEvent, ProjectSummary, Snapshot, ModelQuestion, Transport } from "./lib/types";
 import { AGENT_VISION_MODELS } from "./components/ModelQuestionDialog";
@@ -113,7 +113,7 @@ function useShortcuts() {
           void deleteOverlay(cover.open, overlay);
           return;
         }
-        if (key === " " || (!mod && (key === "s" || key === "q" || key === "w")) || (mod && key === "d") || clipboardKey || key === "delete" || key === "backspace") {
+        if (key === " " || (!mod && (key === "s" || key === "q" || key === "w" || key === "r")) || (mod && key === "d") || clipboardKey || key === "delete" || key === "backspace") {
           e.preventDefault();
           return;
         }
@@ -134,7 +134,7 @@ function useShortcuts() {
         return;
       }
       // Full screen hides the timeline; the keys that would change it unseen rest.
-      if (usePreview.getState().full && (key === "delete" || key === "backspace" || (!mod && (key === "s" || key === "q" || key === "w")) || (mod && (key === "d" || key === "i" || key === "y" || key === "z")) || (clipboardKey && clipboardKey !== "copy"))) {
+      if (usePreview.getState().full && (key === "delete" || key === "backspace" || (!mod && (key === "s" || key === "q" || key === "w" || key === "r")) || (mod && (key === "d" || key === "i" || key === "y" || key === "z")) || (clipboardKey && clipboardKey !== "copy"))) {
         e.preventDefault();
         return;
       }
@@ -169,6 +169,9 @@ function useShortcuts() {
       } else if (!mod && key === "s") {
         e.preventDefault();
         splitAtPlayhead();
+      } else if (!mod && e.shiftKey && key === "r") {
+        e.preventDefault();
+        if (!e.repeat) void freezeAtPlayhead();
       } else if (!mod && (key === "q" || key === "w")) {
         e.preventDefault();
         deleteSide(key === "q" ? "left" : "right");

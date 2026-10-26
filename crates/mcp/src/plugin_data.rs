@@ -83,6 +83,9 @@ pub(crate) fn gather(
         .flat_map(|track| track.clips.iter().map(move |clip| (track.id.as_str(), clip)))
         .filter_map(|(track, clip)| {
             let ClipContent::Media { asset_id, .. } = &clip.content else { return None };
+            if clip.is_freeze() {
+                return None;
+            }
             Some((track, clip, project.asset(asset_id).filter(|asset| has_audio(asset))?))
         })
         .collect();

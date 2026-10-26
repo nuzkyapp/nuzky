@@ -437,7 +437,7 @@ fn fade_out(clip_id: &str, fade_out_us: i64) -> EditCmd {
 /// The footage: the shots given, else the main track's clips in order, each keeping its look and speed.
 fn sources(project: &Project, main: &Track, shots: Option<&[Shot]>) -> Result<Vec<Source>> {
     let look = |asset_id: &str| {
-        main.clips.iter().find_map(|c| match &c.content {
+        main.clips.iter().filter(|c| !c.is_freeze()).find_map(|c| match &c.content {
             ClipContent::Media { asset_id: id, .. } if id == asset_id => Some(c.content.clone()),
             _ => None,
         })
@@ -478,6 +478,7 @@ fn sources(project: &Project, main: &Track, shots: Option<&[Shot]>) -> Result<Ve
         None => main
             .clips
             .iter()
+            .filter(|c| !c.is_freeze())
             .filter_map(|c| match &c.content {
                 ClipContent::Media { asset_id, source_in_us, speed, .. } => Some(source(
                     asset_id,

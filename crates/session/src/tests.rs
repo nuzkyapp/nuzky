@@ -1,5 +1,5 @@
 use super::*;
-use nuzky_engine::model::{Adjust, Asset, AssetKind, Clip, ClipContent, Transform};
+use nuzky_engine::model::{Adjust, Asset, AssetKind, Clip, ClipContent, TrackKind, Transform};
 
 struct Fixture(PathBuf);
 impl Fixture {
@@ -354,6 +354,46 @@ fn validates_references_overlaps_source_ranges_and_unique_ids() {
         *speed = f32::NAN;
     }
     assert!(validate(&bad).is_err());
+}
+
+/// Speed 0 is a freeze frame only for a silent video on a video track holding a frame the file has; any other
+/// clip at speed 0 or below 0.1x would divide by its speed or play sound frozen in place.
+#[test]
+fn speed_zero_is_valid_only_as_a_silent_freeze_frame_of_a_video() {
+    let freeze = |volume: f32, source_in: i64, kind: AssetKind, track: TrackKind, speed: f32| {
+        let mut p = Project::new("test");
+        p.assets.push(Asset { kind, ..asset() });
+        p.tracks[0].kind = track;
+        p.tracks[0].clips.push(media_clip());
+        if let ClipContent::Media { speed: s, volume: v, source_in_us, .. } = &mut p.tracks[0].clips[0].content {
+            (*s, *v, *source_in_us) = (speed, volume, source_in);
+        }
+        validate(&p)
+    };
+    use TrackKind::{Audio, Video};
+    freeze(0.0, 9_999_999, AssetKind::Video, Video, 0.0).unwrap();
+    for (volume, source_in, kind, track, speed) in [
+        (1.0, 0, AssetKind::Video, Video, 0.0),
+        (0.0, 10_000_000, AssetKind::Video, Video, 0.0),
+        (0.0, 0, AssetKind::Image, Video, 0.0),
+        (0.0, 0, AssetKind::Video, Audio, 0.0),
+        (0.0, 0, AssetKind::Video, Video, 0.05),
+        (0.0, 0, AssetKind::Video, Video, -1.0),
+    ] {
+        assert!(
+            freeze(volume, source_in, kind, track, speed).is_err(),
+            "{volume} {source_in} {kind:?} {track:?} {speed}"
+        );
+    }
+    // Frozen at the start of a clip that pops in, the still is the invisible picture it shows there.
+    let mut p = Project::new("test");
+    p.assets.push(asset());
+    let mut popping = media_clip();
+    popping.anim_in =
+        Some(nuzky_engine::model::Animation { kind: nuzky_engine::model::AnimationKind::Pop, duration_us: 400_000 });
+    p.tracks[0].clips.push(popping);
+    p.apply(EditCmd::FreezeFrame { clip_id: "c".into(), at_us: 0, duration_us: None }).unwrap();
+    validate(&p).unwrap();
 }
 
 #[test]

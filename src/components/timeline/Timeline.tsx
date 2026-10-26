@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { Copy, Magnet, Maximize2, PanelLeftClose, PanelRightClose, RotateCwSquare, Scissors, Trash2, Unlink, ZoomIn, ZoomOut } from "lucide-react";
+import { Copy, Magnet, Maximize2, PanelLeftClose, PanelRightClose, RotateCwSquare, Scissors, Snowflake, Trash2, Unlink, ZoomIn, ZoomOut } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import {
   MAIN_TRACK,
@@ -18,6 +18,8 @@ import {
   rotateSelection,
   splitAtPlayhead,
   splitBlocker,
+  freezeAtPlayhead,
+  freezeBlocker,
   useAiLocked,
   useEditor,
 } from "../../lib/store";
@@ -226,6 +228,7 @@ export function Timeline({ height }: { height: number }) {
   const cut = useEditor((s) => s.cut);
   // A string or null, so playback re-renders the timeline only when it changes.
   const splitBlocked = useEditor((s) => (s.snap ? splitBlocker(s.snap.project, s.selection, s.timeUs) : "move the playhead over a clip"));
+  const freezeBlocked = useEditor((s) => (s.snap ? freezeBlocker(s.snap.project, s.selection, Math.round(s.timeUs)) : "move the playhead over a video clip to freeze its frame"));
   const zoom = useEditor((s) => s.zoom);
   // Media dragged from the panel, or files dragged in from the desktop.
   const assetDrag = useEditor((s) => s.assetDrag ?? s.fileDrag);
@@ -303,7 +306,7 @@ export function Timeline({ height }: { height: number }) {
       const end = Math.min(r.width / 4, REPLACE_END);
       const found = findClip(project, el.dataset.clipId!);
       const c = found?.clip.content;
-      if (!found || c?.type !== "media" || x < r.left + end || x > r.right - end) return null;
+      if (!found || c?.type !== "media" || c.speed === 0 || x < r.left + end || x > r.right - end) return null;
       const fits = found.track.kind === "video" ? media.kind !== "audio" : found.track.kind === "audio" && media.kind !== "image" && media.hasAudio !== false;
       // The engine's tolerance: one frame of the clip's source.
       const short = media.kind !== "image" && media.durationUs !== undefined && media.durationUs + minUs * c.speed < found.clip.durationUs * c.speed;
@@ -570,6 +573,9 @@ export function Timeline({ height }: { height: number }) {
             <span aria-hidden className="mx-1 h-4 w-px bg-white/[.12]" />
             <IconButton round label={locked ? lockedLabel("Split") : splitBlocked ? `Split: ${splitBlocked}` : "Split at playhead (S)"} disabled={locked || !!splitBlocked} onClick={splitAtPlayhead}>
               <Scissors size={16} />
+            </IconButton>
+            <IconButton round label={locked ? lockedLabel("Freeze frame") : freezeBlocked ? `Freeze frame: ${freezeBlocked}` : "Freeze frame (Shift+R)"} disabled={locked || !!freezeBlocked} onClick={() => void freezeAtPlayhead()}>
+              <Snowflake size={16} />
             </IconButton>
             <IconButton
               round

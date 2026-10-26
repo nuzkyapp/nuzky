@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { ClipboardCopy, ClipboardPaste, Copy, ListChecks, Paintbrush, Replace, Scissors, ScissorsLineDashed, Trash2, Unlink } from "lucide-react";
+import { ClipboardCopy, ClipboardPaste, Copy, ListChecks, Paintbrush, Replace, Scissors, ScissorsLineDashed, Snowflake, Trash2, Unlink } from "lucide-react";
 import { pickAndReplace } from "../panel/assets";
-import { AI_EDITING, NOTHING_COPIED, attributeTargets, canSplitClip, copySelection, cutSelection, deleteSelection, detachAudio, detachBlocker, duplicateSelection, findClip, pasteAttributes, pasteAttributesBlocker, pasteClips, selectTrack, splitAtPlayhead, useAiLocked, useEditor } from "../../lib/store";
+import { AI_EDITING, NOTHING_COPIED, attributeTargets, canSplitClip, copySelection, cutSelection, deleteSelection, detachAudio, detachBlocker, duplicateSelection, findClip, freezeAtPlayhead, freezeBlocker, isFreeze, pasteAttributes, pasteAttributesBlocker, pasteClips, selectTrack, splitAtPlayhead, useAiLocked, useEditor } from "../../lib/store";
 import type { Clip } from "../../lib/types";
 
 export interface MenuAt {
@@ -43,6 +43,9 @@ export function ClipMenu({ at, onClose }: { at: MenuAt; onClose: () => void }) {
   const clipboard = useEditor((s) => s.clipboard);
   const splittable = useEditor((s) => picked.filter((c) => canSplitClip(c, s.timeUs, project.canvas.fps)).length);
   const atEdge = useEditor((s) => picked.some((c) => s.timeUs >= c.startUs && s.timeUs <= c.startUs + c.durationUs));
+  const freezeReason = useEditor((s) =>
+    picked.length > 1 ? "select one video clip to freeze its frame" : found ? freezeBlocker(project, selection, Math.round(s.timeUs), found.clip) : null,
+  );
 
   // Focus goes back where it was when the menu opened, unless an action moved it elsewhere.
   const [opener] = useState(() => document.activeElement as HTMLElement | null);
@@ -90,7 +93,14 @@ export function ClipMenu({ at, onClose }: { at: MenuAt; onClose: () => void }) {
   const many = (one: string, verb: string) => (n === 1 ? one : `${verb} ${n} clips`);
   const detachable = picked.filter((c) => !detachBlocker(project, c));
   const detachReason = n === 1 ? detachBlocker(project, picked[0]) : "None of the selected clips has sound to detach";
-  const replaceReason = n > 1 ? "Select one clip to replace its media" : clip.content.type !== "media" ? "Only video, image and sound clips take other media" : null;
+  const replaceReason =
+    n > 1
+      ? "Select one clip to replace its media"
+      : clip.content.type !== "media"
+        ? "Only video, image and sound clips take other media"
+        : isFreeze(clip)
+          ? "A freeze frame holds a frame of its video; freeze a frame of the other media instead"
+          : null;
   const copies = clipboard?.length ?? 0;
   const looks = attributeTargets(project, selection, clipboard).reduce((sum, g) => sum + g.clipIds.length, 0);
   const run = (fn: () => unknown) => () => {
@@ -133,6 +143,14 @@ export function ClipMenu({ at, onClose }: { at: MenuAt; onClose: () => void }) {
                 : "Move the playhead over the selected clips to split them"
         }
         onSelect={run(splitAtPlayhead)}
+      />
+      <Item
+        icon={<Snowflake size={14} />}
+        label="Freeze frame"
+        shortcut="Shift+R"
+        disabled={locked || !!freezeReason}
+        reason={locked ? AI_EDITING : freezeReason && freezeReason[0].toUpperCase() + freezeReason.slice(1)}
+        onSelect={run(() => freezeAtPlayhead(clip))}
       />
       <Item icon={<Copy size={14} />} label={many("Duplicate", "Duplicate")} shortcut="Ctrl+D" disabled={locked} reason={AI_EDITING} onSelect={run(duplicateSelection)} />
       <Item

@@ -12,6 +12,7 @@ use crate::model::{
 
 pub const MAIN_TRACK: &str = "main";
 const IMAGE_DURATION_US: i64 = 3_000_000;
+pub const FREEZE_DURATION_US: i64 = 3_000_000;
 const TEXT_DURATION_US: i64 = 3_000_000;
 const UNDO_LIMIT: usize = 200;
 pub const MIN_SPEED: f32 = 0.1;
@@ -156,6 +157,16 @@ pub enum EditCmd {
     SplitClip {
         clip_id: String,
         at_us: i64,
+    },
+    /// Holds the frame of a video clip shown at `at_us` for `duration_us` (3 s by default): the clip is split there
+    /// and the still goes in between, on the same track, pushing what follows along; on the main track the other
+    /// tracks, except audio kept in place, open the same time. Within a frame of the clip's start or end the still
+    /// goes before or after it. The still is the same video at speed 0, silent; trim it to change its length.
+    #[cfg_attr(feature = "ts", ts(optional_fields = nullable))]
+    FreezeFrame {
+        clip_id: String,
+        at_us: i64,
+        duration_us: Option<i64>,
     },
     DeleteClips {
         clip_ids: Vec<String>,
@@ -890,9 +901,10 @@ impl Project {
         }
     }
 
-    /// Source length a media clip may read, or `None` for images and text, which have no end.
+    /// Source length a media clip may read, or `None` for images, freeze frames and text, which have no end.
     fn source_limit(&self, clip: &Clip) -> Option<i64> {
         match &clip.content {
+            ClipContent::Media { .. } if clip.is_freeze() => None,
             ClipContent::Media { asset_id, .. } => {
                 self.asset(asset_id).filter(|a| a.kind != AssetKind::Image).map(|a| a.duration_us)
             }
@@ -953,6 +965,7 @@ impl Project {
             | EditCmd::MoveClips { .. }
             | EditCmd::TrimClip { .. }
             | EditCmd::SplitClip { .. }
+            | EditCmd::FreezeFrame { .. }
             | EditCmd::DeleteClips { .. }
             | EditCmd::DuplicateClip { .. } => self.apply_placement(cmd, &mut out, &mut moved)?,
             EditCmd::UpdateClip { .. }
@@ -1168,6 +1181,10 @@ impl Project {
                 let ClipContent::Media { speed, .. } = clip.content else {
                     bail!("Only video, image and sound clips take other media")
                 };
+                ensure!(
+                    !clip.is_freeze(),
+                    "A freeze frame holds a frame of its video; freeze a frame of the other media instead"
+                );
                 match self.tracks[ti].kind {
                     TrackKind::Video => ensure!(
                         asset.kind != AssetKind::Audio,
@@ -1310,6 +1327,7 @@ impl Project {
             EditCmd::TrimClip { clip_id, start_us, duration_us, source_in_us } => {
                 let (ti, ci) = self.find_clip(&clip_id).ok_or_else(|| anyhow!("Unknown clip"))?;
                 let limit = self.source_limit(&self.tracks[ti].clips[ci]);
+                let freeze = self.tracks[ti].clips[ci].is_freeze();
                 let speed = match &self.tracks[ti].clips[ci].content {
                     ClipContent::Media { speed, .. } => *speed as f64,
                     ClipContent::Text { .. } => 1.0,
@@ -1318,9 +1336,11 @@ impl Project {
                 let (old_start, old_end) = (clip.start_us, clip.end_us());
                 let mut start = start_us.max(0);
                 let mut duration = duration_us.max(min);
-                // An image has no source time, so its left edge moves without one.
+                // An image or a freeze frame has no source time to move, so its left edge moves without one.
                 let left_edge = start_us != old_start && (source_in_us.is_some() || limit.is_none());
-                if let ClipContent::Media { source_in_us: src, .. } = &mut clip.content {
+                if let ClipContent::Media { source_in_us: src, .. } = &mut clip.content
+                    && speed > 0.0
+                {
                     let mut new_src = source_in_us.unwrap_or(*src).max(0);
                     if source_in_us.is_some() && start_us != old_start {
                         // Trimming the left edge: keep the right edge in place.
@@ -1356,6 +1376,12 @@ impl Project {
                 }
                 if ti != 0 {
                     let end = start + duration;
+                    // A freeze frame pushes what follows it on its track, as when it was made, so it can stretch.
+                    if freeze && end > old_end {
+                        for c in self.tracks[ti].clips.iter_mut().filter(|c| c.id != clip_id && c.start_us >= old_end) {
+                            c.start_us += end - old_end;
+                        }
+                    }
                     if !self.is_free(ti, start, end, Some(&clip_id)) {
                         bail!("Clips on the same track cannot overlap");
                     }
@@ -1369,6 +1395,76 @@ impl Project {
                 }
                 let second = self.split_clip(ti, ci, at_us);
                 out.select.push(self.tracks[ti].clips[second].id.clone());
+            }
+            EditCmd::FreezeFrame { clip_id, at_us, duration_us } => {
+                let (ti, ci) = self.find_clip(&clip_id).ok_or_else(|| anyhow!("Unknown clip"))?;
+                let clip = self.tracks[ti].clips[ci].clone();
+                let ClipContent::Media { asset_id, .. } = &clip.content else {
+                    bail!("Only video clips have a frame to freeze")
+                };
+                let asset = self.asset(asset_id).ok_or_else(|| anyhow!("Unknown media"))?;
+                ensure!(
+                    self.tracks[ti].kind == TrackKind::Video && asset.kind == AssetKind::Video,
+                    "Only video clips have a frame to freeze"
+                );
+                ensure!(!clip.is_freeze(), "This clip is already a freeze frame");
+                ensure!(
+                    clip.start_us <= at_us && at_us < clip.end_us(),
+                    "Move the playhead over the clip to freeze its frame"
+                );
+                let duration = duration_us.unwrap_or(FREEZE_DURATION_US);
+                ensure!(duration >= min, "A freeze frame lasts at least one frame");
+                let last = (asset.duration_us - 1).max(0);
+                let mut still = clip.clone();
+                still.id = new_id();
+                still.duration_us = duration;
+                if let ClipContent::Media { transform, .. } = &mut still.content {
+                    let shown = crate::effects::transform_at(&clip, at_us).0;
+                    // A picture popping in from nothing is invisible there, and a scale of 0 is no transform.
+                    *transform =
+                        Transform { scale: if shown.scale > 0.0 { shown.scale } else { transform.scale }, ..shown };
+                }
+                still.anim_in = None;
+                still.anim_out = None;
+                still.transition_in = None;
+                still.keyframes.clear();
+                if let ClipContent::Media {
+                    source_in_us,
+                    speed,
+                    volume,
+                    keep_pitch,
+                    fade_in_us,
+                    fade_out_us,
+                    clean_voice,
+                    dereverb,
+                    normalize,
+                    leveler,
+                    duck_db,
+                    ..
+                } = &mut still.content
+                {
+                    *source_in_us = crate::effects::source_time(&clip, at_us).min(last);
+                    (*speed, *volume, *keep_pitch, *clean_voice, *normalize) = (0.0, 0.0, false, false, false);
+                    (*fade_in_us, *fade_out_us, *dereverb, *leveler, *duck_db) = (0, 0, 0.0, 0.0, 0.0);
+                }
+                let at = if at_us - clip.start_us < min {
+                    clip.start_us
+                } else if clip.end_us() - at_us < min {
+                    clip.end_us()
+                } else {
+                    self.split_clip(ti, ci, at_us);
+                    at_us
+                };
+                still.start_us = at;
+                out.select.push(still.id.clone());
+                if ti == 0 {
+                    *moved = Some((still.id.clone(), at));
+                } else {
+                    for c in self.tracks[ti].clips.iter_mut().filter(|c| c.start_us >= at) {
+                        c.start_us += duration;
+                    }
+                }
+                self.tracks[ti].clips.push(still);
             }
             EditCmd::DeleteClips { clip_ids } => {
                 let cuts: Vec<(i64, i64)> = self
@@ -1436,6 +1532,16 @@ impl Project {
                 let (ti, ci) = self.find_clip(&clip_id).ok_or_else(|| anyhow!("Unknown clip"))?;
                 let changes_length = speed.is_some();
                 ensure!(
+                    !self.tracks[ti].clips[ci].is_freeze()
+                        || (speed.is_none()
+                            && keep_pitch.is_none()
+                            && volume.is_none_or(|v| v == 0.0)
+                            && fade_in_us.is_none_or(|f| f == 0)
+                            && fade_out_us.is_none_or(|f| f == 0)
+                            && duck_db.is_none_or(|d| d == 0.0)),
+                    "A freeze frame has no sound or speed; trim it to change how long it lasts"
+                );
+                ensure!(
                     shape.is_none() || matches!(self.tracks[ti].clips[ci].content, ClipContent::Media { .. }),
                     "Only video and image clips have a shape"
                 );
@@ -1460,9 +1566,10 @@ impl Project {
                     || normalize == Some(true)
                     || leveler.is_some_and(|x| x > 0.0)
                 {
-                    let sound = match &self.tracks[ti].clips[ci].content {
+                    let clip = &self.tracks[ti].clips[ci];
+                    let sound = match &clip.content {
                         ClipContent::Media { asset_id, .. } => {
-                            self.asset(asset_id).is_some_and(crate::audio::has_audio)
+                            !clip.is_freeze() && self.asset(asset_id).is_some_and(crate::audio::has_audio)
                         }
                         ClipContent::Text { .. } => false,
                     };
@@ -2830,6 +2937,72 @@ mod tests {
         assert_eq!(main_layout(&p), vec![(0, 2000), (2000, 3000)]);
         let ClipContent::Media { source_in_us, .. } = &p.tracks[0].clips[1].content else { panic!() };
         assert_eq!(*source_in_us, 2_000_000);
+    }
+
+    /// A freeze holds the frame shown at the playhead, pushes what follows along, stretches when trimmed from either
+    /// side and never takes a speed or sound, which would make it play or divide by its speed of 0.
+    #[test]
+    fn a_freeze_frame_holds_the_frame_at_the_playhead_and_trims_like_a_picture() {
+        let mut p = project();
+        let add = |p: &mut Project, cmd| p.apply(cmd).unwrap().select[0].clone();
+        let clip = add(&mut p, EditCmd::AddClip { asset_id: "a".into(), start_us: None, track_id: None });
+        let change = |id: &str, field: &str, value: serde_json::Value| -> EditCmd {
+            serde_json::from_value(serde_json::json!({"type": "updateClip", "clipId": id, field: value})).unwrap()
+        };
+        p.apply(change(&clip, "speed", 2.0.into())).unwrap();
+        let style: TextStyle =
+            serde_json::from_value(serde_json::json!({"fontSize": 60.0, "color": "#ffffff"})).unwrap();
+        let title = add(&mut p, EditCmd::AddText { start_us: 2_000_000, text: "Hi".into(), style });
+        let freeze = |at_us| EditCmd::FreezeFrame { clip_id: clip.clone(), at_us, duration_us: None };
+        // At 1 s of a clip at 2x the picture is 2 s into the file.
+        let still = add(&mut p, freeze(1_000_000));
+        assert_eq!(main_layout(&p), vec![(0, 1000), (1000, 3000), (4000, 1500)]);
+        let source = |p: &Project, id: &str| match p.find_clip(id).map(|(ti, ci)| &p.tracks[ti].clips[ci].content) {
+            Some(ClipContent::Media { source_in_us, speed, volume, .. }) => (*source_in_us, *speed, *volume),
+            _ => panic!("no media clip {id}"),
+        };
+        assert_eq!(source(&p, &still), (2_000_000, 0.0, 0.0));
+        assert_eq!(p.find_clip(&title).map(|(ti, ci)| p.tracks[ti].clips[ci].start_us), Some(5_000_000));
+        // Within a frame of the clip's start it goes before it, holding the frame shown there.
+        let before = add(&mut p, freeze(10_000));
+        assert_eq!((source(&p, &before).0, main_layout(&p)[0]), (20_000, (0, 3000)));
+        // Trimmed from either edge it only gets longer or shorter.
+        let trim = |start_us, duration_us| EditCmd::TrimClip {
+            clip_id: still.clone(),
+            start_us,
+            duration_us,
+            source_in_us: Some(0),
+        };
+        p.apply(trim(4_000_000, 1_000_000)).unwrap();
+        p.apply(trim(4_000_000, 10_000_000)).unwrap();
+        assert_eq!((main_layout(&p)[2], source(&p, &still).0), ((4000, 10_000), 2_000_000));
+        p.apply(trim(3_500_000, 10_500_000)).unwrap();
+        assert_eq!((main_layout(&p)[2], source(&p, &still).0), ((4000, 10_500), 2_000_000));
+        for refused in [
+            change(&still, "speed", 1.0.into()),
+            change(&still, "volume", 1.0.into()),
+            change(&still, "cleanVoice", true.into()),
+            EditCmd::DetachAudio { clip_id: still.clone() },
+            EditCmd::ReplaceClip { clip_id: still.clone(), asset_id: "b".into() },
+            EditCmd::FreezeFrame { clip_id: still.clone(), at_us: 5_000_000, duration_us: None },
+        ] {
+            assert!(p.clone().apply(refused.clone()).is_err(), "{refused:?}");
+        }
+        // Split, it stays the same frame.
+        p.apply(EditCmd::SplitClip { clip_id: still.clone(), at_us: 6_000_000 }).unwrap();
+        assert_eq!(source(&p, &p.tracks[0].clips[3].id.clone()), (2_000_000, 0.0, 0.0));
+        // On an overlay track it pushes the rest of its clip along, also when stretched.
+        let pip = add(&mut p, EditCmd::AddPictureInPicture { asset_id: "b".into(), start_us: 0, duration_us: None });
+        let overlay = |p: &Project| {
+            let ti = p.find_clip(&pip).unwrap().0;
+            p.tracks[ti].clips.iter().map(|c| (c.start_us / 1000, c.duration_us / 1000)).collect::<Vec<_>>()
+        };
+        let held = add(&mut p, EditCmd::FreezeFrame { clip_id: pip.clone(), at_us: 1_000_000, duration_us: None });
+        assert_eq!(overlay(&p), [(0, 1000), (1000, 3000), (4000, 2000)]);
+        let stretch =
+            EditCmd::TrimClip { clip_id: held, start_us: 1_000_000, duration_us: 4_000_000, source_in_us: None };
+        p.apply(stretch).unwrap();
+        assert_eq!(overlay(&p), [(0, 1000), (1000, 4000), (5000, 2000)]);
     }
 
     #[test]

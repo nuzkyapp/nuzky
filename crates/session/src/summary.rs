@@ -213,21 +213,22 @@ pub fn summarize(before: &Project, after: &Project) -> Vec<RunChange> {
 
     // Media placed on the timeline that was not there before (split pieces are not new).
     let added: Vec<&Clip> = pairs.iter().filter(|(c, o)| o.is_none() && source(c).is_some()).map(|(c, _)| *c).collect();
-    let mut by_asset: Vec<(String, Vec<&Clip>)> = Vec::new();
+    let mut by_asset: Vec<(String, bool, Vec<&Clip>)> = Vec::new();
     for clip in added {
-        let name = asset_name(source(clip).unwrap().0);
-        match by_asset.iter_mut().find(|(n, _)| *n == name) {
-            Some((_, clips)) => clips.push(clip),
-            None => by_asset.push((name, vec![clip])),
+        let (name, freeze) = (asset_name(source(clip).unwrap().0), clip.is_freeze());
+        match by_asset.iter_mut().find(|(n, f, _)| *n == name && *f == freeze) {
+            Some((_, _, clips)) => clips.push(clip),
+            None => by_asset.push((name, freeze, vec![clip])),
         }
     }
-    for (name, clips) in &by_asset {
+    for (name, freeze, clips) in &by_asset {
         let place = match track_of.get(clips[0].id.as_str()) {
             Some((_, TrackKind::Audio, _)) => " on an audio track",
             Some((id, _, _)) if *id == MAIN_TRACK => "",
             _ => " as an overlay",
         };
-        out.push(line(format!("Added {name}{place}"), clips));
+        let what = if *freeze { "Froze a frame of" } else { "Added" };
+        out.push(line(format!("{what} {name}{place}"), clips));
     }
 
     // Captions and titles.

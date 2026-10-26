@@ -1218,3 +1218,52 @@ fn a_shadowed_caption_in_a_small_preview_matches_the_export_scaled_down_by_ffmpe
         assert!(error < 4.0, "{name}: caption pixel MAE={error}");
     }
 }
+
+/// A freeze frame is the frame its video showed at the playhead, HDR tone mapped, turned and mirrored as an iPhone
+/// selfie is, and stays that frame for its whole length while the video around it moves.
+#[test]
+fn a_freeze_frame_shows_the_frame_its_video_showed_at_the_playhead() {
+    use nuzky_engine::edit::EditCmd;
+    if !available() {
+        return;
+    }
+    let d = dir("freeze-frame");
+    let stored = d.join("stored.mp4");
+    let x265 = "pools=1:frame-threads=1:log-level=error:colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc:range=limited";
+    ff(
+        &[
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=320x180:rate=30:duration=2",
+            "-vf",
+            "format=yuv420p10le",
+            "-c:v",
+            "libx265",
+            "-x265-params",
+            x265,
+        ],
+        &stored,
+    );
+    let path = d.join("selfie.mp4");
+    let source = stored.to_str().unwrap();
+    ff(&["-display_rotation", "90", "-display_hflip", "-i", source, "-c", "copy"], &path);
+    let mut original = project(&path, 2_000_000);
+    let (w, h) = (original.canvas.width, original.canvas.height);
+    // Frozen during its entry animation, it holds the size and fade it had there.
+    original.tracks[0].clips[0].anim_in = Some(Animation { kind: AnimationKind::ZoomOut, duration_us: 1_500_000 });
+    let mut frozen = original.clone();
+    let at = 1_016_000;
+    let cmd = EditCmd::FreezeFrame { clip_id: "qa-clip".into(), at_us: at, duration_us: None };
+    frozen.apply(cmd).unwrap();
+    let mut renderer = Renderer::new().unwrap();
+    let shown = renderer.render(&original, at, w, h, Wait::Exact, false).unwrap();
+    let later = renderer.render(&original, 1_500_000, w, h, Wait::Exact, false).unwrap();
+    assert!(mae(&shown, &later) > 5.0, "the video moves, so a held frame can be told apart");
+    for t in [at, 2_500_000, 3_990_000] {
+        let got = renderer.render(&frozen, t, w, h, Wait::Exact, false).unwrap();
+        assert!(got == shown, "at {t} µs the freeze shows another frame: MAE {}", mae(&got, &shown));
+    }
+    let after = renderer.render(&frozen, 4_016_000 + 484_000, w, h, Wait::Exact, false).unwrap();
+    assert!(mae(&after, &later) < 1.0, "after the freeze the video plays on from where it stopped");
+}

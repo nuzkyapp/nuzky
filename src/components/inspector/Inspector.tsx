@@ -5,7 +5,7 @@ import { TRANSITIONS } from "../../lib/presets";
 import { useCover } from "../../lib/cover";
 import { useGallery } from "../../lib/gallery";
 import { usePlugins } from "../../lib/plugins";
-import { findClip, isCaptionTrack, mainCuts, useEditor } from "../../lib/store";
+import { findClip, isCaptionTrack, isFreeze, mainCuts, useEditor } from "../../lib/store";
 import { formatDuration, formatTime } from "../../lib/time";
 import type { Asset, Clip } from "../../lib/types";
 import { CoverInspector } from "../cover/CoverInspector";
@@ -29,7 +29,7 @@ import { TransformSection } from "./TransformSection";
 type TabId = "video" | "adjust" | "speed" | "animation" | "audio" | "text" | "transform";
 type Kind = "video" | "image" | "audio" | "text" | "caption";
 
-function tabsFor(kind: Kind, hasSound: boolean): { id: TabId; label: string }[] {
+function tabsFor(kind: Kind, hasSound: boolean, freeze: boolean): { id: TabId; label: string }[] {
   if (kind === "audio") return [{ id: "audio", label: "Audio" }];
   if (kind === "text" || kind === "caption")
     return [
@@ -41,9 +41,9 @@ function tabsFor(kind: Kind, hasSound: boolean): { id: TabId; label: string }[] 
     { id: "video", label: kind === "image" ? "Image" : "Video" },
     { id: "adjust", label: "Adjust" },
   ];
-  if (kind === "video") tabs.push({ id: "speed", label: "Speed" });
+  if (kind === "video" && !freeze) tabs.push({ id: "speed", label: "Speed" });
   tabs.push({ id: "animation", label: "Animation" });
-  if (hasSound) tabs.push({ id: "audio", label: "Audio" });
+  if (hasSound && !freeze) tabs.push({ id: "audio", label: "Audio" });
   return tabs;
 }
 
@@ -54,7 +54,8 @@ type Chosen = Partial<Record<Kind, TabId>>;
 function ClipInspector({ clip, kind, asset, music, chosen, onChoose }: { clip: Clip; kind: Kind; asset?: Asset; /** A song on a music track, which the video can be cut to. */ music: boolean; chosen: Chosen; onChoose: (c: Chosen) => void }) {
   const c = clip.content;
   const hasSound = kind === "video" && !!asset?.hasAudio;
-  const tabs = tabsFor(kind, hasSound);
+  const freeze = isFreeze(clip);
+  const tabs = tabsFor(kind, hasSound, freeze);
   const tab = tabs.find((t) => t.id === chosen[kind])?.id ?? tabs[0].id;
   const title = kind === "caption" ? "Caption" : kind === "text" ? "Text" : (asset?.name ?? "Missing media");
   // A YouTube video's hidden footage stays hidden: until the clip reaches into it, times count within the part.
@@ -63,7 +64,9 @@ function ClipInspector({ clip, kind, asset, music, chosen, onChoose }: { clip: C
   const [origin, length] = within && part ? [part.startUs, part.endUs - part.startUs] : [0, asset?.durationUs ?? 0];
   const detail =
     formatDuration(clip.durationUs) +
-    (asset && asset.kind !== "image" && c.type === "media" ? ` · from ${formatDuration(c.sourceInUs - origin)} of ${formatDuration(length)}` : "");
+    (asset && asset.kind !== "image" && c.type === "media"
+      ? ` · ${freeze ? "freeze frame at" : "from"} ${formatDuration(c.sourceInUs - origin)} of ${formatDuration(length)}`
+      : "");
 
   return (
     <>

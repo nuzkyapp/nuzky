@@ -226,7 +226,7 @@ export function useTimelineGestures({
       const mode: Mode = fade === "in" ? "fadeIn" : fade === "out" ? "fadeOut" : x <= EDGE ? "trimL" : x >= rect.width - EDGE ? "trimR" : "move";
       const asset = clipAsset(project, clip);
       const media = clip.content.type === "media" ? clip.content : null;
-      const sourceInUs = media && asset?.kind !== "image" ? media.sourceInUs : null;
+      const sourceInUs = media && asset?.kind !== "image" && media.speed !== 0 ? media.sourceInUs : null;
       // The right edge stops where the source ends, at this clip's speed (floored like the engine).
       const maxDurUs = sourceInUs !== null && asset && media ? Math.floor((asset.durationUs - sourceInUs) / media.speed) : null;
       const selection = useEditor.getState().selection;

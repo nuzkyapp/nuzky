@@ -2129,6 +2129,40 @@ fn correct_words_fixes_the_transcript_and_captions_over_stdio() {
     );
 }
 
+/// A freeze frame an agent puts between two words holds the picture silently: no word or caption lands on it, the
+/// words after it move on with their picture, and it refuses a speed that would make it play.
+#[test]
+fn an_agent_freezes_a_frame_and_no_word_lands_on_it_over_stdio() {
+    let mut c = Client::start(true, None, Some(None));
+    let run = c.call("begin_run", json!({"label":"hold the reaction"}));
+    place_transcribed_take(&mut c, &["Mikrofon", "vejte", "co", "nejblíž."], &run["run_id"]);
+    let take = c.call("get_state", json!({}))["tracks"][0]["clips"][0]["id"].clone();
+    let freeze = json!([{"type":"freezeFrame","clipId":take,"atUs":1_600_000,"durationUs":2_000_000}]);
+    let done = c.call("apply_edits", json!({"run_id":run["run_id"],"request_id":"freeze","edits":freeze}));
+    let still = done["clips"].as_array().unwrap().iter().find(|c| c["content"]["speed"] == 0.0).unwrap().clone();
+    assert_eq!((&still["startUs"], &still["durationUs"]), (&json!(1_600_000), &json!(2_000_000)), "{done}");
+    assert_eq!((&still["content"]["sourceInUs"], &still["content"]["volume"]), (&json!(1_600_000), &json!(0.0)));
+    let words = c.call("get_transcript", json!({}))["words"].clone();
+    let starts: Vec<_> = words.as_array().unwrap().iter().map(|w| w["start_us"].as_i64().unwrap()).collect();
+    assert_eq!(starts, [200_000, 1_000_000, 3_800_000, 4_600_000], "{words}");
+    c.call("build_captions", json!({"run_id":run["run_id"]}));
+    let state = c.call("get_state", json!({}));
+    let captions =
+        state["tracks"].as_array().unwrap().iter().find(|t| t["name"] == "Captions").unwrap()["clips"].clone();
+    let over = |clip: &Value| {
+        let start = clip["startUs"].as_i64().unwrap();
+        start < 3_600_000 && start + clip["durationUs"].as_i64().unwrap() > 1_600_000
+    };
+    assert!(!captions.as_array().unwrap().iter().any(over), "no caption over the freeze: {captions}");
+    let faster = json!([{"type":"updateClip","clipId":still["id"],"speed":2.0}]);
+    let refused = c.error("apply_edits", json!({"run_id":run["run_id"],"request_id":"faster","edits":faster}));
+    assert!(refused.contains("trim it"), "{refused}");
+    c.call("end_run", json!({"run_id":run["run_id"],"action":"keep"}));
+    c.finish();
+    let disk: Project = serde_json::from_slice(&std::fs::read(c.dir.join("project.nuzky")).unwrap()).unwrap();
+    assert_eq!(disk.tracks[0].clips.iter().filter(|clip| clip.is_freeze()).count(), 1);
+}
+
 /// An agent off by one word once overwrote "něco" instead of "natchne" with a current
 /// transcript_key. `expected` names the word the agent means, so a shifted index changes nothing.
 #[test]

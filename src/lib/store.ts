@@ -813,6 +813,47 @@ export async function splitAtPlayhead() {
   );
 }
 
+/** A video clip at speed 0: the frame at its source in, held for the whole clip, silent. */
+export const isFreeze = (clip: Clip) => clip.content.type === "media" && clip.content.speed === 0;
+
+/** The video clip whose frame Freeze holds: the topmost selected clip under the playhead, else the main-track one. */
+function freezeTarget(project: Project, selection: string[], timeUs: number): Clip | null {
+  const under = (c: Clip) => timeUs >= c.startUs && timeUs < c.startUs + c.durationUs;
+  const videoTracks = project.tracks.filter((t) => t.kind === "video");
+  const selected = videoTracks.flatMap((t) => t.clips.filter((c) => selection.includes(c.id) && under(c))).at(-1);
+  return selected ?? mainClips(project).find(under) ?? null;
+}
+
+/** Why Freeze has no frame of `clip` (by default the one under the playhead) to hold, as what to do next; null when it has one. */
+export function freezeBlocker(project: Project, selection: string[], timeUs: number, clip = freezeTarget(project, selection, timeUs)): string | null {
+  if (!clip || clip.content.type !== "media" || findClip(project, clip.id)?.track.kind !== "video") return "move the playhead over a video clip to freeze its frame";
+  const { assetId } = clip.content;
+  if (isFreeze(clip)) return "this clip is already a freeze frame";
+  if (project.assets.find((a) => a.id === assetId)?.kind !== "video") return "an image is already still; move the playhead over a video clip";
+  if (timeUs < clip.startUs || timeUs >= clip.startUs + clip.durationUs) return "move the playhead over this clip to freeze its frame";
+  return null;
+}
+
+/** Holds the frame under the playhead for 3 s between the halves of its clip, `clip` or the one Freeze takes, as one undo step. */
+export async function freezeAtPlayhead(clip?: Clip) {
+  const { snap, selection, timeUs, edit, toast } = useEditor.getState();
+  if (!snap) return;
+  const at = Math.round(timeUs);
+  const target = clip ?? freezeTarget(snap.project, selection, at);
+  const blocker = freezeBlocker(snap.project, selection, at, target);
+  if (blocker) {
+    toast({ kind: "info", text: `${sentence(blocker)}.` });
+    return;
+  }
+  const id = target?.id;
+  // An earlier queued edit may have removed or moved the clip; then nothing freezes rather than another frame.
+  await edit((project) => {
+    const found = id ? findClip(project, id) : null;
+    const still = found && at >= found.clip.startUs && at < found.clip.startUs + found.clip.durationUs;
+    return still && id ? [{ type: "freezeFrame", clipId: id, atUs: at, durationUs: null }] : [];
+  });
+}
+
 export async function duplicateSelection() {
   const { selection, edit } = useEditor.getState();
   if (selection.length === 0) return;
@@ -978,6 +1019,7 @@ export function detachBlocker(project: Project, clip: Clip): string | null {
   if (c.type !== "media") return "Text clips have no sound";
   const asset = project.assets.find((a) => a.id === c.assetId);
   if (!asset || asset.kind !== "video" || findClip(project, clip.id)?.track.kind === "audio") return "Only video clips have sound to detach";
+  if (isFreeze(clip)) return "A freeze frame has no sound";
   if (!asset.hasAudio) return "This video has no sound";
   if (c.volume <= 0) return "Sound is already detached or muted";
   return null;

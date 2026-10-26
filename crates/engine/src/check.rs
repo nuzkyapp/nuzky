@@ -520,6 +520,9 @@ fn frozen_at(project: &Project, t: i64) -> Why {
     if videos.is_empty() {
         return Why::Intended("image");
     }
+    if shown.iter().filter(|l| l.asset.kind == AssetKind::Video).all(|l| l.clip.is_freeze()) {
+        return Why::Intended("freeze_frame");
+    }
     // A full-frame picture may hide the video under it, or only frame it if it is partly transparent.
     if shown.last().is_some_and(|top| top.asset.kind != AssetKind::Video && top.covers) {
         return Why::Shows("image_over_video");

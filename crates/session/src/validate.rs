@@ -427,8 +427,14 @@ fn validate_clip(project: &Project, clip: &Clip, kind: TrackKind) -> Result<()> 
                 kind != TrackKind::Text && (kind != TrackKind::Video || asset.kind != AssetKind::Audio),
                 "INVALID_PROJECT: media on incompatible track"
             );
+            // A freeze frame holds a frame its video has, silent.
+            let freeze = clip.is_freeze()
+                && kind == TrackKind::Video
+                && asset.kind == AssetKind::Video
+                && *source_in_us < asset.duration_us
+                && *volume == 0.0;
             ensure!(
-                speed.is_finite() && (0.1..=10.0).contains(speed) && volume.is_finite() && *volume >= 0.0,
+                speed.is_finite() && (freeze || (0.1..=10.0).contains(speed)) && volume.is_finite() && *volume >= 0.0,
                 "INVALID_PROJECT: clip {} speed/volume",
                 clip.id
             );

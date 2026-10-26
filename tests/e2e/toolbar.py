@@ -29,8 +29,8 @@ def toolbar(r):
     r.focus_clip(clip)
     time.sleep(1.5)
     labels = [label for label, _ in r.s.run(BUTTONS)]
-    r.check('the toolbar reads Undo, Nothing to redo, Split, Delete left, Delete right, Delete, Duplicate, Detach audio, Rotate, Snapping',
-            [l.split(' (')[0].split(':')[0] for l in labels] == ['Undo', 'Nothing to redo', 'Split at playhead', 'Delete left of playhead',
+    r.check('the toolbar reads Undo, Nothing to redo, Split, Freeze frame, Delete left, Delete right, Delete, Duplicate, Detach audio, Rotate, Snapping',
+            [l.split(' (')[0].split(':')[0] for l in labels] == ['Undo', 'Nothing to redo', 'Split at playhead', 'Freeze frame', 'Delete left of playhead',
              'Delete right of playhead', 'Delete selection', 'Duplicate', 'Detach audio', 'Rotate 90°', 'Snapping on'], labels)
     r.check('with nothing to redo, Redo says so', labels[1] == 'Nothing to redo', labels[1])
     r.check('the top bar has no Undo or Redo of its own', not r.s.run(HEADER_UNDO))
