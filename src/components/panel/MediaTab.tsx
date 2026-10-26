@@ -125,7 +125,7 @@ function MediaItem({ asset }: { asset: Asset }) {
             { label: "Add at playhead", icon: <Plus size={15} />, run: () => addAtPlayhead(asset.id), disabled: lock },
             ...(visual
               ? [
-                  { label: "Over the video", icon: <Layers2 size={15} />, run: () => addOverlay(asset.id), disabled: lock },
+                  { label: "Overlay", icon: <Layers2 size={15} />, run: () => addOverlay(asset.id), disabled: lock },
                   { label: "Picture in picture", icon: <PictureInPicture2 size={15} />, run: () => addPictureInPicture(asset.id), disabled: lock },
                 ]
               : []),

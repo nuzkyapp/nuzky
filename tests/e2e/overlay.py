@@ -93,7 +93,7 @@ def overlay(r):
     items = lambda: r.s.run("const m = document.querySelector('[role=menu][aria-label=\"red.png\"]');"
                             "return m && [...m.querySelectorAll('[role=menuitem]')].map((i) => i.textContent)")
     shown = wait(items, 5)
-    r.check('Shift+F10 opens the tile\'s menu', shown == ['Add at playhead', 'Over the video', 'Picture in picture', 'Remove'], shown)
+    r.check('Shift+F10 opens the tile\'s menu', shown == ['Add at playhead', 'Overlay', 'Picture in picture', 'Remove'], shown)
     time.sleep(0.3)
     r.shot('menu')
     for key in ('ArrowDown', 'ArrowDown', 'Enter'):
