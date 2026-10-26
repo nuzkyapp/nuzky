@@ -895,7 +895,12 @@ impl Defaults {
         })
     }
 
+    // An unreadable EDIT.md is reported once the rows every edit relies on are read; these optional rows stay quiet,
+    // so a pause the agent gives itself still warns about nothing.
     pub fn keep_before_word_us(&mut self) -> Option<i64> {
+        if self.unreadable.is_some() {
+            return None;
+        }
         self.take(
             "edit_transcript keep_before_word_us",
             "keep_before_word_us",
@@ -905,6 +910,9 @@ impl Defaults {
     }
 
     pub fn keep_after_word_us(&mut self) -> Option<i64> {
+        if self.unreadable.is_some() {
+            return None;
+        }
         self.take("edit_transcript keep_after_word_us", "keep_after_word_us", "a whole number from 0 to 1000000", |v| {
             v.parse().ok().filter(|us| (0..=1_000_000).contains(us))
         })
