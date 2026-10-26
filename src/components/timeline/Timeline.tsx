@@ -29,6 +29,7 @@ import type { Clip, EditCmd, Project, Track } from "../../lib/types";
 import { candidateReason, thumbnailOf, useCandidates, useCover } from "../../lib/cover";
 import { describePeek } from "../../lib/peek";
 import { usePlugins } from "../../lib/plugins";
+import { usePreview } from "../../lib/preview";
 import { addDropResolver, type DropMedia } from "../panel/assets";
 import { IconButton, RangeInput } from "../ui";
 import { ClipMenu, type MenuAt } from "./ClipMenu";
@@ -325,7 +326,8 @@ export function Timeline({ height }: { height: number }) {
   const dropAt = useCallback(
     (x: number, y: number) => {
       const el = scroller.current;
-      if (!el || !project) return null;
+      // The full screen preview covers the timeline, which still has its place under it.
+      if (!el || !project || usePreview.getState().full) return null;
       const r = el.getBoundingClientRect();
       if (x < r.left || x > r.right || y < r.top || y > r.bottom) return null;
       let trackId: string | null = null;

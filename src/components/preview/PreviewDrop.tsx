@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { useEditor } from "../../lib/store";
+import { aiLocked, useAiLocked, useEditor } from "../../lib/store";
 import type { Canvas } from "../../lib/types";
 import { addDropResolver, type DropTarget } from "../panel/assets";
 
@@ -28,13 +28,14 @@ function zoneAt(el: HTMLElement | null, canvas: Canvas, x: number, y: number, w:
   return px >= pip.left && px <= pip.left + pip.width && py >= pip.top && py <= pip.top + pip.height ? "pictureInPicture" : "overlay";
 }
 
-/** What is dragged, when it has a picture: its size, or 16:9 for a file not imported yet. */
+/** What is dragged, when it has a picture: its size, or for a file not imported yet the frame's, the likeliest guess. */
 function draggedPicture(s: ReturnType<typeof useEditor.getState>) {
   if (s.assetDrag) {
     const asset = s.snap?.project.assets.find((a) => a.id === s.assetDrag!.assetId);
     return asset && asset.kind !== "audio" && asset.width > 0 ? { w: asset.width, h: asset.height } : null;
   }
-  return s.fileDrag && s.fileDrag.kind !== "audio" ? { w: 16, h: 9 } : null;
+  const canvas = s.snap?.project.canvas;
+  return s.fileDrag && s.fileDrag.kind !== "audio" && canvas ? { w: canvas.width, h: canvas.height } : null;
 }
 
 /**
@@ -43,16 +44,19 @@ function draggedPicture(s: ReturnType<typeof useEditor.getState>) {
  */
 export function PreviewDrop({ canvas }: { canvas: Canvas }) {
   const ref = useRef<HTMLDivElement>(null);
+  // Under the AI lock nothing can be dropped, so nothing is offered; the lane on the timeline says why.
+  const locked = useAiLocked();
   const picture = useEditor(useShallow(draggedPicture));
   const at = useEditor(useShallow((s) => (s.assetDrag ?? s.fileDrag) && { x: (s.assetDrag ?? s.fileDrag)!.x, y: (s.assetDrag ?? s.fileDrag)!.y }));
 
   useEffect(
     () =>
       addDropResolver((x, y, media) => {
-        if (media?.kind === "audio") return null;
         const { snap, timeUs } = useEditor.getState();
-        const shown = media?.width && media.height ? { w: media.width, h: media.height } : { w: 16, h: 9 };
-        const over = snap && zoneAt(ref.current, snap.project.canvas, x, y, shown.w, shown.h);
+        if (media?.kind === "audio" || !snap || aiLocked()) return null;
+        const { canvas } = snap.project;
+        const shown = media?.width && media.height ? { w: media.width, h: media.height } : { w: canvas.width, h: canvas.height };
+        const over = zoneAt(ref.current, canvas, x, y, shown.w, shown.h);
         return over ? { trackId: null, startUs: Math.round(timeUs), replaceId: null, over } : null;
       }),
     [],
@@ -64,14 +68,14 @@ export function PreviewDrop({ canvas }: { canvas: Canvas }) {
   const label = "rounded-md bg-black/70 px-2 py-1 text-[12px] leading-tight font-semibold text-white";
   return (
     <div ref={ref} className="pointer-events-none absolute inset-0 z-30" data-testid="preview-drop">
-      {picture && pip && (
+      {picture && pip && !locked && (
         <>
           <div
             data-zone="overlay"
             data-hot={zone === "overlay" || undefined}
             className={`absolute inset-1.5 flex items-center justify-center rounded-md border-2 ${zone === "overlay" ? "border-accent bg-accent/15" : "border-dashed border-white/50"}`}
           >
-            <span className={label}>Over the video</span>
+            <span className={label}>Overlay</span>
           </div>
           <div
             data-zone="pictureInPicture"

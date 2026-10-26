@@ -303,4 +303,21 @@ def overlay_preview(r):
                 found and found[0][1]['startUs'] == AT_US and abs(shape.get('radius', 0) - 0.15) < 1e-6, found)
         r.key('z', ctrlKey=True)
         wait(lambda: not placed(r, red), 5)
+
+    # Under the AI lock the preview offers nothing and takes nothing.
+    bridge = Bridge(r, r.saved_project())
+    try:
+        run = bridge.call('begin_run', {'label': 'Edit'})['run_id']
+        r.check('the app shows the AI lock', wait(lambda: r.state()['aiRun'], 5))
+        rect = preview_rect(r)
+        x, y = rect['left'] + rect['width'] / 2, rect['top'] + rect['height'] * 0.6
+        r.s.run(DRAG_TILE, 'red.png', x, y)
+        time.sleep(0.5)
+        r.check('under the AI lock a dragged picture shows no places on the preview', not r.s.run(ZONE, 'overlay'))
+        r.s.run(RELEASE, x, y)
+        time.sleep(1)
+        r.check('and dropping it there adds nothing', not placed(r, red))
+        bridge.call('end_run', {'run_id': run, 'action': 'keep'})
+    finally:
+        bridge.close()
     r.check('no error toast', not r.errors(), r.errors())
