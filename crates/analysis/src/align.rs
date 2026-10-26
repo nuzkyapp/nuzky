@@ -94,6 +94,17 @@ impl Aligner {
         cancelled: &dyn Fn() -> bool,
         progress: &mut dyn FnMut(f32),
     ) -> Result<Vec<bool>> {
+        self.align_heard(words, audio, cancelled, progress, None)
+    }
+
+    pub(crate) fn align_heard(
+        &self,
+        words: &mut [Word],
+        audio: &[f32],
+        cancelled: &dyn Fn() -> bool,
+        progress: &mut dyn FnMut(f32),
+        mut heard: Option<&mut Vec<Word>>,
+    ) -> Result<Vec<bool>> {
         let mut placed = vec![false; words.len()];
         let duration = sample_us(audio.len());
         let spans = spans(words);
@@ -118,6 +129,9 @@ impl Aligner {
                 continue;
             }
             let emissions = self.emissions(&audio[first..last], cancelled)?;
+            if let Some(heard) = heard.as_deref_mut() {
+                heard.extend(self.greedy(&emissions, sample_us(first)));
+            }
             let local = &mut placed[span.clone()];
             let words = &mut words[span];
             for (i, time) in self.place(words, &emissions, sample_us(first)).into_iter().enumerate() {
@@ -132,6 +146,33 @@ impl Aligner {
         }
         keep_order(words, duration);
         Ok(placed)
+    }
+
+    fn greedy(&self, emissions: &Emissions, origin: i64) -> Vec<Word> {
+        let mut words = Vec::new();
+        let mut previous = self.alphabet.blank;
+        let mut word = Word { start_us: origin, end_us: origin, text: String::new(), probability: 1.0 };
+        for frame in 0..emissions.frames {
+            let row = emissions.row(frame);
+            let best = (0..row.len()).max_by(|&a, &b| row[a].total_cmp(&row[b])).unwrap();
+            if best != self.alphabet.blank && best != self.alphabet.separator {
+                if word.text.is_empty() {
+                    word.start_us = origin + frame as i64 * FRAME_US;
+                }
+                if best != previous {
+                    word.text.push_str(&self.model.tokens[best]);
+                }
+                word.end_us = origin + (frame as i64 + 1) * FRAME_US;
+            } else if best == self.alphabet.separator && !word.text.is_empty() {
+                words.push(word.clone());
+                word.text.clear();
+            }
+            previous = best;
+        }
+        if !word.text.is_empty() {
+            words.push(word);
+        }
+        words
     }
 
     /// Log-probabilities, frames × tokens, of `audio`, computed in windows with context so a long

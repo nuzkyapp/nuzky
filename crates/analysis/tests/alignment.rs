@@ -3,7 +3,9 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use nuzky_analysis::{Aligner, AudioSource, Word, align_model, align_to_sound, transcribe_words_cancellable};
+use nuzky_analysis::{
+    Aligner, AudioSource, Word, align_model, align_to_sound, align_transcript, transcribe_with_regions,
+};
 use nuzky_engine::media::probe;
 
 /// How far past the hand-checked range a boundary may land. The ranges already hold the whole
@@ -24,7 +26,7 @@ fn connected_czech_speech_is_timed_to_its_word_boundaries() -> Result<()> {
     let models = root.join("tmp-test/xdg/data/nuzky/models");
     let asset = probe(&root.join("tmp-test/krysar-cs.wav"), "krysar".into())?;
     let cache = cache_dir(&root)?;
-    let recognised = transcribe_words_cancellable(
+    let (recognised, regions) = transcribe_with_regions(
         AudioSource::Asset { asset: &asset, cache: &cache },
         &models.join("ggml-large-v3-turbo-q5_0.bin"),
         &models.join(nuzky_analysis::VAD_MODEL),
@@ -44,6 +46,19 @@ fn connected_czech_speech_is_timed_to_its_word_boundaries() -> Result<()> {
     assert!(align_to_sound(&mut words, &asset, &cache, Some(&aligner), || false, |_| {})?, "no word was measured");
     let after = reference.score(&words);
     eprintln!("word timing model: {after}");
+    let mut checked = recognised.clone();
+    align_transcript(
+        &mut checked,
+        &regions,
+        &asset,
+        &cache,
+        &aligner,
+        &models.join("ggml-large-v3-turbo-q5_0.bin"),
+        &|| false,
+        &mut |_| {},
+    )?;
+    assert_eq!(checked.words, words, "ordinary speech changed during restart detection");
+    assert_eq!(checked.segments, recognised.segments);
 
     assert_eq!(
         words.iter().map(|w| &w.text).collect::<Vec<_>>(),

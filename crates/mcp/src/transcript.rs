@@ -129,7 +129,7 @@ fn recognise_with(
         stage(if waiting { Stage::Waiting } else { Stage::Recognising(0.0) })
     })?;
     let fingerprint = store.fingerprint(asset)?;
-    let mut result = nuzky_analysis::transcribe_words_cancellable(
+    let (mut result, regions) = nuzky_analysis::transcribe_with_regions(
         AudioSource::Asset { asset, cache },
         model_path,
         vad,
@@ -140,10 +140,16 @@ fn recognise_with(
     check_cancel(cancel)?;
     let aligner = aligner(&result.language, &mut stage)?;
     stage(Stage::Aligning(0.0));
-    // Cuts are planned from these times, so they follow the sound, not Whisper's estimates.
-    let measured = measure(&mut result.words, asset, cache, aligner.as_ref().map(|(a, _)| a), cancel, &mut |part| {
-        stage(Stage::Aligning(part))
-    })?;
+    let measured = measure(
+        &mut result,
+        &regions,
+        asset,
+        cache,
+        aligner.as_ref().map(|(a, _)| a),
+        model_path,
+        cancel,
+        &mut |part| stage(Stage::Aligning(part)),
+    )?;
     // A stop asked for while the words were being refined still keeps nothing.
     check_cancel(cancel)?;
     let record = Record {
@@ -191,26 +197,38 @@ fn aligner(
     }
 }
 
-/// Measures `words` in the sound, with `aligner` when there is one; true when it measured any.
+/// Measures a fresh transcript in the sound, with `aligner` when there is one; true when it measured any word.
 /// A failing model leaves Whisper's estimates aligned to pauses; only a stop ends recognition.
+#[allow(clippy::too_many_arguments)]
 fn measure(
-    words: &mut [Word],
+    transcript: &mut nuzky_analysis::Transcript,
+    regions: &[(usize, usize)],
     asset: &Asset,
     cache: &Path,
     aligner: Option<&nuzky_analysis::Aligner>,
+    model: &Path,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(f32),
 ) -> Result<bool> {
     let cancelled = || cancel.load(Ordering::Relaxed);
-    if aligner.is_some() {
-        let mut measured = words.to_vec();
+    if let Some(aligner) = aligner {
+        let mut measured = transcript.clone();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            nuzky_analysis::align_to_sound(&mut measured, asset, cache, aligner, cancelled, &mut *progress)
+            nuzky_analysis::align_transcript(
+                &mut measured,
+                regions,
+                asset,
+                cache,
+                aligner,
+                model,
+                &cancelled,
+                &mut *progress,
+            )
         }))
         .unwrap_or_else(|_| Err(anyhow::anyhow!("the word timing model crashed")));
         match result {
             Ok(any) => {
-                words.clone_from_slice(&measured);
+                *transcript = measured;
                 return Ok(any);
             }
             Err(error) => {
@@ -219,7 +237,7 @@ fn measure(
             }
         }
     }
-    nuzky_analysis::align_to_sound(words, asset, cache, None, cancelled, progress)?;
+    nuzky_analysis::align_to_sound(&mut transcript.words, asset, cache, None, cancelled, progress)?;
     Ok(false)
 }
 

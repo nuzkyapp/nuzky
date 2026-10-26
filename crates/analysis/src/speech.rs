@@ -112,8 +112,20 @@ pub fn transcribe_words_cancellable(
     vad_model_path: &Path,
     language: &str,
     cancelled: impl Fn() -> bool,
-    mut progress: impl FnMut(f32),
+    progress: impl FnMut(f32),
 ) -> Result<Transcript> {
+    transcribe_with_regions(source, model_path, vad_model_path, language, cancelled, progress).map(|(t, _)| t)
+}
+
+/// Recognition plus its original VAD regions, retained only while measuring a new transcript.
+pub fn transcribe_with_regions(
+    source: AudioSource<'_>,
+    model_path: &Path,
+    vad_model_path: &Path,
+    language: &str,
+    cancelled: impl Fn() -> bool,
+    mut progress: impl FnMut(f32),
+) -> Result<(Transcript, Vec<(usize, usize)>)> {
     let check = || {
         ensure!(!cancelled(), "CANCELLED: transcription cancelled");
         Ok::<_, anyhow::Error>(())
@@ -136,29 +148,16 @@ pub fn transcribe_words_cancellable(
     let mut transcript = Transcript { language: language.into(), words: Vec::new(), segments: Vec::new() };
     if audio.is_empty() {
         progress(1.0);
-        return Ok(transcript);
+        return Ok((transcript, Vec::new()));
     }
     check()?;
     let regions = voice_regions(audio, vad_model_path)?;
     check()?;
     if regions.is_empty() {
         progress(1.0);
-        return Ok(transcript);
+        return Ok((transcript, regions));
     }
-    let mut context_params = WhisperContextParameters::default();
-    let gpu = use_gpu();
-    context_params.use_gpu(gpu);
-    let context = match WhisperContext::new_with_params(model_path, context_params) {
-        Ok(context) => context,
-        Err(error) if gpu => {
-            eprintln!("GPU speech context failed ({error}); retrying on CPU");
-            let mut cpu_params = WhisperContextParameters::default();
-            cpu_params.use_gpu(false);
-            WhisperContext::new_with_params(model_path, cpu_params)
-                .context("Loading speech model on CPU after GPU failure")?
-        }
-        Err(error) => return Err(error).context("Loading speech model"),
-    };
+    let context = speech_context(model_path)?;
     if transcript.language == "auto" {
         // Detect once on up to 30 s of speech: the first region alone may be a short
         // greeting, and its guess would then decide every later region.
@@ -185,7 +184,7 @@ pub fn transcribe_words_cancellable(
     // Independent decoding prevents tokens from drifting across compacted pauses.
     let total: usize = regions.iter().map(|(start, end)| end - start).sum();
     let mut done = 0;
-    for region in regions {
+    for &region in &regions {
         check()?;
         let (compact, mapping) = compact_audio(audio, &[region]);
         let mut params = recognition_params(&transcript.language);
@@ -206,6 +205,50 @@ pub fn transcribe_words_cancellable(
         append_segments(&state, context.token_eot(), &mapping, &mut transcript, &cancelled)?;
         done += length;
         progress(done as f32 / total as f32);
+    }
+    Ok((transcript, regions))
+}
+
+pub(crate) fn speech_context(model_path: &Path) -> Result<WhisperContext> {
+    let mut params = WhisperContextParameters::default();
+    let gpu = use_gpu();
+    params.use_gpu(gpu);
+    match WhisperContext::new_with_params(model_path, params) {
+        Ok(context) => Ok(context),
+        Err(error) if gpu => {
+            eprintln!("GPU speech context failed ({error}); retrying on CPU");
+            let mut params = WhisperContextParameters::default();
+            params.use_gpu(false);
+            WhisperContext::new_with_params(model_path, params).context("Loading speech model on CPU after GPU failure")
+        }
+        Err(error) => Err(error).context("Loading speech model"),
+    }
+}
+
+pub(crate) fn recognise_again(
+    context: &WhisperContext,
+    audio: &[f32],
+    pieces: &[(usize, usize)],
+    language: &str,
+    cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(f32),
+) -> Result<Transcript> {
+    let mut transcript = Transcript { language: language.into(), words: Vec::new(), segments: Vec::new() };
+    let mut state = context.create_state()?;
+    for (i, &piece) in pieces.iter().enumerate() {
+        ensure!(!cancelled(), "CANCELLED: transcription cancelled");
+        let (audio, mapping) = compact_audio(audio, &[piece]);
+        let mut params = recognition_params(language);
+        let mut within =
+            |percent: i32| progress((i as f32 + percent.clamp(0, 100) as f32 / 100.0) / pieces.len() as f32);
+        let mut within: &mut dyn FnMut(i32) = &mut within;
+        // SAFETY: both callbacks outlive this synchronous full call.
+        unsafe {
+            stop_on(&mut params, &cancelled);
+            report_on(&mut params, &mut within);
+        }
+        state.full(params, &audio).map_err(|error| stopped(error, &cancelled, "Recognising speech restart"))?;
+        append_segments(&state, context.token_eot(), &mapping, &mut transcript, &cancelled)?;
     }
     Ok(transcript)
 }
