@@ -39,7 +39,7 @@ jobs:
       - name: Build profiles
         id: profiles
         shell: bash
-        run: echo "hash=$(grep -v '^version = ' Cargo.toml | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+        run: echo "hash=$(grep -v '^version = ' Cargo.toml | git hash-object --stdin)" >> "$GITHUB_OUTPUT"
       # Only main saves, so pull requests and tags, which can read main's caches, never push them out of the
       # repository's 10 GB.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2

@@ -39,7 +39,7 @@ jobs:
       # version line stays out: with it, the first runs after a new version started from an empty cache.
       - name: Build profiles
         id: profiles
-        run: echo "hash=$(grep -v '^version = ' Cargo.toml | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+        run: echo "hash=$(grep -v '^version = ' Cargo.toml | git hash-object --stdin)" >> "$GITHUB_OUTPUT"
       # Only main saves; pull requests read main's cache and never push it out of the repository's 10 GB.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
