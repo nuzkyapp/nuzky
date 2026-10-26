@@ -16,12 +16,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Windows compiles slowest: its clippy, tests and installers took 16, 30 and 20 minutes one after the other,
-        # so they run on three machines at once (`part`) and a release waits only for the longest.
-        include: >-
-          ${{ fromJSON(github.event_name == 'push' && github.ref == 'refs/heads/main' && '[{"os": "macos-14"}]'
-          || '[{"os": "ubuntu-24.04"}, {"os": "macos-14"}, {"os": "windows-2022", "part": "clippy"},
-          {"os": "windows-2022", "part": "test"}, {"os": "windows-2022", "part": "installers"}]') }}
+        os: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && fromJSON('["macos-14"]') || fromJSON('["ubuntu-24.04", "macos-14", "windows-2022"]') }}
+        # One after the other, clippy, the tests and the installers took 71 minutes on Windows, 33 on macOS and 27 on
+        # Linux. On machines of their own a release waits only for the longest of them.
+        part: [clippy, test, installers]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     env:
@@ -46,7 +44,7 @@ jobs:
       # repository's 10 GB.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          key: ${{ runner.os }}-${{ runner.arch }}-${{ matrix.part || 'all' }}-ffmpeg-v1-${{ steps.profiles.outputs.hash }}
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ matrix.part }}-ffmpeg-v1-${{ steps.profiles.outputs.hash }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -66,26 +64,26 @@ jobs:
       - name: ONNX Runtime
         run: node scripts/fetch-onnxruntime.mjs
       - run: npm run typecheck
-        if: ${{ !matrix.part || matrix.part == 'clippy' }}
+        if: matrix.part == 'clippy'
       - run: cargo fmt --all --check
-        if: ${{ !matrix.part || matrix.part == 'clippy' }}
+        if: matrix.part == 'clippy'
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-        if: ${{ !matrix.part || matrix.part == 'clippy' }}
+        if: matrix.part == 'clippy'
       - run: cargo test --workspace --locked --no-fail-fast
-        if: ${{ runner.os != 'macOS' && (!matrix.part || matrix.part == 'test') }}
+        if: runner.os != 'macOS' && matrix.part == 'test'
       # The engine tests draw frame numbers with drawtext, which only Homebrew's keg-only ffmpeg-full has.
       # Nuzky itself builds against ffmpeg.
       - name: cargo test --workspace --locked --no-fail-fast
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && matrix.part == 'test'
         run: PATH="$(brew --prefix ffmpeg-full)/bin:$PATH" cargo test --workspace --locked --no-fail-fast
       - name: Build installers
-        if: ${{ !matrix.part || matrix.part == 'installers' }}
+        if: matrix.part == 'installers'
         run: node scripts/build-bundles.mjs
       - name: Verify Linux bundle
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.part == 'installers'
         run: bash scripts/verify-linux-bundle.sh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: ${{ !matrix.part || matrix.part == 'installers' }}
+        if: matrix.part == 'installers'
         with:
           name: nuzky-${{ matrix.os }}
           path: |
