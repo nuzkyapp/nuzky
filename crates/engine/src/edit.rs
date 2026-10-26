@@ -1357,21 +1357,28 @@ impl Project {
                 let (ti, ci) = self.find_clip(&clip_id).ok_or_else(|| anyhow!("Unknown clip"))?;
                 let limit = self.source_limit(&self.tracks[ti].clips[ci]);
                 let freeze = self.tracks[ti].clips[ci].is_freeze();
-                let speed = match &self.tracks[ti].clips[ci].content {
-                    ClipContent::Media { speed, .. } => *speed as f64,
-                    ClipContent::Text { .. } => 1.0,
+                let (speed, old_src) = match &self.tracks[ti].clips[ci].content {
+                    ClipContent::Media { speed, source_in_us, .. } => (*speed as f64, *source_in_us),
+                    ClipContent::Text { .. } => (1.0, 0),
                 };
                 let clip = &mut self.tracks[ti].clips[ci];
                 let (old_start, old_end) = (clip.start_us, clip.end_us());
                 let mut start = start_us.max(0);
                 let mut duration = duration_us.max(min);
+                // A later source start with the source end kept trims the head even when start_us stays, as an
+                // agent sends it for a packed main track; otherwise the picture would slip under the captions.
+                let head_trim = source_in_us.is_some_and(|s| {
+                    s != old_src
+                        && (s - old_src - ((clip.duration_us - duration_us) as f64 * speed).round() as i64).abs() <= 1
+                });
+                let moves_left = start_us != old_start || head_trim;
                 // An image or a freeze frame has no source time to move, so its left edge moves without one.
-                let left_edge = start_us != old_start && (source_in_us.is_some() || limit.is_none());
+                let left_edge = moves_left && (source_in_us.is_some() || limit.is_none());
                 if let ClipContent::Media { source_in_us: src, .. } = &mut clip.content
                     && speed > 0.0
                 {
                     let mut new_src = source_in_us.unwrap_or(*src).max(0);
-                    if source_in_us.is_some() && start_us != old_start {
+                    if source_in_us.is_some() && moves_left {
                         // Trimming the left edge: keep the right edge in place.
                         let shift = ((new_src - *src) as f64 / speed).round() as i64;
                         start = (old_start + shift).max(0);
@@ -3388,11 +3395,12 @@ mod tests {
             (trim(&a, 0, 5_000_000, None), vec![1_000_000, 6_000_000], "right edge out"),
             (trim(&b, 6_000_000, 2_000_000, Some(1_000_000)), vec![1_000_000, 5_000_000], "left edge in"),
             (trim(&b, 4_000_000, 3_000_000, Some(0)), vec![1_000_000, 6_000_000], "left edge out"),
+            (trim(&b, 5_000_000, 2_000_000, Some(1_000_000)), vec![1_000_000, 5_000_000], "left edge in, start kept"),
         ] {
             p.apply(cmd).unwrap();
             assert_eq!(starts(&p), (texts, music), "{step}");
         }
-        assert_eq!(main_layout(&p), vec![(0, 5000), (5000, 3000)]);
+        assert_eq!(main_layout(&p), vec![(0, 5000), (5000, 2000)]);
     }
 
     #[test]
