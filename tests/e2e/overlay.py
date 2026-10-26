@@ -304,6 +304,20 @@ def overlay_preview(r):
         r.key('z', ctrlKey=True)
         wait(lambda: not placed(r, red), 5)
 
+    # The corner box's label is part of it: a drop on the words makes a picture in picture too.
+    LABEL = "const b = document.querySelector('[data-zone=pictureInPicture]').firstElementChild.getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]"
+    rect = preview_rect(r)
+    r.s.run(DRAG_TILE, 'red.png', rect['left'] + 4, rect['top'] + rect['height'] / 2)
+    lx, ly = wait(lambda: r.s.run(ZONE, 'pictureInPicture') and r.s.run(LABEL), 5)
+    r.s.run("window.dispatchEvent(new PointerEvent('pointermove', {bubbles: true, button: 0, pointerId: 1, clientX: arguments[0], clientY: arguments[1]}))", lx, ly)
+    r.check('over the corner box\'s label, the box lights up', wait(lambda: (z := r.s.run(ZONE, 'pictureInPicture')) and z[2], 5))
+    r.s.run(RELEASE, lx, ly)
+    found = wait(lambda: placed(r, red) or None, 10)
+    shape = found and found[0][1]['content'].get('shape') or {}
+    r.check('dropped on the label, it becomes a picture in picture', found and abs(shape.get('radius', 0) - 0.15) < 1e-6, found)
+    r.key('z', ctrlKey=True)
+    wait(lambda: not placed(r, red), 5)
+
     # Under the AI lock the preview offers nothing and takes nothing.
     bridge = Bridge(r, r.saved_project())
     try:

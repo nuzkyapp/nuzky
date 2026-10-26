@@ -18,10 +18,14 @@ function pipBox(canvas: Canvas, w: number, h: number) {
   return { left: right - bw, top, width: bw, height: bh };
 }
 
-/** Which part of the frame shown in `el` a point is over, by geometry, so it still answers once the drag has ended. */
-function zoneAt(el: HTMLElement | null, canvas: Canvas, x: number, y: number, w: number, h: number): DropTarget["over"] | null {
+/**
+ * Which part of the frame shown in `el` a point is over, by geometry, so it still answers once the drag has ended.
+ * `label` is where the corner box's label was drawn last, which belongs to the box.
+ */
+function zoneAt(el: HTMLElement | null, label: DOMRect | null, canvas: Canvas, x: number, y: number, w: number, h: number): DropTarget["over"] | null {
   const r = el?.getBoundingClientRect();
   if (!r || x < r.left || x > r.right || y < r.top || y > r.bottom) return null;
+  if (label && x >= label.left && x <= label.right && y >= label.top && y <= label.bottom) return "pictureInPicture";
   const k = r.width / canvas.width;
   const pip = pipBox(canvas, w, h);
   const [px, py] = [(x - r.left) / k, (y - r.top) / k];
@@ -44,6 +48,7 @@ function draggedPicture(s: ReturnType<typeof useEditor.getState>) {
  */
 export function PreviewDrop({ canvas }: { canvas: Canvas }) {
   const ref = useRef<HTMLDivElement>(null);
+  const label = useRef<DOMRect | null>(null);
   // Under the AI lock nothing can be dropped, so nothing is offered; the lane on the timeline says why.
   const locked = useAiLocked();
   const picture = useEditor(useShallow(draggedPicture));
@@ -56,16 +61,16 @@ export function PreviewDrop({ canvas }: { canvas: Canvas }) {
         if (media?.kind === "audio" || !snap || aiLocked()) return null;
         const { canvas } = snap.project;
         const shown = media?.width && media.height ? { w: media.width, h: media.height } : { w: canvas.width, h: canvas.height };
-        const over = zoneAt(ref.current, canvas, x, y, shown.w, shown.h);
+        const over = zoneAt(ref.current, label.current, canvas, x, y, shown.w, shown.h);
         return over ? { trackId: null, startUs: Math.round(timeUs), replaceId: null, over } : null;
       }),
     [],
   );
 
-  const zone = picture && at ? zoneAt(ref.current, canvas, at.x, at.y, picture.w, picture.h) : null;
+  const zone = picture && at ? zoneAt(ref.current, label.current, canvas, at.x, at.y, picture.w, picture.h) : null;
   const pip = picture && pipBox(canvas, picture.w, picture.h);
   const pct = (v: number, of: number) => `${(v / of) * 100}%`;
-  const label = "rounded-md bg-black/70 px-2 py-1 text-[12px] leading-tight font-semibold text-white";
+  const chip = "rounded-md bg-black/70 px-2 py-1 text-[12px] leading-tight font-semibold text-white";
   return (
     <div ref={ref} className="pointer-events-none absolute inset-0 z-30" data-testid="preview-drop">
       {picture && pip && !locked && (
@@ -75,7 +80,7 @@ export function PreviewDrop({ canvas }: { canvas: Canvas }) {
             data-hot={zone === "overlay" || undefined}
             className={`absolute inset-1.5 flex items-center justify-center rounded-md border-2 ${zone === "overlay" ? "border-accent bg-accent/15" : "border-dashed border-white/50"}`}
           >
-            <span className={label}>Overlay</span>
+            <span className={chip}>Overlay</span>
           </div>
           <div
             data-zone="pictureInPicture"
@@ -84,7 +89,9 @@ export function PreviewDrop({ canvas }: { canvas: Canvas }) {
             style={{ left: pct(pip.left, canvas.width), top: pct(pip.top, canvas.height), width: pct(pip.width, canvas.width), height: pct(pip.height, canvas.height) }}
           >
             {/* Under the box rather than in it: on a small preview the box is narrower than the words. */}
-            <span className={`absolute top-full right-0 mt-1 whitespace-nowrap ${label}`}>Picture in picture</span>
+            <span ref={(el) => void (el && (label.current = el.getBoundingClientRect()))} className={`absolute top-full right-0 mt-1 whitespace-nowrap ${chip}`}>
+              Picture in picture
+            </span>
           </div>
         </>
       )}
