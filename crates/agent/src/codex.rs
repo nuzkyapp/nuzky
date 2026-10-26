@@ -51,7 +51,8 @@ pub(crate) fn command(req: &TurnRequest) -> Command {
     if req.resume {
         c.arg("resume");
     }
-    // The user's login stays; their config.toml, with its MCP servers, plugins and rules, does not.
+    // The login and panel-selected model stay; config.toml, with its MCP servers, plugins and rules, does not.
+    // Codex still loads global AGENTS.md: neither ignore flag nor project_doc_max_bytes disables it.
     c.args(["--json", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check"]);
     let mut settings: Vec<String> = OFF.iter().map(|s| s.to_string()).collect();
     settings.push(format!("mcp_servers.nuzky.command={}", string(&req.mcp.command.to_string_lossy())));

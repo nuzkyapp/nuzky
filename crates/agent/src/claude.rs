@@ -9,7 +9,7 @@ use std::process::Command;
 /// Settings Nuzky needs; `outputStyle` doubles as a check that Claude applied them at all,
 /// since it silently ignores a settings value it does not accept.
 fn settings() -> Value {
-    json!({"disableAllHooks": true, "outputStyle": "default", "autoMemoryEnabled": false})
+    json!({"disableAllHooks": true, "outputStyle": "default", "autoMemoryEnabled": false, "claudeMdExcludes": ["**"]})
 }
 
 pub(crate) fn command(req: &TurnRequest) -> Command {
@@ -26,7 +26,8 @@ pub(crate) fn command(req: &TurnRequest) -> Command {
         "--verbose",
         "--include-partial-messages",
     ])
-    // The user's login, model and gateway stay; the folder's settings, hooks and MCP servers do not.
+    // User settings keep the login, model and gateway; claudeMdExcludes skips user/project instructions and imports.
+    // The folder's settings, hooks and foreign MCP servers stay out.
     .args(["--setting-sources", "user", "--settings", &settings().to_string()])
     .args(["--strict-mcp-config", "--mcp-config", &mcp.to_string()])
     // No shell, files or page fetching: only Nuzky's tools and Claude's own web search, allowed without asking.
@@ -212,6 +213,28 @@ fn init(v: &Value) -> Option<Step> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_command_keeps_user_settings_without_instruction_files() {
+        let req = TurnRequest {
+            agent: crate::AgentId::Claude,
+            exe: "claude".into(),
+            session: "session".into(),
+            resume: false,
+            model: None,
+            effort: None,
+            prompt: Message::default(),
+            cwd: Default::default(),
+            mcp: crate::turn::McpServer { command: "nuzky".into(), args: vec![], env: vec![] },
+        };
+        let args: Vec<_> = command(&req).get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert!(args.windows(2).any(|a| a == ["--setting-sources", "user"]));
+        assert!(args.windows(2).any(|a| a == ["--append-system-prompt", SYSTEM]));
+        let settings = args.windows(2).find(|a| a[0] == "--settings").unwrap();
+        let settings: Value = serde_json::from_str(&settings[1]).unwrap();
+        assert_eq!(settings["claudeMdExcludes"], json!(["**"]));
+        assert_eq!(settings["autoMemoryEnabled"], false);
+    }
 
     fn events(lines: &[Value]) -> Vec<Result<AgentEvent, (ErrorCode, String)>> {
         let mut p = Parser::default();
