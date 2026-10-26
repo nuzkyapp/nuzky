@@ -43,7 +43,8 @@ jobs:
       # Only main saves; pull requests read main's cache and never push it out of the repository's 10 GB.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          key: checks-ffmpeg-v1-${{ steps.profiles.outputs.hash }}
+          # ci.yml's Linux clippy and tests start from this cache too.
+          shared-key: checks-ffmpeg-v1-${{ steps.profiles.outputs.hash }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install Linux dependencies
         run: bash scripts/setup-ubuntu-deps.sh

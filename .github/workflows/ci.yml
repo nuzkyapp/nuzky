@@ -41,10 +41,12 @@ jobs:
         shell: bash
         run: echo "hash=$(grep -v '^version = ' Cargo.toml | git hash-object --stdin)" >> "$GITHUB_OUTPUT"
       # Only main saves, so pull requests and tags, which can read main's caches, never push them out of the
-      # repository's 10 GB.
+      # repository's 10 GB. Linux builds nothing here on main; its clippy and tests are checks.yml's and start
+      # from its cache, which without that took 28 of a release's 29 minutes.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: ${{ runner.os }}-${{ runner.arch }}-${{ matrix.part }}-ffmpeg-v1-${{ steps.profiles.outputs.hash }}
+          shared-key: ${{ runner.os == 'Linux' && matrix.part != 'installers' && format('checks-ffmpeg-v1-{0}', steps.profiles.outputs.hash) || '' }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
