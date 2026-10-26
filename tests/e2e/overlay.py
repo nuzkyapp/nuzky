@@ -242,3 +242,65 @@ def overlay_lane(r):
             [moved and moved[0][1]['startUs'], shot['startUs']])
     r.check('the title stays on its own track', any(t['kind'] == 'text' and t['clips'] for t in tracks), title)
     r.check('no error toast', not r.errors(), r.errors())
+
+
+ZONE = "const z = document.querySelector(`[data-zone=${arguments[0]}]`); if (!z) return null; const b = z.getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2, !!z.dataset.hot]"
+
+
+@flow('overlay-preview', 'A picture dragged over the preview shows where it can go: dropped on the frame it goes over the '
+      'video at the playhead, dropped on the corner box it becomes a picture in picture there')
+def overlay_preview(r):
+    Image.new('RGB', (1280, 720), (230, 30, 30)).save(r.work / 'red.png')
+    r.import_media(FIXTURES / 'talk.mp4', r.work / 'red.png')
+    r.add_clip('talk.mp4')
+    red = next(a['id'] for a in r.state()['assets'] if a['name'] == 'red.png')
+    main = r.track()
+    r.seek(AT_US)
+    r.s.run('window.__nuzky.store.getState().select([])')
+    rect = preview_rect(r)
+    middle_x, middle_y = rect['left'] + rect['width'] / 2, rect['top'] + rect['height'] * 0.6
+
+    r.s.run(DRAG_TILE, 'red.png', middle_x, middle_y)
+    frame = wait(lambda: r.s.run(ZONE, 'overlay'), 5)
+    corner = r.s.run(ZONE, 'pictureInPicture')
+    r.check('while a picture is dragged, the preview offers the frame and the corner box', frame and corner, [frame, corner])
+    r.check('the frame under the pointer lights up', frame and frame[2] and not corner[2], [frame, corner])
+    time.sleep(0.3)
+    r.shot('preview-drag')
+    r.s.run(RELEASE, middle_x, middle_y)
+    found = wait(lambda: placed(r, red) or None, 10)
+    if not r.check('dropped on the frame, the picture lands on a track above the main track', found and found[0][0] == 1, found):
+        return
+    clip = found[0][1]
+    t = clip['content']['transform']
+    r.check('it goes over the whole video at the playhead',
+            clip['startUs'] == AT_US and (t['x'], t['y'], t['scale']) == (0, 0, 1) and not clip['content'].get('shape'), clip)
+    r.check('the talking head\'s clip stays as it was', r.track() == main)
+    r.check('no zones show once it is dropped', not r.s.run(ZONE, 'overlay'))
+    r.key('z', ctrlKey=True)
+    wait(lambda: not placed(r, red), 5)
+
+    for width, height, name in ((1440, 900, 'preview-drag-pip'), (1024, 640, 'preview-drag-pip-1024')):
+        webdriver('POST', r.s.path + '/window/rect', {'width': width, 'height': height})
+        wait(lambda: r.s.run('return window.innerWidth') == width, 5)
+        rect = preview_rect(r)
+        r.s.run(DRAG_TILE, 'red.png', rect['left'] + 4, rect['top'] + rect['height'] / 2)
+        box = wait(lambda: r.s.run(ZONE, 'pictureInPicture'), 5)
+        r.s.run("window.dispatchEvent(new PointerEvent('pointermove', {bubbles: true, button: 0, pointerId: 1, clientX: arguments[0], clientY: arguments[1]}))",
+                box[0], box[1])
+        hot = wait(lambda: (z := r.s.run(ZONE, 'pictureInPicture')) and z[2], 5)
+        r.check(f'the corner box under the pointer lights up in a {width} × {height} window', hot)
+        label = r.s.run("const z = document.querySelector('[data-zone=pictureInPicture]'), s = z.firstElementChild.getBoundingClientRect(),"
+                        "b = z.getBoundingClientRect(), f = document.querySelector('[data-testid=preview-drop]').getBoundingClientRect();"
+                        "return s.left >= f.left && s.right <= f.right && s.bottom <= f.bottom && s.top >= b.bottom")
+        r.check(f'its label shows whole in the frame, under the box, in a {width} × {height} window', label)
+        time.sleep(0.3)
+        r.shot(name)
+        r.s.run(RELEASE, box[0], box[1])
+        found = wait(lambda: placed(r, red) or None, 10)
+        shape = found and found[0][1]['content'].get('shape') or {}
+        r.check(f'dropped there in a {width} × {height} window, it becomes a picture in picture at the playhead',
+                found and found[0][1]['startUs'] == AT_US and abs(shape.get('radius', 0) - 0.15) < 1e-6, found)
+        r.key('z', ctrlKey=True)
+        wait(lambda: not placed(r, red), 5)
+    r.check('no error toast', not r.errors(), r.errors())

@@ -172,13 +172,14 @@ export interface DropTarget {
   trackId: string | null;
   startUs: number;
   replaceId: string | null;
-  over?: "overlay";
+  over?: "overlay" | "pictureInPicture";
 }
 
 /** The edit that puts dropped media where the target says. Sound has no picture to put over the video. */
 export function dropEdit(assetId: string, kind: Asset["kind"] | undefined, target: DropTarget): EditCmd {
   if (target.replaceId) return { type: "replaceClip", clipId: target.replaceId, assetId };
   if (target.over === "overlay" && kind !== "audio") return { type: "addOverlay", assetId, startUs: target.startUs, durationUs: null };
+  if (target.over === "pictureInPicture" && kind !== "audio") return { type: "addPictureInPicture", assetId, startUs: target.startUs, durationUs: null };
   return { type: "addClip", assetId, startUs: target.startUs, trackId: target.trackId };
 }
 /** What is dragged, so the timeline knows which clips it can replace. */
@@ -189,10 +190,23 @@ export interface DropMedia {
   durationUs?: number;
   /** Several files at once, which go in one after another and never replace a clip. */
   several?: boolean;
+  /** The picture's size; unknown for a file not imported yet. */
+  width?: number;
+  height?: number;
 }
-export let dropResolver: ((x: number, y: number, media: DropMedia | null) => DropTarget | null) | null = null;
-export function setDropResolver(fn: typeof dropResolver) {
-  dropResolver = fn;
+type DropResolver = (x: number, y: number, media: DropMedia | null) => DropTarget | null;
+const dropResolvers = new Set<DropResolver>();
+/** Lets a place that takes media, the timeline or the preview, say where media dropped at a point lands. */
+export function addDropResolver(fn: DropResolver) {
+  dropResolvers.add(fn);
+  return () => void dropResolvers.delete(fn);
+}
+export function resolveDrop(x: number, y: number, media: DropMedia | null) {
+  for (const fn of dropResolvers) {
+    const target = fn(x, y, media);
+    if (target) return target;
+  }
+  return null;
 }
 
 /** Pointer handler that drags an asset from the panel onto a timeline track. */
@@ -210,7 +224,7 @@ export function assetDragHandler(assetId: string) {
       useEditor.setState({ assetDrag: null });
       if (!dragging || !drag) return;
       const asset = useEditor.getState().snap?.project.assets.find((a) => a.id === assetId);
-      const target = dropResolver?.(ev.clientX, ev.clientY, asset ?? null);
+      const target = resolveDrop(ev.clientX, ev.clientY, asset ?? null);
       if (target) useEditor.getState().edit(dropEdit(assetId, asset?.kind, target));
     };
     // A cancelled drag drops nothing.

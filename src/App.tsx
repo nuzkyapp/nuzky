@@ -14,7 +14,7 @@ import type { Asset, JobEvent, ProjectSummary, Snapshot, ModelQuestion, Transpor
 import { AGENT_VISION_MODELS } from "./components/ModelQuestionDialog";
 import { showsVisionDownload } from "./components/setup/steps/VisionStep";
 import { useYoutube } from "./lib/youtube";
-import { MEDIA_EXTENSIONS, dropResolver, importPaths, mediaKind, pickAndImport } from "./components/panel/assets";
+import { MEDIA_EXTENSIONS, importPaths, mediaKind, pickAndImport, resolveDrop } from "./components/panel/assets";
 import { Toasts } from "./components/Toasts";
 import { Tour } from "./components/Tour";
 import { listenAgentEvents, panelRunEnded, useAgent } from "./lib/agent";
@@ -391,7 +391,7 @@ function useBackendEvents() {
           return;
         }
         // The same as while dragging, so a drop lands where the highlight said.
-        const target = dropResolver?.(p.position.x / dpr, p.position.y / dpr, single ? { kind: single, several } : null) ?? undefined;
+        const target = resolveDrop(p.position.x / dpr, p.position.y / dpr, single ? { kind: single, several } : null) ?? undefined;
         importPaths(paths, target);
       }),
     );

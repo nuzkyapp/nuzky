@@ -12,6 +12,7 @@ import { CropGuide, ReelBar } from "../reels/ReelBar";
 import { AiRunBar } from "../TopBar";
 import { IconButton, trapTab } from "../ui";
 import { LayerOverlay } from "./LayerOverlay";
+import { PreviewDrop } from "./PreviewDrop";
 import { RatioMenu } from "./RatioMenu";
 import { ReframeStatus } from "./ReframeStatus";
 
@@ -225,6 +226,7 @@ export function Preview() {
             </div>
             {/* Outside the clipped frame so handles of a layer larger than the canvas stay reachable. */}
             {!empty && !engineError && canvas && fit.w > 0 && !reels && <LayerOverlay width={fit.w} height={fit.h} bleed={{ x: (box.w - fit.w) / 2, y: (box.h - fit.h) / 2 }} />}
+            {!empty && !engineError && canvas && !reels && !cover && <PreviewDrop canvas={canvas} />}
           </div>
         </div>
       </div>
