@@ -5,9 +5,9 @@ import { COVER_FORMATS, openCover, thumbnailOf } from "../../lib/cover";
 import { CAPTION_STYLES, formatLabel, isLook } from "../../lib/presets";
 import { useSounds } from "../../lib/sounds";
 import { speechBlocker, useTranscriptView } from "../../lib/speech";
-import { isCaptionTrack, projectDuration, useEditor, type PanelTab } from "../../lib/store";
+import { isCaptionTrack, mainClips, projectDuration, useEditor, type PanelTab } from "../../lib/store";
 import { formatLength } from "../../lib/time";
-import type { Project, TranscriptView } from "../../lib/types";
+import type { Clip, Project, TranscriptView } from "../../lib/types";
 import { AiLock, Button, ColorInput, Section, Segmented, Slider, lockedProps, tabIds, useLockReason } from "../ui";
 import { InspectorHeader } from "./Header";
 
@@ -116,8 +116,20 @@ function soundsOf(project: Project) {
     });
 }
 
+/**
+ * Main-track clips that zoom: a punch-in scales a piece above the clips around it, a camera move keys its transform.
+ * Framing the whole video bigger alike is not a zoom.
+ */
+function zoomedClips(project: Project) {
+  const clips = mainClips(project).filter((c) => c.content.type === "media");
+  const scaleOf = (c: Clip) => (c.content.type === "media" ? c.content.transform.scale : 1);
+  const base = Math.min(...clips.filter((c) => !c.keyframes.length).map(scaleOf));
+  return clips.filter((c) => c.keyframes.length || scaleOf(c) > base + 0.005).length;
+}
+
 function ProjectStatus({ project }: { project: Project }) {
   const captions = useMemo(() => captionsOf(project), [project]);
+  const zoomed = useMemo(() => zoomedClips(project), [project]);
   const sounds = useMemo(() => soundsOf(project), [project]);
   const music = useMemo(() => musicClipOf(project), [project]);
   const covers = COVER_FORMATS.filter((f) => thumbnailOf(project, f.id));
@@ -143,18 +155,23 @@ function ProjectStatus({ project }: { project: Project }) {
             {captions.count ? "Edit" : "Add"}
           </Button>
         </Step>
-        <Step icon={ZoomIn} title="Zooms" detail={transcribed ? undefined : "Needs a transcript"}>
-          <Button
-            className={STEP_BUTTON}
-            aria-label="Suggest zooms"
-            disabled={!transcribed}
-            disabledReason="Transcribe the timeline first"
-            title="Open Transcript to zoom in on the sentences said with emphasis"
-            onClick={() => reach("transcript", "[data-suggest-zooms]")}
-          >
-            Suggest
-          </Button>
-        </Step>
+        {/* Suggesting again would scale the zoomed pieces once more. */}
+        {zoomed ? (
+          <Step icon={ZoomIn} done title="Zooms" detail={count(zoomed, "zoomed clip")} />
+        ) : (
+          <Step icon={ZoomIn} title="Zooms" detail={transcribed ? undefined : "Needs a transcript"}>
+            <Button
+              className={STEP_BUTTON}
+              aria-label="Suggest zooms"
+              disabled={!transcribed}
+              disabledReason="Transcribe the timeline first"
+              title="Open Transcript to zoom in on the sentences said with emphasis"
+              onClick={() => reach("transcript", "[data-suggest-zooms]")}
+            >
+              Suggest
+            </Button>
+          </Step>
+        )}
         <Step icon={Music} done={sounds.length > 0} title="Music" detail={sounds.length === 1 ? sounds[0] : sounds.length ? count(sounds.length, "sound") : "None"}>
           {music && (
             <Button

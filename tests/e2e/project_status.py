@@ -77,6 +77,12 @@ def project_status(r):
     press_step(r, 'Zooms')
     landed = lands(r, 'transcript', lambda f: 'data-suggest-zooms' in f['attrs'])
     r.check('Suggest opens Transcript on Suggest zooms', landed is True, landed)
+    # A zoom as Apply or an agent's apply_zooms makes it; suggesting again would zoom the same pieces twice.
+    r.s.call("window.__nuzky.store.getState().edit({type: 'zoomRanges', ranges: [{startUs: 1000000, endUs: 2500000, scale: 1.2}]})")
+    r.s.run('window.__nuzky.store.getState().select([])')
+    r.check('Zooms counts the zoomed clips and offers no second Suggest once zoomed',
+            wait(lambda: step(r, 'Zooms') == '1 zoomed clip', 10) and r.s.run(BUTTON, 'Zooms') is None,
+            {'state': step(r, 'Zooms'), 'button': r.s.run(BUTTON, 'Zooms')})
 
     music = r.work / 'music.wav'
     subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3', str(music)], check=True)
