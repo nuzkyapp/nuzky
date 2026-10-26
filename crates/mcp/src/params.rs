@@ -22,10 +22,22 @@ pub struct Begin {
 pub struct Apply {
     pub run_id: String,
     pub request_id: String,
+    #[serde(deserialize_with = "deserialize_edits")]
+    #[schemars(with = "Vec<EditCmd>")]
     pub edits: Vec<EditCmd>,
     pub expected_revision: Option<u64>,
     pub expected_speech_layout_key: Option<String>,
 }
+
+fn deserialize_edits<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<EditCmd>, D::Error> {
+    use serde::de::Error;
+    match serde_json::Value::deserialize(deserializer)? {
+        serde_json::Value::String(text) => serde_json::from_str(&text)
+            .map_err(|e| D::Error::custom(format!("edits must be a JSON array of edits: {e}"))),
+        value => serde_json::from_value(value).map_err(D::Error::custom),
+    }
+}
+
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Reframe {

@@ -1065,6 +1065,23 @@ fn get_state_shares_caption_defaults_and_keeps_filtered_clips_full_over_stdio() 
     c.finish();
 }
 
+#[test]
+fn apply_edits_accepts_a_stringified_array_over_stdio() {
+    let mut c = Client::new(true);
+    let list = c.rpc("tools/list", json!({}));
+    let apply = list["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "apply_edits").unwrap();
+    assert_eq!(apply["inputSchema"]["properties"]["edits"]["type"], "array");
+    let run = c.call("begin_run", json!({"label":"rename"}))["run_id"].clone();
+    let edits = json!([{"type":"renameProject","name":"Stringified edits"}]).to_string();
+    c.call("apply_edits", json!({"run_id":run,"request_id":"rename","edits":edits}));
+    assert_eq!(c.call("get_state", json!({}))["name"], "Stringified edits");
+    for edits in ["not JSON", "{}", "[{}]"] {
+        let error = c.error("apply_edits", json!({"run_id":run,"request_id":"invalid","edits":edits}));
+        assert!(error.contains("INVALID_ARGUMENTS") && error.contains("edits must be a JSON array"), "{error}");
+    }
+    c.call("end_run", json!({"run_id":run,"action":"keep"}));
+}
+
 /// An agent restyled 117 karaoke captions one updateClip each and got back 64 thousand characters it could not
 /// read. A batch that big now answers with the ids and how many clips were left out, the same on a retry, while a
 /// small batch still shows its clips in full.
