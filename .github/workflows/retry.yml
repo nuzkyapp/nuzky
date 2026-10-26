@@ -1,0 +1,53 @@
+name: Retry runner failures
+
+on:
+  workflow_run:
+    workflows: [Checks, Build and test, Draft release]
+    types: [completed]
+
+permissions:
+  actions: write
+  checks: read
+
+jobs:
+  retry:
+    if: contains(fromJSON('["failure", "cancelled"]'), github.event.workflow_run.conclusion)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # workflow_run has a write token even for fork PRs. Never check out or execute their code here.
+      - name: Retry only failures caused by runners
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        shell: bash
+        run: |
+          echo "Run $RUN_ID, attempt $ATTEMPT" >> "$GITHUB_STEP_SUMMARY"
+          if (( ATTEMPT >= 3 )); then
+            echo 'Not rerunning: the limit of two automatic retries has been reached.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          jobs=$(gh api --paginate "repos/$GH_REPO/actions/runs/$RUN_ID/attempts/$ATTEMPT/jobs" |
+            jq -s '[.[].jobs[] | select(.conclusion == "failure" or .conclusion == "cancelled")]')
+          retry=true
+          while IFS= read -r job; do
+            name=$(jq -r '.name' <<< "$job")
+            check=$(jq -r '.check_run_url' <<< "$job")
+            annotations=$(gh api --paginate "$check/annotations" | jq -s 'add')
+            reason=$(jq -r '[.[] | select(.annotation_level == "failure") | .message |
+              select(test("The job was not acquired by Runner|The runner.*lost communication with the server|The runner.*received a shutdown signal"; "i"))] | join("; ")' <<< "$annotations")
+            if [[ -n $reason ]] && jq -e 'all(.steps[]; .conclusion != "failure")' <<< "$job" > /dev/null; then
+              printf '\n- %s: %s\n' "$name" "$reason" >> "$GITHUB_STEP_SUMMARY"
+            else
+              printf '\n- %s: not a runner failure, or a step failed.\n' "$name" >> "$GITHUB_STEP_SUMMARY"
+              retry=false
+            fi
+          done < <(jq -c '.[]' <<< "$jobs")
+          if [[ $retry == true ]] && [[ $(jq 'length' <<< "$jobs") -gt 0 ]]; then
+            gh run rerun "$RUN_ID" --failed
+            echo 'Reran failed jobs: every failed or cancelled job had a runner failure annotation.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Not rerunning: not every failed or cancelled job was caused by a runner.' >> "$GITHUB_STEP_SUMMARY"
+          fi
