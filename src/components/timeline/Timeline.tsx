@@ -237,7 +237,7 @@ export function Timeline({ height }: { height: number }) {
   const dragMedia = useEditor(
     useShallow((s): DropMedia | null => {
       const asset = s.assetDrag && s.snap?.project.assets.find((a) => a.id === s.assetDrag!.assetId);
-      return asset ? { kind: asset.kind, hasAudio: asset.hasAudio, durationUs: asset.durationUs } : s.fileDrag?.kind ? { kind: s.fileDrag.kind } : null;
+      return asset ? { kind: asset.kind, hasAudio: asset.hasAudio, durationUs: asset.durationUs } : s.fileDrag?.kind ? { kind: s.fileDrag.kind, several: s.fileDrag.several } : null;
     }),
   );
   const locked = useAiLocked();
@@ -305,7 +305,7 @@ export function Timeline({ height }: { height: number }) {
   const replaceTarget = useCallback(
     (x: number, y: number, media: DropMedia | null) => {
       const el = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-clip-id]");
-      if (peeking || !media || !project || !el || !scroller.current?.contains(el)) return null;
+      if (peeking || !media || media.several || !project || !el || !scroller.current?.contains(el)) return null;
       const r = el.getBoundingClientRect();
       const end = Math.min(r.width / 4, REPLACE_END);
       const found = findClip(project, el.dataset.clipId!);

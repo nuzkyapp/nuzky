@@ -56,7 +56,7 @@ interface EditorState {
   assetDrag: AssetDrag | null;
   /** Where files dragged in from the desktop are over the window, in CSS pixels, while they include media. */
   /** `kind` is the file's when exactly one media file is dragged, the only case that can replace a clip. */
-  fileDrag: { x: number; y: number; kind: Asset["kind"] | null } | null;
+  fileDrag: { x: number; y: number; kind: Asset["kind"] | null; several: boolean } | null;
   /** Files and videos being added, shown as skeleton tiles; `stop` gives the tile a Stop. */
   importing: { key: number; name: string; kind: Asset["kind"]; stop?: () => void }[];
   exportOpen: boolean;

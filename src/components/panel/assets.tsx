@@ -187,6 +187,8 @@ export interface DropMedia {
   /** Unknown for a file not imported yet. */
   hasAudio?: boolean;
   durationUs?: number;
+  /** Several files at once, which go in one after another and never replace a clip. */
+  several?: boolean;
 }
 export let dropResolver: ((x: number, y: number, media: DropMedia | null) => DropTarget | null) | null = null;
 export function setDropResolver(fn: typeof dropResolver) {

@@ -300,6 +300,7 @@ function useBackendEvents() {
     offs.push(listen<string | null>("engine-error", (e) => useEditor.setState({ engineError: e.payload })));
     let hasMedia = false;
     let single: Asset["kind"] | null = null;
+    let several = false;
     // The run seen last, also one already open at boot; a snapshot can clear `aiRun` before this event.
     let lastRun: string | null = useEditor.getState().aiRun;
     // The revision the run started from, unknown for a run already open at boot.
@@ -372,8 +373,9 @@ function useBackendEvents() {
           hasMedia = media.length > 0;
           // Several files of one kind, such as songs, are offered only the places that kind can go.
           single = new Set(media.map(mediaKind)).size === 1 ? mediaKind(media[0]) : null;
+          several = media.length > 1;
         }
-        if ((p.type === "enter" || p.type === "over") && hasMedia) useEditor.setState({ fileDrag: { x: p.position.x / dpr, y: p.position.y / dpr, kind: single } });
+        if ((p.type === "enter" || p.type === "over") && hasMedia) useEditor.setState({ fileDrag: { x: p.position.x / dpr, y: p.position.y / dpr, kind: single, several } });
         if (p.type === "leave" || p.type === "drop") useEditor.setState({ fileDrag: null });
         if (p.type !== "drop" || useEditor.getState().snap?.recovery) return;
         // On the home screen a dropped project opens, and dropped videos start a new project.
@@ -388,7 +390,8 @@ function useBackendEvents() {
           useEditor.getState().toast({ kind: "error", text: "Those files are not video, audio or images Nuzky can open." });
           return;
         }
-        const target = dropResolver?.(p.position.x / dpr, p.position.y / dpr, paths.length === 1 ? { kind: mediaKind(paths[0]) } : null) ?? undefined;
+        // The same as while dragging, so a drop lands where the highlight said.
+        const target = dropResolver?.(p.position.x / dpr, p.position.y / dpr, single ? { kind: single, several } : null) ?? undefined;
         importPaths(paths, target);
       }),
     );

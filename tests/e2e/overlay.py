@@ -186,6 +186,17 @@ def overlay_lane(r):
     r.key('z', ctrlKey=True)
     r.check('one undo removes the picture and brings the lane back', wait(lambda: not placed(r, red) and r.s.run(LANE) is not None, 5))
 
+    # Files from the desktop over the middle of the talking head: one video offers to replace it, several never do,
+    # as several dropped there go in one after another.
+    talk_left, talk_top, talk_right, talk_bottom, _ = r.s.run(RECT, main[0]['id'])
+    mid = ((talk_left + talk_right) / 2, (talk_top + talk_bottom) / 2)
+    chip = lambda: r.s.run("return document.querySelector(`[data-clip-id='${arguments[0]}']`).textContent.includes('Replace')", main[0]['id'])
+    for several, expect in ((False, True), (True, False)):
+        r.s.run("window.__nuzky.store.setState({fileDrag: {x: arguments[0], y: arguments[1], kind: 'video', several: arguments[2]}})", *mid, several)
+        shown = wait(lambda: chip() == expect or None, 3)
+        r.check(f'{"several videos" if several else "one video"} from the desktop over a clip {"never offer" if several else "offers"} to replace it', shown, chip())
+    r.s.run('window.__nuzky.store.setState({fileDrag: null})')
+
     # Under the AI lock the lane says why and takes nothing.
     bridge = Bridge(r, r.saved_project())
     try:
