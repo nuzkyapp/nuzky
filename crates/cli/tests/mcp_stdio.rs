@@ -1010,6 +1010,61 @@ fn initialize_list_state_edit_end_undo_over_stdio() {
     assert_eq!(disk["name"], "Original");
 }
 
+#[test]
+fn get_state_shares_caption_defaults_and_keeps_filtered_clips_full_over_stdio() {
+    let mut c = Client::start(true, None, Some(None));
+    let run = c.call("begin_run", json!({"label":"caption state"}))["run_id"].clone();
+    let segments: Vec<Value> = (0..150i64)
+        .map(|i| {
+            json!({"startUs":i * 500_000,"endUs":(i + 1) * 500_000,"text":"read this",
+            "words":[{"text":"read","startUs":i * 500_000,"endUs":i * 500_000 + 250_000},
+                     {"text":"this","startUs":i * 500_000 + 250_000,"endUs":(i + 1) * 500_000}]})
+        })
+        .collect();
+    c.call(
+        "apply_edits",
+        json!({"run_id":run,"request_id":"captions","edits":[
+        {"type":"addCaptions","segments":segments,"style":{"fontSize":64.0,"color":"#ffffff","highlight":"#ffe14d"}}]}),
+    );
+    let full = c.call("get_state", json!({"range":{"startUs":0,"endUs":75_000_000}}));
+    let first = full["tracks"][1]["clips"][0]["id"].clone();
+    c.call(
+        "apply_edits",
+        json!({"run_id":run,"request_id":"exception","edits":[
+        {"type":"updateClip","clipId":first,"style":{"fontSize":64.0,"color":"#ff0000","highlight":"#ffe14d"},
+         "transform":{"x":0.0,"y":0.25,"scale":1.0,"rotation":0.0,"opacity":1.0}}]}),
+    );
+    let full = c.call("get_state", json!({"range":{"startUs":0,"endUs":75_000_000}}));
+    let compact = c.call("get_state", json!({}));
+    let before = full.to_string().chars().count();
+    let after = compact.to_string().chars().count();
+    eprintln!("get_state, 150 karaoke captions: full {before}, unfiltered {after} characters");
+    let (track, original) = (&compact["tracks"][1], &full["tracks"][1]);
+    assert_eq!(track["shared_style"], original["clips"][1]["content"]["style"]);
+    assert_eq!(track["shared_transform"], original["clips"][1]["content"]["transform"]);
+    assert_eq!(track["words_omitted"], true);
+    for (i, clip) in track["clips"].as_array().unwrap().iter().enumerate() {
+        assert!(clip["content"].get("words").is_none());
+        for field in ["style", "transform"] {
+            if i == 0 {
+                assert_eq!(clip["content"][field], original["clips"][i]["content"][field]);
+            } else {
+                assert!(clip["content"].get(field).is_none());
+            }
+        }
+    }
+    assert!(after * 2 < before, "{before} -> {after}");
+    let ids: Vec<Value> = original["clips"].as_array().unwrap().iter().map(|clip| clip["id"].clone()).collect();
+    assert_eq!(c.call("get_state", json!({"clip_ids":ids})), full);
+    assert_eq!(compact["tracks"][0], full["tracks"][0]);
+    assert_eq!(compact["filtered"], false);
+    assert_eq!(full["filtered"], true);
+    assert_eq!(original["clips"][0]["content"]["words"].as_array().unwrap().len(), 2);
+    assert!(original.get("shared_style").is_none() && original.get("words_omitted").is_none());
+    c.call("end_run", json!({"run_id":run,"action":"keep"}));
+    c.finish();
+}
+
 /// An agent restyled 117 karaoke captions one updateClip each and got back 64 thousand characters it could not
 /// read. A batch that big now answers with the ids and how many clips were left out, the same on a retry, while a
 /// small batch still shows its clips in full.
@@ -1113,7 +1168,7 @@ fn an_agent_pastes_a_hook_later_and_its_look_onto_another_title_over_stdio() {
         {"type":"addText","startUs":0,"text":"Hook","style":{"fontSize":120.0,"color":"#ffcc00","bold":true}},
         {"type":"addText","startUs":5_000_000,"text":"Later","style":{"fontSize":40.0,"color":"#ffffff"}}]);
     c.call("apply_edits", json!({"run_id":run["run_id"],"request_id":"titles","edits":titles}));
-    let track = c.call("get_state", json!({}))["tracks"][1].clone();
+    let track = c.call("get_state", json!({"range":{"startUs":0,"endUs":i64::MAX}}))["tracks"][1].clone();
     let (hook, later) = (&track["clips"][0], &track["clips"][1]);
     let copied =
         json!({"clip":hook,"trackId":track["id"],"trackKind":track["kind"],"keepInPlace":track["keepInPlace"]});
@@ -1121,7 +1176,7 @@ fn an_agent_pastes_a_hook_later_and_its_look_onto_another_title_over_stdio() {
         {"type":"pasteClips","clips":[copied],"atUs":20_000_000},
         {"type":"pasteAttributes","source":copied,"clipIds":[later["id"]]}]});
     assert_eq!(c.call("apply_edits", paste.clone()), c.call("apply_edits", paste));
-    let tracks = c.call("get_state", json!({}))["tracks"].clone();
+    let tracks = c.call("get_state", json!({"range":{"startUs":0,"endUs":i64::MAX}}))["tracks"].clone();
     let clips = tracks[1]["clips"].as_array().unwrap();
     assert_eq!(tracks.as_array().unwrap().len(), 2);
     assert_eq!(clips.len(), 3);
@@ -1179,7 +1234,7 @@ fn restyle_track_changes_every_caption_in_place_over_stdio() {
     };
     store.put(&asset, &record).unwrap();
     let captions = |c: &mut Client| {
-        let state = c.call("get_state", json!({}));
+        let state = c.call("get_state", json!({"range":{"startUs":0,"endUs":i64::MAX}}));
         state["tracks"].as_array().unwrap().iter().find(|t| t["name"] == "Captions").unwrap().clone()
     };
 
@@ -1699,7 +1754,7 @@ fn caption_style_packages_over_stdio() {
     for (name, preset) in [("hormozi", caption_preset("hormozi").unwrap()), ("MY-NEON", &own)] {
         let made = c.call("build_captions", json!({"run_id": run["run_id"], "style_preset": name}));
         assert!(made["caption_count"].as_u64().unwrap() > 1);
-        let state = c.call("get_state", json!({}));
+        let state = c.call("get_state", json!({"range":{"startUs":0,"endUs":i64::MAX}}));
         let clips = state["tracks"].as_array().unwrap().iter().find(|t| t["name"] == "Captions").unwrap()["clips"]
             .as_array()
             .unwrap();
@@ -1914,7 +1969,14 @@ fn a_reel_keeps_the_pause_it_was_proposed_with_over_stdio() {
 fn captions_of(tracks: &Value) -> Vec<(String, Value)> {
     let track = tracks.as_array().unwrap().iter().find(|t| t["name"] == "Captions").unwrap();
     let clips = track["clips"].as_array().unwrap().iter();
-    clips.map(|clip| (clip["content"]["text"].as_str().unwrap().to_owned(), clip["content"]["style"].clone())).collect()
+    clips
+        .map(|clip| {
+            (
+                clip["content"]["text"].as_str().unwrap().to_owned(),
+                clip["content"].get("style").unwrap_or(&track["shared_style"]).clone(),
+            )
+        })
+        .collect()
 }
 
 fn most_words(captions: &[(String, Value)]) -> usize {
@@ -2073,7 +2135,7 @@ fn place_take(c: &mut Client, duration_us: i64, said: &[(&str, i64, i64)], run_i
 
 /// Each caption clip's id, text, and whether its timed words still spell it, so karaoke highlights it.
 fn caption_clips(c: &mut Client) -> Vec<(String, String, bool)> {
-    let state = c.call("get_state", json!({}));
+    let state = c.call("get_state", json!({"range":{"startUs":0,"endUs":i64::MAX}}));
     let track = state["tracks"].as_array().unwrap().iter().find(|t| t["name"] == "Captions").unwrap().clone();
     track["clips"]
         .as_array()
@@ -2529,7 +2591,7 @@ fn transcribe_edit_and_caption_real_media_over_stdio() {
     );
     let karaoke = c.call("build_captions", json!({"run_id":run["run_id"],"style_preset":"karaoke"}));
     assert_eq!(karaoke["caption_count"], captions["caption_count"]);
-    let state = c.call("get_state", json!({}));
+    let state = c.call("get_state", json!({"range":{"startUs":0,"endUs":i64::MAX}}));
     let track = state["tracks"].as_array().unwrap().iter().find(|t| t["name"] == "Captions").unwrap();
     for clip in track["clips"].as_array().unwrap() {
         let content = &clip["content"];

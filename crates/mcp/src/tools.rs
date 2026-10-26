@@ -200,7 +200,15 @@ impl Backend {
 
     fn dispatch(&self, name: &str, arguments: Value, state: &SessionState) -> Result<Value> {
         match name {
-            "get_state" => state_value(state, parse(arguments)?),
+            "get_state" => {
+                let args: State = parse(arguments)?;
+                let unfiltered = args.range.is_none() && args.clip_ids.is_none();
+                let mut value = state_value(state, args)?;
+                if unfiltered {
+                    share_text_defaults(&mut value);
+                }
+                Ok(value)
+            }
             "begin_run" => {
                 let a: Begin = parse(arguments)?;
                 Ok(serde_json::to_value(self.host.session.begin_run(a.label)?)?)
@@ -1876,6 +1884,39 @@ pub(crate) fn state_value(state: &SessionState, args: State) -> Result<Value> {
     }
     object.insert("filtered".into(), json!(args.range.is_some() || args.clip_ids.is_some()));
     Ok(value)
+}
+
+/// Unfiltered state of a reel with karaoke captions overflows an agent's tool result, mostly through the same style
+/// and transform on every caption and their word times: each text track gives its most common style and transform
+/// once, and its clips keep theirs only where they differ and leave out their words.
+fn share_text_defaults(value: &mut Value) {
+    let Some(tracks) = value["tracks"].as_array_mut() else { return };
+    for track in tracks.iter_mut().filter(|t| t["kind"] == "text") {
+        for field in ["style", "transform"] {
+            let mut counts = std::collections::BTreeMap::new();
+            for clip in track["clips"].as_array().into_iter().flatten() {
+                let value = &clip["content"][field];
+                counts.entry(value.to_string()).or_insert_with(|| (0, value.clone())).0 += 1;
+            }
+            if let Some((count, shared)) = counts.into_values().max_by_key(|(count, _)| *count)
+                && count > 1
+            {
+                for content in
+                    track["clips"].as_array_mut().into_iter().flatten().filter_map(|c| c["content"].as_object_mut())
+                {
+                    if content.get(field) == Some(&shared) {
+                        content.remove(field);
+                    }
+                }
+                track[format!("shared_{field}")] = shared;
+            }
+        }
+        for content in track["clips"].as_array_mut().into_iter().flatten().filter_map(|c| c["content"].as_object_mut())
+        {
+            content.remove("words");
+        }
+        track["words_omitted"] = json!(true);
+    }
 }
 
 /// An hour in 10 ms windows; longer media needs wider windows so results stay bounded.
