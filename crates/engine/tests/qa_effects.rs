@@ -292,7 +292,7 @@ fn cancel_ends_the_wait_for_a_stuck_gpu() {
     let stop = Arc::new(AtomicBool::new(false));
     let (tx, rx) = std::sync::mpsc::channel();
     let (shown, stopped) = (p.clone(), stop.clone());
-    std::thread::spawn(move || {
+    let drawing = std::thread::spawn(move || {
         let mut renderer = Renderer::new().unwrap();
         renderer.set_gpu_timeout(Duration::from_secs(60));
         renderer.hang_gpu(1);
@@ -301,6 +301,7 @@ fn cancel_ends_the_wait_for_a_stuck_gpu() {
         let result = renderer.render_until(&shown, 0, w, h, Wait::Exact, true, &stopped);
         tx.send(Instant::now()).ok();
         result.map(drop).map_err(|e| format!("{e:#}")).expect_err("a stopped frame draws nothing");
+        renderer.render(&shown, 0, w, h, Wait::Exact, true).expect("the next frame draws on a new device");
     });
     rx.recv_timeout(Duration::from_secs(30)).unwrap();
     std::thread::sleep(Duration::from_millis(300));
@@ -309,6 +310,7 @@ fn cancel_ends_the_wait_for_a_stuck_gpu() {
     let ended = rx.recv_timeout(Duration::from_secs(30)).expect("cancel did not end the frame");
     assert!(ended.duration_since(cancelled) < Duration::from_secs(3), "{:?}", ended.duration_since(cancelled));
     assert!(matches!(plugin_effects::lookup(&data().join("plugins"), "cancelled", "scanlines"), Lookup::Ready(_)));
+    drawing.join().unwrap();
 }
 
 /// Posters and covers kept for later go stale when a plugin effect of the project changes, breaks or goes away.

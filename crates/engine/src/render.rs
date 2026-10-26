@@ -74,6 +74,9 @@ pub struct Renderer {
     /// The user's plugins, whose effects clips may name; `None` draws every clip without its effects.
     plugins: Option<PathBuf>,
     gpu_timeout: Duration,
+    /// The device still holds a frame that was stopped. A new one takes seconds to make, which a cancelled export
+    /// should not wait for, so the next frame makes it.
+    stale_gpu: bool,
     /// The effects drawn in this frame: key, name and file.
     frame_effects: Vec<(u64, String, String)>,
     /// Names of the effects the last frame was drawn without, and of all since the renderer started.
@@ -321,6 +324,7 @@ impl Renderer {
             late_layers: 0,
             plugins: plugin_effects::plugins_dir(),
             gpu_timeout: Duration::from_secs(10),
+            stale_gpu: false,
             frame_effects: Vec::new(),
             skipped: Vec::new(),
             skipped_ever: Vec::new(),
@@ -421,8 +425,12 @@ impl Renderer {
             Err(error) if error.downcast_ref::<GpuFault>().is_some() => error,
             done => return done,
         };
+        if matches!(error.downcast_ref(), Some(GpuFault::Stopped)) {
+            self.stale_gpu = true;
+            return Err(error);
+        }
         self.renew_gpu()?;
-        if !effects || matches!(error.downcast_ref(), Some(GpuFault::Stopped)) {
+        if !effects {
             return Err(error);
         }
         log::error!("Drawing a frame failed on the GPU: {error:#}");
@@ -508,6 +516,10 @@ impl Renderer {
         playing: bool,
         stop: &AtomicBool,
     ) -> Result<Vec<u8>> {
+        if self.stale_gpu {
+            self.renew_gpu()?;
+            self.stale_gpu = false;
+        }
         self.drop_stale_workers(project);
         self.needed.clear();
         self.skipped.clear();
