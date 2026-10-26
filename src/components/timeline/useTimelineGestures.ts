@@ -26,6 +26,8 @@ export interface Drag {
   dxUs: number;
   /** undefined: same track, null: a new track, string: another track, `below`: a new track right below that one. */
   target: string | null | { below: string } | undefined;
+  /** Over the empty lane above the main track, which takes a video clip onto a new track right above it. */
+  onLane?: boolean;
   snapUs: number | null;
   candidates: number[];
   maxDurUs: number | null;
@@ -98,6 +100,7 @@ export function useTimelineGestures({
   snapping,
   minUs,
   rows,
+  lane,
   scroller,
   lanesAt,
   timeAt,
@@ -107,6 +110,7 @@ export function useTimelineGestures({
   snapping: boolean;
   minUs: number;
   rows: RefObject<Map<string, HTMLDivElement>>;
+  lane: RefObject<HTMLDivElement | null>;
   scroller: RefObject<HTMLDivElement | null>;
   /** Where the lanes start in the scroller, past the track headers and the ruler. */
   lanesAt: { left: number; top: number };
@@ -157,11 +161,18 @@ export function useTimelineGestures({
         return { ...d, moved: true, dxUs: Math.round(dxUs), snapUs };
       }
       let target: Drag["target"] = undefined;
+      let onLane = false;
       if (d.mode === "move") {
         const rects = [...rows.current.entries()].map(([id, el]) => [id, el.getBoundingClientRect()] as const);
         const hit = rects.find(([, r]) => e.clientY >= r.top && e.clientY <= r.bottom);
         const above = kind !== "audio" ? trackAboveGap(project, rects, e.clientY, d) : undefined;
-        if (above) {
+        const laneRect = kind === "video" ? lane.current?.getBoundingClientRect() : undefined;
+        onLane = !!laneRect && e.clientY >= laneRect.top && e.clientY <= laneRect.bottom;
+        if (onLane) {
+          // Under any text tracks above the lane, as Overlay puts media.
+          const upper = rects.filter(([, r]) => r.bottom <= laneRect!.top).sort((a, b) => b[1].bottom - a[1].bottom)[0];
+          target = upper ? { below: upper[0] } : null;
+        } else if (above) {
           target = { below: above };
         } else if (hit) {
           const t = project.tracks.find((tr) => tr.id === hit[0]);
@@ -172,9 +183,9 @@ export function useTimelineGestures({
           if ((kind !== "audio" && e.clientY < top) || (kind === "audio" && e.clientY > bottom)) target = null;
         }
       }
-      return { ...d, moved: true, dxUs: Math.round(dxUs), snapUs, target };
+      return { ...d, moved: true, dxUs: Math.round(dxUs), snapUs, target, onLane };
     },
-    [rows],
+    [rows, lane],
   );
 
   const finish = (d: Drag) => {

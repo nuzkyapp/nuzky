@@ -20,6 +20,7 @@ import {
   splitBlocker,
   freezeAtPlayhead,
   freezeBlocker,
+  AI_EDITING,
   useAiLocked,
   useEditor,
 } from "../../lib/store";
@@ -44,7 +45,7 @@ const ROW_GAP = 4;
 const LANES_AT = { left: HEADER_W, top: RULER_H };
 /** How far into each end of a clip dropped media still goes in beside it instead of replacing it, in px. */
 const REPLACE_END = 24;
-const OVERLAY_LANE_H = 36;
+const OVERLAY_LANE_H = 28;
 const END_TIP = "The video ends here. Sound after this point is not exported.";
 
 function rowHeight(track: Track) {
@@ -272,7 +273,7 @@ export function Timeline({ height }: { height: number }) {
     [zoom],
   );
 
-  const { drag: gesture, box, startClipDrag, startScrub, startBoxSelect } = useTimelineGestures({ project, zoom, snapping, minUs, rows, scroller, lanesAt: LANES_AT, timeAt });
+  const { drag: gesture, box, startClipDrag, startScrub, startBoxSelect } = useTimelineGestures({ project, zoom, snapping, minUs, rows, lane: overlayLane, scroller, lanesAt: LANES_AT, timeAt });
   // While Undo or Redo is hovered, the lanes draw the project that step would restore, with what changes marked.
   // Only the drawing: selection, focus and edits keep working on the project as it is. A box select passing over
   // the button never shows it, since the box selects the clips drawn.
@@ -480,7 +481,7 @@ export function Timeline({ height }: { height: number }) {
   const emptyTimeline = allClips(drawn).length === 0;
   // Until something sits over the video, an empty lane above it shows where a picture over it goes.
   const overlayLaneShown = !!project && !emptyTimeline && !cover && !peekShown && !project.tracks.some((t) => t.kind === "video" && t.id !== MAIN_TRACK);
-  const overLane = !!place?.over && dragMedia?.kind !== "audio";
+  const overLane = !locked && ((!!place?.over && dragMedia?.kind !== "audio") || !!drag?.onLane);
   const laneRow = overlayLaneShown && (
     <div key="overlay-lane" data-lane className="relative flex shrink-0" style={{ height: OVERLAY_LANE_H + ROW_GAP }}>
       <div className="sticky left-0 z-[47] shrink-0 border-r border-white/[.07] bg-panel" style={{ width: HEADER_W }} />
@@ -491,9 +492,12 @@ export function Timeline({ height }: { height: number }) {
           }`}
         >
           <span className="sticky px-3" style={{ left: HEADER_W }}>
-            {overLane ? "Drop to put it over the video" : "Drag a video or picture here to put it over the video"}
+            {locked ? AI_EDITING : overLane ? "Drop to put it over the video" : "Drag a video or picture here to put it over the video"}
           </span>
         </div>
+        {place?.over && dropTime !== null && (
+          <div data-testid="drop-line" className="pointer-events-none absolute inset-y-0 z-30 w-0.5 bg-accent" style={{ left: (dropTime / US) * zoom }} />
+        )}
       </div>
     </div>
   );
@@ -738,7 +742,7 @@ export function Timeline({ height }: { height: number }) {
             // A removed element fires no blur, so a deleted clip keeps its place for the effect below.
             onBlur={(e) => e.target.isConnected && (focusPlace.current = null)}
           >
-            {drag?.moved && drag.target === null && dragKind !== "audio" && <div className="ml-[152px] h-0.5 rounded-full bg-accent" title="Drop to create a new track" />}
+            {drag?.moved && drag.target === null && !drag.onLane && dragKind !== "audio" && <div className="ml-[152px] h-0.5 rounded-full bg-accent" title="Drop to create a new track" />}
             {tracks.map((track) => {
               const h = rowHeight(track);
               const isMain = track.id === MAIN_TRACK;
@@ -754,7 +758,7 @@ export function Timeline({ height }: { height: number }) {
                     role="listbox"
                     aria-label={`${track.name || track.kind} track`}
                     aria-multiselectable
-                    className={`relative flex-1 ${isMain ? "bg-white/[0.035]" : "bg-white/[0.015]"} ${assetDrag && dropTime !== null ? "outline-1 outline-dashed outline-white/20" : ""}`}
+                    className={`relative flex-1 ${isMain ? "bg-white/[0.035]" : "bg-white/[0.015]"} ${assetDrag && dropTime !== null && !place?.over ? "outline-1 outline-dashed outline-white/20" : ""}`}
                     style={{ marginBlock: ROW_GAP / 2 }}
                   >
                     {isMain && emptyTimeline && !peekShown && (
@@ -877,7 +881,7 @@ export function Timeline({ height }: { height: number }) {
           )}
 
           {/* Drop position for media dragged from the panel */}
-          {dropTime !== null && <div data-testid="drop-line" className="pointer-events-none absolute bottom-0 top-0 z-30 w-0.5 bg-accent" style={{ left: HEADER_W + (dropTime / US) * zoom }} />}
+          {dropTime !== null && !place?.over && <div data-testid="drop-line" className="pointer-events-none absolute bottom-0 top-0 z-30 w-0.5 bg-accent" style={{ left: HEADER_W + (dropTime / US) * zoom }} />}
 
           <Playhead zoom={zoom} scroller={scroller} follow={!box} />
 

@@ -5,7 +5,7 @@ import time
 
 from PIL import Image, ImageStat
 
-from e2e.harness import FIXTURES, changed_share, flow, preview_crop, preview_rect, preview_redraw, wait, webdriver
+from e2e.harness import FIXTURES, Bridge, changed_share, flow, preview_crop, preview_rect, preview_redraw, wait, webdriver
 
 AT_US = 1_000_000
 OVERLAY = "document.querySelector('[aria-label=\"Put red.png over the video\"]')"
@@ -131,6 +131,12 @@ window.dispatchEvent(at('pointermove', x + 20, y));
 window.dispatchEvent(at('pointermove', arguments[1], arguments[2]));"""
 RELEASE = """window.dispatchEvent(new PointerEvent('pointerup', {bubbles: true, button: 0, pointerId: 1,
   clientX: arguments[0], clientY: arguments[1]}))"""
+PRESS = """const [x, y, path] = arguments;
+const at = (type, x, y) => new PointerEvent(type, {bubbles: true, button: 0, pointerId: 1, clientX: x, clientY: y});
+document.elementFromPoint(x, y).dispatchEvent(at('pointerdown', x, y));
+for (const [px, py] of path) window.dispatchEvent(at('pointermove', px, py));"""
+RECT = """const el = document.querySelector(`[data-clip-id='${arguments[0]}']`); const b = el.getBoundingClientRect();
+return [b.left, b.top, b.right, b.bottom, el.closest('[role=listbox]').getBoundingClientRect().bottom];"""
 LANE = "const l = document.querySelector('[data-testid=overlay-lane]'); return l && [l.getBoundingClientRect().top, l.getBoundingClientRect().bottom, l.textContent]"
 
 
@@ -179,4 +185,49 @@ def overlay_lane(r):
 
     r.key('z', ctrlKey=True)
     r.check('one undo removes the picture and brings the lane back', wait(lambda: not placed(r, red) and r.s.run(LANE) is not None, 5))
+
+    # Under the AI lock the lane says why and takes nothing.
+    bridge = Bridge(r, r.saved_project())
+    try:
+        run = bridge.call('begin_run', {'label': 'Edit'})['run_id']
+        r.check('the app shows the AI lock', wait(lambda: r.state()['aiRun'], 5))
+        lane = wait(lambda: (l := r.s.run(LANE)) and l[2].startswith('AI is editing') and l, 5)
+        r.check('under the AI lock the lane says why it takes nothing', lane, r.s.run(LANE))
+        if lane:
+            y = (lane[0] + lane[1]) / 2
+            r.s.run(DRAG_TILE, 'red.png', x, y)
+            time.sleep(0.5)
+            r.check('dragged over under the lock, it does not light up', r.s.run(LANE)[2].startswith('AI is editing'), r.s.run(LANE))
+            r.shot('lane-locked')
+            r.s.run(RELEASE, x, y)
+            time.sleep(1)
+            r.check('and dropping there adds nothing', not placed(r, red))
+        bridge.call('end_run', {'run_id': run, 'action': 'keep'})
+    finally:
+        bridge.close()
+    wait(lambda: not r.state()['aiRun'], 5)
+
+    # A picture put on the main track by mistake goes up onto the lane, under a title above the main track.
+    r.s.call("window.__nuzky.store.getState().edit({type: 'addText', startUs: 0, text: 'Hook', style: {fontSize: 80, color: '#ffffff'}})")
+    r.add_clip('red.png')
+    title = next(i for i, t in enumerate(project(r)['tracks']) if t['kind'] == 'text')
+    shot = next(c for c in project(r)['tracks'][0]['clips'] if c['content'].get('assetId') == red)
+    lane = wait(lambda: r.s.run(LANE), 5)
+    if not r.check('with a title above the main track the lane still shows, between them', lane, r.s.run(LANE)):
+        return
+    clip_left, clip_top, _, clip_bottom, _ = r.s.run(RECT, shot['id'])
+    sx, sy = clip_left + 20, (clip_top + clip_bottom) / 2
+    ly = (lane[0] + lane[1]) / 2
+    r.s.run(PRESS, sx, sy, [[sx + 2, sy - 10], [sx, ly]])
+    lit = wait(lambda: (l := r.s.run(LANE)) and l[2] == 'Drop to put it over the video', 5)
+    r.check('a picture dragged up from the main track lights the lane up', lit, r.s.run(LANE))
+    time.sleep(0.3)
+    r.shot('lane-clip-drag')
+    r.s.run(RELEASE, sx, ly)
+    moved = wait(lambda: placed(r, red) or None, 10)
+    tracks = project(r)['tracks']
+    r.check('it goes onto a new track right above the main track', moved and tracks[moved[0][0]]['kind'] == 'video' and moved[0][0] == 1, moved)
+    r.check('it keeps its time and the main track closes the gap', moved and moved[0][1]['startUs'] == shot['startUs'] and r.track() == main,
+            [moved and moved[0][1]['startUs'], shot['startUs']])
+    r.check('the title stays on its own track', any(t['kind'] == 'text' and t['clips'] for t in tracks), title)
     r.check('no error toast', not r.errors(), r.errors())

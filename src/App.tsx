@@ -370,7 +370,8 @@ function useBackendEvents() {
         if (p.type === "enter") {
           const media = p.paths.filter(isMedia);
           hasMedia = media.length > 0;
-          single = media.length === 1 ? mediaKind(media[0]) : null;
+          // Several files of one kind, such as songs, are offered only the places that kind can go.
+          single = new Set(media.map(mediaKind)).size === 1 ? mediaKind(media[0]) : null;
         }
         if ((p.type === "enter" || p.type === "over") && hasMedia) useEditor.setState({ fileDrag: { x: p.position.x / dpr, y: p.position.y / dpr, kind: single } });
         if (p.type === "leave" || p.type === "drop") useEditor.setState({ fileDrag: null });
