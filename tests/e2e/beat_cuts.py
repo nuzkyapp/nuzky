@@ -23,7 +23,7 @@ const svg = clip?.querySelector('[data-beat-ticks]');
 const box = clip?.getBoundingClientRect();
 return {ticks: svg ? [...svg.querySelectorAll('path')].map((p) => (p.getAttribute('d').match(/M/g) || []).length) : [],
         drops: [...(clip?.querySelectorAll('[data-beat-drop]') ?? [])].map((d) => d.innerText.trim()),
-        box: box && [box.left, box.top, box.width, box.height], width: window.innerWidth};"""
+        box: box && [box.left, box.top, box.width, box.height], ticksTop: svg?.getBoundingClientRect().top, width: window.innerWidth};"""
 PROJECT = 'return window.__nuzky.store.getState().snap.project'
 STATUS_BUTTON = """const li = [...document.querySelectorAll('ul[aria-label="Project status"] > li')]
   .find((li) => li.querySelector('span').firstChild.textContent === 'Music');
@@ -61,13 +61,14 @@ def ticks(r, clip_id):
 
 
 def tick_columns(r, name, clip_id, beat_from):
-    """Columns with a white tick in the music clip's top 12 px: (in the intro before the beat, after it). The drop's flag
-    chip and the fade dots in the clip's corners are left out."""
+    """Columns with a white tick in the top 12 px of the music clip's waveform, under its name: (in the intro before the
+    beat, after it). The drop's flag chip and the fade dots in the waveform's corners are left out."""
     r.shot(name)
     t = ticks(r, clip_id)
     image = np.asarray(Image.open(r.work / f'{name}.png').convert('RGB')).astype(int)
     scale = image.shape[1] / t['width']
-    left, top, width, _ = (v * scale for v in t['box'])
+    left, _, width, _ = (v * scale for v in t['box'])
+    top = t['ticksTop'] * scale
     band = image[round(top + 2 * scale):round(top + 12 * scale)]
     white = ((band > 140).all(-1) & (band.max(-1) - band.min(-1) < 45)).any(0)
     beat = left + beat_from * width

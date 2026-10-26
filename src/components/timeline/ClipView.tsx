@@ -9,8 +9,10 @@ import { Waveform } from "./Waveform";
 
 /** Width of the trim handles, and of the zone at each end that trims instead of moving. */
 export const EDGE = 8;
-/** Size of the zone at each top corner of a sound clip that drags its fade instead of trimming. */
+/** Size of the zone at each top corner of a sound clip's waveform that drags its fade instead of trimming. */
 const FADE_HANDLE = 16;
+/** A sound clip's name row; its waveform starts below it. */
+const WAVE_TOP = 17;
 
 export function clipAsset(project: Project, clip: Clip): Asset | undefined {
   const c = clip.content;
@@ -135,6 +137,7 @@ export const ClipView = memo(function ClipView({
   const fadeIn = fade ? (fade.inUs / US) * zoom : 0;
   const fadeOut = fade ? (fade.outUs / US) * zoom : 0;
   const fadeHandles = !!fade && !locked && !ghost && width >= 3 * FADE_HANDLE;
+  const waveH = innerH - WAVE_TOP - 3;
 
   return (
     <div
@@ -160,25 +163,28 @@ export const ClipView = memo(function ClipView({
     >
       {strip && c.type === "media" && <FilmstripTiles strip={strip} sourceInUs={sourceInUs} speed={speed} zoom={zoom} width={width} height={innerH} visible={local} />}
       {sound && asset && c.type === "media" && (
-        <Waveform assetId={asset.id} sourceInUs={sourceInUs} durationUs={durationUs} speed={speed} gain={c.volume} width={width} visible={local} color="#5fd497" className="absolute top-[5px] h-[calc(100%-8px)]" />
-      )}
-      {sound && asset && c.type === "media" && <BeatTicks path={asset.path} sourceInUs={sourceInUs} speed={speed} zoom={zoom} width={width} height={innerH} visible={local} />}
-      {(fadeIn > 0 || fadeOut > 0) && (
-        // The fades as ramps over the waveform: the shaded corner above the line is how much quieter the sound plays there.
-        // The line has a dark edge, like the snap guide, so it stays visible over loud sound.
-        <svg className="pointer-events-none absolute left-0 top-0" width={width} height={innerH}>
-          {fadeIn > 0 && <path d={`M0 0H${fadeIn}L0 ${innerH}Z`} className="fill-black/45" />}
-          {fadeOut > 0 && <path d={`M${width} 0H${width - fadeOut}L${width} ${innerH}Z`} className="fill-black/45" />}
-          {[fadeIn > 0 && `M0 ${innerH}L${fadeIn} 0`, fadeOut > 0 && `M${width - fadeOut} 0L${width} ${innerH}`].map(
-            (d) =>
-              d && (
-                <g key={d}>
-                  <path d={d} strokeWidth={3} className="stroke-black/50" />
-                  <path d={d} strokeWidth={1.5} className="stroke-white/90" />
-                </g>
-              ),
+        // The name gets its own row above the sound, so the bars, beats and fades below it are never covered.
+        <div className="pointer-events-none absolute inset-x-0" style={{ top: WAVE_TOP, height: waveH }}>
+          <Waveform assetId={asset.id} sourceInUs={sourceInUs} durationUs={durationUs} speed={speed} gain={c.volume} width={width} visible={local} color="#5fd497" className="absolute top-0 h-full" />
+          <BeatTicks path={asset.path} sourceInUs={sourceInUs} speed={speed} zoom={zoom} width={width} height={waveH} visible={local} />
+          {(fadeIn > 0 || fadeOut > 0) && (
+            // The fades as ramps over the waveform: the shaded corner above the line is how much quieter the sound plays there.
+            // The line has a dark edge, like the snap guide, so it stays visible over loud sound.
+            <svg className="absolute left-0 top-0" width={width} height={waveH}>
+              {fadeIn > 0 && <path d={`M0 0H${fadeIn}L0 ${waveH}Z`} className="fill-black/45" />}
+              {fadeOut > 0 && <path d={`M${width} 0H${width - fadeOut}L${width} ${waveH}Z`} className="fill-black/45" />}
+              {[fadeIn > 0 && `M0 ${waveH}L${fadeIn} 0`, fadeOut > 0 && `M${width - fadeOut} 0L${width} ${waveH}`].map(
+                (d) =>
+                  d && (
+                    <g key={d}>
+                      <path d={d} strokeWidth={3} className="stroke-black/50" />
+                      <path d={d} strokeWidth={1.5} className="stroke-white/90" />
+                    </g>
+                  ),
+              )}
+            </svg>
           )}
-        </svg>
+        </div>
       )}
       {soundStrip && (
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-3.5 bg-black/55">
@@ -194,16 +200,16 @@ export const ClipView = memo(function ClipView({
           {width > 110 && <span className="tabular shrink-0 font-normal text-fg/70">{formatDuration(durationUs)}</span>}
         </div>
       ) : (
-        // Over pictures and waveforms the name sits in a dark chip, readable over bright footage. A plain fill, not a blur: there is one per clip.
-        // On sound it sits at the bottom, clear of the fade dots in the top corners.
-        <div className={`pointer-events-none absolute inset-x-0 ${sound ? "bottom-1" : "top-1"} flex items-center gap-1 px-2.5 text-[11px] font-medium text-fg`}>
-          <span className={`flex h-[17px] min-w-0 items-center gap-1 rounded-[5px] ${sound ? "bg-black/80" : "bg-black/60"} pl-[5px] pr-1.5`}>
+        // Over pictures the name sits in a dark chip, readable over bright footage. A plain fill, not a blur: there is one per clip.
+        // On sound it sits on the clip's colour in the row above the waveform.
+        <div className={`pointer-events-none absolute inset-x-0 ${sound ? "top-0.5" : "top-1"} flex items-center gap-1 px-2.5 text-[11px] font-medium text-fg`}>
+          <span className={`flex min-w-0 items-center gap-1 ${sound ? "h-3.5" : "h-[17px] rounded-[5px] bg-black/60 pl-[5px] pr-1.5"}`}>
             <Icon size={11} className="shrink-0" />
             <span className="truncate">{label}</span>
             {width > 110 && <span className="tabular shrink-0 pl-0.5 font-normal text-fg/80">{formatDuration(durationUs)}</span>}
           </span>
           {speed !== 1 && speed !== 0 && width > 40 && (
-            <span className={`tabular ml-auto flex h-[17px] shrink-0 items-center gap-0.5 rounded-[5px] ${sound ? "bg-black/80" : "bg-black/60"} px-1 font-semibold`}>
+            <span className={`tabular ml-auto flex shrink-0 items-center gap-0.5 font-semibold ${sound ? "h-3.5" : "h-[17px] rounded-[5px] bg-black/60 px-1"}`}>
               <Gauge size={11} />
               {Number(speed.toFixed(2))}x
             </span>
@@ -293,8 +299,8 @@ export const ClipView = memo(function ClipView({
             key={end}
             data-fade={end}
             title={title}
-            className={`absolute top-0 flex cursor-ew-resize items-center justify-center ${selected || fades ? "" : "opacity-0 group-hover:opacity-100"}`}
-            style={{ left: Math.max(min, Math.min(max, x - FADE_HANDLE / 2)), width: FADE_HANDLE, height: FADE_HANDLE }}
+            className={`absolute flex cursor-ew-resize items-center justify-center ${selected || fades ? "" : "opacity-0 group-hover:opacity-100"}`}
+            style={{ top: WAVE_TOP, left: Math.max(min, Math.min(max, x - FADE_HANDLE / 2)), width: FADE_HANDLE, height: FADE_HANDLE }}
           >
             <span className="h-2.5 w-2.5 rounded-full border border-black/70 bg-fg" />
           </div>

@@ -49,7 +49,7 @@ const END_TIP = "The video ends here. Sound after this point is not exported.";
 function rowHeight(track: Track) {
   if (track.id === MAIN_TRACK) return 64;
   if (track.kind === "video") return 50;
-  if (track.kind === "audio") return 46;
+  if (track.kind === "audio") return 58;
   return 34;
 }
 

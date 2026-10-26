@@ -43,6 +43,13 @@ SOURCE_IN = """return window.__nuzky.store.getState().snap.project.tracks.flatMa
 UNDER = """const b = document.querySelector(`[data-clip-id='${arguments[0]}'] [data-fade='${arguments[1]}']`).getBoundingClientRect();
 return document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)?.closest('[data-fade]')?.dataset.fade ?? null;"""
 KNOBS = "return document.querySelectorAll(`[data-clip-id='${arguments[0]}'] [data-fade]`).length"
+# Whether the clip `arguments[0]`'s name `arguments[1]` sits above its waveform and fade dots, covering none of them.
+NAME_CLEAR = """const clip = document.querySelector(`[data-clip-id='${arguments[0]}']`);
+const name = [...clip.querySelectorAll('span.truncate')].find((s) => s.textContent === arguments[1])?.getBoundingClientRect();
+const wave = clip.querySelector('canvas')?.getBoundingClientRect();
+if (!name || !wave) return null;
+return [wave, ...[...clip.querySelectorAll('[data-fade]')].map((d) => d.getBoundingClientRect())].every((b) => b.top >= name.bottom)
+  && wave.height >= 28;"""
 SELECTION = 'return window.__nuzky.store.getState().selection'
 # Sends `arguments[2]` Ctrl + wheel events of `arguments[1]` px over the clip `arguments[0]` and returns the zoom.
 WHEEL = """const b = document.querySelector(`[data-clip-id='${arguments[0]}']`).getBoundingClientRect();
@@ -226,6 +233,8 @@ def edit(r):
     r.focus_clip(clip)
     time.sleep(0.5)
     r.check('the selected sound clip shows a fade dot at each end', r.s.run(KNOBS, clip) == 2, r.s.run(KNOBS, clip))
+    r.check("the sound clip's name sits above its waveform and fade dots, which keep their height",
+            wait(lambda: r.s.run(NAME_CLEAR, clip, 'tone.wav'), 5), r.s.run(NAME_CLEAR, clip, 'tone.wav'))
     r.s.run(FADE_DRAG, clip, 'in', 100)
     r.check('dragging the fade-in dot 100 px shows "Fade in 1.0 s"', wait(lambda: r.s.run(TIP, 'Fade in 1.0 s'), 5))
     r.shot('fade-drag')
