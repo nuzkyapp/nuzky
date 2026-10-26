@@ -102,7 +102,7 @@ export function TextSection({ clip, text, style, caption }: { clip: Clip; text: 
   };
   const apply = (p: (typeof presets)[number]) => {
     const look = p as CaptionPreset;
-    if (everyCaption) return void applyCaptionLook({ style: look.style, animIn: look.animIn ?? null, animOut: look.animOut ?? null }, track?.id);
+    if (everyCaption) return void applyCaptionLook({ style: look.style, animIn: look.animIn ?? null, animOut: look.animOut ?? null }, p.name, track?.id);
     const restyle: EditCmd = { type: "updateClip", clipId: clip.id, style: presetOver(p.style, style) };
     // A caption style brings its animations too.
     const animate = (slot: "in" | "out", animation: Animation | null | undefined): EditCmd => ({ type: "setAnimation", clipId: clip.id, slot, animation: animation ?? null });

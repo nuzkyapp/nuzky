@@ -77,7 +77,7 @@ export function CaptionsTab() {
   const apply = (preset: CaptionPreset) => {
     const next: CaptionLook = { style: preset.style, animIn: preset.animIn ?? null, animOut: preset.animOut ?? null };
     // Captions keep their font and case when the style brings none, each caption its own.
-    if (hasCaptions) applyCaptionLook(next);
+    if (hasCaptions) void applyCaptionLook(next, preset.name);
     else useSpeech.setState({ captionLook: { ...next, style: presetOver(preset.style, pending.style) } });
   };
   // Every caption at once, or the look waiting for Generate, read when the change goes out so quick changes both stick.

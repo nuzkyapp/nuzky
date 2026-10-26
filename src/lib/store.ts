@@ -1106,9 +1106,12 @@ export function presetOver(preset: TextStyle, style: TextStyle): TextStyle {
 /** The captions track `trackId`, or the first one. */
 const captionTrack = (project: Project, trackId?: string) => (trackId ? project.tracks.find((t) => t.id === trackId) : project.tracks.find(isCaptionTrack));
 
-/** Gives every caption the look, its style as `presetOver` puts it and its animations, as one undo step. */
-export function applyCaptionLook(look: CaptionLook, trackId?: string) {
-  return useEditor.getState().edit(
+/**
+ * Gives every caption the look named `name`, its style as `presetOver` puts it and its animations, as one undo
+ * step, and offers Undo: one click changes every caption, karaoke included.
+ */
+export async function applyCaptionLook(look: CaptionLook, name: string, trackId?: string) {
+  const snap = await useEditor.getState().edit(
     (project) =>
       captionTrack(project, trackId)?.clips.flatMap((c): EditCmd[] => {
         if (c.content.type !== "text") return [];
@@ -1119,6 +1122,8 @@ export function applyCaptionLook(look: CaptionLook, trackId?: string) {
         ];
       }) ?? null,
   );
+  const count = snap && captionTrack(snap.project, trackId)?.clips.length;
+  if (count) useEditor.getState().toast({ kind: "info", text: `${name} applied to ${count === 1 ? "the caption" : `all ${count} captions`}`, action: undoAction(snap) });
 }
 
 /**

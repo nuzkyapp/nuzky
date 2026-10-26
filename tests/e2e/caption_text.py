@@ -1,5 +1,6 @@
 """A caption's text style goes to every caption unless Apply to says This caption, as CapCut's Apply to all captions:
-All caps from one caption's inspector capitalises every caption and survives picking another style, This caption keeps
+All caps from one caption's inspector capitalises every caption and survives picking another style, which a toast
+reports with Undo, This caption keeps
 a colour to one caption, More style stays folded until opened and then aligns every caption and gives them a box with
 its opacity and fully round corners, Position moves every caption at once and undoes in one step, and a caption dragged
 in the preview takes every caption with it, or only itself on This caption. The Captions tab
@@ -140,6 +141,16 @@ def caption_text(r):
     r.check('the Outline style goes on every caption and keeps the capitals',
             every(r, lambda c: c['style']['strokeWidth'] == 7 and c['style']['bold'] and c['style'].get('letterCase') == 'upper'), captions(r))
     r.check('its tile is checked', wait(lambda: r.s.run(f"return document.querySelector('{SECTION} button[title=\"Apply Outline to all captions\"]').getAttribute('aria-pressed')") == 'true', 5))
+    # One click restyles every caption, so the toast says so and its Undo takes the look back.
+    r.check('a toast says Outline went on all 3 captions and offers Undo', wait(lambda: r.s.run(
+        "return window.__nuzky.store.getState().toasts.find((t) => t.text === 'Outline applied to all 3 captions')?.action?.label ?? null") == 'Undo', 5),
+        r.state()['toasts'])
+    r.shot('look-toast')
+    r.s.run("[...document.querySelectorAll('[data-toast] button')].find((b) => b.textContent.trim() === 'Undo')?.click()")
+    r.check('Undo in the toast gives every caption its look before, capitals included',
+            every(r, lambda c: c['style']['strokeWidth'] == 7.5 and not c['style']['bold'] and c['style'].get('letterCase') == 'upper'), captions(r))
+    r.s.run(f"document.querySelector('{SECTION} button[title=\"Apply Outline to all captions\"]').click()")
+    every(r, lambda c: c['style']['strokeWidth'] == 7)
 
     # This caption: a colour for the selected caption only.
     r.s.run(f'{segment(SECTION, "Apply style to", "This caption")}.click()')
