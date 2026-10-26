@@ -117,8 +117,8 @@ pub enum EditCmd {
         start_us: i64,
         duration_us: Option<i64>,
     },
-    /// Puts a video or image over the whole picture, fitted to the canvas like a main-track clip, on an
-    /// overlay track above the main track. `duration_us` defaults to the whole video, or 3 s of an image.
+    /// Puts a video or image over the whole picture, filling the canvas when it is at least as large as the
+    /// canvas both ways and fitted to it otherwise, on an overlay track above the main track. `duration_us` defaults to the whole video, or 3 s of an image.
     #[cfg_attr(feature = "ts", ts(optional_fields = nullable))]
     AddOverlay {
         asset_id: String,
@@ -678,6 +678,17 @@ fn picture_in_picture(canvas: &Canvas, asset: &Asset) -> Transform {
     }
 }
 
+/// Over the video: filling the canvas when the picture is at least as large as it both ways, so filling only
+/// shrinks it; a smaller picture is fitted, as filling would blow it up past its own pixels.
+fn overlay_transform(canvas: &Canvas, asset: &Asset) -> Transform {
+    if asset.width < canvas.width || asset.height < canvas.height {
+        return Transform::default();
+    }
+    let (sx, sy) = (canvas.width as f32 / asset.width as f32, canvas.height as f32 / asset.height as f32);
+    // Rounded as the inspector's Fill is, so the inspector shows Fill as chosen.
+    Transform { scale: (sx.max(sy) / sx.min(sy) * 1000.0).round() / 1000.0, ..Transform::default() }
+}
+
 /// Where a new clip of the asset starts reading and how much it reads: the part the user chose, or
 /// the whole file.
 fn source_span(asset: &Asset) -> (i64, i64) {
@@ -1127,7 +1138,7 @@ impl Project {
                     "Only a video or an image can go over the video"
                 );
                 let duration = overlay_duration(&asset, duration_us, min);
-                self.add_overlay(&asset, start_us, duration, Transform::default(), None, out);
+                self.add_overlay(&asset, start_us, duration, overlay_transform(&self.canvas, &asset), None, out);
             }
             EditCmd::AddSticker { asset_id, start_us, duration_us, transform } => {
                 let asset = self.asset(&asset_id).ok_or_else(|| anyhow!("Unknown media"))?.clone();
@@ -3085,6 +3096,18 @@ mod tests {
         .unwrap();
         assert_eq!(p.tracks[0].clips[0].id, b);
         assert_eq!(main_layout(&p), vec![(0, 3000), (3000, 5000)]);
+    }
+
+    #[test]
+    fn an_overlay_fills_the_frame_only_when_filling_does_not_enlarge_it() {
+        let canvas = Canvas { width: 1080, height: 1920, ..Project::new("t").canvas };
+        let sized = |width, height| Asset { width, height, ..asset("p", AssetKind::Image, 0) };
+        // 4K landscape over a vertical frame: cropped at the sides, still shrunk.
+        assert_eq!(overlay_transform(&canvas, &sized(3840, 2160)).scale, 3.16);
+        assert_eq!(overlay_transform(&canvas, &sized(1080, 1920)).scale, 1.0);
+        // A side shorter than the frame's would be enlarged by filling, so it stays fitted.
+        assert_eq!(overlay_transform(&canvas, &sized(1920, 1080)), Transform::default());
+        assert_eq!(overlay_transform(&canvas, &sized(1079, 4000)), Transform::default());
     }
 
     #[test]

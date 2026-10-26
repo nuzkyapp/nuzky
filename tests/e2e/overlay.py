@@ -101,4 +101,20 @@ def overlay(r):
     found = wait(lambda: placed(r, red) or None, 10)
     shape = found and found[0][1]['content'].get('shape') or {}
     r.check('Picture in picture from the menu puts it in a rounded window', found and abs(shape.get('radius', 0) - 0.15) < 1e-6, shape)
+
+    # A picture larger than the frame both ways fills it; the 16:9 one above was only fitted.
+    r.key('z', ctrlKey=True)
+    wait(lambda: not placed(r, red), 5)
+    Image.new('RGB', (2000, 2400), (30, 60, 230)).save(r.work / 'blue.png')
+    r.import_media(r.work / 'blue.png')
+    blue = next(a['id'] for a in r.state()['assets'] if a['name'] == 'blue.png')
+    r.s.run('window.__nuzky.store.getState().select([])')
+    r.s.run("document.querySelector('[aria-label=\"Put blue.png over the video\"]').click()")
+    found = wait(lambda: placed(r, blue) or None, 10)
+    scale = found and found[0][1]['content']['transform']['scale']
+    r.check('a picture larger than the frame fills it', scale and abs(scale - 1.481) < 1e-4, scale)
+    r.s.run('window.__nuzky.store.getState().select([])')
+    after, redrawn = preview_redraw(r, 'overlay-fill', before)
+    corner = ImageStat.Stat(after.crop((4, 4, 24, 24))).mean
+    r.check('the preview shows it over the whole frame, corners included', redrawn and corner[2] > 170 and corner[0] < 90, [round(v) for v in corner])
     r.check('no error toast', not r.errors(), r.errors())
