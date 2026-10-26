@@ -210,6 +210,7 @@ fn timecode(us: i64) -> String {
 
 /// The message as the agent gets it: the user's words, then what they had selected.
 fn prompt(text: &str, context: &PromptContext, project: &nuzky_engine::Project) -> String {
+    use nuzky_engine::model::{ClipContent, TrackKind};
     let thumbnail;
     let text = if context.thumbnail {
         // What the user typed beside Make a thumbnail are their wishes.
@@ -225,11 +226,37 @@ fn prompt(text: &str, context: &PromptContext, project: &nuzky_engine::Project) 
         );
     }
     if let Some(ids) = context.selection.as_ref().filter(|ids| !ids.is_empty()) {
-        let clips: Vec<_> = project.tracks.iter().flat_map(|t| &t.clips).filter(|c| ids.contains(&c.id)).collect();
-        let range = clips.iter().map(|c| c.start_us).min().zip(clips.iter().map(|c| c.end_us()).max());
-        let range =
-            range.map_or(String::new(), |(a, b)| format!(" covering {}–{} ({a}–{b} µs)", timecode(a), timecode(b)));
-        lines.push(format!("[Nuzky] Selected clips: {}{range}.", ids.join(", ")));
+        let clips: Vec<_> = project
+            .tracks
+            .iter()
+            .flat_map(|t| t.clips.iter().map(move |c| (t, c)))
+            .filter(|(_, c)| ids.contains(&c.id))
+            .collect();
+        let range = clips.iter().map(|(_, c)| c.start_us).min().zip(clips.iter().map(|(_, c)| c.end_us()).max());
+        let range = range.map_or(String::new(), |(a, b)| {
+            let (a, b) = (a.min(project.duration_us()), b.min(project.duration_us()));
+            format!(" covering {}–{} ({a}–{b} µs)", timecode(a), timecode(b))
+        });
+        let names: Vec<_> = clips
+            .iter()
+            .map(|(track, clip)| match &clip.content {
+                ClipContent::Text { text, .. } => {
+                    let kind = if track.is_captions() { "caption" } else { "text" };
+                    let text: String = text.chars().take(40).collect();
+                    format!("{} ({kind} {text:?})", clip.id)
+                }
+                ClipContent::Media { asset_id, .. } => {
+                    let kind = match track.kind {
+                        TrackKind::Audio => "audio track",
+                        _ if track.id == nuzky_engine::edit::MAIN_TRACK => "main-track video",
+                        _ => "video track",
+                    };
+                    let name = project.asset(asset_id).map_or(asset_id.as_str(), |a| a.name.as_str());
+                    format!("{} ({name:?}, {kind})", clip.id)
+                }
+            })
+            .collect();
+        lines.push(format!("[Nuzky] Selected clips: {}{range}.", names.join(", ")));
     }
     if let Some(at) = context.playhead_us {
         lines.push(format!("[Nuzky] Playhead: {} ({at} µs).", timecode(at)));
@@ -1000,6 +1027,24 @@ mod tests {
             attachments: Vec::new(),
         };
         assert_eq!(prompt("Ahoj", &none, &project), "Ahoj");
+        use serde_json::{from_value, json};
+        let mut selected = Project::new("selection");
+        selected.assets = from_value(json!([{
+            "id":"song", "name":"My song", "path":"/song.wav", "kind":"audio",
+            "durationUs":281_258_145, "width":0, "height":0, "fps":0.0, "hasAudio":true
+        }]))
+        .unwrap();
+        selected.tracks = from_value(json!([
+            {"id":"main", "kind":"video", "clips":[{"id":"take", "startUs":0, "durationUs":84_100_000,
+                "content":{"type":"media", "assetId":"video", "sourceInUs":0}}]},
+            {"id":"music", "kind":"audio", "clips":[{"id":"song-clip", "startUs":0, "durationUs":281_258_145,
+                "content":{"type":"media", "assetId":"song", "sourceInUs":0}}]}
+        ]))
+        .unwrap();
+        let selection: PromptContext = from_value(json!({"selection":["song-clip"]})).unwrap();
+        let text = prompt("Zkrať to", &selection, &selected);
+        assert!(text.contains("covering 00:00.00–01:24.10 (0–84100000 µs)"), "{text}");
+        assert!(text.contains("song-clip (\"My song\", audio track)"), "{text}");
         let attachment = |path: &str, kind| Attachment { path: path.into(), kind, name: String::new(), preview: None };
         let attached = PromptContext {
             attachments: vec![
