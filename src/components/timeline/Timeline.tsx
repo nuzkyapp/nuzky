@@ -44,6 +44,7 @@ const ROW_GAP = 4;
 const LANES_AT = { left: HEADER_W, top: RULER_H };
 /** How far into each end of a clip dropped media still goes in beside it instead of replacing it, in px. */
 const REPLACE_END = 24;
+const OVERLAY_LANE_H = 36;
 const END_TIP = "The video ends here. Sound after this point is not exported.";
 
 function rowHeight(track: Track) {
@@ -246,6 +247,8 @@ export function Timeline({ height }: { height: number }) {
   const { select, setZoom } = useEditor.getState();
   const scroller = useRef<HTMLDivElement>(null);
   const rows = useRef(new Map<string, HTMLDivElement>());
+  /** The empty lane above the main track that puts dropped media over the video. */
+  const overlayLane = useRef<HTMLDivElement>(null);
   const [snapping, setSnapping] = useState(true);
   const [view, setView] = useState({ left: 0, width: 1000 });
   const [menu, setMenu] = useState<MenuAt | null>(null);
@@ -329,10 +332,12 @@ export function Timeline({ height }: { height: number }) {
         const rr = row.getBoundingClientRect();
         if (y >= rr.top && y <= rr.bottom) trackId = id;
       }
+      const lane = overlayLane.current?.getBoundingClientRect();
+      const over = lane && y >= lane.top && y <= lane.bottom ? ("overlay" as const) : undefined;
       const t = timeAt(x);
       const edges = [0, ...(playing ? [] : [useEditor.getState().timeUs]), ...allClips(project).flatMap((c) => [c.startUs, c.startUs + c.durationUs])];
-      const snapped = snapping && trackId && trackId !== MAIN_TRACK ? snap(t, edges, (SNAP_PX / zoom) * US) : null;
-      return { trackId, startUs: Math.round(snapped ?? t) };
+      const snapped = snapping && (over || (trackId && trackId !== MAIN_TRACK)) ? snap(t, edges, (SNAP_PX / zoom) * US) : null;
+      return { trackId, startUs: Math.round(snapped ?? t), over };
     },
     [project, playing, snapping, timeAt, zoom],
   );
@@ -473,6 +478,25 @@ export function Timeline({ height }: { height: number }) {
           return i < main.length ? main[i].startUs : main.reduce((end, c) => Math.max(end, c.startUs + c.durationUs), 0);
         })();
   const emptyTimeline = allClips(drawn).length === 0;
+  // Until something sits over the video, an empty lane above it shows where a picture over it goes.
+  const overlayLaneShown = !!project && !emptyTimeline && !cover && !peekShown && !project.tracks.some((t) => t.kind === "video" && t.id !== MAIN_TRACK);
+  const overLane = !!place?.over && dragMedia?.kind !== "audio";
+  const laneRow = overlayLaneShown && (
+    <div key="overlay-lane" data-lane className="relative flex shrink-0" style={{ height: OVERLAY_LANE_H + ROW_GAP }}>
+      <div className="sticky left-0 z-[47] shrink-0 border-r border-white/[.07] bg-panel" style={{ width: HEADER_W }} />
+      <div ref={overlayLane} data-lane data-testid="overlay-lane" className="relative flex-1" style={{ marginBlock: ROW_GAP / 2 }}>
+        <div
+          className={`pointer-events-none absolute inset-y-0 right-1 left-1 flex items-center rounded-[7px] border text-[12px] transition-colors duration-[120ms] ease-out ${
+            overLane ? "border-accent bg-accent/15 text-fg" : "border-dashed border-white/15 text-muted"
+          }`}
+        >
+          <span className="sticky px-3" style={{ left: HEADER_W }}>
+            {overLane ? "Drop to put it over the video" : "Drag a video or picture here to put it over the video"}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
   // One tab stop for all clips: the last focused, else the first selected, else the first main-track clip.
   const known = (id: string | null | undefined) => !!id && allClips(project).some((c) => c.id === id);
   const tabStop = known(focusId) ? focusId : known(selection[0]) ? selection[0] : (mainClips(project)[0]?.id ?? tracks.find((t) => t.clips.length > 0)?.clips[0]?.id ?? null);
@@ -718,7 +742,7 @@ export function Timeline({ height }: { height: number }) {
             {tracks.map((track) => {
               const h = rowHeight(track);
               const isMain = track.id === MAIN_TRACK;
-              return (
+              const row = (
                 <div key={track.id} data-lane className="relative flex shrink-0" style={{ height: h + ROW_GAP }}>
                   <TrackHeader track={track} width={HEADER_W} locked={locked} />
                   <div
@@ -808,6 +832,7 @@ export function Timeline({ height }: { height: number }) {
                   )}
                 </div>
               );
+              return isMain && laneRow ? [laneRow, row] : row;
             })}
             {drag?.moved && drag.target === null && dragKind === "audio" && <div className="ml-[152px] h-0.5 rounded-full bg-accent" />}
             {/* The header column runs on below the last track, so nothing scrolled under it shows through. */}

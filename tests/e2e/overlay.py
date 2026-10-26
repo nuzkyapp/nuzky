@@ -118,3 +118,65 @@ def overlay(r):
     corner = ImageStat.Stat(after.crop((4, 4, 24, 24))).mean
     r.check('the preview shows it over the whole frame, corners included', redrawn and corner[2] > 170 and corner[0] < 90, [round(v) for v in corner])
     r.check('no error toast', not r.errors(), r.errors())
+
+
+ZOOM = 60
+# Presses the middle of a media tile and drags it to `arguments[1]`, `arguments[2]`, without letting go.
+DRAG_TILE = """const tile = document.querySelector(`[aria-label='Add ${arguments[0]} at playhead']`).closest('.cursor-grab');
+const b = tile.getBoundingClientRect();
+const at = (type, x, y) => new PointerEvent(type, {bubbles: true, button: 0, pointerId: 1, clientX: x, clientY: y});
+const [x, y] = [b.left + b.width / 2, b.top + b.height / 3];
+document.elementFromPoint(x, y).dispatchEvent(at('pointerdown', x, y));
+window.dispatchEvent(at('pointermove', x + 20, y));
+window.dispatchEvent(at('pointermove', arguments[1], arguments[2]));"""
+RELEASE = """window.dispatchEvent(new PointerEvent('pointerup', {bubbles: true, button: 0, pointerId: 1,
+  clientX: arguments[0], clientY: arguments[1]}))"""
+LANE = "const l = document.querySelector('[data-testid=overlay-lane]'); return l && [l.getBoundingClientRect().top, l.getBoundingClientRect().bottom, l.textContent]"
+
+
+@flow('overlay-lane', 'Over a talking head on the main track, an empty lane says where a picture over the video goes; a '
+      'picture dragged there lights it up and lands over the video at the drop line on a track above the main one')
+def overlay_lane(r):
+    Image.new('RGB', (1280, 720), (230, 30, 30)).save(r.work / 'red.png')
+    r.import_media(FIXTURES / 'talk.mp4', r.work / 'red.png')
+    r.add_clip('talk.mp4')
+    red = next(a['id'] for a in r.state()['assets'] if a['name'] == 'red.png')
+    main = r.track()
+    r.s.run('const st = window.__nuzky.store.getState(); st.select([]); st.seek(0); st.setZoom(arguments[0])', ZOOM)
+    lane = wait(lambda: r.s.run(LANE), 5)
+    if not r.check('an empty lane above the main track says what goes there',
+                   lane and lane[2] == 'Drag a video or picture here to put it over the video', lane):
+        return
+    main_top = r.s.run("return document.querySelector(`[data-clip-id='${arguments[0]}']`).getBoundingClientRect().top", main[0]['id'])
+    r.check('the lane sits right above the main track', lane[1] <= main_top, [lane, main_top])
+    time.sleep(0.5)
+    r.shot('lane')
+
+    left = r.s.run("return document.querySelector(`[data-clip-id='${arguments[0]}']`).getBoundingClientRect().left", main[0]['id'])
+    x, y = left + 2 * ZOOM, (lane[0] + lane[1]) / 2
+    r.s.run(DRAG_TILE, 'red.png', x, y)
+    hot = wait(lambda: (l := r.s.run(LANE)) and l[2] == 'Drop to put it over the video', 5)
+    r.check('dragged over it, the lane says the picture will go over the video', hot, r.s.run(LANE))
+    line = r.s.run("return document.querySelector('[data-testid=drop-line]')?.getBoundingClientRect().left ?? null")
+    r.check('the drop line shows where it will start', line is not None and abs(line - x) < 2, [line, x])
+    time.sleep(0.3)
+    r.shot('lane-drag')
+    r.s.run(RELEASE, x, y)
+
+    found = wait(lambda: placed(r, red) or None, 10)
+    if not r.check('the picture lands on a track right above the main track', found and found[0][0] == 1, found):
+        return
+    clip = found[0][1]
+    r.check('it starts at the drop line and lasts 3 s', abs(clip['startUs'] - 2_000_000) < 2e6 / ZOOM and clip['durationUs'] == 3_000_000,
+            (clip['startUs'], clip['durationUs']))
+    t = clip['content']['transform']
+    r.check('it covers the picture as Overlay does', (t['x'], t['y'], t['scale']) == (0, 0, 1) and not clip['content'].get('shape'), t)
+    r.check('the talking head\'s clip stays as it was', r.track() == main)
+    r.check('the new track takes the lane\'s place', wait(lambda: r.s.run(LANE) is None, 5))
+    r.s.run('window.__nuzky.store.getState().select([])')
+    time.sleep(0.5)
+    r.shot('lane-dropped')
+
+    r.key('z', ctrlKey=True)
+    r.check('one undo removes the picture and brings the lane back', wait(lambda: not placed(r, red) and r.s.run(LANE) is not None, 5))
+    r.check('no error toast', not r.errors(), r.errors())

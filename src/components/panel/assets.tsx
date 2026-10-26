@@ -4,7 +4,7 @@ import { api, errorText } from "../../lib/api";
 import { followPointer } from "../../lib/drag";
 import { runAutomatically } from "../../lib/plugins";
 import { MAIN_TRACK, aiLocked, allClips, currentEpoch, findClip, undoAction, useEditor } from "../../lib/store";
-import type { Asset } from "../../lib/types";
+import type { Asset, EditCmd } from "../../lib/types";
 import { lockedProps, useLockReason } from "../ui";
 
 export const AUDIO_EXTENSIONS = ["mp3", "wav", "m4a", "aac", "flac", "ogg", "opus"];
@@ -59,7 +59,8 @@ export async function importPaths(paths: string[], place?: DropTarget | { replac
       let startUs = place.startUs;
       for (const id of res.added) {
         if (currentEpoch() !== epoch) break;
-        const snap = await edit({ type: "addClip", assetId: id, startUs, trackId: place.trackId });
+        const kind = useEditor.getState().snap?.project.assets.find((a) => a.id === id)?.kind;
+        const snap = await edit(dropEdit(id, kind, { ...place, startUs }));
         const added = snap && findClip(snap.project, snap.select[0]);
         if (added) startUs = added.clip.startUs + added.clip.durationUs;
       }
@@ -166,11 +167,19 @@ export function addOverlay(assetId: string) {
   return edit({ type: "addOverlay", assetId, startUs: Math.round(timeUs), durationUs: null });
 }
 
-/** Where media dropped at a point lands: on a track at a time, or in the clip it replaces. */
+/** Where media dropped at a point lands: on a track at a time, over the video, or in the clip it replaces. */
 export interface DropTarget {
   trackId: string | null;
   startUs: number;
   replaceId: string | null;
+  over?: "overlay";
+}
+
+/** The edit that puts dropped media where the target says. Sound has no picture to put over the video. */
+export function dropEdit(assetId: string, kind: Asset["kind"] | undefined, target: DropTarget): EditCmd {
+  if (target.replaceId) return { type: "replaceClip", clipId: target.replaceId, assetId };
+  if (target.over === "overlay" && kind !== "audio") return { type: "addOverlay", assetId, startUs: target.startUs, durationUs: null };
+  return { type: "addClip", assetId, startUs: target.startUs, trackId: target.trackId };
 }
 /** What is dragged, so the timeline knows which clips it can replace. */
 export interface DropMedia {
@@ -200,8 +209,7 @@ export function assetDragHandler(assetId: string) {
       if (!dragging || !drag) return;
       const asset = useEditor.getState().snap?.project.assets.find((a) => a.id === assetId);
       const target = dropResolver?.(ev.clientX, ev.clientY, asset ?? null);
-      if (target?.replaceId) useEditor.getState().edit({ type: "replaceClip", clipId: target.replaceId, assetId });
-      else if (target) useEditor.getState().edit({ type: "addClip", assetId, startUs: target.startUs, trackId: target.trackId });
+      if (target) useEditor.getState().edit(dropEdit(assetId, asset?.kind, target));
     };
     // A cancelled drag drops nothing.
     followPointer({ move, up, cancel: () => useEditor.setState({ assetDrag: null }) });
