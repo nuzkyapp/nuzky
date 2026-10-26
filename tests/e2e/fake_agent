@@ -407,6 +407,18 @@ def call(tool, arguments, text=False):
     return json.loads(result['content'][0]['text']) if text else result.get('structuredContent', {})
 
 
+def unprefixed(tool):
+    """A Nuzky tool called without Claude's prefix, as models do since the guide names them so; Claude Code 2.1.310 refuses it."""
+    global calls
+    calls += 1
+    tid, block = f'toolu_{os.getpid()}_{calls}', {'type': 'tool_use', 'name': tool}
+    emit({'type': 'stream_event', 'parent_tool_use_id': None, 'event': {'type': 'message_start'}})
+    emit({'type': 'stream_event', 'parent_tool_use_id': None, 'event': {'type': 'content_block_start', 'content_block': dict(block, id=tid, input={})}})
+    emit({'type': 'assistant', 'parent_tool_use_id': None, 'message': {'content': [dict(block, id=tid, input={})]}})
+    emit({'type': 'user', 'parent_tool_use_id': None, 'message': {'content': [{'type': 'tool_result', 'tool_use_id': tid, 'is_error': True,
+          'content': f'<tool_use_error>Error: No such tool available: {tool}</tool_use_error>'}]}})
+
+
 def search(query, title='File:Spotify logo.svg', url='https://commons.wikimedia.org/wiki/File:Spotify_logo.svg'):
     """The agent's own web search, which runs on its provider's servers, in the shape each one reports it."""
     global calls
@@ -691,6 +703,8 @@ elif 'cut' in message:
     run = call('begin_run', {'label': 'Tighten the start'})['run_id']
     say('Začínám.')
     time.sleep(1.5)
+    if not (CODEX or OPENCODE):
+        unprefixed('apply_edits')
     call('apply_edits', {'run_id': run, 'request_id': 'cut', 'edits': [
         {'type': 'rippleDeleteRanges', 'ranges': [{'startUs': 1_000_000, 'endUs': 3_000_000}]}]})
     style = {'fontSize': 95.0, 'color': '#ffffff', 'strokeWidth': 7.5}

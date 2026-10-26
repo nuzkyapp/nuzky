@@ -64,6 +64,8 @@ pub(crate) struct Parser {
     streamed: bool,
     /// Tool names by call id; results carry only the id.
     tools: HashMap<String, String>,
+    /// The tools Claude Code offered, each one `allowed`.
+    offered: Vec<String>,
 }
 
 fn text_of(content: &Value) -> String {
@@ -87,7 +89,11 @@ impl Parser {
             return Vec::new();
         }
         match v["type"].as_str() {
-            Some("system") if v["subtype"] == "init" => init(&v).into_iter().collect(),
+            Some("system") if v["subtype"] == "init" => {
+                self.offered =
+                    v["tools"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect();
+                init(&v).into_iter().collect()
+            }
             Some("stream_event") => {
                 let e = &v["event"];
                 match e["type"].as_str() {
@@ -96,7 +102,7 @@ impl Parser {
                         Vec::new()
                     }
                     Some("content_block_start") if e["content_block"]["type"] == "tool_use" => {
-                        vec![self.tool_use(&e["content_block"], None)]
+                        self.tool_use(&e["content_block"], None).into_iter().collect()
                     }
                     Some("content_block_delta") if e["delta"]["type"] == "text_delta" => {
                         self.streamed = true;
@@ -120,7 +126,7 @@ impl Parser {
                 let mut out = Vec::new();
                 for c in content.as_array().into_iter().flatten() {
                     match c["type"].as_str() {
-                        Some("tool_use") => out.push(self.tool_use(c, Some(c["input"].clone()))),
+                        Some("tool_use") => out.extend(self.tool_use(c, Some(c["input"].clone()))),
                         Some("text") if !self.streamed => out
                             .push(Step::Event(AgentEvent::Text { text: c["text"].as_str().unwrap_or("").to_owned() })),
                         _ => {}
@@ -133,10 +139,10 @@ impl Parser {
                 .into_iter()
                 .flatten()
                 .filter(|c| c["type"] == "tool_result")
-                .map(|c| {
+                .filter_map(|c| {
                     let id = c["tool_use_id"].as_str().unwrap_or("");
-                    let name = self.tools.get(id).cloned().unwrap_or_default();
-                    tool(id, &name, if c["is_error"] == true { ToolStatus::Failed } else { ToolStatus::Done }, None)
+                    let status = if c["is_error"] == true { ToolStatus::Failed } else { ToolStatus::Done };
+                    Some(tool(id, self.tools.get(id)?, status, None))
                 })
                 .collect(),
             Some("result") if v["is_error"] == true => {
@@ -151,15 +157,20 @@ impl Parser {
         }
     }
 
-    fn tool_use(&mut self, block: &Value, input: Option<Value>) -> Step {
+    fn tool_use(&mut self, block: &Value, input: Option<Value>) -> Option<Step> {
         let (id, name) = (block["id"].as_str().unwrap_or(""), block["name"].as_str().unwrap_or(""));
+        // The guide names Nuzky's tools without Claude's prefix, and the model now and then calls one so.
+        // Claude Code has no such tool and answers with an error, so the model calls it again by its full name.
+        if self.offered.iter().any(|t| t.strip_prefix("mcp__nuzky__") == Some(name)) {
+            return None;
+        }
         if !allowed(name) {
-            return Step::Fail(
+            return Some(Step::Fail(
                 ErrorCode::AgentFailed,
                 format!(
                     "Claude Code used a tool Nuzky did not give it ({name}), so Nuzky stopped it. Update Claude Code and Nuzky."
                 ),
-            );
+            ));
         }
         let (name, input) = if name == "WebSearch" {
             ("web_search", input.map(|i| json!({"query": i["query"]})))
@@ -167,7 +178,7 @@ impl Parser {
             (name, input)
         };
         self.tools.insert(id.to_owned(), name.to_owned());
-        tool(id, name, ToolStatus::Running, input)
+        Some(tool(id, name, ToolStatus::Running, input))
     }
 }
 
@@ -284,6 +295,27 @@ mod tests {
                 search(ToolStatus::Running, Some(json!({"query": "Spotify logo svg wikimedia commons"}))),
                 search(ToolStatus::Done, None),
             ]
+        );
+    }
+
+    // Shapes from claude 2.1.310 answering a call without the prefix.
+    #[test]
+    fn a_nuzky_tool_called_without_the_prefix_is_retried_not_stopped() {
+        let lines = [
+            init_line(&["mcp__nuzky__apply_edits"], "default"),
+            json!({"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_start","content_block":{"type":"tool_use","id":"t1","name":"apply_edits","input":{}}}}),
+            json!({"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"tool_use","id":"t1","name":"apply_edits","input":{"run_id":"x"}}]}}),
+            json!({"type":"user","parent_tool_use_id":null,"message":{"content":[{"type":"tool_result","content":"<tool_use_error>Error: No such tool available: apply_edits</tool_use_error>","is_error":true,"tool_use_id":"t1"}]}}),
+            json!({"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"tool_use","id":"t2","name":"mcp__nuzky__apply_edits","input":{"run_id":"x"}}]}}),
+        ];
+        assert_eq!(
+            events(&lines),
+            [Ok(AgentEvent::Tool {
+                id: "t2".into(),
+                name: "mcp__nuzky__apply_edits".into(),
+                status: ToolStatus::Running,
+                input: Some(json!({"run_id":"x"})),
+            })]
         );
     }
 

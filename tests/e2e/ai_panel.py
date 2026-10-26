@@ -1133,6 +1133,10 @@ def ai_panel(r):
     r.check('a card lists exactly what changed, from the project itself',
             'Shortened the video from' in text and 'Cut out 1 passage, 2.0 s in total' in text and 'Added 2 captions' in text, text)
     r.check("the agent's answer streams in", 'Hotovo.' in text, text)
+    r.check('apply_edits called without the prefix, which Claude Code refuses, neither stops the turn nor shows as a step',
+            'did not give it' not in text and not r.s.run(
+                "return window.__nuzky.agent.getState().items.flatMap((i) => i.steps ?? []).filter((s) => s.status === 'failed')"),
+            text)
     r.check('a message after a call the panel does not show (here begin_run) is a message of its own, not glued to the last one',
             r.s.run(MESSAGES)[:2] == ['Vystřihnu pauzu na začátku a přidám titulky.', 'Začínám.'] and 'titulky.Začínám' not in text,
             r.s.run(MESSAGES))
