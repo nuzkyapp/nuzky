@@ -504,7 +504,7 @@ mod tests {
         Asset {
             id: id.into(),
             name: id.into(),
-            path: format!("/{id}"),
+            path: std::env::temp_dir().join(id).to_string_lossy().into_owned(),
             kind,
             duration_us,
             width: 1080,
