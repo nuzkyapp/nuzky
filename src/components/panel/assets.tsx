@@ -160,6 +160,12 @@ export function addPictureInPicture(assetId: string) {
   return edit({ type: "addPictureInPicture", assetId, startUs: Math.round(timeUs), durationUs: null });
 }
 
+/** Puts a video or image over the whole picture, from the playhead, above the main track. */
+export function addOverlay(assetId: string) {
+  const { edit, timeUs } = useEditor.getState();
+  return edit({ type: "addOverlay", assetId, startUs: Math.round(timeUs), durationUs: null });
+}
+
 /** Where media dropped at a point lands: on a track at a time, or in the clip it replaces. */
 export interface DropTarget {
   trackId: string | null;

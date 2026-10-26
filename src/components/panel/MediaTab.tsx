@@ -1,11 +1,11 @@
-import { useEffect } from "react";
-import { AudioLines, Check, Film, Link2, PictureInPicture2, Plus, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { AudioLines, Check, Film, Layers2, Link2, PictureInPicture2, Plus, Trash2 } from "lucide-react";
 import { usedAssets, useEditor } from "../../lib/store";
 import { formatDuration } from "../../lib/time";
 import { openYoutube } from "../../lib/youtube";
 import type { Asset } from "../../lib/types";
-import { ProgressBar, lockedProps, useLockReason } from "../ui";
-import { ImportPlaceholder, ImportTile, KindIcon, addAtPlayhead, addPictureInPicture, assetDragHandler, pickAndImport, removeAsset } from "./assets";
+import { Menu, ProgressBar, lockedProps, useLockReason } from "../ui";
+import { ImportPlaceholder, ImportTile, KindIcon, addAtPlayhead, addOverlay, addPictureInPicture, assetDragHandler, pickAndImport, removeAsset } from "./assets";
 
 /** Round action on a media tile; no blur, so a grid of them stays cheap to paint. */
 const ACTION = "flex h-[26px] w-[26px] items-center justify-center rounded-full transition-colors duration-[120ms] ease-out aria-disabled:cursor-not-allowed aria-disabled:opacity-40";
@@ -26,64 +26,54 @@ function MediaItem({ asset }: { asset: Asset }) {
   const used = useEditor((s) => !!s.snap && usedAssets(s.snap.project).has(asset.id));
   const preparing = job?.status === "running";
   const lock = useLockReason();
+  const visual = asset.kind !== "audio";
+  const [menu, setMenu] = useState<{ x: number; y: number; keyboard: boolean; opener: HTMLElement | null } | null>(null);
 
   return (
-    <div
-      onPointerDown={assetDragHandler(asset.id)}
-      onDoubleClick={() => addAtPlayhead(asset.id)}
-      className="group flex min-w-0 cursor-grab flex-col gap-1.5 active:cursor-grabbing"
-      title={`${asset.name}${credit(asset)}${used ? "\nIn the timeline" : ""}\nDrag onto the timeline, or press + to add at the playhead`}
-    >
-      {/* The hairline is an outline, so it draws over the thumbnail rather than under it. */}
-      <div className="relative aspect-square overflow-hidden rounded-[10px] bg-bg outline-1 -outline-offset-1 outline-white/[.08] group-hover:outline-white/[.22]">
-        {asset.kind === "audio" ? (
-          <div className="flex h-full items-center justify-center bg-clip-audio/50 text-muted">
-            <AudioLines size={26} />
-          </div>
-        ) : thumb === undefined ? (
-          <div className="skeleton h-full w-full" />
-        ) : thumb ? (
-          <img src={thumb} alt="" className="h-full w-full object-cover" draggable={false} />
-        ) : (
-          <div className="flex h-full items-center justify-center text-muted">
-            <KindIcon kind={asset.kind} size={24} />
-          </div>
-        )}
-        {preparing && (
-          <div className="absolute inset-x-1.5 top-1.5">
-            <ProgressBar value={job.progress} label={job.label} />
-          </div>
-        )}
-        <span className="tabular absolute right-1 bottom-1 rounded-[4px] bg-black/60 px-1 text-[11px] leading-[15px] font-semibold text-white group-focus-within:opacity-0 group-hover:opacity-0">
-          {asset.kind === "image" ? "Image" : formatDuration(asset.part ? asset.part.endUs - asset.part.startUs : asset.durationUs)}
-        </span>
-        {used && !preparing && (
-          <span aria-hidden className="absolute top-1.5 left-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/60 text-white shadow-[inset_0_0_0_1px_rgb(255_255_255/.2)]">
-            <Check size={10} strokeWidth={3} />
+    <>
+      <div
+        onPointerDown={assetDragHandler(asset.id)}
+        onDoubleClick={() => addAtPlayhead(asset.id)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setMenu({ x: e.clientX, y: e.clientY, keyboard: false, opener: null });
+        }}
+        onKeyDown={(e) => {
+          if (e.key !== "ContextMenu" && !(e.key === "F10" && e.shiftKey)) return;
+          e.preventDefault();
+          const r = e.currentTarget.getBoundingClientRect();
+          setMenu({ x: r.left + 8, y: r.bottom - 8, keyboard: true, opener: document.activeElement as HTMLElement | null });
+        }}
+        className="group flex min-w-0 cursor-grab flex-col gap-1.5 active:cursor-grabbing"
+        title={`${asset.name}${credit(asset)}${used ? "\nIn the timeline" : ""}\n${visual ? "Drag onto the timeline, + adds it at the playhead, Overlay puts it over the video" : "Drag onto the timeline, or press + to add at the playhead"}`}
+      >
+        {/* The hairline is an outline, so it draws over the thumbnail rather than under it. */}
+        <div className="relative aspect-square overflow-hidden rounded-[10px] bg-bg outline-1 -outline-offset-1 outline-white/[.08] group-hover:outline-white/[.22]">
+          {asset.kind === "audio" ? (
+            <div className="flex h-full items-center justify-center bg-clip-audio/50 text-muted">
+              <AudioLines size={26} />
+            </div>
+          ) : thumb === undefined ? (
+            <div className="skeleton h-full w-full" />
+          ) : thumb ? (
+            <img src={thumb} alt="" className="h-full w-full object-cover" draggable={false} />
+          ) : (
+            <div className="flex h-full items-center justify-center text-muted">
+              <KindIcon kind={asset.kind} size={24} />
+            </div>
+          )}
+          {preparing && (
+            <div className="absolute top-1.5 right-1.5 left-1.5 group-focus-within:right-9 group-hover:right-9">
+              <ProgressBar value={job.progress} label={job.label} />
+            </div>
+          )}
+          <span className="tabular absolute right-1 bottom-1 rounded-[4px] bg-black/60 px-1 text-[11px] leading-[15px] font-semibold text-white group-focus-within:opacity-0 group-hover:opacity-0">
+            {asset.kind === "image" ? "Image" : formatDuration(asset.part ? asset.part.endUs - asset.part.startUs : asset.durationUs)}
           </span>
-        )}
-        <div className="absolute inset-x-0 bottom-0 flex items-end gap-1.5 bg-linear-to-b from-transparent to-black/45 p-1.5 pt-6 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100">
-          <button
-            type="button"
-            aria-label={`Add ${asset.name} at playhead`}
-            title="Add at playhead"
-            onClick={() => addAtPlayhead(asset.id)}
-            {...lockedProps(lock)}
-            className={`btn-prominent ${ACTION}`}
-          >
-            <Plus size={15} />
-          </button>
-          {asset.kind !== "audio" && (
-            <button
-              type="button"
-              aria-label={`Add ${asset.name} as picture in picture`}
-              title="Picture in picture at the playhead"
-              onClick={() => addPictureInPicture(asset.id)}
-              {...lockedProps(lock)}
-              className={QUIET_ACTION}
-            >
-              <PictureInPicture2 size={14} />
-            </button>
+          {used && !preparing && (
+            <span aria-hidden className="absolute top-1.5 left-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/60 text-white shadow-[inset_0_0_0_1px_rgb(255_255_255/.2)]">
+              <Check size={10} strokeWidth={3} />
+            </span>
           )}
           <button
             type="button"
@@ -91,14 +81,60 @@ function MediaItem({ asset }: { asset: Asset }) {
             title="Remove from project, with its clips"
             onClick={() => removeAsset(asset)}
             {...lockedProps(lock)}
-            className={`hover:text-danger aria-disabled:hover:text-white ${QUIET_ACTION}`}
+            className={`absolute top-1.5 right-1.5 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 hover:text-danger aria-disabled:hover:text-white ${QUIET_ACTION}`}
           >
             <Trash2 size={14} />
           </button>
+          <div className="absolute inset-x-0 bottom-0 flex items-end gap-1.5 bg-linear-to-b from-transparent to-black/45 p-1.5 pt-6 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100">
+            <button
+              type="button"
+              aria-label={`Add ${asset.name} at playhead`}
+              title="Add at playhead"
+              onClick={() => addAtPlayhead(asset.id)}
+              {...lockedProps(lock)}
+              className={`btn-prominent shrink-0 ${ACTION}`}
+            >
+              <Plus size={15} />
+            </button>
+            {visual && (
+              <button
+                type="button"
+                aria-label={`Put ${asset.name} over the video`}
+                title="Over the video at the playhead"
+                onClick={() => addOverlay(asset.id)}
+                {...lockedProps(lock)}
+                className="flex h-[26px] min-w-0 flex-1 items-center justify-center rounded-full bg-black/55 px-1.5 text-[11px] font-semibold text-white shadow-[inset_0_0_0_1px_rgb(255_255_255/.18)] transition-colors duration-[120ms] ease-out hover:bg-black/75 aria-disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:hover:bg-black/55"
+              >
+                <span className="truncate">Overlay</span>
+              </button>
+            )}
+          </div>
         </div>
+        <span className="truncate text-[11px] leading-[13px] text-muted">{asset.name}</span>
       </div>
-      <span className="truncate text-[11px] leading-[13px] text-muted">{asset.name}</span>
-    </div>
+      {menu && (
+        <Menu
+          label={asset.name}
+          at={menu}
+          keyboard={menu.keyboard}
+          onClose={(chose) => {
+            if (!chose) menu.opener?.focus({ preventScroll: true });
+            setMenu(null);
+          }}
+          items={[
+            { label: "Add at playhead", icon: <Plus size={15} />, run: () => addAtPlayhead(asset.id), disabled: lock },
+            ...(visual
+              ? [
+                  { label: "Over the video", icon: <Layers2 size={15} />, run: () => addOverlay(asset.id), disabled: lock },
+                  { label: "Picture in picture", icon: <PictureInPicture2 size={15} />, run: () => addPictureInPicture(asset.id), disabled: lock },
+                ]
+              : []),
+            "separator",
+            { label: "Remove", icon: <Trash2 size={15} />, run: () => removeAsset(asset), disabled: lock, danger: true },
+          ]}
+        />
+      )}
+    </>
   );
 }
 

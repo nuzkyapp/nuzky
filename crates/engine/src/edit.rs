@@ -117,6 +117,14 @@ pub enum EditCmd {
         start_us: i64,
         duration_us: Option<i64>,
     },
+    /// Puts a video or image over the whole picture, fitted to the canvas like a main-track clip, on an
+    /// overlay track above the main track. `duration_us` defaults to the whole video, or 3 s of an image.
+    #[cfg_attr(feature = "ts", ts(optional_fields = nullable))]
+    AddOverlay {
+        asset_id: String,
+        start_us: i64,
+        duration_us: Option<i64>,
+    },
     #[cfg_attr(feature = "ts", ts(optional_fields = nullable))]
     AddSticker {
         asset_id: String,
@@ -957,6 +965,7 @@ impl Project {
             | EditCmd::RemoveAsset { .. }
             | EditCmd::AddClip { .. }
             | EditCmd::AddPictureInPicture { .. }
+            | EditCmd::AddOverlay { .. }
             | EditCmd::AddSticker { .. }
             | EditCmd::AddText { .. }
             | EditCmd::DetachAudio { .. }
@@ -1110,6 +1119,15 @@ impl Project {
                     Some(shape),
                     out,
                 );
+            }
+            EditCmd::AddOverlay { asset_id, start_us, duration_us } => {
+                let asset = self.asset(&asset_id).ok_or_else(|| anyhow!("Unknown media"))?.clone();
+                ensure!(
+                    asset.kind != AssetKind::Audio && asset.width > 0 && asset.height > 0,
+                    "Only a video or an image can go over the video"
+                );
+                let duration = overlay_duration(&asset, duration_us, min);
+                self.add_overlay(&asset, start_us, duration, Transform::default(), None, out);
             }
             EditCmd::AddSticker { asset_id, start_us, duration_us, transform } => {
                 let asset = self.asset(&asset_id).ok_or_else(|| anyhow!("Unknown media"))?.clone();
@@ -2633,6 +2651,7 @@ mod tests {
             for cmd in [
                 EditCmd::AddClip { asset_id: id.into(), start_us: Some(0), track_id: None },
                 EditCmd::AddPictureInPicture { asset_id: id.into(), start_us: 0, duration_us: None },
+                EditCmd::AddOverlay { asset_id: id.into(), start_us: 0, duration_us: None },
                 EditCmd::AddSticker { asset_id: id.into(), start_us: 0, duration_us: None, transform: None },
             ] {
                 let added = p.apply(cmd).unwrap().select[0].clone();

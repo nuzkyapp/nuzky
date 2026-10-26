@@ -1,5 +1,5 @@
-"""Picture in picture over a talking head. One click on a media tile puts a 16:9 video in a rounded window in the
-top right corner of the safe area; the inspector turns it into a circle with a border, typed with the keyboard;
+"""Picture in picture over a talking head. Picture in picture in a media tile's menu puts a 16:9 video in a rounded
+window in the top right corner of the safe area; the inspector turns it into a circle with a border, typed with the keyboard;
 a bar in the preview crops it; and the export shows the same picture as the preview, with the talking head in the
 corners of the circle's square."""
 import json, subprocess, time
@@ -54,8 +54,8 @@ def click_button(r, text, scope=SECTION):
                    "if (!b) return false; b.click(); return true;", text, scope)
 
 
-@flow('pip', 'A video goes into a rounded corner window over a talking head in one click; it becomes a circle with a '
-      'border, a preview handle crops it, and the export matches the preview')
+@flow('pip', 'A video goes into a rounded corner window over a talking head from its tile\'s menu; it becomes a circle '
+      'with a border, a preview handle crops it, and the export matches the preview')
 def pip(r):
     r.import_media(FIXTURES / 'talk.mp4', FIXTURES / 'wide.mp4')
     r.add_clip('talk.mp4')
@@ -79,11 +79,14 @@ def pip(r):
     time.sleep(1.5)  # `nuzky frame` reads the saved file, written about a second after an edit.
     engine_before = engine_frame(r, 'engine-talking-head')
 
-    # The tile's action, as a click on the button that shows on hover or focus.
-    tile = "document.querySelector('[aria-label=\"Add wide.mp4 as picture in picture\"]')"
-    if not r.check('a video tile offers picture in picture', r.s.run(f'return !!{tile}')):
+    # The tile's menu, opened with a right-click.
+    tile = "document.querySelector('[aria-label=\"Add wide.mp4 at playhead\"]')"
+    item = "[...document.querySelectorAll('[role=menuitem]')].find((i) => i.textContent === 'Picture in picture')"
+    r.s.run(f"const b = {tile}.getBoundingClientRect(); {tile}.dispatchEvent(new MouseEvent('contextmenu', "
+            "{bubbles: true, cancelable: true, clientX: b.left, clientY: b.top}))")
+    if not r.check('a video tile\'s menu offers picture in picture', wait(lambda: r.s.run(f'return !!{item}'), 5)):
         return
-    r.s.run(f'{tile}.click()')
+    r.s.run(f'{item}.click()')
     index, clip = wait(lambda: (found := pip_clip(r, wide))[1] and found, 10) or (None, None)
     if not r.check('the video lands on a track right above the main track', index == 1, index):
         return

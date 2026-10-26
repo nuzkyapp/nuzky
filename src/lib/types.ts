@@ -589,6 +589,11 @@ export type EditCmd = {
   startUs: number,
   durationUs?: number | null,
 } | {
+  "type": "addOverlay",
+  assetId: string,
+  startUs: number,
+  durationUs?: number | null,
+} | {
   "type": "addSticker",
   assetId: string,
   startUs: number,
