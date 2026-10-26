@@ -21,9 +21,16 @@ fn main() {
     }
     // whisper.cpp links the Vulkan loader, which Windows has only with a graphics driver. Loading it on first use
     // lets Nuzky start without one; crates/analysis/build.rs says why speech then runs on the processor.
-    if std::env::var("CARGO_CFG_TARGET_ENV").is_ok_and(|env| env == "msvc") {
+    let msvc = std::env::var("CARGO_CFG_TARGET_ENV").is_ok_and(|env| env == "msvc");
+    if msvc {
         println!("cargo:rustc-link-arg=/DELAYLOAD:vulkan-1.dll");
         println!("cargo:rustc-link-arg=delayimp.lib");
+        // Tauri's manifest, which asks for Common Controls 6. tauri-build embeds it in the app only, and the tests,
+        // which link Tauri's mock runtime, cannot start without it (STATUS_ENTRYPOINT_NOT_FOUND).
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("windows-app-manifest.xml");
+        println!("cargo:rerun-if-changed={}", manifest.display());
+        println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
+        println!("cargo:rustc-link-arg=/MANIFESTINPUT:{}", manifest.display());
     }
     println!("cargo:rerun-if-changed=src/commands.rs");
     // Without an app manifest Tauri lets every local webview call every app command. The permission is written here
@@ -41,6 +48,9 @@ fn main() {
     std::fs::write(permissions.join("main-ui.toml"), permission).expect("writing the main-ui permission");
     let pattern = permissions.join("*.toml").to_string_lossy().into_owned().leak();
     let manifest = tauri_build::AppManifest::new().permissions_path_pattern(pattern);
-    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest))
-        .unwrap_or_else(|error| panic!("{error:#}"))
+    let mut attributes = tauri_build::Attributes::new().app_manifest(manifest);
+    if msvc {
+        attributes = attributes.windows_attributes(tauri_build::WindowsAttributes::new_without_app_manifest());
+    }
+    tauri_build::try_build(attributes).unwrap_or_else(|error| panic!("{error:#}"))
 }
