@@ -42,11 +42,25 @@ pub fn group_words(words: &[Word], grouping: CaptionGrouping, frame_us: i64) -> 
     for word in &parts {
         match groups.last_mut() {
             Some(group) if !hard_break(group, word, grouping) && fits(group, word, grouping) => group.push(word),
+            Some(group) if continues_number(group[group.len() - 1], word) => {
+                let mut start = group.len() - 1;
+                while start > 0 && continues_number(group[start - 1], group[start]) {
+                    start -= 1;
+                }
+                if start == 0 {
+                    group.push(word);
+                } else {
+                    let mut number = group.split_off(start);
+                    number.push(word);
+                    groups.push(number);
+                }
+            }
             // "iPhone 17": a number starts its caption together with the word it belongs to.
             Some(group)
                 if !hard_break(group, word, grouping)
                     && starts_with_digit(word)
                     && group.len() > 1
+                    && !continues_number(group[group.len() - 2], group[group.len() - 1])
                     && fits(&group[group.len() - 1..], word, grouping) =>
             {
                 let carried = group.pop();
@@ -125,11 +139,20 @@ fn balance_phrase_end(groups: &mut [Vec<&Word>], grouping: CaptionGrouping) {
         return;
     }
     if let Some(&moved) = before.last()
+        && !continues_number(before[before.len() - 2], moved)
         && fits(&[moved], last[0], grouping)
     {
         before.pop();
         last.insert(0, moved);
     }
+}
+
+fn continues_number(previous: &Word, next: &Word) -> bool {
+    previous.text.trim_end().ends_with(|c: char| c.is_ascii_digit())
+        && next.text.split_whitespace().all(|part| {
+            let digits = part.trim_end_matches(|c: char| c.is_ascii_punctuation() || c == '…');
+            digits.len() == 3 && digits.bytes().all(|c| c.is_ascii_digit())
+        })
 }
 
 fn starts_with_digit(word: &Word) -> bool {
@@ -192,6 +215,23 @@ mod tests {
         // Across a pause the lone word keeps its own caption.
         let paused = [word(0, 300, "fakt"), word(300, 600, "dobře"), word(1200, 1500, "jo.")];
         assert_eq!(texts(&paused, CaptionGrouping::default()), ["fakt dobře", "jo."]);
+    }
+
+    #[test]
+    fn thousands_groups_stay_with_the_number() {
+        let grouping = CaptionGrouping { max_words: 2, max_chars: 13, ..CaptionGrouping::default() };
+        let sentence = ["Appku", "si", "stáhlo", "přes", "13", "000", "lidí."];
+        let words: Vec<_> =
+            sentence.iter().enumerate().map(|(i, text)| word(i as i64 * 300, (i as i64 + 1) * 300, text)).collect();
+        assert_eq!(texts(&words, grouping), ["Appku si", "stáhlo", "přes", "13 000", "lidí."]);
+        let price = [word(0, 300, "1"), word(300, 600, "500"), word(600, 900, "Kč")];
+        assert_eq!(texts(&price, grouping), ["1 500", "Kč"]);
+        let ordinary = [word(0, 300, "mám"), word(300, 600, "300"), word(600, 900, "lidí")];
+        assert_eq!(texts(&ordinary, grouping), ["mám 300", "lidí"]);
+        let millions = [word(0, 300, "2"), word(300, 600, "000"), word(600, 900, "000.")];
+        assert_eq!(texts(&millions, grouping), ["2 000 000."]);
+        let combined = [word(0, 300, "2"), word(300, 900, "000 000.")];
+        assert_eq!(texts(&combined, grouping), ["2 000 000."]);
     }
 
     #[test]
