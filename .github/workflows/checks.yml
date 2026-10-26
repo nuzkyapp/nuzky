@@ -35,10 +35,16 @@ jobs:
       - name: Install Rust
         run: rustup update stable --no-self-update && rustup default stable
       # rust-cache leaves the root Cargo.toml out of its key. Without its hash here, a change of the build profiles
-      # kept restoring a build cargo threw away, so every run compiled all dependencies again and saved nothing.
+      # kept restoring a build cargo threw away, so every run compiled all dependencies again and saved nothing. Its
+      # version line stays out: with it, the first runs after a new version started from an empty cache.
+      - name: Build profiles
+        id: profiles
+        run: echo "hash=$(grep -v '^version = ' Cargo.toml | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      # Only main saves; pull requests read main's cache and never push it out of the repository's 10 GB.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          key: checks-ffmpeg-v1-${{ hashFiles('Cargo.toml') }}
+          key: checks-ffmpeg-v1-${{ steps.profiles.outputs.hash }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install Linux dependencies
         run: bash scripts/setup-ubuntu-deps.sh
       - name: Install QEMU

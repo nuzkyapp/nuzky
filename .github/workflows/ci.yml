@@ -16,11 +16,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && fromJSON('["macos-14"]') || fromJSON('["ubuntu-24.04", "macos-14", "windows-2022"]') }}
+        # Windows compiles slowest: its clippy, tests and installers took 16, 30 and 20 minutes one after the other,
+        # so they run on three machines at once (`part`) and a release waits only for the longest.
+        include: >-
+          ${{ fromJSON(github.event_name == 'push' && github.ref == 'refs/heads/main' && '[{"os": "macos-14"}]'
+          || '[{"os": "ubuntu-24.04"}, {"os": "macos-14"}, {"os": "windows-2022", "part": "clippy"},
+          {"os": "windows-2022", "part": "test"}, {"os": "windows-2022", "part": "installers"}]') }}
     runs-on: ${{ matrix.os }}
-    # Windows compiles slowest, and a release tag builds without a cache (it cannot read another ref's): clippy, the
-    # tests and the installers took over 60 minutes there.
-    timeout-minutes: ${{ matrix.os == 'windows-2022' && 90 || 60 }}
+    timeout-minutes: 60
     env:
       CARGO_TERM_COLOR: always
       CARGO_INCREMENTAL: '0'
@@ -33,10 +36,18 @@ jobs:
       - name: Install Rust
         shell: bash
         run: rustup update stable --no-self-update && rustup default stable
-      # The root Cargo.toml with the build profiles is not in rust-cache's own key (checks.yml).
+      # The root Cargo.toml with the build profiles is not in rust-cache's own key, and its version line stays out of
+      # ours, or a release tag never finds main's cache (checks.yml).
+      - name: Build profiles
+        id: profiles
+        shell: bash
+        run: echo "hash=$(grep -v '^version = ' Cargo.toml | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      # Only main saves, so pull requests and tags, which can read main's caches, never push them out of the
+      # repository's 10 GB.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          key: ${{ runner.os }}-${{ runner.arch }}-ffmpeg-v1-${{ hashFiles('Cargo.toml') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ matrix.part || 'all' }}-ffmpeg-v1-${{ steps.profiles.outputs.hash }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: bash scripts/setup-ubuntu-deps.sh
@@ -55,21 +66,26 @@ jobs:
       - name: ONNX Runtime
         run: node scripts/fetch-onnxruntime.mjs
       - run: npm run typecheck
+        if: ${{ !matrix.part || matrix.part == 'clippy' }}
       - run: cargo fmt --all --check
+        if: ${{ !matrix.part || matrix.part == 'clippy' }}
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        if: ${{ !matrix.part || matrix.part == 'clippy' }}
       - run: cargo test --workspace --locked --no-fail-fast
-        if: runner.os != 'macOS'
+        if: ${{ runner.os != 'macOS' && (!matrix.part || matrix.part == 'test') }}
       # The engine tests draw frame numbers with drawtext, which only Homebrew's keg-only ffmpeg-full has.
       # Nuzky itself builds against ffmpeg.
       - name: cargo test --workspace --locked --no-fail-fast
         if: runner.os == 'macOS'
         run: PATH="$(brew --prefix ffmpeg-full)/bin:$PATH" cargo test --workspace --locked --no-fail-fast
       - name: Build installers
+        if: ${{ !matrix.part || matrix.part == 'installers' }}
         run: node scripts/build-bundles.mjs
       - name: Verify Linux bundle
         if: runner.os == 'Linux'
         run: bash scripts/verify-linux-bundle.sh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !matrix.part || matrix.part == 'installers' }}
         with:
           name: nuzky-${{ matrix.os }}
           path: |
