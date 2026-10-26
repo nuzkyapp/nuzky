@@ -174,22 +174,21 @@ fn mismatch(words: &[Word], heard: &[Word]) -> (f64, Vec<Range<usize>>) {
             if i < n {
                 offer(i + 1, j, 0.6, b'D');
             }
-            if i < n && j + 1 < m && words[i] != "#" {
-                offer(
-                    i + 1,
-                    j + 2,
-                    distance(&words[i], &(heard[j].clone() + &heard[j + 1])) as f64 / words[i].len() as f64 + 0.05,
-                    b'S',
-                );
+            // A piece that is the word itself is that word, not half of a split spelling: otherwise "tak" + "a" of a
+            // restarted "a tak a tak" would pass for one "tak".
+            if i < n && j + 1 < m && words[i] != "#" && heard[j] != words[i] && heard[j + 1] != words[i] {
+                let joined = distance(&words[i], &(heard[j].clone() + &heard[j + 1]));
+                offer(i + 1, j + 2, joined as f64 / words[i].len() as f64 + 0.05, b'S');
             }
-            if i + 1 < n && j < m && words[i] != "#" && words[i + 1] != "#" {
-                offer(
-                    i + 2,
-                    j + 1,
-                    distance(&(words[i].clone() + &words[i + 1]), &heard[j]) as f64 / heard[j].len().max(1) as f64
-                        + 0.05,
-                    b'J',
-                );
+            if i + 1 < n
+                && j < m
+                && words[i] != "#"
+                && words[i + 1] != "#"
+                && words[i] != heard[j]
+                && words[i + 1] != heard[j]
+            {
+                let joined = distance(&(words[i].clone() + &words[i + 1]), &heard[j]);
+                offer(i + 2, j + 1, joined as f64 / heard[j].len().max(1) as f64 + 0.05, b'J');
             }
         }
     }
@@ -263,5 +262,6 @@ mod tests {
         assert!(mismatch(&words("Hleděla s úsměvem."), &heard).0 >= before.0);
         assert!(mismatch(&words("a krysař"), &words("a krysař a")).1.is_empty());
         assert!(!mismatch(&words("a krysař"), &words("a krysař stále")).1.is_empty());
+        assert!(!mismatch(&words("A tak mám auto"), &words("a tak a tak mám auto")).1.is_empty());
     }
 }
