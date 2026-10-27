@@ -1,4 +1,4 @@
-import time as clock
+import json, time as clock
 
 from e2e.harness import FIXTURES, flow, wait
 
@@ -6,6 +6,15 @@ TIME = 'return window.__nuzky.store.getState().timeUs'
 FPS = 'return window.__nuzky.store.getState().snap.project.canvas.fps'
 ADD_CAPTION = """window.__nuzky.store.getState().edit({type: 'addText', startUs: arguments[0], text: 'Caption',
   style: {fontSize: 64, color: '#ffffff', bold: false, strokeWidth: 0, strokeColor: '#000000'}})"""
+# Plays for 0.8 s from the start and records, on every display frame, where the playhead line is drawn (in µs of the
+# timeline) and the time of the last frame the preview drew.
+SAMPLE = """(async () => { const st = window.__nuzky.store; const zoom = st.getState().zoom;
+const line = document.querySelector('[data-playhead]'); const x = () => new DOMMatrix(getComputedStyle(line).transform).m41;
+st.getState().seek(0); await new Promise((d) => setTimeout(d, 500)); st.getState().togglePlay();
+await new Promise((d) => setTimeout(d, 300)); const seen = [];
+const end = performance.now() + 800;
+while (performance.now() < end) { await new Promise(requestAnimationFrame); seen.push([Math.round(x() / zoom * 1e6), st.getState().timeUs]); }
+st.getState().togglePlay(); return JSON.stringify(seen); })()"""
 CALM = 'window.__nuzky.store.getState().select([]); document.activeElement?.blur()'
 # Clicks the ruler `arguments[1]` px right of where the clip `arguments[0]` starts on screen.
 SCRUB = """const ruler = document.querySelector('[data-ruler]').getBoundingClientRect();
@@ -90,3 +99,14 @@ def playhead(r):
     r.check('← from the end lands on the last frame', settles(lambda t: t == last), time())
     r.key('ArrowRight')
     r.check('→ from the last frame does not leave the frames', settles(lambda t: t == last), time())
+
+    # While playing, the line moves on every display frame rather than only when the preview draws a new frame, and never
+    # runs more than 100 ms past the picture.
+    r.s.run(CALM)
+    played = r.s.call(SAMPLE)
+    seen = json.loads(played['value']) if played['ok'] else []
+    drawn, frames = len({x for x, _ in seen}), len({t for _, t in seen})
+    lead = max((x - t for x, t in seen), default=None)
+    r.check('while playing, the playhead line takes a new place on most display frames, more often than the preview draws one',
+            seen and drawn > frames * 1.3 and drawn >= len(seen) * 0.7, {'display frames': len(seen), 'line places': drawn, 'preview frames': frames})
+    r.check('and it never runs more than 100 ms ahead of the frame shown', lead is not None and lead <= 101_000, lead)

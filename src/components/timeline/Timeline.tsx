@@ -207,6 +207,29 @@ const VISIBLE_STEP = 400;
 function Playhead({ zoom, scroller, follow }: { zoom: number; scroller: RefObject<HTMLDivElement | null>; follow: boolean }) {
   const timeUs = useEditor((s) => s.timeUs);
   const playing = useEditor((s) => s.playing);
+  const line = useRef<HTMLDivElement>(null);
+  // While playing, the time arrives with each frame the engine draws, 30 times a second for most phone videos, so the
+  // line would move in steps of 2 px at the default zoom and 20 px at the closest. It moves on every display frame
+  // instead, by the time passed since the last frame arrived, and never more than 100 ms past it, so it waits for a
+  // preview that stalls rather than running ahead of the picture.
+  useLayoutEffect(() => {
+    if (!playing) return;
+    let last = { us: useEditor.getState().timeUs, at: performance.now() };
+    const arrived = useEditor.subscribe((s, prev) => {
+      if (s.timeUs !== prev.timeUs) last = { us: s.timeUs, at: performance.now() };
+    });
+    let frame = 0;
+    const move = (now: number) => {
+      const us = last.us + Math.min(Math.max(0, now - last.at), 100) * 1000;
+      if (line.current) line.current.style.transform = `translateX(${(us / US) * zoom}px)`;
+      frame = requestAnimationFrame(move);
+    };
+    move(performance.now());
+    return () => {
+      cancelAnimationFrame(frame);
+      arrived();
+    };
+  }, [playing, zoom]);
   useEffect(() => {
     const el = scroller.current;
     if (!el || !playing || !follow) return;
@@ -217,7 +240,13 @@ function Playhead({ zoom, scroller, follow }: { zoom: number; scroller: RefObjec
   // Above the ruler, below the track headers. The dark edges keep it visible on bright footage; no blur, it moves every frame.
   // It moves by transform on its own layer, so playback never repaints the clips under it.
   return (
-    <div className="pointer-events-none absolute bottom-0 top-0 z-[45] will-change-transform" style={{ left: HEADER_W, transform: `translateX(${(timeUs / US) * zoom}px)` }}>
+    <div
+      ref={line}
+      data-playhead
+      className="pointer-events-none absolute bottom-0 top-0 z-[45] will-change-transform"
+      // While playing, the effect above moves it.
+      style={{ left: HEADER_W, transform: playing ? undefined : `translateX(${(timeUs / US) * zoom}px)` }}
+    >
       <div className="absolute -left-[0.75px] bottom-0 top-2 w-[1.5px] bg-white shadow-[0_0_0_0.5px_rgb(0_0_0/.4)]" />
       <div className="absolute -left-1.5 top-0.5 h-[15px] w-3 rounded-t-[2px] bg-white [clip-path:polygon(0_0,100%_0,100%_60%,50%_100%,0_60%)]" />
     </div>
