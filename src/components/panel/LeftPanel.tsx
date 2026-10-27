@@ -71,7 +71,7 @@ export function LeftPanel({ width }: { width: number }) {
               tab === t.id ? "text-fg" : "text-muted hover:text-fg"
             }`}
           >
-            <t.icon size={17} className={tab === t.id ? "text-accent" : undefined} />
+            <t.icon size={17} className={`transition-colors duration-[120ms] ease-out ${tab === t.id ? "text-accent" : ""}`} />
             <span>{t.label}</span>
           </button>
         ))}

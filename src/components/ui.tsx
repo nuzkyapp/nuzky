@@ -669,10 +669,13 @@ export function SegThumb({ value, className = "" }: { value: string | number | n
       const seg = segment(key);
       thumb.style.visibility = seg ? "" : "hidden";
       if (!seg) return;
-      // In px of the layout, to a fraction, also while a dialog around it scales in.
+      // In px of the layout, also while a dialog around it scales in, with its edges on the screen's pixels, as a
+      // background of the segment itself would be.
       const t = track.getBoundingClientRect(), b = seg.getBoundingClientRect();
       const scale = track.offsetWidth ? t.width / track.offsetWidth : 1;
-      const [x, y, w, h] = [b.left - t.left, b.top - t.top, b.width, b.height].map((v) => Math.round((v / scale) * 100) / 100);
+      const px = (v: number) => Math.round((v / scale) * devicePixelRatio) / devicePixelRatio;
+      const [x, y] = [px(b.left - t.left), px(b.top - t.top)];
+      const [w, h] = [px(b.right - t.left) - x, px(b.bottom - t.top) - y];
       const box = `${x} ${y} ${w} ${h}`;
       if (box === shown.current.box) return;
       shown.current.box = box;

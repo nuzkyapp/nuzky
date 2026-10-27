@@ -38,7 +38,7 @@ const dot = [...document.querySelectorAll('[role=status]')].find((s) => s.textCo
 return {stage: box({...beside, width: 4, height: 4}), saved: dot ? getComputedStyle(dot).backgroundColor : null,
         used: (tile.title || '').includes('In the timeline') && !!tile.querySelector('span[aria-hidden] > svg')};"""
 # Chooses the tab named arguments[1] in the tab list at arguments[0]: whether the chosen tab's plate slides there, and once
-# it settled, how many px it lies off that tab.
+# it settled, how many px it lies off that tab: at most 1, as its edges snap to the screen's pixels.
 SLIDE = """(async () => { const list = document.querySelector(arguments[0]);
 const plate = () => list.querySelector(':scope > .seg-thumb');
 [...list.querySelectorAll('[role=tab]')].find((t) => t.textContent.trim() === arguments[1]).click();
@@ -57,6 +57,10 @@ LIBRARY_TABS, INSPECTOR_TABS = '[role=tablist][aria-label=Library]', 'aside[aria
 def slide(r, tabs, name):
     done = r.s.call(SLIDE, tabs, name)
     return json.loads(done['value']) if done['ok'] else done
+
+
+def slid(moved):
+    return moved.get('sliding') is True and moved.get('off') is not None and moved['off'] <= 1
 
 
 # The inspector's header tile and the group behind the first slider.
@@ -165,7 +169,7 @@ def layout(r):
         r.check('back in the large window the inspector and the timeline are as the user left them',
                 wait(lambda: (lambda s: s['inspector'] == wide['inspector'] and s['timeline'] == wide['timeline'])(sizes(r)), 5), sizes(r))
         plate = lambda: r.s.run(f'return {PLATE_OFF}(document.querySelector(arguments[0]))', LIBRARY_TABS)
-        r.check("after the library's tabs changed width, the chosen tab's plate still lies exactly under it", wait(lambda: plate() == 0, 5), plate())
+        r.check("after the library's tabs changed width, the chosen tab's plate still lies exactly under it", wait(lambda: (lambda off: off is not None and off <= 1)(plate()), 5), plate())
 
     clip = r.track()[0]['id']
     r.s.run('window.__nuzky.store.getState().select([arguments[0]])', clip)
@@ -173,9 +177,9 @@ def layout(r):
     groups = r.s.run("""return [...document.querySelectorAll('aside[aria-label=Inspector] [role=group]')].filter((g) => g.querySelector('[aria-pressed=true]'))
         .map((g) => { const a = g.querySelector(':scope > .seg-thumb')?.getBoundingClientRect(), b = g.querySelector('[aria-pressed=true]').getBoundingClientRect();
           return a ? Math.round(Math.abs(a.left - b.left) + Math.abs(a.width - b.width)) : null; })""")
-    r.check("every segmented control in the Video tab has its plate under the chosen segment", groups and all(g == 0 for g in groups), groups)
+    r.check("every segmented control in the Video tab has its plate under the chosen segment", groups and all(g is not None and g <= 1 for g in groups), groups)
     moved = slide(r, INSPECTOR_TABS, 'Adjust')
-    r.check("choosing Adjust slides the inspector tabs' plate from Video to Adjust, where it settles", moved == {'sliding': True, 'off': 0}, moved)
+    r.check("choosing Adjust slides the inspector tabs' plate from Video to Adjust, where it settles", slid(moved), moved)
     sliders = wait(lambda: (lambda s: s if len(s) == 10 else None)(r.s.run(SLIDERS)), 5) or r.s.run(SLIDERS)
     r.check('every Adjust slider has its name above it, from the same left edge, in full',
             len(sliders) == 10 and all(s['above'] and s['whole'] for s in sliders), sliders)
@@ -188,7 +192,7 @@ def layout(r):
     r.check("the Adjust sliders sit in a section's rounded group", header['group'] not in ('rgba(0, 0, 0, 0)', 'transparent') and header['radius'] == '10px', header)
 
     moved = slide(r, LIBRARY_TABS, 'Text')
-    r.check("choosing Text slides the library tabs' plate there", moved == {'sliding': True, 'off': 0}, moved)
+    r.check("choosing Text slides the library tabs' plate there", slid(moved), moved)
     wait(lambda: r.s.run("const b = document.querySelector('button[title$=\"text at the playhead\"]'); if (!b) return false; b.click(); return true"), 5)
     font = wait(lambda: r.s.run("""const l = [...document.querySelectorAll('aside[aria-label=Inspector] span')].find((s) => s.textContent === 'Font');
         if (!l) return null; const a = l.getBoundingClientRect(), b = l.nextElementSibling.getBoundingClientRect();
