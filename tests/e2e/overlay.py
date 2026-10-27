@@ -140,7 +140,7 @@ return [b.left, b.top, b.right, b.bottom, el.closest('[role=listbox]').getBoundi
 LANE = "const l = document.querySelector('[data-testid=overlay-lane]'); return l && [l.getBoundingClientRect().top, l.getBoundingClientRect().bottom, l.textContent]"
 
 
-@flow('overlay-lane', 'Over a talking head on the main track, an empty lane says where a picture over the video goes; a '
+@flow('overlay-lane', 'Over a talking head on the main track, an empty lane says where a picture over the video goes once one is dragged; a '
       'picture dragged there lights it up and lands over the video at the drop line on a track above the main one')
 def overlay_lane(r):
     Image.new('RGB', (1280, 720), (230, 30, 30)).save(r.work / 'red.png')
@@ -150,13 +150,22 @@ def overlay_lane(r):
     main = r.track()
     r.s.run('const st = window.__nuzky.store.getState(); st.select([]); st.seek(0); st.setZoom(arguments[0])', ZOOM)
     lane = wait(lambda: r.s.run(LANE), 5)
-    if not r.check('an empty lane above the main track says what goes there',
-                   lane and lane[2] == 'Drag a video or picture here to put it over the video', lane):
+    if not r.check('an empty lane above the main track keeps room but says nothing while nothing is dragged', lane and lane[2] == '', lane):
         return
     main_top = r.s.run("return document.querySelector(`[data-clip-id='${arguments[0]}']`).getBoundingClientRect().top", main[0]['id'])
     r.check('the lane sits right above the main track', lane[1] <= main_top, [lane, main_top])
     time.sleep(0.5)
-    r.shot('lane')
+    r.shot('lane-idle')
+    for kind, text in (('audio', ''), ('video', 'Drag a video or picture here to put it over the video')):
+        r.s.run("window.__nuzky.store.setState({fileDrag: {x: 5, y: 5, kind: arguments[0], several: false}})", kind)
+        said = wait(lambda: (l := r.s.run(LANE)) and l[2] == text and l, 3)
+        r.check(f'{"sound" if kind == "audio" else "a video"} dragged in from the desktop {"leaves the lane blank" if kind == "audio" else "makes the lane say what goes there"}',
+                said and abs(said[0] - lane[0]) < 1, [r.s.run(LANE), lane])
+        if kind == 'video':
+            time.sleep(0.3)
+            r.shot('lane')
+    r.s.run('window.__nuzky.store.setState({fileDrag: null})')
+    r.check('once the drag ends the lane goes blank again', wait(lambda: r.s.run(LANE)[2] == '', 3), r.s.run(LANE))
 
     left = r.s.run("return document.querySelector(`[data-clip-id='${arguments[0]}']`).getBoundingClientRect().left", main[0]['id'])
     x, y = left + 2 * ZOOM, (lane[0] + lane[1]) / 2
@@ -202,13 +211,12 @@ def overlay_lane(r):
     try:
         run = bridge.call('begin_run', {'label': 'Edit'})['run_id']
         r.check('the app shows the AI lock', wait(lambda: r.state()['aiRun'], 5))
-        lane = wait(lambda: (l := r.s.run(LANE)) and l[2].startswith('AI is editing') and l, 5)
-        r.check('under the AI lock the lane says why it takes nothing', lane, r.s.run(LANE))
+        lane = wait(lambda: r.s.run(LANE), 5)
         if lane:
             y = (lane[0] + lane[1]) / 2
             r.s.run(DRAG_TILE, 'red.png', x, y)
-            time.sleep(0.5)
-            r.check('dragged over under the lock, it does not light up', r.s.run(LANE)[2].startswith('AI is editing'), r.s.run(LANE))
+            said = wait(lambda: (l := r.s.run(LANE)) and l[2].startswith('AI is editing'), 5)
+            r.check('dragged over under the lock, the lane says why it takes nothing and does not light up', said, r.s.run(LANE))
             r.shot('lane-locked')
             r.s.run(RELEASE, x, y)
             time.sleep(1)
