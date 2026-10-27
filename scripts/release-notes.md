@@ -5,6 +5,9 @@ The third alpha of Nuzky, a free, open-source video editor for your computer. It
 - **Plugins.** Ask the AI for a feature or a look Nuzky lacks, such as "remove clips shorter than a second" or a VHS look, and it writes a plugin that stays in Nuzky's plugins folder through updates. The Plugins tab shows its settings with Nuzky's own controls and says what it would do before you press its button. A run is one step you can undo. A plugin can add its own logo or sound, captions, zooms and motion, and looks you put on clips in Adjust → Effects. Turn on Run after import or Run before export to have it run by itself. A plugin only reads the project and returns edits. It can't reach the internet, your files or other apps.
 - **A plugin gallery.** Gallery in the Plugins tab lists plugins other people share, which Nuzky's maintainer checks first. It tells you what each one may do before you click Install, and installing runs nothing.
 - **Cut to the beat.** Pick a song and Cut to beat in Project status finds its beats, shows them on the song and recuts the video on them: Calm, Builds to the drop or Fast. The AI can do the same.
+- **Pictures and videos over the video.** Overlay on a picture or video in your media puts it over the video at the playhead, for B-roll or a screenshot over a talking head. You can also drop it on the preview, or on the lane above the main track in the timeline.
+- **Freeze frame.** `Shift+R`, or the snowflake next to Split, holds the frame at the playhead for 3 s. Trim it to make it as long as you want. The AI can do it too.
+- **A deeper studio look.** The editor's panes have more depth and finish, so the video stands out more.
 
 ## Fixed
 
@@ -14,6 +17,13 @@ The third alpha of Nuzky, a free, open-source video editor for your computer. It
 - The timeline stops scrolling where the clips end, and the track headers stay in place.
 - Your style learns Spelling only from words the speech model heard wrong, and a suggested change shows only the words it adds or drops.
 - Update available in the sidebar shows the whole version.
+- Captions keep words you clearly said when you restart a sentence after a short pause, and cutting the first attempt no longer drops words from the caption.
+- A number written with a space, such as 13 000, stays in one caption.
+- A word too wide for its text or caption makes the text smaller instead of breaking in the middle.
+- With All captions, dragging a caption in the preview moves every caption, and a style tile says it restyled every caption and offers Undo.
+- When the AI trims silence off the start of a clip, captions stay in time with the speech. They used to come up to 65 ms late.
+- A song's name sits above its waveform, so a long title no longer hides it.
+- Claude in the AI panel no longer reads your own CLAUDE.md, which cost tokens on every message.
 
 ## Not yet
 
