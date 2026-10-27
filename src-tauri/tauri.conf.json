@@ -18,7 +18,12 @@
         "height": 900,
         "minWidth": 1024,
         "minHeight": 640,
-        "dragDropEnabled": true
+        "dragDropEnabled": true,
+        "theme": "Dark",
+        "backgroundColor": "#060607",
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": { "x": 18, "y": 24 }
       }
     ],
     "security": {
