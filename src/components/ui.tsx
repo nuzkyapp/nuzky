@@ -797,6 +797,25 @@ export function Segmented<T extends string | number>({
   );
 }
 
+/** A picture of media or a project that fades in over 180 ms once it has loaded, instead of popping in. */
+export function FadeImg({ className = "", onLoad, onError, ...props }: ComponentProps<"img">) {
+  return (
+    <img
+      {...props}
+      onLoad={(e) => {
+        e.currentTarget.dataset.loaded = "";
+        onLoad?.(e);
+      }}
+      // A picture that cannot load shows what it shows today rather than staying hidden.
+      onError={(e) => {
+        e.currentTarget.dataset.loaded = "";
+        onError?.(e);
+      }}
+      className={`opacity-0 transition-opacity duration-[180ms] ease-out data-loaded:opacity-100 ${className}`}
+    />
+  );
+}
+
 /** Preset grid item: preview on top, label below; the selected one carries a check. */
 export function PresetTile({
   label,

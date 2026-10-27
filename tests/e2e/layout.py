@@ -112,6 +112,11 @@ def layout(r):
     r.check('the preview is black around the frame, so the video is the brightest thing there', max(stage) <= 2, stage)
     r.check('the media tile of a video the timeline uses carries a check and says so in its tooltip', look['used'], look)
     r.check('Saved in the top bar starts with a green dot', look['saved'] == 'rgb(48, 209, 88)', look['saved'])
+    fade = r.s.run("""const img = [...document.querySelectorAll('[role=tablist][aria-label=Library] ~ [role=tabpanel] span')]
+        .find((e) => e.textContent === 'talk.mp4').closest('.group').querySelector('img'); const st = getComputedStyle(img);
+        return {loaded: img.hasAttribute('data-loaded'), opacity: st.opacity, fades: st.transitionProperty.includes('opacity') && st.transitionDuration.includes('0.18s')};""")
+    r.check("the media tile's thumbnail fades in over 180 ms once loaded instead of popping in, and then shows fully",
+            fade == {'loaded': True, 'opacity': '1', 'fades': True}, fade)
     zoom = r.s.run("""const b = document.querySelector('input[aria-label="Timeline zoom"]').getBoundingClientRect();
         return {left: b.left, top: b.top, width: b.width, height: b.height, viewport: window.innerWidth};""")
     track = preview_crop(r.work / 'default.png', zoom)

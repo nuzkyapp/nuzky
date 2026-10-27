@@ -4,7 +4,7 @@ import { usedAssets, useEditor } from "../../lib/store";
 import { formatDuration } from "../../lib/time";
 import { openYoutube } from "../../lib/youtube";
 import type { Asset } from "../../lib/types";
-import { Menu, ProgressBar, lockedProps, useLockReason } from "../ui";
+import { FadeImg, Menu, ProgressBar, lockedProps, useLockReason } from "../ui";
 import { ImportPlaceholder, ImportTile, KindIcon, addAtPlayhead, addOverlay, addPictureInPicture, assetDragHandler, pickAndImport, removeAsset } from "./assets";
 
 /** Round action on a media tile; no blur, so a grid of them stays cheap to paint. */
@@ -56,7 +56,7 @@ function MediaItem({ asset }: { asset: Asset }) {
           ) : thumb === undefined ? (
             <div className="skeleton h-full w-full" />
           ) : thumb ? (
-            <img src={thumb} alt="" className="h-full w-full object-cover" draggable={false} />
+            <FadeImg src={thumb} alt="" className="h-full w-full object-cover" draggable={false} />
           ) : (
             <div className="flex h-full items-center justify-center text-muted">
               <KindIcon kind={asset.kind} size={24} />
