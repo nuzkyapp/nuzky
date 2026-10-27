@@ -1,7 +1,7 @@
 import json, statistics, subprocess, time
 
 from e2e.ducking import RATE, TONE, WINDOW, decode, tone_levels
-from e2e.harness import FIXTURES, MACOS, Bridge, export, flow, preview_brightness, wait, webdriver
+from e2e.harness import FIXTURES, MACOS, Bridge, export, flow, preview_brightness, settled, wait, webdriver
 
 # Presses what is under the middle of a fade dot of a clip and drags it `arguments[2]` px along the timeline, without
 # letting go.
@@ -74,6 +74,15 @@ document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2).dispatchEv
 window.dispatchEvent(at('pointerup'));"""
 
 
+# For 1.5 s, notes every clip on the timeline that moves by itself.
+WATCH_MOTION = """window.__motion = {slid: []}; const end = performance.now() + 1500;
+(function look() { const m = window.__motion;
+  document.querySelectorAll('[data-clip-id]').forEach((c) => c.getAnimations().some((a) => !(a instanceof CSSAnimation) && !(a instanceof CSSTransition))
+    && !m.slid.includes(c.dataset.clipId) && m.slid.push(c.dataset.clipId));
+  if (performance.now() < end) requestAnimationFrame(look); })();"""
+SEEN_MOTION = 'return window.__motion'
+
+
 @flow('edit', 'Import two clips, zoom the timeline with a touchpad and a wheel, split one with S, delete a piece with Delete, undo, find the result saved, drag a clip edge '
       'and see a title move with the clip after it, see imported music '
       'in the Audio tab, and fade a sound in by dragging the dot on its clip, heard in the export; Esc cancels such a drag')
@@ -92,18 +101,40 @@ def edit(r):
     r.s.run('window.__nuzky.store.getState().setZoom(60)')
     r.seek(2_000_000)
     r.focus_clip(clips[0]['id'])
+    r.s.run(WATCH_MOTION)
     r.key('s')
     split = wait(lambda: (c := r.track()) and len(c) == 3 and c)
     r.check('S splits the clip at the playhead', split and split[0]['durationUs'] == 2_000_000, split)
+    time.sleep(0.6)
+    seen = r.s.run(SEEN_MOTION)
+    r.check('splitting moves no clip', seen['slid'] == [], seen)
     piece = split[1]
     r.focus_clip(piece['id'])
+    r.s.run(WATCH_MOTION)
     r.key('Delete')
     deleted = wait(lambda: (c := r.track()) and len(c) == 2 and c)
     end = lambda clips: clips[-1]['startUs'] + clips[-1]['durationUs']
     r.check('Delete removes the piece and closes the gap', deleted and end(deleted) == end(split) - piece['durationUs'], deleted)
+    time.sleep(0.6)
+    seen = r.s.run(SEEN_MOTION)
+    r.check('the clip after it slides left into the gap instead of jumping', seen['slid'] == [split[2]['id']], seen)
+    # Undo's preview, shown while the pointer is on Undo, is the user's own look: nothing slides into it or out of it.
+    peek = "document.querySelector('[data-peek-button=undo]').dispatchEvent(new PointerEvent(arguments[0], {bubbles: true, pointerId: 1, relatedTarget: null}))"
+    r.s.run(WATCH_MOTION)
+    r.s.run(peek, 'pointerover')
+    shown = wait(lambda: r.s.run("return !!document.querySelector('[data-testid=history-peek]')"), 5)
+    time.sleep(0.4)
+    r.s.run(peek, 'pointerout')
+    time.sleep(0.6)
+    seen = r.s.run(SEEN_MOTION)
+    r.check("hovering Undo shows its preview without sliding clips into it or back", shown and seen['slid'] == [], {'shown': shown, **seen})
+    r.s.run(WATCH_MOTION)
     r.key('z', ctrlKey=True)
     undone = wait(lambda: (c := r.track()) and len(c) == 3 and c)
     r.check('Ctrl+Z brings the piece back', undone == split, undone)
+    time.sleep(0.6)
+    seen = r.s.run(SEEN_MOTION)
+    r.check('and the clip after it slides back to make room', split[2]['id'] in seen['slid'], seen)
     time.sleep(1.5)
     r.shot('timeline')
     # talk.mp4 is portrait and fills the 9:16 canvas; wide.mp4, which followed the deleted piece, leaves it black at the top.
@@ -130,10 +161,14 @@ def edit(r):
     r.seek(0)
     r.s.run('window.__nuzky.store.getState().setZoom(100)')
     time.sleep(0.5)
+    r.s.run(WATCH_MOTION)
     r.s.run(TRIM_RIGHT, undone[0]['id'], 100)
     time.sleep(0.3)
     r.s.run(RELEASE)
     grown = wait(lambda: (c := r.track()) and c[0]['durationUs'] > undone[0]['durationUs'] and c, 5)
+    time.sleep(0.5)
+    seen = r.s.run(SEEN_MOTION)
+    r.check('releasing a dragged edge leaves the clips where the drag showed them, with no slide from their old places', seen['slid'] == [], seen)
     moved = grown and grown[2]['startUs'] - wide['startUs']
     r.check('dragging the first clip\'s right edge out moves the wide clip later', grown and moved > 0, grown)
     r.check('the title moves with the wide clip', grown and title()['startUs'] == grown[2]['startUs'],
@@ -194,6 +229,7 @@ def edit(r):
     r.key('z', ctrlKey=True)
     wait(lambda: len(captions()) == 2, 5)
     caption = next(c['id'] for t in r.state()['tracks'] if t['kind'] == 'text' for c in t['clips'] if c['text'] == 'Piece')
+    settled(r)
     r.s.run(CLICK_CLIP, piece['id'], {})
     r.s.run(CLICK_CLIP, caption, add)
     wait(lambda: r.s.run(SELECTION) == [piece['id'], caption], 5)

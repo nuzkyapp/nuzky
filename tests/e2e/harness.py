@@ -411,6 +411,11 @@ def run_flow(name):
 
 # --- Helpers shared by flows ----------------------------------------------------------------------------
 
+def settled(r):
+    """Waits until no clip on the timeline is still sliding after an edit (230 ms), so a click by its place hits it."""
+    return wait(lambda: r.s.run("return ![...document.querySelectorAll('[data-clip-id]')].some((c) => c.getAnimations().some((a) => a.playState === 'running'))"), 2, 0.05)
+
+
 def preview_rect(r):
     return r.s.run("""const b = document.querySelector('section[aria-label=Preview] canvas').getBoundingClientRect();
         return {left: b.left, top: b.top, width: b.width, height: b.height, viewport: window.innerWidth};""")

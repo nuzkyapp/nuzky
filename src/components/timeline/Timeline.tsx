@@ -200,6 +200,40 @@ function tickStep(zoom: number): number {
 
 const VISIBLE_STEP = 400;
 
+const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+
+/**
+ * Cuts close as they happen, as the recap video closes them. When the project changes so that clips move along their
+ * track, such as a deleted piece's gap closing, a paste pushing the clips after it or an undo, they slide from where
+ * they were to their new place over 200 ms instead of jumping, the next change carrying on from wherever a slide got to.
+ * Not when the result is already on screen: after a clip or edge was dragged or a box drawn in the last 1.5 s, or when
+ * Undo or Redo is taken while its preview shows; nor after a zoom, for a step under 8 px such as a nudge by a frame, or
+ * with reduced motion. Places come from the projects, so a clip that was off screen slides in too.
+ */
+function useCutMotion(lanes: RefObject<HTMLElement | null>, project: Project | undefined, zoom: number, held: boolean, peeking: boolean) {
+  const was = useRef<{ project: Project | undefined; zoom: number; heldAt: number; peeking: boolean }>({ project, zoom, heldAt: 0, peeking });
+  useLayoutEffect(() => {
+    const before = was.current;
+    const heldAt = held ? performance.now() : before.heldAt;
+    was.current = { project, zoom, heldAt, peeking };
+    if (!before.project || !project || before.project === project || before.zoom !== zoom || before.peeking || performance.now() - heldAt < 1500 || reducedMotion.matches)
+      return;
+    const place = (p: Project) => new Map(p.tracks.flatMap((t) => t.clips.map((c) => [c.id, { track: t.id, startUs: c.startUs }] as const)));
+    const then = place(before.project);
+    const now = place(project);
+    for (const el of lanes.current?.querySelectorAll<HTMLElement>("[data-clip-id]") ?? []) {
+      const a = then.get(el.dataset.clipId!);
+      const b = now.get(el.dataset.clipId!);
+      if (!a || !b || a.track !== b.track) continue;
+      const running = el.getAnimations().find((x) => x.id === "cut-slide");
+      // Where it is drawn now, a slide that is still running included.
+      const from = ((a.startUs - b.startUs) / US) * zoom + (running ? new DOMMatrix(getComputedStyle(el).transform).m41 : 0);
+      running?.cancel();
+      if (Math.abs(from) >= 8) el.animate([{ transform: `translateX(${from}px)` }, { transform: "none" }], { id: "cut-slide", duration: 200, easing: "cubic-bezier(0.2, 0, 0, 1)" });
+    }
+  });
+}
+
 /**
  * The playhead line, the one part of the timeline that follows playback frame by frame; it keeps itself in view while playing,
  * except while `follow` is off: a box select scrolls the timeline itself.
@@ -336,6 +370,7 @@ export function Timeline({ height }: { height: number }) {
   // Media dropped on the middle of a clip that can show or play it goes in that clip; its ends insert beside it.
   // While Undo or Redo is hovered the clips are drawn where they were, so nothing is offered.
   const peeking = !!peekShown;
+  useCutMotion(scroller, project, zoom, !!gesture || !!box, peeking);
   const replaceTarget = useCallback(
     (x: number, y: number, media: DropMedia | null) => {
       const el = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-clip-id]");
