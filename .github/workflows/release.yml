@@ -159,7 +159,7 @@ jobs:
               echo "- Copied \`$asset\` from \`$previous\` to \`$SOURCE_TAG\`." >> "$GITHUB_STEP_SUMMARY"
             else
               # A rerun after the libraries changed must not leave the copy an earlier run attached.
-              if [ -n "$asset" ] && gh release view "$SOURCE_TAG" --json assets --jq '.assets[].name' | grep -Fxq "$asset"; then
+              if [ "$reusable" != true ] && [ -n "$asset" ] && gh release view "$SOURCE_TAG" --json assets --jq '.assets[].name' | grep -Fxq "$asset"; then
                 test "$(gh release view "$SOURCE_TAG" --json isDraft --jq .isDraft)" = true
                 gh release delete-asset "$SOURCE_TAG" "$asset" --yes
                 echo "- Removed \`$asset\`, which an earlier run copied, from \`$SOURCE_TAG\`." >> "$GITHUB_STEP_SUMMARY"
