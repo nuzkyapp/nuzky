@@ -37,7 +37,7 @@ jobs:
             check=$(jq -r '.check_run_url' <<< "$job")
             annotations=$(gh api --paginate "$check/annotations" | jq -s 'add')
             reason=$(jq -r '[.[] | select(.annotation_level == "failure") | .message |
-              select(test("The job was not acquired by Runner|The runner.*lost communication with the server|The runner.*received a shutdown signal"; "i"))] | join("; ")' <<< "$annotations")
+              select(test("not acquired by Runner|lost communication with the server|received a shutdown signal"; "i"))] | join("; ")' <<< "$annotations")
             if [[ -n $reason ]] && jq -e 'all(.steps[]; .conclusion != "failure")' <<< "$job" > /dev/null; then
               printf '\n- %s: %s\n' "$name" "$reason" >> "$GITHUB_STEP_SUMMARY"
             else
