@@ -158,7 +158,12 @@ jobs:
               rm -f "transfer/$asset"
               echo "- Copied \`$asset\` from \`$previous\` to \`$SOURCE_TAG\`." >> "$GITHUB_STEP_SUMMARY"
             else
-              if [ -n "$asset" ]; then rm -f "transfer/$asset"; fi
+              # A rerun after the libraries changed must not leave the copy an earlier run attached.
+              if [ -n "$asset" ] && gh release view "$SOURCE_TAG" --json assets --jq '.assets[].name' | grep -Fxq "$asset"; then
+                test "$(gh release view "$SOURCE_TAG" --json isDraft --jq .isDraft)" = true
+                gh release delete-asset "$SOURCE_TAG" "$asset" --yes
+                echo "- Removed \`$asset\`, which an earlier run copied, from \`$SOURCE_TAG\`." >> "$GITHUB_STEP_SUMMARY"
+              fi
               {
                 echo "- Collect the $archive archive by hand (build-info differs or is missing, or no archive is available)."
                 if [ "$archive" != onnxruntime ]; then
