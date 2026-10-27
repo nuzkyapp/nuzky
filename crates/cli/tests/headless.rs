@@ -171,7 +171,8 @@ fn headless_rough_cut_exports_reels_and_saves_captions() {
     let captions = c.call("build_captions", json!({"run_id":run["run_id"],"style_preset":"reel"}));
     assert!(captions["caption_count"].as_u64().unwrap() > 0, "{captions}");
     c.call("end_run", json!({"run_id":run["run_id"],"action":"keep"}));
-    let state = c.call("get_state", json!({}));
+    // Unfiltered get_state shares the captions' common style; a range returns every clip as saved.
+    let state = c.call("get_state", json!({"range":{"startUs":0,"endUs":i64::MAX}}));
     let output = c.dir.join("rough-cut.mp4");
     let job = c.call("export_video", json!({"path":output,"preset":"reels"}));
     let exported = c.wait_job(job);
