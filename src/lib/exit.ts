@@ -7,7 +7,7 @@
  */
 const ENTRY = ["menu-in", "toast-in", "dialog-in", "scrim-in"];
 /** The longest a copy lives: the blink and the fade (index.css), with a frame to spare. */
-const LIFE_MS = 120 + 150 + 30;
+const LIFE_MS = 50 + 150 + 30;
 
 const reduced = matchMedia("(prefers-reduced-motion: reduce)");
 
