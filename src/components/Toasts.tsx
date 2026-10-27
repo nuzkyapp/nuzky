@@ -126,7 +126,8 @@ export function Toasts({ bottom, left }: { bottom: number; /** From the window's
       const top = box!.top + el.offsetTop;
       el.dataset.exitRect = `${box!.left + el.offsetLeft} ${top} ${el.offsetWidth}`;
       const was = tops.current.get(el.dataset.toast!);
-      if (slide && was !== undefined && was !== top) {
+      // A script animation, which the reduced-motion rule in index.css does not reach.
+      if (slide && was !== undefined && was !== top && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
         el.getAnimations().forEach((a) => a instanceof CSSAnimation || a.cancel());
         el.animate([{ transform: `translateY(${was - top}px)` }, { transform: "none" }], { duration: 200, easing: "cubic-bezier(0.32, 0.72, 0, 1)" });
       }
