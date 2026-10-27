@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { ClipboardCopy, ClipboardPaste, Copy, ListChecks, Paintbrush, Replace, Scissors, ScissorsLineDashed, Snowflake, Trash2, Unlink } from "lucide-react";
+import { chose } from "../../lib/exit";
 import { pickAndReplace } from "../panel/assets";
 import { AI_EDITING, NOTHING_COPIED, attributeTargets, canSplitClip, copySelection, cutSelection, deleteSelection, detachAudio, detachBlocker, duplicateSelection, findClip, freezeAtPlayhead, freezeBlocker, isFreeze, pasteAttributes, pasteAttributesBlocker, pasteClips, selectTrack, splitAtPlayhead, useAiLocked, useEditor } from "../../lib/store";
 import type { Clip } from "../../lib/types";
@@ -18,7 +19,14 @@ function Item({ icon, label, shortcut, disabled, reason, onSelect }: { icon: Rea
       role="menuitem"
       aria-disabled={disabled || undefined}
       title={disabled ? (reason ?? undefined) : undefined}
-      onClick={disabled ? undefined : onSelect}
+      onClick={
+        disabled
+          ? undefined
+          : (e) => {
+              chose(e.currentTarget);
+              onSelect();
+            }
+      }
       className="group flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] text-fg hover:bg-white/[.08] focus-visible:bg-white/[.08] aria-disabled:cursor-not-allowed aria-disabled:text-subtle aria-disabled:hover:bg-transparent aria-disabled:focus-visible:bg-white/[.08]"
     >
       <span className="text-muted group-aria-disabled:text-subtle">{icon}</span>
@@ -120,12 +128,13 @@ export function ClipMenu({ at, onClose }: { at: MenuAt; onClose: () => void }) {
   return (
     <div
       ref={ref}
+      data-exit
       role="menu"
       aria-label={n === 1 ? "Clip actions" : `Actions for ${n} clips`}
       onKeyDown={onKeyDown}
       onContextMenu={(e) => e.preventDefault()}
-      className="overlay fixed z-[110] w-56 rounded-xl p-1"
-      style={{ left: pos.x, top: pos.y }}
+      className="overlay menu-in fixed z-[110] w-56 rounded-xl p-1"
+      style={{ left: pos.x, top: pos.y, transformOrigin: `${at.x - pos.x}px ${at.y - pos.y}px` }}
     >
       {/* Split takes the selected clips under the playhead, like S. */}
       <Item

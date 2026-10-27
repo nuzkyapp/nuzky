@@ -59,6 +59,7 @@ export function OpenedDraftDialog() {
   };
   return (
     <dialog
+      data-exit
       ref={dialog}
       aria-labelledby="opened-draft-title"
       onCancel={(e) => {

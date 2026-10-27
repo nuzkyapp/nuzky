@@ -154,7 +154,7 @@ export function ChatGptDialog() {
   const notice = status?.state === "signedOut" ? status.notice : null;
   const done = status?.state === "signedIn" && status.plan;
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/45" onPointerDown={(e) => e.target === e.currentTarget && close()}>
+    <div data-exit className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/45" onPointerDown={(e) => e.target === e.currentTarget && close()}>
       <div ref={dialog} role="dialog" aria-modal="true" aria-labelledby="chatgpt-title" tabIndex={-1} onKeyDown={trapTab} className="overlay w-[440px] rounded-[20px] p-6 outline-none dialog-in">
         <div className="mb-5 flex items-start justify-between gap-3">
           <h2 id="chatgpt-title" className="text-[17px] font-semibold leading-[22px] tracking-[-0.025em]">

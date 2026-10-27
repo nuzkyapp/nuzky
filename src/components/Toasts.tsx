@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { AlertCircle, AlertTriangle, CheckCircle2, Info, X } from "lucide-react";
 import { useEditor, type Toast } from "../lib/store";
 import { useUpdates } from "../lib/updates";
@@ -52,12 +52,13 @@ function ToastItem({ toast: t, paused, dismiss }: { toast: Toast; paused: boolea
   }, [expired, onDismiss]);
   return (
     <div
-      data-toast
+      data-toast={t.id}
+      data-exit="float"
       tabIndex={-1}
       role={t.kind === "error" ? "alert" : undefined}
       // Only the keyboard (F8, Esc) focuses a toast, so it always shows the focus outline; a click on its text does not focus it.
       onMouseDown={(e) => !(e.target as Element).closest("button") && e.preventDefault()}
-      className={`overlay pointer-events-auto flex min-h-12 max-w-full items-center rounded-[14px] py-2 pr-2 pl-3.5 text-[13px] font-medium text-fg focus:outline-2 focus:outline-offset-1 focus:outline-accent ${
+      className={`overlay toast-in pointer-events-auto flex min-h-12 max-w-full items-center rounded-[14px] py-2 pr-2 pl-3.5 text-[13px] font-medium text-fg focus:outline-2 focus:outline-offset-1 focus:outline-accent ${
         stacked ? "flex-wrap gap-x-2.5 gap-y-0" : "gap-2.5"
       } ${t.kind === "error" || t.kind === "warning" ? EDGE[t.kind] : ""}`}
     >
@@ -111,6 +112,30 @@ export function Toasts({ bottom, left }: { bottom: number; /** From the window's
   const stack = useRef<HTMLDivElement>(null);
   /** Where focus was before F8, so it goes back there once the toasts are done with. */
   const back = useRef<HTMLElement | null>(null);
+  /** Each toast's top in the window after the last change of the stack. */
+  const tops = useRef(new Map<string, number>());
+
+  // A toast that goes fades out where it was (exit.ts, from `data-exit-rect`), and the others slide to their new places
+  // instead of jumping there; a moved or resized stack moves them at once.
+  const ids = toasts.map((t) => t.id).join();
+  /** Where each toast sits in the window, leaving out the motion it may be in. */
+  const place = (slide: boolean) => {
+    const box = stack.current?.getBoundingClientRect();
+    const placed = new Map<string, number>();
+    for (const el of stack.current?.querySelectorAll<HTMLElement>("[data-toast]") ?? []) {
+      const top = box!.top + el.offsetTop;
+      el.dataset.exitRect = `${box!.left + el.offsetLeft} ${top} ${el.offsetWidth}`;
+      const was = tops.current.get(el.dataset.toast!);
+      if (slide && was !== undefined && was !== top) {
+        el.getAnimations().forEach((a) => a instanceof CSSAnimation || a.cancel());
+        el.animate([{ transform: `translateY(${was - top}px)` }, { transform: "none" }], { duration: 200, easing: "cubic-bezier(0.32, 0.72, 0, 1)" });
+      }
+      placed.set(el.dataset.toast!, top);
+    }
+    tops.current = placed;
+  };
+  useLayoutEffect(() => place(true), [ids]);
+  useLayoutEffect(() => place(false), [bottom, left, lift]);
 
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {

@@ -114,7 +114,7 @@ export function ConnectAgentDialog() {
   const first = rows?.find((r) => r.state !== "connected" && r.state !== "unreadable");
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/45"
+      data-exit className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/45"
       onPointerDown={(e) => e.target === e.currentTarget && close()}
     >
       <div

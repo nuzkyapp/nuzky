@@ -269,7 +269,7 @@ export function Launcher() {
 
   let index = 0;
   return (
-    <div className="fixed inset-0 z-[80]" onKeyDown={onKeyDown}>
+    <div data-exit className="fixed inset-0 z-[80]" onKeyDown={onKeyDown}>
       <div className="scrim-in absolute inset-0 bg-black/45" onPointerDown={close} />
       <div className="pointer-events-none absolute inset-x-0 top-[88px] flex justify-center px-6">
         <div

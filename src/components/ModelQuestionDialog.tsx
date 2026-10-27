@@ -50,6 +50,7 @@ export function ModelQuestionDialog({ kind }: { kind: ModelKind }) {
   const answer = (download: boolean) => void answerModelQuestion(kind, download);
   return (
     <dialog
+      data-exit
       ref={dialog}
       tabIndex={-1}
       aria-labelledby={`${kind}-model-title`}

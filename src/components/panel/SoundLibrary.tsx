@@ -468,6 +468,7 @@ function RightsDialog() {
   }, [open]);
   return (
     <dialog
+      data-exit
       ref={dialog}
       tabIndex={-1}
       aria-labelledby="youtube-rights-title"

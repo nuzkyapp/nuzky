@@ -369,7 +369,7 @@ export function ExportDialog() {
   return (
     <div
       data-scrim
-      className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/45"
+      data-exit className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/45"
       onPointerDown={(e) => e.target === e.currentTarget && close()}
     >
       <div

@@ -425,7 +425,7 @@ function ResetDialog({ view, onClose }: { view: StyleView; onClose: () => void }
   const dialog = useRef<HTMLDivElement>(null);
   useEffect(() => dialog.current?.querySelector("button")?.focus(), []);
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/45" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div data-exit className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/45" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
       <div
         ref={dialog}
         role="alertdialog"
