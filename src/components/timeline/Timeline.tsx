@@ -484,20 +484,26 @@ export function Timeline({ height }: { height: number }) {
   const emptyTimeline = allClips(drawn).length === 0;
   // Until something sits over the video, an empty lane above it shows where a picture over it goes.
   const overlayLaneShown = !!project && !emptyTimeline && !cover && !peekShown && !project.tracks.some((t) => t.kind === "video" && t.id !== MAIN_TRACK);
+  const dragTrack = drag ? project.tracks.find((t) => t.id === drag.trackId) : undefined;
+  const dragKind = dragTrack?.kind ?? null;
+  // The lane keeps its room so nothing jumps under the pointer, but says something only while it could take the drag.
+  const laneOffered = (!!assetDrag && dragMedia?.kind !== "audio") || (!!drag?.moved && drag.mode === "move" && dragKind === "video");
   const overLane = !locked && ((!!place?.over && dragMedia?.kind !== "audio") || !!drag?.onLane);
   const laneRow = overlayLaneShown && (
     <div key="overlay-lane" data-lane className="relative flex shrink-0" style={{ height: OVERLAY_LANE_H + ROW_GAP }}>
       <div className="sticky left-0 z-[47] shrink-0 border-r border-white/[.07] bg-panel" style={{ width: HEADER_W }} />
       <div ref={overlayLane} data-lane data-testid="overlay-lane" className="relative flex-1" style={{ marginBlock: ROW_GAP / 2 }}>
-        <div
-          className={`pointer-events-none absolute inset-y-0 right-1 left-1 flex items-center rounded-[7px] border text-[12px] transition-colors duration-[120ms] ease-out ${
-            overLane ? "border-accent bg-accent/15 text-fg" : "border-dashed border-white/15 text-muted"
-          }`}
-        >
-          <span className="sticky px-3" style={{ left: HEADER_W }}>
-            {locked ? AI_EDITING : overLane ? "Drop to put it over the video" : "Drag a video or picture here to put it over the video"}
-          </span>
-        </div>
+        {laneOffered && (
+          <div
+            className={`pointer-events-none absolute inset-y-0 right-1 left-1 flex items-center rounded-[7px] border text-[12px] transition-colors duration-[120ms] ease-out ${
+              overLane ? "border-accent bg-accent/15 text-fg" : "border-dashed border-white/15 text-muted"
+            }`}
+          >
+            <span className="sticky px-3" style={{ left: HEADER_W }}>
+              {locked ? AI_EDITING : overLane ? "Drop to put it over the video" : "Drag a video or picture here to put it over the video"}
+            </span>
+          </div>
+        )}
         {place?.over && dropTime !== null && (
           <div data-testid="drop-line" className="pointer-events-none absolute inset-y-0 z-30 w-0.5 bg-accent" style={{ left: (dropTime / US) * zoom }} />
         )}
@@ -569,8 +575,6 @@ export function Timeline({ height }: { height: number }) {
     const off = (n: number, side: string) => `${n} changed clip${n === 1 ? "" : "s"} off screen, to the ${side}`;
     return [...described.lines, ...(before ? [off(before, "left")] : []), ...(after ? [off(after, "right")] : [])];
   })();
-  const dragTrack = drag ? project.tracks.find((t) => t.id === drag.trackId) : undefined;
-  const dragKind = dragTrack?.kind ?? null;
   // A sound clip's name has its own row, so its ghost needs an audio row's height to keep its waveform.
   const ghostHeight = dragKind === "audio" ? rowHeight(dragTrack!) : 44;
   const picked = selection.flatMap((id) => {
