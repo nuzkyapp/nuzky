@@ -1361,6 +1361,7 @@ impl Project {
                     ClipContent::Media { speed, source_in_us, .. } => (*speed as f64, *source_in_us),
                     ClipContent::Text { .. } => (1.0, 0),
                 };
+                let main = self.tracks[ti].id == MAIN_TRACK;
                 let clip = &mut self.tracks[ti].clips[ci];
                 let (old_start, old_end) = (clip.start_us, clip.end_us());
                 let mut start = start_us.max(0);
@@ -1381,7 +1382,8 @@ impl Project {
                     if source_in_us.is_some() && moves_left {
                         // Trimming the left edge: keep the right edge in place.
                         let shift = ((new_src - *src) as f64 / speed).round() as i64;
-                        start = (old_start + shift).max(0);
+                        // The main track packs the clip where it was, so its head can grow past the timeline's start.
+                        start = if main { old_start + shift } else { (old_start + shift).max(0) };
                         new_src = *src + ((start - old_start) as f64 * speed).round() as i64;
                         duration = (old_end - start).max(min);
                     }
@@ -1399,9 +1401,9 @@ impl Project {
                     k.t_us -= shift;
                 }
                 shift_words(clip, shift);
-                clip.start_us = start;
+                clip.start_us = if main { old_start } else { start };
                 clip.duration_us = duration;
-                if self.tracks[ti].id == MAIN_TRACK {
+                if main {
                     // Packing keeps the clip's start, so the other tracks gain or lose the time at the moved edge.
                     if left_edge {
                         self.ripple_others(old_start, old_start - start, min);
@@ -3396,6 +3398,8 @@ mod tests {
             (trim(&b, 6_000_000, 2_000_000, Some(1_000_000)), vec![1_000_000, 5_000_000], "left edge in"),
             (trim(&b, 4_000_000, 3_000_000, Some(0)), vec![1_000_000, 6_000_000], "left edge out"),
             (trim(&b, 5_000_000, 2_000_000, Some(1_000_000)), vec![1_000_000, 5_000_000], "left edge in, start kept"),
+            (trim(&a, 0, 4_000_000, Some(1_000_000)), vec![0, 4_000_000], "first clip's left edge in"),
+            (trim(&a, 0, 5_000_000, Some(0)), vec![1_000_000, 5_000_000], "first clip's left edge out, start kept"),
         ] {
             p.apply(cmd).unwrap();
             assert_eq!(starts(&p), (texts, music), "{step}");
