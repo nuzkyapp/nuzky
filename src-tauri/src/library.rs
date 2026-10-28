@@ -205,9 +205,10 @@ pub struct ProjectPoster {
 pub struct Library {
     /// Serialises reading and writing `library.json`.
     index: Mutex<()>,
-    /// Projects moved to the Trash that Undo can still bring back: path, and which move it was, so the
-    /// timer of a move that was undone never takes a later one.
-    pending_trash: Mutex<HashMap<String, u64>>,
+    /// Projects moved to the Trash and hidden from the list: path, and which move it was, so the timer
+    /// of a move that was undone never takes a later one. `None` while the file is on its way to the
+    /// Trash, when Undo can no longer bring it back and a list must still not show it.
+    pending_trash: Mutex<HashMap<String, Option<u64>>>,
     trash_moves: AtomicU64,
     spoken: Mutex<HashMap<String, Arc<Spoken>>>,
     transcripts: OnceLock<Option<TranscriptStore>>,
@@ -485,7 +486,7 @@ impl Library {
             }
         }
         let move_id = self.trash_moves.fetch_add(1, Ordering::Relaxed);
-        self.pending_trash.lock().unwrap().extend(paths.iter().map(|p| (p.clone(), move_id)));
+        self.pending_trash.lock().unwrap().extend(paths.iter().map(|p| (p.clone(), Some(move_id))));
         let library = self.clone();
         std::thread::Builder::new()
             .name("nuzky-trash".into())
@@ -502,7 +503,7 @@ impl Library {
     pub fn restore(&self, paths: &[String]) -> Result<()> {
         let mut pending = self.pending_trash.lock().unwrap();
         ensure!(
-            paths.iter().all(|p| pending.contains_key(p)),
+            paths.iter().all(|p| pending.get(p).is_some_and(Option::is_some)),
             "It is already in the Trash. Put it back from there, then open it with Open file."
         );
         for path in paths {
@@ -523,12 +524,14 @@ impl Library {
         for path in paths {
             {
                 let mut pending = self.pending_trash.lock().unwrap();
-                if pending.get(path).is_none_or(|id| move_id.is_some_and(|m| m != *id)) {
-                    continue;
+                match pending.get_mut(path) {
+                    Some(waiting @ Some(_)) if move_id.is_none_or(|m| *waiting == Some(m)) => *waiting = None,
+                    _ => continue,
                 }
-                pending.remove(path);
             }
-            if let Err(error) = self.move_to_trash(Path::new(path)) {
+            let moved = self.move_to_trash(Path::new(path));
+            self.pending_trash.lock().unwrap().remove(path);
+            if let Err(error) = moved {
                 log::error!("Cannot move {path} to the Trash: {error:#}");
                 let name = store::load(Path::new(path)).map(|p| p.name).unwrap_or_else(|_| "A project".into());
                 failed.push(if error.to_string().starts_with("PROJECT_BUSY") {
