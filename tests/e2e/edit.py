@@ -163,12 +163,13 @@ def edit(r):
     time.sleep(0.5)
     r.s.run(WATCH_MOTION)
     r.s.run(TRIM_RIGHT, undone[0]['id'], 100)
-    time.sleep(0.3)
+    # The pointer rests on the edge for 2 s before letting go.
+    time.sleep(2)
     r.s.run(RELEASE)
     grown = wait(lambda: (c := r.track()) and c[0]['durationUs'] > undone[0]['durationUs'] and c, 5)
     time.sleep(0.5)
     seen = r.s.run(SEEN_MOTION)
-    r.check('releasing a dragged edge leaves the clips where the drag showed them, with no slide from their old places', seen['slid'] == [], seen)
+    r.check('releasing a dragged edge after resting on it leaves the clips where the drag showed them, with no slide from their old places', seen['slid'] == [], seen)
     moved = grown and grown[2]['startUs'] - wide['startUs']
     r.check('dragging the first clip\'s right edge out moves the wide clip later', grown and moved > 0, grown)
     r.check('the title moves with the wide clip', grown and title()['startUs'] == grown[2]['startUs'],
@@ -176,8 +177,18 @@ def edit(r):
     r.s.run('window.__nuzky.store.getState().setZoom(40)')
     time.sleep(1)
     r.shot('trim-moves-title')
-    for _ in range(2):
-        r.key('z', ctrlKey=True)
+    # Undo clicked while its preview shows: the preview was the result, so nothing slides into it again.
+    peek = "document.querySelector('[data-peek-button=undo]').dispatchEvent(new PointerEvent(arguments[0], {bubbles: true, pointerId: 1, relatedTarget: null}))"
+    r.s.run(peek, 'pointerover')
+    previewed = wait(lambda: r.s.run("return !!document.querySelector('[data-testid=history-peek]')"), 5)
+    r.s.run(WATCH_MOTION)
+    r.s.run(peek, 'pointerdown')
+    r.s.run("document.querySelector('[data-peek-button=undo]').click()")
+    r.s.run(peek, 'pointerout')
+    time.sleep(0.8)
+    seen = r.s.run(SEEN_MOTION)
+    r.check('clicking Undo while its preview shows slides nothing into the layout the preview already showed', previewed and seen['slid'] == [], {'previewed': previewed, **seen})
+    r.key('z', ctrlKey=True)
     r.check('undo puts the clip and the title back', wait(lambda: r.track() == undone and title() is None, 5), r.track())
 
     # Dragging a main-track clip's left edge in, as in CapCut, moves only that edge while dragging; the clips after it

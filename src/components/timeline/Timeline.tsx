@@ -206,18 +206,20 @@ const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
  * Cuts close as they happen, as the recap video closes them. When the project changes so that clips move along their
  * track, such as a deleted piece's gap closing, a paste pushing the clips after it or an undo, they slide from where
  * they were to their new place over 200 ms instead of jumping, the next change carrying on from wherever a slide got to.
- * Not when the result is already on screen: after a clip or edge was dragged or a box drawn in the last 1.5 s, or when
- * Undo or Redo is taken while its preview shows; nor after a zoom, for a step under 8 px such as a nudge by a frame, or
- * with reduced motion. Places come from the projects, so a clip that was off screen slides in too.
+ * Not when the result is already on screen: within 1.5 s of letting go of a dragged clip, edge or box, or when Undo or
+ * Redo is taken while its preview shows; nor after a zoom, for a step under 8 px such as a nudge by a frame, or with
+ * reduced motion. Places come from the projects, so a clip that was off screen slides in too.
  */
 function useCutMotion(lanes: RefObject<HTMLElement | null>, project: Project | undefined, zoom: number, held: boolean, peeking: boolean) {
-  const was = useRef<{ project: Project | undefined; zoom: number; heldAt: number; peeking: boolean }>({ project, zoom, heldAt: 0, peeking });
+  const was = useRef<{ project: Project | undefined; zoom: number; held: boolean; heldAt: number; peeking: boolean }>({ project, zoom, held, heldAt: 0, peeking });
   useLayoutEffect(() => {
     const before = was.current;
-    const heldAt = held ? performance.now() : before.heldAt;
-    was.current = { project, zoom, heldAt, peeking };
-    if (!before.project || !project || before.project === project || before.zoom !== zoom || before.peeking || performance.now() - heldAt < 1500 || reducedMotion.matches)
-      return;
+    const at = performance.now();
+    // Until it is let go, however long the pointer rests.
+    const heldAt = held || before.held ? at : before.heldAt;
+    was.current = { project, zoom, held, heldAt, peeking };
+    const quiet = before.peeking || at - heldAt < 1500;
+    if (!before.project || !project || before.project === project || before.zoom !== zoom || quiet || reducedMotion.matches) return;
     const place = (p: Project) => new Map(p.tracks.flatMap((t) => t.clips.map((c) => [c.id, { track: t.id, startUs: c.startUs }] as const)));
     const then = place(before.project);
     const now = place(project);
