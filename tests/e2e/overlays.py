@@ -118,15 +118,16 @@ def overlays(r):
     r.check('and goes', faded(r))
     # A dialog that stays mounted and only closes, as the model question does when the agent stops waiting, fades out too,
     # still showing what it asked.
-    r.s.run("window.__nuzky.store.setState({speechModelQuestion: {id: 'test', sizeMb: 574}})")
-    r.check('the model question opens', wait(lambda: r.s.run("return !!document.querySelector('dialog[open]')"), 5))
-    time.sleep(0.4)
-    left = gone(r, "window.__nuzky.store.setState({speechModelQuestion: null})")
-    if not left['copies']:
-        time.sleep(0.05)
-        left = r.s.run(GONE)
-    copy = left['copies'][0] if left['copies'] else {}
-    r.check('closing it in place leaves a fading copy that still says what it asked, and no dialog counts as open',
-            left['live'] == 0 and len(left['copies']) == 1 and copy['fading'] and '574 MB' in copy['text'], left)
-    r.check('and goes', faded(r))
+    for time_ in ('first', 'second'):
+        r.s.run("window.__nuzky.store.setState({speechModelQuestion: {id: 'test', sizeMb: 574}})")
+        r.check(f'the model question opens the {time_} time', wait(lambda: r.s.run("return !!document.querySelector('dialog[open]')"), 5))
+        time.sleep(0.4)
+        left = gone(r, "window.__nuzky.store.setState({speechModelQuestion: null})")
+        if not left['copies']:
+            time.sleep(0.05)
+            left = r.s.run(GONE)
+        copy = left['copies'][0] if left['copies'] else {}
+        r.check(f'closing it in place the {time_} time leaves a fading copy that still says what it asked, and no dialog counts as open',
+                left['live'] == 0 and len(left['copies']) == 1 and copy['fading'] and '574 MB' in copy['text'], left)
+        r.check('and goes', faded(r))
     r.check('no error toast', not r.errors(), r.errors())

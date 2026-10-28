@@ -70,8 +70,10 @@ new MutationObserver((records) => {
   for (const record of records) {
     const target = record.target;
     if (record.type === "attributes") {
-      if (target instanceof HTMLDialogElement && target.hasAttribute("data-exit") && record.oldValue !== null && !target.open && target.parentNode)
-        leave(target, target.parentNode, target.nextSibling);
+      if (!(target instanceof HTMLDialogElement) || !target.hasAttribute("data-exit")) continue;
+      // Opened again, it fades again when it next closes.
+      if (target.open) left.delete(target);
+      else if (record.oldValue !== null && target.parentNode) leave(target, target.parentNode, target.nextSibling);
       continue;
     }
     for (const node of record.removedNodes) if (node instanceof HTMLElement && node.hasAttribute("data-exit") && target.isConnected) leave(node, target, record.nextSibling);
