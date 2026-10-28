@@ -353,6 +353,54 @@ input[type="range"].range:disabled {
 .dialog-in {
   animation: dialog-in 200ms ease-out both;
 }
+/* Menus grow out of the point they were opened from (each sets its transform-origin); toasts rise into the stack. */
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+.menu-in {
+  animation: menu-in 140ms cubic-bezier(0.2, 0.9, 0.3, 1) backwards;
+}
+/* It shows once the toasts it pushes up have left its place. */
+@keyframes toast-in {
+  0%,
+  35% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+.toast-in {
+  animation: toast-in 220ms cubic-bezier(0.32, 0.72, 0, 1) backwards;
+}
+/* The copy a menu, dialog or toast leaves while it fades out (lib/exit.ts). A chosen menu item blinks once first, off
+   and back on, as on macOS. */
+@keyframes exit-out {
+  to {
+    opacity: 0;
+  }
+}
+.exit-ghost {
+  pointer-events: none;
+  animation: exit-out 150ms ease-out forwards;
+}
+.exit-ghost[data-chose] {
+  animation-delay: 50ms;
+}
+@keyframes chosen {
+  0%,
+  49% {
+    background-color: transparent;
+  }
+  50%,
+  100% {
+    background-color: rgb(255 255 255 / 0.14);
+  }
+}
+.exit-ghost [data-chosen] {
+  animation: chosen 100ms linear forwards;
+}
 /* A part of Your style that just changed, by the AI or anywhere else. */
 @keyframes changed {
   from {

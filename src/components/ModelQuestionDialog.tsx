@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, errorText, plainError } from "../lib/api";
 import { usePreview } from "../lib/preview";
 import { useEditor } from "../lib/store";
@@ -36,6 +36,9 @@ export function ModelQuestionDialog({ kind }: { kind: ModelKind }) {
   // The editor stays behind the home screen with its panel, and the full screen preview hides the panel.
   const full = usePreview((s) => s.full);
   const asked = useEditor((s) => (kind === "vision" && s.aiChats > 0 && s.view === "editor" && !full ? null : s[question(kind)]));
+  // What it asked stays while it closes, so it fades out whole.
+  const [shown, setShown] = useState(asked);
+  if (asked && asked !== shown) setShown(asked);
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const d = dialog.current;
@@ -50,6 +53,7 @@ export function ModelQuestionDialog({ kind }: { kind: ModelKind }) {
   const answer = (download: boolean) => void answerModelQuestion(kind, download);
   return (
     <dialog
+      data-exit
       ref={dialog}
       tabIndex={-1}
       aria-labelledby={`${kind}-model-title`}
@@ -66,13 +70,13 @@ export function ModelQuestionDialog({ kind }: { kind: ModelKind }) {
       }}
       className="dialog-in overlay fixed inset-0 m-auto w-[440px] rounded-[20px] p-6 text-fg outline-none backdrop:bg-black/45"
     >
-      {asked && (
+      {shown && (
         <>
           <h2 id={`${kind}-model-title`} className="text-[17px] font-semibold leading-[22px] tracking-[-0.025em]">
             {MODEL_QUESTION[kind].title}
           </h2>
           <p id={`${kind}-model-text`} className="mt-2 text-[13px] text-fg/85">
-            {MODEL_QUESTION[kind].text(asked.sizeMb)}
+            {MODEL_QUESTION[kind].text(shown.sizeMb)}
           </p>
           <div className="mt-6 flex justify-end gap-2">
             <Button pill onClick={() => answer(false)}>

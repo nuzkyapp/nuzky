@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CircleMinus, Sparkles, TriangleAlert } from "lucide-react";
 import { send, sendBlocked, useAgent } from "../../lib/agent";
 import { FINISH_DRAFT, leftOutLine, plural, useCapCut } from "../../lib/capcut";
@@ -33,6 +33,9 @@ export function OpenedDraftDialog() {
   const snap = useEditor((s) => s.snap);
   const project = snap && snap.path === opened ? snap.project : null;
   const imported = project?.imported;
+  // What it said stays while it closes, so it fades out whole.
+  const [shown, setShown] = useState(project && imported ? { project, imported } : null);
+  if (project && imported && (project !== shown?.project || imported !== shown?.imported)) setShown({ project, imported });
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const d = dialog.current;
@@ -59,6 +62,7 @@ export function OpenedDraftDialog() {
   };
   return (
     <dialog
+      data-exit
       ref={dialog}
       aria-labelledby="opened-draft-title"
       onCancel={(e) => {
@@ -71,14 +75,14 @@ export function OpenedDraftDialog() {
       }}
       className="dialog-in overlay fixed inset-0 m-auto w-[480px] max-w-[calc(100vw-48px)] rounded-[20px] p-6 text-fg outline-none backdrop:bg-black/45"
     >
-      {project && imported && (
+      {shown && (
         <>
           <h2 id="opened-draft-title" className="text-[17px] font-semibold leading-[22px] tracking-[-0.025em]">
-            Opened “{project.name}” from {imported.editor}
+            Opened “{shown.project.name}” from {shown.imported.editor}
           </h2>
-          <p className="mt-2 text-[13px] text-muted">{cameOver(project)}</p>
+          <p className="mt-2 text-[13px] text-muted">{cameOver(shown.project)}</p>
           <ul aria-label="Did not come over" className="mt-3.5 max-h-[min(320px,calc(100vh-280px))] overflow-y-auto rounded-xl bg-white/[.055] px-3 py-1 shadow-[inset_0_0_0_1px_rgba(255,255,255,.06)]">
-            {imported.leftOut.map((line) => {
+            {shown.imported.leftOut.map((line) => {
               const { what, count, missing } = leftOutLine(line);
               return (
                 <li key={line} className="flex items-start gap-2.5 border-t border-white/[.06] py-2 text-[13px] leading-[18px] first:border-t-0">
@@ -90,7 +94,7 @@ export function OpenedDraftDialog() {
             })}
           </ul>
           <div className="mt-5 flex items-center justify-end gap-2">
-            <span className="mr-auto text-[12px] text-muted">The draft in {imported.editor} stays as it was.</span>
+            <span className="mr-auto text-[12px] text-muted">The draft in {shown.imported.editor} stays as it was.</span>
             <Button pill onClick={finish}>
               <Sparkles size={15} /> Finish with AI
             </Button>

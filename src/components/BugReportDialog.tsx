@@ -59,6 +59,7 @@ function Dialog() {
 
   return (
     <dialog
+      data-exit
       ref={dialog}
       aria-labelledby="bug-report-title"
       onCancel={(e) => {

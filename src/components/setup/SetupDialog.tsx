@@ -42,7 +42,7 @@ export function SetupDialog() {
   return (
     <div
       data-scrim
-      className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/45"
+      data-exit className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/45"
       onPointerDown={(e) => {
         if (e.target !== e.currentTarget) return;
         // Otherwise the press would take the focus that closing gives back to the opener.

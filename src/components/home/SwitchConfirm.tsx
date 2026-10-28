@@ -49,6 +49,7 @@ export function SwitchDialog() {
   if (!shown) return null;
   return (
     <dialog
+      data-exit
       ref={dialog}
       aria-labelledby="switch-title"
       aria-describedby="switch-description"

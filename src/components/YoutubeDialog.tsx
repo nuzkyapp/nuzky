@@ -158,7 +158,7 @@ function Dialog() {
   const video = "video" in step ? step.video : null;
   return (
     // Once a video downloads, a press that misses the dialog would throw away the download and the chosen part.
-    <div data-scrim className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/45" onPointerDown={(e) => e.target === e.currentTarget && !video && close()}>
+    <div data-scrim data-exit className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/45" onPointerDown={(e) => e.target === e.currentTarget && !video && close()}>
       <div
         ref={dialog}
         role="dialog"

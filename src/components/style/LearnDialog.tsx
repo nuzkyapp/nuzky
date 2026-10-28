@@ -93,7 +93,7 @@ export function LearnDialog() {
   }, []);
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/45" onPointerDown={(e) => e.target === e.currentTarget && close()}>
+    <div data-exit className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/45" onPointerDown={(e) => e.target === e.currentTarget && close()}>
       <div
         ref={dialog}
         role="dialog"

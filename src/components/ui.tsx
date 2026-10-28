@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, u
 import { createPortal } from "react-dom";
 import { AlertTriangle, Check, ChevronDown, ChevronRight, Minus, Search, X } from "lucide-react";
 import { followPointer } from "../lib/drag";
+import { chose } from "../lib/exit";
 import { fontCss } from "../lib/fonts";
 import { AI_EDITING, useAiLocked } from "../lib/store";
 import type { TextShadow, TextStyle } from "../lib/types";
@@ -1061,13 +1062,15 @@ export function Menu({
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const { width, height } = el.getBoundingClientRect();
+    // Its size before it grows in from 96 % (menu-in), so it is placed inside the window at its full size.
+    const [width, height] = [el.offsetWidth, el.offsetHeight];
     const x = at.align === "end" ? at.x - width : at.x;
     const left = Math.max(8, Math.min(x, window.innerWidth - width - 8));
     const top = at.above ? Math.max(8, at.y - height) : at.y + height > window.innerHeight - 8 ? Math.max(8, window.innerHeight - height - 8) : at.y;
     setPlace({ left, top });
-    // A hidden element cannot take focus, so it shows in place now rather than with the next render.
-    Object.assign(el.style, { left: `${left}px`, top: `${top}px`, visibility: "visible" });
+    // A hidden element cannot take focus, so it shows in place now rather than with the next render. It grows out of
+    // the point it was opened from.
+    Object.assign(el.style, { left: `${left}px`, top: `${top}px`, visibility: "visible", transformOrigin: `${at.x - left}px ${at.y - top}px` });
     el.focus({ preventScroll: true });
   }, [at.x, at.y, at.align, at.above]);
 
@@ -1092,6 +1095,7 @@ export function Menu({
     const item = items[index] as MenuItemEntry | undefined;
     if (!item || item.disabled) return;
     if (item.submenu) return setOpen({ index, keyboard: viaKeyboard });
+    chose(ref.current?.querySelector(`[data-index="${index}"]`));
     onClose(true);
     item.run?.();
   };
@@ -1137,13 +1141,14 @@ export function Menu({
       <div
         ref={ref}
         data-menu
+        data-exit
         role="menu"
         aria-label={label}
         tabIndex={-1}
         aria-activedescendant={active >= 0 ? `${id}-${active}` : undefined}
         onKeyDown={onKeyDown}
         onContextMenu={(e) => e.preventDefault()}
-        className="overlay fixed z-[140] w-max max-w-[min(420px,calc(100vw-16px))] rounded-xl p-1 text-[13px] text-fg outline-none"
+        className="overlay menu-in fixed z-[140] w-max max-w-[min(420px,calc(100vw-16px))] rounded-xl p-1 text-[13px] text-fg outline-none"
         style={{ minWidth, left: place?.left ?? at.x, top: place?.top ?? at.y, visibility: place ? "visible" : "hidden" }}
       >
         {items.map((item, i) =>

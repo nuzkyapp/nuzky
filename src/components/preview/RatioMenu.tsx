@@ -1,5 +1,6 @@
 import { useEffect, useRef, type KeyboardEvent } from "react";
 import { Check, ChevronDown, RectangleHorizontal } from "lucide-react";
+import { chose } from "../../lib/exit";
 import { FORMATS, formatLabel } from "../../lib/presets";
 import { picturedClips, reframe, useReframe } from "../../lib/reframe";
 import { AI_EDITING, useAiLocked, useEditor } from "../../lib/store";
@@ -75,7 +76,7 @@ export function RatioMenu() {
         <ChevronDown size={13} className="text-muted" />
       </button>
       {open && (
-        <div role="menu" aria-label="Canvas ratio" onKeyDown={onMenuKey} className="overlay absolute bottom-11 right-0 z-50 w-[19rem] rounded-xl p-1">
+        <div data-exit role="menu" aria-label="Canvas ratio" onKeyDown={onMenuKey} className="overlay menu-in absolute bottom-11 right-0 z-50 w-[19rem] origin-bottom-right rounded-xl p-1">
           {FORMATS.map((f) => {
             const on = f.width === canvas.width && f.height === canvas.height;
             const why = !pictures ? "Add a video to the timeline first" : reframing ? "Already following the face" : null;
@@ -86,7 +87,8 @@ export function RatioMenu() {
                   type="button"
                   role="menuitemradio"
                   aria-checked={on}
-                  onClick={() => {
+                  onClick={(e) => {
+                    chose(e.currentTarget);
                     if (!on) edit({ type: "setCanvas", width: f.width, height: f.height });
                     closeToTrigger();
                   }}

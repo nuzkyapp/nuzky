@@ -69,6 +69,7 @@ import { api } from "../../lib/api";
 import { copyText } from "../../lib/clipboard";
 import { FINISH_DRAFT } from "../../lib/capcut";
 import { downloadModels, useCover } from "../../lib/cover";
+import { chose } from "../../lib/exit";
 import { openRecap, undoAction, undoStep, useEditor } from "../../lib/store";
 import { formatTime } from "../../lib/time";
 import { whenLabel } from "../../lib/library";
@@ -150,13 +151,22 @@ function Menu({
     >
       {trigger({ open, toggle: () => setOpen(!open), ref: triggerRef })}
       {open && (
-        <div role="menu" aria-label={label} onKeyDown={onKey} className={`overlay absolute ${place} z-50 rounded-xl p-1 ${width} ${up ? "bottom-9" : "top-9"}`}>
+        <div
+          data-exit
+          role="menu"
+          aria-label={label}
+          onKeyDown={onKey}
+          className={`overlay menu-in absolute ${place} z-50 rounded-xl p-1 ${width} ${up ? "bottom-9" : "top-9"} ${ORIGIN[`${up ? "bottom" : "top"}-${place?.includes("right") ? "right" : "left"}`]}`}
+        >
           {children(close)}
         </div>
       )}
     </div>
   );
 }
+
+/** Where a menu grows from: the corner at its button. */
+const ORIGIN: Record<string, string> = { "top-left": "origin-top-left", "top-right": "origin-top-right", "bottom-left": "origin-bottom-left", "bottom-right": "origin-bottom-right" };
 
 function MenuItem({ checked, disabled, reason, onClick, children }: { checked?: boolean; disabled?: boolean; reason?: string; onClick: () => void; children: ReactNode }) {
   return (
@@ -166,7 +176,14 @@ function MenuItem({ checked, disabled, reason, onClick, children }: { checked?: 
       aria-checked={checked}
       aria-disabled={disabled || undefined}
       title={disabled ? reason : undefined}
-      onClick={disabled ? undefined : onClick}
+      onClick={
+        disabled
+          ? undefined
+          : (e) => {
+              chose(e.currentTarget);
+              onClick();
+            }
+      }
       className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] text-fg hover:bg-white/[.08] aria-disabled:cursor-not-allowed aria-disabled:text-muted aria-disabled:hover:bg-transparent"
     >
       <span className="flex w-4 shrink-0 justify-center">{checked && <Check size={14} className="text-accent" />}</span>
