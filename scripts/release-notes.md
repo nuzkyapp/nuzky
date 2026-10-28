@@ -1,29 +1,17 @@
-The third alpha of Nuzky, a free, open-source video editor for your computer. It's early, so expect rough edges. Nuzky never changes or deletes your original videos.
+The fourth alpha of Nuzky, a free, open-source video editor for your computer. It's early, so expect rough edges. Nuzky never changes or deletes your original videos.
 
 ## What's new
 
-- **Plugins.** Ask the AI for a feature or a look Nuzky lacks, such as "remove clips shorter than a second" or a VHS look, and it writes a plugin that stays in Nuzky's plugins folder through updates. The Plugins tab shows its settings with Nuzky's own controls and says what it would do before you press its button. A run is one step you can undo. A plugin can add its own logo or sound, captions, zooms and motion, and looks you put on clips in Adjust → Effects. Turn on Run after import or Run before export to have it run by itself. A plugin only reads the project and returns edits. It can't reach the internet, your files or other apps.
-- **A plugin gallery.** Gallery in the Plugins tab lists plugins other people share, which Nuzky's maintainer checks first. It tells you what each one may do before you click Install, and installing runs nothing.
-- **Cut to the beat.** Pick a song and Cut to beat in Project status finds its beats, shows them on the song and recuts the video on them: Calm, Builds to the drop or Fast. The AI can do the same.
-- **Pictures and videos over the video.** Overlay on a picture or video in your media puts it over the video at the playhead, for B-roll or a screenshot over a talking head. You can also drop it on the preview, or on the lane above the main track in the timeline.
-- **Freeze frame.** `Shift+R`, or the snowflake next to Split, holds the frame at the playhead for 3 s. Trim it to make it as long as you want. The AI can do it too.
-- **A deeper studio look.** The editor's panes have more depth and finish, so the video stands out more.
+- **Smoother editing.** When you delete a piece of the timeline, paste a clip or undo, the clips slide into their new places instead of jumping, so you can see which clip went where. While the video plays, the playhead moves smoothly on every frame of your display.
+- **Calmer menus, toasts and dialogs.** They come in and fade out with short motion instead of blinking. The chosen tab or option slides to a new choice, and thumbnails fade in once they load.
+- **Tooltips that show shortcuts.** Hover a button and Nuzky's own tooltip says what it does, with its key, such as Split at playhead (S). They look the same on macOS, Windows and Linux.
+- **The window buttons in the top bar on a Mac.** The grey title bar over the app is gone, so the video gets more room. The window is dark from the moment it opens, and the window switcher shows the project's name.
 
 ## Fixed
 
-- Emoji in texts and captions keep their own colours, and look the same on every computer. A 💀 in a caption with an outline used to come out as a white silhouette.
-- On a Mac, a pasted YouTube link in Music shows its title in seconds.
-- A clip's thumbnail shows right after a phone video is added, without waiting for its filmstrip.
-- The timeline stops scrolling where the clips end, and the track headers stay in place.
-- Your style learns Spelling only from words the speech model heard wrong, and a suggested change shows only the words it adds or drops.
-- Update available in the sidebar shows the whole version.
-- Captions keep words you clearly said when you restart a sentence after a short pause, and cutting the first attempt no longer drops words from the caption.
-- A number written with a space, such as 13 000, stays in one caption.
-- A word too wide for its text or caption makes the text smaller instead of breaking in the middle.
-- With All captions, dragging a caption in the preview moves every caption, and a style tile says it restyled every caption and offers Undo.
-- When the AI trims silence off the start of a clip, captions stay in time with the speech. They used to come up to 65 ms late.
-- A song's name sits above its waveform, so a long title no longer hides it.
-- Claude in the AI panel no longer reads your own CLAUDE.md, which cost tokens on every message.
+- You can move the project that just opened to the Trash. Nuzky opens another one behind the home screen first, and Undo brings it back.
+- A project you moved to the Trash no longer comes back on the home screen.
+- The hint for putting a video or picture over the video shows only while you drag one, not on every project.
 
 ## Not yet
 
@@ -51,4 +39,4 @@ Open an issue at https://github.com/nuzkyapp/nuzky/issues, or use Send feedback 
 
 ## Source
 
-Nuzky is GPL-3.0-or-later, and its source is the Source code archive below. The installers include FFmpeg, ONNX Runtime and other libraries. Their source, and what each installer was built from, is in [Third-party source for Nuzky v0.1.2-alpha](https://github.com/nuzkyapp/nuzky/releases/tag/third-party-source-0.1.2-alpha).
+Nuzky is GPL-3.0-or-later, and its source is the Source code archive below. The installers include FFmpeg, ONNX Runtime and other libraries. Their source, and what each installer was built from, is in [Third-party source for Nuzky v0.1.3-alpha](https://github.com/nuzkyapp/nuzky/releases/tag/third-party-source-0.1.3-alpha).
