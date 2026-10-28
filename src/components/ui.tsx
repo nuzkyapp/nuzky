@@ -1062,7 +1062,8 @@ export function Menu({
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const { width, height } = el.getBoundingClientRect();
+    // Its size before it grows in from 96 % (menu-in), so it is placed inside the window at its full size.
+    const [width, height] = [el.offsetWidth, el.offsetHeight];
     const x = at.align === "end" ? at.x - width : at.x;
     const left = Math.max(8, Math.min(x, window.innerWidth - width - 8));
     const top = at.above ? Math.max(8, at.y - height) : at.y + height > window.innerHeight - 8 ? Math.max(8, window.innerHeight - height - 8) : at.y;

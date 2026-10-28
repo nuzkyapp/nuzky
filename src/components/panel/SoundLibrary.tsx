@@ -485,31 +485,29 @@ function RightsDialog() {
       }}
       className="dialog-in overlay fixed inset-0 m-auto w-[440px] rounded-[20px] p-6 text-fg outline-none backdrop:bg-black/45"
     >
-      {open && (
-        // Answering edits no project, so an agent's run does not lock it.
-        <LockReason.Provider value={null}>
-          <h2 id="youtube-rights-title" className="text-[17px] font-semibold leading-[22px] tracking-[-0.025em]">
-            Music from YouTube is yours to clear
-          </h2>
-          <div id="youtube-rights-text" className="mt-2 flex flex-col gap-2 text-[13px] text-fg/85">
-            <p>
-              Nuzky downloads only the sound of the video you link, with <Nowrap>yt-dlp</Nowrap> on this computer.
-            </p>
-            <p>
-              You're responsible for having the rights to use the music in your video and for following YouTube's Terms of Service. Most songs on YouTube are copyrighted, and a video that
-              uses one can be muted, blocked or demonetized.
-            </p>
-          </div>
-          <div className="mt-6 flex justify-end gap-2">
-            <Button pill onClick={() => answerRights(false)}>
-              Cancel
-            </Button>
-            <Button pill variant="primary" onClick={() => answerRights(true)}>
-              I understand
-            </Button>
-          </div>
-        </LockReason.Provider>
-      )}
+      {/* Always there, so it fades out whole when it closes. Answering edits no project, so an agent's run does not lock it. */}
+      <LockReason.Provider value={null}>
+        <h2 id="youtube-rights-title" className="text-[17px] font-semibold leading-[22px] tracking-[-0.025em]">
+          Music from YouTube is yours to clear
+        </h2>
+        <div id="youtube-rights-text" className="mt-2 flex flex-col gap-2 text-[13px] text-fg/85">
+          <p>
+            Nuzky downloads only the sound of the video you link, with <Nowrap>yt-dlp</Nowrap> on this computer.
+          </p>
+          <p>
+            You're responsible for having the rights to use the music in your video and for following YouTube's Terms of Service. Most songs on YouTube are copyrighted, and a video that
+            uses one can be muted, blocked or demonetized.
+          </p>
+        </div>
+        <div className="mt-6 flex justify-end gap-2">
+          <Button pill onClick={() => answerRights(false)}>
+            Cancel
+          </Button>
+          <Button pill variant="primary" onClick={() => answerRights(true)}>
+            I understand
+          </Button>
+        </div>
+      </LockReason.Provider>
     </dialog>
   );
 }

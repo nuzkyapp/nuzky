@@ -61,6 +61,9 @@ def overlays(r):
     at = (menu or {}).get('done') or {}
     r.check('the clip menu grows out of the point that was right-clicked',
             menu and menu.get('entering') and abs(menu['origin'][0] - at['x']) <= 1 and abs(menu['origin'][1] - at['y']) <= 1, menu)
+    time.sleep(0.3)
+    inside = r.s.run("const b = document.querySelector('[role=menu][aria-label=\"Clip actions\"]').getBoundingClientRect(); return [Math.round(b.bottom), innerHeight]")
+    r.check('once grown, the clip menu lies wholly inside the window', inside[0] <= inside[1] - 8, inside)
     r.shot('clip-menu')
     left = gone(r, PICK, 'Duplicate')
     copy = left['copies'][0] if left['copies'] else {}
@@ -112,5 +115,18 @@ def overlays(r):
     copy = left['copies'][0] if left['copies'] else {}
     r.check('Cancel closes the modal Report a bug dialog; its copy shows on a scrim of its own and fades, and no dialog counts as open',
             left['live'] == 0 and len(left['copies']) == 1 and copy['fading'] and copy['display'] == 'block' and not copy['takesPointer'], left)
+    r.check('and goes', faded(r))
+    # A dialog that stays mounted and only closes, as the model question does when the agent stops waiting, fades out too,
+    # still showing what it asked.
+    r.s.run("window.__nuzky.store.setState({speechModelQuestion: {id: 'test', sizeMb: 574}})")
+    r.check('the model question opens', wait(lambda: r.s.run("return !!document.querySelector('dialog[open]')"), 5))
+    time.sleep(0.4)
+    left = gone(r, "window.__nuzky.store.setState({speechModelQuestion: null})")
+    if not left['copies']:
+        time.sleep(0.05)
+        left = r.s.run(GONE)
+    copy = left['copies'][0] if left['copies'] else {}
+    r.check('closing it in place leaves a fading copy that still says what it asked, and no dialog counts as open',
+            left['live'] == 0 and len(left['copies']) == 1 and copy['fading'] and '574 MB' in copy['text'], left)
     r.check('and goes', faded(r))
     r.check('no error toast', not r.errors(), r.errors())

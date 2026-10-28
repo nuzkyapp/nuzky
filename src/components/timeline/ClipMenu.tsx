@@ -70,8 +70,8 @@ export function ClipMenu({ at, onClose }: { at: MenuAt; onClose: () => void }) {
     const el = ref.current;
     if (!el) return;
     // Keep the menu inside the window.
-    const r = el.getBoundingClientRect();
-    setPos({ x: Math.min(at.x, window.innerWidth - r.width - 8), y: Math.min(at.y, window.innerHeight - r.height - 8) });
+    // Its size before it grows in from 96 % (menu-in).
+    setPos({ x: Math.min(at.x, window.innerWidth - el.offsetWidth - 8), y: Math.min(at.y, window.innerHeight - el.offsetHeight - 8) });
     el.querySelector<HTMLElement>("[role=menuitem]:not([aria-disabled=true])")?.focus();
   }, [at]);
 
