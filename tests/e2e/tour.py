@@ -88,10 +88,12 @@ def click_at(hands, css):
 
 
 def offline(r):
-    # Every request Nuzky would make goes to a closed port, as without internet.
+    # Every request Nuzky would make goes to a closed port, as without internet. libproxy 0.5 sends 127.0.0.1 through the
+    # proxy too unless it is named here, and with it the WebDriver's connection to WebKit's inspector.
     dead = 'http://127.0.0.1:9'
+    local = 'localhost,127.0.0.1,::1'
     r.env.update(HTTP_PROXY=dead, HTTPS_PROXY=dead, ALL_PROXY=dead, http_proxy=dead, https_proxy=dead, all_proxy=dead,
-                 NO_PROXY='localhost', no_proxy='localhost')
+                 NO_PROXY=local, no_proxy=local)
 
 
 def storage(r, script):
