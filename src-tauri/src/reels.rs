@@ -5,7 +5,7 @@ use nuzky_engine::{
     edit::{EditCmd, new_id},
     model::ReelCandidate,
 };
-use nuzky_mcp::reels::{self, Framing, MadeReel};
+use nuzky_mcp::reels::{self, Finish, Framing, MadeReel};
 use nuzky_mcp::transcript;
 use nuzky_session::{Expect, SessionState, host::Host};
 use std::sync::{Arc, atomic::Ordering};
@@ -20,14 +20,16 @@ fn make(
     host: &Host,
     state: &SessionState,
     ids: &[String],
-    framing: Framing,
+    (framing, finish): (Framing, Finish),
     step: &mut dyn FnMut(usize) -> Result<()>,
     cancelled: &dyn Fn() -> bool,
     apply: impl FnOnce(Vec<EditCmd>, Expect) -> Result<()>,
 ) -> Result<Vec<MadeReel>> {
     anyhow::ensure!(state.open_run.is_none(), "RUN_ACTIVE: stop the open run before editing");
     let derived = transcript::derive(&state.project, &host.transcripts)?;
-    let (made, edits) = reels::make(&host.session.path(), &state.project, &derived, ids, framing, step, cancelled)?;
+    let stored = (&host.transcripts, host.cache_dir.as_path());
+    let path = host.session.path();
+    let (made, edits) = reels::make(&path, &state.project, &derived, ids, framing, finish, stored, step, cancelled)?;
     let expect = Expect { revision: Some(state.stamp.revision), speech_layout_key: None };
     if let Err(error) = apply(edits, expect) {
         reels::forget(&made, &host.session.state()?.project);
@@ -53,6 +55,7 @@ pub fn start_make_reels(
     app: AppHandle,
     ids: Vec<String>,
     canvas: Option<Framing>,
+    finish: Option<Finish>,
     expected_epoch: Option<String>,
 ) -> CmdResult<String> {
     let state = app.state::<AppState>();
@@ -72,7 +75,7 @@ pub fn start_make_reels(
                 &source,
                 &view,
                 &ids,
-                canvas.unwrap_or_default(),
+                (canvas.unwrap_or_default(), finish.unwrap_or_default()),
                 &mut |i| {
                     check_cancelled(&cancel)?;
                     rep.progress(i as f32 / ids.len() as f32, Some(&format!("Making reel {} of {}", i + 1, ids.len())));
@@ -130,9 +133,15 @@ mod tests {
 
         let make = || {
             let state = host.session.state().unwrap();
-            super::make(&host, &state, &ids, Framing::Crop, &mut |_| Ok(()), &|| false, |edits, expect| {
-                host.session.edit(edits, None, expect).map(|_| ())
-            })
+            super::make(
+                &host,
+                &state,
+                &ids,
+                (Framing::Crop, Finish::default()),
+                &mut |_| Ok(()),
+                &|| false,
+                |edits, expect| host.session.edit(edits, None, expect).map(|_| ()),
+            )
         };
         let run = host.session.begin_run("Agent".into()).unwrap();
         let refused = make().unwrap_err().to_string();

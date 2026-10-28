@@ -157,6 +157,7 @@ fn generate() -> String {
     types.visit::<crate::beats::BeatCutDone>();
     types.visit::<nuzky_mcp::reels::MadeReel>();
     types.visit::<nuzky_mcp::reels::Framing>();
+    types.visit::<nuzky_mcp::reels::Finish>();
     types.visit::<crate::connect::Connection>();
     types.visit::<crate::AgentStatus>();
     types.visit::<SignIn>();

@@ -13,6 +13,7 @@ use nuzky_engine::{
     model::{AssetKind, ClipContent, MAX_REEL_HOOK_CHARS, ReelCandidate, ReelStatus},
     speech::{TimelineWord, is_heard},
 };
+use nuzky_session::transcripts::TranscriptStore;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -43,6 +44,20 @@ pub enum Framing {
     Blur,
 }
 
+/// What making a reel also does to it, as the app's Remove retakes and pauses, Generate captions and Suggest zooms do.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts", ts(rename = "ReelFinish"))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct Finish {
+    /// Cut retakes, fillers and hesitations.
+    pub clean: bool,
+    /// Captions in the creator's style, else Reel, as build_captions makes them without arguments.
+    pub captions: bool,
+    /// Punch-ins on the sentences said with emphasis.
+    pub zooms: bool,
+}
+
 /// A moment an agent proposes; the transcript gives the rest of its candidate.
 #[derive(Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -66,6 +81,11 @@ pub struct MadeReel {
     pub id: String,
     pub path: PathBuf,
     pub duration_us: i64,
+    /// The steps of `Finish` that could not run, each with why.
+    pub skipped: Vec<String>,
+    /// The sentence the reel opens with once cleaning cut what was before it.
+    #[serde(skip)]
+    pub hook: Option<String>,
     /// Font families of the reel's text.
     #[serde(skip)]
     pub fonts: BTreeSet<String>,
@@ -216,11 +236,15 @@ fn hook_and_duration(
     to: usize,
     pause_us: i64,
 ) -> Result<(String, i64)> {
-    let words = &derived.words;
+    let duration_us = cut(project, derived, from, to, pause_us, None)?.preview.duration_us();
+    Ok((opening(&derived.words, from, to), duration_us))
+}
+
+/// The sentence said first from word `from` on, at most to word `to`.
+fn opening(words: &[TimelineWord], from: usize, to: usize) -> String {
     let end = (from..=to).find(|&i| ends_sentence(words, i)).unwrap_or(to);
     let hook = words[from..=end].iter().map(|w| w.text.trim()).collect::<Vec<_>>().join(" ");
-    let duration_us = cut(project, derived, from, to, pause_us, None)?.preview.duration_us();
-    Ok((hook.chars().take(MAX_REEL_HOOK_CHARS).collect(), duration_us))
+    hook.chars().take(MAX_REEL_HOOK_CHARS).collect()
 }
 
 /// Candidates for `proposals`, each inside the transcript, from the start of a sentence to the end of one, apart
@@ -291,13 +315,17 @@ pub fn plan(
 /// Writes a project beside `source` for each candidate in `ids`: only its words, cut as edit_transcript keep
 /// cuts with the pause length the candidate was measured with, starting and ending without a silent sliver of a
 /// shot at an original cut of the picture, on a 9:16 canvas filled as `framing` says. Returns them with the edits
-/// that mark them made in the source, which the caller applies; see [`forget`] when that fails.
+/// that mark them made in the source, which the caller applies; see [`forget`] when that fails. Each reel then gets
+/// what `finish` asks, read from `stored`, the transcripts and the sound cache.
+#[allow(clippy::too_many_arguments)]
 pub fn make(
     source: &Path,
     project: &Project,
     derived: &Derived,
     ids: &[String],
     framing: Framing,
+    finish: Finish,
+    stored: (&TranscriptStore, &Path),
     step: &mut dyn FnMut(usize) -> Result<()>,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<(Vec<MadeReel>, Vec<EditCmd>)> {
@@ -332,7 +360,9 @@ pub fn make(
     let mut made = Vec::new();
     let mut n = 1;
     for (i, candidate) in planned.iter().enumerate() {
-        let reel = match step(i).and_then(|()| reel_project(project, derived, candidate, framing, cancelled)) {
+        let made_in = |()| reel_project(project, derived, candidate, framing, cancelled);
+        let finished = |reel| finish_reel(reel, dir, finish, stored, pause_of(candidate), cancelled);
+        let (reel, skipped, hook) = match step(i).and_then(made_in).and_then(finished) {
             Ok(reel) => reel,
             Err(error) => {
                 forget(&made, project);
@@ -354,6 +384,8 @@ pub fn make(
             id: candidate.id.clone(),
             path,
             duration_us: reel.duration_us(),
+            skipped,
+            hook,
             fonts: crate::fonts::families(&reel).map(str::to_owned).collect(),
         });
     }
@@ -365,6 +397,7 @@ pub fn make(
                 status: ReelStatus::Made,
                 project_path: Some(made.path.to_string_lossy().into_owned()),
                 duration_us: made.duration_us,
+                hook: made.hook.clone().unwrap_or_else(|| candidate.hook.clone()),
                 ..(*candidate).clone()
             },
         })
@@ -387,6 +420,92 @@ fn reel_project(
     frame(&mut reel, framing)?;
     nuzky_session::validate(&reel)?;
     Ok(reel)
+}
+
+/// Does to a made reel what `finish` asks, in the order the app's buttons would: cleaning first, so the captions and
+/// zooms land on the words that stay. A step that cannot run, such as one that needs sound not prepared yet, is left
+/// out and named in the result; the reel is made without it.
+fn finish_reel(
+    mut reel: Project,
+    dir: &Path,
+    finish: Finish,
+    (transcripts, cache): (&TranscriptStore, &Path),
+    pause_us: i64,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<(Project, Vec<String>, Option<String>)> {
+    let mut skipped = Vec::new();
+    let mut step = |on: bool, name: &str, plan: &dyn Fn(&Project) -> Result<Option<EditCmd>>| -> Result<()> {
+        if !on {
+            return Ok(());
+        }
+        ensure!(!cancelled(), "CANCELLED: job cancelled");
+        match plan(&media_of(&reel, dir)) {
+            Ok(Some(edit)) => {
+                reel.apply(edit)?;
+            }
+            Ok(None) => {}
+            Err(error) if cancelled() => return Err(error),
+            Err(error) => skipped.push(format!("{name}: {}", without_code(&error))),
+        }
+        Ok(())
+    };
+    step(finish.clean, "Clean up", &|media| {
+        let derived = transcript::derive(media, transcripts)?;
+        let hesitations = transcript::hesitations(media, &derived, cache);
+        let delete = nuzky_analysis::retakes(&derived.words, &derived.languages).suggested_delete;
+        let ranges = transcript::edit_ranges(media, &derived, Some(&delete), None, Some(pause_us), &hesitations)?;
+        Ok((!ranges.is_empty()).then(|| transcript::plan_cut(media, &derived, ranges)).transpose()?.map(|cut| cut.edit))
+    })?;
+    step(finish.captions, "Captions", &|media| {
+        let args = crate::params::Captions {
+            run_id: String::new(),
+            style: None,
+            style_preset: None,
+            max_words: None,
+            max_chars: None,
+            transform: None,
+        };
+        Ok(Some(crate::tools::caption_plan(&args, media, media, (transcripts, cache), cancelled)?.0))
+    })?;
+    step(finish.zooms, "Zooms", &|media| {
+        let derived = transcript::derive(media, transcripts)?;
+        let zooms: Vec<_> = crate::zooms::suggest(media, &derived, cache)?
+            .into_iter()
+            .map(|z| crate::zooms::WordZoom { from: z.from, to: z.to, scale: z.scale })
+            .collect();
+        if zooms.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(EditCmd::ZoomRanges { ranges: crate::zooms::ranges(media, &derived.words, &zooms)? }))
+    })?;
+    let hook = match finish.clean {
+        true => transcript::derive(&media_of(&reel, dir), transcripts)
+            .ok()
+            .filter(|derived| !derived.words.is_empty())
+            .map(|derived| opening(&derived.words, 0, derived.words.len() - 1)),
+        false => None,
+    };
+    nuzky_session::validate(&reel)?;
+    Ok((reel, skipped, hook))
+}
+
+/// The reel with its media where the source's folder has them: the sound cache, the transcripts and the hesitations
+/// find a file by its path.
+fn media_of(reel: &Project, dir: &Path) -> Project {
+    let mut media = reel.clone();
+    for asset in &mut media.assets {
+        asset.path = dir.join(&asset.path).to_string_lossy().into_owned();
+    }
+    media
+}
+
+/// "SPEECH_CHANGED: the words moved" without its code, for the user to read.
+fn without_code(error: &anyhow::Error) -> String {
+    let text = format!("{error:#}");
+    match text.split_once(": ") {
+        Some((code, rest)) if code.bytes().all(|c| c.is_ascii_uppercase() || c == b'_') => rest.to_owned(),
+        _ => text,
+    }
 }
 
 /// Removes the reels `make` wrote unless `source` names them: a failed save keeps the live edit, so its
@@ -480,6 +599,8 @@ mod tests {
             &derived,
             &ids,
             Framing::Crop,
+            Finish::default(),
+            (&TranscriptStore::at(dir.join("transcripts")).unwrap(), &dir),
             &mut |i| {
                 if i == 1 {
                     assert!(dir.join("source-reel-1.nuzky").is_file());

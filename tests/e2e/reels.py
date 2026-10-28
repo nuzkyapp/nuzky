@@ -12,7 +12,7 @@ from e2e.reel import MODEL, poll
 FAKE = Path(__file__).resolve().parent / 'fake_agent'
 CANDIDATES = """const p = window.__nuzky.store.getState().snap.project;
 return (p.reelCandidates ?? []).map((c) => ({id: c.id, from: c.from, to: c.to, durationUs: c.durationUs, status: c.status,
-  score: c.score, title: c.title, projectPath: c.projectPath ?? null, pause: c.shortenPausesUs ?? null}));"""
+  score: c.score, title: c.title, hook: c.hook, projectPath: c.projectPath ?? null, pause: c.shortenPausesUs ?? null}));"""
 # Clicks the button whose text or label is `arguments[0]` inside `arguments[1]`; null when there is none.
 CLICK = """const scope = arguments[1] ? document.querySelector(arguments[1]) : document;
 const b = [...(scope?.querySelectorAll('button') ?? [])].find((b) => b.textContent.trim() === arguments[0] || b.getAttribute('aria-label') === arguments[0]);
@@ -172,6 +172,8 @@ def trim(r):
 
 def make(r, source, collection):
     before = candidates(r)
+    gets = r.s.run(f"return [...document.querySelectorAll('{LIST} button')].find((b) => b.textContent.startsWith('Each reel gets'))?.textContent ?? null")
+    r.check('each reel gets every finishing step until the user turns one off', gets == 'Each reel gets all', gets)
     r.s.run(CLICK, 'Make 2 reels', LIST)
     done = wait(lambda: [c for c in candidates(r) if c['status'] == 'made'], 30)
     r.check('Make 2 reels marks both made', done and len(done) == 2, candidates(r))
@@ -183,8 +185,17 @@ def make(r, source, collection):
         saved = json.loads(path.read_text()) if path.exists() else {}
         r.check(f'{path.name} is a 9:16 project', saved.get('canvas', {}).get('width') == 1080 and saved['canvas']['height'] == 1920,
                 saved.get('canvas'))
-        r.check(f'{path.name} is as long as its card said', path.exists() and project_length(path) == planned['durationUs'],
-                [project_length(path) if path.exists() else None, planned['durationUs']])
+        r.check(f'{path.name} is as long as its card says once made', path.exists() and project_length(path) == c['durationUs'],
+                [project_length(path) if path.exists() else None, c['durationUs']])
+        captions = [clip['content']['text'] for t in saved.get('tracks', []) if t.get('name') == 'Captions' for clip in t['clips']]
+        r.check(f'{path.name} has captions of its words', len(captions) > 3, captions[:5])
+        if c['title'] == 'Moment 1':
+            # It opens on two attempts at "Dneska vám ukážu, jak natočit…" before the one said in full.
+            said = ' '.join(captions).lower()
+            r.check('the retakes it opened on are cut, only the attempt said in full stays', said.count('dneska') == 1
+                    and project_length(path) < planned['durationUs'], [said[:120], project_length(path), planned['durationUs']])
+            r.check('its card names the sentence it opens with now', 'video za' in c['hook'] and 'video za' not in planned['hook'],
+                    [planned['hook'], c['hook']])
         r.check(f'{path.name} sits beside the source', path.parent == Path(source).parent, [str(path), source])
     r.s.call('window.__nuzky.refreshLibrary()')
     members = r.s.run('return (window.__nuzky.library.getState().projects ?? []).filter((p) => p.collection === arguments[0]).map((p) => p.path)', collection)

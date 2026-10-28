@@ -5,7 +5,7 @@ import { useDock } from "./dock";
 import { openProject, refreshLibrary } from "./library";
 import { MAIN_TRACK, aiLocked, currentEpoch, projectDuration, useEditor, whenIdle } from "./store";
 import { US } from "./time";
-import type { JobEvent, MadeReel, Project, ReelCandidate, ReelFraming, TranscriptWord } from "./types";
+import type { JobEvent, MadeReel, Project, ReelCandidate, ReelFinish, ReelFraming, TranscriptWord } from "./types";
 
 /** From this length on the Transcript tab offers Reels from a long video. */
 export const LONG_VIDEO_US = 180 * US;
@@ -17,12 +17,24 @@ export const FIND_REELS =
   "Find the moments in this video that work as reels on their own and propose them for me to pick. Transcribe it first if it has no transcript. Don't change the video itself.";
 
 const FRAMING_KEY = "nuzky.reelFraming";
+const FINISH_KEY = "nuzky.reelFinish";
+
+/** What each reel gets once made, every step unless the user turned it off. */
+function storedFinish(): ReelFinish {
+  const all = { clean: true, captions: true, zooms: true };
+  try {
+    return { ...all, ...JSON.parse(localStorage.getItem(FINISH_KEY) ?? "{}") };
+  } catch {
+    return all;
+  }
+}
 
 interface ReelsState {
   open: boolean;
   /** The candidate in the preview and the trim pane. */
   current: string | null;
   framing: ReelFraming;
+  finish: ReelFinish;
   /** The playhead and clip selection from before, given back on close. */
   before: { timeUs: number; selection: string[] } | null;
   /** Bounds asked for and not confirmed yet, so the trim pane shows them in the same frame. */
@@ -43,6 +55,7 @@ export const useReels = create<ReelsState>(() => ({
   open: false,
   current: null,
   framing: localStorage.getItem(FRAMING_KEY) === "blur" ? "blur" : "crop",
+  finish: storedFinish(),
   before: null,
   trim: null,
   finding: false,
@@ -226,6 +239,11 @@ export function setFraming(framing: ReelFraming) {
   useReels.setState({ framing });
 }
 
+export function setFinish(finish: ReelFinish) {
+  localStorage.setItem(FINISH_KEY, JSON.stringify(finish));
+  useReels.setState({ finish });
+}
+
 /** Makes a project of each checked candidate as a job with progress and Stop. */
 export async function makeReels() {
   const { snap } = useEditor.getState();
@@ -244,7 +262,8 @@ export async function makeReels() {
   if (currentEpoch() !== epoch) return;
   useReels.setState({ failed: null });
   try {
-    const id = await api.startMakeReels(ids, useReels.getState().framing, epoch);
+    const { framing, finish } = useReels.getState();
+    const id = await api.startMakeReels(ids, framing, finish, epoch);
     useReels.setState({ job: id });
     // A job can end before its id comes back; its last event is already in.
     const ended = useEditor.getState().jobs[id];
@@ -268,9 +287,11 @@ export function onReelsJob(job: JobEvent) {
   if (job.status !== "done") return;
   const { reels, unlisted } = JSON.parse(job.output ?? "{}") as { reels: MadeReel[]; unlisted: string | null };
   const made = reels.length === 1 ? "Made 1 reel" : `Made ${reels.length} reels`;
+  const skipped = [...new Set(reels.flatMap((reel) => reel.skipped.map((step) => step.replace(/\.$/, ""))))];
+  const left = skipped.length ? ` Left out: ${skipped.join("; ")}.` : "";
   if (unlisted)
-    useEditor.getState().toast({ kind: "warning", text: `${made} beside the long video, but your projects list could not be updated (${unlisted}). Open them with Open file… on the home screen.` });
-  else useEditor.getState().toast({ kind: "success", text: made });
+    useEditor.getState().toast({ kind: "warning", text: `${made} beside the long video, but your projects list could not be updated (${unlisted}). Open them with Open file… on the home screen.${left}` });
+  else useEditor.getState().toast(left ? { kind: "warning", text: `${made}.${left}` } : { kind: "success", text: made });
 }
 
 /**

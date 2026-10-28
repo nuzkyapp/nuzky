@@ -1,5 +1,5 @@
-import { useEffect, useRef, type KeyboardEvent } from "react";
-import { AlertCircle, AlertTriangle, Check, Film, GalleryVerticalEnd, Loader2, Plug, Sparkles } from "lucide-react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { AlertCircle, AlertTriangle, Check, ChevronDown, Film, GalleryVerticalEnd, Loader2, Plug, Sparkles } from "lucide-react";
 import { api } from "../../lib/api";
 import { anyAgent, loadAgents, useAgent } from "../../lib/agent";
 import { openChatGpt, useChatGpt } from "../../lib/chatgpt";
@@ -7,11 +7,11 @@ import { useModels } from "../../lib/models";
 import { useDock } from "../../lib/dock";
 import { useLibrary } from "../../lib/library";
 import { useTranscriptView } from "../../lib/speech";
-import { REEL_LIMIT_US, candidates, choose, findBlocked, findReels, makeReels, moved, openReel, pickAll, setFraming, setPicked, setRejected, toggleReelPlay, useReels } from "../../lib/reels";
+import { REEL_LIMIT_US, candidates, choose, findBlocked, findReels, makeReels, moved, openReel, pickAll, setFinish, setFraming, setPicked, setRejected, toggleReelPlay, useReels } from "../../lib/reels";
 import { useEditor } from "../../lib/store";
 import { formatDuration } from "../../lib/time";
-import type { ReelCandidate } from "../../lib/types";
-import { AiLock, Bars, Button, Checkbox, LockReason, ProgressBar, Segmented } from "../ui";
+import type { ReelCandidate, ReelFinish } from "../../lib/types";
+import { AiLock, Bars, Button, Checkbox, LockReason, Menu, ProgressBar, Segmented } from "../ui";
 
 const plural = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;
 
@@ -255,6 +255,51 @@ function NoReels() {
   );
 }
 
+const FINISH_STEPS: [keyof ReelFinish, string][] = [
+  ["clean", "Remove retakes and fillers"],
+  ["captions", "Captions in your style"],
+  ["zooms", "Zooms on what is said with emphasis"],
+];
+
+/** What each reel gets once made, as a menu of steps to turn on and off. */
+function FinishMenu() {
+  const finish = useReels((s) => s.finish);
+  const [menu, setMenu] = useState<{ at: { x: number; y: number; align: "end" }; keyboard: boolean; back: HTMLElement } | null>(null);
+  const on = FINISH_STEPS.filter(([key]) => finish[key]).length;
+  return (
+    <>
+      <Button
+        pill
+        className="h-7 px-3 text-[12px]"
+        aria-haspopup="menu"
+        aria-expanded={!!menu}
+        title="What each reel gets once made"
+        onClick={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          setMenu({ at: { x: r.right, y: r.bottom + 6, align: "end" }, keyboard: e.detail === 0, back: e.currentTarget });
+        }}
+      >
+        Each reel gets <span className="tabular text-muted">{on === FINISH_STEPS.length ? "all" : `${on} of ${FINISH_STEPS.length}`}</span>
+        <ChevronDown size={14} className="text-muted" />
+      </Button>
+      {menu && (
+        <Menu
+          label="Each reel gets"
+          minWidth={260}
+          at={menu.at}
+          keyboard={menu.keyboard}
+          items={FINISH_STEPS.map(([key, label]) => ({ label, checked: finish[key], run: () => setFinish({ ...finish, [key]: !finish[key] }) }))}
+          onClose={(chose) => {
+            const back = menu.back;
+            setMenu(null);
+            if (!chose) back.focus();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
 /** Make N reels, or the job making them with its progress and Stop. */
 function MakeButton({ picked, blocker }: { picked: number; blocker: string | null }) {
   const id = useReels((s) => s.job);
@@ -322,6 +367,7 @@ export function ReelList({ height }: { height: number }) {
           <span className="flex-1" />
           {list.length > 0 && (
             <>
+              <FinishMenu />
               <span className="text-[12px] text-muted">9:16</span>
               <div className="w-[248px]">
                 <Segmented
