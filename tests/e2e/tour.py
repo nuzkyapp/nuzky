@@ -64,6 +64,13 @@ def at_step(r, step, timeout=20):
     return wait(lambda: tour(r)['step'] == step, timeout)
 
 
+def run_card_undo(r):
+    """A selector for Undo on the AI panel's run card, found by its text: once the pointer is over it, its title is held by
+    Nuzky's own tooltip, so a selector by title would no longer match."""
+    r.s.run("[...document.querySelectorAll('[data-run-card] button')].find((b) => b.textContent.trim() === 'Undo').dataset.e2e = 'run-undo'")
+    return '[data-run-card] [data-e2e="run-undo"]'
+
+
 def card_button(r, text):
     """A selector for the tour card's button with this text."""
     r.s.run(f"[...document.querySelectorAll('{CARD} button')].find((b) => b.textContent.trim() === arguments[0]).dataset.e2e = arguments[0]", text)
@@ -202,7 +209,7 @@ def flow_tour(r):
     r.shot('3-undo-1440')
 
     # Undo on the run card, the button the step points at: the card says the video is back and offers Redo.
-    r.check('a real click reaches Undo on the run card', click_at(hands, '[data-run-card] button[title="Undo everything this run did"]'))
+    r.check('a real click reaches Undo on the run card', click_at(hands, run_card_undo(r)))
     t = wait(lambda: (x := tour(r))['undone'] and x, 10) or tour(r)
     p = project(r)
     r.check('the edit is undone, and the card says so and offers Redo with its shortcut',
@@ -339,7 +346,7 @@ def flow_tour(r):
     cut = project(r)
 
     # Undo on the run card, through the hole, takes back the cut and the captions in one step; Next goes on without Redo.
-    r.check('a real click reaches Undo on the run card', click_at(hands, '[data-run-card] button[title="Undo everything this run did"]'))
+    r.check('a real click reaches Undo on the run card', click_at(hands, run_card_undo(r)))
     undone = wait(lambda: (p := project(r))['durationUs'] == before['durationUs'] and p['captions'] == 0 and p, 10) or project(r)
     r.check('one Undo restores the original length and removes the captions', cut['durationUs'] < before['durationUs'] and cut['captions'] > 0
             and undone['durationUs'] == before['durationUs'] and undone['captions'] == 0, [before['durationUs'], cut, undone])
@@ -402,7 +409,7 @@ def flow_tour(r):
     r.check('the cut stays, without captions', stopped['durationUs'] < uncut and stopped['captions'] == 0, stopped)
     r.shot('2-stopped-1024')
     r.check('Next leads to One Undo', click_at(hands, card_button(r, 'Next')) and at_step(r, 'undo', 5), tour(r))
-    r.check('a real click reaches Undo on the stopped run card', click_at(hands, '[data-run-card] button[title="Undo everything this run did"]'))
+    r.check('a real click reaches Undo on the stopped run card', click_at(hands, run_card_undo(r)))
     t = wait(lambda: (x := tour(r))['undone'] and x, 10) or tour(r)
     r.check('the cut is undone and the card offers Redo', project(r)['durationUs'] == uncut and t['buttons'][-2:] == ['Redo', 'Next'], [project(r), t])
     r.check('a real click reaches Redo', click_at(hands, card_button(r, 'Redo')))
