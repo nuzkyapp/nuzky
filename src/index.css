@@ -168,6 +168,10 @@ select {
       transform 260ms cubic-bezier(0.32, 0.72, 0, 1),
       width 260ms cubic-bezier(0.32, 0.72, 0, 1);
   }
+  /* Segments a disabled fieldset turns off, as in the Export dialog while it exports, drop to 40 % with their plate. */
+  .seg-track:has(> [data-seg]:disabled) > .seg-thumb {
+    opacity: 0.4;
+  }
 
   /* Button and IconButton (ui.tsx) shapes. Here rather than as utilities, so a `className` such as
      "h-6 px-2 text-[12px]" on a call site overrides them: Tailwind sorts same-property utilities by

@@ -659,7 +659,7 @@ export function TabPanel({ group, id, className, children }: { group: string; id
  */
 export function SegThumb({ value, className = "" }: { value: string | number | null; className?: string }) {
   const ref = useRef<HTMLSpanElement>(null);
-  const shown = useRef<{ key: string | null; box: string }>({ key: null, box: "" });
+  const shown = useRef<{ key: string | null; segments: string; box: string }>({ key: null, segments: "", box: "" });
   const key = value === null ? null : String(value);
   useLayoutEffect(() => {
     const thumb = ref.current!;
@@ -686,8 +686,10 @@ export function SegThumb({ value, className = "" }: { value: string | number | n
         thumb.style.transition = "";
       }
     };
-    place(shown.current.key !== key && !!segment(shown.current.key));
-    shown.current.key = key;
+    // Only a new choice among the same segments slides; new segments, such as another model's efforts, put it there at once.
+    const segments = [...track.querySelectorAll<HTMLElement>(":scope > [data-seg]")].map((s) => s.dataset.seg).join("\n");
+    place(shown.current.key !== key && shown.current.segments === segments && !!segment(shown.current.key));
+    Object.assign(shown.current, { key, segments });
     const moved = new ResizeObserver(() => place(false));
     moved.observe(track);
     track.querySelectorAll(":scope > [data-seg]").forEach((seg) => moved.observe(seg));
