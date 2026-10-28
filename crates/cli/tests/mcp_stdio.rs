@@ -4095,7 +4095,8 @@ fn reels_start_and_end_on_the_videos_own_cuts_over_stdio() {
     c.finish();
 }
 
-/// A reel made with finish loses the earlier attempt of a restarted sentence and gets captions of the words it keeps.
+/// A reel made with finish loses the earlier attempt of a restarted sentence, which only the second's pause in the
+/// recording sets apart, and gets captions of the words it keeps.
 #[test]
 fn made_reels_finish_cleans_retakes_and_builds_captions_over_stdio() {
     use nuzky_engine::model::{ClipContent, TrackKind};
@@ -4118,14 +4119,13 @@ fn made_reels_finish_cleans_retakes_and_builds_captions_over_stdio() {
         json!({"run_id": run, "request_id": "place", "edits": [{"type": "addClip", "assetId": ids[0]}]}),
     );
     c.call("end_run", json!({"run_id": run, "action": "keep"}));
-    let said =
-        "Dneska natáčíme video doma. Kamera musí stát. Kamera musí stát pevně na stativu. Celé to zabere deset minut.";
+    let said = "Dneska natáčíme video doma. Kamera musí Kamera musí stát pevně na stativu. Celé to zabere deset minut.";
     let words: Vec<_> = said
         .split_whitespace()
         .enumerate()
         .map(|(i, text)| {
-            json!({"start_us": 200_000 + i as i64 * 1_000_000,
-            "end_us": 900_000 + i as i64 * 1_000_000, "text": text, "probability": 0.9})
+            let at = 200_000 + i as i64 * 1_000_000 + if i >= 6 { 1_000_000 } else { 0 };
+            json!({"start_us": at, "end_us": at + 700_000, "text": text, "probability": 0.9})
         })
         .collect();
     let asset = serde_json::from_value(c.call("get_state", json!({}))["assets"][0].clone()).unwrap();
@@ -4148,7 +4148,7 @@ fn made_reels_finish_cleans_retakes_and_builds_captions_over_stdio() {
     nuzky_engine::audio::ensure_pcm(&c.dir.join("cache"), &asset, |_| Ok(())).unwrap();
     let key = c.call("get_transcript", json!({}))["transcript_key"].clone();
     let retakes = c.call("analyze", json!({"kind": "retakes"}));
-    assert_eq!(retakes["suggested_delete"], json!([[4, 6]]), "{retakes}");
+    assert_eq!(retakes["suggested_delete"], json!([[4, 5]]), "{retakes}");
     let mut projects = Vec::new();
     for finish in [false, true] {
         let run = c.call("begin_run", json!({"label": "Make reel"}))["run_id"].clone();
@@ -4173,7 +4173,7 @@ fn made_reels_finish_cleans_retakes_and_builds_captions_over_stdio() {
     assert!(finished.duration_us() < plain.duration_us(), "finish did not shorten the restarted sentence");
     for (project, earlier_attempt_present) in [(plain, true), (finished, false)] {
         let main = project.tracks.iter().find(|t| t.id == nuzky_engine::edit::MAIN_TRACK).unwrap();
-        for word in &words[4..7] {
+        for word in &words[4..6] {
             let start = word["start_us"].as_i64().unwrap();
             let end = word["end_us"].as_i64().unwrap();
             let present = main.clips.iter().any(|clip| {
