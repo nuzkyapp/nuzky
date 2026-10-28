@@ -237,14 +237,19 @@ fn hook_and_duration(
     pause_us: i64,
 ) -> Result<(String, i64)> {
     let duration_us = cut(project, derived, &[[from, to]], pause_us, &[], None)?.preview.duration_us();
-    Ok((opening(&derived.words, from, to), duration_us))
+    Ok((opening(&derived.words, from..=to), duration_us))
 }
 
-/// The sentence said first from word `from` on, at most to word `to`.
-fn opening(words: &[TimelineWord], from: usize, to: usize) -> String {
-    let end = (from..=to).find(|&i| ends_sentence(words, i)).unwrap_or(to);
-    let hook = words[from..=end].iter().map(|w| w.text.trim()).collect::<Vec<_>>().join(" ");
-    hook.chars().take(MAX_REEL_HOOK_CHARS).collect()
+/// The first sentence the words `kept` say.
+fn opening(words: &[TimelineWord], kept: impl IntoIterator<Item = usize>) -> String {
+    let mut said = Vec::new();
+    for i in kept {
+        said.push(words[i].text.trim());
+        if ends_sentence(words, i) {
+            break;
+        }
+    }
+    said.join(" ").chars().take(MAX_REEL_HOOK_CHARS).collect()
 }
 
 /// Candidates for `proposals`, each inside the transcript, from the start of a sentence to the end of one, apart
@@ -369,7 +374,7 @@ pub fn make(
             true => without_retakes(derived, candidate.from, candidate.to),
             false => vec![[candidate.from, candidate.to]],
         };
-        let hook = finish.clean.then(|| opening(&derived.words, kept[0][0], candidate.to));
+        let hook = finish.clean.then(|| opening(&derived.words, kept.iter().flat_map(|&[a, b]| a..=b)));
         let made_in = |()| reel_project(project, derived, candidate, (&kept, &hesitations), framing, cancelled);
         let finished = |reel| finish_reel(reel, dir, finish, stored, cancelled);
         let (reel, skipped) = match step(i).and_then(made_in).and_then(finished) {
