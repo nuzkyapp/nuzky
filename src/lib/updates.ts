@@ -12,7 +12,8 @@ import type { JobEvent } from "./types";
  * the version on the latest GitHub release. Automatic checks run 10 s after start and then at most
  * once a day, also across launches, and say nothing when they fail; Check for updates always answers.
  * Only Update downloads anything: the backend keeps the package once its signature matches the key
- * built into Nuzky, and installs it and restarts only when the user chooses Restart to update.
+ * built into Nuzky, and installs it and restarts once it is downloaded if the user left Nuzky alone meanwhile, otherwise
+ * only when they choose Restart to update.
  */
 type Updates = {
   /** This Nuzky's version. */
@@ -168,7 +169,11 @@ export const waitFor = (work: string) => `Restart when ${work} finishes`;
 /** Errors that trying again cannot fix; Download from GitHub can. */
 const FINAL = ["UPDATE_NO_PACKAGE", "UPDATE_SIGNATURE", "UPDATE_SOURCE", "UPDATE_FOLDER"];
 
-/** Downloads the newer version and checks its signature. Nuzky then restarts into it only when the user chooses Restart to update. */
+/**
+ * Downloads the newer version and checks its signature. When the user hasn't touched Nuzky since choosing Update and
+ * nothing is open or playing, Nuzky restarts into it at once; otherwise only when they choose Restart to update, so a
+ * restart never cuts into what they are doing.
+ */
 export async function installUpdate() {
   const { latest, install, canInstall } = useUpdates.getState();
   if (!latest || install) return;
@@ -176,14 +181,22 @@ export async function installUpdate() {
   const progress = new Channel<number>();
   progress.onmessage = (percent) => useUpdates.getState().install?.stage === "downloading" && useUpdates.setState({ install: { stage: "downloading", percent } });
   useUpdates.setState({ install: { stage: "downloading", percent: null } });
+  let touched = false;
+  const touch = () => (touched = true);
+  addEventListener("keydown", touch, true);
+  addEventListener("pointerdown", touch, true);
   try {
     await api.downloadUpdate(progress);
   } catch (e) {
     useUpdates.setState({ install: null });
     return failed(e, () => void installUpdate());
+  } finally {
+    removeEventListener("keydown", touch, true);
+    removeEventListener("pointerdown", touch, true);
   }
   useUpdates.setState({ install: { stage: "ready" } });
   if (restartBlocker()) return;
+  if (!touched && leftAlone()) return restartToUpdate();
   useEditor.getState().toast({
     kind: "info",
     text: `Nuzky ${latest} is ready.`,
@@ -191,6 +204,8 @@ export async function installUpdate() {
     action: { label: "Restart now", run: () => void restartToUpdate(), valid: () => useUpdates.getState().install?.stage === "ready" && !restartBlocker() },
   });
 }
+
+const leftAlone = () => document.hasFocus() && !useEditor.getState().playing && !document.querySelector("dialog[open], [aria-modal='true'], [role=menu]");
 
 /** Saves the project, installs the downloaded update and restarts; work that started meanwhile postpones the restart. */
 export async function restartToUpdate() {

@@ -1,7 +1,8 @@
 //! Whether a newer Nuzky was released, and installing it when the user asks. The check reads only the version from
 //! `latest.json` on the newest published GitHub release. Update downloads the package that file names for this kind of
-//! install and keeps it only when its signature matches the key built into Nuzky (tauri.conf.json); Restart to update
-//! installs it and restarts. Nothing is downloaded, installed or restarted without the user's click.
+//! install and keeps it only when its signature matches the key built into Nuzky (tauri.conf.json); `restart_to_update`
+//! installs it and restarts, when the user chooses Restart to update or left Nuzky alone while it downloaded. Nothing
+//! is downloaded, installed or restarted without the user's click.
 use std::io::Read;
 use std::sync::Mutex;
 use std::time::Duration;
