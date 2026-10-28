@@ -410,6 +410,16 @@ input[type="range"].range:disabled {
 .changed {
   animation: changed 2400ms ease-out;
 }
+/* A tooltip's first showing (Tooltip in ui.tsx); the ones after it, while the pointer moves along, show at once. */
+@keyframes tip-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+}
+.tip-in {
+  animation: tip-in 120ms ease-out backwards;
+}
 
 @keyframes indeterminate {
   from {

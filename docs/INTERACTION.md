@@ -8,6 +8,8 @@ Nuzky starts on the home screen with every project; the editor of the last proje
 
 The library, the inspector and the timeline start close to CapCut's proportions (28 % of the width each, 35 % of the height) and follow the window until resized. Drag the gap right of the library, left of the inspector or above the timeline to resize that pane (a grip shows while the pointer is over it); double-click resets it to its share of the window, and ←/→ (↑/↓ above the timeline) on the focused gap resize by 24 px. The preview always keeps at least 340 px of width and 300 px of height: a pane stops there, and in a smaller window the inspector gives way first, then the library; both get their size back when the window grows. The sizes are remembered.
 
+**Tooltips**: resting the pointer on a control for 600 ms shows what it does, with its shortcut. Moving on to another control within 800 ms of a tooltip closing shows that one at once, as on macOS. A press, a key, the wheel or scrolling closes it until the pointer leaves the control. Tooltips follow the pointer only; a disabled control says why on keyboard focus instead (see DESIGN.md, States).
+
 ## Response time
 
 | Action | Feedback |

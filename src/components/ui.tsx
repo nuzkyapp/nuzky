@@ -169,6 +169,171 @@ export function DisabledHint() {
   );
 }
 
+/** "Split at playhead (S)": the text and, drawn as a key, the shortcut. */
+const SHORTCUT = /^(.+?)\s+\(((?:(?:Ctrl|Cmd|Shift|Alt|Option)\+)*(?:[A-Z0-9+=,./[\]-]|F\d{1,2}|Esc|Delete|Del|Space|Enter|Tab|Home|End|Backspace|[←→↑↓]))\)$/;
+/** The wait before the first tooltip, and how long after one closes the next shows at once. */
+const TIP_DELAY_MS = 600;
+const TIP_WARM_MS = 800;
+
+/**
+ * Every `title` in the app shows as a tooltip of its own material, the same on every system, with its shortcut drawn
+ * as a key. While the pointer is over an element, its title is held here and the element's own is empty, which also
+ * keeps a parent's title from showing, so the system's own tooltip never shows; React's changes to it land here
+ * meanwhile, and leaving puts the current one back. A title React adds under a resting pointer is taken over too. The
+ * first tooltip waits 600 ms; moving on to a neighbour within 800 ms of one closing shows the neighbour's at once, as on
+ * macOS. A press, a key, the wheel or scrolling closes it until the pointer leaves. It is a popover, so it lies in the
+ * top layer over a modal dialog too. Mount once.
+ */
+export function Tooltip() {
+  const [tip, setTip] = useState<{ text: string; key: string | null; x: number; y: number; above: boolean; instant: boolean } | null>(null);
+  const box = useRef<HTMLDivElement>(null);
+  // Centred under its control, but inside the window by its real width.
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el || !tip) return;
+    // A webview without popovers, where `:popover-open` would throw, shows it as a plain fixed box instead.
+    if ("showPopover" in el && !el.matches(":popover-open")) el.showPopover();
+    const half = el.offsetWidth / 2 + 8;
+    el.style.left = `${Math.max(half, Math.min(window.innerWidth - half, tip.x))}px`;
+  }, [tip]);
+  useEffect(() => {
+    let target: HTMLElement | null = null;
+    /** The title React gave the target, and whether it gave one at all. */
+    let title = "";
+    let present = false;
+    let at: Element | null = null;
+    let timer = 0;
+    let cooling = 0;
+    let shown = false;
+    let warm = false;
+    let quiet = false;
+    let gone = 0;
+    /** The attribute hovering put on the target for screen readers, while its title is held here. */
+    let named: string | null = null;
+    const set = Element.prototype.setAttribute;
+    const remove = Element.prototype.removeAttribute;
+    const show = (instant: boolean) => {
+      // A disabled control with keyboard focus already says why in DisabledHint.
+      if (!target?.isConnected || !title || quiet || (target.matches(":focus-visible") && target.getAttribute("aria-disabled") === "true")) return;
+      const r = target.getBoundingClientRect();
+      const m = SHORTCUT.exec(title);
+      // Over controls whose tooltip would cover what they act on, such as the timeline's tools over the ruler and playhead.
+      const above = !!target.closest("[data-tips-above]") || r.bottom + 40 > window.innerHeight;
+      setTip({ text: m ? m[1] : title, key: m ? m[2] : null, x: r.left + r.width / 2, y: above ? r.top - 6 : r.bottom + 6, above, instant });
+      shown = true;
+      window.clearTimeout(cooling);
+      // An element that goes away under the pointer, as a button an edit removes, takes its tooltip with it.
+      window.clearInterval(gone);
+      gone = window.setInterval(() => !target?.isConnected && release(), 250);
+    };
+    const hide = () => {
+      window.clearTimeout(timer);
+      window.clearInterval(gone);
+      setTip(null);
+      if (shown) {
+        warm = true;
+        window.clearTimeout(cooling);
+        cooling = window.setTimeout(() => (warm = false), TIP_WARM_MS);
+      }
+      shown = false;
+    };
+    // Screen readers keep what the title told them: its name when it had no other, else its description.
+    const describe = (el: HTMLElement) => {
+      if (named) remove.call(el, named);
+      named = null;
+      if (!title) return;
+      const name = el.hasAttribute("aria-label") || el.hasAttribute("aria-labelledby") || el.textContent?.trim() ? "aria-description" : "aria-label";
+      if (el.hasAttribute(name) || (name === "aria-description" && el.hasAttribute("aria-describedby"))) return;
+      set.call(el, name, title);
+      named = name;
+    };
+    const release = () => {
+      hide();
+      quiet = false;
+      if (!target) return;
+      const el = target;
+      target = null;
+      for (const name of ["setAttribute", "removeAttribute", "getAttribute"] as const) Reflect.deleteProperty(el, name);
+      if (named) remove.call(el, named);
+      named = null;
+      if (present) set.call(el, "title", title);
+      else remove.call(el, "title");
+    };
+    const hold = (el: HTMLElement) => {
+      target = el;
+      title = el.getAttribute("title") ?? "";
+      present = true;
+      set.call(el, "title", "");
+      describe(el);
+      // React sets and removes the title through these; while the pointer is here they change the held one.
+      const retitle = (value: string | null) => {
+        title = value ?? "";
+        present = value !== null;
+        describe(el);
+        if (shown) (title ? show(true) : hide());
+      };
+      el.setAttribute = (name: string, value: string) => (name === "title" ? retitle(String(value)) : set.call(el, name, value));
+      el.removeAttribute = (name: string) => (name === "title" ? retitle(null) : remove.call(el, name));
+      el.getAttribute = (name: string) => (name === "title" ? (present ? title : null) : Element.prototype.getAttribute.call(el, name));
+    };
+    const enter = (pointerAt: Element | null, pressed: boolean) => {
+      at = pointerAt;
+      const el = at?.closest<HTMLElement>("[title]") ?? null;
+      // Still on the same element, unless a part of it has a title of its own, as a media tile's Remove has.
+      if (target && at && target.contains(at) && (!el || el === target || !target.contains(el))) return;
+      release();
+      if (!el || pressed) return;
+      hold(el);
+      if (warm) show(true);
+      else timer = window.setTimeout(() => show(false), TIP_DELAY_MS);
+    };
+    const over = (e: PointerEvent) => e.pointerType !== "touch" && enter(e.target instanceof Element ? e.target : null, e.buttons !== 0);
+    const out = (e: PointerEvent) => {
+      if (e.relatedTarget) return;
+      at = null;
+      release();
+    };
+    const close = (e: Event) => {
+      // Scrolling elsewhere, such as the AI panel following a run or the timeline following playback, leaves it.
+      if (e.type === "scroll" && !(e.target instanceof Node && target && (e.target === document || e.target.contains(target)))) return;
+      hide();
+      quiet = !!target;
+    };
+    // A title given to what the pointer rests on, as when the AI starts editing under it, is taken over at once.
+    const titled = new MutationObserver((records) => {
+      if (at?.isConnected && records.some((r) => r.target !== target && r.target.contains(at))) enter(at, false);
+    });
+    titled.observe(document.body, { subtree: true, attributes: true, attributeFilter: ["title"] });
+    window.addEventListener("pointerover", over, true);
+    window.addEventListener("pointerout", out, true);
+    window.addEventListener("blur", release);
+    for (const type of ["pointerdown", "keydown", "wheel", "scroll"]) window.addEventListener(type, close, true);
+    return () => {
+      release();
+      titled.disconnect();
+      window.removeEventListener("pointerover", over, true);
+      window.removeEventListener("pointerout", out, true);
+      window.removeEventListener("blur", release);
+      for (const type of ["pointerdown", "keydown", "wheel", "scroll"]) window.removeEventListener(type, close, true);
+    };
+  }, []);
+  if (!tip) return null;
+  return createPortal(
+    <div
+      ref={box}
+      data-tooltip
+      aria-hidden
+      popover="manual"
+      className={`overlay pointer-events-none fixed inset-auto z-[150] m-0 flex max-w-[280px] -translate-x-1/2 items-center gap-2 overflow-visible rounded-lg border-0 px-2 py-[5px] text-[12px] leading-4 text-fg ${tip.above ? "-translate-y-full" : ""} ${tip.instant ? "" : "tip-in"}`}
+      style={{ left: tip.x, top: tip.y }}
+    >
+      <span className="min-w-0">{tip.text}</span>
+      {tip.key && <kbd className="tabular shrink-0 rounded-[4px] bg-white/[.08] px-[5px] font-sans text-[11px] leading-4 font-medium text-muted shadow-[inset_0_0_0_1px_rgb(255_255_255/.1)]">{tip.key}</kbd>}
+    </div>,
+    document.body,
+  );
+}
+
 /**
  * Locks the editing controls inside while an agent's run is open. Buttons stay focusable and give
  * the reason; fields are disabled with the reason as their tooltip.

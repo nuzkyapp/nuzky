@@ -9,6 +9,15 @@ PRESS = f"""const b = [...document.querySelectorAll('{TOOLBAR} button')].find((b
 if (!b || b.getAttribute('aria-disabled') === 'true' || b.disabled) return false;
 b.click();
 return true;"""
+# A mouse pointer coming over (arguments[1] true) or leaving (false) the toolbar button whose label starts with arguments[0].
+HOVER_TOOL = f"""const b = [...document.querySelectorAll('{TOOLBAR} button')].find((b) => b.getAttribute('aria-label').startsWith(arguments[0]));
+b.dispatchEvent(new PointerEvent(arguments[1] ? 'pointerover' : 'pointerout', {{bubbles: true, pointerType: 'mouse', relatedTarget: null}}));"""
+# The tooltip showing, and the titles of the toolbar's Split and Freeze frame buttons.
+TIP = f"""const t = document.querySelector('[data-tooltip]'); const r = t?.getBoundingClientRect();
+const b = (name) => [...document.querySelectorAll('{TOOLBAR} button')].find((b) => b.getAttribute('aria-label').startsWith(name));
+return {{text: t?.querySelector('span')?.textContent ?? null, key: t?.querySelector('kbd')?.textContent ?? null, fading: !!t?.classList.contains('tip-in'),
+        above: t ? Math.round(b('Split').getBoundingClientRect().top - r.bottom) : null,
+        titles: [b('Split').title, b('Freeze').title]}};"""
 HEADER_UNDO = "return [...document.querySelectorAll('header button')].some((b) => /^(Undo|Redo)/.test(b.getAttribute('aria-label') ?? ''))"
 KEYS = """return window.__nuzky.store.getState().snap.project.tracks.flatMap((t) => t.clips)
   .find((c) => c.id === arguments[0]).keyframes.map((k) => k.transform.rotation)"""
@@ -34,6 +43,70 @@ def toolbar(r):
              'Delete right of playhead', 'Delete selection', 'Duplicate', 'Detach audio', 'Rotate 90°', 'Snapping on'], labels)
     r.check('with nothing to redo, Redo says so', labels[1] == 'Nothing to redo', labels[1])
     r.check('the top bar has no Undo or Redo of its own', not r.s.run(HEADER_UNDO))
+
+    r.s.run(HOVER_TOOL, 'Split', True)
+    held = r.s.run(TIP)
+    r.check("hovering Split empties the button's own title, so the system's own tooltip never shows, and shows nothing yet",
+            held['text'] is None and held['titles'][0] == '', held)
+    shown = wait(lambda: (lambda t: t if t['text'] else None)(r.s.run(TIP)), 2)
+    r.check("after a moment Nuzky's own tooltip says Split at playhead with S as a key, fading in 6 px over the button, clear of the ruler and playhead",
+            shown and shown['text'] == 'Split at playhead' and shown['key'] == 'S' and shown['fading']
+            and (time.sleep(0.2) or r.s.run(TIP)['above'] == 6), shown)
+    r.shot('tooltip')
+    r.s.run(HOVER_TOOL, 'Freeze', True)
+    next_tip = r.s.run(TIP)
+    r.check("moving on to Freeze frame shows its tooltip at once, without fading in, and gives Split its title back",
+            next_tip['text'] == 'Freeze frame' and next_tip['key'] == 'Shift+R' and not next_tip['fading']
+            and next_tip['titles'] == ['Split at playhead (S)', ''], next_tip)
+    described = r.s.run(f"return [...document.querySelectorAll('{TOOLBAR} button')].find((b) => b.getAttribute('aria-label').startsWith('Freeze')).getAttribute('aria-description')")
+    r.check("while its title is held, a screen reader still gets it as the button's description", described == 'Freeze frame (Shift+R)', described)
+    r.s.run("document.querySelector('aside[aria-label=Inspector] .overflow-y-auto')?.dispatchEvent(new Event('scroll'))")
+    r.check('scrolling another part of the window, as the AI panel does while an agent writes, leaves the tooltip', r.s.run(TIP)['text'] == 'Freeze frame')
+    r.s.run("document.querySelector('[data-tooltip]') && window.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true}))")
+    pressed = r.s.run(TIP)
+    r.check('a press closes it, and the button keeps its title held while the pointer stays', pressed['text'] is None and pressed['titles'][1] == '', pressed)
+    r.s.run(HOVER_TOOL, 'Freeze', False)
+    left = r.s.run(TIP)
+    r.check('leaving the window gives Freeze frame its title back', left['text'] is None and left['titles'] == ['Split at playhead (S)', 'Freeze frame (Shift+R)'], left)
+    # A media tile has a title of its own and so does its Remove button: moving onto Remove shows Remove's, and the
+    # button's empty title keeps the system from showing the tile's.
+    tile = "[...document.querySelectorAll('[role=tablist][aria-label=Library] ~ [role=tabpanel] span')].find((e) => e.textContent === 'talk.mp4').closest('.group')"
+    hover = "arguments[0].dispatchEvent(new PointerEvent('pointerover', {bubbles: true, pointerType: 'mouse'}))"
+    r.s.run(f"{hover.replace('arguments[0]', tile)}")
+    wait(lambda: r.s.run("return document.querySelector('[data-tooltip] span')?.textContent ?? null"), 2)
+    r.s.run(f"{hover.replace('arguments[0]', tile + '.querySelector(\"button[aria-label^=Remove]\")')}")
+    nested = r.s.run(f"""const remove = {tile}.querySelector('button[aria-label^=Remove]');
+        return {{tip: document.querySelector('[data-tooltip] span')?.textContent ?? null, own: remove.title, tile: {tile}.title !== ''}};""")
+    r.check("moving onto a tile's Remove shows Remove's tooltip, with the button's own title empty so the tile's cannot show",
+            nested == {'tip': 'Remove from project, with its clips', 'own': '', 'tile': True}, nested)
+    r.s.run(f"{tile}.querySelector('button[aria-label^=Remove]').dispatchEvent(new PointerEvent('pointerout', {{bubbles: true, pointerType: 'mouse', relatedTarget: null}}))")
+    # A title given to what the pointer rests on, as when the AI starts editing under it, becomes the app's tooltip.
+    fit = "document.querySelector('aside[aria-label=Inspector] [role=group] button')"
+    r.s.run(f"{fit}.dispatchEvent(new PointerEvent('pointerover', {{bubbles: true, pointerType: 'mouse'}}))")
+    r.s.run(f"{fit}.setAttribute('title', 'Fit: the AI is editing')")
+    late = wait(lambda: r.s.run(f"return document.querySelector('[data-tooltip] span')?.textContent === 'Fit: the AI is editing' && {fit}.title === ''"), 2)
+    r.check('a title added under a resting pointer shows as the tooltip, never the system one', late, r.s.run(f"return {fit}.title"))
+    r.s.run(f"{fit}.dispatchEvent(new PointerEvent('pointerout', {{bubbles: true, pointerType: 'mouse', relatedTarget: null}})); {fit}.removeAttribute('title')")
+    # Over a modal dialog, which lies over everything else, the tooltip still shows, under its control.
+    r.s.run("const b = document.querySelector('header [data-feedback]'); b.focus(); b.click();")
+    wait(lambda: r.s.run("return !!document.querySelector('[role=menu][aria-label=\"Send feedback\"]')"), 5)
+    r.s.run("[...document.querySelectorAll('[role=menu] [role^=menuitem]')].find((i) => i.textContent.includes('Report a bug')).click()")
+    wait(lambda: r.s.run("return !!document.querySelector('dialog[open]')"), 5)
+    cancel = "[...document.querySelectorAll('dialog[open] button')].find((b) => b.textContent.trim() === 'Cancel')"
+    r.s.run(f"const c = {cancel}; c.setAttribute('title', 'Close without reporting'); c.dispatchEvent(new PointerEvent('pointerover', {{bubbles: true, pointerType: 'mouse'}}))")
+    inside = wait(lambda: r.s.run(f"""const t = document.querySelector('[data-tooltip]:popover-open'); if (!t) return null;
+        const a = t.getBoundingClientRect(), b = {cancel}.getBoundingClientRect();
+        return {{text: t.textContent, gap: Math.round(a.top - b.bottom), centre: Math.round(a.left + a.width / 2 - (b.left + b.width / 2))}};"""), 2)
+    r.check("a tooltip in a modal dialog lies over it in the top layer, under its control", inside and inside['text'] == 'Close without reporting'
+            and inside['gap'] == 6 and abs(inside['centre']) <= 1, inside)
+    r.s.run(f"{cancel}.dispatchEvent(new PointerEvent('pointerout', {{bubbles: true, pointerType: 'mouse', relatedTarget: null}})); {cancel}.click()")
+    wait(lambda: r.s.run("return !document.querySelector('dialog[open]')"), 5)
+    edge = "document.querySelector('header [data-feedback]')"
+    r.s.run(f"{edge}.dispatchEvent(new PointerEvent('pointerover', {{bubbles: true, pointerType: 'mouse'}}))")
+    centred = wait(lambda: r.s.run(f"""const t = document.querySelector('[data-tooltip]'); if (!t) return null; const a = t.getBoundingClientRect(), b = {edge}.getBoundingClientRect();
+        return Math.round((a.left + a.width / 2) - (b.left + b.width / 2));"""), 2)
+    r.check('a short tooltip near the window\'s left edge stays centred under its button', centred == 0, centred)
+    r.s.run(f"{edge}.dispatchEvent(new PointerEvent('pointerout', {{bubbles: true, pointerType: 'mouse', relatedTarget: null}}))")
     r.shot('before')
     # talk.mp4 is portrait and fills the 9:16 canvas; turned a quarter it lies across the middle, black above it.
     upright = preview_brightness(r, r.work / 'before.png', 0.1)
