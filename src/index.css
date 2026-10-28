@@ -162,6 +162,16 @@ select {
       inset 0 1px 0 rgb(255 255 255 / 0.1),
       0 1px 3px rgb(0 0 0 / 0.4);
   }
+  /* SegThumb (ui.tsx): it slides to a new choice. It is placed absolutely, so its width changes only its own box. */
+  .seg-thumb {
+    transition:
+      transform 260ms cubic-bezier(0.32, 0.72, 0, 1),
+      width 260ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  /* Segments a disabled fieldset turns off, as in the Export dialog while it exports, drop to 40 % with their plate. */
+  .seg-track:has(> [data-seg]:disabled) > .seg-thumb {
+    opacity: 0.4;
+  }
 
   /* Button and IconButton (ui.tsx) shapes. Here rather than as utilities, so a `className` such as
      "h-6 px-2 text-[12px]" on a call site overrides them: Tailwind sorts same-property utilities by

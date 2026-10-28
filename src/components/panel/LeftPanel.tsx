@@ -4,7 +4,7 @@ import { useReels } from "../../lib/reels";
 import { useEditor, type PanelTab } from "../../lib/store";
 import { CoverFrames } from "../cover/CoverFrames";
 import { ReelTrim } from "../reels/ReelTrim";
-import { AiLock, TabPanel, tabIds, tabListKeys } from "../ui";
+import { AiLock, SegThumb, TabPanel, tabIds, tabListKeys } from "../ui";
 import { AudioTab } from "./AudioTab";
 import { CaptionsTab } from "./CaptionsTab";
 import { FiltersTab } from "./FiltersTab";
@@ -53,7 +53,8 @@ export function LeftPanel({ width }: { width: number }) {
     <aside data-tour="library" className="pane flex shrink-0 flex-col overflow-hidden" style={{ width }}>
       {/* Tabs size to their labels and share the leftover width, so no two labels touch at 360 px, the narrowest, also where
           WebKitGTK sets Inter a little wider than Chromium. */}
-      <div className="seg-track mx-1.5 mt-1.5 flex shrink-0 rounded-[13px] p-0.5" role="tablist" aria-label="Library" onKeyDown={tabListKeys(TAB_IDS, tab, setTab)}>
+      <div className="seg-track relative mx-1.5 mt-1.5 flex shrink-0 rounded-[13px] p-0.5" role="tablist" aria-label="Library" onKeyDown={tabListKeys(TAB_IDS, tab, setTab)}>
+        <SegThumb value={tab} className="rounded-[11px]" />
         {TABS.map((t) => (
           <button
             key={t.id}
@@ -61,15 +62,16 @@ export function LeftPanel({ width }: { width: number }) {
             role="tab"
             id={tabIds("library", t.id).tab}
             data-tab={t.id}
+            data-seg={t.id}
             aria-selected={tab === t.id}
             aria-controls={tab === t.id ? tabIds("library", t.id).panel : undefined}
             tabIndex={tab === t.id ? 0 : -1}
             onClick={() => setTab(t.id)}
-            className={`flex flex-auto flex-col items-center gap-[3px] rounded-[11px] px-px pt-1.5 pb-[5px] text-[11px] leading-[13px] font-medium tracking-[-0.02em] whitespace-nowrap transition-colors duration-[120ms] ease-out ${
-              tab === t.id ? "seg-on text-fg" : "text-muted hover:text-fg"
+            className={`relative flex flex-auto flex-col items-center gap-[3px] rounded-[11px] px-px pt-1.5 pb-[5px] text-[11px] leading-[13px] font-medium tracking-[-0.02em] whitespace-nowrap transition-colors duration-[120ms] ease-out ${
+              tab === t.id ? "text-fg" : "text-muted hover:text-fg"
             }`}
           >
-            <t.icon size={17} className={tab === t.id ? "text-accent" : undefined} />
+            <t.icon size={17} className={`transition-colors duration-[120ms] ease-out ${tab === t.id ? "text-accent" : ""}`} />
             <span>{t.label}</span>
           </button>
         ))}

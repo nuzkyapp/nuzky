@@ -652,7 +652,53 @@ export function TabPanel({ group, id, className, children }: { group: string; id
   );
 }
 
-/** Text tabs with an underline, arrow keys move between them. The selected tab's content goes in a `TabPanel` of the same `group`. */
+/**
+ * The chosen segment's plate in a `seg-track` (made `relative`), whose segments carry `data-seg` and `relative` so they
+ * paint over it. A new choice slides it there, as a segmented control does on macOS and iOS; anything else that moves
+ * the segments, such as a resized pane, other segments or the font arriving, puts it there at once.
+ */
+export function SegThumb({ value, className = "" }: { value: string | number | null; className?: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const shown = useRef<{ key: string | null; segments: string; box: string }>({ key: null, segments: "", box: "" });
+  const key = value === null ? null : String(value);
+  useLayoutEffect(() => {
+    const thumb = ref.current!;
+    const track = thumb.parentElement!;
+    const segment = (k: string | null) => (k === null ? null : track.querySelector<HTMLElement>(`:scope > [data-seg="${CSS.escape(k)}"]`));
+    const place = (slide: boolean) => {
+      const seg = segment(key);
+      thumb.style.visibility = seg ? "" : "hidden";
+      if (!seg) return;
+      // In px of the layout, also while a dialog around it scales in, with its edges on the screen's pixels, as a
+      // background of the segment itself would be.
+      const t = track.getBoundingClientRect(), b = seg.getBoundingClientRect();
+      const scale = track.offsetWidth ? t.width / track.offsetWidth : 1;
+      const px = (v: number) => Math.round((v / scale) * devicePixelRatio) / devicePixelRatio;
+      const [x, y] = [px(b.left - t.left), px(b.top - t.top)];
+      const [w, h] = [px(b.right - t.left) - x, px(b.bottom - t.top) - y];
+      const box = `${x} ${y} ${w} ${h}`;
+      if (box === shown.current.box) return;
+      shown.current.box = box;
+      if (!slide) thumb.style.transition = "none";
+      Object.assign(thumb.style, { width: `${w}px`, height: `${h}px`, transform: `translate(${x}px, ${y}px)` });
+      if (!slide) {
+        thumb.getBoundingClientRect();
+        thumb.style.transition = "";
+      }
+    };
+    // Only a new choice among the same segments slides; new segments, such as another model's efforts, put it there at once.
+    const segments = [...track.querySelectorAll<HTMLElement>(":scope > [data-seg]")].map((s) => s.dataset.seg).join("\n");
+    place(shown.current.key !== key && shown.current.segments === segments && !!segment(shown.current.key));
+    Object.assign(shown.current, { key, segments });
+    const moved = new ResizeObserver(() => place(false));
+    moved.observe(track);
+    track.querySelectorAll(":scope > [data-seg]").forEach((seg) => moved.observe(seg));
+    return () => moved.disconnect();
+  });
+  return <span ref={ref} aria-hidden className={`seg-on seg-thumb pointer-events-none absolute top-0 left-0 ${className}`} />;
+}
+
+/** Tabs in a segmented track, arrow keys move between them. The selected tab's content goes in a `TabPanel` of the same `group`. */
 export function TabBar<T extends string>({
   group,
   tabs,
@@ -675,7 +721,8 @@ export function TabBar<T extends string>({
     onChange,
   );
   return (
-    <div role="tablist" aria-label={label} className={`seg-track flex shrink-0 gap-0.5 overflow-hidden rounded-[9px] p-0.5 ${className}`} onKeyDown={onKeyDown}>
+    <div role="tablist" aria-label={label} className={`seg-track relative flex shrink-0 gap-0.5 overflow-hidden rounded-[9px] p-0.5 ${className}`} onKeyDown={onKeyDown}>
+      <SegThumb value={value} className="rounded-[7px]" />
       {tabs.map((t) => (
         <button
           key={t.id}
@@ -683,12 +730,13 @@ export function TabBar<T extends string>({
           role="tab"
           id={tabIds(group, t.id).tab}
           data-tab={t.id}
+          data-seg={t.id}
           aria-selected={t.id === value}
           aria-controls={t.id === value ? tabIds(group, t.id).panel : undefined}
           tabIndex={t.id === value ? 0 : -1}
           onClick={() => onChange(t.id)}
-          className={`h-7 min-w-0 flex-auto truncate rounded-[7px] px-1 text-[12px] font-medium whitespace-nowrap transition-colors duration-[120ms] ease-out ${
-            t.id === value ? "seg-on text-fg" : "text-muted hover:text-fg"
+          className={`relative h-7 min-w-0 flex-auto truncate rounded-[7px] px-1 text-[12px] font-medium whitespace-nowrap transition-colors duration-[120ms] ease-out ${
+            t.id === value ? "text-fg" : "text-muted hover:text-fg"
           }`}
         >
           {t.label}
@@ -722,16 +770,18 @@ export function Segmented<T extends string | number>({
   disabled = disabled || !!lock;
   const reason = lock ?? (disabled ? disabledReason : undefined);
   return (
-    <div role="group" aria-label={label} className="seg-track flex gap-0.5 rounded-[9px] p-0.5">
+    <div role="group" aria-label={label} className="seg-track relative flex gap-0.5 rounded-[9px] p-0.5">
+      <SegThumb value={value} className={`rounded-[7px] ${disabled ? "opacity-40" : ""}`} />
       {options.map((o) => (
         <button
           key={o.id}
           type="button"
+          data-seg={o.id}
           aria-pressed={o.id === value}
           title={disabled ? reason : o.title}
           {...disabledProps(disabled, () => onChange(o.id), reason ? reasonId : undefined)}
-          className={`tabular h-7 flex-1 rounded-[7px] ${compact ? "px-1" : "px-2"} text-[12px] font-medium whitespace-nowrap transition-colors duration-[120ms] ease-out disabled:cursor-not-allowed disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:opacity-40 ${
-            o.id === value ? "seg-on text-fg" : `text-muted ${disabled ? "" : "enabled:hover:text-fg"}`
+          className={`tabular relative h-7 flex-1 rounded-[7px] ${compact ? "px-1" : "px-2"} text-[12px] font-medium whitespace-nowrap transition-colors duration-[120ms] ease-out disabled:cursor-not-allowed disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:opacity-40 ${
+            o.id === value ? "text-fg" : `text-muted ${disabled ? "" : "enabled:hover:text-fg"}`
           }`}
         >
           {o.label}
