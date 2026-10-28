@@ -1,8 +1,9 @@
 """Update checks and installing. The foot of the home sidebar says when a newer Nuzky was released, from a latest.json
 served here in place of GitHub's. The automatic check runs 10 s after start and at most once a day, also across launches,
 says nothing when it fails and can be turned off; Check for updates always answers in a toast. Update downloads the
-package latest.json names, signed here with a throwaway key, with its progress and a Stop, and keeps it; Nuzky never
-restarts by itself, only when the user chooses Restart to update, which waits for running work. This debug build
+package latest.json names, signed here with a throwaway key, with its progress and a Stop, and keeps it; left alone
+meanwhile, Nuzky then installs it and restarts, otherwise only when the user chooses Restart to update, which waits for
+running work. This debug build
 installs into a folder that stands in for the installed copy (NUZKY_UPDATE_INSTALL) and is never started again: the
 flow reloads the page where a release would restart."""
 import gzip, json, os, re, subprocess, threading, time
@@ -582,9 +583,12 @@ def install(r, server, version):
             (server.package_requests, answer))
     r.installed.mkdir()
 
-    # Downloaded with nothing running: a toast says it is ready, and nothing restarts until the user says so.
+    # Downloaded with nothing running and Nuzky left alone meanwhile: it installs at once, as Restart to update does.
+    # The install is held, then refused as Windows can refuse it, so the package stays for what follows.
+    (r.installed / 'hold').touch()
+    (r.installed / 'refuse').touch()
     answer = offered(r)
-    asked = server.package_requests
+    server.pace = 0.03
     r.s.run(OPEN_EDITOR_MENU)
     wait(lambda: r.s.run(MENU), 3)
     r.s.run(CHOOSE, 'Update')
@@ -592,8 +596,34 @@ def install(r, server, version):
             (answer or {}).get('choices') == ['Update'] and wait(lambda: (r.s.run(INSTALL) or {}).get('stage') == 'downloading'
                                                                  and not any(t['text'] == 'Nuzky 99.0.0 is available.' for t in r.s.run(SHOWN) or []), 2),
             (answer, r.s.run(INSTALL), r.s.run(SHOWN)))
+    progress = wait(lambda: (p := r.s.run(PROGRESS)) and p['text'] == 'Installing update…' and p, 30)
+    r.check('left alone while it downloads, Nuzky installs it by itself, with no toast to click', progress and ready_toast(r) is None,
+            (progress, r.s.run(SHOWN)))
+    r.shot('installing-left-alone')
+    (r.installed / 'hold').unlink()
+    answer = wait(lambda: (t := r.s.run(CHOICES)) and t[-1]['kind'] == 'error' and t[-1], 10)
+    (r.installed / 'refuse').unlink()
+    r.check('an install that fails then leaves Nuzky as it was, with Try again',
+            (answer or {}).get('text') == "Couldn't install the update. Try again." and (r.s.run(INSTALL) or {}).get('stage') == 'ready'
+            and r.s.run(VIEW) == 'editor', (answer, r.s.run(INSTALL)))
+
+    # Touched while it downloads: a toast says it is ready, and nothing restarts until the user says so.
+    r.installed.rmdir()
+    r.s.run(TOAST_BUTTON, 'Try again')
+    wait(lambda: (t := r.s.run(CHOICES)) and t[-1]['text'].startswith('Nuzky can'), 10)
+    r.installed.mkdir()
+    offered(r)
+    r.s.run('window.__nuzky.store.setState({toasts: []})')
+    server.pace = 0.1
+    asked = server.package_requests
+    r.s.run(OPEN_EDITOR_MENU)
+    wait(lambda: r.s.run(MENU), 3)
+    r.s.run(CHOOSE, 'Update')
+    wait(lambda: (r.s.run(INSTALL) or {}).get('stage') == 'downloading', 3)
+    time.sleep(0.5)
+    press('Escape')
     toast = wait(lambda: ready_toast(r), 30)
-    r.check('downloaded with nothing running, a toast says it is ready, with Restart now',
+    r.check('touched while it downloads (Escape here), a toast says it is ready, with Restart now',
             toast == {'text': 'Nuzky 99.0.0 is ready.', 'buttons': ['Restart now', 'Dismiss']}, toast)
     r.shot('ready')
     name, view, revision = r.s.run(NAME), r.s.run(VIEW), r.s.run(REVISION)
