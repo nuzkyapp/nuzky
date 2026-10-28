@@ -387,12 +387,28 @@ export async function duplicateProject(p: LibraryProject) {
   await refreshLibrary();
 }
 
+/** Why these projects cannot go to the Trash now. */
+export function trashBlocked(paths: string[]): string | null {
+  const { snap, aiRun } = useEditor.getState();
+  return aiRun && paths.includes(snap?.path ?? "") ? "The AI is editing this project. Stop it first, then move it to the Trash." : null;
+}
+
+/** The open project is about to go: the most recent other one that opens takes its place, or a new empty one. */
+async function leaveOpen(paths: string[]) {
+  const next = useLibrary.getState().projects?.find((p) => !paths.includes(p.path) && !blocked(p));
+  const { width, height } = useEditor.getState().snap!.project.canvas;
+  await switchProject(() => (next ? api.openProject(next.path) : api.newProject(width, height)));
+}
+
 /** Hides them at once; Undo in the toast brings them back until they really go to the Trash. */
 export async function trashProjects(paths: string[]) {
   if (paths.length === 0) return;
+  const reason = trashBlocked(paths);
+  if (reason) return toast({ kind: "info", text: reason });
   const text =
     paths.length === 1 ? `Moved “${projectName(paths[0])}” to the Trash. Your videos stay where they are.` : `Moved ${paths.length} projects to the Trash. Your videos stay where they are.`;
   try {
+    if (paths.includes(useEditor.getState().snap?.path ?? "")) await leaveOpen(paths);
     await api.trashProjects(paths);
   } catch (e) {
     return failed(e);

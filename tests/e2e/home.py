@@ -402,10 +402,24 @@ def home(r):
         agent.close()
     r.check('the videos it used are untouched', (FIXTURES / 'wide-head.mp4').exists())
     open_card = card(r, 'Talk to camera')['path']
-    r.s.run("document.querySelector(`[data-path=\"${CSS.escape(arguments[0])}\"]`).focus()", open_card)
-    r.key('Delete')
-    r.check('the open project cannot go to the Trash, a toast says why',
-            wait(lambda: any('Open another project first' in t for t in toast_texts(r)), 3) and os.path.exists(open_card), toast_texts(r))
+    r.s.run("""const c = document.querySelector(`[data-path="${CSS.escape(arguments[0])}"]`); const b = c.getBoundingClientRect();
+        c.dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, clientX: b.left + 60, clientY: b.top + 80}));""", open_card)
+    wait(lambda: r.s.run("return !!document.querySelector('[role=menu]')"), 3)
+    time.sleep(0.3)
+    r.shot('open-project-menu')
+    click(r, 'Move to Trash', '[role=menu]')
+    opened = lambda: r.s.run('return window.__nuzky.store.getState().snap?.path')
+    r.check('the open project goes to the Trash too: another one opens behind the home screen, which stays',
+            wait(lambda: not card(r, 'Talk to camera') and opened() not in (None, open_card), 10)
+            and any('Moved “Talk to camera” to the Trash.' in t for t in toast_texts(r)) and view(r)['view'] == 'home'
+            and os.path.exists(open_card), (opened(), toast_texts(r), view(r)))
+    r.check('the project open now says so on its card', wait(lambda: any(c['path'] == opened() and 'Open now' in c['meta'] for c in cards(r)), 5), cards(r))
+    r.shot('trash-open-project')
+    r.s.run("[...document.querySelectorAll('[data-toast]')].find((t) => t.textContent.includes('“Talk to camera” to the Trash')).querySelector('button').click()")
+    r.check('Undo brings it back', wait(lambda: card(r, 'Talk to camera'), 5))
+    r.s.run("window.__nuzky.openProject({path: arguments[0], name: 'Talk to camera'})", open_card)
+    wait(lambda: opened() == open_card and view(r)['view'] == 'editor', 10)
+    r.s.run("window.__nuzky.store.setState({view: 'home'})")
 
     # Search: names at once, then what was said once the project is transcribed.
     models = r.s.call('window.__nuzky.api.speechModels().then((m) => JSON.stringify(m))')
