@@ -411,6 +411,16 @@ input[type="range"].range:disabled {
   animation: changed 2400ms ease-out;
 }
 
+/* FadeImg (ui.tsx): a picture that arrives after its place was drawn. */
+@keyframes img-in {
+  from {
+    opacity: 0;
+  }
+}
+img[data-loaded="fade"] {
+  animation: img-in 180ms ease-out;
+}
+
 @keyframes indeterminate {
   from {
     transform: translateX(-100%);
