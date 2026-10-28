@@ -7,7 +7,7 @@ import { useEditor } from "../../lib/store";
 import { formatTime } from "../../lib/time";
 import type { CoverCandidate, ThumbnailFormat } from "../../lib/types";
 import { useShownCover } from "./CoverStage";
-import { AiLock, Button, ProgressBar, lockedProps, useLockReason } from "../ui";
+import { AiLock, Button, FadeImg, ProgressBar, lockedProps, useLockReason } from "../ui";
 
 /**
  * The library's place in the cover editor. Until there is a cover, Make it with AI leads: the agent picks the frame
@@ -179,7 +179,7 @@ function Frames({ format, made }: { format: ThumbnailFormat; made: boolean }) {
                   <span
                     className={`relative block w-full overflow-hidden rounded-[10px] border bg-bg ${chosen ? "border-accent shadow-[0_0_0_1px_var(--color-accent)]" : "border-white/[.08] group-hover:border-white/30"}`}
                   >
-                    <img src={c.still} alt="" className="block w-full" draggable={false} />
+                    <FadeImg src={c.still} alt="" className="block w-full" draggable={false} />
                     <span className="tabular absolute bottom-1 right-1 rounded bg-black/60 px-1 text-[11px] leading-4 text-fg">{formatTime(c.timeUs).slice(0, -1)}</span>
                     {chosen && (
                       <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-accent-strong text-white shadow-[0_1px_2px_rgb(0_0_0/.5)]">

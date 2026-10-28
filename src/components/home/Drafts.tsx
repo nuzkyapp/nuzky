@@ -4,7 +4,7 @@ import { addDraftFolder, findDrafts, loadCover, openDraft, projectOf, useCapCut 
 import { openProject, useLibrary, whenLabel } from "../../lib/library";
 import { formatLength } from "../../lib/time";
 import type { CapCutDraft, LibraryProject } from "../../lib/types";
-import { Button, IconButton, Menu, type MenuEntry } from "../ui";
+import { Button, FadeImg, IconButton, Menu, type MenuEntry } from "../ui";
 
 /** Width over height of a card's picture box, as a project card's. */
 const CARD_BOX = 152 / 180;
@@ -169,7 +169,7 @@ function DraftCard({
       >
         <div className="relative overflow-hidden bg-white/[.04]" style={frame}>
           {cover?.url ? (
-            <img src={cover.url} alt="" draggable={false} onLoad={(e) => setRatio(e.currentTarget.naturalWidth / Math.max(1, e.currentTarget.naturalHeight))} className="h-full w-full object-cover" />
+            <FadeImg src={cover.url} alt="" draggable={false} onLoad={(e) => setRatio(e.currentTarget.naturalWidth / Math.max(1, e.currentTarget.naturalHeight))} className="h-full w-full object-cover" />
           ) : (
             cover && (
               <div className="flex h-full w-full items-center justify-center text-subtle">

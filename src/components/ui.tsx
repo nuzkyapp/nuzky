@@ -962,6 +962,33 @@ export function Segmented<T extends string | number>({
   );
 }
 
+/**
+ * A picture of media or a project that fades in over 180 ms when it arrives after its place was drawn, instead of popping
+ * in; one the webview already has shows at once with its place. A keyframe animation, as a transition would not start
+ * for a picture that loads before it was first styled.
+ */
+export function FadeImg({ className = "", onLoad, onError, ...props }: ComponentProps<"img">) {
+  // A picture that cannot load shows what it shows today rather than staying hidden.
+  const loaded = (img: HTMLImageElement) => (img.dataset.loaded ||= "fade");
+  return (
+    <img
+      {...props}
+      ref={(img) => {
+        if (img?.complete && img.naturalWidth) img.dataset.loaded ||= "at-once";
+      }}
+      onLoad={(e) => {
+        loaded(e.currentTarget);
+        onLoad?.(e);
+      }}
+      onError={(e) => {
+        loaded(e.currentTarget);
+        onError?.(e);
+      }}
+      className={`opacity-0 data-loaded:opacity-100 ${className}`}
+    />
+  );
+}
+
 /** Preset grid item: preview on top, label below; the selected one carries a check. */
 export function PresetTile({
   label,

@@ -3,6 +3,7 @@ import { CircleAlert, Film, Lock, Sparkles, TriangleAlert } from "lucide-react";
 import { loadPoster, useLibrary } from "../../lib/library";
 import { formatLength } from "../../lib/time";
 import type { LibraryProject, ThumbnailFormat } from "../../lib/types";
+import { FadeImg } from "../ui";
 
 const COVER_RATIO: Record<ThumbnailFormat, number> = { cover_9x16: 9 / 16, youtube_16x9: 16 / 9 };
 
@@ -47,7 +48,7 @@ export function Poster({ p, box, ai = false, compact = false }: { p: LibraryProj
     <div className="flex h-full w-full items-center justify-center">
       <div className={`relative overflow-hidden bg-white/[.04] ${p.state === "busy" ? "opacity-35" : ""}`} style={frame}>
         {poster?.url ? (
-          <img src={poster.url} alt="" draggable={false} className="h-full w-full object-cover" />
+          <FadeImg src={poster.url} alt="" draggable={false} className="h-full w-full object-cover" />
         ) : (
           poster && (
             <div className="flex h-full w-full items-center justify-center text-subtle">
