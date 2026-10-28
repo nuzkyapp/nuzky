@@ -50,6 +50,7 @@ import {
   renameCollection,
   setSort,
   showEditor,
+  trashBlocked,
   trashProjects,
   undoLastToast,
   useLibrary,
@@ -223,7 +224,6 @@ export function Home() {
     const sel = selection.includes(p.path) && selection.length > 1 ? selection : [p.path];
     const many = sel.length > 1;
     const reason = blocked(p);
-    const isOpen = sel.includes(current?.path ?? "");
     const shared = (useLibrary.getState().projects ?? []).filter((x) => sel.includes(x.path)).map((x) => x.collection);
     const same = shared.every((c) => c === shared[0]) ? shared[0] : undefined;
     return [
@@ -249,7 +249,7 @@ export function Home() {
         shortcut: "Delete",
         danger: true,
         run: () => void trashProjects(sel),
-        disabled: isOpen ? "This project is open. Open another project first, then move it to the Trash." : p.state === "busy" ? reason : null,
+        disabled: trashBlocked(sel) ?? (p.state === "busy" ? reason : null),
       },
     ];
   };
@@ -325,9 +325,7 @@ export function Home() {
       useLibrary.setState({ renaming: p.path });
     } else if (e.key === "Delete" || e.key === "Backspace") {
       e.preventDefault();
-      const paths = selection.length > 0 ? selection : [p.path];
-      if (paths.includes(current?.path ?? "")) useEditor.getState().toast({ kind: "info", text: "The open project can't go to the Trash. Open another project first." });
-      else void trashProjects(paths);
+      void trashProjects(selection.length > 0 ? selection : [p.path]);
     } else if (mod && e.key.toLowerCase() === "a") {
       e.preventDefault();
       select(found.map((x) => x.path));
@@ -753,8 +751,7 @@ function FirstRun() {
 function SelectionBar({ showMenu, newCollection }: { showMenu: (items: MenuEntry[], at: MenuState["at"], label: string, keyboard: boolean) => void; newCollection: (paths: string[]) => void }) {
   const selection = useLibrary((s) => s.selection);
   const collections = useLibrary((s) => s.collections);
-  const current = useEditor((s) => s.snap?.path);
-  const hasOpen = selection.includes(current ?? "");
+  const editing = useEditor((s) => !!s.aiRun && selection.includes(s.snap?.path ?? ""));
   return (
     <div role="toolbar" aria-label="Selected projects" className="overlay absolute bottom-4 left-1/2 z-10 flex h-11 -translate-x-1/2 items-center gap-1 rounded-full pl-4 pr-1.5 text-[13px] text-fg">
       <span className="tabular pr-2 font-medium">{selection.length} selected</span>
@@ -783,8 +780,8 @@ function SelectionBar({ showMenu, newCollection }: { showMenu: (items: MenuEntry
       <Button
         variant="ghost"
         pill
-        disabled={hasOpen}
-        disabledReason="The open project can't go to the Trash. Open another project first."
+        disabled={editing}
+        disabledReason="The AI is editing the open project. Stop it first, then move it to the Trash."
         onClick={() => void trashProjects(selection)}
         className="text-danger! hover:text-danger!"
       >
