@@ -182,6 +182,8 @@ def edit(r):
     r.s.run(peek, 'pointerover')
     previewed = wait(lambda: r.s.run("return !!document.querySelector('[data-testid=history-peek]')"), 5)
     r.s.run(WATCH_MOTION)
+    # The undo answers 300 ms late, as in a large project, so the click closes the preview before the result lands.
+    r.s.run("const api = window.__nuzky.api; const undo = api.undo; api.undo = (...a) => new Promise((d) => setTimeout(d, 300)).then(() => (api.undo = undo)(...a));")
     r.s.run(peek, 'pointerdown')
     r.s.run("document.querySelector('[data-peek-button=undo]').click()")
     r.s.run(peek, 'pointerout')

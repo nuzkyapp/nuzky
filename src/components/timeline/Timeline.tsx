@@ -207,18 +207,19 @@ const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
  * track, such as a deleted piece's gap closing, a paste pushing the clips after it or an undo, they slide from where
  * they were to their new place over 200 ms instead of jumping, the next change carrying on from wherever a slide got to.
  * Not when the result is already on screen: within 1.5 s of letting go of a dragged clip, edge or box, or when Undo or
- * Redo is taken while its preview shows; nor after a zoom, for a step under 8 px such as a nudge by a frame, or with
- * reduced motion. Places come from the projects, so a clip that was off screen slides in too.
+ * Redo is taken while its preview shows or within 400 ms after it closed, as a click closes it before a slow undo lands;
+ * nor after a zoom, for a step under 8 px such as a nudge by a frame, or with reduced motion. Places come from the projects, so a clip that was off screen slides in too.
  */
 function useCutMotion(lanes: RefObject<HTMLElement | null>, project: Project | undefined, zoom: number, held: boolean, peeking: boolean) {
-  const was = useRef<{ project: Project | undefined; zoom: number; held: boolean; heldAt: number; peeking: boolean }>({ project, zoom, held, heldAt: 0, peeking });
+  const was = useRef<{ project: Project | undefined; zoom: number; held: boolean; heldAt: number; peeking: boolean; peekedAt: number }>({ project, zoom, held, heldAt: 0, peeking, peekedAt: 0 });
   useLayoutEffect(() => {
     const before = was.current;
     const at = performance.now();
     // Until it is let go, however long the pointer rests.
     const heldAt = held || before.held ? at : before.heldAt;
-    was.current = { project, zoom, held, heldAt, peeking };
-    const quiet = before.peeking || at - heldAt < 1500;
+    const peekedAt = peeking || before.peeking ? at : before.peekedAt;
+    was.current = { project, zoom, held, heldAt, peeking, peekedAt };
+    const quiet = at - heldAt < 1500 || at - peekedAt < 400;
     if (!before.project || !project || before.project === project || before.zoom !== zoom || quiet || reducedMotion.matches) return;
     const place = (p: Project) => new Map(p.tracks.flatMap((t) => t.clips.map((c) => [c.id, { track: t.id, startUs: c.startUs }] as const)));
     const then = place(before.project);
