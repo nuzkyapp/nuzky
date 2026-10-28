@@ -37,6 +37,7 @@ import { closeCover, closeExport, deleteOverlay, deleteText, exportCover, loadMo
 import { candidateOf, closeReels, onReelsJob, openReelsToFind, playEnding, toggleReelPlay, useReels } from "./lib/reels";
 import { onBeatsFound } from "./lib/beats";
 import { appWindow, toggleFullPreview, toggleMuted, usePreview } from "./lib/preview";
+import { titleWindow } from "./lib/window";
 
 const isMedia = (path: string) => MEDIA_EXTENSIONS.includes(path.split(".").pop()?.toLowerCase() ?? "");
 
@@ -599,6 +600,8 @@ function useDrawn(ready: boolean) {
 export default function App() {
   const snap = useEditor((s) => s.snap);
   const view = useEditor((s) => s.view);
+  const projectName = useEditor((s) => s.snap?.project.name ?? null);
+  useEffect(() => titleWindow(view === "editor" ? projectName : null), [view, projectName]);
   const setupOpen = useSetup((s) => s.open);
   const dock = useDockLayout();
   const win = useWindowSize();

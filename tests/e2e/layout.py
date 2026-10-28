@@ -1,6 +1,6 @@
 import json, subprocess, time
 
-from e2e.harness import CLI, FIXTURES, flow, preview_crop, wait, webdriver
+from e2e.harness import CLI, FIXTURES, LINUX, _windows, flow, preview_crop, wait, webdriver
 
 # Nulls while the editor is still drawing after a reload.
 SIZES = """const width = (e) => e ? Math.round(e.getBoundingClientRect().width) : null;
@@ -77,6 +77,27 @@ return getComputedStyle(tile.closest('.grid')).gridTemplateColumns.split(' ').le
 def setup(r):
     project = r.work / 'data/nuzky/projects/layout.nuzky'
     subprocess.run([str(CLI), 'new', str(project), str(FIXTURES / 'talk.mp4')], env=r.env, check=True, capture_output=True)
+
+
+def window_names():
+    from Xlib import display
+    d = display.Display()
+    try:
+        return [name for _, name in _windows(d)]
+    finally:
+        d.close()
+
+
+def window_variants():
+    """The look each of the app's X windows asks GTK for (_GTK_THEME_VARIANT)."""
+    from Xlib import display
+    d = display.Display()
+    try:
+        variant = d.intern_atom('_GTK_THEME_VARIANT')
+        found = [w.get_full_property(variant, 0) for w, _ in _windows(d)]
+        return [p.value.decode() if isinstance(p.value, bytes) else str(p.value) for p in found if p]
+    finally:
+        d.close()
 
 
 def sizes(r):
@@ -220,4 +241,12 @@ def layout(r):
         return tile ? getComputedStyle(tile).backgroundColor : null;""")
     r.check("a track holding only a picture shows its tile in the pictures' indigo",
             wait(lambda: tone() == 'rgb(67, 70, 142)', 5), tone())
+    if LINUX:
+        name = r.s.run('return window.__nuzky.store.getState().snap.project.name')
+        r.check('the window is titled with the open project, as the taskbar and window switcher show it',
+                wait(lambda: f'{name} — Nuzky' in window_names(), 5), window_names())
+        r.check('and asks GTK for its dark look, so the system title bar is dark too', 'dark' in window_variants(), window_variants())
+        r.s.run("window.__nuzky.store.setState({view: 'home'})")
+        r.check('on the home screen it is titled Nuzky', wait(lambda: 'Nuzky' in window_names(), 5), window_names())
+        r.s.run("window.__nuzky.store.setState({view: 'editor'})")
     r.check('no error toast', not r.errors(), r.errors())

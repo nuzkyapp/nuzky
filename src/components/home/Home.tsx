@@ -71,6 +71,7 @@ import { DraftsSection } from "./Drafts";
 import { Poster } from "./Poster";
 import { VersionRow } from "../Updates";
 import { FeedbackRow } from "../Feedback";
+import { useWindowButtons } from "../../lib/window";
 
 type MenuState = { items: MenuEntry[]; at: { x: number; y: number; align?: "start" | "end"; above?: boolean }; label: string; keyboard: boolean; back: HTMLElement | null; /** The card it acts on. */ target?: string };
 
@@ -397,9 +398,10 @@ export function Home() {
     return groups;
   }, [found, searching, sort]);
 
+  const buttonsInBar = useWindowButtons((s) => s.inBar);
   return (
     <div className="flex h-full flex-col bg-bg" aria-label="Projects">
-      <header className="flex h-12 shrink-0 items-center gap-2 px-1.5">
+      <header data-tauri-drag-region="deep" className={`flex h-12 shrink-0 items-center gap-2 px-1.5 ${buttonsInBar ? "pl-[78px]" : ""}`}>
         <Button variant="bar" pill title="Back to the editor (Esc)" onClick={() => showEditor()} className="max-w-[340px] min-w-0">
           <ChevronLeft size={15} className="shrink-0" />
           <span className="truncate">{current?.project.name ?? "Editor"}</span>

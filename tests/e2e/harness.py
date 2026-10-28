@@ -484,11 +484,14 @@ def changed_share(a, b):
 
 
 def _windows(d):
+    """Every X window with its title: the UTF-8 one GTK sets, as a title such as "Talk — Nuzky" has no Latin-1 form."""
     found, stack = [], [d.screen().root]
+    utf8, net_name = d.intern_atom('UTF8_STRING'), d.intern_atom('_NET_WM_NAME')
     while stack:
         w = stack.pop()
         try:
-            name = w.get_wm_name()
+            prop = w.get_full_property(net_name, utf8)
+            name = prop.value if prop else w.get_wm_name()
             stack.extend(w.query_tree().children)
         except Exception:
             continue
@@ -524,7 +527,7 @@ def press(key):
     from Xlib.ext import xtest
     d = display.Display()
     for window, name in _windows(d):
-        if name == 'Nuzky':
+        if name == 'Nuzky' or name.endswith(' — Nuzky'):
             window.set_input_focus(X.RevertToParent, X.CurrentTime)
     keysym = XK.string_to_keysym(key)
     code = d.keysym_to_keycode(keysym)
@@ -599,7 +602,7 @@ def close_window(d=None):
     d = d or display.Display()
     protocols, delete = d.intern_atom('WM_PROTOCOLS'), d.intern_atom('WM_DELETE_WINDOW')
     for w, name in _windows(d):
-        if name == 'Nuzky':
+        if name == 'Nuzky' or name.endswith(' — Nuzky'):
             w.send_event(event.ClientMessage(window=w, client_type=protocols, data=(32, [delete, X.CurrentTime, 0, 0, 0])))
     d.sync()
     return d
@@ -693,7 +696,7 @@ class win32:
             text, pid = ctypes.create_unicode_buffer(256), wintypes.DWORD()
             user32.GetWindowTextW(hwnd, text, 256)
             user32.GetWindowThreadProcessId(wintypes.HWND(hwnd), ctypes.byref(pid))
-            if text.value == title and user32.IsWindowVisible(hwnd) and RUN.app and pid.value == RUN.app.pid:
+            if (text.value == title or text.value.endswith(' — ' + title)) and user32.IsWindowVisible(hwnd) and RUN.app and pid.value == RUN.app.pid:
                 found.append(hwnd)
             return True
         user32.EnumWindows(ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)(each), 0)

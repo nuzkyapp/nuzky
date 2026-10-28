@@ -12,6 +12,7 @@ import type { ProjectVersion } from "../lib/types";
 import { Button, IconButton, Menu, ProgressBar } from "./ui";
 import { UpdateButton } from "./Updates";
 import { FeedbackButton } from "./Feedback";
+import { useWindowButtons } from "../lib/window";
 
 function SaveStatus() {
   const saveState = useEditor((s) => s.saveState);
@@ -284,8 +285,9 @@ export function TopBar() {
   const empty = !snap || projectDuration(snap.project) === 0;
   // Choosing reels makes them, each a project to export on its own; the long video is not exported there.
   const reels = useReels((s) => s.open);
+  const buttonsInBar = useWindowButtons((s) => s.inBar);
   return (
-    <header className="flex h-12 shrink-0 items-center gap-2 px-1.5">
+    <header data-tauri-drag-region="deep" className={`flex h-12 shrink-0 items-center gap-2 px-1.5 ${buttonsInBar ? "pl-[78px]" : ""}`}>
       {/* The cover editor takes over the panes, so its way back is where the eye starts. */}
       {cover ? (
         <Button variant="bar" pill title="Back to the video (Esc)" onClick={closeCover}>

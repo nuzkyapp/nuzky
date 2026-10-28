@@ -1254,6 +1254,12 @@ pub fn run() {
             unsafe {
                 libc::setlocale(libc::LC_NUMERIC, c"C".as_ptr());
             }
+            // The app is dark only (tauri.conf.json). tao asks GTK for the dark look at creation only when the desktop
+            // says dark, so on a light desktop a GTK title bar would be light over the app.
+            #[cfg(target_os = "linux")]
+            if let Some(window) = app.get_webview_window("main") {
+                window.set_theme(Some(tauri::Theme::Dark))?;
+            }
             let handle = app.handle().clone();
             nuzky_mcp::transcript::ask_for_model_with(move |cancel, progress| {
                 model_question::ask_speech(&handle, cancel, progress)
