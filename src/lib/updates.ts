@@ -4,6 +4,7 @@ import { useAgent } from "./agent";
 import { api, errorText } from "./api";
 import { reportBug } from "./diagnostics";
 import { showEditor } from "./library";
+import { useSounds } from "./sounds";
 import { useEditor, whenIdle } from "./store";
 import type { JobEvent } from "./types";
 
@@ -205,7 +206,8 @@ export async function installUpdate() {
   });
 }
 
-const leftAlone = () => document.hasFocus() && !useEditor.getState().playing && !document.querySelector("dialog[open], [aria-modal='true'], [role=menu]");
+const leftAlone = () =>
+  document.hasFocus() && !useEditor.getState().playing && !useSounds.getState().preview && !document.querySelector("dialog[open], [aria-modal='true'], [role=menu]");
 
 /** Saves the project, installs the downloaded update and restarts; work that started meanwhile postpones the restart. */
 export async function restartToUpdate() {
