@@ -466,6 +466,11 @@ pub struct MakeReels {
     /// crop (default) fills the 9:16 frame with the middle of the picture; blur fits the whole picture with a
     /// blurred copy behind.
     pub canvas: Option<crate::reels::Framing>,
+    /// What each reel also gets, like {"clean": true, "captions": true, "zooms": true}: clean cuts retakes, fillers
+    /// and hesitations, captions are made as build_captions makes them without arguments, zooms punch in on the
+    /// sentences said with emphasis. Left out, a reel gets none of them. A step that cannot run is left out of that
+    /// reel and named in its `skipped`.
+    pub finish: Option<crate::reels::Finish>,
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

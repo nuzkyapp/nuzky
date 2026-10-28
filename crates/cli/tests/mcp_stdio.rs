@@ -4095,6 +4095,110 @@ fn reels_start_and_end_on_the_videos_own_cuts_over_stdio() {
     c.finish();
 }
 
+/// A reel made with finish loses the earlier attempt of a restarted sentence, which only the second's pause in the
+/// recording sets apart, and gets captions of the words it keeps.
+#[test]
+fn made_reels_finish_cleans_retakes_and_builds_captions_over_stdio() {
+    use nuzky_engine::model::{ClipContent, TrackKind};
+    use nuzky_session::transcripts::{Record, TranscriptStore, VERSION};
+
+    let mut c = Client::start(true, None, Some(None));
+    let video = c.dir.join("restart.mp4");
+    let output = Command::new("ffmpeg")
+        .args(["-v", "error", "-f", "lavfi", "-i", "color=s=192x108:r=30:d=20"])
+        .args(["-f", "lavfi", "-i", "sine=frequency=440:duration=20"])
+        .args(["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac"])
+        .arg(&video)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let run = c.call("begin_run", json!({"label": "Place restarted talk"}))["run_id"].clone();
+    let ids = c.call("import_media", json!({"run_id": run, "paths": [video]}))["asset_ids"].clone();
+    c.call(
+        "apply_edits",
+        json!({"run_id": run, "request_id": "place", "edits": [{"type": "addClip", "assetId": ids[0]}]}),
+    );
+    c.call("end_run", json!({"run_id": run, "action": "keep"}));
+    let said = "Dneska natáčíme video doma. Kamera musí Kamera musí stát pevně na stativu. Celé to zabere deset minut.";
+    let words: Vec<_> = said
+        .split_whitespace()
+        .enumerate()
+        .map(|(i, text)| {
+            let at = 200_000 + i as i64 * 1_000_000 + if i >= 6 { 1_000_000 } else { 0 };
+            json!({"start_us": at, "end_us": at + 700_000, "text": text, "probability": 0.9})
+        })
+        .collect();
+    let asset = serde_json::from_value(c.call("get_state", json!({}))["assets"][0].clone()).unwrap();
+    let store = TranscriptStore::at(c.dir.join("data/nuzky/transcripts")).unwrap();
+    store
+        .put(
+            &asset,
+            &Record {
+                version: VERSION,
+                fingerprint: store.fingerprint(&asset).unwrap(),
+                duration_us: asset.duration_us,
+                model: "fixture".into(),
+                language: "cs".into(),
+                words: serde_json::from_value(json!(words)).unwrap(),
+                segments: vec![],
+                alignment: None,
+            },
+        )
+        .unwrap();
+    nuzky_engine::audio::ensure_pcm(&c.dir.join("cache"), &asset, |_| Ok(())).unwrap();
+    let key = c.call("get_transcript", json!({}))["transcript_key"].clone();
+    let retakes = c.call("analyze", json!({"kind": "retakes"}));
+    assert_eq!(retakes["suggested_delete"], json!([[4, 5]]), "{retakes}");
+    let mut projects = Vec::new();
+    for finish in [false, true] {
+        let run = c.call("begin_run", json!({"label": "Make reel"}))["run_id"].clone();
+        let proposed = c.call(
+            "propose_reels",
+            json!({"run_id": run, "transcript_key": key, "candidates": [{"from": 0, "to": words.len() - 1,
+                "title": "Keep the camera steady", "why": "One filming tip.", "score": 0.9}]}),
+        );
+        let mut args = json!({"run_id": run, "ids": [proposed["candidates"][0]["id"]]});
+        if finish {
+            args["finish"] = json!({"clean": true, "captions": true});
+        }
+        let made = c.call("make_reels", args);
+        c.call("end_run", json!({"run_id": run, "action": "keep"}));
+        assert_eq!(made["reels"][0]["skipped"], json!([]), "{made}");
+        let reel: Project =
+            serde_json::from_slice(&std::fs::read(made["reels"][0]["path"].as_str().unwrap()).unwrap()).unwrap();
+        assert_eq!(made["reels"][0]["durationUs"], reel.duration_us());
+        projects.push(reel);
+    }
+    let (plain, finished) = (&projects[0], &projects[1]);
+    assert!(finished.duration_us() < plain.duration_us(), "finish did not shorten the restarted sentence");
+    for (project, earlier_attempt_present) in [(plain, true), (finished, false)] {
+        let main = project.tracks.iter().find(|t| t.id == nuzky_engine::edit::MAIN_TRACK).unwrap();
+        for word in &words[4..6] {
+            let start = word["start_us"].as_i64().unwrap();
+            let end = word["end_us"].as_i64().unwrap();
+            let present = main.clips.iter().any(|clip| {
+                let ClipContent::Media { source_in_us, speed, .. } = clip.content else { return false };
+                source_in_us < end && source_in_us + (clip.duration_us as f64 * f64::from(speed)) as i64 > start
+            });
+            assert_eq!(present, earlier_attempt_present, "earlier attempt word {word}");
+        }
+    }
+    assert!(!plain.tracks.iter().any(|t| t.name == "Captions"));
+    let captions = finished.tracks.iter().find(|t| t.name == "Captions").expect("finished reel has captions");
+    assert_eq!(captions.kind, TrackKind::Text);
+    let text = captions
+        .clips
+        .iter()
+        .map(|clip| {
+            let ClipContent::Text { text, .. } = &clip.content else { panic!("expected caption text") };
+            text.as_str()
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert_eq!(text, "Dneska natáčíme video doma. Kamera musí stát pevně na stativu. Celé to zabere deset minut.");
+    c.finish();
+}
+
 /// A long talk becomes reels: proposals out of bounds are refused, three picked ones become projects beside it
 /// with only their words on a 9:16 canvas, the talk and its video stay as they were, and undo takes it all back.
 #[test]

@@ -1040,6 +1040,10 @@ export type MadeReel = {
   id: string,
   path: string,
   durationUs: number,
+  /**
+   * The steps of `Finish` that could not run, each with why.
+   */
+  skipped: Array<string>,
 };
 
 export type ModelKind = "speech" | "vision";
@@ -1250,6 +1254,24 @@ export type ReelCandidate = {
    * proposed before it was kept were all measured with 300 ms.
    */
   shortenPausesUs?: number | null,
+};
+
+/**
+ * What making a reel also does to it, as the app's Remove retakes and pauses, Generate captions and Suggest zooms do.
+ */
+export type ReelFinish = {
+  /**
+   * Cut retakes, fillers and hesitations.
+   */
+  clean: boolean,
+  /**
+   * Captions in the creator's style, else Reel, as build_captions makes them without arguments.
+   */
+  captions: boolean,
+  /**
+   * Punch-ins on the sentences said with emphasis.
+   */
+  zooms: boolean,
 };
 
 /**
