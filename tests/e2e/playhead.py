@@ -12,9 +12,16 @@ SAMPLE = """(async () => { const st = window.__nuzky.store; const zoom = st.getS
 const line = document.querySelector('[data-playhead]'); const x = () => new DOMMatrix(getComputedStyle(line).transform).m41;
 st.getState().seek(0); await new Promise((d) => setTimeout(d, 500)); st.getState().togglePlay();
 await new Promise((d) => setTimeout(d, 300)); const seen = [];
+// From one frame on the preview runs 40 ms behind, each frame's time coming that much later, as when it stalls a moment.
+const real = st.setState; let late = false;
+st.setState = (patch, replace) => {
+  if (!(patch && typeof patch === 'object' && 'timeUs' in patch && st.getState().playing)) return real(patch, replace);
+  late ||= seen.length >= 20;
+  if (late) setTimeout(() => real(patch, replace), 40); else real(patch, replace);
+};
 const end = performance.now() + 800;
 while (performance.now() < end) { await new Promise(requestAnimationFrame); seen.push([Math.round(x() / zoom * 1e6), st.getState().timeUs]); }
-st.getState().togglePlay(); return JSON.stringify(seen); })()"""
+st.setState = real; st.getState().togglePlay(); return JSON.stringify(seen); })()"""
 CALM = 'window.__nuzky.store.getState().select([]); document.activeElement?.blur()'
 # Clicks the ruler `arguments[1]` px right of where the clip `arguments[0]` starts on screen.
 SCRUB = """const ruler = document.querySelector('[data-ruler]').getBoundingClientRect();
@@ -110,3 +117,5 @@ def playhead(r):
     r.check('while playing, the playhead line takes a new place on most display frames, more often than the preview draws one',
             seen and drawn > frames * 1.3 and drawn >= len(seen) * 0.7, {'display frames': len(seen), 'line places': drawn, 'preview frames': frames})
     r.check('and it never runs more than 100 ms ahead of the frame shown', lead is not None and lead <= 101_000, lead)
+    back = [(a, b) for (a, _), (b, _) in zip(seen, seen[1:]) if b < a]
+    r.check('and never steps back while playing on, even when a frame comes late', seen and not back, back[:5])

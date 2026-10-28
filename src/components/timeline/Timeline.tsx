@@ -211,16 +211,20 @@ function Playhead({ zoom, scroller, follow }: { zoom: number; scroller: RefObjec
   // While playing, the time arrives with each frame the engine draws, 30 times a second for most phone videos, so the
   // line would move in steps of 2 px at the default zoom and 20 px at the closest. It moves on every display frame
   // instead, by the time passed since the last frame arrived, and never more than 100 ms past it, so it waits for a
-  // preview that stalls rather than running ahead of the picture.
+  // preview that stalls rather than running ahead of the picture. It never steps back while playing on, as when a frame
+  // comes late; only a jump back in time, a seek, takes it back.
   useLayoutEffect(() => {
     if (!playing) return;
     let last = { us: useEditor.getState().timeUs, at: performance.now() };
+    let drawn = last.us;
     const arrived = useEditor.subscribe((s, prev) => {
-      if (s.timeUs !== prev.timeUs) last = { us: s.timeUs, at: performance.now() };
+      if (s.timeUs === prev.timeUs) return;
+      if (s.timeUs < prev.timeUs) drawn = s.timeUs;
+      last = { us: s.timeUs, at: performance.now() };
     });
     let frame = 0;
     const move = (now: number) => {
-      const us = last.us + Math.min(Math.max(0, now - last.at), 100) * 1000;
+      const us = (drawn = Math.max(drawn, last.us + Math.min(Math.max(0, now - last.at), 100) * 1000));
       if (line.current) line.current.style.transform = `translateX(${(us / US) * zoom}px)`;
       frame = requestAnimationFrame(move);
     };
