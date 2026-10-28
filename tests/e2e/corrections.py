@@ -10,9 +10,11 @@ from e2e.reel import phrases, words as plain
 TAKE = FIXTURES / 'reel-2.mp4'
 MODEL = 'large-v3-turbo-q5_0'
 # Words of the transcript as the panel shows them; pause chips carry an aria-label instead of text.
+# The word under the pointer, as the one just double-clicked, has its title held by the app's tooltip, which shows it
+# and gives it to screen readers as the description.
 SHOWN = """return [...document.querySelectorAll('[role=listbox][aria-label=Transcript] [role=option][data-t]')]
     .filter((e) => !e.hasAttribute('aria-label'))
-    .map((e) => ({t: Number(e.dataset.t), text: e.textContent, title: e.title || null,
+    .map((e) => ({t: Number(e.dataset.t), text: e.textContent, title: e.title || e.getAttribute('aria-description') || null,
                   underline: getComputedStyle(e).textDecorationStyle}));"""
 
 
