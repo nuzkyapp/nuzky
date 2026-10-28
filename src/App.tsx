@@ -22,7 +22,7 @@ import { togglePanel, useDock, useDockLayout, useWindowSize } from "./lib/dock";
 import { checkYtdlp, useSetup } from "./lib/setup";
 import { useTour } from "./lib/tour";
 import { paneLayout, usePanes } from "./lib/layout";
-import { Button, DisabledHint } from "./components/ui";
+import { Button, DisabledHint, Tooltip } from "./components/ui";
 import { Home } from "./components/home/Home";
 import { openDraft, useCapCut, openDraftFolder } from "./lib/capcut";
 import { newProjectFromMedia, openProject, refreshLibrary, showHome, trashProjects, useLibrary } from "./lib/library";
@@ -635,6 +635,7 @@ export default function App() {
       {/* On the home screen they sit at the grid's left edge, clear of the sidebar; in the editor, clear of a panel docked left. */}
       <Toasts bottom={home ? 18 : panes.timeline + 18} left={home ? 268 : dock.open && dock.mode === "left" ? dock.width + 24 : 18} />
       <DisabledHint />
+      <Tooltip />
       {snap.recovery && <RecoveryDialog key={snap.sessionEpoch} />}
     </>
   );

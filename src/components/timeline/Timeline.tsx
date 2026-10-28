@@ -599,7 +599,7 @@ export function Timeline({ height }: { height: number }) {
 
   return (
     <section className="pane flex shrink-0 flex-col overflow-hidden bg-well" style={{ height }} aria-label="Timeline">
-      <div className="flex h-11 shrink-0 items-center gap-1.5 px-2.5">
+      <div data-tips-above className="flex h-11 shrink-0 items-center gap-1.5 px-2.5">
         {cover ? (
           <p className="truncate pl-1.5 text-[12px] text-muted">
             {coverFromImage ? "Moving the playhead keeps the image; Use frame takes this frame." : "Click or drag on the timeline to choose the cover's frame."}
