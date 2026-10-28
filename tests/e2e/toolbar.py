@@ -54,7 +54,8 @@ def toolbar(r):
             and (time.sleep(0.2) or r.s.run(TIP)['above'] == 6), shown)
     r.shot('tooltip')
     r.s.run(HOVER_TOOL, 'Freeze', True)
-    next_tip = r.s.run(TIP)
+    # Well before the 600 ms a first tooltip waits, once React has drawn the switch.
+    next_tip = wait(lambda: (lambda t: t if t['text'] != 'Split at playhead' else None)(r.s.run(TIP)), 0.3, 0.05) or r.s.run(TIP)
     r.check("moving on to Freeze frame shows its tooltip at once, without fading in, and gives Split its title back",
             next_tip['text'] == 'Freeze frame' and next_tip['key'] == 'Shift+R' and not next_tip['fading']
             and next_tip['titles'] == ['Split at playhead (S)', ''], next_tip)
@@ -91,10 +92,11 @@ def toolbar(r):
     r.s.run("const b = document.querySelector('header [data-feedback]'); b.focus(); b.click();")
     wait(lambda: r.s.run("return !!document.querySelector('[role=menu][aria-label=\"Send feedback\"]')"), 5)
     r.s.run("[...document.querySelectorAll('[role=menu] [role^=menuitem]')].find((i) => i.textContent.includes('Report a bug')).click()")
-    wait(lambda: r.s.run("return !!document.querySelector('dialog[open]')"), 5)
+    # Once the dialog has grown to its size, as a tooltip shown while it scales in sits where Cancel was then.
+    wait(lambda: r.s.run("const d = document.querySelector('dialog[open]'); return !!d && !d.getAnimations({subtree: true}).length"), 5)
     cancel = "[...document.querySelectorAll('dialog[open] button')].find((b) => b.textContent.trim() === 'Cancel')"
     r.s.run(f"const c = {cancel}; c.setAttribute('title', 'Close without reporting'); c.dispatchEvent(new PointerEvent('pointerover', {{bubbles: true, pointerType: 'mouse'}}))")
-    inside = wait(lambda: r.s.run(f"""const t = document.querySelector('[data-tooltip]:popover-open'); if (!t) return null;
+    inside = wait(lambda: r.s.run(f"""const t = document.querySelector('[data-tooltip]:popover-open'); if (!t || t.getAnimations().length) return null;
         const a = t.getBoundingClientRect(), b = {cancel}.getBoundingClientRect();
         return {{text: t.textContent, gap: Math.round(a.top - b.bottom), centre: Math.round(a.left + a.width / 2 - (b.left + b.width / 2))}};"""), 2)
     r.check("a tooltip in a modal dialog lies over it in the top layer, under its control", inside and inside['text'] == 'Close without reporting'

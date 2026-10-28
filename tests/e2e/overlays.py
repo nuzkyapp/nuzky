@@ -12,16 +12,24 @@ return at;"""
 CAME_IN = """(async () => { const done = new Function(arguments[0]).apply(null, arguments);
 await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame);
 const el = [...document.querySelectorAll(arguments[1])].pop(); if (!el) return JSON.stringify(null); const b = el.getBoundingClientRect();
-const [x, y] = getComputedStyle(el).transformOrigin.split(' ').map(parseFloat);
+const style = getComputedStyle(el), [x, y] = style.transformOrigin.split(' ').map(parseFloat);
+// The rect is the scaled one, so the origin lies its scaled offset in, whichever frame of the growth this is.
+const m = new DOMMatrix(style.transform === 'none' ? undefined : style.transform);
 return JSON.stringify({entering: el.getAnimations().some((a) => a.animationName === arguments[2] && a.playState === 'running'),
-                       origin: [Math.round(b.left + x), Math.round(b.top + y)], done: done ?? null}); })()"""
-# What the window shows of a layer that just went: the fading copies, and whether anything still finds the layer.
-GONE = """const copies = [...document.querySelectorAll('.exit-ghost')].map((g) => { const b = g.getBoundingClientRect();
+                       origin: [Math.round(b.left + m.a * x), Math.round(b.top + m.d * y)], done: done ?? null}); })()"""
+# Runs arguments[0] (JS) with the rest as its arguments and says what the window shows of the layer it closed: the fading
+# copies, and whether anything still finds the layer. It waits up to 150 ms of the copy's 230 ms life for the copy, as
+# React and the observer that copies a layer run after the script when the window is busy.
+GONE = """(async () => { new Function(arguments[0]).apply(null, [...arguments].slice(1));
+const read = () => { const copies = [...document.querySelectorAll('.exit-ghost')].map((g) => { const b = g.getBoundingClientRect();
   const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
   return {fading: g.getAnimations().some((a) => a.animationName === 'exit-out'), inert: g.inert, text: g.textContent.trim(),
           chosen: g.querySelector('[data-chosen]')?.textContent.trim() ?? null, takesPointer: !!hit && g.contains(hit),
           top: Math.round(b.top), display: getComputedStyle(g.querySelector('.overlay') ?? g).display}; });
-return {copies, live: document.querySelectorAll('[role=menu], [role=dialog], dialog[open], [aria-modal=true]').length};"""
+return {copies, live: document.querySelectorAll('[role=menu], [role=dialog], dialog[open], [aria-modal=true]').length}; };
+const until = performance.now() + 150; let seen = read();
+while (!seen.copies.length && performance.now() < until) { await new Promise(requestAnimationFrame); seen = read(); }
+return JSON.stringify(seen); })()"""
 PICK = """const item = [...document.querySelectorAll('[role=menu] [role^=menuitem]')].find((i) => i.textContent.includes(arguments[0]));
 item.click();"""
 TOAST = "window.__nuzky.store.getState().toast({kind: 'info', text: arguments[0]})"
@@ -43,9 +51,10 @@ def came_in(r, trigger, layer, animation, *args):
     return json.loads(done['value']) if done['ok'] else done
 
 
-def gone(r, then=None, *args):
-    """Runs `then` (JS) and reads at once what is left of the layer it closed."""
-    return r.s.run((then or '') + ';' + GONE, *args)
+def gone(r, then, *args):
+    """Runs `then` (JS) and reads what is left of the layer it closed."""
+    done = r.s.call(GONE, then, *args)
+    return json.loads(done['value']) if done['ok'] else done
 
 
 def faded(r):
