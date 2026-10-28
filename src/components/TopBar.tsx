@@ -301,8 +301,9 @@ export function TopBar() {
         </>
       )}
       {/* The name sits in the middle of the space the two sides leave, so a long AI label never covers it.
-          The save state hangs off its right edge, so "Saving…" and "Saved" never move the name. */}
-      <div className="flex min-w-0 flex-1 justify-center">
+          The save state hangs off its right edge, so "Saving…" and "Saved" never move the name; the room kept at
+          its right holds it, so it never runs under the AI run capsule in a narrow window. */}
+      <div className="flex min-w-0 flex-1 justify-center pr-[72px]">
         <div className="relative flex min-w-0 items-center">
           {cover ? (
             <span className="flex min-w-0 items-center gap-1.5 text-[13px]">
