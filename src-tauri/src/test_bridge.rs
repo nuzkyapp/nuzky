@@ -67,6 +67,8 @@ pub fn prepare(
         window.visible = false;
         window.focus = false;
         window.decorations = false;
+        // Without its buttons, macOS has nothing to move there, and tao would crash moving them on each new title.
+        window.traffic_light_position = None;
         window.background_throttling = Some(tauri::utils::config::BackgroundThrottlingPolicy::Disabled);
     }
     unsafe extern "C-unwind" fn stay_inactive() {}

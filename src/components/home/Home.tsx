@@ -401,7 +401,7 @@ export function Home() {
   const buttonsInBar = useWindowButtons((s) => s.inBar);
   return (
     <div className="flex h-full flex-col bg-bg" aria-label="Projects">
-      <header data-tauri-drag-region className={`flex h-12 shrink-0 items-center gap-2 px-1.5 ${buttonsInBar ? "pl-[78px]" : ""}`}>
+      <header data-tauri-drag-region="deep" className={`flex h-12 shrink-0 items-center gap-2 px-1.5 ${buttonsInBar ? "pl-[78px]" : ""}`}>
         <Button variant="bar" pill title="Back to the editor (Esc)" onClick={() => showEditor()} className="max-w-[340px] min-w-0">
           <ChevronLeft size={15} className="shrink-0" />
           <span className="truncate">{current?.project.name ?? "Editor"}</span>

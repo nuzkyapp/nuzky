@@ -287,7 +287,7 @@ export function TopBar() {
   const reels = useReels((s) => s.open);
   const buttonsInBar = useWindowButtons((s) => s.inBar);
   return (
-    <header data-tauri-drag-region className={`flex h-12 shrink-0 items-center gap-2 px-1.5 ${buttonsInBar ? "pl-[78px]" : ""}`}>
+    <header data-tauri-drag-region="deep" className={`flex h-12 shrink-0 items-center gap-2 px-1.5 ${buttonsInBar ? "pl-[78px]" : ""}`}>
       {/* The cover editor takes over the panes, so its way back is where the eye starts. */}
       {cover ? (
         <Button variant="bar" pill title="Back to the video (Esc)" onClick={closeCover}>
