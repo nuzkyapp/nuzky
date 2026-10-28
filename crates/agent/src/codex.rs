@@ -3,6 +3,7 @@
 use crate::event::{AgentEvent, ErrorCode, ToolStatus, web_search_input};
 use crate::turn::{SYSTEM, Step, TurnRequest};
 use serde_json::{Value, json};
+use std::path::Path;
 use std::process::Command;
 
 /// Everything that would give Codex a tool besides Nuzky's, its image generation and its web search. `-c` rather
@@ -44,8 +45,33 @@ fn string(s: &str) -> String {
     Value::from(s).to_string()
 }
 
+/// Codex starts itself again in its sandbox to read AGENTS.md, by the path it was started by, and lets the sandbox
+/// read only the file that path leads to. Through a link, such as ~/.local/bin/codex of Codex's own installer, macOS
+/// then refuses to start it. So the real file starts, under the link's name, by which version managers' shims pick
+/// the tool. A script keeps the link, since the system would give it the real file's name instead; Node's codex.js
+/// starts Codex by its real path anyway.
+fn start(exe: &Path) -> Command {
+    #[cfg(unix)]
+    if let Ok(real) = dunce::canonicalize(exe)
+        && !script(&real)
+    {
+        use std::os::unix::process::CommandExt;
+        let mut c = Command::new(real);
+        c.arg0(exe);
+        return c;
+    }
+    Command::new(exe)
+}
+
+#[cfg(unix)]
+fn script(path: &Path) -> bool {
+    use std::io::Read;
+    let mut head = [0; 2];
+    std::fs::File::open(path).and_then(|mut f| f.read_exact(&mut head)).is_ok_and(|()| &head == b"#!")
+}
+
 pub(crate) fn command(req: &TurnRequest) -> Command {
-    let mut c = Command::new(&req.exe);
+    let mut c = start(&req.exe);
     c.env("PATH", crate::discover::agent_path());
     c.arg("exec");
     if req.resume {
@@ -371,5 +397,27 @@ mod tests {
         assert_eq!(setting("web_search"), json!("cached"));
         assert_eq!(setting("default_permissions"), json!("nuzky"));
         assert_eq!(setting("permissions.nuzky.filesystem"), json!({":minimal": "read"}));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_codex_starts_from_its_real_file_under_the_links_name() {
+        let dir = std::env::temp_dir().join(format!("nuzky-codex-link-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let link = dir.join("codex");
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink("/bin/sh", &link).unwrap();
+        let mut c = start(&link);
+        assert_eq!(Path::new(c.get_program()), dunce::canonicalize("/bin/sh").unwrap());
+        // `; :` keeps sh from replacing itself with ps, whose own name ps would show.
+        let out = c.args(["-c", "ps -o command= -p $$; :"]).output().unwrap();
+        assert!(String::from_utf8_lossy(&out.stdout).starts_with(&format!("{} -c", link.display())));
+        // Like the tests' fake_codex, a link to fake_agent, which tells by its name which agent it plays.
+        std::fs::write(dir.join("fake_agent"), "#!/bin/sh\n").unwrap();
+        let script = dir.join("fake_codex");
+        let _ = std::fs::remove_file(&script);
+        std::os::unix::fs::symlink("fake_agent", &script).unwrap();
+        assert_eq!(Path::new(start(&script).get_program()), script);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
