@@ -79,8 +79,8 @@ function formatBytes(b: number) {
   return `${Math.max(1, Math.round(b / 1e6))} MB`;
 }
 
-/** Tab and Shift+Tab cycle through the dialog's controls, so focus never leaves it for the editor behind. */
-function loadOptions(canvas: Canvas, asked: Delivery | null): ExportRequest {
+/** The settings the last export used, or the project's own; `asked`'s preset where the video fits it. */
+export function loadOptions(canvas: Canvas, asked: Delivery | null): ExportRequest {
   const short = Math.min(canvas.width, canvas.height);
   const fallback: ExportRequest = {
     resolution: RESOLUTIONS.some((r) => r.id === short) ? short : 1080,

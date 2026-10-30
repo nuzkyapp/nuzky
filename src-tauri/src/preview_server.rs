@@ -52,6 +52,11 @@ impl PreviewServer {
         Ok(Self { url: format!("ws://127.0.0.1:{port}/{token}"), slot })
     }
 
+    /// The newest frame with its number, which grows with every frame.
+    pub fn latest(&self) -> (u64, Option<Bytes>) {
+        self.slot.frame.lock().unwrap().clone()
+    }
+
     /// Replaces the pending frame. Slow clients skip straight to the newest one.
     pub fn publish(&self, width: u32, height: u32, flags: u32, t_us: i64, rgba: &[u8]) {
         let mut buf = Vec::with_capacity(HEADER_LEN + rgba.len());

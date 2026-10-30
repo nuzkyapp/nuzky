@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#060607" />
+    <title>Nuzky</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/app.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div class="app">
+      <header class="top">
+        <div class="title">
+          <div id="name" class="name">Nuzky</div>
+          <div id="conn" class="conn"><i class="dot"></i><span>Connecting…</span></div>
+        </div>
+        <button id="export" class="pill prominent" type="button" aria-disabled="true">Export</button>
+      </header>
+
+      <main class="work">
+        <section class="stage" aria-label="Preview">
+          <img id="frame" alt="" hidden />
+          <button id="add-first" class="pill prominent big" type="button" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M12 5v14" /></svg>
+            Add videos
+          </button>
+        </section>
+        <div id="strip" class="strip" role="slider" tabindex="0" aria-label="Playhead" aria-valuemin="0" aria-valuenow="0" hidden>
+          <div id="clips" class="clips"></div>
+          <div id="head" class="head"></div>
+        </div>
+        <div id="lock" class="lock" hidden>
+          <span class="spin" aria-hidden="true"></span>
+          <span id="lock-text" class="lock-text">AI is editing</span>
+          <span id="lock-step" class="lock-step"></span>
+          <button id="stop" class="pill small" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+            Stop
+          </button>
+        </div>
+      </main>
+
+      <aside id="chat" class="chat" aria-label="AI">
+        <div class="chat-head">
+          <span id="agent" class="agent">AI</span>
+          <button id="chat-close" class="round quiet" type="button" aria-label="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
+        </div>
+        <div id="items" class="items" aria-live="polite"></div>
+      </aside>
+
+      <div class="bottom">
+        <button id="last" class="last" type="button" hidden>
+          <span id="last-text"></span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m18 15-6-6-6 6" /></svg>
+        </button>
+        <p id="note" class="note" hidden></p>
+        <div class="composer">
+          <button id="add" class="round" type="button" aria-label="Add videos">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M12 5v14" /></svg>
+          </button>
+          <textarea id="text" rows="1" enterkeyhint="send" placeholder="Tell the AI how to cut it…" aria-label="Message to the AI"></textarea>
+          <button id="send" class="round send" type="button" aria-label="Send" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 7-7 7 7M12 19V5" /></svg>
+          </button>
+        </div>
+      </div>
+      <input id="files" type="file" accept="video/*,image/*" multiple hidden />
+    </div>
+
+    <div id="sheet" class="sheet" role="dialog" aria-labelledby="sheet-title" hidden>
+      <div class="sheet-head">
+        <h2 id="sheet-title">Exporting</h2>
+        <button id="sheet-close" class="round quiet" type="button" aria-label="Close">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+        </button>
+      </div>
+      <div id="sheet-progress" class="progress"><i></i></div>
+      <p id="sheet-error" class="error" hidden></p>
+      <div id="sheet-done" class="done" hidden>
+        <video id="video" controls playsinline preload="none" hidden></video>
+        <div class="file">
+          <img id="sheet-thumb" alt="" />
+          <div>
+            <div id="sheet-name" class="file-name"></div>
+            <div id="sheet-info" class="muted"></div>
+          </div>
+        </div>
+        <div class="actions">
+          <button id="play" class="pill secondary" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true" class="fill"><path d="M7 4v16l13-8z" /></svg>
+            Play
+          </button>
+          <a id="save" class="pill prominent grow" href="/video?download=1" download>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v12M6 11l6 6 6-6M5 20h14" /></svg>
+            <span id="save-text">Save to phone</span>
+          </a>
+        </div>
+      </div>
+    </div>
+    <div id="toast" class="toast" role="status" hidden></div>
+  </body>
+</html>

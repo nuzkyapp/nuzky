@@ -18,6 +18,7 @@ import { MEDIA_EXTENSIONS, importPaths, mediaKind, pickAndImport, resolveDrop } 
 import { Toasts } from "./components/Toasts";
 import { Tour } from "./components/Tour";
 import { listenAgentEvents, panelRunEnded, useAgent } from "./lib/agent";
+import { listenRemote, useRemote } from "./lib/remote";
 import { togglePanel, useDock, useDockLayout, useWindowSize } from "./lib/dock";
 import { checkYtdlp, useSetup } from "./lib/setup";
 import { useTour } from "./lib/tour";
@@ -482,7 +483,7 @@ useEditor.subscribe((s, prev) => {
 // Test hook for WebDriver runs; native file dialogs cannot be automated.
 if (import.meta.env.DEV)
   Object.assign(window, {
-    __nuzky: { importPaths, exportVideo, plugins: usePlugins, gallery: useGallery, store: useEditor, cover: useCover, reels: useReels, openReelsToFind, speech: useSpeech, api, agent: useAgent, dock: useDock, setup: useSetup, library: useLibrary, style: useStyle, addProjects, findDrafts, newProjectFromMedia, capcut: useCapCut, openDraft, openDraftFolder, openProject, refreshLibrary, trashProjects, updates: useUpdates, checkForUpdates, sounds: useSounds, stickers: useStickers, tour: useTour, youtube: useYoutube, previewWindow: appWindow },
+    __nuzky: { importPaths, exportVideo, plugins: usePlugins, gallery: useGallery, store: useEditor, cover: useCover, reels: useReels, openReelsToFind, speech: useSpeech, api, agent: useAgent, dock: useDock, setup: useSetup, library: useLibrary, style: useStyle, addProjects, findDrafts, newProjectFromMedia, capcut: useCapCut, openDraft, openDraftFolder, openProject, refreshLibrary, trashProjects, updates: useUpdates, checkForUpdates, sounds: useSounds, stickers: useStickers, tour: useTour, youtube: useYoutube, previewWindow: appWindow, remote: useRemote },
   });
 
 async function startEditor() {
@@ -612,6 +613,7 @@ export default function App() {
   useBackendEvents();
   useUiContext();
   useEffect(listenAgentEvents, []);
+  useEffect(listenRemote, []);
   const drawn = useDrawn(!!snap);
 
   if (!snap) return <BootScreen />;

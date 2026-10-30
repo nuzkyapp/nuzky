@@ -10,6 +10,7 @@ import { when } from "../lib/time";
 import { AI_EDITING, PLUGIN_RUN, openExport, projectDuration, restoreVersion, stopAiRun, useAiLocked, useEditor, whenIdle } from "../lib/store";
 import type { ProjectVersion } from "../lib/types";
 import { Button, IconButton, Menu, ProgressBar } from "./ui";
+import { ShareButton } from "./ShareDialog";
 import { UpdateButton } from "./Updates";
 import { FeedbackButton } from "./Feedback";
 import { useWindowButtons } from "../lib/window";
@@ -297,6 +298,7 @@ export function TopBar() {
         <>
           <ProjectsButton />
           <FeedbackButton />
+          <ShareButton />
           <UpdateButton />
         </>
       )}
