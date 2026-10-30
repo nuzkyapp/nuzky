@@ -3,7 +3,9 @@ import { listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import { errorText, plainError } from "./api";
 import { agentName, choose, send, sendBlocked, steer, steerBlocked, stop, useAgent, type ChatItem } from "./agent";
+import { useChatGpt } from "./chatgpt";
 import { useDock } from "./dock";
+import { useModels } from "./models";
 import { MAIN_TRACK, currentEpoch, mainClips, projectDuration, useEditor } from "./store";
 import { importPaths } from "../components/panel/assets";
 import { exportVideo, loadOptions, outputSize } from "../components/ExportDialog";
@@ -104,7 +106,11 @@ function act(a: Action) {
   if (a.action === "seek") return useEditor.getState().seek(a.us);
   if (a.action === "stop") return void stop();
   if (a.action === "export") return void exportForPage();
-  if (a.action === "choose") return choose(a.id, a.label);
+  if (a.action === "choose") {
+    if (sendBlocked()) return;
+    useAgent.setState({ dropSelection: true });
+    return choose(a.id, a.label);
+  }
   // The panel opens, so whoever sits here sees what the page asked. The page selects nothing, so the clip selected
   // here, often the one just added, is not what its message is about; the playhead is, as the page moves it.
   useDock.setState({ open: true });
@@ -194,7 +200,8 @@ export function listenRemote() {
       useEditor.getState().toast({ kind: "info", text: "Sharing turned off after 30 minutes with no one connected" });
     }),
   ];
-  const unsubscribe = [useEditor.subscribe(publish), useAgent.subscribe(publish), useRemote.subscribe(publish)];
+  // sendBlocked() also reads the ChatGPT sign-in and its models.
+  const unsubscribe = [useEditor, useAgent, useRemote, useChatGpt, useModels].map((store) => store.subscribe(publish));
   return () => {
     offs.forEach((p) => p.then((off) => off()));
     unsubscribe.forEach((off) => off());

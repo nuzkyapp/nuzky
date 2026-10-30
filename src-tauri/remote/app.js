@@ -324,7 +324,8 @@ function item(it) {
 function renderComposer() {
   const text = $("text").value.trim();
   const reason = closed ? null : state?.sendBlocked;
-  $("send").disabled = !text || closed || !online || !state || !!reason;
+  // One message waits for the videos at a time; another stays in the field until it has gone.
+  $("send").disabled = !text || closed || !online || !state || !!reason || !!held;
   const note = held ? "It goes to the AI once your videos are on the timeline." : text && reason ? `${reason}.` : "";
   $("note").textContent = note;
   $("note").hidden = !note;

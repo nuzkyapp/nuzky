@@ -522,7 +522,9 @@ fn frame(share: &Share) -> Response {
                 frame_bounds: [[[0.0; 2]; 4]; 2],
                 overlay_bounds: Vec::new(),
             };
-            nuzky_engine::thumbnail::encode(&rendered, ImageKind::Jpeg).ok()
+            nuzky_engine::thumbnail::encode(&rendered, ImageKind::Jpeg)
+                .inspect_err(|e| log::warn!("Could not encode the shared preview frame: {e:#}"))
+                .ok()
         });
         *cached = (seq, jpeg.map(Arc::new));
     }

@@ -108,8 +108,9 @@ def share(r):
 
     r.check('the page moves the playhead', page.act(action='seek', us=1_500_000) == 200
             and wait(lambda: r.s.run('return window.__nuzky.store.getState().timeUs') == 1_500_000, 10))
-    status, headers, jpeg = page.request('GET', '/frame.jpg')
-    r.check('the page gets the preview frame', status == 200 and jpeg.startswith(b'\xff\xd8'), status)
+    # The computer draws the frame at the new playhead a moment later.
+    frame = wait(lambda: (got := page.request('GET', '/frame.jpg'))[0] == 200 and got, 10)
+    r.check('the page gets the preview frame', frame and frame[2].startswith(b'\xff\xd8'), frame and frame[0])
     r.check('the page cannot seek before the start', page.act(action='seek', us=-1) == 400)
 
     duration = sum(c['durationUs'] for c in clips)
@@ -133,8 +134,9 @@ def share(r):
     if options:
         page.act(action='choose', id=options['id'], label='The last take')
         chosen = page_state(page, lambda s: any(i['kind'] == 'options' and i['chosen'] == 'The last take' for i in s['items']), 30)
-        r.check('a choice on the page answers the agent', chosen and r.s.run(
-            "return window.__nuzky.agent.getState().items.some((i) => i.kind === 'user' && i.text === 'The last take')"), chosen and chosen['items'])
+        answer = r.s.run("return window.__nuzky.agent.getState().items.find((i) => i.kind === 'user' && i.text === 'The last take') ?? null")
+        r.check('a choice on the page answers the agent, without the selection there either', chosen and answer
+                and 'clip' not in (answer['context'] or ''), answer)
         page_state(page, lambda s: not s['working'], 30)
 
     page.act(action='send', text='slow')
