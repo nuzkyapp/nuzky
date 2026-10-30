@@ -9,6 +9,7 @@ import { OpenedDraftDialog } from "./home/OpenedDraftDialog";
 import { SwitchDialog } from "./home/SwitchConfirm";
 import { ModelQuestionDialog } from "./ModelQuestionDialog";
 import { SetupDialog } from "./setup/SetupDialog";
+import { ShareDialog } from "./ShareDialog";
 import { LearnDialog } from "./style/LearnDialog";
 import { YoutubeDialog } from "./YoutubeDialog";
 
@@ -30,6 +31,7 @@ export default function Dialogs() {
       <ModelQuestionDialog kind="vision" />
       <OpenedDraftDialog />
       <BugReportDialog />
+      <ShareDialog />
     </>
   );
 }

@@ -21,6 +21,7 @@ mod plugins;
 mod preview_server;
 mod recap;
 mod reels;
+mod remote;
 mod sample;
 mod sounds;
 mod stickers;
@@ -58,6 +59,7 @@ pub struct AppState {
     session: Mutex<OpenSession>,
     engine: Engine,
     preview_url: String,
+    preview: Arc<PreviewServer>,
     cache_dir: PathBuf,
     jobs: Mutex<HashMap<String, Arc<AtomicBool>>>,
     /// Sound caches whose extraction failed, not retried on every edit; a changed file gets a new one.
@@ -1280,6 +1282,7 @@ pub fn run() {
                 session: Mutex::new(session),
                 engine,
                 preview_url: server.url.clone(),
+                preview: server.clone(),
                 cache_dir,
                 jobs: Mutex::new(HashMap::new()),
                 audio_failed: Mutex::new(Default::default()),
@@ -1306,6 +1309,7 @@ pub fn run() {
             // Jobs look the state up from their threads, so it must be managed first.
             app.manage(state);
             app.manage(agent_panel::AgentPanel::default());
+            app.manage(remote::Remote::default());
             app.state::<AppState>().session.lock().unwrap().start_pump(app.handle().clone(), events);
             jobs::prepare_media(&app.state::<AppState>(), &project);
             style::watch(app.handle().clone());
@@ -1320,6 +1324,10 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            remote::remote_export_path,
+            remote::remote_publish,
+            remote::remote_start,
+            remote::remote_stop,
             caption_styles::caption_styles,
             caption_styles::save_caption_style,
             caption_styles::rename_caption_style,
