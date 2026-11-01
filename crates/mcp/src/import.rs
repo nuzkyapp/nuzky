@@ -347,7 +347,11 @@ fn text(clip: &TextClip, project: &Project, fonts: &[String], left: &mut Left) -
             align: TextAlign::Center,
             box_radius: BOX_RADIUS,
         },
-        None => crate::params::reel().style,
+        None => {
+            let mut style = crate::params::reel().style;
+            style.scale_pixels(project.canvas.unit());
+            style
+        }
     };
     if let Some(font) = &style.font_family
         && !fonts.is_empty()
@@ -425,5 +429,30 @@ fn lanes(
             keep_in_place,
             clips,
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn imported_text_fallback_scales_to_canvas_pixels() {
+        let mut project = Project::new("4K import");
+        project
+            .apply(EditCmd::SetCanvas { width: 2160, height: 3840, background: None, background_blur: None })
+            .unwrap();
+        let clip = TextClip {
+            text: "Title".into(),
+            start_us: 0,
+            duration_us: 1_000_000,
+            transform: None,
+            style: None,
+            caption: false,
+        };
+        let imported = text(&clip, &project, &[], &mut Left::default()).unwrap();
+        let ClipContent::Text { style, .. } = imported.content else { panic!() };
+        assert_eq!(style.font_size, crate::params::reel().style.font_size * 2.0);
+        assert_eq!(style.stroke_width, crate::params::reel().style.stroke_width * 2.0);
     }
 }

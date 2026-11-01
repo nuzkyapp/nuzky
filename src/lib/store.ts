@@ -3,6 +3,7 @@ import { useShallow } from "zustand/react/shallow";
 import { api, errorText, plainError } from "./api";
 import { closeSource, sourceOpen, toggleSourcePlay } from "./source";
 import { clipOffset, keyframeTolerance, transformAt, upsertKeyframe } from "./keyframes";
+import { canvasUnit, scaleStyle } from "./presets";
 import { US } from "./time";
 import type { Asset, Background, Clip, CopiedClip, Delivery, EditCmd, Filmstrip, JobEvent, Project, ProjectVersion, Snapshot, ModelQuestion, TextStyle, TimeRange, Track, Transform, Transition, ZoomsApplied } from "./types";
 import type { CaptionLook } from "./speech";
@@ -466,6 +467,8 @@ export const useEditor = create<EditorState>((set, get) => ({
       aiRun: snap.openRunLabel,
       // A copied project can reuse asset ids for other files, so media previews start over.
       // An agent's jobs end with their project, whose last events never arrive.
+      // Copied text and borders are in the pixels of the canvas they came from.
+      ...(!switched && canvasUnit(snap.project.canvas) !== canvasUnit(prev.project.canvas) ? { clipboard: null } : {}),
       ...(switched ? { clipboard: null, thumbs: {}, filmstrips: {}, waveforms: {}, jobs: Object.fromEntries(Object.entries(get().jobs).filter(([, j]) => j.kind !== "agent")) } : {}),
       ...(rebound.length > 0 ? { thumbs: without(get().thumbs), filmstrips: without(get().filmstrips), waveforms: without(get().waveforms) } : {}),
     });
@@ -604,6 +607,8 @@ useEditor.subscribe((s, prev) => {
   else useEditor.setState({ lockShown: !!s.aiRun });
 });
 
+/** The open canvas's `canvasUnit`. */
+export const useCanvasUnit = () => useEditor((s) => (s.snap ? canvasUnit(s.snap.project.canvas) : 1));
 /** While an agent's run is open the editing controls are locked. */
 export const useAiLocked = () => useEditor((s) => s.aiRun !== null && s.lockShown);
 
@@ -1102,17 +1107,17 @@ export function patched(style: TextStyle, patch: StylePatch): TextStyle {
 
 /**
  * `preset` over `style`: a preset brings a whole look, but one without its own font or case keeps the text's,
- * so a font or capitals picked separately survive it. The text keeps where it wraps.
+ * so a font or capitals picked separately survive it. The text keeps where it wraps. `unit` is the canvas's `canvasUnit`.
  */
-export function presetOver(preset: TextStyle, style: TextStyle): TextStyle {
-  return { ...preset, fontFamily: preset.fontFamily ?? style.fontFamily, letterCase: preset.letterCase ?? style.letterCase, maxWidth: style.maxWidth };
+export function presetOver(preset: TextStyle, style: TextStyle, unit: number): TextStyle {
+  return { ...scaleStyle(preset, unit), fontFamily: preset.fontFamily ?? style.fontFamily, letterCase: preset.letterCase ?? style.letterCase, maxWidth: style.maxWidth };
 }
 
 /** The captions track `trackId`, or the first one. */
 const captionTrack = (project: Project, trackId?: string) => (trackId ? project.tracks.find((t) => t.id === trackId) : project.tracks.find(isCaptionTrack));
 
 /**
- * Gives every caption the look named `name`, its style as `presetOver` puts it and its animations, as one undo
+ * Gives every caption the look named `name`, made for 1080p, its style as `presetOver` puts it and its animations, as one undo
  * step, and offers Undo: one click changes every caption, karaoke included.
  */
 export async function applyCaptionLook(look: CaptionLook, name: string, trackId?: string) {
@@ -1121,7 +1126,7 @@ export async function applyCaptionLook(look: CaptionLook, name: string, trackId?
       captionTrack(project, trackId)?.clips.flatMap((c): EditCmd[] => {
         if (c.content.type !== "text") return [];
         return [
-          { type: "updateClip", clipId: c.id, style: presetOver(look.style, c.content.style) },
+          { type: "updateClip", clipId: c.id, style: presetOver(look.style, c.content.style, canvasUnit(project.canvas)) },
           { type: "setAnimation", clipId: c.id, slot: "in", animation: look.animIn },
           { type: "setAnimation", clipId: c.id, slot: "out", animation: look.animOut },
         ];

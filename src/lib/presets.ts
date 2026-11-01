@@ -1,6 +1,7 @@
 import captionStyles from "../../assets/presets/captions.json";
 import type { Adjust, Animation, AnimationKind, CaptionPreset, Crop, KeywordPick, Shape, TextShadow, TextStyle, Transform, TransitionKind } from "./types";
 
+/** Canvas formats at 1080p; `canvasSize` gives them at another resolution. */
 export const FORMATS = [
   { label: "9:16", hint: "Reels, TikTok, Shorts", width: 1080, height: 1920 },
   { label: "16:9", hint: "YouTube", width: 1920, height: 1080 },
@@ -8,8 +9,33 @@ export const FORMATS = [
   { label: "4:5", hint: "Instagram feed", width: 1080, height: 1350 },
 ];
 
+/** Canvas resolutions by the shorter side. Presets are made for the first one. */
+export const CANVAS_RESOLUTIONS = [
+  { id: 1080, label: "1080p" },
+  { id: 2160, label: "4K" },
+];
+
+const REFERENCE_SIDE = CANVAS_RESOLUTIONS[0].id;
+
+/** Canvas pixels per pixel of a preset, as the engine's `Canvas::unit`: 1 on 1080p, 2 on 4K. */
+export const canvasUnit = (canvas: { width: number; height: number }) => Math.min(canvas.width, canvas.height) / REFERENCE_SIDE;
+
+/** A canvas or format of the same shape at the resolution with this shorter side, in even pixels as the engine keeps it. */
+export function canvasSize(size: { width: number; height: number }, short: number) {
+  const even = (v: number) => 2 * Math.round((v * short) / Math.min(size.width, size.height) / 2);
+  return { width: even(size.width), height: even(size.height) };
+}
+
+export const sameRatio = (a: { width: number; height: number }, b: { width: number; height: number }) => a.width * b.height === a.height * b.width;
+
 export function formatLabel(width: number, height: number) {
-  return FORMATS.find((f) => f.width === width && f.height === height)?.label ?? `${width}×${height}`;
+  return FORMATS.find((f) => sameRatio(f, { width, height }))?.label ?? `${width}×${height}`;
+}
+
+/** A style's sizes in canvas pixels times `k`: a preset's on a canvas `k` times 1080p, or back with 1 / `k`. */
+export function scaleStyle(style: TextStyle, k: number): TextStyle {
+  if (k === 1) return style;
+  return { ...style, fontSize: style.fontSize * k, strokeWidth: style.strokeWidth * k, maxWidth: style.maxWidth == null ? style.maxWidth : style.maxWidth * k };
 }
 
 export const DEFAULT_TRANSFORM: Transform = { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 };
@@ -55,14 +81,15 @@ export const BOX_RADIUS = 0.25;
 
 /**
  * Whether `b` has the look of preset `a`, whatever font it has and, when `a` sets none, its case; a karaoke
- * highlight and key words count, so Karaoke is not Reel.
+ * highlight and key words count, so Karaoke is not Reel. `b` is on a canvas `unit` times 1080p.
  */
-export function sameStyle(a: TextStyle, b: TextStyle) {
+export function sameStyle(a: TextStyle, b: TextStyle, unit = 1) {
+  const near = (preset: number, value: number) => Math.abs(preset * unit - value) < 0.01;
   return (
-    a.fontSize === b.fontSize &&
+    near(a.fontSize, b.fontSize) &&
     lower(a.color) === lower(b.color) &&
     weightOf(a) === weightOf(b) &&
-    a.strokeWidth === b.strokeWidth &&
+    near(a.strokeWidth, b.strokeWidth) &&
     lower(a.strokeColor) === lower(b.strokeColor) &&
     lower(a.background) === lower(b.background) &&
     lower(a.highlight) === lower(b.highlight) &&
@@ -86,9 +113,9 @@ function sameShadow(a: TextShadow | null | undefined, b: TextShadow | null | und
 const sameAnimation = (a: Animation | null | undefined, b: Animation | null | undefined) => (a?.kind ?? null) === (b?.kind ?? null);
 
 /** Whether captions in `style` with these animations look like `preset`: its font counts only when it brings one. */
-export function isLook(preset: CaptionPreset, style: TextStyle, animIn: Animation | null | undefined, animOut: Animation | null | undefined) {
+export function isLook(preset: CaptionPreset, style: TextStyle, animIn: Animation | null | undefined, animOut: Animation | null | undefined, unit = 1) {
   return (
-    sameStyle(preset.style, style) &&
+    sameStyle(preset.style, style, unit) &&
     (!preset.style.fontFamily || preset.style.fontFamily === style.fontFamily) &&
     sameAnimation(preset.animIn, animIn) &&
     sameAnimation(preset.animOut, animOut)

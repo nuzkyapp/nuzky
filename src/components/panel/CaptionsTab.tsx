@@ -1,9 +1,9 @@
 import { Captions, Check, Ellipsis, Plus } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { api, errorText, plainError } from "../../lib/api";
-import { CAPTION_STYLES, isLook } from "../../lib/presets";
+import { CAPTION_STYLES, isLook, scaleStyle } from "../../lib/presets";
 import { type CaptionLook, speechBlocker, startSpeech, useSpeech } from "../../lib/speech";
-import { applyCaptionLook, isCaptionTrack, patched, presetOver, restyleCaptions, useEditor } from "../../lib/store";
+import { applyCaptionLook, isCaptionTrack, patched, presetOver, restyleCaptions, useCanvasUnit, useEditor } from "../../lib/store";
 import type { CaptionPreset, Clip } from "../../lib/types";
 import { CaptionPosition, HighlightRows, KeywordRows, MainStyle, MoreStyleFold, type SetStyle } from "../inspector/TextSection";
 import { Button, IconButton, LockReason, Menu, Segmented, TextSwatch, lockedProps, useLockReason } from "../ui";
@@ -66,8 +66,10 @@ export function CaptionsTab() {
   const { running, last } = useSpeechJobs("captions");
   const blocker = useEditor((s) => (s.snap ? speechBlocker(s.snap.project) : null));
   const hasCaptions = onTimeline !== null;
-  // With captions on the timeline, the highlighted style and the font are the ones they use.
-  const look = onTimeline ?? pending;
+  const unit = useCanvasUnit();
+  // With captions on the timeline, the highlighted style and the font are the ones they use. The look waiting for
+  // Generate is made for 1080p, like a preset; the controls show it in this canvas's pixels.
+  const look = onTimeline ?? { ...pending, style: scaleStyle(pending.style, unit) };
   const font = look.style.fontFamily ?? null;
   const mine = useMyStyles();
   const busy = !!running;
@@ -78,22 +80,22 @@ export function CaptionsTab() {
     const next: CaptionLook = { style: preset.style, animIn: preset.animIn ?? null, animOut: preset.animOut ?? null };
     // Captions keep their font and case when the style brings none, each caption its own.
     if (hasCaptions) void applyCaptionLook(next, preset.name);
-    else useSpeech.setState({ captionLook: { ...next, style: presetOver(preset.style, pending.style) } });
+    else useSpeech.setState({ captionLook: { ...next, style: presetOver(preset.style, pending.style, 1) } });
   };
   // Every caption at once, or the look waiting for Generate, read when the change goes out so quick changes both stick.
   const setStyle: SetStyle = captions
     ? (patch, key) => restyleCaptions(patch, `captions:style:${key}`)
     : (patch) => {
         const waiting = useSpeech.getState().captionLook;
-        useSpeech.setState({ captionLook: { ...waiting, style: patched(waiting.style, patch) } });
+        useSpeech.setState({ captionLook: { ...waiting, style: scaleStyle(patched(scaleStyle(waiting.style, unit), patch), 1 / unit) } });
       };
   const styles = captions?.clips.flatMap((c) => (c.content.type === "text" ? [c.content.style] : []));
 
   const tile: Tile = (preset, own) => {
     // Checked when every caption has the look.
     const current = captions
-      ? captions.clips.every((c) => c.content.type === "text" && isLook(preset, c.content.style, c.animIn, c.animOut))
-      : isLook(preset, look.style, look.animIn, look.animOut);
+      ? captions.clips.every((c) => c.content.type === "text" && isLook(preset, c.content.style, c.animIn, c.animOut, unit))
+      : isLook(preset, pending.style, pending.animIn, pending.animOut);
     const disabled = busy || !!lock;
     // The user's own styles are not the project: recognition running leaves renaming and deleting them alone.
     const openMenu = (at: { x: number; y: number }, keyboard: boolean) => !lock && own?.menu(at, keyboard);
@@ -164,10 +166,11 @@ export function CaptionsTab() {
           <span className="text-[12px] text-muted">Style</span>
           <div className={GRID}>{CAPTION_STYLES.map((s) => tile(s))}</div>
         </div>
-        <MyStyles look={look} mine={mine} tile={tile} />
+        {/* Saved like the built-in ones, for 1080p, so a style looks the same on any canvas. */}
+        <MyStyles look={{ ...look, style: scaleStyle(look.style, 1 / unit) }} mine={mine} tile={tile} />
         <LockReason.Provider value={lock ?? (busy ? BUSY : null)}>
           <div className="flex flex-col gap-3">
-            <MainStyle style={look.style} styles={styles} setStyle={setStyle} />
+            <MainStyle style={look.style} styles={styles} setStyle={setStyle} unit={unit} />
             <HighlightRows style={look.style} styles={styles} setStyle={setStyle} />
           </div>
           <div className="flex flex-col gap-1.5">
@@ -175,7 +178,7 @@ export function CaptionsTab() {
             <KeywordRows style={look.style} styles={styles} setStyle={setStyle} />
           </div>
           <div className="flex flex-col">
-            <MoreStyleFold style={look.style} styles={styles} setStyle={setStyle} flush />
+            <MoreStyleFold style={look.style} styles={styles} setStyle={setStyle} unit={unit} flush />
             {captions && <CaptionPosition clips={captions.clips} flush />}
           </div>
         </LockReason.Provider>

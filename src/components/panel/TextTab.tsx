@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { TEXT_PRESETS } from "../../lib/presets";
+import { TEXT_PRESETS, canvasUnit, scaleStyle } from "../../lib/presets";
 import { addSticker, loadCatalog, loadThumbs, thumbKey, useStickers, type TextTab as Tab } from "../../lib/stickers";
 import { useEditor } from "../../lib/store";
 import type { StickerItem } from "../../lib/types";
@@ -25,7 +25,7 @@ function TextStyles() {
           key={p.name}
           type="button"
           title={`Add "${p.name}" text at the playhead`}
-          onClick={() => edit({ type: "addText", startUs: useEditor.getState().timeUs, text: p.text, style: p.style })}
+          onClick={() => edit((project) => ({ type: "addText", startUs: useEditor.getState().timeUs, text: p.text, style: scaleStyle(p.style, canvasUnit(project.canvas)) }))}
           {...lockedProps(lock)}
           className="flex h-16 min-w-0 items-center justify-center rounded-[10px] border border-white/[.08] bg-white/[.1] px-2 transition-colors duration-[120ms] ease-out hover:border-white/30 aria-disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:hover:border-white/[.08]"
         >

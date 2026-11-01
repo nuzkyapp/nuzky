@@ -1,7 +1,7 @@
 import { useShallow } from "zustand/react/shallow";
 import { RotateCcw } from "lucide-react";
 import { NO_CROP, NO_SHAPE } from "../../lib/presets";
-import { editClip, readoutTime, setClipTransform, transformAtPlayhead, transformEdit, useEditor } from "../../lib/store";
+import { editClip, readoutTime, setClipTransform, transformAtPlayhead, transformEdit, useCanvasUnit, useEditor } from "../../lib/store";
 import type { Asset, Canvas, Clip, Crop, EditCmd, Shape, Transform } from "../../lib/types";
 import { ColorInput, IconButton, Section, Segmented, Slider } from "../ui";
 import { QUIET } from "./Header";
@@ -63,6 +63,7 @@ export function ShapeSection({ clip, content, asset }: { clip: Clip; content: Me
   const crop = useEditor(useShallow((s) => transformAtPlayhead(clip, readoutTime(s)).crop ?? NO_CROP));
   const shape = content.shape ?? NO_SHAPE;
   const keyed = clip.keyframes.length > 0;
+  const unit = useCanvasUnit();
   const plain = !content.shape && Object.values(crop).every((v) => v === 0) && !clip.keyframes.some((k) => k.transform.crop);
 
   const setEdge = (edge: keyof Crop, v: number) =>
@@ -115,7 +116,7 @@ export function ShapeSection({ clip, content, asset }: { clip: Clip; content: Me
       {EDGES.map((e) => (
         <Slider key={e.key} label={e.label} value={crop[e.key] * 100} min={0} max={95} step={0.5} unit="%" format={pct} onChange={(v) => setEdge(e.key, v)} />
       ))}
-      <Slider label="Border" value={shape.borderWidth} min={0} max={40} step={1} unit="px" format={pct} onChange={(v) => setShape({ borderWidth: v }, "border")} />
+      <Slider label="Border" value={shape.borderWidth} min={0} max={40 * unit} step={1} unit="px" format={pct} onChange={(v) => setShape({ borderWidth: v }, "border")} />
       {shape.borderWidth > 0 && <ColorInput label="Border color" value={shape.borderColor} onChange={(v) => setShape({ borderColor: v }, "borderColor")} />}
       <Slider label="Shadow" value={shape.shadow * 100} min={0} max={100} step={1} unit="%" format={pct} onChange={(v) => setShape({ shadow: v / 100 }, "shadow")} />
     </Section>

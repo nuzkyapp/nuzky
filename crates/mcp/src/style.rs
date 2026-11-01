@@ -20,7 +20,7 @@ use nuzky_analysis::style::{
     Rule, Source, ZoomChange,
 };
 use nuzky_engine::effects::transform_at;
-use nuzky_engine::model::{Asset, AssetKind, ClipContent, Project, TextStyle};
+use nuzky_engine::model::{Asset, AssetKind, ClipContent, Project, TextStyle, unit_of};
 use nuzky_engine::speech::is_heard;
 use nuzky_session::ProjectSession;
 use nuzky_session::transcripts::{Record, TranscriptStore};
@@ -935,10 +935,7 @@ impl Defaults {
     pub fn caption_style(&mut self, (width, height): (u32, u32)) -> Option<TextStyle> {
         self.take("build_captions style", "style", "a caption style that fits this canvas", |v| {
             let mut style: TextStyle = serde_json::from_str(v).ok()?;
-            let scale = width.min(height) as f32 / 1080.0;
-            style.font_size *= scale;
-            style.stroke_width *= scale;
-            style.max_width = style.max_width.map(|w| w * scale);
+            style.scale_pixels(unit_of(width, height));
             nuzky_session::text_style(&style, (width, height)).is_ok().then_some(style)
         })
     }

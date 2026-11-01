@@ -1,7 +1,7 @@
 use nuzky_engine::{
     edit::{CaptionPreset, EditCmd, MotionKind, TimeRange, TransformPatch},
     export::{Delivery, Quality},
-    model::{TextStyle, ThumbnailFormat, Transform},
+    model::{TextStyle, ThumbnailFormat, Transform, unit_of},
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -572,11 +572,15 @@ impl Captions {
     /// creator's learned look on a canvas of this size, else Reel.
     pub fn look(&self, from: &mut crate::style::Defaults, canvas: (u32, u32)) -> anyhow::Result<CaptionPreset> {
         let plain = |style| CaptionPreset { name: String::new(), style, anim_in: None, anim_out: None };
+        let scaled = |mut preset: CaptionPreset| {
+            preset.style.scale_pixels(unit_of(canvas.0, canvas.1));
+            preset
+        };
         match (&self.style, &self.style_preset) {
             (Some(_), Some(_)) => anyhow::bail!("INVALID_ARGUMENTS: give style or style_preset, not both"),
             (Some(style), None) => Ok(plain(style.clone())),
-            (None, Some(name)) => crate::caption_styles::find(name),
-            (None, None) => Ok(from.caption_style(canvas).map_or_else(reel, plain)),
+            (None, Some(name)) => crate::caption_styles::find(name).map(scaled),
+            (None, None) => Ok(from.caption_style(canvas).map_or_else(|| scaled(reel()), plain)),
         }
     }
 
@@ -622,6 +626,26 @@ mod tests {
                 "strokeWidth": 7.5, "strokeColor": "#000000", "background": null
             })
         );
+    }
+
+    #[test]
+    fn captions_scale_presets_and_fallback_to_canvas_pixels() {
+        for preset in [Some("reel"), None] {
+            let args: Captions = serde_json::from_value(serde_json::json!({
+                "run_id": "run", "style_preset": preset
+            }))
+            .unwrap();
+            let style = args.look(&mut crate::style::Defaults::default(), (2160, 3840)).unwrap().style;
+            let reference = reel_style();
+            assert_eq!(style.font_size, reference.font_size * 2.0);
+            assert_eq!(style.stroke_width, reference.stroke_width * 2.0);
+        }
+        let reference = TextStyle { max_width: Some(800.0), ..reel_style() };
+        let args: Captions = serde_json::from_value(serde_json::json!({
+            "run_id": "run", "style": reference
+        }))
+        .unwrap();
+        assert_eq!(args.look(&mut crate::style::Defaults::default(), (2160, 3840)).unwrap().style, reference);
     }
 
     #[test]
