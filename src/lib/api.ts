@@ -1,7 +1,7 @@
 import { invoke, type Channel } from "@tauri-apps/api/core";
 import type { GalleryPlugin, GalleryState } from "./gallery";
 import type { EffectIssue, ListedPlugin, PluginRow, PluginValues } from "./plugins";
-import type { AgentAccess, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, BeatCutDone, BeatPlans, Boot, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Part, PreviewStarted, Project, ProjectPoster, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFinish, ReelFraming, Rhythm, Said, SampleRun, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied } from "./types";
+import type { AgentAccess, ImportedKeys, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, BeatCutDone, BeatPlans, Boot, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Part, PreviewStarted, Project, ProjectPoster, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFinish, ReelFraming, Rhythm, Said, SampleRun, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied } from "./types";
 
 /**
  * The session a change was made for. Mutating commands carry it, so a change still in flight when
@@ -121,6 +121,7 @@ export const api = {
   /** The credits the video's description needs; null when no CC BY sound is heard in it. */
   soundCredits: (epoch: Epoch) => invoke<string | null>("sound_credits", { expectedEpoch: epoch }),
   soundSettings: () => invoke<SoundSettings>("sound_settings"),
+  importShortcuts: (path: string) => invoke<ImportedKeys>("import_shortcuts", { path }),
   /** The video a YouTube link points at. */
   youtubeVideoLink: (url: string) => invoke<YoutubeVideo>("youtube_video_link", { url }),
   /** Downloads the whole video, with `youtube-video-progress`, and starts its own preview. */

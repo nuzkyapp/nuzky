@@ -11,6 +11,7 @@ import { useSounds } from "./sounds";
 import { useSpeech, useWordPick } from "./speech";
 import { allClips, isCaptionTrack, projectDuration, useEditor } from "./store";
 import type { Project, Snapshot } from "./types";
+import { keysOf } from "./keys";
 
 /**
  * The first-run tour on the sample video: eight steps, each pointing at one part of the editor while the rest
@@ -50,7 +51,10 @@ export const STEP: Record<TourStep, { title: string; text: string; target: strin
     next: true,
     side: "left",
   },
-  play: { title: "Play the result", text: "Press Space to play. What you see here is exactly what you export.", target: "section[aria-label=Preview]", next: true, side: "right" },
+  play: { title: "Play the result", get text() {
+      const key = keysOf("playPause")[0];
+      return `${key ? `Press ${key} to play.` : "Click Play."} What you see here is exactly what you export.`;
+    }, target: "section[aria-label=Preview]", next: true, side: "right" },
   transcript: {
     title: "Fix anything by hand",
     text: "Every word is here. Select words and press Delete to cut them.",
@@ -75,7 +79,10 @@ export const STEP: Record<TourStep, { title: string; text: string; target: strin
     next: true,
     side: "left",
   },
-  export: { title: "Export when it's ready", text: "Export makes a video you can post anywhere. Ctrl+E opens it too.", target: "[data-tour=export]", next: false, side: "below" },
+  export: { title: "Export when it's ready", get text() {
+      const key = keysOf("export")[0];
+      return `Export makes a video you can post anywhere.${key ? ` ${key} opens it too.` : ""}`;
+    }, target: "[data-tour=export]", next: false, side: "below" },
 };
 
 interface TourState {

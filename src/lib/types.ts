@@ -904,6 +904,13 @@ export type Imported = {
   leftOut: Array<string>,
 };
 
+export type ImportedKeys = {
+  program: KeysProgram,
+  keys: {
+    [key in string]: Array<string>
+  },
+};
+
 export type JobEvent = {
   id: string,
   kind: "audio" | "proxy" | "matte" | "export" | "captions" | "transcript" | "style" | "vision-models" | "cover" | "reframe" | "reels" | "speech-model" | "agent" | "beats",
@@ -923,6 +930,8 @@ export type Keyframe = {
    */
   ease: Ease,
 };
+
+export type KeysProgram = "premiere" | "finalCut" | "resolve";
 
 /**
  * Which words of a caption are key.

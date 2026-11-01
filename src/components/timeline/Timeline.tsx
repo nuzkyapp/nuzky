@@ -38,6 +38,7 @@ import { CutMarkers } from "./CutMarkers";
 import { HistoryButton, type Peek } from "./HistoryButton";
 import { TrackHeader } from "./TrackHeader";
 import { SNAP_PX, dragFade, dragResult, isFade, snap, useTimelineGestures, type Drag } from "./useTimelineGestures";
+import { useKeyLabels } from "../../lib/keys";
 
 const HEADER_W = 152;
 const RULER_H = 28;
@@ -295,6 +296,7 @@ function Playhead({ zoom, scroller, follow }: { zoom: number; scroller: RefObjec
 }
 
 export function Timeline({ height }: { height: number }) {
+  const { withKey } = useKeyLabels();
   const snap0 = useEditor((s) => s.snap);
   const project = snap0?.project;
   const selection = useEditor((s) => s.selection);
@@ -664,7 +666,7 @@ export function Timeline({ height }: { height: number }) {
         : "Detach audio: select a video first";
   const rotatable = picked.some((f) => f.track.kind !== "audio");
   const rotateLabel = rotatable ? "Rotate 90°" : picked.length ? "Rotate: audio has no picture to turn" : "Rotate: select a clip first";
-  const deleteLabel = cut ? "Delete transition (Delete)" : selection.length ? "Delete selection (Delete)" : "Delete: select a clip first";
+  const deleteLabel = cut ? withKey("Delete transition", "delete") : selection.length ? withKey("Delete selection", "delete") : "Delete: select a clip first";
   // While the AI edits, the editing buttons say so instead of what they would need.
   const lockedLabel = (action: string) => `${action}: the AI is editing`;
 
@@ -680,15 +682,15 @@ export function Timeline({ height }: { height: number }) {
             <HistoryButton redo={false} locked={locked} lines={peekShown && !peekShown.redo ? peekLines : null} onPeek={setPeek} />
             <HistoryButton redo locked={locked} lines={peekShown?.redo ? peekLines : null} onPeek={setPeek} />
             <span aria-hidden className="mx-1 h-4 w-px bg-white/[.12]" />
-            <IconButton round label={locked ? lockedLabel("Split") : splitBlocked ? `Split: ${splitBlocked}` : "Split at playhead (S)"} disabled={locked || !!splitBlocked} onClick={splitAtPlayhead}>
+            <IconButton round label={locked ? lockedLabel("Split") : splitBlocked ? `Split: ${splitBlocked}` : withKey("Split at playhead", "split")} disabled={locked || !!splitBlocked} onClick={splitAtPlayhead}>
               <Scissors size={16} />
             </IconButton>
-            <IconButton round label={locked ? lockedLabel("Freeze frame") : freezeBlocked ? `Freeze frame: ${freezeBlocked}` : "Freeze frame (Shift+R)"} disabled={locked || !!freezeBlocked} onClick={() => void freezeAtPlayhead()}>
+            <IconButton round label={locked ? lockedLabel("Freeze frame") : freezeBlocked ? `Freeze frame: ${freezeBlocked}` : withKey("Freeze frame", "freeze")} disabled={locked || !!freezeBlocked} onClick={() => void freezeAtPlayhead()}>
               <Snowflake size={16} />
             </IconButton>
             <IconButton
               round
-              label={locked ? lockedLabel("Delete left") : splitBlocked ? `Delete left: ${splitBlocked}` : "Delete left of playhead (Q)"}
+              label={locked ? lockedLabel("Delete left") : splitBlocked ? `Delete left: ${splitBlocked}` : withKey("Delete left of playhead", "deleteLeft")}
               disabled={locked || !!splitBlocked}
               onClick={() => deleteSide("left")}
             >
@@ -696,7 +698,7 @@ export function Timeline({ height }: { height: number }) {
             </IconButton>
             <IconButton
               round
-              label={locked ? lockedLabel("Delete right") : splitBlocked ? `Delete right: ${splitBlocked}` : "Delete right of playhead (W)"}
+              label={locked ? lockedLabel("Delete right") : splitBlocked ? `Delete right: ${splitBlocked}` : withKey("Delete right of playhead", "deleteRight")}
               disabled={locked || !!splitBlocked}
               onClick={() => deleteSide("right")}
             >
@@ -708,7 +710,7 @@ export function Timeline({ height }: { height: number }) {
             <span aria-hidden className="mx-1 h-4 w-px bg-white/[.12]" />
             <IconButton
               round
-              label={locked ? lockedLabel("Duplicate") : selection.length ? "Duplicate (Ctrl+D)" : "Duplicate: select a clip first"}
+              label={locked ? lockedLabel("Duplicate") : selection.length ? withKey("Duplicate", "duplicate") : "Duplicate: select a clip first"}
               disabled={locked || selection.length === 0}
               onClick={duplicateSelection}
             >
@@ -727,7 +729,7 @@ export function Timeline({ height }: { height: number }) {
           </div>
         )}
         <div className="flex-1" />
-        <IconButton round label="Zoom out (-)" onClick={() => setZoom(zoom / 1.3)}>
+        <IconButton round label={withKey("Zoom out", "zoomOut")} onClick={() => setZoom(zoom / 1.3)}>
           <ZoomOut size={16} />
         </IconButton>
         <RangeInput
@@ -740,7 +742,7 @@ export function Timeline({ height }: { height: number }) {
           onChange={(v) => setZoom(Math.exp(v))}
           className="w-24"
         />
-        <IconButton round label="Zoom in (+)" onClick={() => setZoom(zoom * 1.3)}>
+        <IconButton round label={withKey("Zoom in", "zoomIn")} onClick={() => setZoom(zoom * 1.3)}>
           <ZoomIn size={16} />
         </IconButton>
         <IconButton

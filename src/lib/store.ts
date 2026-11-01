@@ -6,6 +6,7 @@ import { clipOffset, keyframeTolerance, transformAt, upsertKeyframe } from "./ke
 import { US } from "./time";
 import type { Asset, Background, Clip, CopiedClip, Delivery, EditCmd, Filmstrip, JobEvent, Project, ProjectVersion, Snapshot, ModelQuestion, TextStyle, TimeRange, Track, Transform, Transition, ZoomsApplied } from "./types";
 import type { CaptionLook } from "./speech";
+import { keysOf } from "./keys";
 
 export interface Toast {
   id: number;
@@ -924,14 +925,14 @@ export async function cutSelection() {
   sayCopied(clips.length, "cut", undoAction(snap));
 }
 
-export const NOTHING_COPIED = "Nothing to paste. Copy clips with Ctrl+C first.";
+export const nothingCopied = () => `Nothing to paste. Copy clips${keysOf("copy")[0] ? ` with ${keysOf("copy")[0]}` : ""} first.`;
 
 /** Pastes the copied clips at the playhead as one undo step; the pasted clips are selected. */
 export async function pasteClips() {
   const { timeUs, edit, toast } = useEditor.getState();
   await edit(() => {
     const clips = useEditor.getState().clipboard;
-    if (!clips) toast({ kind: "info", text: NOTHING_COPIED });
+    if (!clips) toast({ kind: "info", text: nothingCopied() });
     return clips && { type: "pasteClips", clips, atUs: Math.round(timeUs) };
   });
 }
@@ -950,7 +951,7 @@ export function attributeTargets(project: Project, selection: string[], clipboar
 
 /** Why the copied attributes cannot go on the selection, or null when they can. */
 export function pasteAttributesBlocker(project: Project, selection: string[], clipboard: CopiedClip[] | null): string | null {
-  if (!clipboard) return NOTHING_COPIED;
+  if (!clipboard) return nothingCopied();
   if (attributeTargets(project, selection, clipboard).length > 0) return null;
   const names = { text: "a text clip", video: "a video or image clip", audio: "an audio clip" };
   return `Select ${[...new Set(clipboard.map((c) => names[c.trackKind]))].join(" or ")} to paste the copied attributes onto.`;

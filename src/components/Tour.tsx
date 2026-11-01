@@ -6,6 +6,7 @@ import { useSetup } from "../lib/setup";
 import { useEditor } from "../lib/store";
 import { STEP, TOUR_STEPS, changed, endTour, nextStep, openOwnVideo, useTour, type TourStep } from "../lib/tour";
 import { Button } from "./ui";
+import { keysOf } from "../lib/keys";
 
 /** Space between the target and the hole's edge, the hole and the card, and the card and the window's edges. */
 const PAD = 4;
@@ -171,13 +172,14 @@ function Spotlight({ step }: { step: TourStep }) {
   }, [def, step]);
 
   const index = TOUR_STEPS.indexOf(step);
+  const redoKey = keysOf("redo")[0];
   const text =
     step === "watch" && stopped
       ? cut
         ? "You stopped it. What it changed so far stays, and Undo on its card takes it back."
         : "You stopped it before it changed anything."
       : step === "undo" && undone
-        ? "Undone. The video is back as it was. Redo, or Ctrl+Shift+Z, brings the edit back."
+        ? `Undone. The video is back as it was. Redo${redoKey ? `, or ${redoKey},` : ""} brings the edit back.`
         : step === "transcript" && word
           ? `The video starts on “${word}”. Press Delete to cut it.`
           : def.text;

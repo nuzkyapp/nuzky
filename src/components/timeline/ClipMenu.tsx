@@ -2,8 +2,9 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type 
 import { ClipboardCopy, ClipboardPaste, Copy, ListChecks, Paintbrush, Replace, Scissors, ScissorsLineDashed, Snowflake, Trash2, Unlink } from "lucide-react";
 import { chose } from "../../lib/exit";
 import { pickAndReplace } from "../panel/assets";
-import { AI_EDITING, NOTHING_COPIED, attributeTargets, canSplitClip, copySelection, cutSelection, deleteSelection, detachAudio, detachBlocker, duplicateSelection, findClip, freezeAtPlayhead, freezeBlocker, isFreeze, pasteAttributes, pasteAttributesBlocker, pasteClips, selectTrack, splitAtPlayhead, useAiLocked, useEditor } from "../../lib/store";
+import { AI_EDITING, nothingCopied, attributeTargets, canSplitClip, copySelection, cutSelection, deleteSelection, detachAudio, detachBlocker, duplicateSelection, findClip, freezeAtPlayhead, freezeBlocker, isFreeze, pasteAttributes, pasteAttributesBlocker, pasteClips, selectTrack, splitAtPlayhead, useAiLocked, useEditor } from "../../lib/store";
 import type { Clip } from "../../lib/types";
+import { useKeyLabels } from "../../lib/keys";
 
 export interface MenuAt {
   clipId: string;
@@ -41,6 +42,7 @@ function Item({ icon, label, shortcut, disabled, reason, onSelect }: { icon: Rea
  * it replaces with the clicked clip; with several clips selected the labels say how many.
  */
 export function ClipMenu({ at, onClose }: { at: MenuAt; onClose: () => void }) {
+  const { key } = useKeyLabels();
   const ref = useRef<HTMLDivElement>(null);
   const project = useEditor((s) => s.snap!.project);
   const selection = useEditor((s) => s.selection);
@@ -140,7 +142,7 @@ export function ClipMenu({ at, onClose }: { at: MenuAt; onClose: () => void }) {
       <Item
         icon={<Scissors size={14} />}
         label={n === 1 || splittable === 0 ? "Split at playhead" : splittable === n ? `Split ${n} clips` : `Split ${splittable} of ${n} clips at playhead`}
-        shortcut="S"
+        shortcut={key("split")}
         disabled={locked || splittable === 0}
         reason={
           locked
@@ -156,12 +158,12 @@ export function ClipMenu({ at, onClose }: { at: MenuAt; onClose: () => void }) {
       <Item
         icon={<Snowflake size={14} />}
         label="Freeze frame"
-        shortcut="Shift+R"
+        shortcut={key("freeze")}
         disabled={locked || !!freezeReason}
         reason={locked ? AI_EDITING : freezeReason && freezeReason[0].toUpperCase() + freezeReason.slice(1)}
         onSelect={run(() => freezeAtPlayhead(clip))}
       />
-      <Item icon={<Copy size={14} />} label={many("Duplicate", "Duplicate")} shortcut="Ctrl+D" disabled={locked} reason={AI_EDITING} onSelect={run(duplicateSelection)} />
+      <Item icon={<Copy size={14} />} label={many("Duplicate", "Duplicate")} shortcut={key("duplicate")} disabled={locked} reason={AI_EDITING} onSelect={run(duplicateSelection)} />
       <Item
         icon={<Unlink size={14} />}
         label={n === 1 || detachable.length === 0 ? "Detach audio" : `Detach audio of ${detachable.length} clip${detachable.length === 1 ? "" : "s"}`}
@@ -178,26 +180,26 @@ export function ClipMenu({ at, onClose }: { at: MenuAt; onClose: () => void }) {
       />
       <Item icon={<ListChecks size={14} />} label="Select all on track" onSelect={run(() => selectTrack(clip.id))} />
       <div className="mx-2 my-1 h-px bg-white/[.08]" />
-      <Item icon={<ScissorsLineDashed size={14} />} label={many("Cut", "Cut")} shortcut="Ctrl+X" disabled={locked} reason={AI_EDITING} onSelect={run(cutSelection)} />
-      <Item icon={<ClipboardCopy size={14} />} label={many("Copy", "Copy")} shortcut="Ctrl+C" onSelect={run(copySelection)} />
+      <Item icon={<ScissorsLineDashed size={14} />} label={many("Cut", "Cut")} shortcut={key("cut")} disabled={locked} reason={AI_EDITING} onSelect={run(cutSelection)} />
+      <Item icon={<ClipboardCopy size={14} />} label={many("Copy", "Copy")} shortcut={key("copy")} onSelect={run(copySelection)} />
       <Item
         icon={<ClipboardPaste size={14} />}
         label={copies > 1 ? `Paste ${copies} clips at playhead` : "Paste at playhead"}
-        shortcut="Ctrl+V"
+        shortcut={key("paste")}
         disabled={locked || copies === 0}
-        reason={locked ? AI_EDITING : NOTHING_COPIED}
+        reason={locked ? AI_EDITING : nothingCopied()}
         onSelect={run(pasteClips)}
       />
       <Item
         icon={<Paintbrush size={14} />}
         label={looks > 1 ? `Paste attributes to ${looks} clips` : "Paste attributes"}
-        shortcut="Ctrl+Alt+V"
+        shortcut={key("pasteAttributes")}
         disabled={locked || looks === 0}
         reason={locked ? AI_EDITING : pasteAttributesBlocker(project, selection, clipboard)}
         onSelect={run(pasteAttributes)}
       />
       <div className="mx-2 my-1 h-px bg-white/[.08]" />
-      <Item icon={<Trash2 size={14} />} label={many("Delete", "Delete")} shortcut="Del" disabled={locked} reason={AI_EDITING} onSelect={run(deleteSelection)} />
+      <Item icon={<Trash2 size={14} />} label={many("Delete", "Delete")} shortcut={key("delete")} disabled={locked} reason={AI_EDITING} onSelect={run(deleteSelection)} />
     </div>
   );
 }

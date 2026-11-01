@@ -40,6 +40,7 @@ import { onBeatsFound } from "./lib/beats";
 import { closeSource, seekSource, sourceDuration, useSource } from "./lib/source";
 import { appWindow, toggleFullPreview, toggleMuted, usePreview } from "./lib/preview";
 import { titleWindow } from "./lib/window";
+import { actionOf, chordsOf, openKeys, useKeys, type ActionId } from "./lib/keys";
 
 const isMedia = (path: string) => MEDIA_EXTENSIONS.includes(path.split(".").pop()?.toLowerCase() ?? "");
 
@@ -68,21 +69,36 @@ function suppressSpaceRelease() {
   window.addEventListener("keyup", up, true);
 }
 
+const CLIPBOARD = { copy: copySelection, cut: cutSelection, paste: pasteClips, pasteAttributes } as const;
+/** What the cover editor holds back: nothing plays there, and the clips are not shown. */
+const RESTS_IN_COVER = new Set<ActionId>(["playPause", "split", "deleteLeft", "deleteRight", "freeze", "duplicate", "copy", "cut", "paste", "pasteAttributes", "delete"]);
+/** What choosing reels lets through to the editor. */
+const WORKS_IN_REELS = new Set<ActionId>(["undo", "redo", "framePrev", "frameNext", "secondBack", "secondForward"]);
+/** What would change the hidden timeline unseen in the full screen preview. */
+const RESTS_IN_FULL = new Set<ActionId>(["delete", "split", "deleteLeft", "deleteRight", "freeze", "duplicate", "import", "undo", "redo", "cut", "paste", "pasteAttributes"]);
+
 function useShortcuts() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const s = useEditor.getState();
+      // Keyboard shortcuts open from anywhere, as settings do in other apps.
+      if (chordsOf(e).includes("Ctrl+,") && !document.querySelector("dialog[open], [aria-modal='true']")) {
+        e.preventDefault();
+        openKeys();
+        return;
+      }
       // The home screen and the launcher have their own keys. While an update installs, a key would change the project it is saving.
       if (s.view === "home" || s.launcherOpen || s.snap?.recovery || useUpdates.getState().install?.stage === "installing") return;
-      const mod = e.ctrlKey || e.metaKey;
-      // Ctrl+J opens and closes the AI panel, also from inside its own field.
-      if (mod && e.key.toLowerCase() === "j") {
+      const action = actionOf(chordsOf(e));
+      // The AI panel's and the launcher's keys also work from a text field, but only with a modifier, so typing stays typing.
+      const typed = isTyping(target) && !(e.ctrlKey || e.metaKey || e.altKey);
+      if (action === "aiPanel" && !typed) {
         e.preventDefault();
         togglePanel();
         return;
       }
-      if (mod && e.key.toLowerCase() === "k" && !document.querySelector("dialog[open]")) {
+      if (action === "projects" && !typed && !document.querySelector("dialog[open]")) {
         e.preventDefault();
         useEditor.setState({ launcherOpen: true });
         return;
@@ -90,142 +106,142 @@ function useShortcuts() {
       // The editor's keys stay with an open dialog.
       if (isTyping(target) || document.querySelector("dialog[open], [aria-modal='true']")) return;
       const fps = s.snap?.project.canvas.fps ?? 30;
-      const key = e.key.toLowerCase();
-      // Option+V types a character on macOS, so the key's place on the keyboard names it.
-      const clipboardKey = mod ? (e.altKey ? (e.code === "KeyV" ? "attributes" : null) : ({ c: "copy", x: "cut", v: "paste" } as const)[key]) : null;
+      const escape = e.key === "Escape";
       // The transcript's words are not clips, and selected text, such as an error message, copies as text.
-      if (clipboardKey && (target?.closest("#library-panel-transcript") || (clipboardKey === "copy" && window.getSelection()?.toString()))) return;
+      if (action && action in CLIPBOARD && (target?.closest("#library-panel-transcript") || (action === "copy" && window.getSelection()?.toString()))) return;
       // A focused slider keeps its own arrow, Home and End keys.
-      const onRange = target instanceof HTMLInputElement && target.type === "range";
+      if (target instanceof HTMLInputElement && target.type === "range" && /^(Arrow|Home$|End$|Page)/.test(e.key)) return;
       // In the cover editor the playhead is the cover's frame and nothing plays; the clip keys rest.
       const cover = useCover.getState();
       if (cover.open) {
-        if (key === "escape") {
+        if (escape) {
           if (cover.selected !== null) useCover.setState({ selected: null });
           else closeCover();
           return;
         }
-        if ((key === "delete" || key === "backspace") && typeof cover.selected === "number") {
-          e.preventDefault();
-          void deleteText(cover.open, cover.selected);
-          return;
-        }
         const overlay = selectedOverlay(cover.selected);
-        if ((key === "delete" || key === "backspace") && overlay !== null) {
+        if (action === "delete" && (typeof cover.selected === "number" || overlay !== null)) {
           e.preventDefault();
-          void deleteOverlay(cover.open, overlay);
+          void (typeof cover.selected === "number" ? deleteText(cover.open, cover.selected) : deleteOverlay(cover.open, overlay!));
           return;
         }
-        if (key === " " || (!mod && (key === "s" || key === "q" || key === "w" || key === "r")) || (mod && key === "d") || clipboardKey || key === "delete" || key === "backspace") {
+        if (action && RESTS_IN_COVER.has(action)) {
           e.preventDefault();
           return;
         }
       }
       // Choosing reels plays the current reel; undo, redo and frame steps work as in the editor, the clip keys rest.
       const reels = useReels.getState();
-      if (reels.open && !((mod && (key === "z" || key === "y")) || ((key === "arrowleft" || key === "arrowright") && !onRange))) {
+      if (reels.open && !(action && WORKS_IN_REELS.has(action))) {
         const reel = candidateOf(s.snap?.project, reels.current);
-        if (key === "escape") closeReels();
-        else if (key === " " && !usesSpace(target)) {
+        if (escape) closeReels();
+        else if (action === "playPause" && !(e.key === " " && usesSpace(target))) {
           e.preventDefault();
           if (!e.repeat) {
-            suppressSpaceRelease();
+            if (e.key === " ") suppressSpaceRelease();
             toggleReelPlay();
           }
-        } else if (key === "home" && reel && !onRange) s.seek(reel.startUs);
-        else if (key === "end" && !onRange) playEnding();
+        } else if (action === "goStart" && reel) s.seek(reel.startUs);
+        else if (action === "goEnd") playEnding();
         return;
       }
       // A media item in the preview takes the playback keys; Esc shows the timeline again.
       const source = useSource.getState();
       if (source.asset) {
-        const sourceFps = source.preview?.fps || 30;
-        if (key === "escape" && !usePreview.getState().full) {
+        const step = action === "framePrev" || action === "secondBack" ? -1 : action === "frameNext" || action === "secondForward" ? 1 : 0;
+        if (escape && !usePreview.getState().full) {
           closeSource();
           return;
         }
-        if ((key === "arrowleft" || key === "arrowright") && !onRange) {
+        if (step) {
           e.preventDefault();
-          const dir = key === "arrowleft" ? -1 : 1;
-          seekSource(e.shiftKey ? source.timeUs + dir * US : stepFrame(source.timeUs, dir, sourceFps));
+          const second = action === "secondBack" || action === "secondForward";
+          seekSource(second ? source.timeUs + step * US : stepFrame(source.timeUs, step, source.preview?.fps || 30));
           return;
         }
-        if ((key === "home" || key === "end") && !onRange) {
-          seekSource(key === "home" ? 0 : sourceDuration(source));
+        if (action === "goStart" || action === "goEnd") {
+          seekSource(action === "goStart" ? 0 : sourceDuration(source));
           return;
         }
       }
+      if (escape) {
+        if (usePreview.getState().full) void toggleFullPreview();
+        else s.select([]);
+        return;
+      }
+      if (!action) return;
       // Full screen hides the timeline; the keys that would change it unseen rest.
-      if (usePreview.getState().full && (key === "delete" || key === "backspace" || (!mod && (key === "s" || key === "q" || key === "w" || key === "r")) || (mod && (key === "d" || key === "i" || key === "y" || key === "z")) || (clipboardKey && clipboardKey !== "copy"))) {
+      if (usePreview.getState().full && RESTS_IN_FULL.has(action)) {
         e.preventDefault();
         return;
       }
-      if (key === " ") {
-        if (usesSpace(target)) return;
+      if (action === "cutPrev" || action === "cutNext") {
+        // A focused clip keeps these keys to move between tracks.
+        if (cover.open || e.defaultPrevented || !s.snap) return;
         e.preventDefault();
-        // A focused button would also be clicked when Space is released; that release is held back
-        // instead of taking focus away, so the keyboard user stays where they were.
-        // Holding Space plays or pauses once.
+        const edge = edgeBeside(s.snap.project, s.timeUs, action === "cutPrev" ? -1 : 1);
+        if (edge !== null) s.seek(edge);
+        return;
+      }
+      if (e.key === " " && usesSpace(target)) return;
+      e.preventDefault();
+      // A focused button would also be clicked when Space is released; that release is held back instead of taking
+      // focus away, so the keyboard user stays where they were. Holding Space acts once.
+      if (e.key === " ") {
         if (e.repeat) return;
         suppressSpaceRelease();
-        s.togglePlay();
-      } else if (mod && key === "z" && !e.shiftKey) {
-        e.preventDefault();
-        s.undo();
-      } else if (mod && (key === "y" || (key === "z" && e.shiftKey))) {
-        e.preventDefault();
-        s.redo();
-      } else if (mod && key === "i") {
-        e.preventDefault();
-        pickAndImport();
-      } else if (mod && key === "e") {
-        e.preventDefault();
-        if (cover.open) void exportCover();
-        else openExport();
-      } else if (clipboardKey) {
-        e.preventDefault();
-        void { copy: copySelection, cut: cutSelection, paste: pasteClips, attributes: pasteAttributes }[clipboardKey]();
-      } else if (mod && key === "d") {
-        e.preventDefault();
-        duplicateSelection();
-      } else if (!mod && key === "s") {
-        e.preventDefault();
-        splitAtPlayhead();
-      } else if (!mod && e.shiftKey && key === "r") {
-        e.preventDefault();
-        if (!e.repeat) void freezeAtPlayhead();
-      } else if (!mod && (key === "q" || key === "w")) {
-        e.preventDefault();
-        deleteSide(key === "q" ? "left" : "right");
-      } else if (key === "delete" || key === "backspace") {
-        e.preventDefault();
-        deleteSelection();
-      } else if ((key === "arrowleft" || key === "arrowright") && !onRange) {
-        e.preventDefault();
-        const dir = key === "arrowleft" ? -1 : 1;
-        const end = s.snap ? projectDuration(s.snap.project) : 0;
-        const to = Math.min(e.shiftKey ? nearestFrame(s.timeUs + dir * US, fps) : stepFrame(s.timeUs, dir, fps), lastFrame(end, fps));
-        if (dir > 0 ? to > s.timeUs : to < s.timeUs) s.seek(to);
-      } else if ((key === "arrowup" || key === "arrowdown") && !onRange && !cover.open && !e.defaultPrevented && s.snap) {
-        // CapCut's previous and next cut; a focused clip keeps these keys to move between tracks.
-        e.preventDefault();
-        const edge = edgeBeside(s.snap.project, s.timeUs, key === "arrowup" ? -1 : 1);
-        if (edge !== null) s.seek(edge);
-      } else if (key === "home" && !onRange) {
-        s.seek(0);
-      } else if (key === "end" && !onRange) {
-        if (s.snap) s.seek(projectDuration(s.snap.project));
-      } else if (!mod && key === "m" && !e.repeat) {
-        toggleMuted();
-      } else if (!mod && key === "f" && !e.repeat) {
-        void toggleFullPreview();
-      } else if (key === "escape") {
-        if (usePreview.getState().full) void toggleFullPreview();
-        else s.select([]);
-      } else if (key === "+" || key === "=") {
-        s.setZoom(s.zoom * 1.3);
-      } else if (key === "-") {
-        s.setZoom(s.zoom / 1.3);
+      }
+      switch (action) {
+        case "playPause":
+          // Holding the key plays or pauses once.
+          return e.repeat ? undefined : s.togglePlay();
+        case "undo":
+          return s.undo();
+        case "redo":
+          return s.redo();
+        case "import":
+          return pickAndImport();
+        case "export":
+          return cover.open ? void exportCover() : openExport();
+        case "copy":
+        case "cut":
+        case "paste":
+        case "pasteAttributes":
+          return void CLIPBOARD[action]();
+        case "duplicate":
+          return duplicateSelection();
+        case "split":
+          return splitAtPlayhead();
+        case "freeze":
+          return e.repeat ? undefined : void freezeAtPlayhead();
+        case "deleteLeft":
+        case "deleteRight":
+          return deleteSide(action === "deleteLeft" ? "left" : "right");
+        case "delete":
+          return deleteSelection();
+        case "framePrev":
+        case "frameNext":
+        case "secondBack":
+        case "secondForward": {
+          const dir = action === "framePrev" || action === "secondBack" ? -1 : 1;
+          const second = action === "secondBack" || action === "secondForward";
+          const end = s.snap ? projectDuration(s.snap.project) : 0;
+          const to = Math.min(second ? nearestFrame(s.timeUs + dir * US, fps) : stepFrame(s.timeUs, dir, fps), lastFrame(end, fps));
+          if (dir > 0 ? to > s.timeUs : to < s.timeUs) s.seek(to);
+          return;
+        }
+        case "goStart":
+          return s.seek(0);
+        case "goEnd":
+          return s.snap ? s.seek(projectDuration(s.snap.project)) : undefined;
+        case "mute":
+          return e.repeat ? undefined : toggleMuted();
+        case "fullScreen":
+          return e.repeat ? undefined : void toggleFullPreview();
+        case "zoomIn":
+          return s.setZoom(s.zoom * 1.3);
+        case "zoomOut":
+          return s.setZoom(s.zoom / 1.3);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -514,7 +530,7 @@ useEditor.subscribe((s, prev) => {
 // Test hook for WebDriver runs; native file dialogs cannot be automated.
 if (import.meta.env.DEV)
   Object.assign(window, {
-    __nuzky: { importPaths, exportVideo, plugins: usePlugins, gallery: useGallery, store: useEditor, cover: useCover, reels: useReels, openReelsToFind, speech: useSpeech, api, agent: useAgent, dock: useDock, setup: useSetup, library: useLibrary, style: useStyle, addProjects, findDrafts, newProjectFromMedia, capcut: useCapCut, openDraft, openDraftFolder, openProject, refreshLibrary, trashProjects, updates: useUpdates, checkForUpdates, sounds: useSounds, stickers: useStickers, tour: useTour, youtube: useYoutube, previewWindow: appWindow, remote: useRemote, source: useSource },
+    __nuzky: { importPaths, exportVideo, plugins: usePlugins, gallery: useGallery, store: useEditor, cover: useCover, reels: useReels, openReelsToFind, speech: useSpeech, api, agent: useAgent, dock: useDock, setup: useSetup, library: useLibrary, style: useStyle, addProjects, findDrafts, newProjectFromMedia, capcut: useCapCut, openDraft, openDraftFolder, openProject, refreshLibrary, trashProjects, updates: useUpdates, checkForUpdates, sounds: useSounds, stickers: useStickers, tour: useTour, youtube: useYoutube, previewWindow: appWindow, remote: useRemote, source: useSource, keys: useKeys },
   });
 
 async function startEditor() {

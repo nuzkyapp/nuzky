@@ -51,6 +51,7 @@ pub const COMMANDS: &[&str] = &[
     "font_weights",
     "gallery_plugins",
     "import_media",
+    "import_shortcuts",
     "install_gallery_plugin",
     "install_ytdlp",
     "layer_bounds",

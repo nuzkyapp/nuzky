@@ -7,6 +7,7 @@ import { deleteSelection, editClip, mainClips, transitionTarget, useEditor, type
 import { US, formatTime } from "../../lib/time";
 import type { TransitionKind } from "../../lib/types";
 import { Button, PresetTile, Slider } from "../ui";
+import { useKeyLabels } from "../../lib/keys";
 
 export const TRANSITION_ICONS: Record<TransitionKind, LucideIcon> = {
   dissolve: Blend,
@@ -121,6 +122,7 @@ function TransitionEditor({ cut }: { cut: Cut }) {
 
 /** The selected transition in the inspector: its duration and Remove. The kind is picked in the Transitions tab. */
 export function TransitionSettings({ cut }: { cut: Cut }) {
+  const { withKey } = useKeyLabels();
   const maxUs = useMaxTransitionUs(cut.clipId);
   if (!cut.transition)
     return (
@@ -134,7 +136,7 @@ export function TransitionSettings({ cut }: { cut: Cut }) {
   return (
     <div className="flex flex-col gap-3 p-4">
       <DurationSlider valueUs={cut.transition.durationUs} maxUs={maxUs} onChange={(s) => setTransitionDuration(cut.clipId, s)} />
-      <Button variant="danger" onClick={deleteSelection} title="Remove transition (Delete)">
+      <Button variant="danger" onClick={deleteSelection} title={withKey("Remove transition", "delete")}>
         <Trash2 size={14} /> Remove transition
       </Button>
     </div>

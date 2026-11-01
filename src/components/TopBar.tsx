@@ -14,6 +14,7 @@ import { ShareButton } from "./ShareDialog";
 import { UpdateButton } from "./Updates";
 import { FeedbackButton } from "./Feedback";
 import { useWindowButtons } from "../lib/window";
+import { useKeyLabels } from "../lib/keys";
 
 function SaveStatus() {
   const saveState = useEditor((s) => s.saveState);
@@ -75,11 +76,12 @@ function ProjectName() {
   );
 }
 
-/** Opens the launcher: recent projects, new ones and search (Ctrl+K). */
+/** Opens the launcher: recent projects, new ones and search. */
 function ProjectsButton() {
+  const { withKey } = useKeyLabels();
   const open = useEditor((s) => s.launcherOpen);
   return (
-    <Button variant="bar" pill aria-haspopup="dialog" aria-expanded={open} title="Projects (Ctrl+K)" onClick={() => useEditor.setState({ launcherOpen: !open })} className={open ? "bg-white/[.13]" : ""}>
+    <Button variant="bar" pill aria-haspopup="dialog" aria-expanded={open} title={withKey("Projects", "projects")} onClick={() => useEditor.setState({ launcherOpen: !open })} className={open ? "bg-white/[.13]" : ""}>
       <FolderOpen size={15} /> Projects
     </Button>
   );
@@ -175,6 +177,7 @@ export function JobIndicator() {
 
 /** Opens and closes the AI panel; it stays open or closed across launches. */
 function AiToggle() {
+  const { withKey } = useKeyLabels();
   const open = useDock((s) => s.open);
   const working = useAgent((s) => s.status !== "idle");
   return (
@@ -182,7 +185,7 @@ function AiToggle() {
       variant="bar"
       pill
       aria-pressed={open}
-      title={open ? "Close AI (Ctrl+J)" : working ? "Open AI (Ctrl+J). It is still working." : "Open AI (Ctrl+J)"}
+      title={open ? withKey("Close AI", "aiPanel") : working ? `${withKey("Open AI", "aiPanel")}. It is still working.` : withKey("Open AI", "aiPanel")}
       onClick={togglePanel}
       className={open ? "bg-white/[.15]" : ""}
     >
@@ -279,6 +282,7 @@ function VersionsButton() {
 }
 
 export function TopBar() {
+  const { withKey } = useKeyLabels();
   const snap = useEditor((s) => s.snap);
   const { undo, redo } = useEditor.getState();
   const aiRun = useEditor((s) => s.aiRun);
@@ -327,10 +331,10 @@ export function TopBar() {
         {/* Undo and Redo lead the timeline's toolbar; the cover editor and the reels list have none. */}
         {(cover || reels) && (
           <>
-            <IconButton round label={aiRun ? "Undo is available when the AI is done" : "Undo (Ctrl+Z)"} disabled={!snap?.canUndo || !!aiRun} onClick={undo}>
+            <IconButton round label={aiRun ? "Undo is available when the AI is done" : withKey("Undo", "undo")} disabled={!snap?.canUndo || !!aiRun} onClick={undo}>
               <Undo2 size={16} />
             </IconButton>
-            <IconButton round label={aiRun ? "Redo is available when the AI is done" : "Redo (Ctrl+Shift+Z)"} disabled={!snap?.canRedo || !!aiRun} onClick={redo}>
+            <IconButton round label={aiRun ? "Redo is available when the AI is done" : withKey("Redo", "redo")} disabled={!snap?.canRedo || !!aiRun} onClick={redo}>
               <Redo2 size={16} />
             </IconButton>
           </>
@@ -344,7 +348,7 @@ export function TopBar() {
           pill
           disabled={empty}
           disabledReason="Add a clip to the timeline to export"
-          title={cover ? "Export cover (Ctrl+E)" : "Export video (Ctrl+E)"}
+          title={withKey(cover ? "Export cover" : "Export video", "export")}
           onClick={cover ? () => void exportCover() : openExport}
         >
           <Download size={15} /> {cover ? "Export cover" : "Export"}
