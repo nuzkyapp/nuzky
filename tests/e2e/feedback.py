@@ -165,8 +165,8 @@ def feedback(r):
     webdriver('POST', r.s.path + '/window/rect', {'width': 1440, 'height': 900})
 
     r.s.run("window.__nuzky.store.setState({view: 'editor'})")
-    r.check('in the editor a button next to Projects says Send feedback',
-            wait(lambda: r.s.run("return document.querySelector(arguments[0])?.getAttribute('aria-label')", BUTTON), 3) == 'Send feedback')
+    r.check('in the editor a capsule next to Projects reads Send feedback',
+            wait(lambda: r.s.run("return document.querySelector(arguments[0])?.textContent.trim()", BUTTON), 3) == 'Send feedback')
     r.s.run(OPEN, BUTTON)
     menu = wait(lambda: r.s.run(MENU), 3)
     r.check('it opens the same menu, with the focus in it', menu == ITEMS and wait(lambda: r.s.run(IN_MENU), 3), menu)
@@ -174,6 +174,15 @@ def feedback(r):
     r.shot('editor-menu')
     r.key('Escape')
     r.check('Esc closes it and focus returns to the button', wait(lambda: not r.s.run(MENU) and r.s.run(FOCUSED, BUTTON), 3))
+    webdriver('POST', r.s.path + '/window/rect', {'width': 1024, 'height': 640})
+    time.sleep(0.4)
+    clear = r.s.run("""const b = document.querySelector(arguments[0]).getBoundingClientRect();
+        const name = [...document.querySelectorAll('header span, header button')].find((e) => e.textContent.trim() === 'Untitled project').getBoundingClientRect();
+        return {right: Math.round(b.right), name: Math.round(name.left)};""", BUTTON)
+    r.check('in a 1024 x 640 window the capsule keeps clear of the project name', clear['right'] < clear['name'], clear)
+    r.shot('editor-small')
+    webdriver('POST', r.s.path + '/window/rect', {'width': 1440, 'height': 900})
+    time.sleep(0.4)
     before = len(opened(r))
     r.s.run(OPEN, BUTTON)
     wait(lambda: r.s.run(MENU), 3)
