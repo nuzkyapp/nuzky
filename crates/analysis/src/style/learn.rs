@@ -1067,7 +1067,14 @@ fn captions(edits: &[Edit], say: &dyn Fn(&[Example]) -> String) -> Option<Rule> 
         // Read as written: 0.41, not the 0.4099999964 a single-precision number turns into.
         let hundredths = |v: f32| (f64::from(v) * 100.0).round() / 100.0;
         let font = look.font.as_deref().unwrap_or("the editor's default font");
-        let weight = if look.bold { " bold" } else { "" };
+        let weight = look.weight.map_or_else(
+            || if look.bold { " bold".into() } else { String::new() },
+            |weight| {
+                let names =
+                    ["thin", "extra light", "light", "regular", "medium", "semibold", "bold", "extra bold", "black"];
+                format!(" {}", names[usize::from(weight / 100).clamp(1, 9) - 1])
+            },
+        );
         let outline = look.outline.as_ref().map_or(String::new(), |(c, _)| format!(" with a {c} outline"));
         let width = look.outline.as_ref().map(|(_, w)| *w);
         let shadow = look.shadow.as_ref().map_or(String::new(), |s| {
@@ -1123,6 +1130,9 @@ fn captions(edits: &[Edit], say: &dyn Fn(&[Example]) -> String) -> Option<Rule> 
         let at = out.find("Times in the examples").unwrap_or(out.len());
         out.insert_str(at, &format!("They are drawn in {said}, on a frame 1080 pixels across its shorter side. "));
         let mut style = serde_json::json!({"fontSize": look.size, "color": look.color, "bold": look.bold});
+        if let Some(weight) = look.weight {
+            style["fontWeight"] = weight.into();
+        }
         if let Some(font) = &look.font {
             style["fontFamily"] = font.clone().into();
         }
@@ -1901,6 +1911,7 @@ mod tests {
             size: 90.0,
             color: "#ffffff".into(),
             bold: true,
+            weight: None,
             outline: Some(("#000000".into(), 7.5)),
             shadow: None,
             letter_spacing: 0.0,

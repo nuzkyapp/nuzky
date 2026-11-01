@@ -203,6 +203,10 @@ pub fn text_style(style: &TextStyle, (width, height): (u32, u32)) -> Result<()> 
                 .is_none_or(|max| max.is_finite() && max > 0.0 && max <= MAX_TEXT_WIDTH_RATIO * width as f32),
         "INVALID_PROJECT: text style"
     );
+    ensure!(
+        style.font_weight.is_none_or(|weight| (100..=900).contains(&weight) && weight % 100 == 0),
+        "INVALID_PROJECT: a font weight goes from 100 to 900 in steps of 100"
+    );
     color(&style.color, "text color")?;
     color(&style.stroke_color, "outline color")?;
     if let Some(background) = &style.background {

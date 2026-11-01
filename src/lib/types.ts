@@ -1825,6 +1825,11 @@ export type TextStyle = {
   color: string,
   bold: boolean,
   /**
+   * 100 (thin) to 900 (black) in steps of 100; `None` draws 700 when `bold`, otherwise 400. A family without
+   * that weight draws its nearest one.
+   */
+  fontWeight?: number | null,
+  /**
    * Outline width in canvas pixels before the transform's scale, 0 disables it.
    */
   strokeWidth: number,
@@ -1881,7 +1886,11 @@ export type TextStylePatch = {
   fontFamily?: string | null,
   fontSize?: number,
   color?: string,
+  /**
+   * Without `fontWeight`, setting `bold` clears the weight, so the text turns bold or regular.
+   */
   bold?: boolean,
+  fontWeight?: number | null,
   strokeWidth?: number,
   strokeColor?: string,
   background?: string | null,

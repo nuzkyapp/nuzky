@@ -47,6 +47,9 @@ export const CAPTION_STYLES = captionStyles as CaptionPreset[];
 
 const lower = (c: string | null | undefined) => (c ?? "").toLowerCase();
 
+/** The weight a style draws when its family has every weight. */
+export const weightOf = (style: TextStyle) => style.fontWeight ?? (style.bold ? 700 : 400);
+
 /** The background box's corner radius, as a share of the font size, of a text that never changed it. */
 export const BOX_RADIUS = 0.25;
 
@@ -58,7 +61,7 @@ export function sameStyle(a: TextStyle, b: TextStyle) {
   return (
     a.fontSize === b.fontSize &&
     lower(a.color) === lower(b.color) &&
-    a.bold === b.bold &&
+    weightOf(a) === weightOf(b) &&
     a.strokeWidth === b.strokeWidth &&
     lower(a.strokeColor) === lower(b.strokeColor) &&
     lower(a.background) === lower(b.background) &&

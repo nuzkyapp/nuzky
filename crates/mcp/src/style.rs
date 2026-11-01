@@ -1322,6 +1322,7 @@ fn project_picture(project: &Project, clips: &[&nuzky_engine::model::Clip]) -> P
             size: px(style.font_size),
             color: style.color.clone(),
             bold: style.bold,
+            weight: style.font_weight,
             outline: (style.stroke_width > 0.0).then(|| (style.stroke_color.clone(), px(style.stroke_width))),
             shadow: style.shadow.clone(),
             letter_spacing: style.letter_spacing,
@@ -2149,7 +2150,7 @@ mod tests {
         };
         // The creator's look on three captions half again as large, two of them by keyframes, on a canvas half a
         // Reel's size; Reel on one.
-        let mine = serde_json::json!({"fontSize": 40.0, "color": "#ffe14d", "bold": true, "strokeWidth": 2.5,
+        let mine = serde_json::json!({"fontSize": 40.0, "color": "#ffe14d", "bold": true, "fontWeight": 300, "strokeWidth": 2.5,
             "strokeColor": "#000000", "background": "#000000b3", "highlight": "#4ade80",
             "keywords": {"color": "#ff4d4d", "pick": "last"}, "letterCase": "upper"});
         (project.canvas.width, project.canvas.height) = (540, 960);
@@ -2208,6 +2209,7 @@ mod tests {
         // The look most captions have, as build_captions takes it: sizes for a frame 1080 pixels across.
         let captions = rules.iter().find(|r| r.title == "Captions").unwrap();
         let row = &captions.settings.iter().find(|(name, _)| name == "build_captions style").unwrap().1;
+        assert_eq!(serde_json::from_str::<serde_json::Value>(row).unwrap()["fontWeight"], 300);
         let learned: nuzky_engine::model::TextStyle = serde_json::from_str(row).unwrap();
         let expected = nuzky_engine::model::TextStyle {
             font_size: 120.0,
@@ -2216,13 +2218,14 @@ mod tests {
         };
         assert_eq!(learned, expected, "{row}");
         assert!(
-            captions.text.contains("bold in capitals, 120 pixels, #ffe14d with a #000000 outline 7.5 pixels"),
+            captions.text.contains("light in capitals, 120 pixels, #ffe14d with a #000000 outline 7.5 pixels"),
             "{}",
             captions.text
         );
         let before: learning::CaptionLook =
             serde_json::from_str(r##"{"font":null,"size":95.0,"color":"#ffffff","bold":false,"outline":null}"##)
                 .unwrap();
+        assert!(before.weight.is_none());
         assert!(before.background.is_none() && before.keywords.is_none(), "evidence from before still reads");
         drop(host);
         fs::remove_dir_all(dir).unwrap();

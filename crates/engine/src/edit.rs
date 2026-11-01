@@ -410,8 +410,13 @@ pub struct TextStylePatch {
     pub font_size: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// Without `fontWeight`, setting `bold` clears the weight, so the text turns bold or regular.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bold: Option<bool>,
+    #[serde(default, with = "present", skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Option<u16>>"))]
+    #[cfg_attr(feature = "schema", schemars(with = "Option<Option<u16>>"))]
+    pub font_weight: Option<Option<u16>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stroke_width: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -491,6 +496,10 @@ impl TextStylePatch {
         set(&mut style.font_size, &self.font_size);
         set(&mut style.color, &self.color);
         set(&mut style.bold, &self.bold);
+        if self.bold.is_some() && self.font_weight.is_none() {
+            style.font_weight = None;
+        }
+        set(&mut style.font_weight, &self.font_weight);
         set(&mut style.stroke_width, &self.stroke_width);
         set(&mut style.stroke_color, &self.stroke_color);
         set(&mut style.background, &self.background);
@@ -3055,6 +3064,7 @@ mod tests {
             font_size: 40.0,
             color: "#fff".into(),
             bold: false,
+            font_weight: None,
             stroke_width: 0.0,
             stroke_color: "#000".into(),
             background: None,
@@ -3958,6 +3968,7 @@ mod tests {
             font_size: 70.0,
             color: "#fff".into(),
             bold: true,
+            font_weight: None,
             stroke_width: 5.0,
             stroke_color: "#000".into(),
             background: None,
@@ -4061,6 +4072,7 @@ mod tests {
             font_size: 40.0,
             color: "#fff".into(),
             bold: false,
+            font_weight: None,
             stroke_width: 0.0,
             stroke_color: "#000".into(),
             background: None,
@@ -4113,6 +4125,7 @@ mod tests {
             font_size: 40.0,
             color: "#fff".into(),
             bold: false,
+            font_weight: None,
             stroke_width: 0.0,
             stroke_color: "#000".into(),
             background: None,
@@ -4164,6 +4177,7 @@ mod tests {
             font_size: 40.0,
             color: "#fff".into(),
             bold: false,
+            font_weight: None,
             stroke_width: 0.0,
             stroke_color: "#000".into(),
             background: None,
@@ -4210,6 +4224,7 @@ mod tests {
                 font_size: 40.0,
                 color: "#fff".into(),
                 bold: false,
+                font_weight: None,
                 stroke_width: 0.0,
                 stroke_color: "#000".into(),
                 background: None,
@@ -4585,6 +4600,7 @@ mod tests {
             font_size: 64.0,
             color: "#fff".into(),
             bold: false,
+            font_weight: None,
             stroke_width: 0.0,
             stroke_color: "#000".into(),
             background: None,

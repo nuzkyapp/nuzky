@@ -2,10 +2,12 @@ import { useState } from "react";
 import { create } from "zustand";
 import { AlignCenter, AlignLeft, AlignRight, Ban, RotateCcw } from "lucide-react";
 import { LIMITS } from "../../lib/limits";
-import { BOX_RADIUS, CAPTION_STYLES, KEYWORD_COLOR, KEYWORD_PICKS, TEXT_PRESETS, isLook, sameStyle } from "../../lib/presets";
+import { BOX_RADIUS, CAPTION_STYLES, KEYWORD_COLOR, KEYWORD_PICKS, TEXT_PRESETS, isLook, sameStyle, weightOf } from "../../lib/presets";
 import { applyCaptionLook, editClip, patched, placeCaptions, presetOver, restyleCaptions, useEditor, type StylePatch } from "../../lib/store";
 import type { Animation, CaptionPreset, Clip, EditCmd, LetterCase, TextAlign, TextShadow, TextStyle, Transform } from "../../lib/types";
 import { FontPicker } from "../FontPicker";
+import { Select } from "../panel/SpeechControls";
+import { ALL_WEIGHTS, DEFAULT_FONT, WEIGHT_NAMES, useFontWeights } from "../../lib/fonts";
 import { Button, Checkbox, ColorInput, Disclosure, LockReason, PresetTile, Section, Segmented, Slider, TextSwatch, parseNumber, useLockReason } from "../ui";
 
 /** Which text folds are open and whether a caption's inspector styles every caption, for this session, wherever they show. */
@@ -193,7 +195,10 @@ export function MainStyle({ style, styles, setStyle, maxSize = 300 }: StyleProps
   return (
     <>
       <FieldRow label="Font">
-        <FontPicker value={style.fontFamily} mixed={differ((s) => s.fontFamily)} onChange={(fontFamily) => setStyle({ fontFamily }, "font")} />
+        <div className="flex min-w-0 flex-1 gap-2">
+          <FontPicker value={style.fontFamily} mixed={differ((s) => s.fontFamily)} onChange={(fontFamily) => setStyle({ fontFamily }, "font")} />
+          <WeightSelect style={style} mixed={differ(weightOf)} fonts={differ((s) => s.fontFamily)} onChange={(fontWeight) => setStyle({ fontWeight, bold: fontWeight >= 600 }, "weight")} />
+        </div>
       </FieldRow>
       <Slider label="Size" mixed={differ((s) => s.fontSize)} value={style.fontSize} min={12} max={maxSize} step={1} format={(v) => String(Math.round(v))} onChange={(v) => setStyle({ fontSize: v }, "size")} />
       <ColorInput label="Color" mixed={differ((s) => s.color)} value={style.color} onChange={(v) => setStyle({ color: v }, "color")} />
@@ -203,6 +208,45 @@ export function MainStyle({ style, styles, setStyle, maxSize = 300 }: StyleProps
         </div>
       </FieldRow>
     </>
+  );
+}
+
+/**
+ * The weights the text's font has, each named; the engine draws a weight the font lacks as its nearest one. Until
+ * the project confirms a pick the menu shows the pick, so arrow keys pressed quickly each move one step on.
+ */
+function WeightSelect({ style, mixed, fonts, onChange }: { style: TextStyle; mixed: boolean; /** The texts have different fonts. */ fonts: boolean; onChange: (weight: number) => void }) {
+  const lock = useLockReason();
+  const own = useFontWeights(style.fontFamily);
+  // Each text draws the weight nearest the pick that its own font has.
+  const list = fonts ? ALL_WEIGHTS : own;
+  const [draft, setDraft] = useState<number | null>(null);
+  const confirmed = weightOf(style);
+  if (draft !== null && draft === confirmed && !mixed) setDraft(null);
+  const wanted = draft ?? confirmed;
+  const shown = list?.length ? list.reduce((a, b) => (Math.abs(b - wanted) <= Math.abs(a - wanted) ? b : a)) : wanted;
+  const single = list?.length === 1 ? `${style.fontFamily || DEFAULT_FONT} has only one weight` : null;
+  return (
+    <div className="w-[118px] shrink-0">
+      <Select aria-label="Weight" disabled={!!lock || !list || !!single} title={lock ?? single ?? undefined} value={mixed && draft === null ? "" : shown}
+        onChange={(e) => {
+          setDraft(Number(e.target.value));
+          onChange(Number(e.target.value));
+        }}
+        onBlur={() => setDraft(null)}
+      >
+        {mixed && draft === null && (
+          <option value="" disabled>
+            —
+          </option>
+        )}
+        {(list ?? [shown]).map((w) => (
+          <option key={w} value={w}>
+            {WEIGHT_NAMES[w] ?? w}
+          </option>
+        ))}
+      </Select>
+    </div>
   );
 }
 
@@ -240,7 +284,7 @@ export function KeywordRows({ style, styles, setStyle }: StyleProps) {
 export function MoreStyleFold({ flush, ...props }: StyleProps & { flush?: boolean }) {
   const open = useStyleUi((s) => s.more);
   return (
-    <Disclosure title="More style" summary="Outline, box, shadow, spacing, alignment, bold" open={open} onToggle={() => useStyleUi.setState({ more: !open })} flush={flush}>
+    <Disclosure title="More style" summary="Outline, box, shadow, spacing, alignment" open={open} onToggle={() => useStyleUi.setState({ more: !open })} flush={flush}>
       <MoreStyle {...props} />
     </Disclosure>
   );
@@ -281,7 +325,6 @@ export function MoreStyle({ style, styles, setStyle }: StyleProps) {
   const box = all((s) => s.background !== null) ? (style.background ?? BOX) : null;
   return (
     <>
-      <Checkbox label="Bold" {...on((s) => s.bold)} onChange={(v) => setStyle({ bold: v }, "bold")} />
       <Slider label="Letter spacing" mixed={differ((s) => s.letterSpacing ?? 0)} value={(style.letterSpacing ?? 0) * 100} min={-50} max={200} step={1} unit="%" format={percent} onChange={(v) => setStyle({ letterSpacing: v / 100 }, "letterSpacing")} />
       <Slider label="Line spacing" mixed={differ((s) => s.lineSpacing ?? 0)} value={(style.lineSpacing ?? 0) * 100} min={-60} max={300} step={1} unit="%" format={percent} onChange={(v) => setStyle({ lineSpacing: v / 100 }, "lineSpacing")} />
       <FieldRow label="Alignment">

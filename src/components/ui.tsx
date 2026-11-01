@@ -4,6 +4,7 @@ import { AlertTriangle, Check, ChevronDown, ChevronRight, Minus, Search, X } fro
 import { followPointer } from "../lib/drag";
 import { chose } from "../lib/exit";
 import { fontCss } from "../lib/fonts";
+import { weightOf } from "../lib/presets";
 import { AI_EDITING, useAiLocked } from "../lib/store";
 import type { TextShadow, TextStyle } from "../lib/types";
 
@@ -1159,7 +1160,7 @@ export function TextSwatch({ style, label, size = 15, lines = 1 }: { style: Text
         fontSize: size,
         fontFamily: fontCss(style.fontFamily),
         color: style.color,
-        fontWeight: style.bold ? 700 : 400,
+        fontWeight: weightOf(style),
         background: style.background ?? undefined,
         // As the engine rounds the box and lines up a label of two lines; without either, the usual look.
         borderRadius: style.boxRadius !== undefined ? `${style.boxRadius * size}px` : undefined,

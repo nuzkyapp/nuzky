@@ -190,6 +190,7 @@ pub fn draw(
             font_size: 12.0,
             color: format!("#{:02x}{:02x}{:02x}", colour[0], colour[1], colour[2]),
             bold: span.split(None),
+            font_weight: None,
             stroke_width: 0.0,
             stroke_color: "#000000".into(),
             background: None,

@@ -67,6 +67,8 @@ pub struct CaptionLook {
     /// `#rrggbb`
     pub color: String,
     pub bold: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weight: Option<u16>,
     /// Colour and width.
     pub outline: Option<(String, f32)>,
     #[serde(default)]

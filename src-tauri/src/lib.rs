@@ -956,6 +956,14 @@ fn list_fonts(state: State<'_, AppState>) -> FontFamilies {
         .clone()
 }
 
+/// The weights a text in `family` can pick; a family this computer lacks gives those of the font drawn instead.
+#[tauri::command]
+fn font_weights(state: State<'_, AppState>, family: Option<String>) -> Vec<u16> {
+    use nuzky_engine::text::TextRenderer;
+    let mut renderer = state.bounds_text.lock().unwrap();
+    renderer.get_or_insert_with(TextRenderer::new).font_weights(family.as_deref())
+}
+
 #[tauri::command]
 fn new_project(
     state: State<'_, AppState>,
@@ -1386,6 +1394,7 @@ pub fn run() {
             set_preview_muted,
             list_projects,
             list_fonts,
+            font_weights,
             set_editor_shown,
             new_project,
             new_project_from_media,

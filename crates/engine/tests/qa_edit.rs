@@ -197,6 +197,7 @@ fn equal_start_captions_do_not_overlap() {
         font_size: 40.0,
         color: "#fff".into(),
         bold: false,
+        font_weight: None,
         stroke_width: 0.0,
         stroke_color: "#000".into(),
         background: None,

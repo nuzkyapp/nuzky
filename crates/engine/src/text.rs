@@ -117,8 +117,8 @@ pub const DEFAULT_FAMILY: &str = "Inter";
 pub struct TextRenderer {
     fonts: FontSystem,
     families: HashSet<String>,
-    /// Whether a family draws bold itself, by family name.
-    bold: HashMap<String, bool>,
+    /// The weights each family has, as ranges, by family name.
+    weights: HashMap<String, Vec<(u16, u16)>>,
     swash: SwashCache,
     cache: HashMap<u64, TextImage>,
     /// Layouts of karaoke captions, by text, style, scale and wrap width.
@@ -151,10 +151,12 @@ impl TextRenderer {
             db.load_font_data(data.to_vec());
         }
         // cosmic-text falls back only to faces of the weight it draws, and the emoji font has only a regular one, so
-        // bold text would take its emoji from an installed font.
+        // text of any other weight would take its emoji from an installed font.
         for id in db.load_font_source(cosmic_text::fontdb::Source::Binary(Arc::new(EMOJI_FONT))) {
             let face = db.face(id).expect("just loaded").clone();
-            db.push_face_info(cosmic_text::fontdb::FaceInfo { weight: Weight::BOLD, ..face });
+            for weight in (100..=900).step_by(100).filter(|&w| w != face.weight.0) {
+                db.push_face_info(cosmic_text::fontdb::FaceInfo { weight: Weight(weight), ..face.clone() });
+            }
         }
         db.set_sans_serif_family(DEFAULT_FAMILY);
         let families = db.faces().flat_map(|face| face.families.iter().map(|(name, _)| name.clone())).collect();
@@ -162,7 +164,7 @@ impl TextRenderer {
         Self {
             fonts,
             families,
-            bold: HashMap::new(),
+            weights: HashMap::new(),
             swash: SwashCache::new(),
             cache: HashMap::new(),
             layouts: HashMap::new(),
@@ -190,25 +192,60 @@ impl TextRenderer {
         }
     }
 
-    /// Single-weight families such as Anton have no bold face; asking for one would make
-    /// cosmic-text draw another family's bold, so they stay regular instead.
-    fn draws_bold(&mut self, family: Family) -> bool {
+    /// The weights `family` has as ranges: one weight for a static face, the `wght` axis of a variable one.
+    /// Upright faces count when there are any.
+    fn weight_ranges(&mut self, family: Family) -> &[(u16, u16)] {
         let name = match family {
             Family::Name(name) => name,
             _ => DEFAULT_FAMILY,
         };
-        if let Some(&known) = self.bold.get(name) {
-            return known;
+        if !self.weights.contains_key(name) {
+            let db = self.fonts.db();
+            let faces: Vec<_> = db.faces().filter(|face| face.families.iter().any(|(n, _)| n == name)).collect();
+            let upright = faces.iter().any(|face| face.style == cosmic_text::fontdb::Style::Normal);
+            let ranges = faces
+                .iter()
+                .filter(|face| !upright || face.style == cosmic_text::fontdb::Style::Normal)
+                .map(|face| {
+                    let axis = db.with_face_data(face.id, |data, index| {
+                        use cosmic_text::skrifa::MetadataProvider;
+                        let font = cosmic_text::skrifa::FontRef::from_index(data, index).ok()?;
+                        let axis = font.axes().get_by_tag(cosmic_text::skrifa::Tag::new(b"wght"))?;
+                        Some((axis.min_value().ceil() as u16, axis.max_value().floor() as u16))
+                    });
+                    axis.flatten().filter(|(min, max)| min <= max).unwrap_or((face.weight.0, face.weight.0))
+                })
+                .collect();
+            self.weights.insert(name.to_owned(), ranges);
         }
-        let mut buffer = Buffer::new(&mut self.fonts, Metrics::new(16.0, 20.0));
-        buffer.set_text("A", &Attrs::new().family(family).weight(Weight::BOLD), Shaping::Advanced, None);
-        buffer.shape_until_scroll(&mut self.fonts, false);
-        let font = buffer.layout_runs().flat_map(|run| run.glyphs.iter()).map(|glyph| glyph.font_id).next();
-        let own = font
-            .and_then(|id| self.fonts.db().face(id))
-            .is_some_and(|face| face.families.iter().any(|(n, _)| n == name));
-        self.bold.insert(name.to_owned(), own);
-        own
+        &self.weights[name]
+    }
+
+    /// The weight nearest `wanted` that `family` has. cosmic-text draws a weight a family lacks in another
+    /// family, so Anton's bold would come from some other font.
+    fn draw_weight(&mut self, family: Family, wanted: u16) -> Weight {
+        let nearest = self
+            .weight_ranges(family)
+            .iter()
+            .map(|&(min, max)| wanted.clamp(min, max))
+            .min_by_key(|&weight| (weight.abs_diff(wanted), std::cmp::Reverse(weight)));
+        Weight(nearest.unwrap_or(wanted))
+    }
+
+    /// The weights from 100 to 900 a text in `family` can pick, each drawn as the family's nearest one.
+    pub fn font_weights(&mut self, family: Option<&str>) -> Vec<u16> {
+        let family = self.family(family);
+        let mut weights: Vec<u16> = self
+            .weight_ranges(family)
+            .iter()
+            .flat_map(|&(min, max)| {
+                let round = |w: u16| ((w + 50) / 100 * 100).clamp(100, 900);
+                (round(min)..=round(max)).step_by(100)
+            })
+            .collect();
+        weights.sort_unstable();
+        weights.dedup();
+        weights
     }
 
     /// Renders `text` with `style` scaled by `scale` (output pixels per canvas pixel).
@@ -316,7 +353,7 @@ impl TextRenderer {
         let wrap = (max_width - 2.0 * text_pad).max(size);
         buffer.set_size(Some(wrap), Some((MAX_TEXT_LINES * line_height).max(MAX_LAYOUT_SIDE)));
         let family = self.family(style.font_family.as_deref());
-        let weight = if style.bold && self.draws_bold(family) { Weight::BOLD } else { Weight::NORMAL };
+        let weight = self.draw_weight(family, style.weight());
         let mut attrs = Attrs::new().family(family).weight(weight);
         if letter_spacing != 0.0 {
             // As in CSS: spaced letters do not join into ligatures, so "ffi" spreads like the letters around it.
@@ -771,6 +808,7 @@ mod tests {
             font_size: 95.0,
             color: "#ffffff".into(),
             bold: false,
+            font_weight: None,
             stroke_width: 7.5,
             stroke_color: "#000000".into(),
             background: None,
