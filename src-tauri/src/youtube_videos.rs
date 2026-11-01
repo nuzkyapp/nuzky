@@ -50,11 +50,11 @@ pub async fn youtube_video_link(url: String) -> CmdResult<Video> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VideoPreview {
-    url: String,
-    width: u32,
-    height: u32,
-    duration_us: i64,
-    fps: f64,
+    pub(crate) url: String,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) duration_us: i64,
+    pub(crate) fps: f64,
 }
 
 /// Downloads the video, with `youtube-video-progress`, and starts its preview: frames on the returned socket,

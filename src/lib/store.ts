@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { api, errorText, plainError } from "./api";
+import { closeSource, sourceOpen, toggleSourcePlay } from "./source";
 import { clipOffset, keyframeTolerance, transformAt, upsertKeyframe } from "./keyframes";
 import { US } from "./time";
 import type { Asset, Background, Clip, CopiedClip, Delivery, EditCmd, Filmstrip, JobEvent, Project, ProjectVersion, Snapshot, ModelQuestion, TextStyle, TimeRange, Track, Transform, Transition, ZoomsApplied } from "./types";
@@ -502,12 +503,15 @@ export const useEditor = create<EditorState>((set, get) => ({
     const snap = get().snap;
     const end = snap ? projectDuration(snap.project) : 0;
     const t = Math.max(0, Math.min(end, tUs));
+    // Moving the playhead shows the timeline again.
+    closeSource();
     set({ timeUs: t });
     api.seek(t);
   },
 
   togglePlay: () => {
-    if (get().playing) api.pause();
+    if (sourceOpen()) toggleSourcePlay();
+    else if (get().playing) api.pause();
     else api.play();
   },
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { AudioLines, Check, Film, Layers2, Link2, PictureInPicture2, Plus, Trash2 } from "lucide-react";
+import { AudioLines, Check, Eye, Film, Layers2, Link2, PictureInPicture2, Plus, Trash2 } from "lucide-react";
+import { closeSource, openSource, useSource } from "../../lib/source";
 import { usedAssets, useEditor } from "../../lib/store";
 import { formatDuration } from "../../lib/time";
 import { openYoutube } from "../../lib/youtube";
@@ -25,6 +26,7 @@ function MediaItem({ asset }: { asset: Asset }) {
   useEffect(() => useEditor.getState().loadThumb(asset.id), [asset.id, asset.path, epoch]);
   const used = useEditor((s) => !!s.snap && usedAssets(s.snap.project).has(asset.id));
   const preparing = job?.status === "running";
+  const shown = useSource((s) => s.asset?.id === asset.id);
   const lock = useLockReason();
   const visual = asset.kind !== "audio";
   const [menu, setMenu] = useState<{ x: number; y: number; keyboard: boolean; opener: HTMLElement | null } | null>(null);
@@ -33,7 +35,14 @@ function MediaItem({ asset }: { asset: Asset }) {
     <>
       <div
         onPointerDown={assetDragHandler(asset.id)}
-        onDoubleClick={() => addAtPlayhead(asset.id)}
+        aria-current={shown || undefined}
+        onClick={(e) => {
+          if (e.detail <= 1 && !(e.target as HTMLElement).closest("button")) void openSource(asset);
+        }}
+        onDoubleClick={() => {
+          closeSource();
+          void addAtPlayhead(asset.id);
+        }}
         onContextMenu={(e) => {
           e.preventDefault();
           setMenu({ x: e.clientX, y: e.clientY, keyboard: false, opener: null });
@@ -45,10 +54,10 @@ function MediaItem({ asset }: { asset: Asset }) {
           setMenu({ x: r.left + 8, y: r.bottom - 8, keyboard: true, opener: document.activeElement as HTMLElement | null });
         }}
         className="group flex min-w-0 cursor-grab flex-col gap-1.5 active:cursor-grabbing"
-        title={`${asset.name}${credit(asset)}${used ? "\nIn the timeline" : ""}\n${visual ? "Drag onto the timeline, + adds it at the playhead, Overlay puts it over the video" : "Drag onto the timeline, or press + to add at the playhead"}`}
+        title={`${asset.name}${credit(asset)}${used ? "\nIn the timeline" : ""}\nClick to play it in the preview. ${visual ? "Drag onto the timeline, + adds it at the playhead, Overlay puts it over the video" : "Drag onto the timeline, or press + to add at the playhead"}`}
       >
         {/* The hairline is an outline, so it draws over the thumbnail rather than under it. */}
-        <div className="relative aspect-square overflow-hidden rounded-[10px] bg-bg outline-1 -outline-offset-1 outline-white/[.08] group-hover:outline-white/[.22]">
+        <div className={`relative aspect-square overflow-hidden rounded-[10px] bg-bg ${shown ? "outline-2 -outline-offset-2 outline-accent" : "outline-1 -outline-offset-1 outline-white/[.08] group-hover:outline-white/[.22]"}`}>
           {asset.kind === "audio" ? (
             <div className="flex h-full items-center justify-center bg-clip-audio/50 text-muted">
               <AudioLines size={26} />
@@ -129,6 +138,7 @@ function MediaItem({ asset }: { asset: Asset }) {
                   { label: "Picture in picture", icon: <PictureInPicture2 size={15} />, run: () => addPictureInPicture(asset.id), disabled: lock },
                 ]
               : []),
+            { label: "Show in preview", icon: <Eye size={15} />, run: () => void openSource(asset) },
             "separator",
             { label: "Remove", icon: <Trash2 size={15} />, run: () => removeAsset(asset), disabled: lock, danger: true },
           ]}
