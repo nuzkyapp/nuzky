@@ -3,7 +3,7 @@ import { AtSign, Bug, ClipboardCopy, FolderOpen, Lightbulb, MessageSquare } from
 import { api, errorText, type FeedbackKind } from "../lib/api";
 import { copyDiagnostics, openLogs, reportBug } from "../lib/diagnostics";
 import { useEditor } from "../lib/store";
-import { IconButton, Menu, type MenuEntry } from "./ui";
+import { Button, Menu, type MenuEntry } from "./ui";
 
 type ShowMenu = (items: MenuEntry[], at: { x: number; y: number; above?: boolean }, label: string, keyboard: boolean) => void;
 
@@ -46,20 +46,21 @@ export function FeedbackRow({ showMenu }: { showMenu: ShowMenu }) {
 export function FeedbackButton() {
   const [menu, setMenu] = useState<{ at: { x: number; y: number }; keyboard: boolean; back: HTMLElement } | null>(null);
   return (
-    <div className="bar flex rounded-full">
-      <IconButton
-        round
+    <>
+      <Button
+        variant="bar"
+        pill
         data-feedback
         aria-haspopup="menu"
         aria-expanded={!!menu}
-        label="Send feedback"
         onClick={(e) => {
           const r = e.currentTarget.getBoundingClientRect();
           setMenu({ at: { x: r.left, y: r.bottom + 6 }, keyboard: e.detail === 0, back: e.currentTarget });
         }}
+        className={menu ? "bg-white/[.13]" : ""}
       >
-        <MessageSquare size={16} />
-      </IconButton>
+        <MessageSquare size={15} /> Send feedback
+      </Button>
       {menu && (
         <Menu
           items={feedbackMenu()}
@@ -72,7 +73,7 @@ export function FeedbackButton() {
           }}
         />
       )}
-    </div>
+    </>
   );
 }
 

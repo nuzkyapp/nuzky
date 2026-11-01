@@ -103,12 +103,13 @@ def toolbar(r):
             and inside['gap'] == 6 and abs(inside['centre']) <= 1, inside)
     r.s.run(f"{cancel}.dispatchEvent(new PointerEvent('pointerout', {{bubbles: true, pointerType: 'mouse', relatedTarget: null}})); {cancel}.click()")
     wait(lambda: r.s.run("return !document.querySelector('dialog[open]')"), 5)
-    edge = "document.querySelector('header [data-feedback]')"
-    r.s.run(f"{edge}.dispatchEvent(new PointerEvent('pointerover', {{bubbles: true, pointerType: 'mouse'}}))")
+    # Projects is closest to the edge; its own tooltip with Ctrl+K is wide enough to be pushed in, so it gets a short one.
+    edge = "[...document.querySelectorAll('header button')].find((b) => b.textContent.trim() === 'Projects')"
+    r.s.run(f"{edge}.setAttribute('title', 'Projects'); {edge}.dispatchEvent(new PointerEvent('pointerover', {{bubbles: true, pointerType: 'mouse'}}))")
     centred = wait(lambda: r.s.run(f"""const t = document.querySelector('[data-tooltip]'); if (!t) return null; const a = t.getBoundingClientRect(), b = {edge}.getBoundingClientRect();
         return Math.round((a.left + a.width / 2) - (b.left + b.width / 2));"""), 2)
     r.check('a short tooltip near the window\'s left edge stays centred under its button', centred == 0, centred)
-    r.s.run(f"{edge}.dispatchEvent(new PointerEvent('pointerout', {{bubbles: true, pointerType: 'mouse', relatedTarget: null}}))")
+    r.s.run(f"{edge}.dispatchEvent(new PointerEvent('pointerout', {{bubbles: true, pointerType: 'mouse', relatedTarget: null}})); {edge}.setAttribute('title', 'Projects (Ctrl+K)')")
     r.shot('before')
     # talk.mp4 is portrait and fills the 9:16 canvas; turned a quarter it lies across the middle, black above it.
     upright = preview_brightness(r, r.work / 'before.png', 0.1)
