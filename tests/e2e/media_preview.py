@@ -5,7 +5,7 @@ import subprocess, time
 
 from PIL import ImageStat
 
-from e2e.harness import CLI, flow, preview_crop, preview_rect, wait, webdriver
+from e2e.harness import CLI, flow, leave_editor, preview_crop, preview_rect, wait, webdriver
 
 AT_US = 1_000_000
 TILE = "document.querySelector('[aria-label=\"Add clip.mp4 at playhead\"]').closest('.group').firstElementChild"
@@ -55,6 +55,7 @@ def media_preview(r):
     r.s.run(f'{TILE}.click()')
     if not r.check('a click on the tile shows the media item in the preview', wait(lambda: r.s.run(SHOWN) == '0', 15), r.s.run(SOURCE)):
         return
+    url = r.s.run(SOURCE)['preview']['url']
     time.sleep(0.5)
     r.check('a chip names it, with the way back', 'clip.mp4' in (r.s.run(CHIP) or ''), r.s.run(CHIP))
     rect = preview_rect(r)
@@ -101,6 +102,8 @@ def media_preview(r):
 
     r.s.run(f'{TILE}.click()')
     wait(lambda: r.s.run(SHOWN) == '0', 15)
+    r.check('opening it again after Esc reuses its frame server instead of starting another',
+            r.s.run(SOURCE)['preview']['url'] == url, r.s.run(SOURCE)['preview'])
     r.focus_clip(r.track()[0]['id'])
     r.check('choosing a clip on the timeline shows the timeline again, so its look is what the preview shows',
             wait(lambda: r.s.run(CHIP) is None, 5))
@@ -113,3 +116,11 @@ def media_preview(r):
             and wait(lambda: drawn() == '2000000', 8), drawn())
     r.check('the project is as it was', r.state()['tracks'] == before, r.state()['tracks'])
     r.check('no error toast', not r.errors(), r.errors())
+
+    r.s.run(f'{TILE}.click()')
+    wait(lambda: r.s.run(SHOWN) == '0', 15)
+    r.key(' ')
+    wait(lambda: r.s.run(SOURCE)['playing'], 5)
+    leave_editor(r)
+    r.check('closing the window to the projects closes the media item, which would play on there with no transport',
+            wait(lambda: r.s.run(SOURCE)['asset'] is None, 5), r.s.run(SOURCE))

@@ -1,6 +1,6 @@
 //! Plays an asset from Media without adding it to the open project's timeline.
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, OnceLock};
 
 use nuzky_engine::Project;
 use nuzky_engine::edit::EditCmd;
@@ -11,6 +11,9 @@ use crate::engine::{Engine, Msg};
 use crate::preview_server::PreviewServer;
 use crate::youtube_videos::VideoPreview;
 use crate::{AppState, CmdResult, err};
+
+/// Its accept thread never ends, so every opening after a close shares the first one.
+static SERVER: OnceLock<Arc<PreviewServer>> = OnceLock::new();
 
 /// Opens an asset in its own preview, reusing the engine when switching media.
 #[tauri::command]
@@ -40,7 +43,13 @@ pub async fn source_preview_open(app: AppHandle, asset_id: String) -> CmdResult<
         engine.send(Msg::Seek(0));
         preview.url = url.clone();
     } else {
-        let server = Arc::new(PreviewServer::start().map_err(err)?);
+        let server = match SERVER.get() {
+            Some(server) => server.clone(),
+            None => {
+                let server = Arc::new(PreviewServer::start().map_err(err)?);
+                SERVER.get_or_init(|| server).clone()
+            }
+        };
         preview.url = server.url.clone();
         let engine = Engine::start_other(
             app.clone(),

@@ -336,8 +336,9 @@ function useBackendEvents() {
     // The revision the run started from, unknown for a run already open at boot.
     let runStart: number | null = null;
     const unwatch = useEditor.subscribe((s, prev) => {
-      // A change to the timeline, choosing a clip on it or an AI run shows the timeline, so no edit happens unseen.
-      if ((s.aiRun && !prev.aiRun) || s.snap?.revision !== prev.snap?.revision || (s.selection !== prev.selection && s.selection.length > 0)) closeSource();
+      // A change to the timeline, choosing a clip on it or an AI run shows the timeline, so no edit happens unseen;
+      // going home stops the media item, which would play on with no transport.
+      if ((s.aiRun && !prev.aiRun) || s.snap?.revision !== prev.snap?.revision || (s.selection !== prev.selection && s.selection.length > 0) || (s.view === "home" && prev.view !== "home")) closeSource();
       if (s.aiRun) lastRun = s.aiRun;
       if (s.aiRun && !prev.aiRun) {
         runStart = prev.snap ? (s.snap?.revision ?? null) : null;
