@@ -171,7 +171,7 @@ export function DisabledHint() {
 }
 
 /** "Split at playhead (S)": the text and, drawn as a key, the shortcut. */
-const SHORTCUT = /^(.+?)\s+\(((?:(?:Ctrl|Cmd|Shift|Alt|Option)\+)*(?:[A-Z0-9+=,./[\]-]|F\d{1,2}|Esc|Delete|Del|Space|Enter|Tab|Home|End|Backspace|[←→↑↓]))\)$/;
+const SHORTCUT = /^(.+?)\s+\(((?:(?:Ctrl|Cmd|Shift|Alt|Option)\+)*(?:[A-Z0-9+=,./;'`\\[\]-]|F\d{1,2}|Esc|Delete|Del|Space|Enter|Tab|Home|End|PgUp|PgDn|Backspace|[←→↑↓]))\)$/;
 /** The wait before the first tooltip, and how long after one closes the next shows at once. */
 const TIP_DELAY_MS = 600;
 const TIP_WARM_MS = 800;

@@ -17,6 +17,7 @@ import { LayerOverlay } from "./LayerOverlay";
 import { PreviewDrop } from "./PreviewDrop";
 import { RatioMenu } from "./RatioMenu";
 import { ReframeStatus } from "./ReframeStatus";
+import { useKeyLabels } from "../../lib/keys";
 
 const HEADER = 24;
 const SAFE_ZONE_KEY = "nuzky.safeZone";
@@ -123,6 +124,7 @@ function Timecode({ duration }: { duration: number }) {
 
 /** The media item's transport, laid out as the timeline's so Play stays where the hand expects it. */
 function SourceTransport({ children }: { children: React.ReactNode }) {
+  const { withKey } = useKeyLabels();
   const playing = useSource((s) => s.playing);
   const timeUs = useSource((s) => s.timeUs);
   const duration = useSource(sourceDuration);
@@ -143,20 +145,20 @@ function SourceTransport({ children }: { children: React.ReactNode }) {
         )}
       </span>
       <div className="flex items-center gap-2.5">
-        <IconButton round label="Go to start (Home)" onClick={() => seekSource(0)} disabled={idle} className="@max-[440px]:hidden">
+        <IconButton round label={withKey("Go to start", "goStart")} onClick={() => seekSource(0)} disabled={idle} className="@max-[440px]:hidden">
           <SkipBack size={16} />
         </IconButton>
         <button
           type="button"
-          aria-label={playing ? "Pause (Space)" : "Play (Space)"}
-          title={picture ? "A picture does not play" : playing ? "Pause (Space)" : "Play (Space)"}
+          aria-label={withKey(playing ? "Pause" : "Play", "playPause")}
+          title={picture ? "A picture does not play" : withKey(playing ? "Pause" : "Play", "playPause")}
           disabled={idle}
           onClick={toggleSourcePlay}
           className="flex h-[38px] w-[38px] items-center justify-center rounded-full bg-fg text-black shadow-[0_1px_3px_rgb(0_0_0/.4)] transition-transform duration-[120ms] ease-out active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {playing ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" className="translate-x-px" />}
         </button>
-        <IconButton round label="Go to end (End)" onClick={() => seekSource(duration)} disabled={idle} className="@max-[440px]:hidden">
+        <IconButton round label={withKey("Go to end", "goEnd")} onClick={() => seekSource(duration)} disabled={idle} className="@max-[440px]:hidden">
           <SkipForward size={16} />
         </IconButton>
       </div>
@@ -207,6 +209,7 @@ function SourceChip() {
 }
 
 export function Preview() {
+  const { withKey } = useKeyLabels();
   const url = useEditor((s) => s.previewUrl);
   const canvas = useEditor((s) => s.snap?.project.canvas);
   const duration = useEditor((s) => (s.snap ? projectDuration(s.snap.project) : 0));
@@ -294,12 +297,12 @@ export function Preview() {
   const sourceBox = { w: box.w, h: Math.max(0, box.h - scrub) };
   const sourceFit = sourceBox.w / sourceBox.h > sourceAspect ? { h: sourceBox.h, w: sourceBox.h * sourceAspect } : { w: sourceBox.w, h: sourceBox.w / sourceAspect };
   const muteButton = (
-    <IconButton round label={muted ? "Unmute the preview (M)" : "Mute the preview (M)"} active={muted} onClick={toggleMuted}>
+    <IconButton round label={withKey(muted ? "Unmute the preview" : "Mute the preview", "mute")} active={muted} onClick={toggleMuted}>
       {muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
     </IconButton>
   );
   const fullButton = (
-    <IconButton round label={full ? "Exit full screen (F)" : "Full screen (F)"} onClick={() => void toggleFullPreview()}>
+    <IconButton round label={withKey(full ? "Exit full screen" : "Full screen", "fullScreen")} onClick={() => void toggleFullPreview()}>
       {full ? <Minimize size={16} /> : <Maximize size={16} />}
     </IconButton>
   );
@@ -383,20 +386,20 @@ export function Preview() {
         ) : <div className="bar grid h-11 w-full max-w-[620px] grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-full pl-[18px] pr-1.5">
           <Timecode duration={duration} />
           <div className="flex items-center gap-2.5">
-            <IconButton round label="Go to start (Home)" onClick={() => seek(0)} disabled={empty} className="@max-[440px]:hidden">
+            <IconButton round label={withKey("Go to start", "goStart")} onClick={() => seek(0)} disabled={empty} className="@max-[440px]:hidden">
               <SkipBack size={16} />
             </IconButton>
             <button
               type="button"
-              aria-label={playing ? "Pause (Space)" : "Play (Space)"}
-              title={playing ? "Pause (Space)" : "Play (Space)"}
+              aria-label={withKey(playing ? "Pause" : "Play", "playPause")}
+              title={withKey(playing ? "Pause" : "Play", "playPause")}
               disabled={empty}
               onClick={togglePlay}
               className="flex h-[38px] w-[38px] items-center justify-center rounded-full bg-fg text-black shadow-[0_1px_3px_rgb(0_0_0/.4)] transition-transform duration-[120ms] ease-out active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {playing ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" className="translate-x-px" />}
             </button>
-            <IconButton round label="Go to end (End)" onClick={() => seek(duration)} disabled={empty} className="@max-[440px]:hidden">
+            <IconButton round label={withKey("Go to end", "goEnd")} onClick={() => seek(duration)} disabled={empty} className="@max-[440px]:hidden">
               <SkipForward size={16} />
             </IconButton>
           </div>

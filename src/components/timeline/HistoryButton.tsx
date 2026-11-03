@@ -5,6 +5,7 @@ import { api } from "../../lib/api";
 import { currentEpoch, useEditor } from "../../lib/store";
 import type { HistoryPeek } from "../../lib/types";
 import { IconButton } from "../ui";
+import { useKeyLabels } from "../../lib/keys";
 
 export type Peek = HistoryPeek & { redo: boolean };
 
@@ -66,13 +67,14 @@ export function HistoryButton({ redo, locked, lines, onPeek }: { redo: boolean; 
   }, [shown]);
 
   const name = redo ? "Redo" : "Undo";
+  const { withKey, key } = useKeyLabels();
   const at = shown && lines && ref.current?.getBoundingClientRect();
   return (
     <>
       <IconButton
         ref={ref}
         round
-        label={locked ? `${name} is available when the AI is done` : !can ? `Nothing to ${name.toLowerCase()}` : redo ? "Redo (Ctrl+Shift+Z)" : "Undo (Ctrl+Z)"}
+        label={locked ? `${name} is available when the AI is done` : !can ? `Nothing to ${name.toLowerCase()}` : withKey(name, redo ? "redo" : "undo")}
         disabled={locked || !can}
         onClick={() => {
           setDismissed(true);
@@ -112,7 +114,7 @@ export function HistoryButton({ redo, locked, lines, onPeek }: { redo: boolean; 
                 {shown.ai ? `${name} AI run` : name}
                 {shown.label && ` · ${shown.label}`}
               </span>
-              <span className="ml-auto shrink-0 pl-3 font-normal text-muted">{redo ? "Ctrl+Shift+Z" : "Ctrl+Z"}</span>
+              <span className="ml-auto shrink-0 pl-3 font-normal text-muted">{key(redo ? "redo" : "undo")}</span>
             </div>
             {lines.map((line, i) => (
               <div key={i} className="mt-0.5 text-fg/85">

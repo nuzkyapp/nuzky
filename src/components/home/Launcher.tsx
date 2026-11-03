@@ -26,6 +26,7 @@ import { Button, trapTab } from "../ui";
 import { FormatShape, Quote, SpeechNote } from "./Home";
 import { Poster } from "./Poster";
 import { SwitchChoice } from "./SwitchConfirm";
+import { actionOf, chordsOf } from "../../lib/keys";
 
 const RECENT = 5;
 const FOUND = 6;
@@ -261,7 +262,7 @@ export function Launcher() {
     } else if (e.key === "Enter" && e.target === input.current) {
       e.preventDefault();
       choose(options[at]);
-    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+    } else if ((e.target !== input.current || e.ctrlKey || e.metaKey || e.altKey) && actionOf(chordsOf(e.nativeEvent)) === "projects") {
       e.preventDefault();
       close();
     }

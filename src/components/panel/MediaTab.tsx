@@ -7,6 +7,7 @@ import { openYoutube } from "../../lib/youtube";
 import type { Asset } from "../../lib/types";
 import { FadeImg, Menu, ProgressBar, lockedProps, useLockReason } from "../ui";
 import { ImportPlaceholder, ImportTile, KindIcon, addAtPlayhead, addOverlay, addPictureInPicture, assetDragHandler, pickAndImport, removeAsset } from "./assets";
+import { ariaKeys, useKeyLabels } from "../../lib/keys";
 
 /** Round action on a media tile; no blur, so a grid of them stays cheap to paint. */
 const ACTION = "flex h-[26px] w-[26px] items-center justify-center rounded-full transition-colors duration-[120ms] ease-out aria-disabled:cursor-not-allowed aria-disabled:opacity-40";
@@ -167,6 +168,7 @@ function YoutubeTile({ compact = false, className = "" }: { compact?: boolean; c
 }
 
 export function MediaTab() {
+  const { key } = useKeyLabels();
   const assets = useEditor((s) => s.snap?.project.assets ?? []);
   const importing = useEditor((s) => s.importing);
   return (
@@ -177,13 +179,13 @@ export function MediaTab() {
           <Film size={28} className="text-muted" />
           <p className="text-[13px] font-medium text-fg">No media yet</p>
           <p className="max-w-[240px] text-[12px] text-muted">Import videos, music or images, or drop files anywhere on the window.</p>
-          <ImportTile label="Import media" hint="Ctrl+I" shortcut="Control+I" onClick={() => pickAndImport()} className="mt-3 w-full max-w-[240px]" />
+          <ImportTile label="Import media" hint={key("import")} shortcut={ariaKeys(key("import"))} onClick={() => pickAndImport()} className="mt-3 w-full max-w-[240px]" />
           <YoutubeTile className="w-full max-w-[240px]" />
         </div>
       ) : (
         <>
           <div className="mx-3.5 flex gap-2">
-            <ImportTile label="Import media" hint="Ctrl+I" shortcut="Control+I" onClick={() => pickAndImport()} className="min-w-0 flex-1" />
+            <ImportTile label="Import media" hint={key("import")} shortcut={ariaKeys(key("import"))} onClick={() => pickAndImport()} className="min-w-0 flex-1" />
             <YoutubeTile compact />
           </div>
           <div className="grid min-h-0 grid-cols-[repeat(auto-fill,minmax(100px,1fr))] content-start gap-x-2 gap-y-3 overflow-y-auto px-3.5 pb-3.5">

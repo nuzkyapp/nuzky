@@ -29,6 +29,7 @@ import { MainStyle, MoreStyleFold } from "../inspector/TextSection";
 import { IMAGE_EXTENSIONS, importPaths } from "../panel/assets";
 import { AiLock, Button, ColorInput, Disclosure, IconButton, Menu, PresetTile, Section, Segmented, Slider, Switch, TextSwatch, useLockReason } from "../ui";
 import { COVERED_TOO_MUCH, useShownCover } from "./CoverStage";
+import { useKeyLabels } from "../../lib/keys";
 
 const CANNOT_CUT_OUT = "Cutting out the person doesn't work on this computer";
 
@@ -276,6 +277,7 @@ function OverlayList({ format, cover }: { format: ThumbnailFormat; cover: Thumbn
 
 /** A selected image on the cover: its size, place, rotation and opacity, and Reset to its corner. */
 function OverlayInspector({ format, index }: { format: ThumbnailFormat; index: number }) {
+  const { withKey } = useKeyLabels();
   const overlay = useEditor((s) => thumbnailOf(s.snap?.project, format)?.overlays?.[index]);
   const asset = useEditor((s) => s.snap?.project.assets.find((a) => a.id === overlay?.assetId));
   if (!overlay) return null;
@@ -286,7 +288,7 @@ function OverlayInspector({ format, index }: { format: ThumbnailFormat; index: n
       <div className="flex items-start justify-between pr-2">
         <InspectorHeader icon={ImageIcon} title="Image" detail={asset?.name ?? "Missing image"} />
         <div className="flex items-center gap-0.5 pt-3">
-          <IconButton label="Delete image (Delete)" onClick={() => void deleteOverlay(format, index)}>
+          <IconButton label={withKey("Delete image", "delete")} onClick={() => void deleteOverlay(format, index)}>
             <Trash2 size={15} />
           </IconButton>
         </div>
@@ -316,6 +318,7 @@ function useCoverHidden(): number[] {
 }
 
 function TextInspector({ format, index }: { format: ThumbnailFormat; index: number }) {
+  const { withKey } = useKeyLabels();
   const [position, setPosition] = useState(false);
   const text = useEditor((s) => thumbnailOf(s.snap?.project, format)?.texts[index]);
   const hidden = useCoverHidden()[index] ?? 0;
@@ -337,7 +340,7 @@ function TextInspector({ format, index }: { format: ThumbnailFormat; index: numb
           <IconButton label="Duplicate text" onClick={() => void duplicate()}>
             <Copy size={15} />
           </IconButton>
-          <IconButton label="Delete text (Delete)" onClick={() => void remove()}>
+          <IconButton label={withKey("Delete text", "delete")} onClick={() => void remove()}>
             <Trash2 size={15} />
           </IconButton>
         </div>

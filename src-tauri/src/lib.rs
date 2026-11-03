@@ -23,6 +23,7 @@ mod recap;
 mod reels;
 mod remote;
 mod sample;
+mod shortcuts;
 mod sounds;
 mod source_preview;
 mod stickers;
@@ -1384,6 +1385,7 @@ pub fn run() {
             source_preview::source_preview_seek,
             source_preview::source_preview_resize,
             sounds::sound_credits,
+            shortcuts::import_shortcuts,
             sounds::sound_settings,
             sounds::set_sound_settings,
             sounds::open_sound_page,

@@ -3,6 +3,7 @@ import { candidateOf, closeReels, playEnding, toggleReelPlay, useReels } from ".
 import { useEditor } from "../../lib/store";
 import { formatTime } from "../../lib/time";
 import { Button, IconButton } from "../ui";
+import { useKeyLabels } from "../../lib/keys";
 
 /** The playhead in the recording; the reel's span stands over its words. */
 function Where() {
@@ -12,6 +13,7 @@ function Where() {
 
 /** The transport while choosing reels: the reel from its start, its ending, and Done. */
 export function ReelBar() {
+  const { withKey } = useKeyLabels();
   const playing = useEditor((s) => s.playing);
   const current = useReels((s) => s.current);
   const c = useEditor((s) => candidateOf(s.snap?.project, current));
@@ -20,20 +22,20 @@ export function ReelBar() {
     <div className="bar grid h-11 w-full max-w-[620px] grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-full pl-[18px] pr-1.5">
       <Where />
       <div className="flex items-center gap-2.5">
-        <IconButton round label="Reel start (Home)" disabled={none} onClick={() => c && useEditor.getState().seek(c.startUs)}>
+        <IconButton round label={withKey("Reel start", "goStart")} disabled={none} onClick={() => c && useEditor.getState().seek(c.startUs)}>
           <SkipBack size={16} />
         </IconButton>
         <button
           type="button"
-          aria-label={playing ? "Pause (Space)" : "Play the reel (Space)"}
-          title={playing ? "Pause (Space)" : "Play the reel (Space)"}
+          aria-label={withKey(playing ? "Pause" : "Play the reel", "playPause")}
+          title={withKey(playing ? "Pause" : "Play the reel", "playPause")}
           disabled={none}
           onClick={toggleReelPlay}
           className="flex h-9 w-9 items-center justify-center rounded-full bg-fg text-black shadow-[0_1px_3px_rgb(0_0_0/.4)] transition-transform duration-[120ms] ease-out active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {playing ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" className="translate-x-px" />}
         </button>
-        <IconButton round label="Hear the ending (End)" disabled={none} onClick={playEnding}>
+        <IconButton round label={withKey("Hear the ending", "goEnd")} disabled={none} onClick={playEnding}>
           <SkipForward size={16} />
         </IconButton>
       </div>

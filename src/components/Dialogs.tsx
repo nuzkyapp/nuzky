@@ -4,6 +4,7 @@ import { BugReportDialog } from "./BugReportDialog";
 import { ChatGptDialog } from "./ChatGptDialog";
 import { ConnectAgentDialog } from "./ConnectAgentDialog";
 import { ExportDialog } from "./ExportDialog";
+import { KeysDialog } from "./KeysDialog";
 import { Launcher } from "./home/Launcher";
 import { OpenedDraftDialog } from "./home/OpenedDraftDialog";
 import { SwitchDialog } from "./home/SwitchConfirm";
@@ -32,6 +33,7 @@ export default function Dialogs() {
       <OpenedDraftDialog />
       <BugReportDialog />
       <ShareDialog />
+      <KeysDialog />
     </>
   );
 }

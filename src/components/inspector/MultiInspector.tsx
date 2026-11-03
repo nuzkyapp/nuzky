@@ -9,6 +9,7 @@ import { InspectorHeader, QUIET } from "./Header";
 import { BackgroundSection } from "./BackgroundSection";
 import { DuckingRow, VoiceSection } from "./MediaSections";
 import { StyleSection } from "./TextSection";
+import { useKeyLabels } from "../../lib/keys";
 
 type Found = { clip: Clip; track: Track };
 
@@ -150,6 +151,7 @@ function StyleRows({ found, coalesce }: { found: Found[]; coalesce: string }) {
 
 /** Several clips: the controls they all share, each change applied to all of them as one undo step. */
 export function MultiInspector({ ids }: { ids: string[] }) {
+  const { withKey } = useKeyLabels();
   const project = useEditor((s) => s.snap!.project);
   const found = ids.map((id) => findClip(project, id)).filter((f): f is Found => !!f);
   const info = found.map((f) => facts(project, f));
@@ -164,10 +166,10 @@ export function MultiInspector({ ids }: { ids: string[] }) {
       <InspectorHeader icon={Layers} title={`${found.length} clips selected`} detail={detail} />
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="grid grid-cols-2 gap-2 border-b border-white/[.07] px-4 pb-4 pt-1">
-          <Button onClick={duplicateSelection} title="Duplicate (Ctrl+D)">
+          <Button onClick={duplicateSelection} title={withKey("Duplicate", "duplicate")}>
             <Copy size={14} /> Duplicate
           </Button>
-          <Button variant="danger" onClick={deleteSelection} title="Delete (Delete)">
+          <Button variant="danger" onClick={deleteSelection} title={withKey("Delete", "delete")}>
             <Trash2 size={14} /> Delete
           </Button>
         </div>

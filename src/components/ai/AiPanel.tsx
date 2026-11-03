@@ -83,6 +83,7 @@ import { continueWithChatGpt, openChatGpt, planReady, useChatGpt } from "../../l
 import { EFFORTS, chooseEffort, chooseModel, effortLabel, loadModels, ownDefault, resolved, useModels } from "../../lib/models";
 import { moveFloatBy, startMove } from "./AiDock";
 import { GeminiGuide } from "./GeminiGuide";
+import { useKeyLabels } from "../../lib/keys";
 
 const INSTALL: Record<CliAgentId, string> = {
   claude: "https://docs.claude.com/en/docs/claude-code/setup",
@@ -1397,6 +1398,7 @@ export function AiPanel({
   about?: AiAbout;
   onClose?: () => void;
 }) {
+  const { withKey } = useKeyLabels();
   const busy = useAgent((s) => s.status !== "idle");
   const empty = useAgent((s) => s.items.length === 0);
   const left = useAgent((s) => s.jobs.some((j) => j.status === "running"));
@@ -1471,7 +1473,7 @@ export function AiPanel({
           <SquarePen size={15} />
         </IconButton>
         )}
-        <IconButton label={about === "style" ? "Close AI" : "Close AI (Ctrl+J)"} onClick={onClose ?? (() => useDock.setState({ open: false }))} className="h-7 w-7">
+        <IconButton label={about === "style" ? "Close AI" : withKey("Close AI", "aiPanel")} onClick={onClose ?? (() => useDock.setState({ open: false }))} className="h-7 w-7">
           <X size={16} />
         </IconButton>
       </header>
