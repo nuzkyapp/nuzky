@@ -1582,7 +1582,19 @@ impl Backend {
                 && !out.as_os_str().to_string_lossy().starts_with(&format!("{}.", self.project_path.display())),
             "Export cannot overwrite the project or its sidecars"
         );
-        let project = self.media_project(&state.project);
+        let mut project = self.media_project(&state.project);
+        if !args.leave_out_us.is_empty() {
+            let duration = project.duration_us();
+            ensure!(
+                args.leave_out_us.iter().all(|&[start, end]| 0 <= start && start < end && end <= duration),
+                "INVALID_ARGUMENTS: each leave_out_us range is [start_us, end_us) inside the timeline, 0 to {duration}"
+            );
+            let ranges = args.leave_out_us.iter().map(|&[start_us, end_us]| TimeRange { start_us, end_us }).collect();
+            project
+                .apply(EditCmd::RippleDeleteRanges { ranges, keep_track_ids: None })
+                .map_err(|e| anyhow!("INVALID_ARGUMENTS: {e:#}"))?;
+            ensure!(project.duration_us() > 0, "INVALID_ARGUMENTS: leave_out_us leaves nothing to export");
+        }
         let options = ExportOptions {
             resolution: args.resolution,
             fps: args.fps,
@@ -1599,7 +1611,11 @@ impl Backend {
         // What the creator's cut teaches, checked against the project as exported. This state may
         // hide another client's open run, so the session is asked too.
         let run_open = state.open_run.is_some() || self.host.session.state()?.open_run.is_some();
-        let moment = crate::style::moment(&self.host.session, state.project.clone(), run_open, false);
+        // A file that leaves part of the timeline out is not the creator's cut.
+        let moment = match args.leave_out_us.is_empty() {
+            true => crate::style::moment(&self.host.session, state.project.clone(), run_open, false),
+            false => Ok(None),
+        };
         let transcripts = self.host.transcripts.clone();
         self.host.start_job(
             &self.client.id,
