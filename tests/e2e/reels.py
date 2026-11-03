@@ -29,8 +29,12 @@ def setup(r):
     video = r.work / 'long-talk.mp4'
     inputs = [arg for take in takes for arg in ('-i', str(take))]
     sound = ''.join(f'[{n}:a]' for n in range(len(takes))) + f'concat=n={len(takes)}:v=0:a=1[a]'
+    # Its length given, as -shortest ends a little differently each run and the transcript of an earlier run would no
+    # longer belong to it (reuse_transcripts).
+    length = sum(float(subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=duration',
+                                       '-of', 'csv=p=0', str(take)], capture_output=True, text=True, check=True).stdout) for take in takes)
     subprocess.run(['ffmpeg', '-v', 'error', '-y', *inputs, '-f', 'lavfi', '-i', 'testsrc2=size=1920x1080:rate=30',
-                    '-filter_complex', sound, '-map', f'{len(takes)}:v', '-map', '[a]', '-shortest',
+                    '-filter_complex', sound, '-map', f'{len(takes)}:v', '-map', '[a]', '-t', f'{length:.3f}',
                     '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', str(video)], check=True)
     project = r.work / 'data/nuzky/projects/long-talk.nuzky'
     subprocess.run([str(CLI), 'new', str(project), str(video)], env=r.env, check=True, capture_output=True)
@@ -60,7 +64,7 @@ def project_length(path):
 
 @flow('reels', 'Reels from a long video: the Transcript tab opens the mode, Find reels shows the agent\'s moments live, two '
       'are checked and one trimmed by words, Make 2 reels writes two 9:16 projects of the right length into the source\'s collection',
-      before=setup)
+      before=setup, reuse_transcripts=True)
 def reels(r):
     source = r.s.run('return window.__nuzky.store.getState().snap.path')
     # A talk recorded wide, as podcasts are.

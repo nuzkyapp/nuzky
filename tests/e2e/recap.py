@@ -90,7 +90,7 @@ def recap(r):
     bridge = Bridge(r, r.saved_project())
     try:
         talk_us = r.track()[0]['durationUs']
-        job = poll(bridge, bridge.call('transcribe', {'language': 'en', 'model': 'small'}), 300)
+        job = poll(bridge, bridge.call('transcribe', {'language': 'en', 'model': 'small'}), 600)
         r.check('the speech is recognised', job['status'] == 'done', job)
 
         # The panel's agent cuts 1–3 s, words included.

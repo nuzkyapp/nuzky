@@ -174,7 +174,7 @@ def speech_model(r):
         click(r, 'Download', DIALOG)
         r.check('Download closes the question', wait(lambda: not dialog(r)['open'] and dialog(r)['question'] is None, 3))
         r.check('the download finishes and the agent completes without more input',
-                wait(lambda: agent(r)['status'] == 'idle' and r.s.run("return window.__nuzky.agent.getState().items.filter((i) => i.kind === 'agent').at(-1)?.text.startsWith('Hotovo')"), 180))
+                wait(lambda: agent(r)['status'] == 'idle' and r.s.run("return window.__nuzky.agent.getState().items.filter((i) => i.kind === 'agent').at(-1)?.text.startsWith('Hotovo')"), 600))
         r.check('the speech-model job finished', speech_job(r)['status'] == 'done', speech_job(r))
         r.check('both complete models exist and no partial file remains', (models / MODEL).exists()
                 and (models / MODEL).stat().st_size == SIZE and (models / VAD).exists() and not list(models.glob('*.part')))

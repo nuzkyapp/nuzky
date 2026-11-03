@@ -192,7 +192,7 @@ def presets(r, bridge):
     r.check('None removes the motion', wait(lambda: keys(r) == [], 10), keys(r))
 
     # From the playhead to the end of the sentence said there, from the transcript.
-    job = poll(bridge, bridge.call('transcribe', {'language': 'en', 'model': 'small'}), 300)
+    job = poll(bridge, bridge.call('transcribe', {'language': 'en', 'model': 'small'}), 600)
     r.check('the speech is recognised', job['status'] == 'done', job)
     words = bridge.call('get_transcript', {})['words']
     first_end = next(i for i, w in enumerate(words) if w['text'].strip().endswith('.'))

@@ -76,6 +76,9 @@ fn fixture(dir: &Path) -> Fixture {
     let speech = dir.join("speech.wav");
     ffmpeg(&["-f", "concat", "-safe", "0", "-i", parts.join("list.txt").to_str().unwrap(), speech.to_str().unwrap()]);
     let recording = dir.join("talk.mp4");
+    // Its length given, as -shortest ends a little differently each run and the transcript stored by an earlier test
+    // would not fit it.
+    let length = format!("{:.3}", duration(&speech));
     ffmpeg(&[
         "-f",
         "lavfi",
@@ -83,7 +86,8 @@ fn fixture(dir: &Path) -> Fixture {
         "testsrc2=s=540x960:r=30",
         "-i",
         speech.to_str().unwrap(),
-        "-shortest",
+        "-t",
+        &length,
         "-c:v",
         "libx264",
         "-preset",

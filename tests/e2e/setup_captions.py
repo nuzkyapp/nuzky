@@ -6,7 +6,7 @@ model depends on the language, the chosen model follows the language while it is
 downloaded and at least as big. Czech is only the test's system language here."""
 import json, time
 
-from e2e.harness import FIXTURES, MACOS, MODELS, WINDOWS, flow, press, wait
+from e2e.harness import FIXTURES, MACOS, MODELS, WINDOWS, flow, press, share_recognition_lock, wait
 from e2e.home import focus_card, make, resize, wait_library
 from e2e.setup import BOX, CLICK, FOCUS_TEXT, relaunch
 from e2e.speech_model import Models
@@ -59,6 +59,7 @@ def mb(*names):
 
 def before(r):
     (r.work / 'data/nuzky/models').mkdir(parents=True)
+    share_recognition_lock(r.work / 'data/nuzky/models')
     r.models = Models(PATHS)
     r.env.update(NUZKY_MODEL_URL=f'http://127.0.0.1:{r.models.http.server_port}', NUZKY_TEST_FREE_MB=str(FREE_MB),
                  LANGUAGE='cs', LANG='cs_CZ.UTF-8')

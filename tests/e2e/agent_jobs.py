@@ -34,15 +34,18 @@ def agent_jobs(r):
         if found and int(found[1]) not in seen:
             seen.append(int(found[1]))
         return len([p for p in seen if 0 < p < 100]) >= 3
-    r.check("the agent's transcription shows in the top bar with a percentage that moves", wait(moving, 180, 0.2), seen)
+    r.check("the agent's transcription shows in the top bar with a percentage that moves", wait(moving, 600, 0.2), seen)
     r.shot('transcribing')
     r.check('the percentage only goes up', seen == sorted(seen), seen)
-    r.check('the agent waits on the job until it is done and says so', wait(lambda: 'Přepis skončil: done.' in panel(r)['text'], 300), panel(r)['text'])
+    r.check('the agent waits on the job until it is done and says so', wait(lambda: 'Přepis skončil: done.' in panel(r)['text'], 600), panel(r)['text'])
     r.check('the capsule leaves the top bar once it is done', wait(lambda: 'Transcribing' not in r.s.run(TOP_BAR), 5), r.s.run(TOP_BAR))
     idle(r)
 
     send(r, 'transcribe again please')
     r.check('a second transcription shows again', wait(lambda: 'Transcribing' in r.s.run(TOP_BAR), 60), r.s.run(TOP_BAR))
+    # Its turn may wait behind another flow's recognition (one at a time on a computer); Stop has to end a running one.
+    r.check('the second transcription is recognising speech',
+            wait(lambda: (found := re.search(r'Transcribing\s*(\d+)%', r.s.run(TOP_BAR) or '')) and int(found[1]) > 0, 600, 0.2), r.s.run(TOP_BAR))
     started = time.monotonic()
     click(r, 'Stop', 'header')
     stopped = wait(lambda: any(j[1] == 'cancelled' for j in r.s.run(AGENT_JOBS)), 5, 0.05)

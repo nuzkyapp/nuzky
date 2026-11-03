@@ -8,7 +8,7 @@ On Linux WebKitWebDriver drives the app and on Windows Microsoft Edge WebDriver 
 no WebDriver for an app's webview, so there the debug app answers the same requests itself, over a private
 socket, when the harness starts it with a secret (src-tauri/src/test_bridge.rs).
 """
-import base64, datetime, functools, json, os, queue, secrets, shutil, signal, socket, subprocess, sys, tempfile, threading, time
+import base64, datetime, functools, hashlib, json, os, queue, secrets, shutil, signal, socket, subprocess, sys, tempfile, threading, time
 import traceback, urllib.error, urllib.request
 from pathlib import Path
 
@@ -46,14 +46,19 @@ def edge_driver():
 
 DRIVER = edge_driver() if WINDOWS else WEBKIT_DRIVER
 DEBUG_PORT = 4445  # The webview's on Windows, which Edge WebDriver attaches to.
+# scripts/repro.py gives each of the app sessions it runs side by side a WebDriver port of its own.
+DRIVER_PORT = int(os.environ.get('NUZKY_REPRO_DRIVER_PORT', '4444'))
 
 
-def flow(name, description, before=None, home=False, first_launch=False):
+def flow(name, description, before=None, home=False, first_launch=False, reuse_transcripts=False):
     """`home`: the flow starts on the home screen; others start in the editor of the restored project.
-    `first_launch`: Get set up stays open when a fresh profile opens it by itself; other flows start without it."""
+    `first_launch`: Get set up stays open when a fresh profile opens it by itself; other flows start without it.
+    `reuse_transcripts`: the flow only reads what was said, so it starts with what an earlier run recognised in the same
+    media with the same model (`transcript_pool`); a flow that checks recognition itself must not set it."""
     def register(fn):
         fn.home = home
         fn.first_launch = first_launch
+        fn.reuse_transcripts = reuse_transcripts
         FLOWS[name] = (description, before, fn)
         return fn
     return register
@@ -66,7 +71,7 @@ def webdriver(method, path, body=None, retries=0):
     if MACOS:
         return _bridge(method, path, body, retries)
     data = json.dumps(body).encode() if body is not None else None
-    request = urllib.request.Request('http://127.0.0.1:4444' + path, data=data, method=method,
+    request = urllib.request.Request(f'http://127.0.0.1:{DRIVER_PORT}' + path, data=data, method=method,
                                      headers={'Content-Type': 'application/json'})
     for attempt in range(retries + 1):
         try:
@@ -358,8 +363,8 @@ def start_driver(r):
     """The WebDriver, which on Linux starts the app with its own environment, so r.env as it is now."""
     # Tauri 2 lets WebDriver drive its webview only with this set, as tauri-driver does.
     host = [] if WINDOWS else ['--host=127.0.0.1']
-    r.driver = start([str(DRIVER), '--port=4444', *host], r.work / 'driver.log', r.launch_env(TAURI_WEBVIEW_AUTOMATION='true'))
-    if not started(r.driver, 4444, 20):
+    r.driver = start([str(DRIVER), f'--port={DRIVER_PORT}', *host], r.work / 'driver.log', r.launch_env(TAURI_WEBVIEW_AUTOMATION='true'))
+    if not started(r.driver, DRIVER_PORT, 20):
         raise RuntimeError(f'{Path(DRIVER).name} did not start, see driver.log')
 
 
@@ -368,16 +373,19 @@ def run_flow(name):
     print(f'\n==> {name}: {description}', flush=True)
     # Unix socket paths must stay short, and macOS's TMPDIR is long.
     runtime = tempfile.mkdtemp(prefix='nuzky-repro-', dir='/tmp' if MACOS else None)
+    began = time.monotonic()
     global RUN
     r = RUN = Run(name, runtime)
     error = None
     try:
         if before:
             before(r)
+        if body.reuse_transcripts:
+            reuse_transcripts(r)
         if not MACOS:
             # A WebDriver that is not ours would launch the app outside this run's directories.
-            if not wait(lambda: not port_busy(4444), 10):
-                raise RuntimeError('port 4444 is in use by another session')
+            if not wait(lambda: not port_busy(DRIVER_PORT), 10):
+                raise RuntimeError(f'port {DRIVER_PORT} is in use by another session')
             start_driver(r)
         r.s = Session()
         if not wait(lambda: r.s.run('return !!window.__nuzky?.store.getState().snap', retries=3), 60):
@@ -401,11 +409,14 @@ def run_flow(name):
         if r.app:
             stop(r.app)
         shutil.rmtree(runtime, ignore_errors=True)
+    # The store holds only finished recognitions, so they count even when a later check failed.
+    if body.reuse_transcripts:
+        keep_transcripts(r)
     revision = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=ROOT, capture_output=True, text=True).stdout.strip()
     dirty = bool(subprocess.run(['git', 'status', '--porcelain'], cwd=ROOT, capture_output=True, text=True).stdout)
     result = {'flow': name, 'description': description, 'passed': not error and bool(r.checks) and all(c['ok'] for c in r.checks),
               'checks': r.checks, 'error': error, 'screenshots': r.shots, 'command': f'python3 scripts/repro.py {name}',
-              'revision': revision, 'uncommitted_changes': dirty, 'finished': datetime.datetime.now().isoformat(timespec='seconds')}
+              'revision': revision, 'uncommitted_changes': dirty, 'seconds': round(time.monotonic() - began), 'finished': datetime.datetime.now().isoformat(timespec='seconds')}
     (r.work / 'result.json').write_text(json.dumps(result, indent=2, ensure_ascii=False, default=lambda o: sorted(o) if isinstance(o, set) else str(o)) + '\n')
 
 
@@ -948,6 +959,34 @@ def comma_locale(r):
 ALIGN_MODELS = ('wav2vec2-xls-r-300m-cs-250-q8_0.gguf', 'wav2vec2-base-960h.gguf')
 
 
+def transcript_pool():
+    """Recognised speech the flows with `reuse_transcripts` share across runs and checkouts, beside the test media. Its
+    folder is named after the code that recognises speech, so a change to it recognises everything again."""
+    sources = sorted([*(ROOT / 'crates/analysis/src').rglob('*.rs'), ROOT / 'crates/mcp/src/transcript.rs',
+                      ROOT / 'crates/session/src/transcripts.rs', ROOT / 'crates/analysis/Cargo.toml'])
+    key = hashlib.sha256(b''.join(p.read_bytes() for p in sources)).hexdigest()[:16]
+    return Path(os.environ.get('NUZKY_DEPS') or Path.home() / '.cache/nuzky/deps') / 'transcripts' / key
+
+
+def reuse_transcripts(r):
+    """The app's store keys a transcript by the file's contents only, so the flow gets those of the model it will use: the
+    most accurate one linked into it, as the app picks."""
+    model = next((m for m in ('large-v3-turbo-q5_0', 'small', 'base') if (r.work / f'data/nuzky/models/ggml-{m}.bin').exists()), None)
+    pool = transcript_pool() / str(model)
+    if model and pool.is_dir():
+        shutil.copytree(pool, r.work / 'data/nuzky/transcripts', dirs_exist_ok=True)
+
+
+def keep_transcripts(r):
+    for record in (r.work / 'data/nuzky/transcripts').glob('*.json'):
+        target = transcript_pool() / json.loads(record.read_text())['model'] / record.name
+        if not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            part = target.with_name(f'.{record.name}.{os.getpid()}')
+            shutil.copyfile(record, part)
+            os.replace(part, target)
+
+
 def link_models(r, names=('ggml-small.bin', 'ggml-silero-v5.1.2.bin')):
     models = r.work / 'data/nuzky/models'
     models.mkdir(parents=True)
@@ -956,3 +995,17 @@ def link_models(r, names=('ggml-small.bin', 'ggml-silero-v5.1.2.bin')):
             os.link(MODELS / name, models / name)
         except OSError:
             shutil.copy(MODELS / name, models / name)
+    share_recognition_lock(models)
+
+
+def share_recognition_lock(models):
+    """The app recognises speech one file at a time on a computer, by a lock beside the models. One lock for every flow
+    keeps that true for the flows side by side, so a Stop still ends a recognition within seconds; a flow's recognition
+    may then wait its turn, so flows give it 600 s. The Rust tests keep their own, as their time limits do not allow
+    for the flows' turns."""
+    lock = OUT / '.recognition.lock'
+    lock.touch()
+    try:
+        os.link(lock, models / '.recognition.lock')
+    except OSError:
+        pass
