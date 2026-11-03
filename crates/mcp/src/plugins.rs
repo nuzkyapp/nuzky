@@ -30,10 +30,11 @@ use rquickjs::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
+use crate::plugin_system::{self, Reach};
 use crate::{plugin_files, plugin_tools};
 pub use plugin_tools::slow_tools_for_tests;
 
-pub const API: u64 = 2;
+pub const API: u64 = 3;
 pub const GUIDE: &str = include_str!("../../../skills/nuzky-plugin/SKILL.md");
 pub(crate) const MAX_SCRIPT_BYTES: u64 = 1 << 20;
 pub(crate) const MAX_TEXT_BYTES: u64 = 64 << 10;
@@ -53,6 +54,8 @@ const MAX_PROJECT_BYTES: usize = crate::limits::MAX_TOOL_BYTES;
 const MAX_STRING_CHARS: usize = 10_000;
 const MAX_LOG_LINES: usize = 200;
 const RUN_LIMIT: Duration = Duration::from_secs(60);
+/// A plugin with full access may export, upload or run another program, which takes longer.
+const SYSTEM_LIMIT: Duration = Duration::from_secs(10 * 60);
 /// Saving runs the script's top level once, to report syntax errors and a missing `run`.
 const SAVE_LIMIT: Duration = Duration::from_secs(5);
 /// What the plugin's process may take: QuickJS's 256 MB, the project and its copy at the 64 MB size limit, with room
@@ -93,6 +96,11 @@ pub struct Manifest {
     /// Nuzky's tools its `run` may ask for after its edits, so Nuzky can say what the plugin does before it runs.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<String>,
+    /// From API 3 on: its script may read and write any file, use the internet and run programs (`nuzky.fs`,
+    /// `nuzky.fetch`, `nuzky.exec`), only in a run the user started from the app after allowing this version of it
+    /// (`allow_access`). A preview reaches none of them, and an agent cannot run it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub full_access: bool,
 }
 
 fn default_action() -> String {
@@ -114,6 +122,29 @@ pub enum Need {
 pub struct Action {
     pub id: String,
     pub label: String,
+    /// A file or folder the app asks the user for when the button is pressed, given to the run as `ctx.file`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ask: Option<Ask>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Ask {
+    pub kind: AskKind,
+    /// What the dialog offers, such as `["xml"]`; any file when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extensions: Vec<String>,
+    /// The file name a save dialog suggests; `{project}` stands for the project's name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AskKind {
+    Save,
+    Open,
+    Folder,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -225,6 +256,7 @@ impl<'de> Deserialize<'de> for Options {
 
 /// An installed plugin as the app and list_plugins show it.
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Plugin {
     /// The folder's name.
     pub id: String,
@@ -236,6 +268,9 @@ pub struct Plugin {
     /// Whether it has a plugin.js to run; a plugin may only add effects.
     pub runs: bool,
     pub effects: Vec<EffectStatus>,
+    /// For a plugin with full access, the version the user allows, and whether they allowed it.
+    pub access_key: Option<String>,
+    pub allowed: bool,
 }
 
 /// One of a plugin's effects as this computer draws it.
@@ -349,7 +384,7 @@ pub(crate) fn manifest(value: &Value) -> Result<Manifest> {
     let api = value
         .get("nuzkyPlugin")
         .and_then(Value::as_u64)
-        .context("PLUGIN_BROKEN: plugin.json: nuzkyPlugin must be 1 or 2")?;
+        .context("PLUGIN_BROKEN: plugin.json: nuzkyPlugin must be 1, 2 or 3")?;
     ensure!(api <= API, "PLUGIN_API_NEWER: This plugin needs a newer Nuzky. Update Nuzky.");
     ensure!(api >= 1, "PLUGIN_API_OLD: This plugin was made for an older Nuzky. Ask its author for a new version.");
     let mut manifest = Manifest::deserialize(value).map_err(|e| anyhow!("PLUGIN_BROKEN: plugin.json: {e}"))?;
@@ -457,7 +492,40 @@ pub(crate) fn manifest(value: &Value) -> Result<Manifest> {
         })?;
     }
     panel(api, &mut manifest)?;
+    access(api, &manifest)?;
     Ok(manifest)
+}
+
+/// Checks what API 3 adds: full access, and the files its buttons ask for, which only a plugin with it can use.
+fn access(api: u64, manifest: &Manifest) -> Result<()> {
+    ensure!(!manifest.full_access || api >= 3, "PLUGIN_BROKEN: plugin.json: fullAccess needs nuzkyPlugin 3");
+    for action in &manifest.actions {
+        let Some(ask) = &action.ask else { continue };
+        let id = &action.id;
+        ensure!(manifest.full_access, "PLUGIN_BROKEN: plugin.json: ask of action {id} needs \"fullAccess\": true");
+        ensure!(
+            ask.extensions.len() <= 10
+                && ask
+                    .extensions
+                    .iter()
+                    .all(|e| (1..=10).contains(&e.len()) && e.bytes().all(|c| c.is_ascii_alphanumeric())),
+            "PLUGIN_BROKEN: plugin.json: ask of action {id}: at most 10 extensions of 1 to 10 letters and digits, without the dot"
+        );
+        ensure!(
+            ask.kind != AskKind::Folder || ask.extensions.is_empty(),
+            "PLUGIN_BROKEN: plugin.json: ask of action {id}: a folder has no extensions"
+        );
+        if let Some(name) = &ask.name {
+            ensure!(
+                ask.kind == AskKind::Save
+                    && (1..=100).contains(&name.chars().count())
+                    && !name.contains(['/', '\\'])
+                    && !name.chars().any(char::is_control),
+                "PLUGIN_BROKEN: plugin.json: ask of action {id}: name is a file name of 1 to 100 characters, only for save"
+            );
+        }
+    }
+    Ok(())
 }
 
 /// Checks what API 2 adds to the panel: buttons, headed sections, inputs shown for another's value, checkboxes and
@@ -537,7 +605,7 @@ fn panel(api: u64, manifest: &mut Manifest) -> Result<()> {
 /// The plugin's buttons; one without `actions` has one, `run`, labelled with its `action`.
 fn actions(manifest: &Manifest) -> Vec<Action> {
     if manifest.actions.is_empty() {
-        vec![Action { id: "run".into(), label: manifest.action.clone() }]
+        vec![Action { id: "run".into(), label: manifest.action.clone(), ask: None }]
     } else {
         manifest.actions.clone()
     }
@@ -610,8 +678,9 @@ fn read(path: &Path, max: u64) -> Result<String> {
     std::fs::read_to_string(path).context("unreadable")
 }
 
-/// The manifest and plugin.js, which a plugin that only adds effects may leave out.
-fn open(folder: &Path) -> Result<(Manifest, Option<String>)> {
+/// The manifest and plugin.js, which a plugin that only adds effects may leave out, and for a plugin with full access
+/// the key of this version, which the user allows.
+fn open(folder: &Path) -> Result<(Manifest, Option<String>, Option<String>)> {
     ensure!(
         std::fs::symlink_metadata(folder).is_ok_and(|meta| meta.is_dir()),
         "PLUGIN_BROKEN: the plugin is a link, not a folder"
@@ -635,7 +704,8 @@ fn open(folder: &Path) -> Result<(Manifest, Option<String>)> {
     for name in &manifest.files {
         plugin_files::present(folder, name).map_err(|e| anyhow!("PLUGIN_BROKEN: {name}: {e:#}"))?;
     }
-    Ok((manifest, script))
+    let key = manifest.full_access.then(|| plugin_system::key(&text, script.as_deref().unwrap_or_default()));
+    Ok((manifest, script, key))
 }
 
 /// What is wrong with an effect's WGSL as the renderer checks it, starting with its file and, when it has one, the line
@@ -685,8 +755,10 @@ fn entry(folder: &Path) -> Plugin {
     let id = folder.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
     let readme = read(&folder.join("README.md"), MAX_TEXT_BYTES).ok();
     match open(folder) {
-        Ok((manifest, script)) => Plugin {
+        Ok((manifest, script, key)) => Plugin {
             effects: effect_statuses(&id, &manifest),
+            allowed: key.as_deref().is_some_and(|key| plugin_system::allowed(&id, key)),
+            access_key: key,
             id,
             status: "ok",
             error: None,
@@ -702,6 +774,8 @@ fn entry(folder: &Path) -> Plugin {
             readme,
             runs: false,
             effects: Vec::new(),
+            access_key: None,
+            allowed: false,
         },
     }
 }
@@ -765,7 +839,7 @@ pub fn save_with_files(
         effect_problem(&file, &source).map_err(|why| anyhow!("PLUGIN_BROKEN: {why}"))?;
     }
     if let Some(script) = script {
-        sandbox(script, "PLUGIN_BROKEN", SAVE_LIMIT, Rc::default(), Rc::new(|_| {}), |_, _| Ok(()))?;
+        sandbox(script, "PLUGIN_BROKEN", SAVE_LIMIT, Rc::default(), Rc::new(|_| {}), Reach::Preview, |_, _| Ok(()))?;
     }
     let failed = "STORE_WRITE_FAILED: cannot save the plugin";
     // A plugin folder from someone else may hold links; writing through one would overwrite the file it points at.
@@ -846,6 +920,18 @@ pub(crate) struct Prepared {
     files: Vec<Asset>,
     /// Their copies, by asset id, until the edits place them.
     staged: HashMap<String, plugin_files::Staged>,
+    /// What `nuzky.fs`, `nuzky.fetch` and `nuzky.exec` do in this run.
+    reach: Reach,
+}
+
+/// Who runs the plugin, which decides what a plugin with full access may do.
+pub(crate) enum Caller {
+    /// A preview, or an agent's dry run: it changes nothing and reaches nothing.
+    Preview,
+    /// An agent, which may not run a plugin with full access, so no agent gets the user's files, network or programs.
+    Agent,
+    /// The user pressed its button, or turned on its automatic runs; `file` is what its button asked for.
+    App { file: Option<String> },
 }
 
 impl Prepared {
@@ -892,6 +978,7 @@ impl Prepared {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn prepare(
     host: &Host,
     state: &SessionState,
@@ -900,29 +987,64 @@ pub(crate) fn prepare(
     action: Option<&str>,
     selection: Option<Vec<String>>,
     playhead_us: Option<i64>,
+    caller: Caller,
 ) -> Result<Prepared> {
     let folder = dir()?.join(id);
     ensure!(
         is_id(id) && folder.join("plugin.json").is_file(),
         "PLUGIN_NOT_FOUND: no plugin {id:?}; list_plugins shows the installed ones"
     );
-    let (manifest, script) = open(&folder)?;
+    let (manifest, script, key) = open(&folder)?;
     let script = script.with_context(|| {
         format!("PLUGIN_NO_SCRIPT: {} only adds effects; put one on a clip with setEffects", manifest.name)
     })?;
+    let pressed = self::action(&manifest, action)?;
+    let asks = actions(&manifest).into_iter().find(|a| a.id == pressed).and_then(|a| a.ask);
+    let (reach, file) = match (caller, &key) {
+        (Caller::Preview, Some(_)) => (Reach::Preview, None),
+        (Caller::Preview | Caller::Agent, None) => (Reach::None, None),
+        (Caller::Agent, Some(_)) => bail!(
+            "PLUGIN_FULL_ACCESS: {} has full access to the user's computer, so only the user runs it, from the Plugins \
+             panel; ask them to press its button",
+            manifest.name
+        ),
+        (Caller::App { file }, Some(key)) => {
+            ensure!(
+                plugin_system::allowed(id, key),
+                "PLUGIN_NOT_ALLOWED: {} has full access to your computer. Open it in Plugins and allow it first.",
+                manifest.name
+            );
+            (Reach::Live, file)
+        }
+        (Caller::App { file }, None) => (Reach::None, file),
+    };
+    match (&asks, &file) {
+        (Some(_), None) if reach == Reach::Live => bail!(
+            "PLUGIN_NEEDS_FILE: {} asks where to work when its button is pressed, so it runs only from its button",
+            manifest.name
+        ),
+        (None, Some(_)) => bail!("INVALID_INPUT: this action of {} asks for no file", manifest.name),
+        (_, Some(file)) => ensure!(Path::new(file).is_absolute(), "INVALID_INPUT: the file must be an absolute path"),
+        _ => {}
+    }
     let mut ctx = json!({
         "api": API,
         "project": crate::tools::state_value(state, crate::params::State { range: None, clip_ids: None })?,
         "inputs": inputs(&manifest, given)?,
-        "action": self::action(&manifest, action)?,
+        "action": pressed,
         "selection": selection.unwrap_or_else(|| state.selection.clone()),
         "playheadUs": playhead_us.unwrap_or(state.playhead_us),
         "files": {},
+        "preview": reach != Reach::Live,
     });
     let dir = host.session.path().parent().map(Path::to_path_buf).unwrap_or_default();
     let mut media = state.project.clone();
     for asset in &mut media.assets {
         asset.path = dir.join(&asset.path).to_string_lossy().into_owned();
+    }
+    if reach != Reach::None {
+        ctx["paths"] = plugin_system::paths(&host.session.path(), &folder, &media);
+        ctx["file"] = json!(file);
     }
     if manifest.needs.contains(&Need::Words) {
         let derived = crate::transcript::derive(&media, &host.transcripts)?;
@@ -934,7 +1056,7 @@ pub(crate) fn prepare(
         ctx["words"] = crate::transcript::summary(&derived, None)?["words"].take();
         ctx["transcriptKey"] = json!(crate::transcript::word_key(&state.project, &derived.words));
     }
-    Ok(Prepared { manifest, script, ctx, media, folder, dir, files: vec![], staged: HashMap::new() })
+    Ok(Prepared { manifest, script, ctx, media, folder, dir, files: vec![], staged: HashMap::new(), reach })
 }
 
 #[derive(Serialize, Deserialize)]
@@ -957,9 +1079,10 @@ type Checked = (Output, Result<Project, String>);
 
 type Logs = Rc<RefCell<VecDeque<String>>>;
 
-fn execute(script: &str, input: String, progress: impl Fn(f32) + 'static) -> Result<Output> {
+fn execute(script: &str, input: String, reach: Reach, progress: impl Fn(f32) + 'static) -> Result<Output> {
     let logs = Logs::default();
-    let result = sandbox(script, "PLUGIN_FAILED", RUN_LIMIT, logs.clone(), Rc::new(progress), |ctx, run| {
+    let limit = limit(reach);
+    let result = sandbox(script, "PLUGIN_FAILED", limit, logs.clone(), Rc::new(progress), reach, |ctx, run| {
         let returned: rquickjs::Value = run.call((ctx.json_parse(input)?,))?;
         ctx.json_stringify(returned)?.map(|json| json.to_string()).transpose()
     });
@@ -969,6 +1092,10 @@ fn execute(script: &str, input: String, progress: impl Fn(f32) + 'static) -> Res
         if tail.is_empty() { error } else { anyhow!("{error:#}\nLast lines of its log:\n{}", tail.join("\n")) }
     })?;
     Ok(Output { edits, message, logs, items, tools, planned: Vec::new() })
+}
+
+fn limit(reach: Reach) -> Duration {
+    if reach == Reach::Live { SYSTEM_LIMIT } else { RUN_LIMIT }
 }
 
 type Returned = (Vec<EditCmd>, Option<String>, BTreeMap<String, Vec<Choice>>, Vec<plugin_tools::Call>);
@@ -1244,6 +1371,7 @@ pub(crate) fn start(
 /// Runs the plugin from the app's UI in a run of its own labelled after it, so the AI lock and Stop apply and its
 /// edits are one undo step. `action` is the button pressed, the primary one when None. Answers the job, whose `run_id`
 /// is that run.
+/// `file` is what the button's `ask` got from the user.
 pub fn run_in_app(
     host: &Arc<Host>,
     id: &str,
@@ -1251,9 +1379,11 @@ pub fn run_in_app(
     action: Option<&str>,
     selection: Vec<String>,
     playhead_us: i64,
+    file: Option<String>,
 ) -> Result<Value> {
     let state = host.session.state()?;
-    let prepared = prepare(host, &state, id, inputs, action, Some(selection), Some(playhead_us))?;
+    let caller = Caller::App { file };
+    let prepared = prepare(host, &state, id, inputs, action, Some(selection), Some(playhead_us), caller)?;
     let run = host.session.begin_run(format!("Plugin: {}", prepared.manifest.name))?;
     // Edits the user made since `state` was read fail the batch with STALE_REVISION.
     let started = start(host, "app", Some(run.run_id.clone()), Mode::App, prepared, &state);
@@ -1276,7 +1406,7 @@ pub fn dry_run_in_app(
     cancel: Arc<AtomicBool>,
 ) -> Result<Value> {
     let state = host.session.state()?;
-    let mut prepared = prepare(host, &state, id, inputs, None, Some(selection), Some(playhead_us))?;
+    let mut prepared = prepare(host, &state, id, inputs, None, Some(selection), Some(playhead_us), Caller::Preview)?;
     prepared.stock(&cancel)?;
     // The app prepares every file's sound in a job of its own, which the user sees; a preview never decodes.
     prepared.gather(&host.cache_dir, false, &cancel, &|_| {})?;
@@ -1301,6 +1431,14 @@ struct Sandboxed(Child);
 
 impl Drop for Sandboxed {
     fn drop(&mut self) {
+        // With full access it leads a process group of its own, which holds the programs it started.
+        #[cfg(unix)]
+        // SAFETY: kill only sends a signal; the group exists only while the process does, which wait below reaps.
+        unsafe {
+            if libc::getpgid(self.0.id() as libc::pid_t) == self.0.id() as libc::pid_t {
+                libc::kill(-(self.0.id() as libc::pid_t), libc::SIGKILL);
+            }
+        }
         self.0.kill().ok();
         self.0.wait().ok();
     }
@@ -1321,7 +1459,14 @@ fn isolated(
         None => std::env::current_exe().context("PLUGIN_FAILED: cannot find Nuzky to run the plugin")?,
     };
     let mut command = Command::new(program);
-    command.arg("plugin-sandbox").env_clear().stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    command.arg("plugin-sandbox").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    // The programs a plugin with full access starts find what they would in the user's shell; Stop ends them all.
+    if prepared.reach == Reach::Live {
+        #[cfg(unix)]
+        std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    } else {
+        command.env_clear();
+    }
     // The tools read the creator's style and saved caption styles from there.
     if let Some(data) = nuzky_engine::data_dir() {
         command.env("NUZKY_DATA_DIR", data);
@@ -1347,7 +1492,14 @@ fn isolated(
     // It waits for its input, so the limit holds before it does anything.
     #[cfg(windows)]
     let _job = limit_memory(&child.0)?;
-    let input = serde_json::to_vec(&(&prepared.script, prepared.ctx.to_string(), project, &prepared.files, tools))?;
+    let input = serde_json::to_vec(&(
+        &prepared.script,
+        prepared.ctx.to_string(),
+        project,
+        &prepared.files,
+        tools,
+        prepared.reach,
+    ))?;
     let mut stdin = child.0.stdin.take().context("PLUGIN_FAILED: no input")?;
     std::thread::spawn(move || stdin.write_all(&input));
     let stdout = std::io::BufReader::new(child.0.stdout.take().context("PLUGIN_FAILED: no output")?);
@@ -1371,7 +1523,7 @@ fn isolated(
         }
         said
     });
-    let deadline = Instant::now() + RUN_LIMIT + Duration::from_secs(1);
+    let deadline = Instant::now() + limit(prepared.reach) + Duration::from_secs(1);
     let answer = loop {
         match answered.recv_timeout(Duration::from_millis(10)) {
             Ok(answer) => break answer,
@@ -1382,7 +1534,7 @@ fn isolated(
         ensure!(
             Instant::now() < deadline,
             "PLUGIN_TIMEOUT: the plugin ran longer than {} seconds and was stopped",
-            RUN_LIMIT.as_secs()
+            limit(prepared.reach).as_secs()
         );
         ensure!(resident(child.0.id()).is_none_or(|bytes| bytes <= MEMORY_LIMIT), OUT_OF_MEMORY);
     };
@@ -1408,19 +1560,21 @@ fn isolated(
 /// yet come on stdin, the answer leaves on stdout as
 /// `Result<Checked, String>`, the progress on stderr. It touches no file.
 pub fn sandbox_main() -> Result<()> {
+    type Input = (String, String, Project, Vec<Asset>, Option<plugin_tools::Reach>, Reach);
+    let (script, input, project, files, tools, reach): Input = serde_json::from_reader(std::io::stdin().lock())?;
+    // The programs a plugin with full access starts would inherit the limit; the parent's watchdog still holds this
+    // process to it.
     #[cfg(target_os = "linux")]
-    {
+    if reach != Reach::Live {
         let limit = libc::rlimit { rlim_cur: MEMORY_LIMIT, rlim_max: MEMORY_LIMIT };
         // SAFETY: setrlimit only reads the structure given.
         unsafe { libc::setrlimit(libc::RLIMIT_DATA, &limit) };
     }
     // Should the app die without killing it.
-    std::thread::spawn(|| {
-        std::thread::sleep(RUN_LIMIT + Duration::from_secs(5));
+    std::thread::spawn(move || {
+        std::thread::sleep(limit(reach) + Duration::from_secs(5));
         std::process::exit(1);
     });
-    let (script, input, project, files, tools): (String, String, Project, Vec<Asset>, Option<plugin_tools::Reach>) =
-        serde_json::from_reader(std::io::stdin().lock())?;
     let reporter = |prefix: &'static str| {
         let shown = Cell::new(-1.0);
         move |done: f32| {
@@ -1430,7 +1584,7 @@ pub fn sandbox_main() -> Result<()> {
             }
         }
     };
-    let answer = execute(&script, input, reporter(PROGRESS))
+    let answer = execute(&script, input, reach, reporter(PROGRESS))
         .map(|mut output| {
             let after = check(&project, &output.edits, &files).map_err(|error| format!("{error:#}"));
             let after = match (after, &tools) {
@@ -1515,6 +1669,7 @@ fn sandbox<T>(
     limit: Duration,
     logs: Logs,
     progress: Rc<dyn Fn(f32)>,
+    reach: Reach,
     body: impl for<'js> FnOnce(&Ctx<'js>, Function<'js>) -> rquickjs::Result<T>,
 ) -> Result<T> {
     let runtime = rquickjs::Runtime::new().context("PLUGIN_FAILED: cannot start the script engine")?;
@@ -1525,7 +1680,7 @@ fn sandbox<T>(
     let context = rquickjs::Context::full(&runtime).context("PLUGIN_FAILED: cannot start the script engine")?;
     let result = context.with(|ctx| {
         let run = || {
-            host_api(&ctx, logs, progress)?;
+            host_api(&ctx, logs, progress, reach)?;
             let mut options = EvalOptions::default();
             options.strict = false;
             options.filename = Some("plugin.js".into());
@@ -1554,7 +1709,7 @@ fn sandbox<T>(
     }
 }
 
-fn host_api<'js>(ctx: &Ctx<'js>, logs: Logs, progress: Rc<dyn Fn(f32)>) -> rquickjs::Result<()> {
+fn host_api<'js>(ctx: &Ctx<'js>, logs: Logs, progress: Rc<dyn Fn(f32)>, reach: Reach) -> rquickjs::Result<()> {
     let nuzky = Object::new(ctx.clone())?;
     let report = move |done: f64, _label: Opt<String>| {
         if done.is_finite() {
@@ -1580,6 +1735,7 @@ fn host_api<'js>(ctx: &Ctx<'js>, logs: Logs, progress: Rc<dyn Fn(f32)>) -> rquic
         Ok(())
     };
     nuzky.set("log", Function::new(ctx.clone(), log)?)?;
+    plugin_system::install(ctx, &nuzky, reach)?;
     ctx.globals().set("nuzky", nuzky)
 }
 
@@ -1627,7 +1783,9 @@ mod tests {
     fn failure(script: &str) -> String {
         let run = |_: &Ctx, run: Function| run.call::<_, rquickjs::Value>(()).map(drop);
         let logs = Logs::default();
-        sandbox(script, "PLUGIN_FAILED", Duration::from_secs(20), logs, Rc::new(|_| {}), run).unwrap_err().to_string()
+        sandbox(script, "PLUGIN_FAILED", Duration::from_secs(20), logs, Rc::new(|_| {}), Reach::None, run)
+            .unwrap_err()
+            .to_string()
     }
 
     /// A script that fills QuickJS's 256 MB fails with an error or with a bare null, never with what it allocated.

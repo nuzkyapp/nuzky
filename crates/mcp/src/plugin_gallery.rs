@@ -364,6 +364,8 @@ enum Fact {
     Uses(Tool),
     Reads(Need),
     Sealed,
+    /// Its script may reach the user's files, the internet and other programs, once the user allows it.
+    FullAccess,
     /// Opening it runs its script for a preview that changes nothing.
     Preview,
     OnPress,
@@ -394,7 +396,7 @@ fn facts(manifest: &Manifest, runs: bool) -> Vec<Fact> {
     }
     facts.extend(manifest.tools.iter().filter_map(|name| Tool::named(name)).map(Fact::Uses));
     facts.extend(manifest.needs.iter().map(|need| Fact::Reads(*need)));
-    facts.push(Fact::Sealed);
+    facts.push(if manifest.full_access { Fact::FullAccess } else { Fact::Sealed });
     facts.extend(if runs { vec![Fact::Preview, Fact::OnPress] } else { vec![Fact::OnClips] });
     facts
 }
@@ -436,6 +438,14 @@ fn sentence(fact: Fact, manifest: &Manifest, files: &[Listing]) -> String {
         .into(),
         Fact::Reads(need) => need_line(need).into(),
         Fact::Sealed => "Can't reach the internet, your files or other apps.".into(),
+        Fact::FullAccess => "Has full access to your computer: it can read, change and delete your files, use the \
+                             internet and run other apps. Nuzky asks you before it first runs, and again after it \
+                             changes."
+            .into(),
+        Fact::Preview if manifest.full_access => "Installing runs nothing. Opening it shows a preview: its script \
+                                                  runs without changing your project or reaching your files, the \
+                                                  internet or other apps."
+            .into(),
         Fact::Preview => {
             "Installing runs nothing. Opening it shows a preview: its script runs without changing your project.".into()
         }
@@ -1262,6 +1272,28 @@ mod tests {
         assert!(entry.summary.iter().all(|line| !line.new), "a plugin not installed has nothing new");
         assert!(lines.iter().all(|line| !line.contains("AUTHOR") && !line.contains("playhead")));
         assert!(entry.description.starts_with("AUTHOR SAYS"));
+    }
+
+    /// A plugin with full access says so in place of what every other plugin can't do, so nobody installs one
+    /// thinking it is sealed, and an update that adds it marks the line New.
+    #[test]
+    fn a_plugin_with_full_access_says_what_it_can_reach() {
+        let (mut manifest, mut files) = plugin("beep");
+        manifest["nuzkyPlugin"] = 3.into();
+        manifest["fullAccess"] = true.into();
+        files[0].1 = serde_json::to_vec(&manifest).unwrap();
+        let gallery = gallery_of("http://127.0.0.1:9", &[(manifest, files)]);
+        let entry = entries(&gallery, &Home::new().plugins()).remove(0);
+        let lines: Vec<_> = entry.summary.iter().map(|line| line.text.as_str()).collect();
+        assert!(!lines.contains(&"Can't reach the internet, your files or other apps."), "{lines:?}");
+        assert!(lines.contains(
+            &"Has full access to your computer: it can read, change and delete your files, use the internet and run \
+              other apps. Nuzky asks you before it first runs, and again after it changes."
+        ));
+        let had = facts(&plugins::manifest(&self::tests::manifest("beep")).unwrap(), true);
+        let now =
+            summary(&plugins::manifest(&gallery.plugins[0].manifest).unwrap(), &gallery.plugins[0].files, Some(&had));
+        assert!(now.iter().any(|line| line.new && line.text.starts_with("Has full access")));
     }
 
     const VHS: &[u8] = b"fn effect(p: Pixel) -> vec4<f32> {\n    return vec4<f32>(p.color.rgb * 0.5, p.color.a);\n}\n";

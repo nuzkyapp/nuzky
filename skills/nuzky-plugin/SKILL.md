@@ -5,18 +5,18 @@ description: Write, try and fix a Nuzky plugin, a small script that adds an edit
 
 # Write a Nuzky plugin
 
-A plugin is a small JavaScript file that reads the project and returns edits. The user asks for an edit Nuzky does not have ("delete every clip shorter than a second", "put my end card on every video"), you write it once, and it becomes a button in the app's Plugins panel that they can run on any project, with inputs they set. A plugin can also add looks, such as VHS, that the user puts on clips (Effects below). Plugins live in Nuzky's own data folder, so they survive updates, and a project a plugin edited opens anywhere without it.
+A plugin is a small JavaScript file that reads the project and returns edits, or, with full access, does whatever a program on the user's computer can, such as exporting the timeline as XML or uploading the video. The user asks for an edit Nuzky does not have ("delete every clip shorter than a second", "put my end card on every video"), you write it once, and it becomes a button in the app's Plugins panel that they can run on any project, with inputs they set. A plugin can also add looks, such as VHS, that the user puts on clips (Effects below). Plugins live in Nuzky's own data folder, so they survive updates, and a project a plugin edited opens anywhere without it.
 
 ## What a plugin can and cannot do
 
 - It reads: the project as `get_state` gives it, the clips the user selected, the playhead, the values of its inputs and, when it asks for them, the words of the transcript and the silences, loudness and beats Nuzky finds in the sound.
 - It returns edits, the same EditCmd JSON as `apply_edits`. Nuzky applies them as ONE batch: all of them or none. The user undoes them in one step.
 - After its edits it may ask for three of Nuzky's own tools: captions, zooms and motion (Nuzky's tools below). They join the same batch and the same undo step.
-- It cannot read or write files, reach the network, start processes, use timers or import modules. There is no `fetch`, `require`, `import`, `setTimeout` or `process`. `Math`, `Date`, `JSON`, strings, arrays and regular expressions work. `run` must return its result, not a Promise.
+- Without full access it cannot read or write files, reach the network or start processes. With `"fullAccess": true` it can, through `nuzky.fs`, `nuzky.fetch` and `nuzky.exec` (Full access below), once the user allowed it. Either way it cannot use timers or import modules: there is no `require`, `import`, `setTimeout` or `process`. `Math`, `Date`, `JSON`, strings, arrays and regular expressions work. `run` must return its result, not a Promise.
 - It cannot add media of its own choosing: `addAssets` is refused, so are reel candidates pointing at a new project file. It works with the assets the project already has (`addClip`, `replaceClip` with an existing `assetId`) and with its own pictures and sounds, such as a logo or a beep (Pictures and sounds below).
 - The user can turn it on to run by itself after every import they make in the app, or before every export, with the inputs they last set. Only the user turns that on, in the app; you and the plugin cannot. Such a run gets no selection and the playhead at 0, and may meet the same project again, after another import or the next export. Write a plugin meant for that to change nothing when its work is already done, such as a logo already in the corner, and say so in `message`.
 - Its effects, if it has any, are WGSL functions Nuzky checks and draws per pixel of a clip; a plugin that only adds effects has no plugin.js, no button and nothing to run (Effects below).
-- It runs at most 60 seconds, with 256 MB of memory for the script. It runs in a process of its own, where Nuzky also applies its edits to a copy of the project first; that process may take at most 1 GB. plugin.js is at most 1 MB and a run returns at most 5000 edits.
+- It runs at most 60 seconds, 10 minutes with full access, with 256 MB of memory for the script. It runs in a process of its own, where Nuzky also applies its edits to a copy of the project first; that process may take at most 1 GB. plugin.js is at most 1 MB and a run returns at most 5000 edits.
 
 ## Files
 
@@ -37,7 +37,7 @@ A plugin is a small JavaScript file that reads the project and returns edits. Th
 }
 ```
 
-- `nuzkyPlugin` is the plugin API, 2; plugins made for 1 still run, but one that ships files or effects, or needs silences, loudness or beats, needs 2. `list_plugins` gives the `api` this Nuzky runs, and an older Nuzky refuses a plugin for a newer API with PLUGIN_API_NEWER.
+- `nuzkyPlugin` is the plugin API, 3; plugins made for 1 and 2 still run, but one that ships files or effects, or needs silences, loudness or beats, needs 2, and one with `fullAccess` needs 3. `list_plugins` gives the `api` this Nuzky runs, and an older Nuzky refuses a plugin for a newer API with PLUGIN_API_NEWER.
 - `id`: 1 to 40 lowercase letters, digits and dashes; also the folder's name. Saving with the same id replaces the plugin and keeps the old files as plugin.prev.json, plugin.prev.js and effects/<id>.prev.wgsl.
 - `name` (at most 40 characters), `description` (300), `version` (20) and `action`, the verb on its button (24, "Run" when left out), or `actions` for several buttons (A richer panel below). Write them in the user's language, plainly, saying what will happen.
 - `needs`: what the plugin reads beyond the project, any of `"words"` (the transcript), `"silences"`, `"loudness"` and `"beats"` (found in the sound; these three need `nuzkyPlugin` 2). Ask only for what `run` uses: finding them in a long video takes a while the first time.
@@ -50,6 +50,7 @@ A plugin is a small JavaScript file that reads the project and returns edits. Th
   - `multi` (API 2): checkboxes, `options` as for `choice` and `default` a list of the values checked, such as `[]`. Its value is that list.
 - `files`: the plugin's own pictures and sounds by file name, such as `["logo.png"]` (Pictures and sounds below).
 - `tools`: Nuzky's tools `run` may ask for, any of `"build_captions"`, `"apply_zooms"` and `"apply_motion"`, with `"nuzkyPlugin": 2` (Nuzky's tools below). The first two read the transcript, so they need `"needs": ["words"]`. List only the ones `run` uses: the app tells the user what the plugin does from them.
+- `fullAccess`: `true` with `"nuzkyPlugin": 3` lets `run` reach the user's files, the internet and other programs (Full access below). Ask for it only when the plugin needs it: the user has to allow it, and the Gallery warns about it.
 
 Ask the user only for what changes between runs. A value the plugin can work out from the project is not an input.
 
@@ -94,7 +95,8 @@ function run(ctx) {
 
 `ctx`:
 
-- `api`: 2.
+- `api`: 3.
+- `preview`: true while Nuzky shows what the plugin would do, as `run_plugin` with `dry_run` does; false when it really runs. A plugin with full access returns before it touches a file, the network or a program while it is true.
 - `project`: what `get_state` answers: `canvas`, `assets`, `tracks` (bottom to top; `tracks[0]` is the main track, id `"main"`), each with `clips` `{id, startUs, durationUs, content, animIn, animOut, keyframes, transitionIn}`, `duration_us`, `thumbnails`, `selection`, `playhead_us`. `content.type` is `"media"` (`assetId`, `sourceInUs`, `speed`, `volume`, `transform`…) or `"text"` (`text`, `style`, `transform`).
 - `inputs`: every input's value by id, checked against the manifest; those the user did not set have their default.
 - `action`: the `id` of the button pressed, `"run"` for a plugin without `actions`.
@@ -109,6 +111,35 @@ function run(ctx) {
   - `beats`: one `{clip_id, track_id, asset_id, start_us, end_us, bpm, confidence, beats_us, downbeats_us, steady_from_us, drops, sections}` per clip, as `analyze` finds the beat. `bpm` is the tempo heard on the timeline. Under a `confidence` of 0.3 there is no beat worth cutting to, as in speech. `beats_us` is every beat in the clip, `downbeats_us` those that start a 4/4 bar; beats before `steady_from_us` continue the beat's grid back to the start without being heard. `drops` `[{at_us, rise_db}]` are bars where the music gets at least 6 dB louder; `sections` `[{at_us, level_db}]` start where the level changes by 6 dB, the first at the clip's start when it began before.
 
 Host functions: `nuzky.progress(fraction)` reports 0..1 for a long run; `nuzky.log(...values)` keeps a line (objects as JSON), at most the last 200, which come back to you with the result and with an error.
+
+## Full access
+
+With `"fullAccess": true` and `"nuzkyPlugin": 3`, a plugin can do what the user could: export the project in another editor's format, send it to a service, run FFmpeg or another program the user has. The project still changes only through the edits it returns.
+
+- The user allows it in the app before it first runs, and again whenever plugin.json or plugin.js changes, so every version you save waits for them. Only the user runs it, from its button or its automatic runs: `run_plugin` refuses to run it for you with PLUGIN_FULL_ACCESS, though `dry_run` works. Tell the user to open it in Plugins and press its button.
+- A preview never reaches anything: while `ctx.preview` is true every function below throws PLUGIN_PREVIEW. Start `run` with `if (ctx.preview) return [];`, or return the edits it would make without touching anything. The app then says it works outside the project, and its button stays on.
+- A button can ask where to work: `"actions": [{"id": "save", "label": "Export XML", "ask": {"kind": "save", "extensions": ["xml"], "name": "{project}.xml"}}]`. Pressing it opens the system's dialog, `save` to choose a new file (the dialog asks before replacing one), `open` to choose a file or `folder` a folder, and `ctx.file` is the absolute path chosen; Cancel runs nothing. `name` is what a save dialog suggests, `{project}` standing for the project's name. Its automatic runs cannot ask, so a plugin whose first button asks fails them with PLUGIN_NEEDS_FILE.
+- `ctx.paths`: `project` (the .nuzky file), `projectDir`, `media` (each asset's absolute path by its id), `plugin` (its own folder), `home`, `documents`, `downloads`, `desktop`, `videos` and `temp`; a folder this system does not have is null. `ctx.file` is null when the button asks for nothing.
+
+Functions, each synchronous, throwing an Error that says what failed:
+
+- `nuzky.fs.read(path)` returns UTF-8 text; `nuzky.fs.readBytes(path)` a Uint8Array. At most 128 MB at once.
+- `nuzky.fs.write(path, data)` creates or replaces the file, `nuzky.fs.append(path, data)` adds to it; `data` is a string, a Uint8Array or an ArrayBuffer. The folder must exist.
+- `nuzky.fs.list(dir)` returns `[{name, path, isDir, size}]` by name; `nuzky.fs.stat(path)` returns `{isDir, isFile, size, modifiedMs}`, or null when nothing is there.
+- `nuzky.fs.mkdir(path)` makes it with its parents; `nuzky.fs.remove(path)` deletes a file, or a folder with everything in it; `nuzky.fs.rename(from, to)` and `nuzky.fs.copy(from, to)`.
+- `nuzky.fetch(url, {method, headers, body, binary})` makes an HTTP request and returns `{status, ok, headers, body}`; `body` is text, or a Uint8Array with `binary: true`. A status such as 404 does not throw; a failed connection does.
+- `nuzky.exec(program, args, {cwd, env, input})` runs a program, found on the user's PATH, waits for it and returns `{code, stdout, stderr}`; `input` goes to its standard input. Stop ends it and the programs it started.
+
+Never delete or overwrite the user's media or projects: write next to them, or where the user chose with `ask`. The Export XML example (`examples/export-xml`) writes the timeline as Final Cut Pro 7 XML where the user chose:
+
+```js
+function run(ctx) {
+  if (ctx.preview) return [];
+  const xml = toXml(ctx.project, ctx.paths.media);
+  nuzky.fs.write(ctx.file, xml);
+  return { edits: [], message: "Saved the XML." };
+}
+```
 
 ## Times and edits
 
@@ -333,7 +364,7 @@ Save the effects with the manifest: `save_plugin(manifest, effects: {"vhs": "<th
 5. `inspect_frames` where it changed something, and `get_state`. If it is wrong, `end_run` with discard, or keep and `undo_run`, fix the plugin and try again.
 6. Tell the user the plugin is in their Plugins panel, what it does and what its inputs mean. When they want it every time, tell them to turn on Run after import or Run before export there.
 
-To share a plugin, the user proposes its folder to github.com/nuzkyapp/nuzky-plugins, whose Gallery other people install it from. The Gallery installs only `plugin.json`, `plugin.js` (which a plugin that only adds effects leaves out), a `README.md` beside them, the files the manifest's `files` names and `effects/<id>.wgsl` for each of its effects, each of those names in lowercase letters, digits, dots, dashes and `_`, and refuses an effect whose WGSL does not pass the check `save_plugin` makes. The Gallery tells people what the plugin reads and does from its `needs`, `files`, `effects` and `actions`, so list exactly what `run` uses. Installing from the Gallery turns off the plugin's Run after import and Run before export.
+To share a plugin, the user proposes its folder to github.com/nuzkyapp/nuzky-plugins, whose Gallery other people install it from. The Gallery installs only `plugin.json`, `plugin.js` (which a plugin that only adds effects leaves out), a `README.md` beside them, the files the manifest's `files` names and `effects/<id>.wgsl` for each of its effects, each of those names in lowercase letters, digits, dots, dashes and `_`, and refuses an effect whose WGSL does not pass the check `save_plugin` makes. The Gallery tells people what the plugin reads and does from its `needs`, `files`, `effects`, `actions` and `fullAccess`, so list exactly what `run` uses. Installing from the Gallery turns off the plugin's Run after import and Run before export.
 
 ## Errors
 
@@ -345,13 +376,14 @@ To share a plugin, the user proposes its folder to github.com/nuzkyapp/nuzky-plu
 - TRANSCRIPT_MISSING: it needs the words; `transcribe` first.
 - MEDIA_MISSING: it needs the sound of a file that is missing; the user relinks it.
 - PLUGIN_FAILED: the script threw, with `plugin.js:<line>:<column>`, or returned something that is not edits; the last lines of its log follow.
-- PLUGIN_TIMEOUT: it ran longer than 60 seconds. CANCELLED or RUN_STOPPED: the user stopped it.
+- PLUGIN_TIMEOUT: it ran longer than 60 seconds, or 10 minutes with full access. CANCELLED or RUN_STOPPED: the user stopped it.
 - PLUGIN_OUT_OF_MEMORY: the script took more than its 256 MB, or its edits applied to the copy of the project took more than 1 GB. Make it keep and change less at once, such as fewer clips or fewer keyframes per clip. A script that runs out of memory while QuickJS makes its error fails with `the script threw null` instead.
 - PLUGIN_TOO_MANY_EDITS: more than 5000 edits.
 - PLUGIN_FORBIDDEN_EDIT: `edit <index> (<type>)` would add a file; place the plugin's own files by their `assetId` in `ctx.files`.
 - PLUGIN_BAD_EDIT: `edit <index> (<type>): …` is not a valid edit or does not apply (index counts from 0), or the edits together leave the project invalid.
 - PLUGIN_FORBIDDEN_TOOL: `tools[<index>] (<tool>)` is not in the manifest's `tools`, or not a tool plugins can use.
 - PLUGIN_BAD_TOOL: `tools[<index>] (<tool>): …` has arguments the tool does not take or longer than 16 KB, a text in them over 200 characters, or its result does not apply; `build_captions` makes captions once a run, so a second call, or one after the plugin's own `addCaptions`, is refused. A call that fails inside the tool keeps the tool's own code first, such as `SPEECH_CHANGED: tools[1] (apply_zooms): …`.
+- PLUGIN_FULL_ACCESS: the plugin has full access, so only the user runs it; `dry_run` still works. PLUGIN_NOT_ALLOWED: the user has not allowed this version of it yet. PLUGIN_NEEDS_FILE: its button asks for a file, so it runs only when pressed. PLUGIN_PREVIEW: a preview called `nuzky.fs`, `nuzky.fetch` or `nuzky.exec`; return before them while `ctx.preview` is true.
 - PLUGIN_TOO_MANY_TOOLS: more than 20 calls. PLUGIN_TOO_BIG: a tool's result would make the project too large. The tools are planned in the plugin's own process, so they count toward its 1 GB, its 60 seconds and Stop.
 
 After any error nothing was applied.

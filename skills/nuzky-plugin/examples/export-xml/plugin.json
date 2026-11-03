@@ -1,0 +1,11 @@
+{
+  "nuzkyPlugin": 3,
+  "id": "export-xml",
+  "name": "Export XML",
+  "description": "Saves the timeline as Final Cut Pro 7 XML, which Premiere Pro and DaVinci Resolve open.",
+  "version": "1.0.0",
+  "fullAccess": true,
+  "actions": [
+    { "id": "save", "label": "Export XML", "ask": { "kind": "save", "extensions": ["xml"], "name": "{project}.xml" } }
+  ]
+}

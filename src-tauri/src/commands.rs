@@ -15,6 +15,7 @@ pub const COMMANDS: &[&str] = &[
     "agent_status",
     "agent_steer",
     "agent_stop",
+    "allow_plugin_access",
     "answer_model_question",
     "apply_edit",
     "apply_edits",

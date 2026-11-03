@@ -4579,7 +4579,7 @@ fn a_plugin_is_saved_listed_tried_run_and_undone_over_stdio() {
     let folder = c.dir.join("data/nuzky/plugins");
     for (id, manifest) in [
         ("broken", json!({"nuzkyPlugin": 1, "id": "broken"})),
-        ("future", json!({"nuzkyPlugin": 3, "id": "future", "somethingNew": true})),
+        ("future", json!({"nuzkyPlugin": 4, "id": "future", "somethingNew": true})),
         (
             "old-beats",
             json!({"nuzkyPlugin": 1, "id": "old-beats", "name": "Old beats", "description": "Reads beats",
@@ -4606,7 +4606,7 @@ fn a_plugin_is_saved_listed_tried_run_and_undone_over_stdio() {
         old.starts_with("PLUGIN_BROKEN: plugin.json: needs silences, loudness or beats only with nuzkyPlugin 2"),
         "{old}"
     );
-    assert_eq!(list["api"], 2);
+    assert_eq!(list["api"], 3);
     assert!(list["guide"].as_str().unwrap().contains("function run(ctx)"));
     let out_of_range =
         plugin_error(c.error("run_plugin", json!({"id": "rename", "dry_run": true, "inputs": {"times": 11}})));
@@ -4644,6 +4644,39 @@ fn a_plugin_is_saved_listed_tried_run_and_undone_over_stdio() {
     c.call("undo_run", json!({"run_id": run}));
     let undone = c.call("get_state", json!({}));
     assert_eq!((&undone["name"], &undone["canvas"]), (&before["name"], &before["canvas"]));
+    c.finish();
+}
+
+/// An agent may write a plugin with full access and see its preview, which reaches nothing, but only the user runs
+/// it, so no agent gets the user's files, network or programs through a plugin.
+#[test]
+fn an_agent_cannot_run_a_plugin_with_full_access() {
+    let mut c = Client::start(true, None, Some(None));
+    let touched = c.dir.join("touched.txt");
+    let manifest = json!({"nuzkyPlugin": 3, "id": "toucher", "name": "Toucher", "description": "Writes a file",
+        "version": "1.0.0", "fullAccess": true});
+    let script = format!("function run(ctx) {{ nuzky.fs.write({:?}, 'x'); return []; }}", touched.to_string_lossy());
+    let saved = c.call("save_plugin", json!({"manifest": manifest, "script": script}));
+    assert_eq!(saved["plugin"]["status"], "ok", "{saved}");
+    assert_eq!(saved["plugin"]["allowed"], false, "{saved}");
+    let preview = plugin_error(c.error("run_plugin", json!({"id": "toucher", "dry_run": true})));
+    assert!(preview.contains("PLUGIN_PREVIEW: nuzky.fs.write does not run in a preview"), "{preview}");
+    let run = c.call("begin_run", json!({"label": "Agent"}))["run_id"].clone();
+    let refused = plugin_error(c.error("run_plugin", json!({"id": "toucher", "run_id": run})));
+    assert!(refused.starts_with("PLUGIN_FULL_ACCESS: Toucher has full access"), "{refused}");
+    c.call("end_run", json!({"run_id": run, "action": "discard"}));
+    // Asking for a file needs full access, and only API 3 knows either.
+    let asks = json!({"nuzkyPlugin": 3, "id": "asks", "name": "Asks", "description": "Asks", "version": "1",
+        "actions": [{"id": "go", "label": "Go", "ask": {"kind": "save"}}]});
+    let broken =
+        plugin_error(c.error("save_plugin", json!({"manifest": asks, "script": "function run() { return []; }"})));
+    assert!(broken.starts_with("PLUGIN_BROKEN: plugin.json: ask of action go needs \"fullAccess\": true"), "{broken}");
+    let old =
+        json!({"nuzkyPlugin": 2, "id": "old", "name": "Old", "description": "Old", "version": "1", "fullAccess": true});
+    let broken =
+        plugin_error(c.error("save_plugin", json!({"manifest": old, "script": "function run() { return []; }"})));
+    assert!(broken.starts_with("PLUGIN_BROKEN: plugin.json: fullAccess needs nuzkyPlugin 3"), "{broken}");
+    assert!(!touched.exists());
     c.finish();
 }
 

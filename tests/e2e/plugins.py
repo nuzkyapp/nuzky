@@ -4,7 +4,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from e2e.harness import CLI, FIXTURES, ROOT, Bridge, export, ffprobe, flow, leave_editor, link_models, press, wait, webdriver
+from e2e.harness import CLI, FIXTURES, MACOS, ROOT, Bridge, export, ffprobe, flow, leave_editor, link_models, press, wait, webdriver
 from e2e.zooms import poll
 
 EXAMPLE = ROOT / 'skills/nuzky-plugin/examples/remove-short-clips'
@@ -1017,3 +1017,143 @@ def plugin_tools(r):
     r.s.call('window.__nuzky.store.getState().undo()')
     r.check('one undo takes away the captions and the zoom', wait(lambda: project(r) == before, 5), project(r))
     r.check('no error toast', not r.errors(), r.errors())
+
+
+EXPORT_XML = ROOT / 'skills/nuzky-plugin/examples/export-xml'
+FOOTER = "return document.querySelector('[data-plugin-action]')?.parentElement?.textContent ?? ''"
+ALLOW = "return document.querySelector('[data-plugin-allow]')?.textContent ?? ''"
+
+
+def prepare_full_access(r):
+    shutil.copytree(EXPORT_XML, r.work / 'data/nuzky/plugins/export-xml')
+    # One that never checks ctx.preview, writes a file, then fails.
+    careless = r.work / 'data/nuzky/plugins/careless'
+    careless.mkdir()
+    (careless / 'plugin.json').write_text(json.dumps({'nuzkyPlugin': 3, 'id': 'careless', 'name': 'Careless',
+                                                      'description': 'Writes a note, then fails.', 'version': '1.0.0',
+                                                      'action': 'Write note', 'fullAccess': True}))
+    (careless / 'plugin.js').write_text('function run(ctx) {\n  nuzky.fs.write(ctx.paths.projectDir + "/../../note.txt", "hi");\n'
+                                        '  throw new Error("the upload failed");\n}\n')
+
+
+@flow('plugin_full_access', 'A plugin with full access says so, asks the user before its first run and again after it '
+      'changes, shows a preview that writes nothing, and its Export XML writes the timeline where the user chose '
+      'without changing the project', before=prepare_full_access)
+def plugin_full_access(r):
+    from xml.etree import ElementTree
+    r.import_media(FIXTURES / 'talk.mp4')
+    r.add_clip('talk.mp4')
+    clip = r.track()[0]
+    r.seek(1_000_000)
+    r.focus_clip(clip['id'])
+    r.key('s')
+    if not wait(lambda: len(r.track()) == 2, 5):
+        raise RuntimeError('the clip was not split')
+    r.s.run('window.__nuzky.store.getState().select([])')
+    before = project(r)
+    revision = revision_of(r)
+    target = r.work / 'timeline.xml'
+    r.s.run("[...document.querySelectorAll('[role=tab]')].find((b) => b.textContent === 'Plugins').click()")
+    row = "document.querySelector('[data-plugin=\"export-xml\"]')"
+    r.check('the Plugins tab lists Export XML', wait(lambda: r.s.run(f'return !!{row}'), 10))
+    r.s.run(f'{row}.click()')
+    warned = wait(lambda: r.s.run("return document.querySelector('[data-plugin-full-access]')?.textContent"), 5)
+    r.check('the inspector says it has full access', warned == 'Full access: it can read, change and delete your files, '
+            'use the internet and run other apps.', warned)
+    outside = wait(lambda: 'Works outside the project' in r.s.run(FOOTER), 10)
+    button = "document.querySelector('[data-plugin-action=\"save\"]')"
+    r.check('its preview says it works outside the project and leaves its button on', outside
+            and r.s.run(f"return {button}.getAttribute('aria-disabled')") != 'true', r.s.run(FOOTER))
+    r.check('the preview wrote nothing', not target.exists() and not list(r.work.glob('*.xml')))
+    r.shot('full-access')
+
+    r.s.run(f'{button}.click()')
+    asked = wait(lambda: r.s.run(ALLOW), 5)
+    r.check('the first press asks to allow full access instead of running',
+            asked and 'Export XML gets full access to your computer' in asked and 'Allow and export XML' in asked, asked)
+    r.check('Cancel has the focus, so Enter keeps it off', r.s.run('return document.activeElement?.textContent') == 'Cancel')
+    r.shot('allow')
+    r.key('Escape')
+    r.check('Esc cancels and brings the button back', wait(lambda: not r.s.run(ALLOW) and r.s.run(f'return !!{button}'), 5))
+    r.s.run(f'{button}.focus()')
+    r.key('Enter', ctrlKey=True)
+    r.check('Ctrl+Enter asks too', wait(lambda: r.s.run(ALLOW), 5))
+    resize(r, 1024, 640)
+    r.check('at the smallest window the question and both buttons are in view', r.s.run(
+        "const b = [...document.querySelectorAll('[data-plugin-allow] button')].map((e) => e.getBoundingClientRect());"
+        "return b.length === 2 && b.every((x) => x.bottom <= innerHeight && x.right <= innerWidth && x.width > 60)"))
+    r.shot('allow-small')
+    resize(r, 1440, 900)
+    allowed = "return window.__nuzky.plugins.getState().list.find((p) => p.id === 'export-xml')?.allowed"
+    r.check('nothing is allowed while it asks', r.s.run(allowed) is False)
+    if MACOS:
+        sheet = r.s.path + '/nuzky/sheet'
+        r.s.run("[...document.querySelectorAll('[data-plugin-allow] button')].find((b) => b.textContent.startsWith('Allow')).click()")
+        r.check('Allow remembers it and opens the save dialog', wait(lambda: r.s.run(allowed), 5)
+                and wait(lambda: webdriver('GET', sheet), 5), r.s.run(allowed))
+        webdriver('POST', sheet + '/cancel')
+        wait(lambda: webdriver('GET', sheet) is None, 5)
+        time.sleep(0.5)
+        r.check('Cancel in the save dialog runs nothing', not list(r.work.glob('*.xml')) and revision_of(r) == revision
+                and not usable_toasts(r), usable_toasts(r))
+    else:
+        # The system's file dialog cannot be driven here; Allow's own path is the same call.
+        r.s.call("window.__nuzky.api.allowPluginAccess('export-xml', window.__nuzky.plugins.getState().list"
+                 ".find((p) => p.id === 'export-xml').accessKey).then(() => null)")
+        r.s.run("document.querySelector('[data-plugin-allow] button').click()")
+        r.check('the access is remembered', wait(lambda: r.s.run(allowed), 10))
+
+    # The path the save dialog would answer.
+    r.s.run("const p = window.__nuzky.plugins.getState().list.find((p) => p.id === 'export-xml');"
+            "window.__nuzky.runPlugin(p, 'save', arguments[0])", str(target))
+    said = wait(lambda: next((t['text'] for t in r.state()['toasts'] if t['text'].startswith('Saved timeline.xml')), None), 20)
+    r.check('the run says it saved the file', said == 'Saved timeline.xml.', r.state()['toasts'])
+    r.check('it changed nothing in the project and made no undo step',
+            project(r) == before and revision_of(r) == revision, revision_of(r))
+    items = []
+    if target.exists():
+        root = ElementTree.parse(target).getroot()
+        fps = before['canvas']['fps']
+        items = [(int(c.find('start').text), int(c.find('end').text), int(c.find('in').text), c.find('.//pathurl'))
+                 for c in root.iterfind('./sequence/media/video/track/clipitem')]
+    expected = [(round(c['startUs'] * fps / 1e6), round((c['startUs'] + c['durationUs']) * fps / 1e6),
+                 round(c['content']['sourceInUs'] * fps / 1e6)) for c in before['tracks'][0]['clips']] if target.exists() else None
+    r.check('the XML has both clips at their frames, cut from the same place in the file',
+            [i[:3] for i in items] == expected and len(items) == 2, [items, expected])
+    path = items and items[0][3] is not None and items[0][3].text
+    r.check('it names the video by its full path', path == 'file://localhost' + str(FIXTURES / 'talk.mp4').replace(' ', '%20')
+            or (path or '').endswith('/talk.mp4'), path)
+    r.shot('exported')
+
+    script = r.work / 'data/nuzky/plugins/export-xml/plugin.js'
+    script.write_text(script.read_text() + '\n// changed\n')
+    r.check('a changed script is no longer allowed', wait(lambda: r.s.run(allowed) is False, 5))
+    r.s.run(f'{button}.click()')
+    r.check('so the next press asks again', wait(lambda: r.s.run(ALLOW), 5))
+    r.key('Escape')
+
+    # A plugin that reaches for a file in its preview too.
+    r.s.run("document.querySelector('[data-plugin=\"careless\"]').click()")
+    careless = "document.querySelector('[data-plugin-action=\"run\"]')"
+    r.check('a plugin whose preview reached for a file still says it works outside the project and keeps its button on',
+            wait(lambda: 'Works outside the project' in r.s.run(FOOTER), 10)
+            and r.s.run(f"return {careless}.getAttribute('aria-disabled')") != 'true', r.s.run(FOOTER))
+    note = r.work / 'data/note.txt'
+    r.check('its preview wrote nothing', not note.exists())
+    r.s.call("window.__nuzky.api.allowPluginAccess('careless', window.__nuzky.plugins.getState().list"
+             ".find((p) => p.id === 'careless').accessKey).then(() => null)")
+    wait(lambda: r.s.run("return window.__nuzky.plugins.getState().list.find((p) => p.id === 'careless')?.allowed"), 5)
+    r.s.run(f'{careless}.click()')
+    failed = wait(lambda: next((t['text'] for t in r.state()['toasts'] if t['text'].startswith('Careless failed')), None), 20)
+    r.check('when it fails after writing, the toast says the project didn\'t change, not that nothing changed',
+            failed == "Careless failed: the upload failed. The project didn't change." and note.exists(), [failed, note.exists()])
+    r.shot('careless-failed')
+    r.check('no error toast', not r.errors(), r.errors())
+
+
+def revision_of(r):
+    return r.s.run('return window.__nuzky.store.getState().snap.revision')
+
+
+def usable_toasts(r):
+    return [t['text'] for t in r.state()['toasts']]

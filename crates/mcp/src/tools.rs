@@ -547,6 +547,7 @@ impl Backend {
             args.action.as_deref(),
             args.selection,
             args.playhead_us,
+            if args.dry_run { plugins::Caller::Preview } else { plugins::Caller::Agent },
         )?;
         self.answer_job(&plugins::start(&self.host, &self.client.id, run, mode, prepared, state)?)
     }

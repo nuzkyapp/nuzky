@@ -3820,6 +3820,7 @@ dependencies = [
  "nuzky-session",
  "nuzky-vision",
  "png 0.18.1",
+ "roxmltree 0.21.1",
  "serde_json",
  "uds_windows",
 ]
