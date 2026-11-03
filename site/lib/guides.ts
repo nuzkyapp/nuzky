@@ -42,7 +42,7 @@ export const guides: Guide[] = [
       },
       {
         title: "Pick the language",
-        text: `Nuzky captions ${captionLanguages}. Pick yours or let Nuzky detect it, then pick Fast, Balanced or Most accurate, and add the names and words you use.`,
+        text: `Nuzky captions ${captionLanguages}. Pick yours or let Nuzky detect it, then pick Fast, Balanced or Most accurate.`,
       },
       {
         title: "Generate the captions",
@@ -80,7 +80,7 @@ export const guides: Guide[] = [
       },
       {
         q: "What if it gets a word wrong?",
-        a: "Double-click the word in the transcript, or select it and press F2, and type what you said. The captions change with it. Add names and words you use often, so it gets them right next time.",
+        a: "Double-click the word in the transcript, or select it and press F2, and type what you said. The captions change with it, and the word stays corrected when you generate them again.",
       },
       {
         q: "Will the captions hide behind TikTok's buttons?",
