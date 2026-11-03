@@ -81,21 +81,17 @@ export async function GuidePage({ path }: { path: string }) {
           </header>
 
           <section className="pt-28 sm:pt-[150px]">
-            <SectionHeading center first="How it works." second={`${g.steps.length} steps in Nuzky.`} />
-            <ol className="mx-auto mt-10 grid max-w-[1000px] gap-4 md:grid-cols-2">
+            <SectionHeading center first={g.stepsHeading[0]} second={g.stepsHeading[1]} />
+            <ol className="mx-auto mt-12 max-w-[1000px] border-b border-white/[0.07]">
               {g.steps.map(({ title, text }, i) => (
-                <li key={title} className="surface flex gap-5 rounded-3xl p-7 md:odd:last:col-span-2">
-                  <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-white/[0.08] text-[14px] font-semibold tabular-nums">
-                    {i + 1}
-                  </span>
-                  <div className="flex flex-col gap-2">
-                    <h3 className="text-[18px] font-semibold tracking-[-0.01em]">{title}</h3>
-                    <p className="text-[15px] leading-[1.5] text-muted">{text}</p>
-                  </div>
+                <li key={title} className="grid gap-x-6 gap-y-1.5 border-t border-white/[0.07] py-6 md:grid-cols-[40px_260px_1fr]">
+                  <span className="text-[13px] font-medium tabular-nums text-subtle md:pt-[3px]">{String(i + 1).padStart(2, "0")}</span>
+                  <h3 className="text-[18px] font-semibold tracking-[-0.01em]">{title}</h3>
+                  <p className="text-[15px] leading-[1.5] text-muted md:pt-[2px]">{text}</p>
                 </li>
               ))}
             </ol>
-            <div className="surface mx-auto mt-4 max-w-[1000px] rounded-3xl p-7 sm:p-9">
+            <div className="surface mx-auto mt-12 max-w-[1000px] rounded-3xl p-7 sm:p-9">
               <h3 className="text-[22px] font-semibold tracking-[-0.02em]">Good to know</h3>
               <ul className="mt-5 grid gap-x-8 gap-y-3.5 md:grid-cols-2">
                 {g.details.map((item) => (

@@ -12,6 +12,8 @@ export type Guide = {
   title: string;
   description: string;
   heading: [string, string];
+  /** Over the steps, in the page's own words. */
+  stepsHeading: [string, string];
   intro: string;
   focus: EditorFocus;
   steps: { title: string; text: string }[];
@@ -29,6 +31,7 @@ export const guides: Guide[] = [
     description:
       "Nuzky writes captions from what you say, on your computer, with no limit and no watermark. Pick a style, fix any word and export a vertical video for TikTok, Reels or Shorts.",
     heading: ["Free auto captions.", "Written on your computer."],
+    stepsHeading: ["You talk.", "Nuzky types."],
     intro:
       "Nuzky is a free video editor that writes your captions from what you say. AI runs on your computer, so your video is never uploaded and there is no limit on how many videos you caption.",
     focus: "captions",
@@ -92,6 +95,7 @@ export const guides: Guide[] = [
     description:
       "Cut filler words, long pauses and retakes out of a talking-head video in one click, or delete words from the transcript. Free and open source, with one undo for the whole cut.",
     heading: ["Cut the ums and retakes.", "In one click."],
+    stepsHeading: ["Say it as many times as you need.", "Only the last good take stays."],
     intro:
       "Nuzky turns your recording into text. Then one button cuts the retakes, the filler words and the long pauses, and you edit the rest like a document. It's free, and one undo takes the whole cut back.",
     focus: "edit",
@@ -148,6 +152,7 @@ export const guides: Guide[] = [
     description:
       "Ask ChatGPT, Claude Code or Codex to cut your video in plain words and watch it edit in Nuzky, a free, open source video editor. It runs on the plan you already pay for.",
     heading: ["Your ChatGPT or Claude.", "Editing your video."],
+    stepsHeading: ["Tell it what to cut.", "Watch it cut."],
     intro:
       "Nuzky is a free, open source video editor that AI can edit for you. Type what you want, like “cut the ums and pauses, add captions and music”, and watch it work in the open project. Stop it any time, and one undo takes the whole run back.",
     focus: "edit",
