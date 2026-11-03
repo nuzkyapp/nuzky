@@ -163,6 +163,13 @@ def keys(r):
     r.check('X splits after the import', split_with(r, 'x'))
     r.check('no error toast', not r.errors(), r.errors())
 
+    # The gear in the editor's top bar opens it too.
+    r.shot('topbar')
+    r.s.run("document.querySelector('header button[aria-label^=\"Keyboard shortcuts\"]')?.click()")
+    r.check("the top bar's gear opens it", wait(lambda: r.s.run(DIALOG), 5))
+    r.key('Escape')
+    wait(lambda: not r.s.run(DIALOG), 3)
+
     # The home screen's sidebar row opens the same dialog.
     r.s.run("window.__nuzky.store.setState({view: 'home'})")
     time.sleep(1)

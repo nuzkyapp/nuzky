@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AlertCircle, ChevronLeft, Download, FolderOpen, History, Loader2, Puzzle, Redo2, Sparkles, Undo2 } from "lucide-react";
+import { AlertCircle, ChevronLeft, Download, FolderOpen, History, Loader2, Puzzle, Redo2, Settings, Sparkles, Undo2 } from "lucide-react";
 import { useAgent } from "../lib/agent";
 import { api, errorText } from "../lib/api";
 import { togglePanel, useDock } from "../lib/dock";
@@ -14,7 +14,7 @@ import { ShareButton } from "./ShareDialog";
 import { UpdateButton } from "./Updates";
 import { FeedbackButton } from "./Feedback";
 import { useWindowButtons } from "../lib/window";
-import { useKeyLabels } from "../lib/keys";
+import { openKeys, useKeyLabels } from "../lib/keys";
 
 function SaveStatus() {
   const saveState = useEditor((s) => s.saveState);
@@ -340,6 +340,9 @@ export function TopBar() {
           </>
         )}
         <VersionsButton />
+        <IconButton round aria-haspopup="dialog" label="Keyboard shortcuts (Ctrl+,)" onClick={openKeys}>
+          <Settings size={16} />
+        </IconButton>
       </div>
       {!reels && (
         <Button
