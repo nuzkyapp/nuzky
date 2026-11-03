@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type RefObject } from "react";
 import { Eye, MoreHorizontal, Sparkles, X } from "lucide-react";
 import { describePeek } from "../../lib/peek";
-import { ADD_EFFECTS, fixable, fixWithAi, own, plainDetail, pluginBlocked, previewPlugin, runPlugin, setAuto, setValue, shownInputs, toolsLine, usePlugins, valuesFor, type Plugin, type PluginInput, type PluginRow, type PluginValue, type Trigger } from "../../lib/plugins";
+import { ADD_EFFECTS, allowPlugin, fixable, fixWithAi, own, plainDetail, pluginBlocked, previewPlugin, runPlugin, setAuto, setValue, shownInputs, toolsLine, usePlugins, valuesFor, type Plugin, type PluginInput, type PluginRow, type PluginValue, type Trigger } from "../../lib/plugins";
 import { useSpeech, useTranscriptView } from "../../lib/speech";
+import { errorText, plainError } from "../../lib/api";
 import { useEditor } from "../../lib/store";
 import { Select } from "../panel/SpeechControls";
 import { PluginMark, pluginMenu } from "../panel/PluginsTab";
@@ -128,9 +129,40 @@ function useOutcome(p: Plugin, key: string, running: boolean) {
   if (blocked) return { blocked, lines: null, marked, stale: false, waiting: false, cannotRun: true };
   if (!preview) return { blocked: null, lines: null, marked, stale: true, waiting: false };
   const stale = running || preview.key !== key || preview.revision !== snap?.revision;
+  // What it does outside the project shows only once it runs, so finding nothing to change in it never turns it off.
+  const outside = p.fullAccess && (preview.error?.startsWith("PLUGIN_PREVIEW") || (lines && lines.length === 0));
+  if (outside) return { blocked: null, lines: [OUTSIDE], marked, stale, waiting: false };
   if (preview.error) return { blocked: preview.error, lines: null, marked, stale, waiting: preview.waiting };
   if (lines && lines.length === 0) return { blocked: "Nothing left to change.", lines: null, marked, stale, waiting: false };
   return { blocked: null, lines, marked, stale, waiting: false };
+}
+
+const OUTSIDE = "Works outside the project, so the preview can’t show it";
+
+/** Asking the person to allow full access before its first run, with Cancel focused so Enter keeps it off. */
+function AllowAccess({ plugin: p, label, onCancel, onAllow }: { plugin: Plugin; label: string; onCancel: () => void; onAllow: () => void }) {
+  const choice = useRef<HTMLDivElement>(null);
+  useEffect(() => choice.current?.querySelector("button")?.focus(), []);
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Escape") return;
+    e.stopPropagation();
+    onCancel();
+  };
+  return (
+    <div className="flex flex-col gap-2.5" data-plugin-allow>
+      <p className="text-[12px] text-fg" role="alert">
+        {p.name} gets full access to your computer: it can read, change and delete your files, use the internet and run other apps. Allow it only if you trust it. Nuzky asks again if it changes.
+      </p>
+      <div ref={choice} className="flex gap-2" onKeyDown={onKeyDown}>
+        <Button pill className="h-8 flex-1" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button variant="primary" pill className="h-8 flex-1 px-3" onClick={onAllow}>
+          <span className="truncate">Allow and {label.charAt(0).toLowerCase() + label.slice(1)}</span>
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 function PluginBody({ plugin: p, primary }: { plugin: Plugin; primary: RefObject<(() => void) | null> }) {
@@ -158,15 +190,30 @@ function PluginBody({ plugin: p, primary }: { plugin: Plugin; primary: RefObject
   }, [p, all, key, revision, running, heard]);
 
   const [first, ...more] = p.actions;
+  // The button whose run waits for the person to allow full access.
+  const [allowing, setAllowing] = useState<string | null>(null);
+  const press = (action: string) => (p.fullAccess && !p.allowed ? setAllowing(action) : void runPlugin(p, action));
+  const pressRef = useRef(press);
+  pressRef.current = press;
   const primaryOff = (!!outcome.blocked && !outcome.stale && !outcome.waiting) || running || !!lock;
   // The preview is of the primary action, so only what stops every run turns the others off.
   const moreReason = running ? "Running…" : outcome.cannotRun ? (outcome.blocked ?? undefined) : undefined;
   useEffect(() => {
-    primary.current = primaryOff ? null : () => void runPlugin(p, first.id);
+    primary.current = primaryOff ? null : () => pressRef.current(first.id);
     return () => {
       primary.current = null;
     };
-  }, [primary, primaryOff, p, first.id]);
+  }, [primary, primaryOff, first.id]);
+  const allow = async (action: string) => {
+    setAllowing(null);
+    try {
+      await allowPlugin(p);
+    } catch (e) {
+      useEditor.getState().toast({ kind: "warning", text: plainError(errorText(e)) });
+      return;
+    }
+    void runPlugin(p, action);
+  };
 
   const shown = shownInputs(p, all);
   const placed = new Set(p.sections.flatMap((s) => s.inputs));
@@ -178,6 +225,11 @@ function PluginBody({ plugin: p, primary }: { plugin: Plugin; primary: RefObject
   return (
     <>
       <div className="min-h-0 flex-1 overflow-y-auto">
+        {p.fullAccess && (
+          <p className="border-b border-white/[.07] px-4 py-3 text-[12px] text-warn" data-plugin-full-access>
+            Full access: it can read, change and delete your files, use the internet and run other apps.
+          </p>
+        )}
         {groups.map((g, i) => (
           <Section key={i} title={g.label}>
             {g.inputs.map((input) => (
@@ -207,20 +259,24 @@ function PluginBody({ plugin: p, primary }: { plugin: Plugin; primary: RefObject
             <p className="text-muted">{running ? "\u00a0" : "Checking…"}</p>
           )}
         </div>
-        <Button
-          variant="primary"
-          pill
-          className="h-8 w-full"
-          data-plugin-action={first.id}
-          title={`${first.label} (${MAC ? "Cmd" : "Ctrl"}+Enter)`}
-          aria-keyshortcuts={MAC ? "Meta+Enter" : "Control+Enter"}
-          disabled={primaryOff}
-          disabledReason={running ? "Running…" : (outcome.blocked ?? undefined)}
-          onClick={() => void runPlugin(p, first.id)}
-        >
-          {pressed === first.id ? "Running…" : first.label}
-        </Button>
-        {more.length > 0 && (
+        {allowing ? (
+          <AllowAccess plugin={p} label={p.actions.find((a) => a.id === allowing)?.label ?? first.label} onCancel={() => setAllowing(null)} onAllow={() => void allow(allowing)} />
+        ) : (
+          <Button
+            variant="primary"
+            pill
+            className="h-8 w-full"
+            data-plugin-action={first.id}
+            title={`${first.label} (${MAC ? "Cmd" : "Ctrl"}+Enter)`}
+            aria-keyshortcuts={MAC ? "Meta+Enter" : "Control+Enter"}
+            disabled={primaryOff}
+            disabledReason={running ? "Running…" : (outcome.blocked ?? undefined)}
+            onClick={() => press(first.id)}
+          >
+            {pressed === first.id ? "Running…" : first.label}
+          </Button>
+        )}
+        {more.length > 0 && !allowing && (
           <div className="flex flex-wrap gap-2">
             {more.map((a) => (
               <Button
@@ -231,7 +287,7 @@ function PluginBody({ plugin: p, primary }: { plugin: Plugin; primary: RefObject
                 title={a.label}
                 disabled={!!moreReason}
                 disabledReason={moreReason}
-                onClick={() => void runPlugin(p, a.id)}
+                onClick={() => press(a.id)}
               >
                 <span className="truncate">{pressed === a.id ? "Running…" : a.label}</span>
               </Button>

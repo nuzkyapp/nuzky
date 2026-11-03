@@ -1,4 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { create } from "zustand";
 import { send, sendBlocked, useAgent } from "./agent";
 import { api, errorText, plainError } from "./api";
@@ -27,6 +28,8 @@ export type PluginValues = Record<string, PluginValue>;
 export interface PluginAction {
   id: string;
   label: string;
+  /** A file or folder the button asks for before the plugin runs, which it gets as `ctx.file`. */
+  ask?: { kind: "save" | "open" | "folder"; extensions?: string[]; name?: string };
 }
 
 /** A setting of an effect: a number, a toggle or a colour, as plugin inputs. */
@@ -58,6 +61,10 @@ export interface Plugin {
   /** Whether it has a script to run; a plugin may only add effects. */
   runs: boolean;
   effects: PluginEffect[];
+  /** It may reach the user's files, the internet and other apps, once they allow this version (`accessKey`). */
+  fullAccess: boolean;
+  accessKey: string | null;
+  allowed: boolean;
 }
 
 /** What the plugin would do to the project as it is: `project` after its edits, at `revision`. */
@@ -192,12 +199,15 @@ export interface ListedPlugin {
     inputs: PluginInput[];
     sections?: Plugin["sections"];
     effects?: { id: string; name: string; params?: EffectParam[] }[];
+    fullAccess?: boolean;
   } | null;
   runs: boolean;
   effects: { id: string; status: string; error: string | null }[];
+  accessKey: string | null;
+  allowed: boolean;
 }
 
-const listed = ({ id, error, manifest: m, runs, effects }: ListedPlugin): Plugin => {
+const listed = ({ id, error, manifest: m, runs, effects, accessKey, allowed }: ListedPlugin): Plugin => {
   const name = m?.name ?? id.charAt(0).toUpperCase() + id.slice(1).replaceAll("-", " ");
   return {
     id,
@@ -218,6 +228,9 @@ const listed = ({ id, error, manifest: m, runs, effects }: ListedPlugin): Plugin
       params: e.params ?? [],
       error: effects.find((s) => s.id === e.id)?.error ?? null,
     })),
+    fullAccess: !!m?.fullAccess,
+    accessKey,
+    allowed,
   };
 };
 
@@ -411,7 +424,8 @@ export function pluginBlocked(p: Plugin, hasWords: boolean): string | null {
 export const plainDetail = (text: string) => text.replace(/^[A-Z][A-Z_]+: ?/, "");
 
 /** Whether the AI can fix the error by changing the plugin; a plugin made for a newer Nuzky needs an update instead. */
-export const fixable = (error: string) => !error.startsWith("PLUGIN_API_NEWER");
+/** Errors the plugin's code can't fix: a newer Nuzky, or the person has not allowed its full access yet. */
+export const fixable = (error: string) => !error.startsWith("PLUGIN_API_NEWER") && !error.startsWith("PLUGIN_NOT_ALLOWED");
 
 const TOOL_WORDS: Record<string, string> = { build_captions: "captions", apply_zooms: "zooms", apply_motion: "motion" };
 
@@ -478,7 +492,7 @@ export interface PassReport {
  * step. `epoch` keeps it to that project.
  */
 /** `still`, for an automatic run, says right before the run starts whether its switch is still on; null when it is not. */
-async function execute(p: Plugin, values: PluginValues, selection: string[], timeUs: number, action: string | null = null, epoch?: string, still?: () => boolean): Promise<Ran | null> {
+async function execute(p: Plugin, values: PluginValues, selection: string[], timeUs: number, action: string | null = null, epoch?: string, still?: () => boolean, file: string | null = null): Promise<Ran | null> {
   // The last preview stays, dimmed, so the panel keeps its height while the run goes on.
   usePlugins.setState({ running: p.id, pressed: action ?? p.actions[0].id });
   const out: { failure?: string; message?: string | null; from?: number; skipped?: boolean } = {};
@@ -489,7 +503,7 @@ async function execute(p: Plugin, values: PluginValues, selection: string[], tim
     }
     out.from = useEditor.getState().snap?.revision;
     try {
-      const done = await api.runPlugin(p.id, values, selection, timeUs, epoch ?? current, action);
+      const done = await api.runPlugin(p.id, values, selection, timeUs, epoch ?? current, action, file);
       out.message = done.message;
       return done.snapshot;
     } catch (e) {
@@ -509,16 +523,39 @@ async function execute(p: Plugin, values: PluginValues, selection: string[], tim
  * The run a person started from one of the plugin's buttons in the inspector, `action` or the primary one, on the
  * selection and at the playhead, and a toast that says what it did.
  */
-export async function runPlugin(p: Plugin, action: string | null = null) {
+export async function runPlugin(p: Plugin, action: string | null = null, file?: string) {
   if (aiLocked() || usePlugins.getState().running) return;
+  const ask = (p.actions.find((a) => a.id === action) ?? p.actions[0]).ask;
+  const picked = ask && file === undefined ? await askFile(ask) : (file ?? null);
+  if (ask && !picked) return;
   const { selection, timeUs } = useEditor.getState();
-  const ran = await execute(p, valuesOf(p), selection, timeUs, action);
+  const ran = await execute(p, valuesOf(p), selection, timeUs, action, undefined, undefined, picked);
   if (!ran) return;
   const toast = useEditor.getState().toast;
   if (ran.did === "stopped") return toast({ kind: "info", text: `${p.name} stopped. Nothing changed.` });
   if (ran.did === "failed") return toast(failureToast(ran, null));
   if (ran.did === "changed") return toast({ kind: "success", text: ran.message ?? `${p.name} is done.`, action: undoAction(ran.snap) });
   toast({ kind: "info", text: ran.message ?? `${p.name} found nothing to change.` });
+}
+
+/** The file or folder a button asks for, in the system's dialog; null when the person cancels it. */
+async function askFile(ask: NonNullable<PluginAction["ask"]>): Promise<string | null> {
+  const filters = ask.extensions?.length ? [{ name: ask.extensions.map((e) => e.toUpperCase()).join(", "), extensions: ask.extensions }] : undefined;
+  if (ask.kind === "save") {
+    const project = useEditor.getState().snap?.path.split(/[\\/]/).pop()?.replace(/\.nuzky$/, "") ?? "Untitled";
+    const picked = await saveDialog({ defaultPath: ask.name?.replaceAll("{project}", project), filters });
+    if (!picked || !ask.extensions?.length || ask.extensions.some((e) => picked.toLowerCase().endsWith(`.${e.toLowerCase()}`))) return picked;
+    return `${picked}.${ask.extensions[0]}`;
+  }
+  const picked = await openDialog({ directory: ask.kind === "folder", multiple: false, filters });
+  return typeof picked === "string" ? picked : null;
+}
+
+/** Lets the plugin, as the list last showed it, reach the user's files, the internet and other apps. */
+export async function allowPlugin(p: Plugin) {
+  if (!p.accessKey) return;
+  await api.allowPluginAccess(p.id, p.accessKey);
+  await loadPlugins();
 }
 
 /** What a run did, in a sentence: `when` is "after import" or "before export", or empty inside the export dialog. */

@@ -6,7 +6,7 @@ use std::sync::{
 use std::time::Duration;
 
 use anyhow::{Result, ensure};
-use nuzky_mcp::{plugin_gallery, plugins};
+use nuzky_mcp::{plugin_gallery, plugin_system, plugins};
 use serde_json::{Map, Value, json};
 use tauri::{AppHandle, Emitter, Manager, ipc::Channel};
 
@@ -61,7 +61,9 @@ pub fn cancel_plugin_preview(app: AppHandle) {
     app.state::<AppState>().plugin_preview.lock().unwrap().store(true, Ordering::Relaxed);
 }
 
+/// `file` is what the pressed button's `ask` got from the system's dialog.
 #[tauri::command]
+#[allow(clippy::too_many_arguments, reason = "one argument per field the panel sends")]
 pub async fn run_plugin(
     app: AppHandle,
     id: String,
@@ -70,6 +72,7 @@ pub async fn run_plugin(
     selection: Vec<String>,
     playhead_us: i64,
     expected_epoch: Option<String>,
+    file: Option<String>,
 ) -> CmdResult<Value> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
@@ -77,8 +80,8 @@ pub async fn run_plugin(
             let current = lock_session(&state.session, expected_epoch.as_deref())?;
             let host = current.host.clone();
             let epoch = host.session.stamp().session_epoch;
-            let job =
-                plugins::run_in_app(&host, &id, &values, action.as_deref(), selection, playhead_us).map_err(err)?;
+            let job = plugins::run_in_app(&host, &id, &values, action.as_deref(), selection, playhead_us, file)
+                .map_err(err)?;
             (host, epoch, job)
         };
         let job_id = job["job_id"].as_str().unwrap().to_owned();
@@ -108,10 +111,25 @@ fn folder(id: &str) -> Result<PathBuf> {
     Ok(folder)
 }
 
+/// Lets the plugin, as it is while `key` still names it, reach the user's files, the internet and other programs. Only
+/// the user's click in the app calls it: no agent's tool and no plugin can.
+#[tauri::command]
+pub async fn allow_plugin_access(app: AppHandle, id: String, key: String) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || {
+        plugin_system::allow(&id, &key).map_err(err)?;
+        app.emit("plugins-changed", ()).map_err(err)
+    })
+    .await
+    .map_err(err)?
+}
+
 #[tauri::command]
 pub async fn remove_plugin(app: AppHandle, id: String) -> CmdResult<()> {
     tauri::async_runtime::spawn_blocking(move || {
         crate::library::to_trash(&folder(&id).map_err(err)?).map_err(err)?;
+        if let Err(error) = plugin_system::forget(&id) {
+            log::warn!("The access allowed to {id} stays recorded: {error:#}");
+        }
         if let Err(error) = plugin_gallery::forget(&plugins::dir().map_err(err)?, &id) {
             log::warn!("The gallery's record still names {id}: {error:#}");
         }

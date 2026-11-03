@@ -1485,6 +1485,7 @@ pub fn run() {
             plugins::cancel_plugin_preview,
             plugins::run_plugin,
             plugins::remove_plugin,
+            plugins::allow_plugin_access,
             plugins::show_plugin_folder,
             plugins::gallery_plugins,
             plugins::install_gallery_plugin,

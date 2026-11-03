@@ -47,7 +47,7 @@ fn main_webview_may_call_every_command() {
 
 #[test]
 fn other_webviews_and_remote_pages_get_nothing() {
-    const PROBES: [&str; 4] = ["run_plugin", "apply_edit", "boot", "plugin:event|listen"];
+    const PROBES: [&str; 5] = ["run_plugin", "allow_plugin_access", "apply_edit", "boot", "plugin:event|listen"];
     let app = app();
     let main = WebviewWindowBuilder::new(&app, "main", WebviewUrl::default()).build().unwrap();
     let panel = WebviewWindowBuilder::new(&app, "plugin-panel", WebviewUrl::App("index.html".into())).build().unwrap();

@@ -274,8 +274,10 @@ export const api = {
     invoke<{ project: Project | null; error: string | null; items: Record<string, PluginRow[]>; tools: string[] }>("preview_plugin", { id, values, selection, playheadUs: Math.round(playheadUs) }),
   cancelPluginPreview: () => invoke<void>("cancel_plugin_preview"),
   /** One undo step; `snapshot` is null when the plugin changed nothing. `action` is the button pressed, the primary one when null. */
-  runPlugin: (id: string, values: PluginValues, selection: string[], playheadUs: number, epoch: Epoch, action: string | null = null) =>
-    invoke<{ snapshot: Snapshot | null; message: string | null }>("run_plugin", { id, values, action, selection, playheadUs: Math.round(playheadUs), expectedEpoch: epoch }),
+  runPlugin: (id: string, values: PluginValues, selection: string[], playheadUs: number, epoch: Epoch, action: string | null = null, file: string | null = null) =>
+    invoke<{ snapshot: Snapshot | null; message: string | null }>("run_plugin", { id, values, action, selection, playheadUs: Math.round(playheadUs), expectedEpoch: epoch, file }),
+  /** Lets the plugin reach the user's files, the internet and other apps while it is the version `key` names. */
+  allowPluginAccess: (id: string, key: string) => invoke<void>("allow_plugin_access", { id, key }),
   /** Moves the plugin's folder to the Trash. */
   removePlugin: (id: string) => invoke<void>("remove_plugin", { id }),
   /** Shows the plugin's folder, or the plugins folder, in the file manager. */
