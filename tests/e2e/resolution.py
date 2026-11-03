@@ -94,7 +94,9 @@ def resolution(r):
     # The Ratio menu fades out for 150 ms after a pick.
     wait(lambda: r.s.run("return !document.querySelector('[role=menu][aria-label=\\'Canvas ratio\\']') && !!document.querySelector('[role=dialog]')"), 5)
     time.sleep(0.4)
-    picked = wait(lambda: r.s.run("return document.querySelector('[role=group][aria-label=Resolution] [aria-pressed=true]')?.textContent"), 5)
+    # The dialog shows the options of its last opening for a frame, until it sets this project's.
+    shown = lambda: r.s.run("return document.querySelector('[role=group][aria-label=Resolution] [aria-pressed=true]')?.textContent")
+    picked = wait(lambda: shown() == '4K', 5) and shown()
     r.check('Export opens at 4K although the last export was 1080p', picked == '4K', picked)
     r.shot('resolution-export')
     # Only quality changes here; the 4K stays this project's and is not remembered for the 1080p ones.
@@ -108,7 +110,7 @@ def resolution(r):
             back and [(s['fontSize'], s['strokeWidth']) for s in styles] == [(84, 7), (130, 0)] and r.s.run(BORDER) == 20,
             [back, styles, r.s.run(BORDER)])
     r.s.run("window.__nuzky.store.setState({exportOpen: true})")
-    picked = wait(lambda: r.s.run("return document.querySelector('[role=group][aria-label=Resolution] [aria-pressed=true]')?.textContent"), 5)
+    picked = wait(lambda: shown() == '1080p', 5) and shown()
     remembered = r.s.run("return JSON.parse(localStorage.getItem('nuzky.export'))")
     r.check('Export on 1080p still opens at the remembered 1080p, with the quality picked on 4K', picked == '1080p'
             and remembered['quality'] == 'high', [picked, remembered])
