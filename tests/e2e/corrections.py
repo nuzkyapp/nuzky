@@ -62,6 +62,8 @@ def saved(r):
 
 
 def tab(r, name):
+    # After a restart the editor shows a moment after the view switches to it.
+    wait(lambda: r.s.run('return !!document.querySelector(`[data-tab=${arguments[0]}]`)', name), 10)
     r.s.run('document.querySelector(`[data-tab=${arguments[0]}]`).click()', name)
     time.sleep(0.5)
 
