@@ -6,7 +6,7 @@ three texts selected, as with every caption, one shadow goes on all of them at o
 import json, subprocess, time
 
 from e2e.adjust import select_all
-from e2e.harness import AI_EDITING, CLI, Bridge, changed_share, export, flow, preview_crop, preview_rect, press, wait, webdriver
+from e2e.harness import AI_EDITING, CLI, MACOS, Bridge, changed_share, export, flow, preview_crop, preview_rect, press, wait, webdriver
 
 SECTION = 'aside[aria-label=Inspector]'
 STYLE = """const p = window.__nuzky.store.getState().snap.project;
@@ -386,7 +386,12 @@ def pick_weight(r, keys, weight):
     """Moves the focused Weight menu with real arrow keys, as a person does, until the text has `weight`."""
     # Disabled, and so unfocusable, until it knows the font's weights.
     wait(lambda: r.s.run(f"const s = {WEIGHT}; if (!s || s.disabled) return false; s.focus(); return document.activeElement === s"), 10)
-    for key in keys:
+    if MACOS:
+        # An arrow on a macOS select opens its native menu, which a window off every screen cannot drive; picking
+        # from that menu sets the value and sends `change`, as here.
+        r.s.run(f"const s = {WEIGHT}; Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, arguments[0]);"
+                "s.dispatchEvent(new Event('change', {bubbles: true}))", str(weight))
+    for key in [] if MACOS else keys:
         press(key)
     return wait(lambda: r.s.run(STYLE)['style'].get('fontWeight') == weight, 5)
 
