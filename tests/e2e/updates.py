@@ -657,7 +657,7 @@ def install(r, server, version):
     r.s.run(OPEN_EDITOR_MENU)
     wait(lambda: r.s.run(MENU), 3)
     r.s.run(CHOOSE, 'Update')
-    r.s.run("document.querySelector('header [aria-label=\"Send feedback\"]').click()")
+    r.s.run("document.querySelector('header [data-feedback]').click()")
     wait(lambda: r.s.run("return !!document.querySelector('[role=menu][aria-label=\"Send feedback\"]')"), 3)
     r.s.run("""[...document.querySelectorAll('[role=menu][aria-label="Send feedback"] [role^=menuitem]')]
                .find((i) => i.textContent.startsWith('Report a bug')).click()""")

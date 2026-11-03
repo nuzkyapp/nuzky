@@ -2,7 +2,7 @@ import http.client, json, socket, time
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
-from e2e.harness import FIXTURES, ffprobe, flow, wait
+from e2e.harness import FIXTURES, MACOS, ffprobe, flow, wait
 from e2e.ai_panel import FAKE
 
 BUTTON = 'button[aria-label="Edit from your phone or another computer"], button[title="Edit from your phone or another computer"]'
@@ -148,7 +148,8 @@ def share(r):
 
     r.check('the page exports', page.act(action='export') == 200)
     exported = page_state(page, lambda s: s['exported'] or s['exportError'], 240)
-    target = next((r.work / 'videos').glob('*.mp4'), None)
+    # macOS names its Videos folder Movies in the home and reads no user-dirs.dirs.
+    target = next((r.work / ('home/Movies' if MACOS else 'videos')).glob('*.mp4'), None)
     r.check('the export goes to the Videos folder and the page sees it done', exported and exported['exported'] and target
             and exported['exported']['bytes'] == target.stat().st_size, exported)
     status, headers, video = page.request('GET', '/video?download=1', timeout=120)
