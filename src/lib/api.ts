@@ -137,6 +137,13 @@ export const api = {
   youtubePreviewPause: () => invoke<void>("youtube_preview_pause"),
   youtubePreviewSeek: (tUs: number) => invoke<void>("youtube_preview_seek", { tUs: Math.round(tUs) }),
   youtubePreviewResize: (width: number, height: number) => invoke<void>("youtube_preview_resize", { width, height }),
+  /** Plays a media item in a preview of its own, frames on the returned socket, playback as `source-transport`. */
+  sourcePreviewOpen: (assetId: string) => invoke<VideoPreview>("source_preview_open", { assetId }),
+  sourcePreviewClose: () => invoke<void>("source_preview_close"),
+  sourcePreviewPlay: () => invoke<void>("source_preview_play"),
+  sourcePreviewPause: () => invoke<void>("source_preview_pause"),
+  sourcePreviewSeek: (tUs: number) => invoke<void>("source_preview_seek", { tUs: Math.round(tUs) }),
+  sourcePreviewResize: (width: number, height: number) => invoke<void>("source_preview_resize", { width, height }),
   youtubeFilmstrip: (fromUs: number, intervalUs: number, count: number) =>
     invoke<Filmstrip>("youtube_filmstrip", { fromUs: Math.round(fromUs), intervalUs: Math.max(1, Math.round(intervalUs)), count }),
   /** `key`: a new Freesound key, "" to remove it, undefined to keep it. */

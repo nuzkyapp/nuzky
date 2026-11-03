@@ -24,6 +24,7 @@ mod reels;
 mod remote;
 mod sample;
 mod sounds;
+mod source_preview;
 mod stickers;
 mod store;
 mod style;
@@ -86,6 +87,7 @@ pub struct AppState {
     sounds: sounds::Sounds,
     beat_cuts: beats::BeatCuts,
     youtube: youtube_videos::YoutubeVideos,
+    source_preview: Mutex<Option<(Engine, String)>>,
     plugin_preview: Mutex<Arc<AtomicBool>>,
     gallery: plugins::GalleryState,
     /// What the last learning from imported timelines learned, by job, until the creator uses it,
@@ -492,6 +494,7 @@ impl AppState {
         let snap = next.snapshot(Vec::new())?;
         current.prepare_switch().map_err(err)?;
         *current = next;
+        self.source_preview.lock().unwrap().take();
         // The startup picker uses modification time, including projects opened without edits.
         if let Err(error) = current.host.session.disconnect() {
             log::error!("Cannot save opened project: {error:#}");
@@ -831,6 +834,9 @@ fn set_preview_box(state: State<'_, AppState>, width: u32, height: u32) {
 #[tauri::command]
 fn set_preview_muted(state: State<'_, AppState>, muted: bool) {
     state.engine.muted.store(muted, Ordering::Relaxed);
+    if let Some((engine, _)) = state.source_preview.lock().unwrap().as_ref() {
+        engine.muted.store(muted, Ordering::Relaxed);
+    }
 }
 
 #[tauri::command]
@@ -1310,6 +1316,7 @@ pub fn run() {
                 sounds: Default::default(),
                 beat_cuts: Default::default(),
                 youtube: Default::default(),
+                source_preview: Mutex::default(),
                 plugin_preview: Mutex::default(),
                 gallery: Default::default(),
                 timeline_lessons: Mutex::new(None),
@@ -1370,6 +1377,12 @@ pub fn run() {
             youtube_videos::youtube_preview_seek,
             youtube_videos::youtube_preview_resize,
             youtube_videos::youtube_filmstrip,
+            source_preview::source_preview_open,
+            source_preview::source_preview_close,
+            source_preview::source_preview_play,
+            source_preview::source_preview_pause,
+            source_preview::source_preview_seek,
+            source_preview::source_preview_resize,
             sounds::sound_credits,
             sounds::sound_settings,
             sounds::set_sound_settings,

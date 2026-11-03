@@ -37,6 +37,7 @@ import { addProjects, findDrafts, listenStyle, loadStyle, useStyle } from "./lib
 import { closeCover, closeExport, deleteOverlay, deleteText, exportCover, loadModels as loadVisionModels, onCoverJob, selectedOverlay, useCover } from "./lib/cover";
 import { candidateOf, closeReels, onReelsJob, openReelsToFind, playEnding, toggleReelPlay, useReels } from "./lib/reels";
 import { onBeatsFound } from "./lib/beats";
+import { closeSource, seekSource, sourceDuration, useSource } from "./lib/source";
 import { appWindow, toggleFullPreview, toggleMuted, usePreview } from "./lib/preview";
 import { titleWindow } from "./lib/window";
 
@@ -134,6 +135,25 @@ function useShortcuts() {
         } else if (key === "home" && reel && !onRange) s.seek(reel.startUs);
         else if (key === "end" && !onRange) playEnding();
         return;
+      }
+      // A media item in the preview takes the playback keys; Esc shows the timeline again.
+      const source = useSource.getState();
+      if (source.asset) {
+        const sourceFps = source.preview?.fps || 30;
+        if (key === "escape" && !usePreview.getState().full) {
+          closeSource();
+          return;
+        }
+        if ((key === "arrowleft" || key === "arrowright") && !onRange) {
+          e.preventDefault();
+          const dir = key === "arrowleft" ? -1 : 1;
+          seekSource(e.shiftKey ? source.timeUs + dir * US : stepFrame(source.timeUs, dir, sourceFps));
+          return;
+        }
+        if ((key === "home" || key === "end") && !onRange) {
+          seekSource(key === "home" ? 0 : sourceDuration(source));
+          return;
+        }
       }
       // Full screen hides the timeline; the keys that would change it unseen rest.
       if (usePreview.getState().full && (key === "delete" || key === "backspace" || (!mod && (key === "s" || key === "q" || key === "w" || key === "r")) || (mod && (key === "d" || key === "i" || key === "y" || key === "z")) || (clipboardKey && clipboardKey !== "copy"))) {
@@ -272,7 +292,15 @@ function onJob(job: JobEvent) {
 function useBackendEvents() {
   useEffect(() => {
     const offs: Promise<() => void>[] = [];
-    offs.push(listen<Transport>("transport", (e) => useEditor.setState({ playing: e.payload.playing, timeUs: e.payload.tUs })));
+    offs.push(
+      listen<Transport>("transport", (e) => {
+        // The timeline playing, from the phone or the AI panel, shows the timeline again.
+        if (e.payload.playing) closeSource();
+        useEditor.setState({ playing: e.payload.playing, timeUs: e.payload.tUs });
+      }),
+    );
+    offs.push(listen<Transport>("source-transport", (e) => useSource.setState({ playing: e.payload.playing, timeUs: e.payload.tUs })));
+    offs.push(listen<string | null>("source-preview-error", (e) => useSource.setState({ error: e.payload })));
     offs.push(
       listen<{ revision: number; error: string | null }>("saved", (e) => {
         const snap = useEditor.getState().snap;
@@ -308,6 +336,9 @@ function useBackendEvents() {
     // The revision the run started from, unknown for a run already open at boot.
     let runStart: number | null = null;
     const unwatch = useEditor.subscribe((s, prev) => {
+      // A change to the timeline, choosing a clip on it or an AI run shows the timeline, so no edit happens unseen;
+      // going home stops the media item, which would play on with no transport.
+      if ((s.aiRun && !prev.aiRun) || s.snap?.revision !== prev.snap?.revision || (s.selection !== prev.selection && s.selection.length > 0) || (s.view === "home" && prev.view !== "home")) closeSource();
       if (s.aiRun) lastRun = s.aiRun;
       if (s.aiRun && !prev.aiRun) {
         runStart = prev.snap ? (s.snap?.revision ?? null) : null;
@@ -483,7 +514,7 @@ useEditor.subscribe((s, prev) => {
 // Test hook for WebDriver runs; native file dialogs cannot be automated.
 if (import.meta.env.DEV)
   Object.assign(window, {
-    __nuzky: { importPaths, exportVideo, plugins: usePlugins, gallery: useGallery, store: useEditor, cover: useCover, reels: useReels, openReelsToFind, speech: useSpeech, api, agent: useAgent, dock: useDock, setup: useSetup, library: useLibrary, style: useStyle, addProjects, findDrafts, newProjectFromMedia, capcut: useCapCut, openDraft, openDraftFolder, openProject, refreshLibrary, trashProjects, updates: useUpdates, checkForUpdates, sounds: useSounds, stickers: useStickers, tour: useTour, youtube: useYoutube, previewWindow: appWindow, remote: useRemote },
+    __nuzky: { importPaths, exportVideo, plugins: usePlugins, gallery: useGallery, store: useEditor, cover: useCover, reels: useReels, openReelsToFind, speech: useSpeech, api, agent: useAgent, dock: useDock, setup: useSetup, library: useLibrary, style: useStyle, addProjects, findDrafts, newProjectFromMedia, capcut: useCapCut, openDraft, openDraftFolder, openProject, refreshLibrary, trashProjects, updates: useUpdates, checkForUpdates, sounds: useSounds, stickers: useStickers, tour: useTour, youtube: useYoutube, previewWindow: appWindow, remote: useRemote, source: useSource },
   });
 
 async function startEditor() {

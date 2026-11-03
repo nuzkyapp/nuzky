@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState } from "react";
-import { Maximize, Minimize, Pause, Play, SkipBack, SkipForward, Smartphone, Volume2, VolumeX } from "lucide-react";
+import { AudioLines, Maximize, Minimize, Pause, Play, SkipBack, SkipForward, Smartphone, Volume2, VolumeX, X } from "lucide-react";
 import { api } from "../../lib/api";
 import { useCover } from "../../lib/cover";
 import { toggleFullPreview, toggleMuted, usePreview } from "../../lib/preview";
 import { pictureAspect, useReels } from "../../lib/reels";
+import { closeSource, seekSource, sourceDuration, toggleSourcePlay, useSource } from "../../lib/source";
 import { projectDuration, useEditor } from "../../lib/store";
 import { formatTime } from "../../lib/time";
 import type { SafeArea } from "../../lib/types";
 import { CoverBar, CoverStage } from "../cover/CoverStage";
 import { CropGuide, ReelBar } from "../reels/ReelBar";
 import { AiRunBar } from "../TopBar";
-import { IconButton, trapTab } from "../ui";
+import { IconButton, LockReason, RangeInput, trapTab } from "../ui";
+import { KindIcon } from "../panel/assets";
 import { LayerOverlay } from "./LayerOverlay";
 import { PreviewDrop } from "./PreviewDrop";
 import { RatioMenu } from "./RatioMenu";
@@ -119,6 +121,91 @@ function Timecode({ duration }: { duration: number }) {
   );
 }
 
+/** The media item's transport, laid out as the timeline's so Play stays where the hand expects it. */
+function SourceTransport({ children }: { children: React.ReactNode }) {
+  const playing = useSource((s) => s.playing);
+  const timeUs = useSource((s) => s.timeUs);
+  const duration = useSource(sourceDuration);
+  const picture = useSource((s) => s.asset?.kind === "image");
+  const now = formatTime(timeUs);
+  const idle = duration === 0;
+  return (
+    <div className="bar grid h-11 w-full max-w-[620px] grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-full pl-[18px] pr-1.5">
+      <span className="tabular truncate text-[13px]">
+        {!picture && (
+          <>
+            <span className="text-[15px] font-semibold text-fg @max-[560px]:text-[13px]">
+              {now.slice(0, -3)}
+              <span className="font-medium text-muted">{now.slice(-3)}</span>
+            </span>
+            <span className="text-muted @max-[560px]:hidden"> / {formatTime(duration)}</span>
+          </>
+        )}
+      </span>
+      <div className="flex items-center gap-2.5">
+        <IconButton round label="Go to start (Home)" onClick={() => seekSource(0)} disabled={idle} className="@max-[440px]:hidden">
+          <SkipBack size={16} />
+        </IconButton>
+        <button
+          type="button"
+          aria-label={playing ? "Pause (Space)" : "Play (Space)"}
+          title={picture ? "A picture does not play" : playing ? "Pause (Space)" : "Play (Space)"}
+          disabled={idle}
+          onClick={toggleSourcePlay}
+          className="flex h-[38px] w-[38px] items-center justify-center rounded-full bg-fg text-black shadow-[0_1px_3px_rgb(0_0_0/.4)] transition-transform duration-[120ms] ease-out active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {playing ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" className="translate-x-px" />}
+        </button>
+        <IconButton round label="Go to end (End)" onClick={() => seekSource(duration)} disabled={idle} className="@max-[440px]:hidden">
+          <SkipForward size={16} />
+        </IconButton>
+      </div>
+      <div className="flex items-center justify-end gap-1">{children}</div>
+    </div>
+  );
+}
+
+const SCRUB = 28;
+
+/** The slider over the media item's length, under its frame, as the timeline is the timeline's. */
+function SourceScrub({ width }: { width: number }) {
+  const timeUs = useSource((s) => s.timeUs);
+  const duration = useSource(sourceDuration);
+  const fps = useSource((s) => s.preview?.fps || 30);
+  const name = useSource((s) => s.asset?.name ?? "");
+  return (
+    // Seeking a file the user only looks at changes nothing, so the AI lock does not hold it.
+    <div className="mt-3 shrink-0" style={{ width }}>
+      <LockReason.Provider value={null}>
+        <RangeInput label={`Position in ${name}`} value={timeUs} min={0} max={Math.max(duration, 1)} step={1e6 / fps} onChange={seekSource} disabled={duration === 0} valueText={formatTime(timeUs)} />
+      </LockReason.Provider>
+    </div>
+  );
+}
+
+/** Which media item the preview shows, with the way back to the timeline. */
+function SourceChip() {
+  const asset = useSource((s) => s.asset);
+  if (!asset) return null;
+  return (
+    <div className="absolute top-0 left-0 z-10 flex h-7 max-w-[min(60%,320px)] items-center gap-1.5 rounded-lg bg-black/70 pr-1 pl-2.5 text-[12px] text-fg">
+      <span className="shrink-0 text-muted">
+        <KindIcon kind={asset.kind} size={13} />
+      </span>
+      <span className="truncate">{asset.name}</span>
+      <button
+        type="button"
+        aria-label="Back to the timeline (Esc)"
+        title="Back to the timeline (Esc)"
+        onClick={closeSource}
+        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted transition-colors duration-[120ms] ease-out hover:bg-white/15 hover:text-fg"
+      >
+        <X size={13} />
+      </button>
+    </div>
+  );
+}
+
 export function Preview() {
   const url = useEditor((s) => s.previewUrl);
   const canvas = useEditor((s) => s.snap?.project.canvas);
@@ -140,6 +227,23 @@ export function Preview() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
   const connected = useFrameStream(url, canvasRef, followPlayhead);
+  // A media item from the library shows in place of the timeline; the cover editor and reels keep the preview.
+  const sourceAsset = useSource((s) => s.asset);
+  const sourcePreview = useSource((s) => s.preview);
+  const sourceError = useSource((s) => s.error);
+  const source = sourceAsset && !cover && !reels ? sourceAsset : null;
+  const sourceCanvasRef = useRef<HTMLCanvasElement>(null);
+  const sourceConnected = useFrameStream(sourcePreview?.url ?? "", sourceCanvasRef, (t, framePlaying) => {
+    if (framePlaying && useSource.getState().playing) useSource.setState({ timeUs: t });
+  });
+  const assetGone = useEditor((s) => !!sourceAsset && !s.snap?.project.assets.some((a) => a.id === sourceAsset.id && a.path === sourceAsset.path));
+  useEffect(() => {
+    if (cover || reels || assetGone) closeSource();
+  }, [cover, reels, assetGone]);
+  const deviceBox = useRef({ w: 0, h: 0 });
+  useEffect(() => {
+    if (sourcePreview && deviceBox.current.w > 0) void api.sourcePreviewResize(deviceBox.current.w, deviceBox.current.h);
+  }, [sourcePreview]);
 
   useEffect(() => void api.setPreviewMuted(muted), [muted]);
   // The home screen sits under the preview's full screen; leaving the editor leaves full screen first.
@@ -164,7 +268,9 @@ export function Preview() {
       window.clearTimeout(timer);
       timer = window.setTimeout(() => {
         const dpr = window.devicePixelRatio || 1;
-        api.setPreviewBox(Math.round(width * dpr), Math.round(height * dpr));
+        deviceBox.current = { w: Math.round(width * dpr), h: Math.round(height * dpr) };
+        api.setPreviewBox(deviceBox.current.w, deviceBox.current.h);
+        if (useSource.getState().preview) void api.sourcePreviewResize(deviceBox.current.w, deviceBox.current.h);
       }, 80);
     });
     ro.observe(el);
@@ -183,6 +289,20 @@ export function Preview() {
   };
   const fit = box.w / box.h > aspect ? { h: box.h, w: box.h * aspect } : { w: box.w, h: box.w / aspect };
   const empty = duration === 0;
+  const sourceAspect = sourcePreview ? sourcePreview.width / sourcePreview.height : source && source.width > 0 && source.height > 0 ? source.width / source.height : 16 / 9;
+  const scrub = source && source.kind !== "image" ? SCRUB : 0;
+  const sourceBox = { w: box.w, h: Math.max(0, box.h - scrub) };
+  const sourceFit = sourceBox.w / sourceBox.h > sourceAspect ? { h: sourceBox.h, w: sourceBox.h * sourceAspect } : { w: sourceBox.w, h: sourceBox.w / sourceAspect };
+  const muteButton = (
+    <IconButton round label={muted ? "Unmute the preview (M)" : "Mute the preview (M)"} active={muted} onClick={toggleMuted}>
+      {muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+    </IconButton>
+  );
+  const fullButton = (
+    <IconButton round label={full ? "Exit full screen (F)" : "Full screen (F)"} onClick={() => void toggleFullPreview()}>
+      {full ? <Minimize size={16} /> : <Maximize size={16} />}
+    </IconButton>
+  );
 
   return (
     <section
@@ -202,7 +322,31 @@ export function Preview() {
       <div ref={boxRef} className="relative mx-4 mt-3 min-h-0 flex-1 overflow-hidden">
         {cover && box.w > 0 && <CoverStage format={cover} box={box} />}
         {!cover && <ReframeStatus />}
-        <div className="absolute inset-0 flex items-center justify-center" hidden={!!cover}>
+        {source && (
+          <>
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <div className="relative shrink-0 overflow-hidden bg-black shadow-[0_0_0_1px_rgb(255_255_255/.07)]" style={{ width: sourceFit.w, height: sourceFit.h }}>
+                <canvas ref={sourceCanvasRef} className="h-full w-full" aria-label={`Preview of ${source.name}`} />
+                {source.kind === "audio" && sourcePreview && (
+                  <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 p-6 text-center text-muted">
+                    <AudioLines size={32} />
+                    <p className="max-w-full truncate text-[13px] text-fg">{source.name}</p>
+                  </div>
+                )}
+                {!sourceError && (!sourcePreview || !sourceConnected) && <div className="skeleton absolute inset-0 opacity-60" aria-label={`Opening ${source.name}`} />}
+                {sourceError && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/80 p-6 text-center" role="alert">
+                    <p className="text-[13px] font-medium text-danger">{source.name} can't be shown</p>
+                    <p className="text-[12px] text-muted">{sourceError}</p>
+                  </div>
+                )}
+              </div>
+              {scrub > 0 && <SourceScrub width={Math.min(box.w, Math.max(sourceFit.w, 240))} />}
+            </div>
+            <SourceChip />
+          </>
+        )}
+        <div className="absolute inset-0 flex items-center justify-center" hidden={!!cover || !!source}>
           <div className="relative" style={{ width: fit.w, height: fit.h }}>
             {/* Square corners and no blurred shadow: a rounded clip would cost a mask on every frame, and in
                 WebKitGTK a blurred shadow on this box left the canvas black. */}
@@ -231,7 +375,12 @@ export function Preview() {
         </div>
       </div>
       <div className="flex shrink-0 justify-center px-5 py-2.5 @max-[460px]:px-2">
-        {cover ? <CoverBar format={cover} /> : reels ? <ReelBar /> : <div className="bar grid h-11 w-full max-w-[620px] grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-full pl-[18px] pr-1.5">
+        {cover ? <CoverBar format={cover} /> : reels ? <ReelBar /> : source ? (
+          <SourceTransport>
+            {muteButton}
+            {fullButton}
+          </SourceTransport>
+        ) : <div className="bar grid h-11 w-full max-w-[620px] grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-full pl-[18px] pr-1.5">
           <Timecode duration={duration} />
           <div className="flex items-center gap-2.5">
             <IconButton round label="Go to start (Home)" onClick={() => seek(0)} disabled={empty} className="@max-[440px]:hidden">
@@ -252,9 +401,7 @@ export function Preview() {
             </IconButton>
           </div>
           <div className="flex items-center justify-end gap-1">
-            <IconButton round label={muted ? "Unmute the preview (M)" : "Mute the preview (M)"} active={muted} onClick={toggleMuted}>
-              {muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
-            </IconButton>
+            {muteButton}
             <IconButton
               round
               label={area ? (showSafe ? "Hide the Reels and TikTok safe zone" : "Show the Reels and TikTok safe zone") : "The safe zone applies to vertical videos"}
@@ -265,9 +412,7 @@ export function Preview() {
               <Smartphone size={16} />
             </IconButton>
             {canvas && <RatioMenu />}
-            <IconButton round label={full ? "Exit full screen (F)" : "Full screen (F)"} onClick={() => void toggleFullPreview()}>
-              {full ? <Minimize size={16} /> : <Maximize size={16} />}
-            </IconButton>
+            {fullButton}
           </div>
         </div>}
       </div>

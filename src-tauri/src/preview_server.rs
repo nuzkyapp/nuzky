@@ -57,6 +57,11 @@ impl PreviewServer {
         self.slot.frame.lock().unwrap().clone()
     }
 
+    /// Forgets the newest frame, so a client that connects next waits for the next one.
+    pub fn clear(&self) {
+        self.slot.frame.lock().unwrap().1 = None;
+    }
+
     /// Replaces the pending frame. Slow clients skip straight to the newest one.
     pub fn publish(&self, width: u32, height: u32, flags: u32, t_us: i64, rgba: &[u8]) {
         let mut buf = Vec::with_capacity(HEADER_LEN + rgba.len());
