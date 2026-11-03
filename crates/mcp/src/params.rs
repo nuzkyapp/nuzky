@@ -539,6 +539,10 @@ pub struct Export {
     pub fps: Option<u32>,
     /// Defaults to recommended.
     pub quality: Option<Quality>,
+    /// Timeline ranges [start_us, end_us) left out of this file only, cut as rippleDeleteRanges cuts them, such
+    /// as the other hooks when exporting one variant per hook. The project does not change.
+    #[serde(default)]
+    pub leave_out_us: Vec<[i64; 2]>,
 }
 
 #[derive(Deserialize, JsonSchema)]

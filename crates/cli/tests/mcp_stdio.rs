@@ -4870,6 +4870,93 @@ fn frame_at_30(t_us: i64) -> i64 {
     (t_us as f64 * 30.0 / 1e6).round() as i64
 }
 
+/// Two hooks, red and green, before a blue body, with a white caption box over hook A and over the body: each
+/// export leaves the other hook out, its caption with it, the body follows the hook it keeps with its caption on it,
+/// and the project does not change.
+#[test]
+fn an_export_per_hook_leaves_the_other_hooks_out_over_stdio() {
+    let mut c = Client::new(true);
+    let take = |c: &Client, name: &str, colour: &str, seconds: u32, hz: u32| {
+        ffmpeg_media(
+            c,
+            name,
+            &[
+                &format!("color=c={colour}:s=360x640:r=30:d={seconds}"),
+                &format!("sine=frequency={hz}:sample_rate=48000:duration={seconds}"),
+            ],
+            &["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le"],
+        )
+    };
+    let hook_a = take(&c, "hook-a.mov", "red", 1, 440);
+    let hook_b = take(&c, "hook-b.mov", "lime", 1, 660);
+    let body = take(&c, "body.mov", "blue", 2, 550);
+    let run = c.call("begin_run", json!({"label":"hooks"}))["run_id"].clone();
+    let ids = c.call("import_media", json!({"run_id":run,"paths":[hook_a, hook_b, body]}))["asset_ids"].clone();
+    let edits = json!([{"type":"addClip","assetId":ids[0]},{"type":"addClip","assetId":ids[1]},
+        {"type":"addClip","assetId":ids[2]}]);
+    c.call("apply_edits", json!({"run_id":run,"request_id":"place","edits":edits}));
+    let caption = |c: &mut Client, id: &str, start_us: i64, duration_us: i64| {
+        let style = json!({"fontSize":400.0,"color":"#ffffff","background":"#ffffff"});
+        let edits = json!([{"type":"addText","startUs":start_us,"text":"WWW","style":style}]);
+        let added = c.call("apply_edits", json!({"run_id":run,"request_id":id,"edits":edits}));
+        let clip = added["created"][0].clone();
+        let edits = json!([{"type":"trimClip","clipId":clip,"startUs":start_us,"durationUs":duration_us}]);
+        c.call("apply_edits", json!({"run_id":run,"request_id":format!("{id}-trim"),"edits":edits}));
+    };
+    caption(&mut c, "a", 0, 1_000_000);
+    caption(&mut c, "body", 2_000_000, 2_000_000);
+    c.call("end_run", json!({"run_id":run,"action":"keep"}));
+    let before = c.call("get_state", json!({}));
+    assert_eq!(before["duration_us"], 4_000_000, "{before}");
+
+    let export = |c: &mut Client, name: &str, leave_out: Value| {
+        let out = c.dir.join(name);
+        let job = c.call("export_video", json!({"path":out,"resolution":360,"fps":30,"leave_out_us":leave_out}));
+        let done = wait_job(c, &job, Duration::from_secs(120), |_| false);
+        assert_eq!(done["status"], "done", "{done}");
+        assert_eq!(done["result"]["duration_us"], 3_000_000, "{done}");
+        let decoded = Command::new("ffmpeg")
+            .args(["-hide_banner", "-loglevel", "error", "-i"])
+            .arg(&out)
+            .args(["-vf", "scale=4:4", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+            .output()
+            .unwrap();
+        assert!(decoded.status.success());
+        // The colour of the top-left corner and whether the middle shows the white box.
+        decoded
+            .stdout
+            .chunks(48)
+            .map(|f| {
+                let colour = match [f[0] > 150, f[1] > 150, f[2] > 150] {
+                    [true, false, false] => "red",
+                    [false, true, false] => "green",
+                    [false, false, true] => "blue",
+                    _ => "other",
+                };
+                let middle = &f[5 * 3..5 * 3 + 3];
+                (colour, middle.iter().all(|&v| v > 100))
+            })
+            .collect::<Vec<_>>()
+    };
+    let expect = |hook: &'static str, captioned: bool| {
+        let mut frames = vec![(hook, captioned); 30];
+        frames.extend(vec![("blue", true); 60]);
+        frames
+    };
+    assert_eq!(export(&mut c, "reel - hook 1.mp4", json!([[1_000_000, 2_000_000]])), expect("red", true));
+    assert_eq!(export(&mut c, "reel - hook 2.mp4", json!([[0, 1_000_000]])), expect("green", false));
+
+    let after = c.call("get_state", json!({}));
+    assert_eq!((&after["revision"], &after["tracks"]), (&before["revision"], &before["tracks"]));
+    for leave_out in [json!([[3_000_000, 5_000_000]]), json!([[1_000_000, 1_000_000]]), json!([[0, 4_000_000]])] {
+        let out = c.dir.join("refused.mp4");
+        let args = json!({"path":out,"resolution":360,"fps":30,"leave_out_us":leave_out});
+        let error = c.error("export_video", args);
+        assert!(error.contains("INVALID_ARGUMENTS"), "{leave_out}: {error}");
+    }
+    c.finish();
+}
+
 /// A user's red and blue takes, a song with a beat on a music track and a title: an agent recuts the takes to the
 /// beat. The plan reads the same for a read-only client, every cut lands on the frame export draws, the takes take
 /// turns without sound, the title and song keep their time, a retry changes nothing and one undo takes it back.
