@@ -130,7 +130,8 @@ function useOutcome(p: Plugin, key: string, running: boolean) {
   if (!preview) return { blocked: null, lines: null, marked, stale: true, waiting: false };
   const stale = running || preview.key !== key || preview.revision !== snap?.revision;
   // What it does outside the project shows only once it runs, so finding nothing to change in it never turns it off.
-  const outside = p.fullAccess && (preview.error?.startsWith("PLUGIN_PREVIEW") || (lines && lines.length === 0));
+  // The refusal comes inside the script's error, after where in plugin.js it was thrown.
+  const outside = p.fullAccess && (preview.error?.includes("PLUGIN_PREVIEW:") || (lines && lines.length === 0));
   if (outside) return { blocked: null, lines: [OUTSIDE], marked, stale, waiting: false };
   if (preview.error) return { blocked: preview.error, lines: null, marked, stale, waiting: preview.waiting };
   if (lines && lines.length === 0) return { blocked: "Nothing left to change.", lines: null, marked, stale, waiting: false };

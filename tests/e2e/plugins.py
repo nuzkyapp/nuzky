@@ -1026,6 +1026,14 @@ ALLOW = "return document.querySelector('[data-plugin-allow]')?.textContent ?? ''
 
 def prepare_full_access(r):
     shutil.copytree(EXPORT_XML, r.work / 'data/nuzky/plugins/export-xml')
+    # One that never checks ctx.preview, writes a file, then fails.
+    careless = r.work / 'data/nuzky/plugins/careless'
+    careless.mkdir()
+    (careless / 'plugin.json').write_text(json.dumps({'nuzkyPlugin': 3, 'id': 'careless', 'name': 'Careless',
+                                                      'description': 'Writes a note, then fails.', 'version': '1.0.0',
+                                                      'action': 'Write note', 'fullAccess': True}))
+    (careless / 'plugin.js').write_text('function run(ctx) {\n  nuzky.fs.write(ctx.paths.projectDir + "/../../note.txt", "hi");\n'
+                                        '  throw new Error("the upload failed");\n}\n')
 
 
 @flow('plugin_full_access', 'A plugin with full access says so, asks the user before its first run and again after it '
@@ -1123,6 +1131,23 @@ def plugin_full_access(r):
     r.s.run(f'{button}.click()')
     r.check('so the next press asks again', wait(lambda: r.s.run(ALLOW), 5))
     r.key('Escape')
+
+    # A plugin that reaches for a file in its preview too.
+    r.s.run("document.querySelector('[data-plugin=\"careless\"]').click()")
+    careless = "document.querySelector('[data-plugin-action=\"run\"]')"
+    r.check('a plugin whose preview reached for a file still says it works outside the project and keeps its button on',
+            wait(lambda: 'Works outside the project' in r.s.run(FOOTER), 10)
+            and r.s.run(f"return {careless}.getAttribute('aria-disabled')") != 'true', r.s.run(FOOTER))
+    note = r.work / 'data/note.txt'
+    r.check('its preview wrote nothing', not note.exists())
+    r.s.call("window.__nuzky.api.allowPluginAccess('careless', window.__nuzky.plugins.getState().list"
+             ".find((p) => p.id === 'careless').accessKey).then(() => null)")
+    wait(lambda: r.s.run("return window.__nuzky.plugins.getState().list.find((p) => p.id === 'careless')?.allowed"), 5)
+    r.s.run(f'{careless}.click()')
+    failed = wait(lambda: next((t['text'] for t in r.state()['toasts'] if t['text'].startswith('Careless failed')), None), 20)
+    r.check('when it fails after writing, the toast says the project didn\'t change, not that nothing changed',
+            failed == "Careless failed: the upload failed. The project didn't change." and note.exists(), [failed, note.exists()])
+    r.shot('careless-failed')
     r.check('no error toast', not r.errors(), r.errors())
 
 

@@ -423,8 +423,7 @@ export function pluginBlocked(p: Plugin, hasWords: boolean): string | null {
 /** The text after "CODE: ", for showing an error the plugin caused. */
 export const plainDetail = (text: string) => text.replace(/^[A-Z][A-Z_]+: ?/, "");
 
-/** Whether the AI can fix the error by changing the plugin; a plugin made for a newer Nuzky needs an update instead. */
-/** Errors the plugin's code can't fix: a newer Nuzky, or the person has not allowed its full access yet. */
+/** Whether the AI can fix the error by changing the plugin; a plugin made for a newer Nuzky needs an update instead, and one not allowed yet the person's OK. */
 export const fixable = (error: string) => !error.startsWith("PLUGIN_API_NEWER") && !error.startsWith("PLUGIN_NOT_ALLOWED");
 
 const TOOL_WORDS: Record<string, string> = { build_captions: "captions", apply_zooms: "zooms", apply_motion: "motion" };
@@ -532,7 +531,7 @@ export async function runPlugin(p: Plugin, action: string | null = null, file?: 
   const ran = await execute(p, valuesOf(p), selection, timeUs, action, undefined, undefined, picked);
   if (!ran) return;
   const toast = useEditor.getState().toast;
-  if (ran.did === "stopped") return toast({ kind: "info", text: `${p.name} stopped. Nothing changed.` });
+  if (ran.did === "stopped") return toast({ kind: "info", text: `${p.name} stopped. ${unchanged(p)}` });
   if (ran.did === "failed") return toast(failureToast(ran, null));
   if (ran.did === "changed") return toast({ kind: "success", text: ran.message ?? `${p.name} is done.`, action: undoAction(ran.snap) });
   toast({ kind: "info", text: ran.message ?? `${p.name} found nothing to change.` });
@@ -558,10 +557,13 @@ export async function allowPlugin(p: Plugin) {
   await loadPlugins();
 }
 
+/** What a stopped or failed run left as it was: with full access it may already have written a file or sent something. */
+const unchanged = (p: Plugin) => (p.fullAccess ? "The project didn't change." : "Nothing changed.");
+
 /** What a run did, in a sentence: `when` is "after import" or "before export", or empty inside the export dialog. */
 export function ranText(r: Exclude<Ran, { did: "failed" }>, when: string) {
   const at = when && ` ${when}`;
-  if (r.did === "stopped") return `${r.plugin.name} was stopped${at}. Nothing changed.`;
+  if (r.did === "stopped") return `${r.plugin.name} was stopped${at}. ${unchanged(r.plugin)}`;
   if (r.message) return `${r.plugin.name} ran${at}: ${continued(sentence(r.message))}`;
   return r.did === "changed" ? `${r.plugin.name} ran${at}.` : `${r.plugin.name} ran${at} and found nothing to change.`;
 }
@@ -571,7 +573,7 @@ export function failedText(r: Extract<Ran, { did: "failed" }>, when: string) {
   const at = when && ` ${when}`;
   if (!r.loaded) return `${r.plugin.name} didn't run${at}: it can't load. ${sentence(plainDetail(r.error))}`;
   if (busy(r.error)) return `${r.plugin.name} didn't run${at}: ${continued(sentence(plainError(r.error)))}`;
-  return `${r.plugin.name} failed${at}: ${sentence(readableError(r.error))} Nothing changed.`;
+  return `${r.plugin.name} failed${at}: ${sentence(readableError(r.error))} ${unchanged(r.plugin)}`;
 }
 
 export const skippedText = (skipped: NonNullable<PassReport["skipped"]>, when: string) =>
@@ -586,7 +588,7 @@ function failureToast(r: Extract<Ran, { did: "failed" }>, when: string | null): 
   if (busy(error)) return { kind: "error", text: when === null ? plainError(error) : failedText(r, when) };
   return {
     kind: "warning",
-    text: when === null && r.loaded ? `${p.name} failed: ${sentence(readableError(error))} Nothing changed.` : failedText(r, when ?? ""),
+    text: when === null && r.loaded ? `${p.name} failed: ${sentence(readableError(error))} ${unchanged(p)}` : failedText(r, when ?? ""),
     action: fixable(error) ? { label: "Fix with AI", run: () => fixWithAi(p, error) } : undefined,
     secondary: { label: "Copy error", run: () => copyError(error) },
   };
@@ -600,7 +602,7 @@ function announce({ trigger, results, skipped }: PassReport) {
   const changed = ran.filter((r): r is Extract<Ran, { did: "changed" }> => r.did === "changed");
   if (ran.length) {
     const item = (r: (typeof ran)[number]) =>
-      r.did === "stopped" ? `${r.plugin.name}: stopped, nothing changed.` : `${r.plugin.name}: ${r.message ? continued(sentence(r.message)) : r.did === "changed" ? "changed the project." : "nothing to change."}`;
+      r.did === "stopped" ? `${r.plugin.name}: stopped, ${unchanged(r.plugin).toLowerCase()}` : `${r.plugin.name}: ${r.message ? continued(sentence(r.message)) : r.did === "changed" ? "changed the project." : "nothing to change."}`;
     // Undo takes back the whole pass only while its steps follow one another, with nobody's edit between them.
     const together = changed.every((r, i) => i === 0 || (r.from === changed[i - 1].snap.revision && r.snap.sessionEpoch === changed[i - 1].snap.sessionEpoch));
     const last = changed.at(-1);
