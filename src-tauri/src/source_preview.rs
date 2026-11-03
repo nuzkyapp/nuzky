@@ -50,6 +50,8 @@ pub async fn source_preview_open(app: AppHandle, asset_id: String) -> CmdResult<
                 SERVER.get_or_init(|| server).clone()
             }
         };
+        // The previous media item's last frame would show under this one's name until its first frame.
+        server.clear();
         preview.url = server.url.clone();
         let engine = Engine::start_other(
             app.clone(),

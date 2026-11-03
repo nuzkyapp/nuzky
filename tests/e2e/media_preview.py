@@ -100,8 +100,13 @@ def media_preview(r):
     r.check('Esc shows the timeline again', wait(lambda: r.s.run(CHIP) is None, 5) and is_(colour(r, 'back'), 0), colour(r, 'back'))
     r.check('the timeline is where it was', r.s.run('return window.__nuzky.store.getState().timeUs') == AT_US)
 
+    # Every frame the preview draws from here, to catch the last one from before Esc.
+    r.s.run("window.__drawn = []; new MutationObserver((ms) => ms.forEach((m) => m.target.ariaLabel === 'Preview of clip.mp4' && window.__drawn.push(m.target.dataset.us)))"
+            ".observe(document.querySelector('section[aria-label=Preview]'), {subtree: true, attributeFilter: ['data-us']})")
     r.s.run(f'{TILE}.click()')
     wait(lambda: r.s.run(SHOWN) == '0', 15)
+    r.check('opening it again starts at its first frame, without a moment of the frame it was closed on',
+            set(r.s.run('return window.__drawn')) == {'0'}, r.s.run('return window.__drawn'))
     r.check('opening it again after Esc reuses its frame server instead of starting another',
             r.s.run(SOURCE)['preview']['url'] == url, r.s.run(SOURCE)['preview'])
     r.focus_clip(r.track()[0]['id'])
