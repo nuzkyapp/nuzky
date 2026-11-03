@@ -1,17 +1,20 @@
-The fourth alpha of Nuzky, a free, open-source video editor for your computer. It's early, so expect rough edges. Nuzky never changes or deletes your original videos.
+The fifth alpha of Nuzky, a free, open-source video editor for your computer. It's early, so expect rough edges. Nuzky never changes or deletes your original videos.
 
 ## What's new
 
-- **Smoother editing.** When you delete a piece of the timeline, paste a clip or undo, the clips slide into their new places instead of jumping, so you can see which clip went where. While the video plays, the playhead moves smoothly on every frame of your display.
-- **Calmer menus, toasts and dialogs.** They come in and fade out with short motion instead of blinking. The chosen tab or option slides to a new choice, and thumbnails fade in once they load.
-- **Tooltips that show shortcuts.** Hover a button and Nuzky's own tooltip says what it does, with its key, such as Split at playhead (S). They look the same on macOS, Windows and Linux.
-- **The window buttons in the top bar on a Mac.** The grey title bar over the app is gone, so the video gets more room. The window is dark from the moment it opens, and the window switcher shows the project's name.
+- **Edit from your phone.** The QR code button in the top bar shows a code and a link. Open it on a phone or another computer on the same Wi-Fi to add videos to the timeline, ask the AI to edit, watch the preview, export and download the result. Nuzky on your computer does all the work. Sharing stays off until you turn it on and ends when you click Stop sharing or quit.
+- **Reels that come out finished.** Make reels in Reels now also cuts retakes, fillers and hesitations, adds captions in your style and zooms on the sentences you stress. The Each reel gets menu turns any of them off.
+- **Your own keyboard shortcuts.** Keyboard shortcuts (Ctrl+, or Cmd+, on a Mac, or the gear in the editor's top bar) lets you change the key of every editor action, switch to the keys of Premiere Pro, Final Cut Pro or DaVinci Resolve, or import a keyboard file exported from them.
+- **Font weights.** A Weight menu beside the font picker offers every weight the font has, from Thin to Black, for texts, captions and covers.
+- **4K projects.** Ratio under the preview offers 1080p or 4K. Texts, outlines and borders keep their size on the picture when you switch.
+- **Preview a file before you use it.** Click a video in Media and it plays in the preview without being added to the timeline. Esc brings the timeline back, and a double-click still adds the file.
+- **Plugins with full access.** A plugin can ask to read and write files, use the internet and run other programs, for example to export the timeline for Premiere or Resolve. Nuzky asks you before its first run and again after any change to the plugin, and the AI can never run it.
+- **Updates in one click.** When you click Update and leave Nuzky alone while it downloads, it restarts into the new version by itself.
+- **Send feedback is labelled** in the editor's top bar, so Report a bug… is easy to find.
 
 ## Fixed
 
-- You can move the project that just opened to the Trash. Nuzky opens another one behind the home screen first, and Undo brings it back.
-- A project you moved to the Trash no longer comes back on the home screen.
-- The hint for putting a video or picture over the video shows only while you drag one, not on every project.
+- The AI panel works with Codex installed by its own installer. Every message used to fail with "Operation not permitted".
 
 ## Not yet
 
@@ -39,4 +42,4 @@ Open an issue at https://github.com/nuzkyapp/nuzky/issues, or use Send feedback 
 
 ## Source
 
-Nuzky is GPL-3.0-or-later, and its source is the Source code archive below. The installers include FFmpeg, ONNX Runtime and other libraries. Their source, and what each installer was built from, is in [Third-party source for Nuzky v0.1.3-alpha](https://github.com/nuzkyapp/nuzky/releases/tag/third-party-source-0.1.3-alpha).
+Nuzky is GPL-3.0-or-later, and its source is the Source code archive below. The installers include FFmpeg, ONNX Runtime and other libraries. Their source, and what each installer was built from, is in [Third-party source for Nuzky v0.1.5-alpha](https://github.com/nuzkyapp/nuzky/releases/tag/third-party-source-0.1.5-alpha).
