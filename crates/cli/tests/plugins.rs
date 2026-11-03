@@ -189,7 +189,9 @@ fn stop_ends_a_stuck_plugin_and_a_dry_run_changes_nothing() {
     cancel.store(true, Ordering::Relaxed);
     let error = preview.join().unwrap().unwrap_err();
     assert!(format!("{error:#}").starts_with("CANCELLED"), "{error:#}");
-    assert!(closing.elapsed() < Duration::from_secs(1), "stopped after {:?}", closing.elapsed());
+    // A GitHub Windows runner took 1.13 s.
+    let within = Duration::from_secs(if cfg!(windows) { 2 } else { 1 });
+    assert!(closing.elapsed() < within, "stopped after {:?}", closing.elapsed());
 }
 
 /// The Export XML example of the guide, a plugin with full access: it writes the file its button asked for only once
@@ -241,7 +243,9 @@ fn a_plugin_with_full_access_exports_xml_once_allowed() {
     let cuts: Vec<_> = video.iter().map(|c| (number(*c, "start"), number(*c, "end"), number(*c, "in"))).collect();
     assert_eq!(cuts, [(0, 15, 0), (15, 90, 15), (90, 99, 90), (99, 120, 99)]);
     let path = doc.descendants().find(|n| n.has_tag_name("pathurl")).unwrap().text().unwrap();
-    assert_eq!(path, format!("file://localhost{}", f.dir.join("take.mp4").to_string_lossy()));
+    let take = f.dir.join("take.mp4").to_string_lossy().replace('\\', "/");
+    let slash = if take.starts_with('/') { "" } else { "/" };
+    assert_eq!(path, format!("file://localhost{slash}{take}"));
 
     let folder = plugins::dir().unwrap().join("export-xml");
     let script = std::fs::read_to_string(folder.join("plugin.js")).unwrap();
