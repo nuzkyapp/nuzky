@@ -3766,6 +3766,7 @@ dependencies = [
  "plist",
  "png 0.18.1",
  "qrcode",
+ "quick-xml",
  "roxmltree 0.21.1",
  "rtrb",
  "semver",

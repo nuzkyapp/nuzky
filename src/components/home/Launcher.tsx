@@ -262,7 +262,7 @@ export function Launcher() {
     } else if (e.key === "Enter" && e.target === input.current) {
       e.preventDefault();
       choose(options[at]);
-    } else if (actionOf(chordsOf(e.nativeEvent)) === "projects") {
+    } else if ((e.target !== input.current || e.ctrlKey || e.metaKey || e.altKey) && actionOf(chordsOf(e.nativeEvent)) === "projects") {
       e.preventDefault();
       close();
     }

@@ -7,6 +7,13 @@ use crate::{CmdResult, err};
 
 const NO_KEYS: &str = "This file has no keyboard shortcuts from Premiere Pro, Final Cut Pro or DaVinci Resolve.";
 const LIMIT: u64 = 4 * 1024 * 1024;
+// A command set is a dictionary of arrays of dictionaries with a few thousand values. A binary plist can name one
+// array again and again, so a small file could stand for more values than memory holds, or nest deeper than the stack.
+const PLIST_DEPTH: usize = 16;
+// roxmltree reads an element inside another by recursion, so a file nested deeper would overflow the stack.
+const XML_DEPTH: usize = 64;
+const PLIST_VALUES: usize = 200_000;
+const PLIST_BYTES: usize = 16 * 1024 * 1024;
 
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[derive(Debug, Serialize, PartialEq)]
@@ -253,14 +260,57 @@ fn resolve_key(text: &str) -> Option<String> {
     Some(chord(key, ctrl, alt, shift))
 }
 
+fn shallow_xml(text: &str) -> bool {
+    use quick_xml::events::Event;
+    let mut reader = quick_xml::Reader::from_str(text);
+    let mut depth = 0usize;
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(_)) => depth += 1,
+            Ok(Event::End(_)) => depth = depth.saturating_sub(1),
+            Ok(Event::Eof) => return true,
+            Ok(_) => {}
+            Err(_) => return false,
+        }
+        if depth > XML_DEPTH {
+            return false;
+        }
+    }
+}
+
+fn small_plist(bytes: &[u8]) -> bool {
+    use plist::stream::Event;
+    let (mut depth, mut size) = (0usize, 0usize);
+    let mut events = plist::stream::Reader::new(Cursor::new(bytes));
+    for event in events.by_ref().take(PLIST_VALUES) {
+        match event {
+            Ok(Event::StartArray(_) | Event::StartDictionary(_)) => depth += 1,
+            Ok(Event::EndCollection) => depth = depth.saturating_sub(1),
+            Ok(Event::String(text)) => size += text.len(),
+            Ok(Event::Data(data)) => size += data.len(),
+            Ok(_) => {}
+            Err(_) => return false,
+        }
+        if depth > PLIST_DEPTH || size > PLIST_BYTES {
+            return false;
+        }
+    }
+    events.next().is_none()
+}
+
 fn parse(bytes: &[u8]) -> CmdResult<ImportedKeys> {
     let mut keys = BTreeMap::new();
     let text = std::str::from_utf8(bytes).unwrap_or("");
-    let xml = roxmltree::Document::parse_with_options(
-        text,
-        roxmltree::ParsingOptions { allow_dtd: true, ..Default::default() },
-    );
-    let root = xml.as_ref().ok().map(roxmltree::Document::root_element);
+    let xml = shallow_xml(text)
+        .then(|| {
+            roxmltree::Document::parse_with_options(
+                text,
+                roxmltree::ParsingOptions { allow_dtd: true, ..Default::default() },
+            )
+            .ok()
+        })
+        .flatten();
+    let root = xml.as_ref().map(roxmltree::Document::root_element);
     let program = if let Some(root) = root.filter(|n| n.has_tag_name("PremiereData")) {
         for item in root.descendants().filter(|n| n.is_element() && n.tag_name().name().starts_with("item.")) {
             if let Some(command) = item.children().find(|n| n.has_tag_name("commandname")).and_then(|n| n.text()) {
@@ -269,6 +319,9 @@ fn parse(bytes: &[u8]) -> CmdResult<ImportedKeys> {
         }
         KeysProgram::Premiere
     } else if bytes.starts_with(b"bplist00") || root.is_some_and(|n| n.has_tag_name("plist")) {
+        if !small_plist(bytes) {
+            return Err(NO_KEYS.into());
+        }
         let value = plist::Value::from_reader(Cursor::new(bytes)).map_err(|_| NO_KEYS)?;
         for (command, value) in value.as_dictionary().ok_or(NO_KEYS)? {
             let entries = value.as_array().map(Vec::as_slice).unwrap_or(std::slice::from_ref(value));
@@ -346,6 +399,30 @@ mod tests {
         assert_eq!(result.keys["delete"], ["Delete", "Backspace"]);
         assert!(result.keys["import"].is_empty());
         assert!(!result.keys.contains_key("copy"));
+    }
+
+    #[test]
+    fn shortcuts_plist_too_big() {
+        let deep = format!("<plist>{}{}</plist>", "<array>".repeat(200_000), "</array>".repeat(200_000));
+        // Each array names the next one twice, so 60 of them in under 200 bytes stand for 2^60 values.
+        let mut objects: Vec<Vec<u8>> = vec![vec![0xD1, 1, 2], vec![0x51, b'A']];
+        objects.extend((2..62u8).map(|i| vec![0xA2, i + 1, i + 1]));
+        objects.push(vec![0xA0]);
+        let mut binary = b"bplist00".to_vec();
+        let mut offsets = Vec::new();
+        for object in &objects {
+            offsets.push(binary.len() as u16);
+            binary.extend(object);
+        }
+        let table = binary.len() as u64;
+        offsets.iter().for_each(|o| binary.extend(o.to_be_bytes()));
+        binary.extend([0, 0, 0, 0, 0, 0, 2, 1]);
+        binary.extend((objects.len() as u64).to_be_bytes());
+        binary.extend(0u64.to_be_bytes());
+        binary.extend(table.to_be_bytes());
+        for bytes in [deep.as_bytes(), binary.as_slice()] {
+            assert_eq!(parse(bytes).unwrap_err(), NO_KEYS);
+        }
     }
 
     #[test]

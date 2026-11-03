@@ -121,6 +121,13 @@ def keys(r):
     time.sleep(0.5)
     r.check("typing ! in a text field types, though Shift+1 is Projects' key in this set", not r.s.run(LAUNCHER))
     r.s.run("document.getElementById('typing').remove()")
+    r.s.run("window.__nuzky.store.setState({launcherOpen: true})")
+    wait(lambda: r.s.run("return document.activeElement?.getAttribute('role') === 'combobox'"), 3)
+    r.key('!', code='Digit1', shiftKey=True)
+    time.sleep(0.5)
+    r.check("typing ! in the launcher's search keeps it open", r.s.run(LAUNCHER))
+    r.key('Escape')
+    wait(lambda: not r.s.run(LAUNCHER), 3)
     whole = r.track()[0]['durationUs']
     r.seek(1_500_000)
     time.sleep(0.3)

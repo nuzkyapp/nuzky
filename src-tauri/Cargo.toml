@@ -53,8 +53,9 @@ sha2 = "0.11.0"
 toml_edit = "0.25.15"
 trash = "5.2.9"
 unicode-normalization = "0.1.25"
-plist = "1.10.1"
+plist = { version = "1.10.1", features = ["enable_unstable_features_that_may_break_with_minor_version_bumps"] }
 roxmltree = "0.21.1"
+quick-xml = "0.42.0"
 
 [dev-dependencies]
 # The mock runtime of the ACL tests (src/acl_tests.rs). Not `unstable`: `cargo build --all-targets` would give the
