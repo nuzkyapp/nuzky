@@ -209,6 +209,7 @@ fn look(timeline: &ImportedTimeline, texts: &[&TextClip]) -> Option<CaptionLook>
             size: px(style.size),
             color: style.color.clone(),
             bold: style.bold,
+            weight: None,
             outline: style.outline.as_ref().map(|(color, width)| (color.clone(), px(*width))),
             // Blur and distance follow the size, so they stay as they are.
             shadow: style.shadow.as_ref().map(|s| TextShadow {

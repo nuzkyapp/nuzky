@@ -459,6 +459,7 @@ fn style(size: f32, color: &str, bold: bool, stroke: f32) -> TextStyle {
         font_size: size,
         color: color.into(),
         bold,
+        font_weight: None,
         stroke_width: stroke,
         stroke_color: "#000000".into(),
         background: None,

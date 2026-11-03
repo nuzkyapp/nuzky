@@ -2353,6 +2353,7 @@ mod tests {
             font_size: 64.0,
             color: "#fff".into(),
             bold: false,
+            font_weight: None,
             stroke_width: 0.0,
             stroke_color: "#000".into(),
             background: None,

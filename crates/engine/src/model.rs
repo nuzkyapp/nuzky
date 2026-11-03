@@ -881,6 +881,11 @@ pub struct TextStyle {
     pub color: String,
     #[serde(default)]
     pub bold: bool,
+    /// 100 (thin) to 900 (black) in steps of 100; `None` draws 700 when `bold`, otherwise 400. A family without
+    /// that weight draws its nearest one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional = nullable))]
+    pub font_weight: Option<u16>,
     /// Outline width in canvas pixels before the transform's scale, 0 disables it.
     #[serde(default)]
     pub stroke_width: f32,
@@ -1057,6 +1062,10 @@ pub const LETTER_SPACING: std::ops::RangeInclusive<f32> = -0.5..=2.0;
 pub const LINE_SPACING: std::ops::RangeInclusive<f32> = -0.6..=3.0;
 
 impl TextStyle {
+    pub fn weight(&self) -> u16 {
+        self.font_weight.unwrap_or(if self.bold { 700 } else { 400 })
+    }
+
     /// Older project files can bypass session validation when rendered by the CLI.
     pub fn bounded(&self, canvas: &Canvas) -> Self {
         let mut style = self.clone();
@@ -1181,6 +1190,7 @@ mod tests {
                     font_size: 80.0,
                     color: "#ffffff".into(),
                     bold: true,
+                    font_weight: None,
                     stroke_width: 6.0,
                     stroke_color: "#000000".into(),
                     background: None,

@@ -207,6 +207,8 @@ export const api = {
   correctWords: (key: string, corrections: { i: number; text: string; expected: string }[], epoch: Epoch) =>
     invoke<WordsCorrected>("correct_words", { key, corrections, expectedEpoch: epoch }),
   listFonts: () => invoke<FontFamilies>("list_fonts"),
+  /** The weights a text in `family` can pick, 100 to 900; those of the font drawn instead when it is missing. */
+  fontWeights: (family: string | null) => invoke<number[]>("font_weights", { family }),
   /** Sentences of the timeline said with emphasis, for a punch-in. */
   suggestZooms: () => invoke<ZoomSuggestions>("suggest_zooms"),
   /** Punch-ins on inclusive word ranges of the view with `key`, as one undo step. */

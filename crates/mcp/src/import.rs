@@ -327,6 +327,7 @@ fn text(clip: &TextClip, project: &Project, fonts: &[String], left: &mut Left) -
             font_size: s.size,
             color: s.color.clone(),
             bold: s.bold,
+            font_weight: None,
             stroke_width: s.outline.as_ref().map_or(0.0, |(_, width)| *width),
             stroke_color: s.outline.as_ref().map_or_else(|| "#000000".into(), |(color, _)| color.clone()),
             background: None,

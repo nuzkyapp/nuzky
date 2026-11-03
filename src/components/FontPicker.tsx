@@ -44,7 +44,7 @@ export function FontPicker({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={`Font: ${mixed ? "mixed" : current}`}
-        title={disabled ? disabledReason : missing ? `${current} is not installed on this computer, so ${DEFAULT_FONT} is used` : undefined}
+        title={disabled ? disabledReason : missing ? `${current} is not installed on this computer, so ${DEFAULT_FONT} is used` : mixed ? undefined : current}
         aria-disabled={disabled || undefined}
         onClick={disabled ? undefined : () => setOpen(!open)}
         className={`flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-lg bg-white/[.09] pl-2.5 pr-2 text-left text-fg shadow-[inset_0_1px_0_rgb(255_255_255/.06),inset_0_0_0_1px_rgb(255_255_255/.06)] transition-colors duration-[120ms] ease-out aria-disabled:cursor-not-allowed aria-disabled:opacity-40 ${disabled ? "" : "hover:bg-white/[.14]"}`}

@@ -52,3 +52,44 @@ export function useFontFamilies(): FontList {
   }, []);
   return state;
 }
+
+export const WEIGHT_NAMES: Record<number, string> = {
+  100: "Thin",
+  200: "Extra Light",
+  300: "Light",
+  400: "Regular",
+  500: "Medium",
+  600: "Semibold",
+  700: "Bold",
+  800: "Extra Bold",
+  900: "Black",
+};
+
+export const ALL_WEIGHTS = Object.keys(WEIGHT_NAMES).map(Number);
+
+const weights = new Map<string, Promise<number[]>>();
+
+/** The weights `family` can pick, fetched once per family; null while they load, every weight when they could not. */
+export function useFontWeights(family: string | null | undefined): number[] | null {
+  const key = family || DEFAULT_FONT;
+  const [state, setState] = useState<{ key: string; list: number[] } | null>(null);
+  useEffect(() => {
+    let live = true;
+    let request = weights.get(key);
+    if (!request) {
+      request = api.fontWeights(key);
+      weights.set(key, request);
+    }
+    request.then(
+      (list) => live && setState({ key, list }),
+      () => {
+        weights.delete(key);
+        if (live) setState({ key, list: ALL_WEIGHTS });
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [key]);
+  return state?.key === key ? state.list : null;
+}

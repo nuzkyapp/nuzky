@@ -6,7 +6,7 @@ three texts selected, as with every caption, one shadow goes on all of them at o
 import json, subprocess, time
 
 from e2e.adjust import select_all
-from e2e.harness import AI_EDITING, CLI, Bridge, changed_share, export, flow, preview_crop, preview_rect, press, wait, webdriver
+from e2e.harness import AI_EDITING, CLI, MACOS, Bridge, changed_share, export, flow, preview_crop, preview_rect, press, wait, webdriver
 
 SECTION = 'aside[aria-label=Inspector]'
 STYLE = """const p = window.__nuzky.store.getState().snap.project;
@@ -362,4 +362,116 @@ def text_emoji(r):
             all(look['yellow'] > 0.01 and look['style'] < 0.0005 for look in looks.values()), looks)
     changed = changed_share(engine, exported)
     r.check('the exported frame matches the frame the renderer draws for the preview', changed < 0.005, f'{changed:.3%} of pixels differ')
+    r.check('no error toast', not r.errors(), r.errors())
+
+
+WEIGHT = f"document.querySelector('{SECTION} select[aria-label=Weight]')"
+WEIGHT_TEXT = """window.__nuzky.store.getState().edit({type: 'addText', startUs: 0, text: 'Váha 😀',
+  style: {fontSize: 200, color: '#ffffff', bold: false, strokeWidth: 0, strokeColor: '#000000', background: null}})"""
+RESTYLE = """window.__nuzky.store.getState().edit((p) => {
+  const c = p.tracks.flatMap((t) => t.clips).find((c) => c.id === arguments[0]);
+  return {type: 'updateClip', clipId: c.id, style: {...c.content.style, ...arguments[1]}};
+})"""
+WEIGHTS = ['Thin', 'Extra Light', 'Light', 'Regular', 'Medium', 'Semibold', 'Bold', 'Extra Bold', 'Black']
+
+
+def white(image):
+    """The share of the picture the white letters cover."""
+    from PIL import Image
+    pixels = list((Image.open(image) if not hasattr(image, 'convert') else image).convert('RGB').getdata())
+    return sum(min(px) > 230 for px in pixels) / len(pixels)
+
+
+def pick_weight(r, keys, weight):
+    """Moves the focused Weight menu with real arrow keys, as a person does, until the text has `weight`."""
+    # Disabled, and so unfocusable, until it knows the font's weights.
+    wait(lambda: r.s.run(f"const s = {WEIGHT}; if (!s || s.disabled) return false; s.focus(); return document.activeElement === s"), 10)
+    if MACOS:
+        # An arrow on a macOS select opens its native menu, which a window off every screen cannot drive; picking
+        # from that menu sets the value and sends `change`, as here.
+        r.s.run(f"const s = {WEIGHT}; Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, arguments[0]);"
+                "s.dispatchEvent(new Event('change', {bubbles: true}))", str(weight))
+    for key in [] if MACOS else keys:
+        press(key)
+    return wait(lambda: r.s.run(STYLE)['style'].get('fontWeight') == weight, 5)
+
+
+def drawn(r, name):
+    """The text as the preview, then the engine's frame, draw it, with nothing selected over it."""
+    r.s.run('window.__nuzky.store.getState().select([])')
+    time.sleep(1.5)  # Drawn, and saved about a second after the edit; `nuzky frame` reads the saved file.
+    rect = preview_rect(r)
+    r.shot(f'preview-{name}')
+    return frame(r.work / f'preview-{name}.png', rect), engine_frame(r, f'engine-{name}')
+
+
+@flow('text-weight', 'The Weight menu beside the font lists the weights the font has; a weight picked by keyboard draws '
+      'thinner or heavier text in the preview, the frame and the export with emoji in colour, a font with one weight '
+      'disables the menu and draws itself whatever weight the text asks for, and an AI run locks it', before=grey)
+def text_weight(r):
+    r.import_media(r.grey)
+    r.add_clip('grey.png')
+    r.check('a regular white text with an emoji is added in the default font', r.s.call(WEIGHT_TEXT)['ok'])
+    text = wait(lambda: r.s.run(STYLE), 5)
+    r.focus_clip(text['id'])
+    menu = wait(lambda: r.s.run(f"const s = {WEIGHT}; return s && !s.disabled ? {{options: [...s.options].map((o) => o.textContent), "
+                                f"value: s.value}} : null"), 10)
+    r.check('the Weight menu lists every weight of Inter, on Regular', menu == {'options': WEIGHTS, 'value': '400'}, menu)
+    for width, height, suffix in ((1024, 640, '-1024'), (1440, 900, '')):
+        webdriver('POST', r.s.path + '/window/rect', {'width': width, 'height': height})
+        wait(lambda: r.s.run('return window.innerWidth') == width, 5)
+        r.s.run(f'{WEIGHT}.scrollIntoView({{block: "center"}})')
+        time.sleep(1)
+        r.shot(f'inspector-weight{suffix}')
+    r.check('Up picks Light', pick_weight(r, ['Up'], 300), r.s.run(STYLE)['style'])
+    r.check('Light is not bold', r.s.run(STYLE)['style']['bold'] is False)
+    r.seek(1_000_000)
+    light_preview, light_engine = drawn(r, 'light')
+    r.focus_clip(text['id'])
+    r.check('Down six times picks Black', pick_weight(r, ['Down'] * 6, 900), r.s.run(STYLE)['style'])
+    r.check('Black counts as bold', r.s.run(STYLE)['style']['bold'] is True)
+    black_preview, black_engine = drawn(r, 'black')
+    shares = {'preview': (white(light_preview), white(black_preview)), 'engine': (white(light_engine), white(black_engine))}
+    r.check('Black covers far more of the picture than Light in the preview and the frame',
+            all(light > 0.001 and black > 1.8 * light for light, black in shares.values()), shares)
+    emoji = {name: emoji_colours(path)['yellow'] for name, path in (('light', light_engine), ('black', black_engine))}
+    r.check('the emoji stays in colour at both weights', all(share > 0.002 for share in emoji.values()), emoji)
+    target = export(r, 'text-weight.mp4')
+    exported = r.work / 'export-black.png'
+    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', str(target), '-vf', 'select=eq(n\\,30)', '-frames:v', '1', '-update', '1',
+                    str(exported)], check=True)
+    r.shots.append(exported.name)
+    changed = changed_share(black_engine, exported)
+    r.check('the exported frame matches the frame the renderer draws for the preview', changed < 0.005, f'{changed:.3%} of pixels differ')
+
+    r.check('the text changes to Anton, which has one weight', r.s.call(RESTYLE, text['id'], {'fontFamily': 'Anton'})['ok'])
+    r.focus_clip(text['id'])
+    single = wait(lambda: r.s.run(f"const s = {WEIGHT}; return s && s.disabled && s.title ? {{why: s.title, "
+                                  f"shown: s.selectedOptions[0]?.textContent}} : null"), 10)
+    r.check('the Weight menu is disabled, says why and shows the weight Anton draws',
+            single == {'why': 'Anton has only one weight', 'shown': 'Regular'}, single)
+    r.shot('inspector-anton')
+    _, anton_black = drawn(r, 'anton-black')
+    r.check('the text asks for Regular', r.s.call(RESTYLE, text['id'], {'fontWeight': 400, 'bold': False})['ok'])
+    _, anton_regular = drawn(r, 'anton-regular')
+    changed = changed_share(anton_black, anton_regular)
+    r.check('Anton asked for Black draws its own Regular, not another font\'s Black', changed < 0.001, f'{changed:.3%} of pixels differ')
+
+    r.check('the text changes back to Inter', r.s.call(RESTYLE, text['id'], {'fontFamily': None})['ok'])
+    r.check('a second text in Anton is added', r.s.call(WEIGHT_TEXT.replace("bold: false", "bold: false, fontFamily: 'Anton'"))['ok'])
+    ids = [c['id'] for c in r.s.run(TEXTS)]
+    r.s.run('window.__nuzky.store.getState().select(arguments[0])', ids)
+    both = wait(lambda: r.s.run(f"const s = {WEIGHT}; return s && !s.disabled ? [...s.options].filter((o) => !o.disabled).map((o) => o.textContent) : null"), 10)
+    r.check('with Inter and Anton selected the Weight menu offers every weight', both == WEIGHTS, both)
+    r.focus_clip(text['id'])
+    bridge = Bridge(r, r.saved_project())
+    try:
+        run = bridge.call('begin_run', {'label': 'Restyle text'})
+        r.check('the UI knows an agent is editing', wait(lambda: r.state()['aiRun'], 10))
+        locked = wait(lambda: r.s.run(f"const s = {WEIGHT}; return s && s.disabled ? s.title : null"), 5)
+        r.check('the Weight menu is locked and says why', locked == AI_EDITING, locked)
+        bridge.call('end_run', {'run_id': run['run_id'], 'action': 'keep'})
+        r.check('the lock ends with the run', wait(lambda: not r.state()['aiRun'], 10))
+    finally:
+        bridge.close()
     r.check('no error toast', not r.errors(), r.errors())

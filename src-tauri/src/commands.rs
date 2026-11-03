@@ -48,6 +48,7 @@ pub const COMMANDS: &[&str] = &[
     "effect_issues",
     "filmstrip",
     "find_beats",
+    "font_weights",
     "gallery_plugins",
     "import_media",
     "install_gallery_plugin",
