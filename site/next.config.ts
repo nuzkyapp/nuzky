@@ -10,7 +10,7 @@ const repoRoot = path.join(__dirname, "..");
 const accept = (value: string) => [{ type: "header" as const, key: "accept", value }];
 const markdown = [
   ["/", "/index.md"],
-  ["/capcut-alternative", "/capcut-alternative.md"],
+  ...["/capcut-alternative", "/auto-captions", "/remove-filler-words", "/ai-video-editor"].map((page) => [page, `${page}.md`]),
 ].map(([source, destination]) => ({
   source,
   destination,

@@ -1,9 +1,11 @@
 import Image from "next/image";
+import { guides } from "@/lib/guides";
 import { buildFromSource, license, releases, repo } from "@/lib/site";
 
 export function Footer() {
   const links = [
     ["Nuzky vs CapCut", "/capcut-alternative"],
+    ...guides.map((g) => [g.name, g.path] as const),
     ["GitHub", repo],
     ["Releases", releases],
     ["Building from source", buildFromSource],
