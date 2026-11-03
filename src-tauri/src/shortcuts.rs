@@ -10,7 +10,8 @@ const LIMIT: u64 = 4 * 1024 * 1024;
 // A command set is a dictionary of arrays of dictionaries with a few thousand values. A binary plist can name one
 // array again and again, so a small file could stand for more values than memory holds, or nest deeper than the stack.
 const PLIST_DEPTH: usize = 16;
-// roxmltree reads an element inside another by recursion, so a file nested deeper would overflow the stack.
+// roxmltree reads an element inside another by recursion, so a file nested deeper would overflow the stack. An entity
+// could hide the nesting from this check, and none of the three programs declares one.
 const XML_DEPTH: usize = 64;
 const PLIST_VALUES: usize = 200_000;
 const PLIST_BYTES: usize = 16 * 1024 * 1024;
@@ -262,6 +263,9 @@ fn resolve_key(text: &str) -> Option<String> {
 
 fn shallow_xml(text: &str) -> bool {
     use quick_xml::events::Event;
+    if text.contains("<!ENTITY") {
+        return false;
+    }
     let mut reader = quick_xml::Reader::from_str(text);
     let mut depth = 0usize;
     loop {
@@ -404,6 +408,11 @@ mod tests {
     #[test]
     fn shortcuts_plist_too_big() {
         let deep = format!("<plist>{}{}</plist>", "<array>".repeat(200_000), "</array>".repeat(200_000));
+        let hidden = format!(
+            "<!DOCTYPE plist [<!ENTITY deep \"{}{}\">]><plist>&deep;</plist>",
+            "<a>".repeat(100_000),
+            "</a>".repeat(100_000)
+        );
         // Each array names the next one twice, so 60 of them in under 200 bytes stand for 2^60 values.
         let mut objects: Vec<Vec<u8>> = vec![vec![0xD1, 1, 2], vec![0x51, b'A']];
         objects.extend((2..62u8).map(|i| vec![0xA2, i + 1, i + 1]));
@@ -420,7 +429,7 @@ mod tests {
         binary.extend((objects.len() as u64).to_be_bytes());
         binary.extend(0u64.to_be_bytes());
         binary.extend(table.to_be_bytes());
-        for bytes in [deep.as_bytes(), binary.as_slice()] {
+        for bytes in [deep.as_bytes(), hidden.as_bytes(), binary.as_slice()] {
             assert_eq!(parse(bytes).unwrap_err(), NO_KEYS);
         }
     }
