@@ -11,26 +11,18 @@ import { Nav } from "@/components/Nav";
 import { SectionHeading } from "@/components/SectionHeading";
 import { Waves } from "@/components/Waves";
 import { capcutChecked, capcutFaq, capcutSources, comparison, fromCapcut, pickCapcut, pickNuzky } from "@/lib/content";
+import { shareMetadata } from "@/lib/share";
 import { getRelease, url } from "@/lib/site";
 
 const path = "/capcut-alternative";
 const title = "Nuzky vs CapCut: the open source CapCut alternative";
 const description = "Free auto captions, no watermark and no subscription. See how Nuzky, a free and open source video editor, compares with CapCut.";
 
-const shareImage = (src: string) => ({
-  url: src,
-  width: 2400,
-  height: 1260,
-  alt: "Nuzky: You just wanted to edit. Now you can. A free, open source video editor that writes your captions and cuts out the ums, the pauses and the retakes.",
-});
-
 export const metadata: Metadata = {
   title: { absolute: "Free, open source CapCut alternative with no watermark | Nuzky" },
   description,
   alternates: { canonical: path, types: { "text/markdown": `${path}.md` } },
-  // A page that sets its own Open Graph fields loses the root share image, so it names it again.
-  openGraph: { title, description, url: url + path, siteName: "Nuzky", type: "article", locale: "en_US", images: [shareImage("/opengraph-image.jpg")] },
-  twitter: { card: "summary_large_image", title, description, images: [shareImage("/twitter-image.jpg")] },
+  ...shareMetadata(path, title, description),
 };
 
 const structuredData = {

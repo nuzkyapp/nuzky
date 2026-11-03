@@ -12,7 +12,7 @@ import { Maker } from "@/components/Maker";
 import { Nav } from "@/components/Nav";
 import { Showcase } from "@/components/Showcase";
 import { Waves } from "@/components/Waves";
-import { faq, features } from "@/lib/content";
+import { faq, features, maker } from "@/lib/content";
 import { type Release, description, getRelease, repo, systems, url } from "@/lib/site";
 
 export const metadata: Metadata = {
@@ -41,8 +41,10 @@ const structuredData = (release: Release) => ({
       isAccessibleForFree: true,
       offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
       featureList: features,
+      author: { "@id": `${url}/#maker` },
       sameAs: [repo],
     },
+    { "@type": "Person", "@id": `${url}/#maker`, name: maker.name, image: url + maker.photo, jobTitle: maker.role, nationality: "Czech" },
     {
       "@type": "FAQPage",
       mainEntity: faq.map(({ q, a }) => ({ "@type": "Question", name: q, acceptedAnswer: { "@type": "Answer", text: a } })),

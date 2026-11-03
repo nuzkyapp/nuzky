@@ -16,6 +16,7 @@ import {
   pickCapcut,
   pickNuzky,
 } from "./content";
+import { type Guide, guides } from "./guides";
 import { type Release, buildFromSource, license, releases, repo, systems, url } from "./site";
 
 const raw = repo.replace("github.com", "raw.githubusercontent.com") + "/main";
@@ -93,6 +94,7 @@ ${qa(faq)}
 
 - [Website](${url})
 - [Nuzky vs CapCut](${url}/capcut-alternative)
+${list(guides.map((g) => `[${g.title}](${url}${g.path})`))}
 - [Source code on GitHub](${repo})
 - [Release notes](${r.notes})
 - [Building from source](${buildFromSource})
@@ -139,6 +141,34 @@ What this page says about CapCut was checked in ${capcutChecked} against ${capcu
 `;
 }
 
+export function guideMarkdown(g: Guide, r: Release) {
+  return `# ${g.title}
+
+> ${g.intro}
+
+${status(r)}
+
+## How it works
+
+${g.steps.map((s, i) => `${i + 1}. ${s.title}. ${s.text}`).join("\n")}
+
+## Good to know
+
+${list(g.details)}
+
+## Questions
+
+${qa(g.faq)}
+
+## Links
+
+- [Nuzky home page](${url})
+${list(guides.filter((o) => o !== g).map((o) => `[${o.title}](${url}${o.path}.md)`))}
+- [Nuzky vs CapCut](${url}/capcut-alternative.md)
+- [Source code on GitHub](${repo})
+`;
+}
+
 export function llmsTxt(r: Release) {
   return `# Nuzky
 
@@ -152,7 +182,8 @@ No account, no watermark, no subscription. Editing, captions and export run on t
 
 - [Nuzky](${url}/index.md): What Nuzky does, its features, how AI agents edit in it, the downloads and answers to common questions
 - [Nuzky vs CapCut](${url}/capcut-alternative.md): Price, platforms, privacy and AI editing compared, with when each one fits better
-- [Everything in one file](${url}/llms-full.txt): Both pages above in a single Markdown file
+${list(guides.map((g) => `[${g.title}](${url}${g.path}.md): ${g.description}`))}
+- [Everything in one file](${url}/llms-full.txt): Every page above in a single Markdown file
 
 ## Source
 
@@ -171,7 +202,7 @@ No account, no watermark, no subscription. Editing, captions and export run on t
 }
 
 export function llmsFullTxt(r: Release) {
-  return `${homeMarkdown(r)}\n---\n\n${alternativeMarkdown(r)}`;
+  return [homeMarkdown(r), alternativeMarkdown(r), ...guides.map((g) => guideMarkdown(g, r))].join("\n---\n\n");
 }
 
 // `Vary` keeps a cache from handing the Markdown to a browser, since `/` serves it to agents that ask for
