@@ -967,7 +967,7 @@ def plugin_tools(r):
                 'effects': [{'id': 'dim', 'name': 'Dim', 'params': []}]}
     bridge = Bridge(r, r.saved_project())
     try:
-        job = poll(bridge, bridge.call('transcribe', {'language': 'en', 'model': 'small'}), 300)
+        job = poll(bridge, bridge.call('transcribe', {'language': 'en', 'model': 'small'}), 600)
         r.check('the speech is recognised', job['status'] == 'done', job)
         words = bridge.call('get_transcript', {})['words']
         stored = bridge.call('save_plugin', {'manifest': manifest, 'script': TOOLS_SCRIPT, 'effects': {'dim': DIM}})

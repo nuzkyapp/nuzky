@@ -11,7 +11,7 @@ def captions(r):
     r.s.run("[...document.querySelectorAll('[role=tab]')].find((t) => t.textContent.trim() === 'Captions').click()")
     time.sleep(0.5)
     r.s.run("[...document.querySelectorAll('button')].find((b) => b.textContent.includes('Generate captions')).click()")
-    job = wait(lambda: next((j for j in r.state()['jobs'] if j['kind'] == 'captions' and j['status'] != 'running'), None), 300, 1)
+    job = wait(lambda: next((j for j in r.state()['jobs'] if j['kind'] == 'captions' and j['status'] != 'running'), None), 600, 1)
     r.check('captions finish', job and job['status'] == 'done', job)
     track = next(t for t in r.state()['tracks'] if t['kind'] == 'text')
     texts = [c['text'] for c in track['clips']]

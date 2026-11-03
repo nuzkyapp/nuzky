@@ -15,9 +15,10 @@ where nobody works; input goes to the webview, not the screen. Media and models 
 
 Needs Pillow and numpy, on Linux gamescope, WebKitWebDriver and python-xlib, and on Windows the Edge WebDriver
 and FFmpeg that scripts/setup-windows-deps.ps1 sets up in the same PowerShell. Vite takes port 1420 (the app's
-dev URL), the WebDriver 4444 and on Windows the webview's debugging port 4445. Runs on one machine take turns: a
-second one waits for the first. A port that something else holds, such as a dev server, stops the run instead of
-touching it.
+dev URL), the WebDriver 4444 and on Windows the webview's debugging port 4445. On Linux the flows run in
+NUZKY_REPRO_JOBS headless sessions side by side (2 by default), whose WebDrivers take 4444 and the ports after it.
+Runs on one machine take turns: a second one waits for the first. A port that something else holds, such as a dev
+server, stops the run instead of touching it.
 """
 import importlib, json, os, shutil, signal, subprocess, sys, time
 from pathlib import Path
@@ -29,7 +30,7 @@ if sys.platform == 'win32' and not sys.flags.utf8_mode:
 sys.dont_write_bytecode = True
 TESTS = Path(__file__).resolve().parent.parent / 'tests'
 sys.path.insert(0, str(TESTS))
-from e2e.harness import DEBUG_PORT, DRIVER, FIXTURES, FLOWS, LINUX, MACOS, MODELS, OUT, ROOT, WINDOWS, port_busy, run_flow, start, started, stop  # noqa: E402
+from e2e.harness import DEBUG_PORT, DRIVER, DRIVER_PORT, FIXTURES, FLOWS, LINUX, MACOS, MODELS, OUT, ROOT, WINDOWS, port_busy, run_flow, start, started, stop  # noqa: E402
 
 for module in sorted(p.stem for p in (TESTS / 'e2e').glob('*.py') if p.stem != 'harness'):
     importlib.import_module(f'e2e.{module}')
@@ -54,7 +55,7 @@ def take_turn(lock, wait):
             time.sleep(1)
 
 
-def preflight(names):
+def preflight(names, jobs):
     tools = ('gamescope', 'ffmpeg', 'npx') if LINUX else ('ffmpeg', 'npx')
     problems = [f'{tool} is missing' for tool in tools if not shutil.which(tool)]
     problems += [] if MACOS else [f'{path} is missing' for path in (DRIVER,) if not Path(path).exists()]
@@ -72,7 +73,7 @@ def preflight(names):
             or ('first-reel' in names and not all((FIXTURES / f).exists() for f in (
                 'first-reel.mov', 'xdg/data/nuzky/models/ggml-large-v3-turbo-q5_0.bin')))):
         problems.append('test media or models are missing: run scripts/fixtures.sh')
-    ports = (1420,) if MACOS else (1420, 4444, DEBUG_PORT) if WINDOWS else (1420, 4444)
+    ports = (1420,) if MACOS else (1420, DRIVER_PORT, DEBUG_PORT) if WINDOWS else (1420, *range(DRIVER_PORT, DRIVER_PORT + jobs))
     problems += [f'port {port} is in use by another session' for port in ports if port_busy(port)]
     return problems
 
@@ -92,20 +93,13 @@ def main(args):
     # WebKitWebDriver and the app do not keep running and holding their ports.
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     if os.environ.get('NUZKY_REPRO_INNER') == '1':
-        OUT.mkdir(parents=True, exist_ok=True)
-        # Checked again here: the port may have been taken while the app was building.
-        if port_busy(1420):
-            print('port 1420 is in use by another session', file=sys.stderr)
-            return 1
-        vite = start([shutil.which('npx'), 'vite', '--port', '1420', '--strictPort'], OUT / 'vite.log')
-        try:
-            if not started(vite, 1420, 30):
-                print('Vite did not start, see tmp-test/repro/vite.log', file=sys.stderr)
-                return 1
-            for name in names:
-                run_flow(name)
-        finally:
-            stop(vite)
+        # The sessions side by side take the flows in this order, each flow once: the first to create its claim runs it.
+        for name in names:
+            try:
+                os.close(os.open(OUT / '.claims' / name, os.O_CREAT | os.O_EXCL))
+            except FileExistsError:
+                continue
+            run_flow(name)
         return 0
     # Another session's run holds the ports until it ends; failing on them would waste a whole gate.
     # Kept with the build dependencies, since a terminal running the app may have its own XDG_RUNTIME_DIR.
@@ -115,7 +109,10 @@ def main(args):
     if not take_turn(turn, wait=False):
         print('Another UI run uses the app on this machine; this one starts when it ends.', flush=True)
         take_turn(turn, wait=True)
-    problems = preflight(names)
+    # Linux runs the flows in several headless gamescope sessions side by side, which share one Vite; each flow
+    # waits mostly on the app and real time.
+    jobs = max(1, min(int(os.environ.get('NUZKY_REPRO_JOBS', '2')), len(names))) if LINUX else 1
+    problems = preflight(names, jobs)
     if problems:
         print('repro cannot run:\n  ' + '\n  '.join(problems), file=sys.stderr)
         return 1
@@ -131,21 +128,42 @@ def main(args):
     subprocess.run(['cargo', 'build', '--locked', '--workspace', '--all-targets'], cwd=ROOT, check=True)
     # The debug app opens ONNX Runtime from the build dependencies when covers run.
     subprocess.run(['node', 'scripts/fetch-onnxruntime.mjs'], cwd=ROOT, check=True, stdout=subprocess.DEVNULL)
+    # The longest flows of the last run start first, so none of them is left running alone at the end.
+    last = {}
     for name in names:
-        (OUT / name / 'result.json').unlink(missing_ok=True)
-    OUT.mkdir(parents=True, exist_ok=True)
-    where, log_name = ('in headless gamescope', 'gamescope.log') if LINUX else ('off screen' if MACOS else 'on the desktop', 'flows.log')
-    print(f'Running {", ".join(names)} {where}; its output goes to tmp-test/repro/{log_name}', flush=True)
-    inner = [sys.executable, '-X', 'utf8', __file__, *names]
+        result_file = OUT / name / 'result.json'
+        last[name] = json.loads(result_file.read_text()).get('seconds', 0) if result_file.exists() else 0
+        result_file.unlink(missing_ok=True)
+    shutil.rmtree(OUT / '.claims', ignore_errors=True)
+    (OUT / '.claims').mkdir(parents=True)
+    # Checked again here: the port may have been taken while the app was building.
+    if port_busy(1420):
+        print('port 1420 is in use by another session', file=sys.stderr)
+        return 1
+    vite = start([shutil.which('npx'), 'vite', '--port', '1420', '--strictPort'], OUT / 'vite.log')
+    if not started(vite, 1420, 30):
+        stop(vite)
+        print('Vite did not start, see tmp-test/repro/vite.log', file=sys.stderr)
+        return 1
+    where, log_name = ('in headless gamescope', 'gamescope') if LINUX else ('off screen' if MACOS else 'on the desktop', 'flows')
+    logs = ', '.join(f'tmp-test/repro/{log_name}-{job}.log' for job in range(jobs)) if jobs > 1 else f'tmp-test/repro/{log_name}.log'
+    print(f'Running {", ".join(names)} {where}{f" in {jobs} sessions" if jobs > 1 else ""}; the output goes to {logs}', flush=True)
+    inner = [sys.executable, '-X', 'utf8', __file__, *sorted(names, key=lambda name: -last[name])]
     group = {'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP} if WINDOWS else {'start_new_session': True}
-    with open(OUT / log_name, 'w') as log:
-        runner = subprocess.Popen(['gamescope', '--backend', 'headless', '-W', '1440', '-H', '900', '--', *inner] if LINUX else inner,
-                                  cwd=ROOT, env=dict(os.environ, NUZKY_REPRO_INNER='1'), stdout=log, stderr=subprocess.STDOUT, **group)
-        try:
+    runners = []
+    try:
+        for job in range(jobs):
+            log = open(OUT / (f'{log_name}-{job}.log' if jobs > 1 else f'{log_name}.log'), 'w')
+            env = dict(os.environ, NUZKY_REPRO_INNER='1', NUZKY_REPRO_DRIVER_PORT=str(DRIVER_PORT + job))
+            runners.append(subprocess.Popen(['gamescope', '--backend', 'headless', '-W', '1440', '-H', '900', '--', *inner] if LINUX else inner,
+                                            cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT, **group))
+        for runner in runners:
             runner.wait()
-        finally:
+    finally:
+        for runner in runners:
             if runner.poll() is None:
                 stop(runner, timeout=20)
+        stop(vite)
     failed = []
     for name in names:
         result_file = OUT / name / 'result.json'
@@ -155,7 +173,7 @@ def main(args):
             detail = '' if check['ok'] or check['detail'] is None else f": {check['detail']}"
             print(f"  {'ok  ' if check['ok'] else 'FAIL'} {check['check']}{detail}")
         if not result or result['error']:
-            print('  ' + (result['error'] if result else f'no result; see tmp-test/repro/{log_name}').strip().replace('\n', '\n  '))
+            print('  ' + (result['error'] if result else f'no result; see {logs}').strip().replace('\n', '\n  '))
         failed += [] if result and result['passed'] else [name]
     return 1 if failed else 0
 

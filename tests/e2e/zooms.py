@@ -89,7 +89,7 @@ def square(r, name):
 
 
 @flow('zooms', 'Suggested zooms on three Czech takes: marked sentences, one-step Apply that scales the picture up there '
-      'and nothing else, Ctrl+Z, and the same suggestions and apply over MCP', before=zooms_setup)
+      'and nothing else, Ctrl+Z, and the same suggestions and apply over MCP', before=zooms_setup, reuse_transcripts=True)
 def zooms(r):
     r.import_media(*takes(r))
     for take in takes(r):

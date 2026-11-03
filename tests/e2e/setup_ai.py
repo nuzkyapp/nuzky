@@ -242,7 +242,7 @@ def skip_to_transcript(r):
             v and v['tab'] == 'transcript' and not dialog(r) and len(r.track()) == 1, (v, dialog(r)))
     r.check('Transcribe timeline', wait(lambda: r.s.run("const b = [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Transcribe timeline');"
                                                        "if (!b) return false; b.click(); return true;"), 10))
-    words = wait(lambda: (n := r.s.run(f"return document.querySelectorAll('{WORDS}').length")) and n > 5 and n, 180)
+    words = wait(lambda: (n := r.s.run(f"return document.querySelectorAll('{WORDS}').length")) and n > 5 and n, 600)
     r.check('the transcript shows the words said', words, words)
     before = sum(c['durationUs'] for c in r.track())
     word = r.s.run(f"const w = document.querySelectorAll('{WORDS}')[2]; w.scrollIntoView({{block: 'center'}}); return {{id: w.id, text: w.textContent}}")

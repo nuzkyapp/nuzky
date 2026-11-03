@@ -425,7 +425,7 @@ def home(r):
     models = r.s.call('window.__nuzky.api.speechModels().then((m) => JSON.stringify(m))')
     small = next(m['id'] for m in json.loads(models['value']) if 'small' in m['id'] and m['downloaded'])
     job = r.s.call("window.__nuzky.api.startTranscript(arguments[0], 'en', false, window.__nuzky.store.getState().snap.sessionEpoch)", small)
-    r.check('the open project is transcribed', job['ok'] and wait(lambda: any(j['kind'] == 'transcript' and j['status'] == 'done' for j in r.state()['jobs']), 240),
+    r.check('the open project is transcribed', job['ok'] and wait(lambda: any(j['kind'] == 'transcript' and j['status'] == 'done' for j in r.state()['jobs']), 600),
             r.state()['jobs'])
     r.s.run(TYPE, 'main input[type=search]', 'croatia')
     names = wait(lambda: [c['name'] for c in cards(r)] == ['Croatia day two'] and [c['name'] for c in cards(r)], 3)

@@ -80,6 +80,17 @@ own_node_modules() {
   fi
 }
 
+# The Rust tests keep the transcripts they recognise in tmp-test/xdg between runs. After a change to speech recognition
+# they recognise again, as the UI flows do (transcript_pool in tests/e2e/harness.py).
+current_transcripts() {
+  local key mark=tmp-test/xdg/data/nuzky/transcripts.key
+  key=$(python3 -c 'import sys; sys.dont_write_bytecode = True; sys.path.insert(0, "tests")
+from e2e.harness import transcript_pool; print(transcript_pool().name)') || return 1
+  [ "$(cat "$mark" 2>/dev/null)" = "$key" ] && return
+  rm -rf tmp-test/xdg/data/nuzky/transcripts
+  mkdir -p "$(dirname "$mark")" && printf '%s\n' "$key" >"$mark"
+}
+
 # The Rust tests with media and the UI flows spend their time waiting for speech recognition on the GPU, the app
 # and real time, each with about a tenth of the CPU, so they run side by side. The flows' report follows the tests'.
 media_tests_and_flows() {
@@ -108,6 +119,7 @@ step "Frontend types and build" npm run build
 step "Website build" npm run site:build
 step "Clippy" cargo clippy --workspace --all-targets --locked -- -D warnings
 step "ONNX Runtime" node scripts/fetch-onnxruntime.mjs
+step "Transcripts of the current speech recognition" current_transcripts
 step "Rust tests" scripts/isolated.sh cargo test --workspace --locked
 step "Test media and models" scripts/fixtures.sh
 step "Rust tests with media and models, and the UI flows" media_tests_and_flows

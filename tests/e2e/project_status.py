@@ -55,7 +55,7 @@ def project_status(r):
     landed = lands(r, 'captions', lambda f: 'data-generate-captions' in f['attrs'])
     r.check('Add opens Captions on Generate captions', landed is True, landed)
     r.s.run('document.activeElement.click()')
-    job = wait(lambda: next((j for j in r.state()['jobs'] if j['kind'] == 'captions' and j['status'] != 'running'), None), 300, 1)
+    job = wait(lambda: next((j for j in r.state()['jobs'] if j['kind'] == 'captions' and j['status'] != 'running'), None), 600, 1)
     r.check('captions finish', job and job['status'] == 'done', job)
     captions = sum(len(t['clips']) for t in r.state()['tracks'] if t['kind'] == 'text')
     r.check('Captions counts the captions and names their style',

@@ -72,7 +72,8 @@ def record(dir):
     (parts / 'list.txt').write_text('\n'.join(listing) + '\n')
     speech, recording = dir / 'speech.wav', dir / 'talk.mp4'
     run('ffmpeg', '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', str(parts / 'list.txt'), str(speech))
-    run('ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=540x960:r=30', '-i', str(speech), '-shortest',
+    # Its length given, as -shortest ends a little differently each run and an earlier transcript would not fit it.
+    run('ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=540x960:r=30', '-i', str(speech), '-t', f'{duration(speech):.3f}',
         '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', str(recording))
     return recording, pieces
 
@@ -145,7 +146,7 @@ def rule_menu(r, title, item):
 
 @flow('style', 'Your style: Learn my style suggests rules from a recording and its cut, Accept all writes what `nuzky style learn` '
                'writes and the agent reads it; own rules, Remove, Reject, editing as text, Back to default and Versions change '
-               'what the agent reads', before=setup, home=True)
+               'what the agent reads', before=setup, home=True, reuse_transcripts=True)
 def style(r):
     recording, cut = r.pair
     r.s.run("document.querySelector('nav[aria-label=Collections] button[data-row]:nth-of-type(2)').click()")
@@ -318,11 +319,11 @@ def sources(r):
 
 @flow('style_auto', 'Nuzky learns by itself: never from the AI\'s own cut or its export, but from the user\'s edits of it, their corrected '
                     'words and their export, all as suggestions that leave the style unchanged, each as sure as the moments of the one project '
-                    'make it; accepted, a rule learning would change says so, and once the change is rejected that the user kept it', before=project_setup, home=True)
+                    'make it; accepted, a rule learning would change says so, and once the change is rejected that the user kept it', before=project_setup, home=True, reuse_transcripts=True)
 def style_auto(r):
     bridge = Bridge(r, r.saved_project())
     try:
-        job = poll(bridge, bridge.call('transcribe', {'language': 'en', 'model': 'small'}), 300)
+        job = poll(bridge, bridge.call('transcribe', {'language': 'en', 'model': 'small'}), 600)
         r.check('the speech is recognised', job and job['status'] == 'done', job)
         words = bridge.call('get_transcript', {})['words']
         start = next(i for i, w in enumerate(words) if w['text'].strip().lower().startswith('show'))

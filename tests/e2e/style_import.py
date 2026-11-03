@@ -125,6 +125,9 @@ def style_import(r):
 
     learn(r, ended=False)
     shot(r, 'projects-learning')
+    # Its turn may wait behind another flow's recognition (one at a time on a computer); Stop has to end a running one.
+    r.check('learning is recognising speech',
+            wait(lambda: (j := job(r) or {}).get('phase') == 'Recognising speech' and (j.get('progress') or 0) > 0, 600), job(r))
     started = time.monotonic()
     # From the keyboard: Stop has the focus when it goes away.
     r.s.run(f"[...document.querySelectorAll('{DIALOG} button')].find((b) => b.textContent === 'Stop').focus()")
