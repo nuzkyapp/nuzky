@@ -2068,6 +2068,12 @@ fn captions_of(tracks: &Value) -> Vec<(String, Value)> {
         .collect()
 }
 
+/// Whether a caption has the Reel preset's 95 px, which is for a 1080 px short side, scaled to the canvas.
+fn reel_size(state: &Value, style: &Value) -> bool {
+    let (width, height) = (state["canvas"]["width"].as_f64().unwrap(), state["canvas"]["height"].as_f64().unwrap());
+    (style["fontSize"].as_f64().unwrap() - 95.0 * width.min(height) / 1080.0).abs() < 0.01
+}
+
 fn most_words(captions: &[(String, Value)]) -> usize {
     captions.iter().map(|(text, _)| text.split(' ').count()).max().unwrap()
 }
@@ -2092,9 +2098,10 @@ fn the_creators_settings_fill_in_what_an_agent_leaves_out_over_stdio() {
     let mut fields: Vec<&String> = built.as_object().unwrap().keys().collect();
     fields.sort();
     assert_eq!(fields, ["caption_count", "created", "removed", "revision", "session_epoch"]);
-    let captions = captions_of(&plain.call("get_state", json!({}))["tracks"]);
+    let state = plain.call("get_state", json!({}));
+    let captions = captions_of(&state["tracks"]);
     assert_eq!((most_words(&captions), most_chars(&captions) <= 15), (2, true), "{captions:?}");
-    assert!(captions.iter().all(|(_, style)| style["fontSize"] == 95.0 && style["color"] == "#ffffff"));
+    assert!(captions.iter().all(|(_, style)| reel_size(&state, style) && style["color"] == "#ffffff"), "{captions:?}");
     plain.call("end_run", json!({"run_id": plain_run, "action": "keep"}));
     plain.finish();
 
@@ -2130,9 +2137,10 @@ fn the_creators_settings_fill_in_what_an_agent_leaves_out_over_stdio() {
     assert_eq!(rebuilt["from_style"], json!({"max_chars": 30}));
     let warnings = rebuilt["style_warnings"].to_string();
     assert!(warnings.contains("build_captions max_words") && warnings.contains("build_captions style"), "{warnings}");
-    let captions = captions_of(&styled.call("get_state", json!({}))["tracks"]);
+    let state = styled.call("get_state", json!({}));
+    let captions = captions_of(&state["tracks"]);
     assert_eq!(most_words(&captions), 2, "{captions:?}");
-    assert!(captions.iter().all(|(_, style)| style["fontSize"] == 95.0 && style["color"] == "#ffffff"));
+    assert!(captions.iter().all(|(_, style)| reel_size(&state, style) && style["color"] == "#ffffff"), "{captions:?}");
     // An EDIT.md that is there but cannot be read gives the defaults with a warning, and only when they are used.
     std::fs::write(&edit_md, b"\xff\xfe").unwrap();
     let mut unreadable = plan_cut(&mut styled, None);
@@ -2144,9 +2152,13 @@ fn the_creators_settings_fill_in_what_an_agent_leaves_out_over_stdio() {
     // A preset replaces the learned look as a whole, and a limit given replaces only itself.
     let karaoke = styled.call("build_captions", json!({"run_id": run, "style_preset": "karaoke", "max_chars": 14}));
     assert_eq!(karaoke["from_style"], json!({"max_words": 3}));
-    let captions = captions_of(&styled.call("get_state", json!({}))["tracks"]);
+    let state = styled.call("get_state", json!({}));
+    let captions = captions_of(&state["tracks"]);
     assert_eq!((most_words(&captions), most_chars(&captions)), (3, 14), "{captions:?}");
-    assert!(captions.iter().all(|(_, style)| style["fontSize"] == 95.0 && style["highlight"] == "#ffe14d"));
+    assert!(
+        captions.iter().all(|(_, style)| reel_size(&state, style) && style["highlight"] == "#ffe14d"),
+        "{captions:?}"
+    );
 
     let built = styled.call("build_captions", json!({"run_id": run}));
     assert_eq!((&built["from_style"]["max_words"], &built["from_style"]["max_chars"]), (&json!(3), &json!(30)));

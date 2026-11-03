@@ -6,8 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::{
     Adjust, Animation, Asset, AssetKind, Background, CAPTIONS_TRACK, Canvas, CaptionWord, Clip, ClipContent, Ease,
-    Effect, Keyframe, Keywords, LetterCase, MAX_CLIP_EFFECTS, Project, ReelCandidate, Shape, TextAlign, TextShadow,
-    TextStyle, Thumbnail, ThumbnailFormat, Track, TrackKind, Transform, Transition, WordCorrection,
+    Effect, Keyframe, Keywords, LetterCase, MAX_CANVAS_SIDE, MAX_CLIP_EFFECTS, Project, ReelCandidate, Shape,
+    TextAlign, TextShadow, TextStyle, Thumbnail, ThumbnailFormat, Track, TrackKind, Transform, Transition,
+    WordCorrection,
 };
 
 pub const MAIN_TRACK: &str = "main";
@@ -1788,11 +1789,23 @@ impl Project {
                 if let Some(b) = background_blur {
                     self.canvas.background_blur = b.clamp(0.0, 1.0);
                 }
-                if width < 16 || height < 16 || width > 7680 || height > 7680 {
+                if width < 16 || height < 16 || width > MAX_CANVAS_SIDE || height > MAX_CANVAS_SIDE {
                     bail!("Unsupported canvas size");
                 }
+                let before = self.canvas.unit();
                 self.canvas.width = width & !1;
                 self.canvas.height = height & !1;
+                // Another resolution keeps every text, outline and border the same size on the picture.
+                let k = self.canvas.unit() / before;
+                if k != 1.0 {
+                    for clip in self.tracks.iter_mut().flat_map(|t| &mut t.clips) {
+                        match &mut clip.content {
+                            ClipContent::Text { style, .. } => style.scale_pixels(k),
+                            ClipContent::Media { shape: Some(shape), .. } => shape.border_width *= k,
+                            ClipContent::Media { .. } => {}
+                        }
+                    }
+                }
                 if let Some(b) = background {
                     self.canvas.background = b;
                 }
@@ -3204,6 +3217,28 @@ mod tests {
             assert!(p.apply(cmd("empty", None)).is_err());
             p.apply(cmd("a", None)).unwrap();
             assert_eq!(p.tracks[3].clips[0].duration_us, 5_000_000);
+        }
+    }
+
+    #[test]
+    fn set_canvas_scales_text_and_shape_pixels_with_short_side() {
+        let mut p = project();
+        p.apply(EditCmd::AddClip { asset_id: "a".into(), start_us: None, track_id: None }).unwrap();
+        let ClipContent::Media { shape, .. } = &mut p.tracks[0].clips[0].content else { panic!() };
+        *shape = Some(Shape { border_width: 6.0, ..Shape::default() });
+        let style: TextStyle = serde_json::from_value(serde_json::json!({
+            "fontSize": 95.0, "strokeWidth": 7.5, "maxWidth": 800.0, "color": "#ffffff"
+        }))
+        .unwrap();
+        p.apply(EditCmd::AddText { start_us: 0, text: "Title".into(), style }).unwrap();
+        for (width, height, k) in [(2160, 3840, 2.0), (3840, 2160, 2.0), (1080, 1920, 1.0)] {
+            p.apply(EditCmd::SetCanvas { width, height, background: None, background_blur: None }).unwrap();
+            let ClipContent::Text { style, .. } = &p.tracks[1].clips[0].content else { panic!() };
+            assert_eq!(style.font_size, 95.0 * k);
+            assert_eq!(style.stroke_width, 7.5 * k);
+            assert_eq!(style.max_width, Some(800.0 * k));
+            let ClipContent::Media { shape, .. } = &p.tracks[0].clips[0].content else { panic!() };
+            assert_eq!(shape.as_ref().unwrap().border_width, 6.0 * k);
         }
     }
 

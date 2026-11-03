@@ -2,7 +2,7 @@ import { useMemo, type ReactNode } from "react";
 import { Captions, Check, ChevronDown, Film, ImagePlus, Music, Scissors, ZoomIn, type LucideIcon } from "lucide-react";
 import { musicClipOf, useBeats } from "../../lib/beats";
 import { COVER_FORMATS, openCover, thumbnailOf } from "../../lib/cover";
-import { CAPTION_STYLES, formatLabel, isLook } from "../../lib/presets";
+import { CAPTION_STYLES, canvasUnit, formatLabel, isLook } from "../../lib/presets";
 import { useSounds } from "../../lib/sounds";
 import { speechBlocker, useTranscriptView } from "../../lib/speech";
 import { isCaptionTrack, mainClips, projectDuration, useEditor, type PanelTab } from "../../lib/store";
@@ -100,7 +100,7 @@ function SpeechStep({ project, view, error }: { project: Project; view: Transcri
 
 function captionsOf(project: Project) {
   const clips = project.tracks.filter(isCaptionTrack).flatMap((t) => t.clips);
-  const looks = clips.map(({ content: c, animIn, animOut }) => (c.type === "text" ? CAPTION_STYLES.find((p) => isLook(p, c.style, animIn, animOut)) : undefined));
+  const looks = clips.map(({ content: c, animIn, animOut }) => (c.type === "text" ? CAPTION_STYLES.find((p) => isLook(p, c.style, animIn, animOut, canvasUnit(project.canvas))) : undefined));
   const style = looks.every((l) => l === looks[0]) ? looks[0]?.name : undefined;
   return { count: clips.length, style };
 }

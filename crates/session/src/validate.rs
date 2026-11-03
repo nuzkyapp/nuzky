@@ -6,9 +6,10 @@ use nuzky_engine::{
     Project,
     model::{
         Asset, AssetKind, Background, Clip, ClipContent, EffectValue, LETTER_SPACING, LINE_SPACING, MAX_BORDER_WIDTH,
-        MAX_CLIP_EFFECTS, MAX_CORRECTION_CHARS, MAX_FONT_HEIGHT_RATIO, MAX_LEFT_OUT, MAX_LEFT_OUT_CHARS,
-        MAX_REEL_HOOK_CHARS, MAX_REEL_TITLE_CHARS, MAX_REEL_WHY_CHARS, MAX_SHADOW, MAX_TEXT_WIDTH_RATIO,
-        PROJECT_VERSION, ReelCandidate, ReelStatus, TextStyle, Thumbnail, TrackKind, Transform, max_stroke_width,
+        MAX_CANVAS_SIDE, MAX_CLIP_EFFECTS, MAX_CORRECTION_CHARS, MAX_FONT_HEIGHT_RATIO, MAX_LEFT_OUT,
+        MAX_LEFT_OUT_CHARS, MAX_REEL_HOOK_CHARS, MAX_REEL_TITLE_CHARS, MAX_REEL_WHY_CHARS, MAX_SHADOW,
+        MAX_TEXT_WIDTH_RATIO, PROJECT_VERSION, ReelCandidate, ReelStatus, TextStyle, Thumbnail, TrackKind, Transform,
+        max_stroke_width, unit_of,
     },
 };
 
@@ -19,7 +20,8 @@ const MAX_CAPTION_WORDS: usize = 1000;
 pub fn validate(project: &Project) -> Result<()> {
     ensure!(project.version == PROJECT_VERSION, "INVALID_PROJECT: unsupported version");
     ensure!(
-        (16..=7680).contains(&project.canvas.width) && (16..=7680).contains(&project.canvas.height),
+        (16..=MAX_CANVAS_SIDE).contains(&project.canvas.width)
+            && (16..=MAX_CANVAS_SIDE).contains(&project.canvas.height),
         "INVALID_PROJECT: canvas size"
     );
     ensure!((1..=240).contains(&project.canvas.fps), "INVALID_PROJECT: frame rate");
@@ -197,7 +199,7 @@ pub fn text_style(style: &TextStyle, (width, height): (u32, u32)) -> Result<()> 
             && style.font_size <= MAX_FONT_HEIGHT_RATIO * height as f32
             && style.stroke_width.is_finite()
             && style.stroke_width >= 0.0
-            && style.stroke_width <= max_stroke_width(style.font_size)
+            && style.stroke_width <= max_stroke_width(style.font_size, unit_of(width, height))
             && style
                 .max_width
                 .is_none_or(|max| max.is_finite() && max > 0.0 && max <= MAX_TEXT_WIDTH_RATIO * width as f32),
@@ -493,11 +495,12 @@ fn validate_clip(project: &Project, clip: &Clip, kind: TrackKind) -> Result<()> 
             );
             transform(t)?;
             if let Some(shape) = shape {
+                let border = MAX_BORDER_WIDTH * project.canvas.unit().max(1.0);
                 ensure!(
                     (0.0..=1.0).contains(&shape.radius)
-                        && (0.0..=MAX_BORDER_WIDTH).contains(&shape.border_width)
+                        && (0.0..=border).contains(&shape.border_width)
                         && (0.0..=1.0).contains(&shape.shadow),
-                    "INVALID_PROJECT: shape of {} needs a radius and shadow from 0 to 1 and a border up to {MAX_BORDER_WIDTH} px",
+                    "INVALID_PROJECT: shape of {} needs a radius and shadow from 0 to 1 and a border up to {border} px",
                     clip.id
                 );
                 color(&shape.border_color, "border color")?;
@@ -623,6 +626,36 @@ mod tests {
             style.stroke_width = stroke;
             style.max_width = width;
             assert_eq!(validate(&project).is_ok(), valid, "font {font}, stroke {stroke}, width {width:?}");
+        }
+    }
+
+    #[test]
+    fn shape_border_bounds_follow_canvas_short_side() {
+        let mut project = Project::new("border bounds");
+        let asset = Asset {
+            id: "image".into(),
+            name: "Image".into(),
+            path: std::env::temp_dir().join("border.png").to_string_lossy().into(),
+            kind: AssetKind::Image,
+            duration_us: 0,
+            width: 1080,
+            height: 1920,
+            fps: 0.0,
+            has_audio: false,
+            rotation: 0,
+            mirror: false,
+            credit: None,
+            part: None,
+        };
+        project.apply(EditCmd::AddAssets { assets: vec![asset] }).unwrap();
+        project.apply(EditCmd::AddClip { asset_id: "image".into(), start_us: None, track_id: None }).unwrap();
+        for (width, height, border, valid) in
+            [(2160, 3840, 200.0, true), (2160, 3840, 201.0, false), (1080, 1920, 101.0, false)]
+        {
+            project.apply(EditCmd::SetCanvas { width, height, background: None, background_blur: None }).unwrap();
+            let ClipContent::Media { shape, .. } = &mut project.tracks[0].clips[0].content else { panic!() };
+            *shape = Some(nuzky_engine::model::Shape { border_width: border, ..Default::default() });
+            assert_eq!(validate(&project).is_ok(), valid, "{width}x{height}, border {border}");
         }
     }
 

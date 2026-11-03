@@ -3,7 +3,7 @@ import { create } from "zustand";
 import { AlignCenter, AlignLeft, AlignRight, Ban, RotateCcw } from "lucide-react";
 import { LIMITS } from "../../lib/limits";
 import { BOX_RADIUS, CAPTION_STYLES, KEYWORD_COLOR, KEYWORD_PICKS, TEXT_PRESETS, isLook, sameStyle, weightOf } from "../../lib/presets";
-import { applyCaptionLook, editClip, patched, placeCaptions, presetOver, restyleCaptions, useEditor, type StylePatch } from "../../lib/store";
+import { applyCaptionLook, editClip, patched, placeCaptions, presetOver, restyleCaptions, useCanvasUnit, useEditor, type StylePatch } from "../../lib/store";
 import type { Animation, CaptionPreset, Clip, EditCmd, LetterCase, TextAlign, TextShadow, TextStyle, Transform } from "../../lib/types";
 import { FontPicker } from "../FontPicker";
 import { Select } from "../panel/SpeechControls";
@@ -97,15 +97,16 @@ export function TextSection({ clip, text, style, caption }: { clip: Clip; text: 
     : (patch, key) =>
         editClip(clip.id, (c) => (c.content.type === "text" ? { type: "updateClip", clipId: c.id, style: patched(c.content.style, patch) } : null), `${clip.id}:style:${key}`);
   const styles = everyCaption ? textStyles(everyCaption) : undefined;
+  const unit = useCanvasUnit();
   const presets = caption ? CAPTION_STYLES : TEXT_PRESETS;
   const selected = (p: (typeof presets)[number]) => {
-    if (!caption) return sameStyle(p.style, style);
-    return (everyCaption ?? [clip]).every((c) => c.content.type === "text" && isLook(p as CaptionPreset, c.content.style, c.animIn, c.animOut));
+    if (!caption) return sameStyle(p.style, style, unit);
+    return (everyCaption ?? [clip]).every((c) => c.content.type === "text" && isLook(p as CaptionPreset, c.content.style, c.animIn, c.animOut, unit));
   };
   const apply = (p: (typeof presets)[number]) => {
     const look = p as CaptionPreset;
     if (everyCaption) return void applyCaptionLook({ style: look.style, animIn: look.animIn ?? null, animOut: look.animOut ?? null }, p.name, track?.id);
-    const restyle: EditCmd = { type: "updateClip", clipId: clip.id, style: presetOver(p.style, style) };
+    const restyle: EditCmd = { type: "updateClip", clipId: clip.id, style: presetOver(p.style, style, unit) };
     // A caption style brings its animations too.
     const animate = (slot: "in" | "out", animation: Animation | null | undefined): EditCmd => ({ type: "setAnimation", clipId: clip.id, slot, animation: animation ?? null });
     edit(caption ? [restyle, animate("in", look.animIn), animate("out", look.animOut)] : restyle);
@@ -118,7 +119,7 @@ export function TextSection({ clip, text, style, caption }: { clip: Clip; text: 
       </Section>
       {/* Font, size, colour and case first, so they are in view without scrolling past every style. */}
       <Section title="Style">
-        <MainStyle style={style} styles={styles} setStyle={setStyle} />
+        <MainStyle style={style} styles={styles} setStyle={setStyle} unit={unit} />
         <div className="grid grid-cols-3 gap-2">
           {presets.map((p) => (
             <PresetTile key={p.name} label={p.name} selected={selected(p)} title={everyCaption ? `Apply ${p.name} to all captions` : `Apply ${p.name} style`} onClick={() => apply(p)}>
@@ -141,7 +142,7 @@ export function TextSection({ clip, text, style, caption }: { clip: Clip; text: 
           {style.keywords && unlitReason(clip, text) && <p className="text-[12px] text-muted">{unlitReason(clip, text)}</p>}
         </Section>
       )}
-      <MoreStyleFold style={style} styles={styles} setStyle={setStyle} />
+      <MoreStyleFold style={style} styles={styles} setStyle={setStyle} unit={unit} />
       {everyCaption && <CaptionPosition clips={everyCaption} trackId={track?.id} title="Position of all captions" />}
     </>
   );
@@ -150,7 +151,8 @@ export function TextSection({ clip, text, style, caption }: { clip: Clip; text: 
 export type SetStyle = (patch: StylePatch, key: string) => void;
 
 /** `styles`: every text the controls change, `style` being the one they show; a dash shows where they differ. */
-type StyleProps = { style: TextStyle; styles?: TextStyle[]; setStyle: SetStyle };
+/** `unit` is the canvas's `canvasUnit`: sizes are canvas pixels, and the size and outline sliders reach as far on the picture at any resolution. */
+type StyleProps = { style: TextStyle; styles?: TextStyle[]; setStyle: SetStyle; unit?: number };
 
 function across(style: TextStyle, styles: TextStyle[] = [style]) {
   const json = (v: unknown) => JSON.stringify(v ?? null);
@@ -162,13 +164,13 @@ function across(style: TextStyle, styles: TextStyle[] = [style]) {
 }
 
 /** What a text needs most, then the rest folded under More style. */
-export function StyleSection({ style, styles, setStyle, maxSize = 300 }: StyleProps & { maxSize?: number }) {
+export function StyleSection({ style, styles, setStyle, unit, maxSize = 300 }: StyleProps & { maxSize?: number }) {
   return (
     <>
       <Section title="Style">
-        <MainStyle style={style} styles={styles} setStyle={setStyle} maxSize={maxSize} />
+        <MainStyle style={style} styles={styles} setStyle={setStyle} unit={unit} maxSize={maxSize} />
       </Section>
-      <MoreStyleFold style={style} styles={styles} setStyle={setStyle} />
+      <MoreStyleFold style={style} styles={styles} setStyle={setStyle} unit={unit} />
     </>
   );
 }
@@ -190,7 +192,7 @@ const CASES: { id: LetterCase; label: React.ReactNode; title: string }[] = [
 ];
 
 /** Font, size, colour and case: what a text needs most. */
-export function MainStyle({ style, styles, setStyle, maxSize = 300 }: StyleProps & { maxSize?: number }) {
+export function MainStyle({ style, styles, setStyle, unit = 1, maxSize = 300 }: StyleProps & { maxSize?: number }) {
   const { differ } = across(style, styles);
   return (
     <>
@@ -200,7 +202,7 @@ export function MainStyle({ style, styles, setStyle, maxSize = 300 }: StyleProps
           <WeightSelect style={style} mixed={differ(weightOf)} fonts={differ((s) => s.fontFamily)} onChange={(fontWeight) => setStyle({ fontWeight, bold: fontWeight >= 600 }, "weight")} />
         </div>
       </FieldRow>
-      <Slider label="Size" mixed={differ((s) => s.fontSize)} value={style.fontSize} min={12} max={maxSize} step={1} format={(v) => String(Math.round(v))} onChange={(v) => setStyle({ fontSize: v }, "size")} />
+      <Slider label="Size" mixed={differ((s) => s.fontSize)} value={style.fontSize} min={12 * unit} max={maxSize * unit} step={1} format={(v) => String(Math.round(v))} onChange={(v) => setStyle({ fontSize: v }, "size")} />
       <ColorInput label="Color" mixed={differ((s) => s.color)} value={style.color} onChange={(v) => setStyle({ color: v }, "color")} />
       <FieldRow label="Case">
         <div className="min-w-0 flex-1">
@@ -316,7 +318,7 @@ const degrees = (s: string) => ((((parseNumber(s) + 180) % 360) + 360) % 360) - 
 const boxOpacity = (box: string) => (box.length >= 9 ? parseInt(box.slice(7, 9), 16) / 255 : 1);
 const withOpacity = (box: string, opacity: number) => box.slice(0, 7) + Math.round(opacity * 255).toString(16).padStart(2, "0");
 
-export function MoreStyle({ style, styles, setStyle }: StyleProps) {
+export function MoreStyle({ style, styles, setStyle, unit = 1 }: StyleProps) {
   const { differ, all, on } = across(style, styles);
   const shadow = all((s) => !!s.shadow) ? style.shadow : null;
   // Merged into each shadow as it is when the edit goes out, so quick changes to two of its settings both stick.
@@ -332,7 +334,7 @@ export function MoreStyle({ style, styles, setStyle }: StyleProps) {
           <Segmented label="Alignment" value={differ((s) => s.align ?? "center") ? null : (style.align ?? "center")} onChange={(align) => setStyle({ align }, "align")} options={ALIGNS} />
         </div>
       </FieldRow>
-      <Slider label="Outline" mixed={differ((s) => s.strokeWidth)} value={style.strokeWidth} min={0} max={20} step={0.5} format={(v) => v.toFixed(1)} onChange={(v) => setStyle({ strokeWidth: v }, "stroke")} />
+      <Slider label="Outline" mixed={differ((s) => s.strokeWidth)} value={style.strokeWidth} min={0} max={20 * unit} step={0.5} format={(v) => v.toFixed(1)} onChange={(v) => setStyle({ strokeWidth: v }, "stroke")} />
       {all((s) => s.strokeWidth > 0) && <ColorInput label="Outline color" mixed={differ((s) => s.strokeColor)} value={style.strokeColor} onChange={(v) => setStyle({ strokeColor: v }, "strokeColor")} />}
       <Checkbox label="Background box" {...on((s) => s.background !== null)} onChange={(v) => setStyle((s) => ({ background: v ? (s.background ?? BOX) : null }), "bg")} />
       {box && (

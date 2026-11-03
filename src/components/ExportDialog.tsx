@@ -79,6 +79,20 @@ function formatBytes(b: number) {
   return `${Math.max(1, Math.round(b / 1e6))} MB`;
 }
 
+function savedOptions() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null") as Partial<ExportRequest> | null;
+  } catch {
+    return null;
+  }
+}
+
+/** A canvas above 1080p that an export resolution matches exports at its own. */
+function ownResolution(canvas: Canvas) {
+  const short = Math.min(canvas.width, canvas.height);
+  return short > 1080 && RESOLUTIONS.some((r) => r.id === short);
+}
+
 /** The settings the last export used, or the project's own; `asked`'s preset where the video fits it. */
 export function loadOptions(canvas: Canvas, asked: Delivery | null): ExportRequest {
   const short = Math.min(canvas.width, canvas.height);
@@ -89,10 +103,12 @@ export function loadOptions(canvas: Canvas, asked: Delivery | null): ExportReque
     preset: null,
   };
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null") as Partial<ExportRequest> | null;
-    const options = { ...fallback, ...(saved?.resolution && { resolution: saved.resolution }), ...(saved?.quality && { quality: saved.quality }) };
+    const saved = savedOptions();
+    // A project made in 4K exports in 4K: the remembered resolution, and a preset of another one, are for the others.
+    const own = ownResolution(canvas);
+    const options = { ...fallback, ...(!own && saved?.resolution && { resolution: saved.resolution }), ...(saved?.quality && { quality: saved.quality }) };
     // The preset comes back where it applies; a project in another format starts from its own settings.
-    const preset = asked ?? PRESETS.find((p) => p.id === saved?.preset)?.id;
+    const preset = asked ?? PRESETS.find((p) => p.id === saved?.preset && (!own || p.resolution === short))?.id;
     return preset && fits(preset, canvas) ? { ...options, ...presetOptions(preset, canvas), quality: options.quality } : options;
   } catch {
     return fallback;
@@ -276,7 +292,9 @@ export function ExportDialog() {
     const preset = next.preset && presetOf(next.preset);
     if (preset && (next.resolution !== preset.resolution || (preset.fps !== null && next.fps !== preset.fps))) next.preset = null;
     setOptions(next);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ resolution: next.resolution, quality: next.quality, preset: next.preset ?? null }));
+    // A 4K project's own resolution is not a choice to remember for the others; one picked here is.
+    const resolution = patch.resolution ?? (ownResolution(project.canvas) ? savedOptions()?.resolution : next.resolution);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ resolution, quality: next.quality, preset: next.preset ?? null }));
   };
   const blocked = blockedReason(options.preset, project.canvas);
   const presetItem = (p: (typeof PRESETS)[number]): MenuEntry => {

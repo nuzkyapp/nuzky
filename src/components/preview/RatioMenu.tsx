@@ -1,15 +1,16 @@
 import { useEffect, useRef, type KeyboardEvent } from "react";
 import { Check, ChevronDown, RectangleHorizontal } from "lucide-react";
 import { chose } from "../../lib/exit";
-import { FORMATS, formatLabel } from "../../lib/presets";
+import { CANVAS_RESOLUTIONS, FORMATS, canvasSize, formatLabel, sameRatio } from "../../lib/presets";
 import { picturedClips, reframe, useReframe } from "../../lib/reframe";
 import { AI_EDITING, useAiLocked, useEditor } from "../../lib/store";
 import { Button } from "../ui";
 
 /**
  * CapCut's "Ratio" control next to the player: the one place to change the canvas format, and beside each format
- * Reframe, which also places the clips to follow the face. Open state lives in the store so the Format row in the
- * Project inspector can open it too.
+ * Reframe, which also places the clips to follow the face; under them the resolution. A format keeps the resolution
+ * and a resolution keeps the format. Open state lives in the store so the Format row in the Project inspector can
+ * open it too.
  */
 export function RatioMenu() {
   const canvas = useEditor((s) => s.snap!.project.canvas);
@@ -19,6 +20,7 @@ export function RatioMenu() {
   const edit = useEditor((s) => s.edit);
   const open = useEditor((s) => s.ratioOpen);
   const locked = useAiLocked();
+  const short = Math.min(canvas.width, canvas.height);
   const setOpen = (ratioOpen: boolean) => useEditor.setState({ ratioOpen });
   const ref = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -72,13 +74,18 @@ export function RatioMenu() {
       >
         <RectangleHorizontal size={14} className="text-muted @max-[560px]:hidden" />
         <span className="@max-[560px]:hidden">Ratio</span>
-        <span className="tabular font-normal text-muted">{formatLabel(canvas.width, canvas.height)}</span>
+        <span className="tabular font-normal whitespace-nowrap text-muted">
+          {formatLabel(canvas.width, canvas.height)}
+          {/* Too long beside the timecode in a narrow preview; the Project inspector's Format row still says it. */}
+          {short !== CANVAS_RESOLUTIONS[0].id && <span className="@max-[560px]:hidden"> · {CANVAS_RESOLUTIONS.find((r) => r.id === short)?.label ?? `${short}p`}</span>}
+        </span>
         <ChevronDown size={13} className="text-muted" />
       </button>
       {open && (
         <div data-exit role="menu" aria-label="Canvas ratio" onKeyDown={onMenuKey} className="overlay menu-in absolute bottom-11 right-0 z-50 w-[19rem] origin-bottom-right rounded-xl p-1">
           {FORMATS.map((f) => {
-            const on = f.width === canvas.width && f.height === canvas.height;
+            const on = sameRatio(f, canvas);
+            const size = canvasSize(f, short);
             const why = !pictures ? "Add a video to the timeline first" : reframing ? "Already following the face" : null;
             const which = selected > 0 ? `the ${selected} selected clip${selected === 1 ? "" : "s"}` : "every full-frame clip";
             return (
@@ -89,12 +96,12 @@ export function RatioMenu() {
                   aria-checked={on}
                   onClick={(e) => {
                     chose(e.currentTarget);
-                    if (!on) edit({ type: "setCanvas", width: f.width, height: f.height });
+                    if (!on) edit({ type: "setCanvas", ...size });
                     closeToTrigger();
                   }}
                   className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-left focus-visible:outline-offset-[-2px]"
                 >
-                  <span className="tabular w-9 shrink-0 text-[13px] font-medium text-fg">{f.label}</span>
+                  <span className="tabular w-11 shrink-0 text-[13px] font-medium text-fg">{f.label}</span>
                   <span className="flex-1 truncate text-[12px] text-muted">{f.hint}</span>
                   {on && <Check size={14} className="shrink-0 text-accent" />}
                 </button>
@@ -108,11 +115,41 @@ export function RatioMenu() {
                     disabledReason={why ?? undefined}
                     onClick={() => {
                       closeToTrigger();
-                      void reframe(f.width, f.height);
+                      void reframe(size.width, size.height);
                     }}
                   >
                     Reframe
                   </Button>
+                </span>
+              </div>
+            );
+          })}
+          <div role="separator" className="mx-2 my-1 h-px bg-white/[.08]" />
+          {CANVAS_RESOLUTIONS.map((r) => {
+            const on = short === r.id;
+            const size = canvasSize(canvas, r.id);
+            return (
+              <div key={r.id} className="flex items-center gap-1 rounded-md pr-1 hover:bg-white/[.08] has-[:focus-visible]:bg-white/[.08]">
+                <button
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={on}
+                  onClick={(e) => {
+                    chose(e.currentTarget);
+                    if (!on) edit({ type: "setCanvas", ...size });
+                    closeToTrigger();
+                  }}
+                  className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-left focus-visible:outline-offset-[-2px]"
+                >
+                  <span className="w-11 shrink-0 text-[13px] font-medium text-fg">{r.label}</span>
+                  <span className="tabular flex-1 truncate text-[12px] text-muted">
+                    {size.width}×{size.height}
+                  </span>
+                  {on && <Check size={14} className="shrink-0 text-accent" />}
+                </button>
+                {/* Keeps the check where the formats have theirs, left of Reframe. */}
+                <span aria-hidden className="invisible h-6 shrink-0 px-2.5 text-[12px] font-medium">
+                  Reframe
                 </span>
               </div>
             );

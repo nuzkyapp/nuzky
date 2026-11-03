@@ -12,7 +12,10 @@ use cosmic_text::{
 };
 
 use crate::gpu::Image;
-use crate::model::{LETTER_SPACING, LINE_SPACING, LetterCase, TextAlign, TextStyle, max_stroke_width, parse_color};
+use crate::model::{
+    LETTER_SPACING, LINE_SPACING, LetterCase, MAX_CANVAS_SIDE, TextAlign, TextStyle, max_stroke_width, parse_color,
+    unit_of,
+};
 
 // Physical raster limits also bound legacy files, zoomed text, many lines and cache retention.
 const MAX_GLYPH_PX: f32 = 2048.0;
@@ -336,7 +339,9 @@ impl TextRenderer {
         // Layout stays in canvas pixels; only glyph rasterisation uses the output scale.
         let wanted = finite_clamp(scale, MIN_RASTER_SCALE, MAX_RASTER_SCALE);
         let size = finite_clamp(style.font_size, 1.0, MAX_GLYPH_PX / MIN_RASTER_SCALE);
-        let stroke = finite_clamp(style.stroke_width, 0.0, max_stroke_width(size));
+        // Callers bound the style to their picture; this only keeps the outline finite on the largest one.
+        let stroke =
+            finite_clamp(style.stroke_width, 0.0, max_stroke_width(size, unit_of(MAX_CANVAS_SIDE, MAX_CANVAS_SIDE)));
         let max_width = finite_clamp(max_width / wanted, 1.0, MAX_LAYOUT_SIDE);
         let pad_box = if style.background.is_some() { size * 0.3 } else { 0.0 };
         let letter_spacing = finite_clamp(style.letter_spacing, *LETTER_SPACING.start(), *LETTER_SPACING.end());

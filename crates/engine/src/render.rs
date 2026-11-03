@@ -246,7 +246,7 @@ fn layer_mask(project: &Project, clip: &Clip, transform: &Transform, k: f32) -> 
     Some(Mask {
         rect,
         radius: bounded(shape.radius, 1.0),
-        border: bounded(shape.border_width, MAX_BORDER_WIDTH) * k,
+        border: bounded(shape.border_width, MAX_BORDER_WIDTH * canvas.unit().max(1.0)) * k,
         border_color: parse_color(&shape.border_color),
         shadow: bounded(shape.shadow, 1.0),
         shadow_blur: SHADOW_BLUR * canvas.width.min(canvas.height) as f32 * k,

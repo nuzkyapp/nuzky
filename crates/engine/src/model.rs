@@ -288,7 +288,16 @@ impl SafeArea {
     }
 }
 
+/// The shorter side of the canvas that text, outline and border sizes in presets are made for.
+pub const REFERENCE_SIDE: u32 = 1080;
+pub const MAX_CANVAS_SIDE: u32 = 7680;
+
 impl Canvas {
+    /// Canvas pixels per pixel of a preset: 1 on 1080p, 2 on 4K.
+    pub fn unit(&self) -> f32 {
+        unit_of(self.width, self.height)
+    }
+
     /// The app interface's free area on vertical videos; other formats have nothing over them.
     pub fn safe_area(&self) -> Option<SafeArea> {
         let (w, h) = (self.width as f32, self.height as f32);
@@ -824,7 +833,8 @@ pub struct Shape {
     /// Corner radius as a share of half the shorter visible side, 0 to 1. 1 rounds the shorter sides
     /// fully: a circle when the crop leaves a square.
     pub radius: f32,
-    /// Canvas pixels, drawn outside the edge; 0 draws no border.
+    /// Canvas pixels, drawn outside the edge; 0 draws no border. Multiply a 1080-short-side preset's
+    /// width by min(width, height)/1080 (2 on 4K).
     pub border_width: f32,
     /// `#rrggbb` or `#rrggbbaa`
     pub border_color: String,
@@ -838,7 +848,7 @@ impl Default for Shape {
     }
 }
 
-/// Widest border, in canvas pixels.
+/// Widest border, in pixels of a 1080p picture.
 pub const MAX_BORDER_WIDTH: f32 = 100.0;
 
 /// What shows behind the person in a video or image clip. Anything but `None` cuts the person out of
@@ -875,7 +885,8 @@ pub struct TextStyle {
     #[serde(default)]
     #[cfg_attr(feature = "ts", ts(optional = nullable))]
     pub font_family: Option<String>,
-    /// Pixels at canvas resolution, before the transform's scale.
+    /// Canvas pixels before the transform's scale. Multiply a 1080-short-side preset's size by
+    /// min(width, height)/1080 (2 on 4K).
     pub font_size: f32,
     /// `#rrggbb`
     pub color: String,
@@ -886,7 +897,8 @@ pub struct TextStyle {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional = nullable))]
     pub font_weight: Option<u16>,
-    /// Outline width in canvas pixels before the transform's scale, 0 disables it.
+    /// Outline width in canvas pixels before the transform's scale; 0 disables it. Multiply a
+    /// 1080-short-side preset's width by min(width, height)/1080 (2 on 4K).
     #[serde(default)]
     pub stroke_width: f32,
     #[serde(default = "black")]
@@ -896,6 +908,7 @@ pub struct TextStyle {
     pub background: Option<String>,
     /// Lines wrap at this width in canvas pixels before the transform's scale; `None` wraps at 90% of the
     /// canvas width. Generated captions on vertical videos keep to the Reels and TikTok safe area.
+    /// Multiply a 1080-short-side preset's width by min(width, height)/1080 (2 on 4K).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_width: Option<f32>,
     /// `#rrggbb` fill of the word being spoken (karaoke captions); `None` draws every word in `color`.
@@ -1049,9 +1062,15 @@ pub enum KeywordPick {
 pub const MAX_FONT_HEIGHT_RATIO: f32 = 2.0;
 pub const MAX_TEXT_WIDTH_RATIO: f32 = 4.0;
 
-/// Outlines may be as wide as the text is tall, and up to the inspector's 20 px on any size.
-pub fn max_stroke_width(font_size: f32) -> f32 {
-    font_size.max(20.0)
+/// Canvas pixels per pixel of a preset on a picture this big.
+pub fn unit_of(width: u32, height: u32) -> f32 {
+    width.min(height) as f32 / REFERENCE_SIDE as f32
+}
+
+/// Outlines may be as wide as the text is tall, and up to the inspector's 20 px of a 1080p picture on any size;
+/// `unit` is the picture's `unit_of`, never below 1 so a smaller picture keeps the 20 px.
+pub fn max_stroke_width(font_size: f32, unit: f32) -> f32 {
+    font_size.max(20.0 * unit.max(1.0))
 }
 
 /// The most of a text shadow's Blur and Distance, as in CapCut.
@@ -1066,12 +1085,20 @@ impl TextStyle {
         self.font_weight.unwrap_or(if self.bold { 700 } else { 400 })
     }
 
+    /// Multiplies the sizes in canvas pixels by `k`, for a canvas `k` times bigger.
+    pub fn scale_pixels(&mut self, k: f32) {
+        self.font_size *= k;
+        self.stroke_width *= k;
+        self.max_width = self.max_width.map(|width| width * k);
+    }
+
     /// Older project files can bypass session validation when rendered by the CLI.
     pub fn bounded(&self, canvas: &Canvas) -> Self {
         let mut style = self.clone();
         let finite = |value: f32, fallback: f32| if value.is_finite() { value } else { fallback };
         style.font_size = finite(style.font_size, 1.0).clamp(1.0, MAX_FONT_HEIGHT_RATIO * canvas.height.max(1) as f32);
-        style.stroke_width = finite(style.stroke_width, 0.0).clamp(0.0, max_stroke_width(style.font_size));
+        style.stroke_width =
+            finite(style.stroke_width, 0.0).clamp(0.0, max_stroke_width(style.font_size, canvas.unit()));
         style.max_width = style.max_width.map(|width| {
             finite(width, canvas.width as f32 * 0.9).clamp(1.0, MAX_TEXT_WIDTH_RATIO * canvas.width.max(1) as f32)
         });

@@ -1407,7 +1407,8 @@ export type Shape = {
    */
   radius: number,
   /**
-   * Canvas pixels, drawn outside the edge; 0 draws no border.
+   * Canvas pixels, drawn outside the edge; 0 draws no border. Multiply a 1080-short-side preset's
+   * width by min(width, height)/1080 (2 on 4K).
    */
   borderWidth: number,
   /**
@@ -1825,7 +1826,8 @@ export type TextStyle = {
    */
   fontFamily?: string | null,
   /**
-   * Pixels at canvas resolution, before the transform's scale.
+   * Canvas pixels before the transform's scale. Multiply a 1080-short-side preset's size by
+   * min(width, height)/1080 (2 on 4K).
    */
   fontSize: number,
   /**
@@ -1839,7 +1841,8 @@ export type TextStyle = {
    */
   fontWeight?: number | null,
   /**
-   * Outline width in canvas pixels before the transform's scale, 0 disables it.
+   * Outline width in canvas pixels before the transform's scale; 0 disables it. Multiply a
+   * 1080-short-side preset's width by min(width, height)/1080 (2 on 4K).
    */
   strokeWidth: number,
   strokeColor: string,
@@ -1850,6 +1853,7 @@ export type TextStyle = {
   /**
    * Lines wrap at this width in canvas pixels before the transform's scale; `None` wraps at 90% of the
    * canvas width. Generated captions on vertical videos keep to the Reels and TikTok safe area.
+   * Multiply a 1080-short-side preset's width by min(width, height)/1080 (2 on 4K).
    */
   maxWidth?: number | null,
   /**

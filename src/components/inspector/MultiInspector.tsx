@@ -2,7 +2,7 @@ import { useShallow } from "zustand/react/shallow";
 import { Copy, Layers, RotateCcw, Trash2 } from "lucide-react";
 import { LIMITS } from "../../lib/limits";
 import { ADJUST_ROWS, DEFAULT_TRANSFORM, NO_ADJUST, sameAdjust } from "../../lib/presets";
-import { deleteSelection, duplicateSelection, editClips, findClip, isCaptionTrack, patched, readoutTime, transformAtPlayhead, useEditor, type StylePatch } from "../../lib/store";
+import { deleteSelection, duplicateSelection, editClips, findClip, isCaptionTrack, patched, readoutTime, transformAtPlayhead, useCanvasUnit, useEditor, type StylePatch } from "../../lib/store";
 import type { Adjust, Clip, EditCmd, Project, Track, Transform } from "../../lib/types";
 import { Button, IconButton, Section, Slider } from "../ui";
 import { InspectorHeader, QUIET } from "./Header";
@@ -142,11 +142,12 @@ function VolumeRow({ found, coalesce }: { found: Found[]; coalesce: string }) {
 }
 
 function StyleRows({ found, coalesce }: { found: Found[]; coalesce: string }) {
+  const unit = useCanvasUnit();
   const ids = found.map((f) => f.clip.id);
   const styles = found.flatMap((f) => (f.clip.content.type === "text" ? [f.clip.content.style] : []));
   const setStyle = (patch: StylePatch, key: string) =>
     editClips(ids, (c) => (c.content.type === "text" ? { type: "updateClip", clipId: c.id, style: patched(c.content.style, patch) } : null), `${coalesce}:style:${key}`);
-  return <StyleSection style={styles[0]} styles={styles} setStyle={setStyle} />;
+  return <StyleSection style={styles[0]} styles={styles} setStyle={setStyle} unit={unit} />;
 }
 
 /** Several clips: the controls they all share, each change applied to all of them as one undo step. */

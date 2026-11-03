@@ -941,10 +941,11 @@ impl Backend {
 
     fn reframe(&self, args: Reframe, state: &SessionState) -> Result<Value> {
         owns_run(state, &args.run_id)?;
+        let short = state.project.canvas.width.min(state.project.canvas.height);
         let (width, height) = match args.format.as_str() {
-            "9:16" => (1080, 1920),
-            "4:5" => (1080, 1350),
-            "1:1" => (1080, 1080),
+            "9:16" => (short, 2 * (short as f64 * 16.0 / 9.0 / 2.0).round() as u32),
+            "4:5" => (short, 2 * (short as f64 * 5.0 / 4.0 / 2.0).round() as u32),
+            "1:1" => (short, short),
             _ => anyhow::bail!("INVALID_ARGUMENTS: format is \"9:16\", \"4:5\" or \"1:1\""),
         };
         let project = self.media_project(&state.project);
