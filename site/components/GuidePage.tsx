@@ -83,9 +83,8 @@ export async function GuidePage({ path }: { path: string }) {
           <section className="pt-28 sm:pt-[150px]">
             <SectionHeading center first={g.stepsHeading[0]} second={g.stepsHeading[1]} />
             <ol className="mx-auto mt-12 max-w-[1000px] border-b border-white/[0.07]">
-              {g.steps.map(({ title, text }, i) => (
-                <li key={title} className="grid gap-x-6 gap-y-1.5 border-t border-white/[0.07] py-6 md:grid-cols-[40px_260px_1fr]">
-                  <span className="text-[13px] font-medium tabular-nums text-subtle md:pt-[3px]">{String(i + 1).padStart(2, "0")}</span>
+              {g.steps.map(({ title, text }) => (
+                <li key={title} className="grid gap-x-6 gap-y-1.5 border-t border-white/[0.07] py-6 md:grid-cols-[300px_1fr]">
                   <h3 className="text-[18px] font-semibold tracking-[-0.01em]">{title}</h3>
                   <p className="text-[15px] leading-[1.5] text-muted md:pt-[2px]">{text}</p>
                 </li>
