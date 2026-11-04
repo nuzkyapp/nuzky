@@ -53,6 +53,24 @@ bash scripts/verify-linux-bundle.sh
 
 This creates `target/release/bundle/appimage/*.AppImage` and `deb/*.deb`. The AppImage bundles FFmpeg and the native libraries collected by linuxdeploy. The `.deb` uses system FFmpeg, ALSA, GTK and WebKitGTK and declares the FFmpeg ABI package names from `pkg-config`. The script's Debian package names target Ubuntu 24.04; do not produce a distributable Ubuntu `.deb` on Fedora. Install the Ubuntu package with `sudo apt install ./Nuzky_*.deb` so apt resolves dependencies.
 
+### Mageia 10 `.rpm`
+
+Mageia 10 ships FFmpeg 7.1 with `libx264` in its `tainted` repository. Enable `tainted` (`urpmi.update` or the Mageia Control Center), then:
+
+```sh
+urpmi rust cargo clang lib64clang-devel cmake lib64ffmpeg-devel \
+  lib64webkit2gtk4.1-devel lib64gtk+3.0-devel lib64soup3.0-devel lib64alsa2-devel lib64dbus-devel \
+  vulkan-headers lib64vulkan-loader-devel glslc
+npm ci
+node scripts/build-bundles.mjs
+bash scripts/verify-linux-bundle.sh
+urpmi ./target/release/bundle/rpm/Nuzky-*.rpm
+```
+
+`lib64ffmpeg-devel` must come from `tainted`, like the installed `lib64avcodec61`, so the headers match the libraries and export has `libx264`.
+
+On a host with `rpm` whose `/etc/os-release` names neither Debian nor Ubuntu, `build-bundles.mjs` builds only `target/release/bundle/rpm/*.rpm`, linked against the system's FFmpeg like the `.deb`. It bundles ONNX Runtime and the licence notices in `/usr/lib/Nuzky` and no FFmpeg. Its requirements are SONAMEs (`libavcodec.so.61()(64bit)` and the like) taken from `pkg-config`, so it installs only where the FFmpeg it was linked against is, whatever the distribution calls its packages. The verifier checks that the package holds the binary and ONNX Runtime as regular files, that it requires every FFmpeg, GTK, WebKitGTK and ALSA library the binary links plus the Vulkan loader, and that this system provides each requirement. The release builds no `.rpm`, and `latest.json` names none, so an installed `.rpm` does not update itself: Update says to download the new version, and you build it again.
+
 For a local Fedora/Nobara AppImage, or a separate build directory:
 
 ```sh
