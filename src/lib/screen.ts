@@ -38,9 +38,12 @@ export async function stopRecording(keep: boolean) {
       const added = snap.project.assets[snap.project.assets.length - 1];
       toast({ kind: "success", text: `${added?.name ?? "The recording"} is in Media`, action: undoAction(snap) });
     } else if (!keep) toast({ kind: "info", text: "Recording deleted" });
+    useScreen.setState({ recording: null });
   } catch (e) {
     toast({ kind: "error", text: errorText(e) });
+    // A recording the project refused stays, to be added again or deleted.
+    useScreen.setState({ recording: await api.screenRecording().catch(() => null) });
   } finally {
-    useScreen.setState({ recording: null, stopping: false });
+    useScreen.setState({ stopping: false });
   }
 }

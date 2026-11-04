@@ -48,6 +48,8 @@ pub struct Broll {
     pub to: usize,
     pub start_us: i64,
     pub end_us: i64,
+    /// How long the recording shows: from start_us to end_us, or less when the recording is shorter.
+    pub duration_us: i64,
     pub text: String,
     pub asset_id: String,
     pub asset_name: String,
@@ -62,7 +64,7 @@ impl Broll {
         EditCmd::AddOverlay {
             asset_id: self.asset_id.clone(),
             start_us: self.start_us,
-            duration_us: Some(self.end_us - self.start_us),
+            duration_us: Some(self.duration_us),
         }
     }
 }
@@ -171,6 +173,7 @@ pub fn suggest(project: &Project, words: &[TimelineWord], range: Option<[usize; 
             let mut reason =
                 format!("\"{}\" is said here and names the recording \"{}\"", said.join(" "), found.asset.name);
             let length = found.asset.duration_us - found.asset.part.as_ref().map_or(0, |p| p.start_us);
+            let duration_us = length.min(end_us - start_us);
             if length < end_us - start_us {
                 reason += &format!(
                     "; it lasts {:.1} s, shorter than the {:.1} s said",
@@ -183,6 +186,7 @@ pub fn suggest(project: &Project, words: &[TimelineWord], range: Option<[usize; 
                 to,
                 start_us,
                 end_us,
+                duration_us,
                 text: words[from..=to].iter().map(|w| w.text.trim()).collect::<Vec<_>>().join(" "),
                 asset_id: found.asset.id.clone(),
                 asset_name: found.asset.name.clone(),

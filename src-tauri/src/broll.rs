@@ -19,6 +19,8 @@ pub struct SuggestedBroll {
     to: usize,
     start_us: i64,
     end_us: i64,
+    /// How long the recording shows; shorter than the sentence when the recording is.
+    duration_us: i64,
     text: String,
     asset_id: String,
     asset_name: String,
@@ -57,6 +59,7 @@ fn suggest(host: &Host) -> Result<BrollSuggestions> {
             to: b.to,
             start_us: b.start_us,
             end_us: b.end_us,
+            duration_us: b.duration_us,
             text: b.text,
             asset_id: b.asset_id,
             asset_name: b.asset_name,

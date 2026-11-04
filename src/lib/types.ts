@@ -1427,6 +1427,10 @@ export type ScreenRecording = {
    * The window recorded, or null for the whole screen.
    */
   window: ScreenWindow | null,
+  /**
+   * It stopped but could not be added to the project, such as while the AI edits; Stop adds it again.
+   */
+  ended: boolean,
 };
 
 /**
@@ -1807,6 +1811,10 @@ export type SuggestedBroll = {
   to: number,
   startUs: number,
   endUs: number,
+  /**
+   * How long the recording shows; shorter than the sentence when the recording is.
+   */
+  durationUs: number,
   text: string,
   assetId: string,
   assetName: string,

@@ -1262,6 +1262,15 @@ fn find_broll_suggests_the_screen_recording_named_in_a_sentence_over_stdio() {
     let none = c.call("find_broll", json!({"words": [4, 6], "transcript_key": key}));
     assert_eq!(none["suggestions"], json!([]));
     assert!(c.error("find_broll", json!({"words": [0, 3]})).contains("transcript_key"));
+    // The whole talk lasts 4.7 s; the 4 s recording covers only its first 4 s, and says so.
+    let short = c.call("find_broll", json!({"words": [0, 6], "transcript_key": key}));
+    let short = &short["suggestions"][0];
+    assert_eq!(
+        (&short["duration_us"], &short["edit"]["durationUs"]),
+        (&json!(4_000_000), &json!(4_000_000)),
+        "{short}"
+    );
+    assert!(short["reason"].as_str().unwrap().contains("shorter than the 4.7 s said"), "{short}");
 
     c.call("apply_edits", json!({"run_id": run["run_id"], "request_id": "broll", "edits": [edit]}));
     let overlay = c.call("get_state", json!({}))["tracks"][1]["clips"][0].clone();

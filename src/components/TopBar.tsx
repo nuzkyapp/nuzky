@@ -186,7 +186,7 @@ function RecordingIndicator() {
   const [now, setNow] = useState(Date.now());
   useEffect(watchScreenRecording, []);
   useEffect(() => {
-    if (!recording) return;
+    if (!recording || recording.ended) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [recording]);
@@ -195,15 +195,15 @@ function RecordingIndicator() {
   return (
     <span className="bar flex h-8 items-center gap-1.5 rounded-full pl-3 pr-1 text-[12px] font-medium text-fg" role="status" data-screen-recording>
       <span aria-hidden className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-danger" />
-      <span className="max-w-[160px] truncate">Recording {what}</span>
-      <span className="tabular text-muted">{formatLength(Math.max(0, now - recording.startedMs) * 1000)}</span>
-      <Button pill className="h-6 shrink-0 px-2.5 text-[12px]" disabled={stopping} title="Stop recording and add it to Media" onClick={() => void stopRecording(true)}>
-        Stop
+      <span className="max-w-[160px] truncate">{recording.ended ? "Recording not added" : `Recording ${what}`}</span>
+      {!recording.ended && <span className="tabular text-muted">{formatLength(Math.max(0, now - recording.startedMs) * 1000)}</span>}
+      <Button pill className="h-6 shrink-0 px-2.5 text-[12px]" disabled={stopping} title={recording.ended ? "Add the recording to Media" : "Stop recording and add it to Media"} onClick={() => void stopRecording(true)}>
+        {recording.ended ? "Add" : "Stop"}
       </Button>
       <button
         type="button"
         aria-label="Delete recording"
-        title="Stop recording and delete it"
+        title={recording.ended ? "Delete the recording" : "Stop recording and delete it"}
         aria-disabled={stopping || undefined}
         onClick={() => void stopRecording(false)}
         className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted transition-colors duration-[120ms] ease-out hover:bg-white/[.09] hover:text-fg aria-disabled:opacity-40"

@@ -196,7 +196,7 @@ function RecordTile({ compact = false, className = "" }: { compact?: boolean; cl
     const r = opener.getBoundingClientRect();
     setMenu({ x: r.left, y: r.bottom + 4, keyboard, windows, opener });
   };
-  const label = recording ? "Stop recording" : "Record screen";
+  const label = recording ? (recording.ended ? "Add recording" : "Stop recording") : "Record screen";
   return (
     <>
       <button
@@ -210,7 +210,7 @@ function RecordTile({ compact = false, className = "" }: { compact?: boolean; cl
         className={`${TILE} ${compact ? "w-[46px] px-0" : ""} ${className}`}
       >
         {recording ? <Square size={14} className="shrink-0 fill-danger text-danger" /> : <CircleDot size={16} className="shrink-0 text-muted" />}
-        {!compact && <span>{recording ? "Stop recording" : "Record screen"}</span>}
+        {!compact && <span>{label}</span>}
       </button>
       {menu && (
         <Menu

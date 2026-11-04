@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use nuzky_engine::edit::{EditCmd, new_id};
+use nuzky_engine::model::Asset;
 use nuzky_session::Expect;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -45,6 +46,8 @@ pub struct ScreenRecording {
     pub started_ms: f64,
     /// The window recorded, or null for the whole screen.
     pub window: Option<ScreenWindow>,
+    /// It stopped but could not be added to the project, such as while the AI edits; Stop adds it again.
+    pub ended: bool,
 }
 
 struct Recording {
@@ -57,14 +60,21 @@ struct Recording {
     done: Arc<AtomicBool>,
 }
 
+/// A finished recording the project refused, kept until it is added or deleted.
+struct Unsaved {
+    asset: Asset,
+    shown: ScreenRecording,
+}
+
 #[derive(Default)]
 pub struct ScreenRecorder {
     current: Mutex<Option<Recording>>,
+    unsaved: Mutex<Option<Unsaved>>,
 }
 
 impl ScreenRecorder {
     pub fn recording(&self) -> bool {
-        self.current.lock().unwrap().is_some()
+        self.current.lock().unwrap().is_some() || self.unsaved.lock().unwrap().is_some()
     }
 
     /// Stops the recording, as quitting does, and deletes it: it was never added to a project.
@@ -72,6 +82,9 @@ impl ScreenRecorder {
         if let Some(recording) = self.current.lock().unwrap().take() {
             let path = finish(recording);
             std::fs::remove_file(path).ok();
+        }
+        if let Some(unsaved) = self.unsaved.lock().unwrap().take() {
+            std::fs::remove_file(unsaved.asset.path).ok();
         }
     }
 }
@@ -120,7 +133,8 @@ fn windows() -> Vec<ScreenWindow> {
 
 #[tauri::command]
 pub fn screen_recording(state: State<'_, AppState>) -> Option<ScreenRecording> {
-    state.screen.current.lock().unwrap().as_ref().map(|r| r.shown.clone())
+    let current = state.screen.current.lock().unwrap().as_ref().map(|r| r.shown.clone());
+    current.or_else(|| state.screen.unsaved.lock().unwrap().as_ref().map(|u| u.shown.clone()))
 }
 
 /// Starts recording the whole screen, or `window`, until `screen_record_stop`. When it ends by itself, such as
@@ -130,7 +144,7 @@ pub fn screen_record_start(app: AppHandle, window: Option<ScreenWindow>) -> CmdR
     may_record()?;
     let state = app.state::<AppState>();
     let mut current = state.screen.current.lock().unwrap();
-    if current.is_some() {
+    if current.is_some() || state.screen.unsaved.lock().unwrap().is_some() {
         return Err("RECORDING: the screen is already being recorded".into());
     }
     let (program, _) = program();
@@ -166,7 +180,7 @@ pub fn screen_record_start(app: AppHandle, window: Option<ScreenWindow>) -> CmdR
         std::thread::sleep(Duration::from_millis(50));
     }
     let started_ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs_f64() * 1000.0;
-    let shown = ScreenRecording { started_ms, window };
+    let shown = ScreenRecording { started_ms, window, ended: false };
     let (seen, done) = (Arc::new(Mutex::new(HashMap::new())), Arc::new(AtomicBool::new(false)));
     let stdin = child.stdin.take();
     *current = Some(Recording { child, stdin, path, shown: shown.clone(), seen: seen.clone(), done: done.clone() });
@@ -244,7 +258,24 @@ fn name(shown: &ScreenRecording, seen: &HashMap<(String, String), u32>) -> Strin
     ScreenWindow { id: 0, app: app.to_owned(), title }.name()
 }
 
-/// Stops the recording. `keep` adds it to the project's media as one undo step; otherwise it is deleted.
+/// The recorded file as an asset named after what it showed, or None when nothing was recorded.
+fn recorded(recording: Recording) -> Option<Unsaved> {
+    let (shown, seen) = (recording.shown.clone(), recording.seen.clone());
+    let path = finish(recording);
+    match nuzky_engine::media::probe(&path, new_id()) {
+        Ok(mut asset) if asset.kind == nuzky_engine::model::AssetKind::Video => {
+            asset.name = name(&shown, &seen.lock().unwrap());
+            Some(Unsaved { asset, shown: ScreenRecording { ended: true, ..shown } })
+        }
+        _ => {
+            std::fs::remove_file(&path).ok();
+            None
+        }
+    }
+}
+
+/// Stops the recording. `keep` adds it to the project's media as one undo step; otherwise it is deleted. When the
+/// project refuses it, as while the AI edits, it is kept for another Stop.
 #[tauri::command]
 pub async fn screen_record_stop(
     app: AppHandle,
@@ -252,29 +283,35 @@ pub async fn screen_record_stop(
     expected_epoch: Option<String>,
 ) -> CmdResult<Option<Snapshot>> {
     let recording = app.state::<AppState>().screen.current.lock().unwrap().take();
-    let Some(recording) = recording else { return Ok(None) };
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        let (shown, seen) = (recording.shown.clone(), recording.seen.clone());
-        let path = finish(recording);
+        let was_running = recording.is_some();
+        let unsaved = match recording {
+            Some(recording) => recorded(recording),
+            None => state.screen.unsaved.lock().unwrap().take(),
+        };
+        let Some(unsaved) = unsaved else {
+            return if keep && was_running {
+                Err("Nothing was recorded. Check that Nuzky may record the screen in System Settings › Privacy & Security.".into())
+            } else {
+                Ok(None)
+            };
+        };
         if !keep {
-            std::fs::remove_file(&path).ok();
+            std::fs::remove_file(&unsaved.asset.path).ok();
             return Ok(None);
         }
-        let probed = nuzky_engine::media::probe(&path, new_id());
-        let mut asset = match probed {
-            Ok(asset) if asset.kind == nuzky_engine::model::AssetKind::Video => asset,
-            _ => {
-                std::fs::remove_file(&path).ok();
-                return Err("Nothing was recorded. Check that Nuzky may record the screen in System Settings › Privacy & Security.".into());
+        let add = vec![EditCmd::AddAssets { assets: vec![unsaved.asset.clone()] }];
+        match state.apply_batch(add, None, Expect::default(), expected_epoch.as_deref()) {
+            Ok(snap) => {
+                crate::jobs::prepare_media(&state, &snap.project);
+                Ok(Some(snap))
             }
-        };
-        asset.name = name(&shown, &seen.lock().unwrap());
-        let snap = state
-            .apply_batch(vec![EditCmd::AddAssets { assets: vec![asset] }], None, Expect::default(), expected_epoch.as_deref())
-            .inspect_err(|_| drop(std::fs::remove_file(&path)))?;
-        crate::jobs::prepare_media(&state, &snap.project);
-        Ok(Some(snap))
+            Err(error) => {
+                *state.screen.unsaved.lock().unwrap() = Some(unsaved);
+                Err(error)
+            }
+        }
     })
     .await
     .map_err(crate::err)?
@@ -364,7 +401,7 @@ mod tests {
 
     #[test]
     fn a_whole_screen_recording_is_named_after_the_window_in_front_most_often() {
-        let shown = ScreenRecording { started_ms: 0.0, window: None };
+        let shown = ScreenRecording { started_ms: 0.0, window: None, ended: false };
         let seen = HashMap::from([
             (("Ghostty".into(), "✳ Claude Code".into()), 6),
             (("Ghostty".into(), "zsh".into()), 2),
@@ -373,6 +410,6 @@ mod tests {
         assert_eq!(name(&shown, &seen), "Ghostty · ✳ Claude Code");
         assert_eq!(name(&shown, &HashMap::new()), "Screen recording");
         let window = ScreenWindow { id: 7, app: "Figma".into(), title: String::new() };
-        assert_eq!(name(&ScreenRecording { started_ms: 0.0, window: Some(window) }, &seen), "Figma");
+        assert_eq!(name(&ScreenRecording { started_ms: 0.0, window: Some(window), ended: false }, &seen), "Figma");
     }
 }

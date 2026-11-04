@@ -138,7 +138,8 @@ export function BrollBar({ state, blocker }: { state: BrollSuggestionState; bloc
             <button type="button" className="min-w-0 flex-1 text-left" title="Go to this sentence" onClick={() => useEditor.getState().seek(item.startUs)}>
               <span className="block truncate text-[12px] text-fg">“{item.text}”</span>
               <span className="tabular block truncate text-[11px] text-muted">
-                {item.assetName} · {formatDuration(item.endUs - item.startUs)}
+                {item.assetName} · {formatDuration(item.durationUs)}
+                {item.durationUs < item.endUs - item.startUs && ` of ${formatDuration(item.endUs - item.startUs)} said: the recording ends first`}
               </span>
             </button>
             <Button data-broll-add className="h-7 shrink-0 px-2.5 text-[12px]" disabled={!!blocker || busy} disabledReason={blocker ?? "Adding…"} title={`Show ${item.assetName} over the whole video while you say this`} onClick={() => void state.add([item])}>

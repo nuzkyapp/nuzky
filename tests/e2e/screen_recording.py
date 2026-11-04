@@ -4,7 +4,7 @@ adds it to Media as one undo step, Delete leaves nothing behind, and a recording
 import json, subprocess, time
 from pathlib import Path
 
-from e2e.harness import MACOS, flow, wait, webdriver
+from e2e.harness import MACOS, Bridge, flow, wait, webdriver
 
 MENU = "document.querySelector('[role=menu][aria-label=\"Record screen\"]')"
 INDICATOR = "document.querySelector('[data-screen-recording]')"
@@ -109,6 +109,30 @@ def record_screen(r):
     r.check('a recording the system ends by itself is added to Media', wait(lambda: len(assets(r)) == count + 1, 20)
             and not r.s.run(f'return !!{INDICATOR}'), [a['name'] for a in assets(r)])
     r.check('no error toast', not r.errors(), r.errors())
+
+    # While the AI edits, the project refuses the recording the system ended: it stays, with Add and ×, until added.
+    (r.work / 'system-stop').unlink()
+    open_menu(r)
+    choose(r, 0)
+    count = len(assets(r))
+    bridge = Bridge(r, r.saved_project())
+    try:
+        run = bridge.call('begin_run', {'label': 'Edit'})['run_id']
+        wait(lambda: r.state()['aiRun'], 10)
+        (r.work / 'system-stop').touch()
+        kept = wait(lambda: r.s.run(f'return {INDICATOR}?.textContent ?? null') if 'not added' in (r.s.run(f'return {INDICATOR}?.textContent ?? ""') or '') else None, 20)
+        path = Path(runs(r)[-1][-1])
+        r.check('a recording refused while the AI edits stays, with Add', kept and 'Add' in kept and path.is_file()
+                and len(assets(r)) == count, [kept, path.is_file()])
+        r.shot('not-added')
+        bridge.call('end_run', {'run_id': run, 'action': 'keep'})
+        wait(lambda: not r.state()['aiRun'], 10)
+    finally:
+        bridge.close()
+    r.s.run(f"[...{INDICATOR}.querySelectorAll('button')].find((b) => b.textContent === 'Add').click()")
+    added = wait(lambda: (a := assets(r)) and len(a) == count + 1 and a[-1], 20)
+    r.check('Add then puts it in Media', added and Path(added['path']).resolve() == path.resolve()
+            and not r.s.run(f'return !!{INDICATOR}'), added)
 
 
 if MACOS:
