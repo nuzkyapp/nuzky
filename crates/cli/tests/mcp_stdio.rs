@@ -958,7 +958,7 @@ fn initialize_list_state_edit_end_undo_over_stdio() {
     let mut c = Client::new(true);
     let list = c.rpc("tools/list", json!({}));
     let tools = list["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 41);
+    assert_eq!(tools.len(), 42);
     let beats = tools.iter().find(|t| t["name"] == "cut_to_beats").unwrap();
     assert_eq!(
         (&beats["annotations"]["readOnlyHint"], &beats["annotations"]["destructiveHint"]),
