@@ -69,6 +69,12 @@ urpmi ./target/release/bundle/rpm/Nuzky-*.rpm
 
 `lib64ffmpeg-devel` must come from `tainted`, like the installed `lib64avcodec61`, so the headers match the libraries and export has `libx264`.
 
+Mageia packages rustfmt and clippy apart from Rust; a pull request needs them for `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --locked -- -D warnings`, which `checks.yml` runs:
+
+```sh
+urpmi rustfmt clippy
+```
+
 The UI flows of `scripts/repro.py` also need headless gamescope and python-xlib, and `scripts/fixtures.sh`, which prepares the media of the ignored tests, needs espeak-ng:
 
 ```sh
