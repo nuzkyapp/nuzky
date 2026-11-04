@@ -6,6 +6,9 @@ import { formatDuration } from "../../lib/time";
 import type { BrollSuggestions, SuggestedBroll, TranscriptView } from "../../lib/types";
 import { Button, IconButton } from "../ui";
 
+const NO_RECORDING = "No screen recording in this project yet. Record your screen in Media, then suggest B-roll again.";
+const NO_MATCH = "No recording here is named after an app or tool you mention.";
+
 export interface BrollSuggestionState {
   /** Suggestions for the current words, or null when none are shown. */
   items: SuggestedBroll[] | null;
@@ -30,14 +33,12 @@ export function useBrollSuggestions(view: TranscriptView | null): BrollSuggestio
     setPending("suggesting");
     try {
       const next = await api.suggestBroll();
+      // What an earlier try said no longer holds.
+      useEditor.setState((s) => ({ toasts: s.toasts.filter((t) => t.text !== NO_RECORDING && t.text !== NO_MATCH) }));
       if (next.items.length > 0) setFound(next);
       else {
         setFound(null);
-        const text =
-          next.recordings === 0
-            ? "No screen recording in this project yet. Record your screen in Media, then suggest B-roll again."
-            : "No recording here is named after an app or tool you mention.";
-        useEditor.getState().toast({ kind: "info", text });
+        useEditor.getState().toast({ kind: "info", text: next.recordings === 0 ? NO_RECORDING : NO_MATCH });
       }
     } catch (e) {
       useEditor.getState().toast({ kind: "error", text: errorText(e) });

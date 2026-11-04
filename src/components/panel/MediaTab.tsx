@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AppWindow, AudioLines, Check, CircleDot, Eye, Film, Layers2, Link2, Monitor, PictureInPicture2, Plus, Square, Trash2 } from "lucide-react";
+import { AppWindow, AudioLines, Check, Eye, Film, Layers2, Link2, Monitor, MonitorDot, PictureInPicture2, Plus, Square, Trash2 } from "lucide-react";
 import { closeSource, openSource, useSource } from "../../lib/source";
 import { usedAssets, useEditor } from "../../lib/store";
 import { formatDuration } from "../../lib/time";
@@ -162,10 +162,10 @@ function YoutubeTile({ compact = false, className = "" }: { compact?: boolean; c
       title={lock ?? "Video from YouTube"}
       onClick={() => openYoutube()}
       {...lockedProps(lock)}
-      className={`flex h-[46px] shrink-0 items-center justify-center gap-2 rounded-xl bg-white/[.055] px-4 text-[13px] font-semibold text-fg shadow-[inset_0_0_0_1px_rgb(255_255_255/.07)] transition-colors duration-[120ms] ease-out hover:bg-white/[.09] aria-disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:hover:bg-white/[.055] ${compact ? "@max-[300px]:w-[46px] @max-[300px]:px-0" : ""} ${className}`}
+      className={`flex h-[46px] shrink-0 items-center justify-center gap-2 rounded-xl bg-white/[.055] px-4 text-[13px] font-semibold text-fg shadow-[inset_0_0_0_1px_rgb(255_255_255/.07)] transition-colors duration-[120ms] ease-out hover:bg-white/[.09] aria-disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:hover:bg-white/[.055] ${compact ? "@max-[380px]:w-[46px] @max-[380px]:px-0" : ""} ${className}`}
     >
       <Link2 size={16} className="shrink-0 text-muted" />
-      <span className={compact ? "@max-[300px]:hidden" : ""}>From YouTube</span>
+      <span className={compact ? "@max-[380px]:hidden" : ""}>From YouTube</span>
     </button>
   );
 }
@@ -209,7 +209,13 @@ function RecordTile({ compact = false, className = "" }: { compact?: boolean; cl
         data-record-screen
         className={`${TILE} ${compact ? "w-[46px] px-0" : ""} ${className}`}
       >
-        {recording ? <Square size={14} className="shrink-0 fill-danger text-danger" /> : <CircleDot size={16} className="shrink-0 text-muted" />}
+        {recording?.ended ? (
+          <Plus size={16} className="shrink-0 text-muted" />
+        ) : recording ? (
+          <Square size={14} className="shrink-0 fill-danger text-danger" />
+        ) : (
+          <MonitorDot size={16} className="shrink-0 text-muted" />
+        )}
         {!compact && <span>{label}</span>}
       </button>
       {menu && (

@@ -65,7 +65,7 @@ def record_screen(r):
     time.sleep(0.3)
     r.shot('menu')
     shown = choose(r, 0)
-    r.check('the top bar shows the recording with Stop', shown and shown.startswith('Recording Screen') and 'Stop' in shown, shown)
+    r.check('the top bar shows the recording with Stop', shown and shown.startswith('Recording screen') and 'Stop' in shown, shown)
     started = runs(r)
     target = started and Path(started[-1][-1])
     r.check('screencapture records video of the whole screen into Nuzky\'s own folder',

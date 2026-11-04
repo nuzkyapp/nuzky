@@ -191,10 +191,10 @@ function RecordingIndicator() {
     return () => clearInterval(timer);
   }, [recording]);
   if (!recording) return null;
-  const what = recording.window ? recording.window.app : "Screen";
+  const what = recording.window ? recording.window.app : "screen";
   return (
     <span className="bar flex h-8 items-center gap-1.5 rounded-full pl-3 pr-1 text-[12px] font-medium text-fg" role="status" data-screen-recording>
-      <span aria-hidden className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-danger" />
+      {!recording.ended && <span aria-hidden className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-danger" />}
       <span className="max-w-[160px] truncate">{recording.ended ? "Recording not added" : `Recording ${what}`}</span>
       {!recording.ended && <span className="tabular text-muted">{formatLength(Math.max(0, now - recording.startedMs) * 1000)}</span>}
       <Button pill className="h-6 shrink-0 px-2.5 text-[12px]" disabled={stopping} title={recording.ended ? "Add the recording to Media" : "Stop recording and add it to Media"} onClick={() => void stopRecording(true)}>
