@@ -90,7 +90,7 @@ export function FacesStatus() {
   const item = found.covered[found.at];
   const count = found.covered.length;
   // The time and kind first: in a narrow preview the label is what gets cut.
-  const text = `${formatTime(item.start_us)} · ${KIND[item.kind]} over a face · “${item.label}”`;
+  const text = `${formatTime(item.time_us)} · ${KIND[item.kind]} over a face · “${item.label}”`;
   const stale = !current(found, snap);
   const movable = found.covered.some((c) => c.suggestion);
   return (

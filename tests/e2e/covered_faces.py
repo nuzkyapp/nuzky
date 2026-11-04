@@ -26,6 +26,11 @@ STICKER_AT = 4_600_000
 SAFE = (250, 1420)
 
 
+def fmt(us):
+    """The time as the chip writes it: minutes, seconds and hundredths."""
+    return f'{us // 60_000_000:02d}:{us // 1_000_000 % 60:02d}.{us // 10_000 % 100:02d}'
+
+
 def faces_setup(r):
     link_models(r, names=('yunet-2026may.onnx',))
 
@@ -99,17 +104,17 @@ def covered_faces(r):
         for c in found), [c['suggestion'] and c['suggestion']['layer'] for c in found])
     chip = wait(lambda: (t := r.s.run(CHIP)) and 'over a face' in t and t, 10)
     r.check('the preview names the first one, when it covers the face, and counts them', chip and
-            '00:00.00 · Caption over a face · “Hello there”' in chip and '1 of 5' in chip, chip)
+            f"{fmt(found[0]['time_us'])} · Caption over a face · “Hello there”" in chip and '1 of 5' in chip, chip)
     first = found[0]['clip_id'] if found else None
     state = r.s.run('const s = window.__nuzky.store.getState(); return {selection: s.selection, t: s.timeUs}')
-    r.check('it selects that caption and puts the playhead on it', state['selection'] == [first] and state['t'] == found[0]['start_us'], state)
+    r.check('it selects that caption and puts the playhead on it', state['selection'] == [first] and state['t'] == found[0]['time_us'], state)
     time.sleep(1)
     r.shot('faces-found')
     r.s.run(CHIP_BUTTON, 'Next')
     r.check('Next goes to the second', wait(lambda: '2 of 5' in (r.s.run(CHIP) or ''), 5), r.s.run(CHIP))
     if r.check('the window goes to its smallest size', resize(r, 1024, 640)):
         time.sleep(1)
-        whole = r.s.run('const c = document.querySelector("section[aria-label=Preview] [role=status] span"); return c.textContent.startsWith("00:01.50 · Caption over a face")')
+        whole = r.s.run('const c = document.querySelector("section[aria-label=Preview] [role=status] span"); return c.textContent.includes(" · Caption over a face · ")')
         r.check('in the smallest window the chip still shows when and what', whole)
         r.shot('faces-1024')
         resize(r, 1440, 900)

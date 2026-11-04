@@ -10,6 +10,7 @@ export interface Covered {
   label: string;
   start_us: number;
   end_us: number;
+  time_us: number;
   suggestion: { edits: EditCmd[] } | null;
 }
 
@@ -60,7 +61,7 @@ export function onFacesJob(job: JobEvent) {
   }
 }
 
-/** Selects the finding `at` and puts the playhead where it starts covering the face, the time the chip shows. */
+/** Selects the finding `at` and puts the playhead where it was seen over the face, the time the chip shows. */
 export function show(at: number) {
   const found = useFaces.getState().found;
   const item = found?.covered[at];
@@ -68,7 +69,7 @@ export function show(at: number) {
   useFaces.setState({ found: { ...found, at } });
   const { select, seek } = useEditor.getState();
   select([item.clip_id]);
-  seek(item.start_us);
+  seek(item.time_us);
 }
 
 /** Whether the findings still describe the project: any edit after the check may have moved what they name. */

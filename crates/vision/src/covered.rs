@@ -45,6 +45,8 @@ pub struct Covered {
     /// Timeline range where it covers the face.
     pub start_us: i64,
     pub end_us: i64,
+    /// When it was seen over the face first, clear of its entry animation: the frame to show the user.
+    pub time_us: i64,
     /// Eyes to mouth of the face, and the layer, where it covers it first: x, y, width, height in canvas pixels.
     pub face: [i64; 4],
     pub layer: [i64; 4],
@@ -146,6 +148,7 @@ pub fn covered_faces(
             label: layer.label.clone(),
             start_us: (first.t - half).max(clip.start_us),
             end_us: (last.t + half).min(clip.start_us + clip.duration_us),
+            time_us: first.t,
             face: int(*face),
             layer: int(first.rect),
             suggestion,
