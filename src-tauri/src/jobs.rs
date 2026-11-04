@@ -32,7 +32,7 @@ pub struct JobEvent {
     #[cfg_attr(
         test,
         ts(
-            type = r#""audio" | "proxy" | "matte" | "export" | "captions" | "transcript" | "style" | "vision-models" | "cover" | "reframe" | "reels" | "speech-model" | "agent" | "beats""#
+            type = r#""audio" | "proxy" | "matte" | "export" | "captions" | "transcript" | "style" | "vision-models" | "cover" | "reframe" | "faces" | "reels" | "speech-model" | "agent" | "beats""#
         )
     )]
     pub kind: &'static str,
@@ -112,7 +112,9 @@ pub(crate) fn register(app: &AppHandle, id: &str) -> Option<Arc<AtomicBool>> {
         match kind {
             "export" => running == "export",
             "captions" | "transcript" | "style" => matches!(running, "captions" | "transcript" | "style"),
-            "vision-models" | "cover-pick" | "cover-mask" | "cover-export" | "reframe" | "reels" => running == kind,
+            "vision-models" | "cover-pick" | "cover-mask" | "cover-export" | "reframe" | "faces" | "reels" => {
+                running == kind
+            }
             // Each one decodes a whole video; the next file waits, so the preview keeps some of the machine.
             "proxy" => running == "proxy",
             "matte" => running == "matte",
@@ -917,6 +919,49 @@ pub fn start_reframe(
     if let Err(error) = spawned {
         unregister(&app, &id);
         return Err(format!("Starting reframe: {error}"));
+    }
+    Ok(id)
+}
+
+#[tauri::command]
+pub fn start_face_check(app: AppHandle, expected_epoch: Option<String>) -> Result<String, String> {
+    let state = app.state::<AppState>();
+    let view = {
+        let current = crate::lock_session(&state.session, expected_epoch.as_deref())?;
+        current.host.session.state().map_err(crate::err)?
+    };
+    let project = view.project;
+    nuzky_vision::runtime::require().map_err(crate::err)?;
+    let id = format!("faces:{}", new_id());
+    let cancel = register(&app, &id).ok_or("Face check is already running")?;
+    let (worker, job) = (app.clone(), id.clone());
+    let spawned = std::thread::Builder::new().name("faces".into()).spawn(move || {
+        let mut rep = Reporter::new(&worker, &job, "faces", "Looking for faces".into());
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            crate::cover::download_models(
+                nuzky_vision::models::REFRAME,
+                false,
+                "Downloading the face model",
+                &cancel,
+                &mut rep,
+            )?;
+            let covered = nuzky_vision::covered::covered_faces(&project, &models_dir(), &cancel, &mut |p| {
+                rep.progress(p, Some("Looking for faces"))
+            })?;
+            check_cancelled(&cancel)?;
+            Ok(Some(
+                serde_json::json!({"covered":covered, "revision":view.stamp.revision,
+                    "sessionEpoch":view.stamp.session_epoch})
+                .to_string(),
+            ))
+        }))
+        .unwrap_or_else(|p| Err(crashed(&p)));
+        rep.finish(result, cancel.load(Ordering::Relaxed));
+        unregister(&worker, &job);
+    });
+    if let Err(error) = spawned {
+        unregister(&app, &id);
+        return Err(format!("Starting face check: {error}"));
     }
     Ok(id)
 }

@@ -1447,6 +1447,7 @@ pub fn run() {
             cancel_job,
             jobs::start_captions,
             jobs::start_reframe,
+            jobs::start_face_check,
             jobs::speech_models,
             jobs::speech_setup,
             jobs::start_speech_setup,

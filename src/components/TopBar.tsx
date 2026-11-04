@@ -114,7 +114,7 @@ export function JobIndicator() {
     </>
   );
   // A reframe shows its progress and Stop on the preview, making reels beside their button.
-  if (j.kind === "audio" || j.kind === "matte" || j.kind === "reframe" || j.kind === "reels")
+  if (j.kind === "audio" || j.kind === "matte" || j.kind === "reframe" || j.kind === "faces" || j.kind === "reels")
     return (
       <span className="bar flex h-8 items-center gap-1.5 rounded-full px-3 text-[12px] font-medium text-fg" role="status">
         {body}

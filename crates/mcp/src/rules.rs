@@ -55,7 +55,7 @@ pub(crate) const TOOLS: &[Rules] = &[
     rules(
         "analyze",
         When(|args| {
-            matches!(args["kind"].as_str(), Some("retakes" | "emphasis" | "thumbnail_frames"))
+            matches!(args["kind"].as_str(), Some("retakes" | "emphasis" | "thumbnail_frames" | "covered_faces"))
                 || args["kind"] == "fillers" && args["asset_id"].is_null()
         }),
         false,

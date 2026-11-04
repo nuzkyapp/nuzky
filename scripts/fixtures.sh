@@ -284,6 +284,13 @@ talking_head() {
   rm -rf "$dir"
 }
 media talking-head.mov talking_head
+# The same interview as a selfie held close (crates/vision/tests, tests/e2e/covered_faces.py): 6 s cropped tighter, so
+# her mouth sits where captions start, a bit below the middle of the 1080x1920 frame.
+close_head() {
+  ff -ss 3 -t 6 -i "$(epps_mp4)" -an -vf "crop=252:448:519:8,scale=1080:1920:flags=lanczos,fps=30" \
+    -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p "$1"
+}
+media close-head.mp4 close_head
 # The same interview filmed wide, for reframing to 9:16 (crates/vision/src/reframe.rs, tests/e2e/reframe.py): 10 s
 # at 1920x1080 and 30 fps, slid so her face sits a third of the way across for 5 s, crosses to two thirds in the
 # next second and stays there.

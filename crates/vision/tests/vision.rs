@@ -297,3 +297,57 @@ fn a_background_goes_behind_the_person_along_their_outline_and_holds_still() {
     assert!(band > 10_000 && flicker < 0.05, "edge flicker {flicker:.4} over {band} samples");
     std::fs::remove_dir_all(cache).unwrap();
 }
+
+#[test]
+#[ignore = "Requires scripts/fixtures.sh media and models; run with scripts/isolated.sh"]
+fn captions_where_reels_put_them_cover_a_close_selfie_and_the_suggested_place_does_not() {
+    use nuzky_engine::edit::{CaptionSegment, caption_preset};
+    use nuzky_vision::covered::covered_faces;
+    let mut project = timeline(&[("close-head.mp4", 0, 6_000_000)]);
+    let reel = caption_preset("Reel").unwrap();
+    let segments = ["Hello there", "this is", "a close", "selfie"]
+        .iter()
+        .enumerate()
+        .map(|(i, text)| CaptionSegment {
+            start_us: i as i64 * 1_500_000,
+            end_us: (i as i64 + 1) * 1_500_000,
+            text: text.to_string(),
+            words: Vec::new(),
+        })
+        .collect();
+    project
+        .apply(EditCmd::AddCaptions {
+            segments,
+            style: reel.style.clone(),
+            anim_in: reel.anim_in,
+            anim_out: reel.anim_out,
+            transform: None,
+        })
+        .unwrap();
+    let check = |project: &Project| covered_faces(project, &models(), &AtomicBool::new(false), &mut |_| {}).unwrap();
+    let covered = check(&project);
+    let summary = format!("{covered:#?}");
+    // Her mouth is at about 1220 px of 1920, where captions start.
+    assert_eq!(covered.len(), 4, "{summary}");
+    let safe = project.canvas.safe_area().unwrap();
+    for c in &covered {
+        assert_eq!(c.kind, "caption");
+        assert!(c.face[1] < 1220 && c.face[1] + c.face[3] > 1220, "the face spans the mouth: {summary}");
+        let moved = c.suggestion.as_ref().unwrap_or_else(|| panic!("a place for {}: {summary}", c.label)).layer;
+        assert!(
+            moved[1] as f32 >= safe.top && (moved[1] + moved[3]) as f32 <= safe.bottom,
+            "inside the safe area: {summary}"
+        );
+    }
+    for c in &covered {
+        for edit in &c.suggestion.as_ref().unwrap().edits {
+            project.apply(edit.clone()).unwrap();
+        }
+    }
+    let after = check(&project);
+    assert!(after.is_empty(), "the moved captions are clear of her face: {after:#?}");
+    // Without the face model the check does not run, and says what to install.
+    let empty = std::env::temp_dir().join(format!("nuzky-no-models-{}", std::process::id()));
+    let error = covered_faces(&project, &empty, &AtomicBool::new(false), &mut |_| {}).unwrap_err();
+    assert!(format!("{error:#}").starts_with("MODEL_MISSING"), "{error:#}");
+}
