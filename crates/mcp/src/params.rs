@@ -341,6 +341,15 @@ pub struct GetTranscript {
     /// next_cursor of the page before.
     pub cursor: Option<String>,
 }
+#[derive(Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FindBroll {
+    /// INCLUSIVE word range [from,to] of get_transcript to find B-roll for; the whole transcript sentence by sentence
+    /// when left out.
+    pub words: Option<[usize; 2]>,
+    /// get_transcript's transcript_key the word numbers belong to; required with words.
+    pub transcript_key: Option<String>,
+}
 #[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TranscriptDetail {

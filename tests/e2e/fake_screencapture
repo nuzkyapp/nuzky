@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+"""Stand-in for macOS's `screencapture -v` in the tests: it records nothing, logs its arguments to
+NUZKY_FAKE_SCREENCAPTURE_LOG, and when a key comes on its input, or once the file NUZKY_FAKE_SCREENCAPTURE_END exists, as
+when the user stops it from the menu bar, writes the video NUZKY_FAKE_SCREENCAPTURE_VIDEO to the file it was given."""
+import json, os, select, shutil, sys
+
+
+def main():
+    args = sys.argv[1:]
+    with open(os.environ['NUZKY_FAKE_SCREENCAPTURE_LOG'], 'a') as log:
+        log.write(json.dumps(args) + '\n')
+    if '-v' not in args or not args[-1].endswith('.mov'):
+        print('screencapture: expected -v and a .mov file', file=sys.stderr)
+        sys.exit(1)
+    if any(a.startswith('-l') and not a[2:].isdigit() for a in args):
+        print("screencapture: Can't find window with ID", file=sys.stderr)
+        sys.exit(1)
+    print('type any character (or ctrl-c) to stop screen recording', flush=True)
+    end = os.environ['NUZKY_FAKE_SCREENCAPTURE_END']
+    while not os.path.exists(end):
+        ready, _, _ = select.select([sys.stdin], [], [], 0.1)
+        if ready:
+            sys.stdin.read(1)
+            break
+    shutil.copy(os.environ['NUZKY_FAKE_SCREENCAPTURE_VIDEO'], args[-1])
+
+
+main()

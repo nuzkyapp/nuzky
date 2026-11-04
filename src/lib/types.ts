@@ -227,6 +227,27 @@ export type Boot = {
 };
 
 /**
+ * A suggestion the user accepted.
+ */
+export type BrollChoice = {
+  from: number,
+  to: number,
+  assetId: string,
+};
+
+export type BrollSuggestions = {
+  /**
+   * The transcript key the word numbers belong to; adding is refused once it changed.
+   */
+  key: string,
+  items: Array<SuggestedBroll>,
+  /**
+   * Silent videos in the project, which B-roll can come from.
+   */
+  recordings: number,
+};
+
+/**
  * The canvas as the UI receives it. Snapshots add its safe area (`snapshot_project` in lib.rs), which
  * saved projects leave out.
  */
@@ -1397,6 +1418,33 @@ export type SampleRun = {
   captions: number,
 };
 
+export type ScreenRecording = {
+  /**
+   * Milliseconds since 1970 when the recording started.
+   */
+  startedMs: number,
+  /**
+   * The window recorded, or null for the whole screen.
+   */
+  window: ScreenWindow | null,
+  /**
+   * It stopped but could not be added to the project, such as while the AI edits; Stop adds it again.
+   */
+  ended: boolean,
+};
+
+/**
+ * A window the user can record, as the system lists it, frontmost first.
+ */
+export type ScreenWindow = {
+  id: number,
+  app: string,
+  /**
+   * Empty until Nuzky may record the screen: macOS hides other apps' window titles before that.
+   */
+  title: string,
+};
+
 /**
  * The edge of a video or image layer.
  */
@@ -1753,6 +1801,27 @@ export type StyleView = {
    * Newest first.
    */
   versions: Array<StyleVersion>,
+};
+
+export type SuggestedBroll = {
+  /**
+   * Inclusive word numbers of the transcript view.
+   */
+  from: number,
+  to: number,
+  startUs: number,
+  endUs: number,
+  /**
+   * How long the recording shows; shorter than the sentence when the recording is.
+   */
+  durationUs: number,
+  text: string,
+  assetId: string,
+  assetName: string,
+  /**
+   * The words heard that name the recording.
+   */
+  said: Array<string>,
 };
 
 /**

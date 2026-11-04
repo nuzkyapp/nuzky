@@ -1,7 +1,7 @@
 import { invoke, type Channel } from "@tauri-apps/api/core";
 import type { GalleryPlugin, GalleryState } from "./gallery";
 import type { EffectIssue, ListedPlugin, PluginRow, PluginValues } from "./plugins";
-import type { AgentAccess, ImportedKeys, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, BeatCutDone, BeatPlans, Boot, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Part, PreviewStarted, Project, ProjectPoster, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFinish, ReelFraming, Rhythm, Said, SampleRun, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied } from "./types";
+import type { AgentAccess, ImportedKeys, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, BeatCutDone, BeatPlans, Boot, BrollChoice, BrollSuggestions, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Part, PreviewStarted, Project, ProjectPoster, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFinish, ReelFraming, Rhythm, Said, SampleRun, ScreenRecording, ScreenWindow, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied } from "./types";
 
 /**
  * The session a change was made for. Mutating commands carry it, so a change still in flight when
@@ -222,6 +222,17 @@ export const api = {
   /** Punch-ins on inclusive word ranges of the view with `key`, as one undo step. */
   applyZooms: (key: string, zooms: { from: number; to: number; scale: number }[], epoch: Epoch) =>
     invoke<ZoomsApplied>("apply_zooms", { key, zooms, expectedEpoch: epoch }),
+  /** Silent videos of the project played over the whole frame where the speaker names them. */
+  suggestBroll: () => invoke<BrollSuggestions>("suggest_broll"),
+  /** The chosen recordings over the whole frame of their words, as one undo step. */
+  addBroll: (key: string, choices: BrollChoice[], epoch: Epoch) => invoke<Snapshot>("add_broll", { key, choices, expectedEpoch: epoch }),
+  /** Other apps' windows, frontmost first; fails with SCREEN_UNSUPPORTED outside macOS. */
+  screenWindows: () => invoke<ScreenWindow[]>("screen_windows"),
+  screenRecording: () => invoke<ScreenRecording | null>("screen_recording"),
+  /** Records the whole screen, or `window`, until `screenRecordStop`. */
+  screenRecordStart: (window: ScreenWindow | null) => invoke<ScreenRecording>("screen_record_start", { window }),
+  /** `keep` adds the recording to the project's media as one undo step; otherwise it is deleted. */
+  screenRecordStop: (keep: boolean, epoch: Epoch) => invoke<Snapshot | null>("screen_record_stop", { keep, expectedEpoch: epoch }),
   /** Finds the beat of the song under `clipId` as a `beats` job; null when it is known already. */
   findBeats: (clipId: string, epoch: Epoch) => invoke<string | null>("find_beats", { clipId, expectedEpoch: epoch }),
   /** What each rhythm would cut; null while the song's beat is not known. Nothing changes. */
@@ -303,6 +314,9 @@ const PLAIN: Record<string, string | ((detail: string) => string)> = {
   RECOVERY_PENDING: "Choose what happens to the unfinished AI edit first.",
   RUN_ACTIVE: "AI is editing. Stop it to edit yourself.",
   RUN_BUSY: "An AI edit is still open. Stop it first.",
+  SCREEN_PERMISSION: (detail) => detail,
+  SCREEN_UNSUPPORTED: (detail) => detail,
+  RECORDING: "The screen is already being recorded.",
   EPOCH_CHANGED: "Another project was opened meanwhile, so this did not happen.",
   EDIT_REJECTED: (detail) => {
     const what = detail.replace(/; project unchanged$/, "").replace(/\.$/, "");

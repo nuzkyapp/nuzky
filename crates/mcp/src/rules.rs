@@ -68,6 +68,8 @@ pub(crate) const TOOLS: &[Rules] = &[
     rules("reframe", Never, true, false, true),
     rules("transcribe", Never, false, false, true),
     rules("get_transcript", Always, false, true, false),
+    // Only reads the stored words and the names of the project's silent videos.
+    rules("find_broll", Always, false, true, false),
     rules("edit_transcript", When(|args| args["dry_run"] == true), true, false, false),
     // Changes how words read, never what is heard; the recognised text stays in the project.
     rules("correct_words", Never, false, false, false),
@@ -142,6 +144,7 @@ mod tests {
             set(&[
                 "get_state",
                 "get_transcript",
+                "find_broll",
                 "inspect_frames",
                 "activity",
                 "get_waveform",
@@ -177,6 +180,7 @@ mod tests {
             set(&[
                 "get_state",
                 "get_transcript",
+                "find_broll",
                 "inspect_frames",
                 "activity",
                 "get_waveform",

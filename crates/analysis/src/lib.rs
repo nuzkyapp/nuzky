@@ -25,7 +25,7 @@ pub use captions::{CaptionGrouping, group_words};
 pub use emphasis::{Energy, Zoom, emphasis, key_words, prepared_word_energy, word_energy};
 pub use fillers::{HESITATION_US, filler_words, hesitations};
 pub use restarts::align_transcript;
-pub use retakes::{Attempt, Filler, RetakeGroup, Retakes, Review, retakes};
+pub use retakes::{Attempt, Filler, RetakeGroup, Retakes, Review, retakes, token as word_token};
 pub use scenes::{SceneCut, SceneParams, picture_difference, scene_cuts, scene_cuts_cancellable, scene_cuts_in};
 pub use speech::{
     AudioSource, Segment, Transcript, Word, keep_vulkan_fp32, transcribe_with_regions, transcribe_words,

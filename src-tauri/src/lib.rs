@@ -4,6 +4,7 @@ mod agent_panel;
 mod attachments;
 mod audio_out;
 mod beats;
+mod broll;
 mod caption_styles;
 mod chatgpt;
 #[cfg(test)]
@@ -23,6 +24,7 @@ mod recap;
 mod reels;
 mod remote;
 mod sample;
+mod screen;
 mod shortcuts;
 mod sounds;
 mod source_preview;
@@ -88,6 +90,7 @@ pub struct AppState {
     sounds: sounds::Sounds,
     beat_cuts: beats::BeatCuts,
     youtube: youtube_videos::YoutubeVideos,
+    screen: screen::ScreenRecorder,
     source_preview: Mutex<Option<(Engine, String)>>,
     plugin_preview: Mutex<Arc<AtomicBool>>,
     gallery: plugins::GalleryState,
@@ -1317,6 +1320,7 @@ pub fn run() {
                 sounds: Default::default(),
                 beat_cuts: Default::default(),
                 youtube: Default::default(),
+                screen: Default::default(),
                 source_preview: Mutex::default(),
                 plugin_preview: Mutex::default(),
                 gallery: Default::default(),
@@ -1378,6 +1382,12 @@ pub fn run() {
             youtube_videos::youtube_preview_seek,
             youtube_videos::youtube_preview_resize,
             youtube_videos::youtube_filmstrip,
+            screen::screen_windows,
+            screen::screen_recording,
+            screen::screen_record_start,
+            screen::screen_record_stop,
+            broll::suggest_broll,
+            broll::add_broll,
             source_preview::source_preview_open,
             source_preview::source_preview_close,
             source_preview::source_preview_play,
@@ -1567,6 +1577,7 @@ pub fn run() {
             tauri::RunEvent::Exit => {
                 // The panel's agent runs in its own process group, so it would outlive the app.
                 app.state::<agent_panel::AgentPanel>().stop();
+                app.state::<AppState>().screen.quit();
                 app.state::<AppState>().quit();
                 diagnostics::quit();
                 #[cfg(target_os = "linux")]
@@ -1592,6 +1603,9 @@ impl AppState {
             self.jobs.lock().unwrap().keys().map(|id| id.split(':').next().unwrap_or(id).to_owned()).collect();
         let host = self.session.lock().unwrap().host.clone();
         kinds.extend(host.jobs.running().into_iter().map(String::from));
+        if self.screen.recording() {
+            kinds.push("screen-recording".into());
+        }
         kinds
     }
 
@@ -1619,6 +1633,8 @@ impl AppState {
 fn quit_question(kinds: &[String]) -> Option<&'static str> {
     if kinds.iter().any(|kind| kind == "export" || kind == "cover-export") {
         Some("An export is still running. Quitting cancels it and removes the unfinished file.")
+    } else if kinds.iter().any(|kind| kind == "screen-recording") {
+        Some("A screen recording is not in the project yet. Quitting deletes it.")
     } else if kinds.iter().any(|kind| !matches!(kind.as_str(), "audio" | "proxy" | "matte")) {
         Some("Speech recognition or analysis is still running. Quitting cancels it.")
     } else {

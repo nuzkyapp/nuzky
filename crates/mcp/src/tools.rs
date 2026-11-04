@@ -322,6 +322,7 @@ impl Backend {
             "reframe" => self.reframe(parse(arguments)?, state),
             "transcribe" => self.transcribe(parse(arguments)?, state),
             "get_transcript" => self.get_transcript(parse(arguments)?, state),
+            "find_broll" => self.find_broll(parse(arguments)?, state),
             "edit_transcript" => self.edit_transcript(parse(arguments)?, state),
             "correct_words" => self.correct_words(parse(arguments)?, state),
             "job" => {
@@ -1184,6 +1185,35 @@ impl Backend {
                 Ok(json!({"assets":recognised}))
             },
         )
+    }
+
+    fn find_broll(&self, args: FindBroll, state: &SessionState) -> Result<Value> {
+        let derived = transcript::derive(&self.media_project(&state.project), &self.host.transcripts)?;
+        if args.words.is_some() {
+            let key = args
+                .transcript_key
+                .as_deref()
+                .context("INVALID_ARGUMENTS: words need get_transcript's transcript_key")?;
+            transcript::check_word_key(&state.project, &derived, key)?;
+        }
+        let suggestions: Vec<Value> = crate::broll::suggest(&state.project, &derived.words, args.words)?
+            .into_iter()
+            .map(|b| {
+                let edit = serde_json::to_value(b.edit()).unwrap_or_default();
+                let mut value = serde_json::to_value(b).unwrap_or_default();
+                value["edit"] = edit;
+                value
+            })
+            .collect();
+        let recordings: Vec<Value> = crate::broll::recordings(&state.project)
+            .into_iter()
+            .map(|a| json!({"asset_id": a.id, "name": a.name, "duration_us": a.duration_us}))
+            .collect();
+        Ok(json!({
+            "transcript_key": transcript::word_key(&state.project, &derived.words),
+            "recordings": recordings,
+            "suggestions": suggestions,
+        }))
     }
 
     fn get_transcript(&self, args: GetTranscript, state: &SessionState) -> Result<Value> {
