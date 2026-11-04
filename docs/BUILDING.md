@@ -69,6 +69,14 @@ urpmi ./target/release/bundle/rpm/Nuzky-*.rpm
 
 `lib64ffmpeg-devel` must come from `tainted`, like the installed `lib64avcodec61`, so the headers match the libraries and export has `libx264`.
 
+The UI flows of `scripts/repro.py` also need headless gamescope and python-xlib, and `scripts/fixtures.sh`, which prepares the media of the ignored tests, needs espeak-ng:
+
+```sh
+urpmi gamescope python3-xlib espeak-ng
+```
+
+Six engine tests cannot make their fixtures with Mageia 10's FFmpeg and fail: its `libx265` encodes only 8-bit pictures and its `scale` filter has no `out_color_matrix=bt2020nc`, which `qa_describe`, `qa_proxy` and the HDR tests of `qa_video` use, and FFmpeg 7.1 counts the average frame rate of `qa_describe`'s VFR fixture as 900/41, not the 21.43 the test expects; Nuzky reports what `ffprobe` reports. The HDR and 10-bit paths are therefore not tested on Mageia. The `heic` flow fails there too: it makes an HLG photo, and its reference is `ffmpeg`'s own picture of the file, which FFmpeg 7.1 draws as one tile. Nuzky joins the tiles with FFmpeg 7.1 but shows a rotated or mirrored HEIC photo as stored, because FFmpeg reads the rotation and mirroring of a tile grid only from 8.0 on.
+
 On a host with `rpm` whose `/etc/os-release` names neither Debian nor Ubuntu, `build-bundles.mjs` builds only `target/release/bundle/rpm/*.rpm`, linked against the system's FFmpeg like the `.deb`. It bundles ONNX Runtime and the licence notices in `/usr/lib/Nuzky` and no FFmpeg. Its requirements are SONAMEs (`libavcodec.so.61()(64bit)` and the like) taken from `pkg-config`, so it installs only where the FFmpeg it was linked against is, whatever the distribution calls its packages. The verifier checks that the package holds the binary and ONNX Runtime as regular files, that it requires every FFmpeg, GTK, WebKitGTK and ALSA library the binary links plus the Vulkan loader, and that this system provides each requirement. The release builds no `.rpm`, and `latest.json` names none, so an installed `.rpm` does not update itself: Update says to download the new version, and you build it again.
 
 For a local Fedora/Nobara AppImage, or a separate build directory:
