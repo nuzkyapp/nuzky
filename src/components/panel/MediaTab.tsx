@@ -252,7 +252,7 @@ export function MediaTab() {
       ) : (
         <>
           <div className="mx-3.5 flex gap-2">
-            <ImportTile label="Import media" hint={key("import")} shortcut={ariaKeys(key("import"))} onClick={() => pickAndImport()} className="min-w-0 flex-1" />
+            <ImportTile label="Import media" hint={key("import")} shortcut={ariaKeys(key("import"))} onClick={() => pickAndImport()} className="min-w-0 flex-1 whitespace-nowrap @max-[440px]:[&>kbd]:hidden" />
             <YoutubeTile compact />
             <RecordTile compact />
           </div>
