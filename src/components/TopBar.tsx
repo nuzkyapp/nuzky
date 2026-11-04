@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertCircle, ChevronLeft, Download, FolderOpen, History, Loader2, Puzzle, Redo2, Settings, Sparkles, Undo2, X } from "lucide-react";
+import { AlertCircle, ChevronLeft, Download, FolderOpen, History, Loader2, Puzzle, Redo2, Settings, Sparkles, Undo2 } from "lucide-react";
 import { useAgent } from "../lib/agent";
 import { api, errorText } from "../lib/api";
 import { togglePanel, useDock } from "../lib/dock";
@@ -177,8 +177,8 @@ export function JobIndicator() {
 }
 
 /**
- * The screen recording running: how long, Stop that adds it to Media and Delete. It stays here while the user works in
- * other apps, so coming back to Nuzky shows how to end it.
+ * The screen recording running: how long, Stop that adds it to Media and Discard. It is the one place to end it, and
+ * stays here while the user works in other apps.
  */
 function RecordingIndicator() {
   const recording = useScreen((s) => s.recording);
@@ -200,15 +200,15 @@ function RecordingIndicator() {
       <Button pill className="h-6 shrink-0 px-2.5 text-[12px]" disabled={stopping} title={recording.ended ? "Add the recording to Media" : "Stop recording and add it to Media"} onClick={() => void stopRecording(true)}>
         {recording.ended ? "Add" : "Stop"}
       </Button>
+      {/* Not locked by the AI lock, so a recording can always be thrown away. */}
       <button
         type="button"
-        aria-label="Delete recording"
         title={recording.ended ? "Delete the recording" : "Stop recording and delete it"}
         aria-disabled={stopping || undefined}
         onClick={() => void stopRecording(false)}
-        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted transition-colors duration-[120ms] ease-out hover:bg-white/[.09] hover:text-fg aria-disabled:opacity-40"
+        className="h-6 shrink-0 rounded-full px-2.5 text-[12px] text-muted transition-colors duration-[120ms] ease-out hover:bg-white/[.09] hover:text-fg aria-disabled:opacity-40"
       >
-        <X size={14} />
+        Discard
       </button>
     </span>
   );

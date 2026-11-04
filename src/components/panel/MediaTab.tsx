@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { AppWindow, AudioLines, Check, Eye, Film, Layers2, Link2, Monitor, MonitorDot, PictureInPicture2, Plus, Square, Trash2 } from "lucide-react";
+import { AppWindow, AudioLines, Check, Eye, Film, Layers2, Link2, Monitor, MonitorDot, PictureInPicture2, Plus, Trash2 } from "lucide-react";
 import { closeSource, openSource, useSource } from "../../lib/source";
 import { usedAssets, useEditor } from "../../lib/store";
 import { formatDuration } from "../../lib/time";
 import { openYoutube } from "../../lib/youtube";
 import { api, errorText } from "../../lib/api";
-import { startRecording, stopRecording, useScreen } from "../../lib/screen";
+import { startRecording, useScreen } from "../../lib/screen";
 import type { ScreenWindow } from "../../lib/types";
 import type { Asset } from "../../lib/types";
 import { FadeImg, Menu, ProgressBar, lockedProps, useLockReason } from "../ui";
@@ -176,16 +176,15 @@ const TILE = "flex h-[46px] shrink-0 items-center justify-center gap-2 rounded-x
 const windowLabel = (w: ScreenWindow) => (w.title && w.title !== w.app ? `${w.app} · ${w.title}` : w.app);
 
 /**
- * Record screen: a menu of the whole screen and the other apps' windows; the recording then runs until Stop here or in
- * the top bar, and lands in Media. Only on macOS for now. Beside Import media and From YouTube it is an icon.
+ * Record screen: a menu of the whole screen and the other apps' windows; the recording then runs until Stop in the top
+ * bar, and lands in Media. Only on macOS for now. Beside Import media and From YouTube it is an icon.
  */
 function RecordTile({ compact = false, className = "" }: { compact?: boolean; className?: string }) {
   const lock = useLockReason();
   const recording = useScreen((s) => s.recording);
   const [menu, setMenu] = useState<{ x: number; y: number; keyboard: boolean; windows: ScreenWindow[]; opener: HTMLElement } | null>(null);
-  const reason = !MAC ? "Nuzky records the screen on macOS for now" : lock;
+  const reason = !MAC ? "Nuzky records the screen on macOS for now" : (lock ?? (recording ? "Stop the recording in the top bar first" : null));
   const open = async (opener: HTMLElement, keyboard: boolean) => {
-    if (recording) return void stopRecording(true);
     let windows: ScreenWindow[] = [];
     try {
       windows = await api.screenWindows();
@@ -196,27 +195,20 @@ function RecordTile({ compact = false, className = "" }: { compact?: boolean; cl
     const r = opener.getBoundingClientRect();
     setMenu({ x: r.left, y: r.bottom + 4, keyboard, windows, opener });
   };
-  const label = recording ? (recording.ended ? "Add recording" : "Stop recording") : "Record screen";
   return (
     <>
       <button
         type="button"
-        aria-label={label}
-        aria-haspopup={recording ? undefined : "menu"}
-        title={reason ?? (recording ? "Stop recording and add it to Media" : "Record the whole screen or one window, to show an app over what you say")}
+        aria-label="Record screen"
+        aria-haspopup="menu"
+        title={reason ?? "Record the whole screen or one window, to show an app over what you say"}
         onClick={(e) => void open(e.currentTarget, e.detail === 0)}
         {...lockedProps(reason)}
         data-record-screen
         className={`${TILE} ${compact ? "w-[46px] px-0" : ""} ${className}`}
       >
-        {recording?.ended ? (
-          <Plus size={16} className="shrink-0 text-muted" />
-        ) : recording ? (
-          <Square size={14} className="shrink-0 fill-danger text-danger" />
-        ) : (
-          <MonitorDot size={16} className="shrink-0 text-muted" />
-        )}
-        {!compact && <span>{label}</span>}
+        <MonitorDot size={16} className="shrink-0 text-muted" />
+        {!compact && <span>Record screen</span>}
       </button>
       {menu && (
         <Menu

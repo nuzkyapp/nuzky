@@ -1,6 +1,6 @@
 """Record screen in Media on macOS, with a stand-in for `screencapture` that records nothing (fake_screencapture): nothing
-records until the user picks the whole screen or a window, the top bar shows the recording with Stop and Delete, Stop
-adds it to Media as one undo step, Delete leaves nothing behind, and a recording the system ends lands in Media too."""
+records until the user picks the whole screen or a window, the top bar shows the recording with Stop and Discard, Stop
+adds it to Media as one undo step, Discard leaves nothing behind, and a recording the system ends lands in Media too."""
 import json, subprocess, time
 from pathlib import Path
 
@@ -71,7 +71,8 @@ def record_screen(r):
     r.check('screencapture records video of the whole screen into Nuzky\'s own folder',
             len(started) == 1 and started[0][:2] == ['-x', '-v'] and not any(a.startswith('-l') for a in started[0])
             and target.parent.resolve() == (r.work / 'data/nuzky/recordings').resolve(), started)
-    r.check('the Media tile now stops it', r.s.run("return document.querySelector('[data-record-screen]').getAttribute('aria-label')") == 'Stop recording')
+    tile = r.s.run("const b = document.querySelector('[data-record-screen]'); return [b.getAttribute('aria-disabled'), b.title]")
+    r.check('Record screen waits, saying where to stop the recording', tile == ['true', 'Stop the recording in the top bar first'], tile)
     time.sleep(1.2)
     r.shot('recording')
 
@@ -89,7 +90,7 @@ def record_screen(r):
     r.key('z', ctrlKey=True)
     r.check('one undo takes it out of Media', wait(lambda: len(assets(r)) == count, 5), [a['name'] for a in assets(r)])
 
-    # A window, then Delete: nothing is added and the file is gone.
+    # A window, then Discard: nothing is added and the file is gone.
     items = open_menu(r)
     windows = items[2:] if items and len(items) > 2 else []
     if r.check('the menu lists at least one window to record', windows, items):
@@ -97,8 +98,8 @@ def record_screen(r):
         args = runs(r)[-1]
         r.check('a window is recorded by its id', shown and any(a.startswith('-l') and a[2:].isdigit() for a in args), [shown, args])
         r.check('the top bar names the window\'s app', shown and windows[0].split(' · ')[0] in shown, [shown, windows[0]])
-        r.s.run(f"{INDICATOR}.querySelector('[aria-label=\"Delete recording\"]').click()")
-        r.check('Delete stops it without adding anything', wait(lambda: not r.s.run(f'return !!{INDICATOR}'), 20)
+        r.s.run(f"[...{INDICATOR}.querySelectorAll('button')].find((b) => b.textContent === 'Discard').click()")
+        r.check('Discard stops it without adding anything', wait(lambda: not r.s.run(f'return !!{INDICATOR}'), 20)
                 and len(assets(r)) == count, [a['name'] for a in assets(r)])
         r.check('and deletes what it recorded', wait(lambda: not Path(args[-1]).exists(), 5), recordings(r))
 
@@ -110,7 +111,7 @@ def record_screen(r):
             and not r.s.run(f'return !!{INDICATOR}'), [a['name'] for a in assets(r)])
     r.check('no error toast', not r.errors(), r.errors())
 
-    # While the AI edits, the project refuses the recording the system ended: it stays, with Add and ×, until added.
+    # While the AI edits, the project refuses the recording the system ended: it stays, with Add and Discard, until added.
     (r.work / 'system-stop').unlink()
     open_menu(r)
     choose(r, 0)
@@ -137,5 +138,5 @@ def record_screen(r):
 
 if MACOS:
     flow('screen_recording', 'Record screen in Media records nothing until the user picks the whole screen or a window; the '
-         'top bar shows it with Stop and Delete, Stop adds it to Media as one undo step, Delete leaves nothing, and a '
+         'top bar shows it with Stop and Discard, Stop adds it to Media as one undo step, Discard leaves nothing, and a '
          'recording the system ends lands in Media', before=setup)(record_screen)
