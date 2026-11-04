@@ -5,6 +5,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { api, errorText, plainError } from "./lib/api";
 import { setLimits } from "./lib/limits";
+import { onFacesJob } from "./lib/faces";
 import { onReframeJob } from "./lib/reframe";
 import { canRetrySpeech, retrySpeech, useSpeech } from "./lib/speech";
 import { reportBug } from "./lib/diagnostics";
@@ -254,6 +255,7 @@ function onJob(job: JobEvent) {
   useEditor.setState({ jobs: { ...useEditor.getState().jobs, [job.id]: job } });
   if (job.kind === "cover" || job.kind === "vision-models") onCoverJob(job);
   if (job.kind === "reframe") onReframeJob(job);
+  if (job.kind === "faces") onFacesJob(job);
   if (job.kind === "reels") onReelsJob(job);
   if (job.kind === "beats" && job.status === "done") onBeatsFound(job.id.slice("beats:".length));
   if (job.kind === "beats" && job.status === "failed") toast({ kind: "error", text: `The beat could not be found: ${plainError(job.message ?? "")}` });

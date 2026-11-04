@@ -354,7 +354,7 @@ fn keys(times: &[i64], positions: &[[f32; 2]]) -> Vec<(i64, [f32; 2])> {
     keys
 }
 
-fn update(clip_id: &str, transform: Transform) -> EditCmd {
+pub(crate) fn update(clip_id: &str, transform: Transform) -> EditCmd {
     EditCmd::UpdateClip {
         clip_id: clip_id.into(),
         transform: Some(transform),

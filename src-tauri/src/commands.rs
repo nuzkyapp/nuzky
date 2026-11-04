@@ -143,6 +143,7 @@ pub const COMMANDS: &[&str] = &[
     "start_make_reels",
     "start_recap",
     "start_reframe",
+    "start_face_check",
     "start_speech_setup",
     "start_style_learning",
     "start_timeline_learning",

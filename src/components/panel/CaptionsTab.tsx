@@ -1,9 +1,11 @@
-import { Captions, Check, Ellipsis, Plus } from "lucide-react";
+import { Captions, Check, Ellipsis, Plus, ScanFace } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { api, errorText, plainError } from "../../lib/api";
+import { checkFaces, useFaces } from "../../lib/faces";
+import { useReframe } from "../../lib/reframe";
 import { CAPTION_STYLES, isLook, scaleStyle } from "../../lib/presets";
 import { type CaptionLook, speechBlocker, startSpeech, useSpeech } from "../../lib/speech";
-import { applyCaptionLook, isCaptionTrack, patched, presetOver, restyleCaptions, useCanvasUnit, useEditor } from "../../lib/store";
+import { MAIN_TRACK, applyCaptionLook, isCaptionTrack, patched, presetOver, restyleCaptions, useCanvasUnit, useEditor } from "../../lib/store";
 import type { CaptionPreset, Clip } from "../../lib/types";
 import { CaptionPosition, HighlightRows, KeywordRows, MainStyle, MoreStyleFold, type SetStyle } from "../inspector/TextSection";
 import { Button, IconButton, LockReason, Menu, Segmented, TextSwatch, lockedProps, useLockReason } from "../ui";
@@ -73,6 +75,13 @@ export function CaptionsTab() {
   const font = look.style.fontFamily ?? null;
   const mine = useMyStyles();
   const busy = !!running;
+  const faceBlocker = useEditor((s) =>
+    s.snap?.project.tracks.some((t) => !t.hidden && t.clips.length > 0 && (t.kind === "text" || (t.kind === "video" && t.id !== MAIN_TRACK)))
+      ? null
+      : "Add captions, a text or a sticker first",
+  );
+  const checking = useFaces((s) => !!s.job);
+  const reframing = useReframe((s) => !!s.job);
 
   // Regenerating keeps the look of the captions already there, edits included.
   const start = () => startSpeech(look);
@@ -195,6 +204,14 @@ export function CaptionsTab() {
           </span>
         )}
         {!running && <JobError job={last} />}
+        <Button
+          data-check-faces
+          disabled={!!faceBlocker || checking || reframing || busy}
+          disabledReason={faceBlocker ?? (checking ? "Looking for faces" : reframing ? "Wait for the reframe to finish" : BUSY)}
+          onClick={() => void checkFaces()}
+        >
+          <ScanFace size={15} /> Find text over faces
+        </Button>
       </div>
     </div>
   );

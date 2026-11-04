@@ -934,7 +934,7 @@ export type ImportedKeys = {
 
 export type JobEvent = {
   id: string,
-  kind: "audio" | "proxy" | "matte" | "export" | "captions" | "transcript" | "style" | "vision-models" | "cover" | "reframe" | "reels" | "speech-model" | "agent" | "beats",
+  kind: "audio" | "proxy" | "matte" | "export" | "captions" | "transcript" | "style" | "vision-models" | "cover" | "reframe" | "faces" | "reels" | "speech-model" | "agent" | "beats",
   label: string,
   status: "running" | "done" | "failed" | "cancelled",
   progress: number,

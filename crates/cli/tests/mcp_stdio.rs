@@ -3264,6 +3264,31 @@ fn apply_motion_moves_clips_on_a_smooth_curve_and_skips_keyed_ones_over_stdio() 
 }
 
 #[test]
+fn covered_faces_skips_missing_models_without_changing_the_project_over_stdio() {
+    let mut c = Client::start(true, None, Some(None));
+    place_still(&mut c);
+    let run = c.call("begin_run", json!({"label":"text"}))["run_id"].clone();
+    c.call(
+        "apply_edits",
+        json!({"run_id":run,"request_id":"text","edits":[
+            {"type":"addText","startUs":0,"text":"Hook","style":{"fontSize":80.0,"color":"#ffffff"}}
+        ]}),
+    );
+    c.call("end_run", json!({"run_id":run,"action":"keep"}));
+    let before = std::fs::read(c.dir.join("project.nuzky")).unwrap();
+    let revision = c.call("get_state", json!({}))["revision"].clone();
+    let result = c.call("analyze", json!({"kind":"covered_faces"}));
+    assert_eq!(result["kind"], "covered_faces");
+    let reason = result["skipped"].as_str().unwrap();
+    assert!(reason.contains("MODEL_MISSING") && reason.contains("yunet-2026may.onnx"), "{reason}");
+    assert!(reason.contains("nuzky vision-models"), "{reason}");
+    assert_eq!(c.call("get_state", json!({}))["revision"], revision);
+    assert_eq!(std::fs::read(c.dir.join("project.nuzky")).unwrap(), before);
+    assert!(!c.dir.join("data/nuzky/models").exists());
+    c.finish();
+}
+
+#[test]
 fn reframe_names_missing_models_without_changing_the_project_over_stdio() {
     let mut c = Client::start(true, None, Some(None));
     place_still(&mut c);

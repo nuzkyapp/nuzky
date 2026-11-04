@@ -288,6 +288,8 @@ pub enum AnalysisKind {
     Emphasis,
     /// Frames of the whole timeline worth a cover or thumbnail, as a job.
     ThumbnailFrames,
+    /// Text and stickers hiding faces over the whole timeline, with suggested edits, as a job.
+    CoveredFaces,
     /// Tempo, beats, bars, drops and sections of a song, as a job.
     Beats,
 }
@@ -308,7 +310,7 @@ pub struct AnalysisParams {
 #[serde(deny_unknown_fields)]
 pub struct Analyze {
     pub kind: AnalysisKind,
-    /// Required for silences, loudness, scenes and beats; with fillers it reads that asset only. Omit for retakes, emphasis and thumbnail_frames.
+    /// Required for silences, loudness, scenes and beats; with fillers it reads that asset only. Omit for retakes, emphasis, thumbnail_frames and covered_faces.
     pub asset_id: Option<String>,
     #[serde(default)]
     pub params: AnalysisParams,

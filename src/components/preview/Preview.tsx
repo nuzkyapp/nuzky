@@ -16,6 +16,7 @@ import { KindIcon } from "../panel/assets";
 import { LayerOverlay } from "./LayerOverlay";
 import { PreviewDrop } from "./PreviewDrop";
 import { RatioMenu } from "./RatioMenu";
+import { FacesStatus } from "./FacesStatus";
 import { ReframeStatus } from "./ReframeStatus";
 import { useKeyLabels } from "../../lib/keys";
 
@@ -325,6 +326,7 @@ export function Preview() {
       <div ref={boxRef} className="relative mx-4 mt-3 min-h-0 flex-1 overflow-hidden">
         {cover && box.w > 0 && <CoverStage format={cover} box={box} />}
         {!cover && <ReframeStatus />}
+        {!cover && <FacesStatus />}
         {source && (
           <>
             <div className="absolute inset-0 flex flex-col items-center justify-center">

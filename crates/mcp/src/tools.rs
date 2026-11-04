@@ -852,6 +852,9 @@ impl Backend {
                 "hesitations": hesitations, "time_basis": "timeline",
                 "transcript_key": transcript::word_key(&state.project, &derived.words)}));
         }
+        if matches!(args.kind, AnalysisKind::CoveredFaces) {
+            return self.covered_faces(args, state);
+        }
         if matches!(args.kind, AnalysisKind::ThumbnailFrames) {
             return self.thumbnail_frames(args, state);
         }
@@ -894,7 +897,7 @@ impl Backend {
                     json!({"ranges": nuzky_analysis::filler_words(&t, &t.language), "hesitations": hesitations})
                 }
                 AnalysisKind::Beats => serde_json::to_value(nuzky_analysis::beats_cancellable(&asset, &cache, || cancel.load(Ordering::Relaxed))?)?,
-                AnalysisKind::Retakes | AnalysisKind::Emphasis | AnalysisKind::ThumbnailFrames => {
+                AnalysisKind::Retakes | AnalysisKind::Emphasis | AnalysisKind::ThumbnailFrames | AnalysisKind::CoveredFaces => {
                     anyhow::bail!("This kind is not an asset analysis")
                 }
             };
@@ -936,6 +939,37 @@ impl Backend {
                     progress.set(phase, Some(done))
                 })?;
                 Ok(json!({"kind": "thumbnail_frames", "time_basis": "timeline", "format": format, "candidates": candidates}))
+            },
+        )
+    }
+
+    /// Finds texts and stickers over a face, as a job. Without the face model it answers why, as the check is optional.
+    fn covered_faces(&self, args: Analyze, state: &SessionState) -> Result<Value> {
+        ensure!(args.asset_id.is_none(), "INVALID_ARGUMENTS: covered_faces reads the whole timeline; omit asset_id");
+        let project = self.media_project(&state.project);
+        activity::timeline_range(&project, None)?;
+        media::check_media(&project)?;
+        let skipped = |reason: anyhow::Error| json!({"kind": "covered_faces", "skipped": format!("{reason:#}")});
+        if let Err(reason) = vision_models::check(nuzky_vision::models::REFRAME, &self.vision_refused) {
+            return Ok(skipped(reason));
+        }
+        let models = nuzky_analysis::models_dir();
+        let refused = self.vision_refused.clone();
+        self.host.start_job(
+            &self.client.id,
+            state.open_run.as_ref().map(|run| run.run_id.as_str()),
+            "analysis",
+            state.stamp.clone(),
+            move |cancel, progress| {
+                if let Err(reason) = vision_models::ensure(nuzky_vision::models::REFRAME, &refused, &cancel, &progress)
+                {
+                    check_cancel(&cancel)?;
+                    return Ok(skipped(reason));
+                }
+                let covered = nuzky_vision::covered::covered_faces(&project, &models, &cancel, &mut |p| {
+                    progress.set("looking", Some(p))
+                })?;
+                Ok(json!({"kind": "covered_faces", "time_basis": "timeline", "covered": covered}))
             },
         )
     }
