@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
-import { AudioLines, Check, Eye, Film, Layers2, Link2, PictureInPicture2, Plus, Trash2 } from "lucide-react";
+import { AppWindow, AudioLines, Check, CircleDot, Eye, Film, Layers2, Link2, Monitor, PictureInPicture2, Plus, Square, Trash2 } from "lucide-react";
 import { closeSource, openSource, useSource } from "../../lib/source";
 import { usedAssets, useEditor } from "../../lib/store";
 import { formatDuration } from "../../lib/time";
 import { openYoutube } from "../../lib/youtube";
+import { api, errorText } from "../../lib/api";
+import { startRecording, stopRecording, useScreen } from "../../lib/screen";
+import type { ScreenWindow } from "../../lib/types";
 import type { Asset } from "../../lib/types";
 import { FadeImg, Menu, ProgressBar, lockedProps, useLockReason } from "../ui";
 import { ImportPlaceholder, ImportTile, KindIcon, addAtPlayhead, addOverlay, addPictureInPicture, assetDragHandler, pickAndImport, removeAsset } from "./assets";
@@ -167,6 +170,69 @@ function YoutubeTile({ compact = false, className = "" }: { compact?: boolean; c
   );
 }
 
+const MAC = navigator.userAgent.includes("Mac");
+const TILE = "flex h-[46px] shrink-0 items-center justify-center gap-2 rounded-xl bg-white/[.055] px-4 text-[13px] font-semibold text-fg shadow-[inset_0_0_0_1px_rgb(255_255_255/.07)] transition-colors duration-[120ms] ease-out hover:bg-white/[.09] aria-disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:hover:bg-white/[.055]";
+
+const windowLabel = (w: ScreenWindow) => (w.title && w.title !== w.app ? `${w.app} · ${w.title}` : w.app);
+
+/**
+ * Record screen: a menu of the whole screen and the other apps' windows; the recording then runs until Stop here or in
+ * the top bar, and lands in Media. Only on macOS for now. Beside Import media and From YouTube it is an icon.
+ */
+function RecordTile({ compact = false, className = "" }: { compact?: boolean; className?: string }) {
+  const lock = useLockReason();
+  const recording = useScreen((s) => s.recording);
+  const [menu, setMenu] = useState<{ x: number; y: number; keyboard: boolean; windows: ScreenWindow[]; opener: HTMLElement } | null>(null);
+  const reason = !MAC ? "Nuzky records the screen on macOS for now" : lock;
+  const open = async (opener: HTMLElement, keyboard: boolean) => {
+    if (recording) return void stopRecording(true);
+    let windows: ScreenWindow[] = [];
+    try {
+      windows = await api.screenWindows();
+    } catch (e) {
+      useEditor.getState().toast({ kind: "error", text: errorText(e) });
+      return;
+    }
+    const r = opener.getBoundingClientRect();
+    setMenu({ x: r.left, y: r.bottom + 4, keyboard, windows, opener });
+  };
+  const label = recording ? "Stop recording" : "Record screen";
+  return (
+    <>
+      <button
+        type="button"
+        aria-label={label}
+        aria-haspopup={recording ? undefined : "menu"}
+        title={reason ?? (recording ? "Stop recording and add it to Media" : "Record the whole screen or one window, to show an app over what you say")}
+        onClick={(e) => void open(e.currentTarget, e.detail === 0)}
+        {...lockedProps(reason)}
+        data-record-screen
+        className={`${TILE} ${compact ? "w-[46px] px-0" : ""} ${className}`}
+      >
+        {recording ? <Square size={14} className="shrink-0 fill-danger text-danger" /> : <CircleDot size={16} className="shrink-0 text-muted" />}
+        {!compact && <span>{recording ? "Stop recording" : "Record screen"}</span>}
+      </button>
+      {menu && (
+        <Menu
+          label="Record screen"
+          at={menu}
+          keyboard={menu.keyboard}
+          minWidth={240}
+          onClose={(chose) => {
+            if (!chose) menu.opener.focus({ preventScroll: true });
+            setMenu(null);
+          }}
+          items={[
+            { label: "Whole screen", icon: <Monitor size={15} />, run: () => void startRecording(null) },
+            ...(menu.windows.length ? (["separator"] as const) : []),
+            ...menu.windows.map((w) => ({ label: windowLabel(w), icon: <AppWindow size={15} />, run: () => void startRecording(w) })),
+          ]}
+        />
+      )}
+    </>
+  );
+}
+
 export function MediaTab() {
   const { key } = useKeyLabels();
   const assets = useEditor((s) => s.snap?.project.assets ?? []);
@@ -181,12 +247,14 @@ export function MediaTab() {
           <p className="max-w-[240px] text-[12px] text-muted">Import videos, music or images, or drop files anywhere on the window.</p>
           <ImportTile label="Import media" hint={key("import")} shortcut={ariaKeys(key("import"))} onClick={() => pickAndImport()} className="mt-3 w-full max-w-[240px]" />
           <YoutubeTile className="w-full max-w-[240px]" />
+          <RecordTile className="w-full max-w-[240px]" />
         </div>
       ) : (
         <>
           <div className="mx-3.5 flex gap-2">
             <ImportTile label="Import media" hint={key("import")} shortcut={ariaKeys(key("import"))} onClick={() => pickAndImport()} className="min-w-0 flex-1" />
             <YoutubeTile compact />
+            <RecordTile compact />
           </div>
           <div className="grid min-h-0 grid-cols-[repeat(auto-fill,minmax(100px,1fr))] content-start gap-x-2 gap-y-3 overflow-y-auto px-3.5 pb-3.5">
             {assets.map((a) => (

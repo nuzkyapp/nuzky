@@ -708,7 +708,7 @@ fn bare(text: &str) -> &str {
 }
 
 /// Lowercase letters and digits without diacritics, number words as digits.
-fn token(text: &str) -> String {
+pub fn token(text: &str) -> String {
     let token: String = text.chars().flat_map(char::to_lowercase).map(fold).filter(|c| c.is_alphanumeric()).collect();
     match NUMBERS.iter().find(|(word, _)| *word == token) {
         Some((_, digits)) => (*digits).to_owned(),

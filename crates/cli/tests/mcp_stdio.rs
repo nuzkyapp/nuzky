@@ -1175,6 +1175,102 @@ fn picture_in_picture_over_a_phrase_with_crop_and_shape_over_stdio() {
     assert_eq!((&content["shape"], &content["transform"]["crop"]["left"]), (&round, &json!(0.25)), "{content}");
 }
 
+/// B-roll from a screen recording: "Teď otevřu Claudu Code." names the recording of the Claude Code window in its Czech
+/// ending, so find_broll suggests it over that sentence with why and the edit that places it; once placed it is not
+/// suggested again, a range that names nothing gets nothing, and a range needs the transcript key.
+#[test]
+fn find_broll_suggests_the_screen_recording_named_in_a_sentence_over_stdio() {
+    use nuzky_session::transcripts::{Record, TranscriptStore, VERSION};
+
+    let mut c = Client::start(true, None, Some(None));
+    let ffmpeg = |args: &[&str], out: &PathBuf| {
+        assert!(
+            Command::new("ffmpeg")
+                .args(["-hide_banner", "-loglevel", "error"])
+                .args(args)
+                .arg(out)
+                .status()
+                .unwrap()
+                .success()
+        );
+    };
+    let (talk, screen) = (c.dir.join("talk.mp4"), c.dir.join("screen.mov"));
+    ffmpeg(
+        &[
+            "-f",
+            "lavfi",
+            "-i",
+            "color=s=16x16:r=30:d=6",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=duration=6",
+            "-c:v",
+            "libx264",
+            "-c:a",
+            "aac",
+        ],
+        &talk,
+    );
+    ffmpeg(&["-f", "lavfi", "-i", "color=c=red:s=32x16:r=30:d=4", "-c:v", "libx264", "-an"], &screen);
+    let talk = nuzky_engine::media::probe(&talk, "talk".into()).unwrap();
+    let mut recording = nuzky_engine::media::probe(&screen, "claude".into()).unwrap();
+    recording.name = "Ghostty · ✳ Claude Code".into();
+    let mut figma = recording.clone();
+    (figma.id, figma.name) = ("figma".into(), "Figma".into());
+    let store = TranscriptStore::at(c.dir.join("data/nuzky/transcripts")).unwrap();
+    let words = ["Teď", "otevřu", "Claudu", "Code.", "Pak", "napíšu", "prompt."]
+        .iter()
+        .enumerate()
+        .map(|(i, text)| nuzky_engine::speech::Word {
+            start_us: 200_000 + i as i64 * 700_000,
+            end_us: 700_000 + i as i64 * 700_000,
+            text: (*text).into(),
+            probability: 0.9,
+        })
+        .collect();
+    let record = Record {
+        version: VERSION,
+        fingerprint: store.fingerprint(&talk).unwrap(),
+        duration_us: talk.duration_us,
+        model: "fixture".into(),
+        language: "cs".into(),
+        words,
+        segments: vec![],
+        alignment: None,
+    };
+    store.put(&talk, &record).unwrap();
+    let run = c.call("begin_run", json!({"label": "media"}));
+    let place =
+        json!([{"type": "addAssets", "assets": [talk, recording, figma]}, {"type": "addClip", "assetId": "talk"}]);
+    c.call("apply_edits", json!({"run_id": run["run_id"], "request_id": "place", "edits": place}));
+
+    let found = c.call("find_broll", json!({}));
+    assert_eq!(found["recordings"].as_array().unwrap().len(), 2, "{found}");
+    let suggestions = found["suggestions"].as_array().unwrap();
+    assert_eq!(suggestions.len(), 1, "{found}");
+    let b = &suggestions[0];
+    assert_eq!(
+        (&b["from"], &b["to"], &b["asset_id"], &b["said"]),
+        (&json!(0), &json!(3), &json!("claude"), &json!(["Claudu", "Code"]))
+    );
+    assert!(b["reason"].as_str().unwrap().contains("Ghostty · ✳ Claude Code"), "{b}");
+    let edit = json!({"type": "addOverlay", "assetId": "claude", "startUs": 200_000, "durationUs": 2_600_000});
+    assert_eq!(b["edit"], edit);
+
+    let key = found["transcript_key"].clone();
+    let none = c.call("find_broll", json!({"words": [4, 6], "transcript_key": key}));
+    assert_eq!(none["suggestions"], json!([]));
+    assert!(c.error("find_broll", json!({"words": [0, 3]})).contains("transcript_key"));
+
+    c.call("apply_edits", json!({"run_id": run["run_id"], "request_id": "broll", "edits": [edit]}));
+    let overlay = c.call("get_state", json!({}))["tracks"][1]["clips"][0].clone();
+    assert_eq!((&overlay["startUs"], &overlay["durationUs"]), (&json!(200_000), &json!(2_600_000)), "{overlay}");
+    assert_eq!(c.call("find_broll", json!({}))["suggestions"], json!([]));
+    c.call("end_run", json!({"run_id": run["run_id"], "action": "keep"}));
+    c.finish();
+}
+
 /// The guide's repeat: a hook title read from get_state is pasted 20 s later on its track and another title takes
 /// its look but keeps its words; the retry pastes nothing twice and undoing the run takes all of it back.
 #[test]

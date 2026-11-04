@@ -9,6 +9,7 @@ import { Button, Checkbox, IconButton, NumberInput } from "../ui";
 import { JobError, SpeechFields, SpeechJobCard, useSpeechJobs } from "./SpeechControls";
 import { TranscriptText } from "./TranscriptText";
 import { SuggestZoomsButton, ZoomBar, useZoomSuggestions } from "./TranscriptZooms";
+import { BrollBar, SuggestBrollButton, useBrollSuggestions } from "./TranscriptBroll";
 
 /** Audio tracks with a checkbox: checked ones are not cut, so music keeps playing across cuts. */
 function KeepTracks({ project }: { project: Project }) {
@@ -86,6 +87,7 @@ export function TranscriptTab() {
   const retakesBlocker = cutBlocker ?? (preparing ? "Wait until the sound is prepared" : null);
   const busy = !!running;
   const zooms = useZoomSuggestions(view);
+  const broll = useBrollSuggestions(view);
 
   const removeAll = () => view && removePauses(view.key, pauseUs, null, [], describe(pauses));
   const retakes = view ? retakeParts(view, pauses.length, pauseUs) : null;
@@ -140,6 +142,7 @@ export function TranscriptTab() {
           <span className="tabular flex-1 text-[12px] text-muted">{view.words.length} word{view.words.length === 1 ? "" : "s"}</span>
           <ReelsButton project={project} />
           <SuggestZoomsButton state={zooms} blocker={cutBlocker ?? (busy ? "Wait for speech recognition to finish" : null)} />
+          <SuggestBrollButton state={broll} blocker={busy ? "Wait for speech recognition to finish" : null} />
           <IconButton label={blocker ?? (busy ? "Wait for speech recognition to finish" : "Transcribe again")} className="h-7 w-7" disabled={!!blocker || busy} onClick={() => startSpeech(null, true)}>
             <RefreshCw size={14} />
           </IconButton>
@@ -186,6 +189,7 @@ export function TranscriptTab() {
         {errorNote}
       </div>
       <ZoomBar state={zooms} blocker={cutBlocker} />
+      <BrollBar state={broll} blocker={null} />
       <TranscriptText
         tokens={tokens}
         blocker={cutBlocker}

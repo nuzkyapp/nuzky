@@ -1,12 +1,13 @@
-import { useState } from "react";
-import { AlertCircle, ChevronLeft, Download, FolderOpen, History, Loader2, Puzzle, Redo2, Settings, Sparkles, Undo2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { AlertCircle, ChevronLeft, Download, FolderOpen, History, Loader2, Puzzle, Redo2, Settings, Sparkles, Undo2, X } from "lucide-react";
 import { useAgent } from "../lib/agent";
 import { api, errorText } from "../lib/api";
 import { togglePanel, useDock } from "../lib/dock";
 import { closeCover, exportCover, openCover, useCover } from "../lib/cover";
 import { useReels } from "../lib/reels";
+import { stopRecording, useScreen, watchScreenRecording } from "../lib/screen";
 import { useStyle } from "../lib/style";
-import { when } from "../lib/time";
+import { formatLength, when } from "../lib/time";
 import { AI_EDITING, PLUGIN_RUN, openExport, projectDuration, restoreVersion, stopAiRun, useAiLocked, useEditor, whenIdle } from "../lib/store";
 import type { ProjectVersion } from "../lib/types";
 import { Button, IconButton, Menu, ProgressBar } from "./ui";
@@ -175,6 +176,44 @@ export function JobIndicator() {
   );
 }
 
+/**
+ * The screen recording running: how long, Stop that adds it to Media and Delete. It stays here while the user works in
+ * other apps, so coming back to Nuzky shows how to end it.
+ */
+function RecordingIndicator() {
+  const recording = useScreen((s) => s.recording);
+  const stopping = useScreen((s) => s.stopping);
+  const [now, setNow] = useState(Date.now());
+  useEffect(watchScreenRecording, []);
+  useEffect(() => {
+    if (!recording) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [recording]);
+  if (!recording) return null;
+  const what = recording.window ? recording.window.app : "Screen";
+  return (
+    <span className="bar flex h-8 items-center gap-1.5 rounded-full pl-3 pr-1 text-[12px] font-medium text-fg" role="status" data-screen-recording>
+      <span aria-hidden className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-danger" />
+      <span className="max-w-[160px] truncate">Recording {what}</span>
+      <span className="tabular text-muted">{formatLength(Math.max(0, now - recording.startedMs) * 1000)}</span>
+      <Button pill className="h-6 shrink-0 px-2.5 text-[12px]" disabled={stopping} title="Stop recording and add it to Media" onClick={() => void stopRecording(true)}>
+        Stop
+      </Button>
+      <button
+        type="button"
+        aria-label="Delete recording"
+        title="Stop recording and delete it"
+        aria-disabled={stopping || undefined}
+        onClick={() => void stopRecording(false)}
+        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted transition-colors duration-[120ms] ease-out hover:bg-white/[.09] hover:text-fg aria-disabled:opacity-40"
+      >
+        <X size={14} />
+      </button>
+    </span>
+  );
+}
+
 /** Opens and closes the AI panel; it stays open or closed across launches. */
 function AiToggle() {
   const { withKey } = useKeyLabels();
@@ -325,6 +364,7 @@ export function TopBar() {
         </div>
       </div>
       <AiRunBar />
+      <RecordingIndicator />
       <JobIndicator />
       <AiToggle />
       <div className="bar flex items-center rounded-full">

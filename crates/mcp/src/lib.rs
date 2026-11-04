@@ -2,6 +2,7 @@
 mod activity;
 pub mod beats;
 pub mod bridge;
+pub mod broll;
 pub mod caption_styles;
 mod fonts;
 pub mod import;
@@ -195,6 +196,10 @@ fn catalog() -> Result<Vec<Tool>> {
         tool::<params::GetTranscript>(
             "get_transcript",
             "Read derived timeline speech: transcript_key, revision, words {i,start_us,end_us,text,p}, sentences {from,to,start_us,end_us,text}, pauses {after_word,gap_us}, untranscribed asset ids. i/from/to are global zero-based INCLUSIVE word indices valid for this transcript_key; p is recognition probability. Sentences split at phrase punctuation or gaps >=600000 us; pauses include gaps >=300000 us. Optional range_us=[start,end) filters results without renumbering. Read long videos cheaply with detail: \"sentences\" and limit (1-500), passing next_cursor as cursor until it is null; pass the same range_us on each page. Request full word-level detail only for the part you cut. Use word indices with edit_transcript; never map source times by hand.",
+        )?,
+        tool::<params::FindBroll>(
+            "find_broll",
+            "Find B-roll in the project's screen recordings: where the speaker names an app, a tool or a technology, the silent video named after it, such as a screen recording Nuzky made of that app's window (\"Ghostty · ✳ Claude Code\"). A spoken word names a word of a video's name when they are the same, or differ only in an ending of up to two letters as Czech bends names; words such as screen, recording or a date do not count. Only videos without sound are B-roll, so the voice stays the only sound. Without words, every sentence of get_transcript that names a recording gives one suggestion, consecutive sentences naming the same one together, and sentences the recording already lies over are left out; with words [from,to] and transcript_key, only that range, as one span. Returns transcript_key, recordings [{asset_id,name,duration_us}] and suggestions [{from,to,start_us,end_us,text,asset_id,asset_name,said,reason,edit}]: said are the words heard that name it, reason says why in words to pass on to the user, and edit is the addOverlay that puts the recording over the whole frame from the first word to the last, for apply_edits in a run. A recording shorter than the span ends early, and reason says so. Empty suggestions mean no recording's name is said there; recordings empty means the project has no silent video, so ask the user to record their screen in Media (Record screen) or import one. Nuzky never records the screen for an agent.",
         )?,
         tool::<params::EditTranscript>(
             "edit_transcript",

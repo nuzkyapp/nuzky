@@ -1,5 +1,6 @@
 // Exactly what `generate_handler!` in lib.rs registers: Tauri refuses a command missing here.
 pub const COMMANDS: &[&str] = &[
+    "add_broll",
     "agent_access",
     "agent_attach_file",
     "agent_attach_pasted",
@@ -101,6 +102,10 @@ pub const COMMANDS: &[&str] = &[
     "run_plugin",
     "sample_run",
     "save_caption_style",
+    "screen_record_start",
+    "screen_record_stop",
+    "screen_recording",
+    "screen_windows",
     "search_said",
     "seek",
     "set_agent_access",
@@ -153,6 +158,7 @@ pub const COMMANDS: &[&str] = &[
     "style_read_timelines",
     "style_use_learned",
     "style_view",
+    "suggest_broll",
     "suggest_zooms",
     "thumbnail",
     "transcript_view",
