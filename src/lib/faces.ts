@@ -40,10 +40,12 @@ export async function checkFaces() {
 export function onFacesJob(job: JobEvent) {
   if (job.id !== useFaces.getState().job || job.status === "running") return;
   useFaces.setState({ job: null });
-  const { toast } = useEditor.getState();
+  const { toast, snap } = useEditor.getState();
   if (job.status === "done" && job.output) {
     const out = JSON.parse(job.output) as { covered: Covered[]; revision: number; sessionEpoch: string };
-    if (out.covered.length === 0) toast({ kind: "success", text: "No caption or sticker covers a face." });
+    // Another project was opened meanwhile: the result names clips of a project no longer open.
+    if (snap?.sessionEpoch !== out.sessionEpoch) return;
+    if (out.covered.length === 0) toast({ kind: "success", text: "No caption, text or sticker covers a face." });
     else {
       useFaces.setState({ found: { ...out, at: 0 } });
       show(0);
@@ -58,7 +60,7 @@ export function onFacesJob(job: JobEvent) {
   }
 }
 
-/** Selects the finding `at` and puts the playhead in the middle of where it covers the face. */
+/** Selects the finding `at` and puts the playhead where it starts covering the face, the time the chip shows. */
 export function show(at: number) {
   const found = useFaces.getState().found;
   const item = found?.covered[at];
@@ -66,7 +68,7 @@ export function show(at: number) {
   useFaces.setState({ found: { ...found, at } });
   const { select, seek } = useEditor.getState();
   select([item.clip_id]);
-  seek(Math.round((item.start_us + item.end_us) / 2));
+  seek(item.start_us);
 }
 
 /** Whether the findings still describe the project: any edit after the check may have moved what they name. */
@@ -81,8 +83,11 @@ export async function moveAll() {
   const movable = found.covered.filter((c) => c.suggestion);
   const snap = await useEditor.getState().edit(movable.flatMap((c) => c.suggestion!.edits));
   if (!snap) return;
-  const n = movable.length;
-  const left = found.covered.length - n;
-  const text = `Moved ${n} ${n === 1 ? "layer" : "layers"} off the face` + (left > 0 ? `, ${left} had no free place` : "");
+  const counted = (["caption", "text", "sticker"] as const).flatMap((kind) => {
+    const n = movable.filter((c) => c.kind === kind).length;
+    return n ? [`${n} ${kind}${n === 1 ? "" : "s"}`] : [];
+  });
+  const left = found.covered.length - movable.length;
+  const text = `Moved ${counted.join(" and ")} off the face` + (left > 0 ? `, ${left} had no free place` : "");
   useFaces.setState({ found: null, moved: { snap, text } });
 }

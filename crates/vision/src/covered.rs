@@ -227,14 +227,14 @@ fn free_area(project: &Project) -> Rect {
 }
 
 /// The nearest shift, in canvas pixels, that keeps the layer clear of every face and other layer at every look
-/// and inside `area` along each side it fits in. Text moves only up or down when it can, as captions are centred.
+/// and wholly inside `area`. Text moves only up or down when it can, as captions are centred.
 fn place(samples: &[Sample], area: Rect, upright_first: bool, project: &Project) -> Option<[f32; 2]> {
     let (w, h) = (project.canvas.width as f32, project.canvas.height as f32);
     let gap = GAP * h;
     let free = |d: [f32; 2]| {
         samples.iter().all(|s| {
             let r = shifted(s.rect, d);
-            (0..2).all(|i| r[i + 2] > area[i + 2] || (r[i] >= area[i] && r[i] + r[i + 2] <= area[i] + area[i + 2]))
+            (0..2).all(|i| r[i] >= area[i] && r[i] + r[i + 2] <= area[i] + area[i + 2])
                 && s.faces.iter().all(|f| !overlap(r, [f[0] - gap, f[1] - gap, f[2] + 2.0 * gap, f[3] + 2.0 * gap]))
                 && s.others.iter().all(|o| !overlap(r, *o))
         })
@@ -307,8 +307,9 @@ mod tests {
         let d = place(&[sample(caption, vec![low])], area, true, &project).unwrap();
         let moved = shifted(caption, d);
         assert!(moved[1] + moved[3] <= low[1] && moved[1] >= area[1], "{moved:?}");
-        // A face filling the whole safe area leaves no place.
+        // A face filling the whole safe area leaves no place, and a text wider than it has none either.
         assert!(place(&[sample(caption, vec![area])], area, true, &project).is_none());
+        assert!(place(&[sample([90.0, 1190.0, 900.0, 120.0], vec![face])], area, true, &project).is_none());
     }
 
     #[test]

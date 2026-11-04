@@ -102,7 +102,7 @@ def covered_faces(r):
             '00:00.00 · Caption over a face · “Hello there”' in chip and '1 of 5' in chip, chip)
     first = found[0]['clip_id'] if found else None
     state = r.s.run('const s = window.__nuzky.store.getState(); return {selection: s.selection, t: s.timeUs}')
-    r.check('it selects that caption and puts the playhead on it', state['selection'] == [first] and state['t'] < 1_500_000, state)
+    r.check('it selects that caption and puts the playhead on it', state['selection'] == [first] and state['t'] == found[0]['start_us'], state)
     time.sleep(1)
     r.shot('faces-found')
     r.s.run(CHIP_BUTTON, 'Next')
@@ -115,7 +115,7 @@ def covered_faces(r):
         resize(r, 1440, 900)
 
     r.s.run(CHIP_BUTTON, 'Move all')
-    moved = wait(lambda: (t := r.s.run(CHIP)) and 'Moved 5 layers off the face' in t and t, 10)
+    moved = wait(lambda: (t := r.s.run(CHIP)) and 'Moved 4 captions and 1 sticker off the face' in t and t, 10)
     r.check('Move all moves all five and offers Undo', moved and 'Undo' in moved, r.s.run(CHIP))
     after_move = layers(r)
     r.check('every one moved', all(abs(a['y'] - b['y']) > 0.01 for a, b in zip(start, after_move)), after_move)
@@ -126,7 +126,7 @@ def covered_faces(r):
     r.shot('faces-moved')
     again = check_faces(r)
     r.check('the same check finds nothing over her face now', again and json.loads(again['output'])['covered'] == [], again)
-    r.check('and says so', wait(lambda: any(t['text'] == 'No caption or sticker covers a face.' for t in r.state()['toasts']), 5))
+    r.check('and says so', wait(lambda: any(t['text'] == 'No caption, text or sticker covers a face.' for t in r.state()['toasts']), 5))
     r.s.run('document.activeElement.blur()')
     r.key('z', ctrlKey=True)
     r.check('one undo puts all five back', wait(lambda: [l['y'] for l in layers(r)] == [l['y'] for l in start], 5), layers(r))

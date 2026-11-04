@@ -2,6 +2,7 @@ import { Captions, Check, Ellipsis, Plus, ScanFace } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { api, errorText, plainError } from "../../lib/api";
 import { checkFaces, useFaces } from "../../lib/faces";
+import { useReframe } from "../../lib/reframe";
 import { CAPTION_STYLES, isLook, scaleStyle } from "../../lib/presets";
 import { type CaptionLook, speechBlocker, startSpeech, useSpeech } from "../../lib/speech";
 import { MAIN_TRACK, applyCaptionLook, isCaptionTrack, patched, presetOver, restyleCaptions, useCanvasUnit, useEditor } from "../../lib/store";
@@ -80,6 +81,7 @@ export function CaptionsTab() {
       : "Add captions, a text or a sticker first",
   );
   const checking = useFaces((s) => !!s.job);
+  const reframing = useReframe((s) => !!s.job);
 
   // Regenerating keeps the look of the captions already there, edits included.
   const start = () => startSpeech(look);
@@ -204,8 +206,8 @@ export function CaptionsTab() {
         {!running && <JobError job={last} />}
         <Button
           data-check-faces
-          disabled={!!faceBlocker || checking}
-          disabledReason={faceBlocker ?? "Looking for faces"}
+          disabled={!!faceBlocker || checking || reframing || busy}
+          disabledReason={faceBlocker ?? (checking ? "Looking for faces" : reframing ? "Wait for the reframe to finish" : BUSY)}
           onClick={() => void checkFaces()}
         >
           <ScanFace size={15} /> Find text over faces
