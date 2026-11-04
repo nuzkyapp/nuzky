@@ -1634,7 +1634,7 @@ fn quit_question(kinds: &[String]) -> Option<&'static str> {
     if kinds.iter().any(|kind| kind == "export" || kind == "cover-export") {
         Some("An export is still running. Quitting cancels it and removes the unfinished file.")
     } else if kinds.iter().any(|kind| kind == "screen-recording") {
-        Some("The screen is still being recorded. Quitting stops it and deletes the recording.")
+        Some("A screen recording is not in the project yet. Quitting deletes it.")
     } else if kinds.iter().any(|kind| !matches!(kind.as_str(), "audio" | "proxy" | "matte")) {
         Some("Speech recognition or analysis is still running. Quitting cancels it.")
     } else {
