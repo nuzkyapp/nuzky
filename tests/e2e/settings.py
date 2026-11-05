@@ -51,7 +51,15 @@ def settings(r):
 
     r.s.run("document.querySelector('header button[aria-label^=\"Settings\"]').click()")
     r.check("the editor's gear opens Settings on General", wait(lambda: r.s.run(TITLE) == 'General', 5), r.s.run(TITLE))
-    r.check('the keyboard starts in its search field', r.s.run("return document.activeElement?.matches(arguments[0])", SEARCH))
+    r.check('the keyboard starts on the pane shown in the list', r.s.run("return document.activeElement?.id") == 'settings-tab-general', r.s.run("return document.activeElement?.id"))
+    press('Down')
+    r.check('↓ there shows the next pane', wait(lambda: r.s.run(TITLE) == 'AI', 3), r.s.run(TITLE))
+    press('Up')
+    wait(lambda: r.s.run(TITLE) == 'General', 3)
+    press('d')
+    r.check('typing there searches', wait(lambda: r.s.run("return document.querySelector(arguments[0])?.value", SEARCH) == 'd'
+                                         and r.s.run("return document.activeElement?.matches(arguments[0])", SEARCH), 3))
+    r.s.run(TYPE, SEARCH, '')
     time.sleep(0.5)
     r.shot('general')
 

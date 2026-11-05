@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertCircle, Check, Loader2 } from "lucide-react";
+import { AlertCircle, Check, ChevronRight, Loader2 } from "lucide-react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { api, errorText, plainError } from "../../lib/api";
 import { useSettings } from "../../lib/settings";
@@ -8,12 +8,12 @@ import type { StorageGroup, StorageGroupId, StorageUsage } from "../../lib/types
 import { Button } from "../ui";
 import { formatBytes } from "./parts";
 
-const GROUPS: Record<StorageGroupId, { title: string; detail: string; colour: string }> = {
-  sound: { title: "Prepared sound of your videos", detail: "Made again when a video plays or exports", colour: "bg-white/80" },
-  pictures: { title: "Preview copies, cut-outs and project pictures", detail: "Made again as you work", colour: "bg-white/55" },
-  youtube: { title: "Videos from YouTube", detail: "What Nuzky downloaded to cut a part from", colour: "bg-white/35" },
-  models: { title: "Models", detail: "Remove one in Models", colour: "bg-white/20" },
-  data: { title: "Projects, sounds, plugins and your style", detail: "Never cleared here", colour: "bg-white/10" },
+const GROUPS: Record<StorageGroupId, { title: string; detail: string }> = {
+  sound: { title: "Prepared sound of your videos", detail: "Made again when a video plays or exports" },
+  pictures: { title: "Preview copies, cut-outs and project pictures", detail: "Made again as you work" },
+  youtube: { title: "Videos from YouTube", detail: "What Nuzky downloaded to cut a part from" },
+  models: { title: "Models", detail: "Remove one in Models" },
+  data: { title: "Projects, sounds, plugins and your style", detail: "Never cleared here" },
 };
 
 const CLEARABLE = ["sound", "pictures", "youtube"] as const;
@@ -74,12 +74,7 @@ export function StoragePane() {
   const shown = usage.groups.filter((g) => g.id in GROUPS);
   return (
     <div data-setting="storage" className="flex flex-col gap-4">
-      <div className="flex flex-col gap-2">
-        <p className="tabular text-[13px] text-fg">{formatBytes(total)} on this computer</p>
-        <div className="flex h-2 gap-px overflow-hidden rounded-full bg-white/[.04]" role="img" aria-label={shown.map((g) => `${GROUPS[g.id].title}: ${formatBytes(g.bytes)}`).join(", ")}>
-          {total > 0 && shown.map((g) => <span key={g.id} className={`h-full ${GROUPS[g.id].colour}`} style={{ width: `${(g.bytes / total) * 100}%` }} />)}
-        </div>
-      </div>
+      <p className="tabular text-[13px] text-fg">{formatBytes(total)} on this computer</p>
       <div className="flex flex-col rounded-xl bg-white/[.055] shadow-[inset_0_0_0_1px_rgb(255_255_255/.06)]">
         {shown.map((g) => (
           <Row key={g.id} group={g} clearing={clearing} cleared={cleared[g.id as Clearable]} onClear={clear} />
@@ -97,12 +92,31 @@ export function StoragePane() {
 }
 
 function Row({ group: g, clearing, cleared, onClear }: { group: StorageGroup; clearing: Clearable | null; cleared?: number; onClear: (id: Clearable, before: number) => void }) {
-  const { title, detail, colour } = GROUPS[g.id];
+  const { title, detail } = GROUPS[g.id];
   const id = (CLEARABLE as readonly string[]).includes(g.id) ? (g.id as Clearable) : null;
-  const kept = g.keptBytes > 0 ? ` · ${formatBytes(g.keptBytes)} kept for the open project` : "";
+  const kept = g.keptBytes > 0 ? `${formatBytes(g.keptBytes)} kept for the open project` : "";
+  const size = <span className="tabular w-16 shrink-0 text-right text-[13px] text-fg">{g.bytes ? formatBytes(g.bytes) : "Empty"}</span>;
+  if (g.id === "models")
+    return (
+      <button
+        type="button"
+        data-storage={g.id}
+        aria-label={`${title}, ${formatBytes(g.bytes)}. Show in Models`}
+        onClick={() => useSettings.setState({ pane: "models", target: "speech" })}
+        className="flex min-h-[44px] w-full items-center gap-3 border-t border-white/[.06] px-3.5 py-2.5 text-left transition-colors duration-[120ms] ease-out first:border-t-0 hover:bg-white/[.04]"
+      >
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="text-[13px] font-medium text-fg">{title}</span>
+          <span className="text-[12px] text-muted">{detail}</span>
+        </span>
+        {size}
+        <span className="flex w-[60px] shrink-0 justify-end">
+          <ChevronRight size={15} className="text-muted" />
+        </span>
+      </button>
+    );
   return (
     <div data-storage={g.id} className="flex min-h-[44px] items-center gap-3 border-t border-white/[.06] px-3.5 py-2.5 first:border-t-0">
-      <span aria-hidden className={`size-2 shrink-0 rounded-full ${colour} shadow-[inset_0_0_0_1px_rgb(255_255_255/.2)]`} />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="text-[13px] font-medium text-fg">{title}</span>
         <span className="tabular text-[12px] text-muted">
@@ -110,14 +124,15 @@ function Row({ group: g, clearing, cleared, onClear }: { group: StorageGroup; cl
             <span className="text-fg">
               <Check size={12} strokeWidth={3} className="mr-1 inline align-[-1px] text-ok" />
               Cleared {formatBytes(cleared)}
-              {kept}
+              {kept && ` · ${kept}`}
             </span>
           ) : (
-            `${g.bytes ? formatBytes(g.bytes) : "Empty"} · ${detail}${kept}`
+            [detail, kept].filter(Boolean).join(" · ")
           )}
         </span>
         {id && g.blocked && <span className="text-[12px] text-fg">{g.blocked}</span>}
       </div>
+      {size}
       {id ? (
         <Button
           pill
@@ -126,10 +141,6 @@ function Row({ group: g, clearing, cleared, onClear }: { group: StorageGroup; cl
           onClick={() => onClear(id, g.bytes)}
         >
           {clearing === id ? "Clearing…" : "Clear"}
-        </Button>
-      ) : g.id === "models" ? (
-        <Button pill onClick={() => useSettings.setState({ pane: "models", target: "speech" })}>
-          Models
         </Button>
       ) : (
         g.path && (

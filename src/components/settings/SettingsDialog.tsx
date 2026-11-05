@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ComponentType, type KeyboardEvent } f
 import { HardDrive, Keyboard, Music, Puzzle, Settings, Shield, Sparkles, Subtitles, X } from "lucide-react";
 import { ACTIONS, keysOf, useKeys } from "../../lib/keys";
 import { PANES, PANE_TITLES, closeSettings, useSettings, type Pane } from "../../lib/settings";
+import { useUpdates } from "../../lib/updates";
 import { IconButton, SearchField, trapTab } from "../ui";
 import { AiPane } from "./AiPane";
 import { GeneralPane } from "./GeneralPane";
@@ -65,11 +66,12 @@ const fold = (text: string) =>
 
 type Result = { label: string; pane: Pane; target: string; keys?: string[] };
 
-function search(query: string): Result[] {
+function search(query: string, updates: boolean): Result[] {
   const words = fold(query).split(/\s+/).filter(Boolean);
   if (!words.length) return [];
   const hit = (text: string) => words.every((w) => fold(text).includes(w));
-  const settings = ENTRIES.filter((e) => hit(`${e.label} ${PANE_TITLES[e.pane]} ${e.words ?? ""}`));
+  // A copy that doesn't update itself has no update settings to find.
+  const settings = ENTRIES.filter((e) => (updates || (e.target !== "updates" && e.target !== "auto-update")) && hit(`${e.label} ${PANE_TITLES[e.pane]} ${e.words ?? ""}`));
   const keys = ACTIONS.filter((a) => hit(`${a.label} ${keysOf(a.id).join(" ")} shortcut key`)).map((a) => ({
     label: a.label,
     pane: "keyboard" as const,
@@ -91,14 +93,17 @@ function Dialog() {
   const target = useSettings((s) => s.target);
   useKeys();
   const [query, setQuery] = useState("");
+  const [inField, setInField] = useState(false);
+  const updates = useUpdates((s) => s.enabled);
   const dialog = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
-  const results = search(query);
+  const results = search(query, updates);
   const Body = BODIES[pane];
 
   useEffect(() => {
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    dialog.current?.querySelector<HTMLElement>("input[type=search]")?.focus();
+    // The pane list takes the keyboard, so the arrows move between panes at once; typing there searches.
+    dialog.current?.querySelector<HTMLElement>("[role=tab][aria-selected=true]")?.focus();
     // A button that goes away, such as Cancel once a sign-in ends, leaves the keyboard on the page; Esc still closes.
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.key !== "Escape" || document.activeElement !== document.body) return;
@@ -149,6 +154,12 @@ function Dialog() {
   };
 
   const railKeys = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key.length === 1 && e.key !== " " && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      setQuery(e.key);
+      dialog.current?.querySelector<HTMLElement>("input[type=search]")?.focus();
+      return;
+    }
     const i = PANES.indexOf(pane);
     const to = { ArrowUp: i - 1, ArrowDown: i + 1, Home: 0, End: PANES.length - 1 }[e.key];
     if (to === undefined) return;
@@ -196,7 +207,7 @@ function Dialog() {
         className="dialog-in overlay overlay-solid flex h-[640px] max-h-[calc(100vh-48px)] w-[880px] max-w-[calc(100vw-48px)] overflow-hidden rounded-[20px] text-fg outline-none"
       >
         <div className="flex w-[220px] shrink-0 flex-col gap-3 border-r border-white/[.06] bg-black/[.12] p-3 pt-4">
-          <div className="flex shrink-0">
+          <div className="flex shrink-0" onFocus={() => setInField(true)} onBlur={() => setInField(false)}>
             <SearchField
               value={query}
               onChange={setQuery}
@@ -215,13 +226,15 @@ function Dialog() {
                   No settings match “{query.trim()}”. Try a word from a setting's name, like “captions” or “update”.
                 </p>
               )}
-              {results.map((r) => (
+              {results.map((r, i) => (
                 <button
                   key={`${r.pane}:${r.target}:${r.label}`}
                   type="button"
                   role="listitem"
+                  // Enter in the field takes the first result, so it shows as chosen while the field has the keyboard.
+                  aria-current={inField && i === 0 ? "true" : undefined}
                   onClick={() => choose(r)}
-                  className="flex flex-col items-start rounded-lg px-2.5 py-1.5 text-left transition-colors duration-[120ms] ease-out hover:bg-white/[.06] focus-visible:bg-white/[.08]"
+                  className={`flex flex-col items-start rounded-lg px-2.5 py-1.5 text-left transition-colors duration-[120ms] ease-out hover:bg-white/[.06] focus-visible:bg-white/[.08] ${inField && i === 0 ? "bg-white/[.06]" : ""}`}
                 >
                   <span className="flex w-full items-center gap-2 text-[13px] text-fg">
                     <span className="min-w-0 flex-1 truncate">{r.label}</span>
@@ -265,7 +278,7 @@ function Dialog() {
               <X size={15} />
             </IconButton>
           </div>
-          <div ref={body} tabIndex={-1} data-settings-body className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 pb-6 outline-none">
+          <div ref={body} tabIndex={-1} data-settings-body className="scroll-shown flex min-h-0 flex-1 flex-col overflow-y-auto pb-6 pl-6 pr-3.5 [scrollbar-gutter:stable] outline-none">
             <Body key={pane} />
           </div>
         </div>

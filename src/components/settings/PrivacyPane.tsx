@@ -15,6 +15,7 @@ type Row = { title: string; detail: string; state: string; on?: boolean; pane?: 
  * pane where it is turned on or off; nothing is switched here, so each setting has one place.
  */
 export function PrivacyPane() {
+  const updates = useUpdates((s) => s.enabled);
   const auto = useUpdates((s) => s.enabled && s.auto);
   const chatgpt = useChatGpt((s) => s.status);
   const sharing = useRemote((s) => !!s.sharing);
@@ -23,7 +24,9 @@ export function PrivacyPane() {
   useEffect(() => void api.agentAccess().then(setAccess, () => setAccess(null)), []);
 
   const online: Row[] = [
-    { title: "Update check", detail: "GitHub, once a day. Nuzky reads only the newest version number.", state: auto ? "On" : "Off", on: auto, pane: "general", target: "auto-update" },
+    updates
+      ? { title: "Update check", detail: "GitHub, once a day. Nuzky reads only the newest version number.", state: auto ? "On" : "Off", on: auto, pane: "general", target: "auto-update" }
+      : { title: "Update check", detail: "This copy doesn't look for updates.", state: "Not in this copy" },
     { title: "Model downloads", detail: "Only when you click Download. Every file is checked before Nuzky uses it.", state: "When you ask", pane: "models", target: "speech" },
     { title: "Sound library", detail: "Openverse, or Freesound with your key, gets only the words you search for.", state: "When you search", pane: "sounds", target: "freesound" },
     { title: "YouTube", detail: "yt-dlp reaches YouTube only for a link you paste. Nuzky looks for a newer yt-dlp on GitHub once a week.", state: "When you paste a link", pane: "sounds", target: "ytdlp" },
@@ -53,8 +56,11 @@ export function PrivacyPane() {
 
   return (
     <div data-setting="privacy" className="flex flex-col gap-6">
-      <p className="text-[13px] text-fg/85">Captions, faces, Your style and every edit stay on this computer. Nuzky goes online only for these:</p>
-      <Rows rows={online} label="Online" />
+      <p className="text-[12px] text-muted">Captions, faces, Your style and every edit stay on this computer.</p>
+      <div className="flex flex-col gap-2">
+        <h3 className="text-[13px] font-semibold text-fg">Goes online</h3>
+        <Rows rows={online} label="Goes online" />
+      </div>
       <div className="flex flex-col gap-2">
         <h3 className="text-[13px] font-semibold text-fg">On this computer</h3>
         <Rows rows={local} label="On this computer" />
@@ -79,13 +85,13 @@ function Rows({ rows, label }: { rows: Row[]; label: string }) {
         );
         const row = "flex min-h-[44px] w-full items-center gap-3 px-3.5 py-2.5 text-left";
         return (
-          <li key={r.title} className="border-t border-white/[.06] first:border-t-0">
+          <li key={r.title} className="border-t border-white/[.06] first:border-t-0 first:[&>button]:rounded-t-xl last:[&>button]:rounded-b-xl">
             {r.pane ? (
               <button
                 type="button"
                 aria-label={`${r.title}: ${r.state}. Show in ${PANE_TITLES[r.pane]}`}
                 onClick={() => useSettings.setState({ pane: r.pane, target: r.target ?? null })}
-                className={`${row} rounded-xl transition-colors duration-[120ms] ease-out hover:bg-white/[.04]`}
+                className={`${row} transition-colors duration-[120ms] ease-out hover:bg-white/[.04]`}
               >
                 {body}
               </button>

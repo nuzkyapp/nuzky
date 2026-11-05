@@ -7,7 +7,7 @@ import { useEditor } from "../../../lib/store";
 import type { SpeechModel, SpeechSetup } from "../../../lib/types";
 import { JobError, Select } from "../../panel/SpeechControls";
 import { AiLock, Button, Field, LockReason, ProgressBar, useLockReason } from "../../ui";
-import { StepActions } from "../StepActions";
+import { StepActions, useInSettings } from "../StepActions";
 
 const JOB = "speech-model:setup";
 const STOP = "Stop downloading the speech model";
@@ -75,6 +75,7 @@ export function CaptionsStep({ manage = false }: { manage?: boolean }) {
 }
 
 function Step({ manage }: { manage: boolean }) {
+  const quiet = useInSettings();
   const lock = useLockReason();
   const language = useSpeech((s) => s.language);
   const model = useSpeech((s) => s.model);
@@ -292,7 +293,7 @@ function Step({ manage }: { manage: boolean }) {
       {/* A stop while the last file was checked leaves nothing to fetch, only to install. */}
       {!running && (missing > 0 || !downloaded) && (
         <StepActions>
-          <Button pill variant={done ? "secondary" : "primary"} onClick={download}>
+          <Button pill variant={done || quiet ? "secondary" : "primary"} onClick={download}>
             {again === "failed" ? "Try again" : again === "cancelled" ? "Resume download" : missing > 0 ? `Download ${missing} MB` : "Download"}
           </Button>
         </StepActions>

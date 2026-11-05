@@ -90,51 +90,50 @@ export function AgentsSection() {
   const first = rows?.find((r) => r.state !== "connected" && r.state !== "unreadable");
   return (
     <div ref={section} className="flex flex-col gap-3">
-      {access && (
-        <AiLock>
-          <div role="group" aria-label="Agent access" data-setting="agent-access" className="flex flex-col gap-2.5 rounded-xl bg-white/[.055] px-3.5 py-3 shadow-[inset_0_0_0_1px_rgb(255_255_255/.06)]">
-            <div className="flex items-center gap-3">
-              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span className="text-[13px] font-medium text-fg">Agent access</span>
-                <span className={`text-[12px] ${access.on ? "text-fg" : "text-muted"}`}>
-                  {access.on ? "Agents outside Nuzky can edit the open project" : "Off. Agents outside Nuzky can't edit"}
-                </span>
+      <div className="flex flex-col rounded-xl bg-white/[.055] shadow-[inset_0_0_0_1px_rgb(255_255_255/.06)]">
+        {access && (
+          <AiLock>
+            <div role="group" aria-label="Agent access" data-setting="agent-access" className="flex flex-col gap-2.5 px-3.5 py-3">
+              <div className="flex items-center gap-3">
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="text-[13px] font-medium text-fg">Agent access</span>
+                  <span className={`text-[12px] ${access.on ? "text-fg" : "text-muted"}`}>
+                    {access.on ? "Agents outside Nuzky can edit the open project" : "Off. Agents outside Nuzky can't edit"}
+                  </span>
+                </div>
+                <Switch label="Agent access" checked={access.on} onChange={(on) => void changeAccess(on, access.atLaunch)} />
               </div>
-              <Switch label="Agent access" checked={access.on} onChange={(on) => void changeAccess(on, access.atLaunch)} />
+              <Checkbox label="Turn on when Nuzky starts" checked={access.atLaunch} onChange={(atLaunch) => void changeAccess(access.on, atLaunch)} />
             </div>
-            <Checkbox label="Turn on when Nuzky starts" checked={access.atLaunch} onChange={(atLaunch) => void changeAccess(access.on, atLaunch)} />
+          </AiLock>
+        )}
+        {rows === null && !error && <p className="border-t border-white/[.06] px-3.5 py-3 text-[12px] text-muted">Reading the agents' settings…</p>}
+        {rows?.map((row) => (
+          <div key={row.agent} role="group" aria-label={row.name} className="flex min-h-[44px] items-center gap-3 border-t border-white/[.06] px-3.5 py-2.5">
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span className="text-[13px] font-medium text-fg">{row.name}</span>
+              <span className={`flex min-w-0 items-center gap-1 text-[12px] ${row.state === "connected" && access?.on ? "text-fg" : "text-muted"}`} title={row.problem ?? row.path}>
+                {row.state === "connected" && access?.on && <Check size={13} className="shrink-0 text-ok" />}
+                {row.state === "unreadable" && <AlertTriangle size={13} className="shrink-0 text-warn" />}
+                <span className="shrink-0">{row.state === "connected" && access && !access.on ? "Connected. Agent access is off" : STATE_TEXT[row.state]}</span>
+                <span className="min-w-0 truncate text-muted">· {row.path}</span>
+              </span>
+            </div>
+            {/* A connected agent needs nothing more here; "Connected" says so. */}
+            {row.state !== "connected" && (
+              <Button
+                pill
+                data-autofocus={row === first || undefined}
+                disabled={row.state === "unreadable" || busy !== null}
+                disabledReason={row.state === "unreadable" ? `Fix ${row.path} first; Nuzky does not change a file it cannot read` : "Connecting…"}
+                onClick={() => void connect(row)}
+              >
+                {row.state === "other" ? "Reconnect" : "Connect"}
+              </Button>
+            )}
           </div>
-        </AiLock>
-      )}
-      {rows === null && !error && <p className="text-[12px] text-muted">Reading the agents' settings…</p>}
-      {rows?.map((row) => (
-        <div key={row.agent} role="group" aria-label={row.name} className="flex items-center gap-3 rounded-xl bg-white/[.055] px-3.5 py-3 shadow-[inset_0_0_0_1px_rgb(255_255_255/.06)]">
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="text-[13px] font-medium text-fg">{row.name}</span>
-            <span className="truncate text-[11px] text-muted" title={row.path}>
-              {row.path}
-            </span>
-            <span className={`mt-0.5 flex items-center gap-1 text-[12px] ${row.state === "connected" && access?.on ? "text-fg" : "text-muted"}`} title={row.problem ?? undefined}>
-              {row.state === "connected" && access?.on && <Check size={13} className="shrink-0 text-ok" />}
-              {row.state === "unreadable" && <AlertTriangle size={13} className="shrink-0 text-warn" />}
-              {row.state === "connected" && access && !access.on ? "Connected. Agent access is off" : STATE_TEXT[row.state]}
-            </span>
-          </div>
-          {/* A connected agent needs nothing more here; "Connected" says so. */}
-          {row.state !== "connected" && (
-            <Button
-              pill
-              variant={row === first ? "primary" : undefined}
-              data-autofocus={row === first || undefined}
-              disabled={row.state === "unreadable" || busy !== null}
-              disabledReason={row.state === "unreadable" ? `Fix ${row.path} first; Nuzky does not change a file it cannot read` : "Connecting…"}
-              onClick={() => void connect(row)}
-            >
-              {row.state === "other" ? "Reconnect" : "Connect"}
-            </Button>
-          )}
-        </div>
-      ))}
+        ))}
+      </div>
       <div role="group" aria-labelledby="connect-copy" className="mt-1 flex flex-col gap-2">
         <span id="connect-copy" className="text-[12px] text-muted">
           Copy the setup for another agent

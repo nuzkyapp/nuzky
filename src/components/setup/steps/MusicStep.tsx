@@ -6,7 +6,7 @@ import { checkYtdlp, useSetup } from "../../../lib/setup";
 import { installYtdlp, useSounds } from "../../../lib/sounds";
 import { useEditor } from "../../../lib/store";
 import { AiLock, Button, LockReason, ProgressBar } from "../../ui";
-import { StepActions } from "../StepActions";
+import { StepActions, useInSettings } from "../StepActions";
 
 const STOP = "Stop downloading yt-dlp";
 
@@ -27,6 +27,7 @@ export function MusicStep() {
 }
 
 function Step() {
+  const quiet = useInSettings();
   const done = useSetup((s) => s.states.music === "done");
   const installing = useSounds((s) => s.installing);
   const progress = useSounds((s) => s.progress["yt-dlp"] ?? 0);
@@ -43,7 +44,7 @@ function Step() {
 
   return (
     <div className="flex flex-col gap-3 pt-3">
-      <p className="text-[13px] leading-[18px] text-fg">
+      <p className={`leading-[18px] ${quiet ? "text-[12px] text-muted" : "text-[13px] text-fg"}`}>
         Nuzky can add a song from a YouTube or YouTube Music link in Audio's Music tab.
         <span className="block text-muted">It needs yt-dlp, a free tool. Nuzky keeps its own copy up to date, so YouTube doesn't refuse an old one.</span>
       </p>
@@ -77,7 +78,7 @@ function Step() {
       ) : null}
       {!done && !installing && (
         <StepActions>
-          <Button pill variant="primary" onClick={download}>
+          <Button pill variant={quiet ? "secondary" : "primary"} onClick={download}>
             {stopped ? "Resume download" : error ? "Try again" : "Download yt-dlp"}
           </Button>
         </StepActions>

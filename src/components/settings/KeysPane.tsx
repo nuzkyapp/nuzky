@@ -96,7 +96,7 @@ export function KeysPane() {
         <Button pill className="shrink-0" onClick={() => void importFile()}>
           Import file…
         </Button>
-        <SearchField value={query} onChange={setQuery} placeholder="Search actions or keys" />
+        <SearchField value={query} onChange={setQuery} placeholder="Filter shortcuts" />
       </div>
       {status && (
         <p role="status" className={`mt-3 flex items-start gap-1.5 text-[12px] ${status.ok ? "text-muted" : "text-danger"}`}>
@@ -122,15 +122,15 @@ export function KeysPane() {
           const rows = shown.filter((a) => a.group === group);
           if (rows.length === 0) return null;
           return (
-            <section key={group} className="mt-3 first:mt-1">
+            <section key={group} className="mt-6 first:mt-1">
               <h3 className="mb-1.5 text-[13px] font-semibold">{group}</h3>
-              <div className="rounded-[10px] bg-white/[.035] px-2.5 shadow-[inset_0_0_0_1px_rgb(255_255_255/.05)]">
+              <div className="rounded-xl bg-white/[.055] px-3.5 shadow-[inset_0_0_0_1px_rgb(255_255_255/.06)]">
                 {rows.map(({ id, label }) => {
                   const keys = keysOf(id, s);
                   const own = !!s.changed[id];
                   return (
                     <Fragment key={id}>
-                      <div className="flex min-h-[38px] items-center gap-2 border-t border-white/[.05] first:border-t-0" data-action={id}>
+                      <div className="flex min-h-[38px] items-center gap-2 border-t border-white/[.06] first:border-t-0" data-action={id}>
                         <span className="min-w-0 flex-1 truncate text-[13px]">{label}</span>
                         <button
                           type="button"

@@ -97,7 +97,7 @@ export function PluginsPane() {
           {error}
         </p>
       )}
-      <div>
+      <div className="flex justify-end">
         <Button pill onClick={() => void api.showPluginFolder(null)}>
           Show plugins folder
         </Button>
