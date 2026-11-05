@@ -14,6 +14,7 @@ SEARCH = '[data-settings] input[type=search]'
 RESULTS = "return [...document.querySelectorAll('[data-settings] [data-results] button')].map((b) => b.innerText)"
 LIT = "return !!document.querySelector(arguments[0])?.classList.contains('changed')"
 TAB = "document.querySelector(`#settings-tab-${arguments[0]}`).click()"
+FOCUSED_TAB = "return document.activeElement?.id ?? null"
 BUTTON = """const scope = document.querySelector(arguments[1]);
 return scope && [...scope.querySelectorAll('button')].find((b) => b.textContent.trim() === arguments[0] && b.getAttribute('aria-disabled') !== 'true') || null;"""
 CLICK = BUTTON.replace('return scope &&', 'const b = scope &&') + '\nif (!b) return false; b.click(); return true;'
@@ -82,6 +83,7 @@ def settings(r):
 
     # Storage: Clear deletes what the open project no longer uses and keeps the rest.
     r.s.run(TAB, 'storage')
+    r.check('a click on a pane moves the keyboard there too', r.s.run(FOCUSED_TAB) == 'settings-tab-storage', r.s.run(FOCUSED_TAB))
     row = wait(lambda: (t := r.s.run(ROW, 'sound')) and 'Prepared sound' in t and t, 10)
     data = usage(r)['data']
     r.check('the projects, plugins and style count, also when the data folder is a link, as it is here', data['bytes'] > 0 and data['path'], data)

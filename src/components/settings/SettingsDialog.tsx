@@ -258,7 +258,11 @@ function Dialog() {
                     aria-selected={on}
                     aria-controls="settings-panel"
                     tabIndex={on ? 0 : -1}
-                    onClick={() => show(id)}
+                    onClick={(e) => {
+                      show(id);
+                      // WebKit leaves the keyboard where it was on a click, so the ring would stay on the pane before.
+                      e.currentTarget.focus();
+                    }}
                     className={`flex h-8 shrink-0 items-center gap-2.5 rounded-lg px-2.5 text-left text-[13px] transition-colors duration-[120ms] ease-out ${on ? "bg-white/[.1] font-medium text-fg" : "text-fg hover:bg-white/[.05]"} ${id === "storage" ? "mt-3" : ""}`}
                   >
                     <Icon size={16} className={on ? "text-accent" : "text-muted"} />
