@@ -7,7 +7,7 @@ export function ModelsPane() {
   return (
     <div className="flex flex-col gap-6">
       <StepSection title="Captions and transcript" id="speech">
-        <CaptionsStep />
+        <CaptionsStep manage />
       </StepSection>
       <StepSection title="Faces and people" id="vision">
         <VisionStep />
