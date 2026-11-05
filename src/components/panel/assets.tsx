@@ -113,11 +113,9 @@ export function ImportTile({ label, hint, shortcut, onClick, className = "" }: {
       aria-keyshortcuts={shortcut}
       onClick={onClick}
       {...lockedProps(lock)}
-      className={`flex h-[46px] shrink-0 items-center justify-center gap-2.5 rounded-xl bg-white/[.055] text-[13px] font-semibold text-fg shadow-[inset_0_0_0_1px_rgb(255_255_255/.07)] transition-colors duration-[120ms] ease-out hover:bg-white/[.09] aria-disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:hover:bg-white/[.055] ${className}`}
+      className={`flex h-9 shrink-0 items-center justify-center gap-2 rounded-[10px] bg-white/[.055] text-[13px] font-semibold text-fg shadow-[inset_0_0_0_1px_rgb(255_255_255/.07)] transition-colors duration-[120ms] ease-out hover:bg-white/[.09] aria-disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:hover:bg-white/[.055] ${className}`}
     >
-      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-accent-strong text-white shadow-[inset_0_1px_0_rgb(255_255_255/.2)]">
-        <Plus size={16} />
-      </span>
+      <Plus size={16} className="text-accent" />
       {label}
       {hint && (
         <kbd aria-hidden className="ml-0.5 rounded-[5px] bg-white/[.055] px-[5px] py-0.5 font-sans text-[11px] leading-[13px] font-medium text-muted">

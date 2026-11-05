@@ -26,7 +26,7 @@ export class WindowErrorBoundary extends Component<{ children: ReactNode }, { fa
     if (!this.state.failed) return this.props.children;
     return (
       <div className="flex h-screen items-center justify-center p-6">
-        <div role="alertdialog" aria-labelledby="window-error-title" aria-describedby="window-error-text" className="overlay w-[440px] rounded-[20px] p-6 text-fg">
+        <div role="alertdialog" aria-labelledby="window-error-title" aria-describedby="window-error-text" className="overlay overlay-solid w-[440px] rounded-[20px] p-6 text-fg">
           <h2 id="window-error-title" className="text-[17px] font-semibold">
             Something went wrong in this window
           </h2>

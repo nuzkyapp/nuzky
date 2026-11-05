@@ -114,7 +114,7 @@ export function ConnectAgentDialog() {
   const first = rows?.find((r) => r.state !== "connected" && r.state !== "unreadable");
   return (
     <div
-      data-exit className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/45"
+      data-exit className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/55"
       onPointerDown={(e) => e.target === e.currentTarget && close()}
     >
       <div
@@ -123,7 +123,7 @@ export function ConnectAgentDialog() {
         aria-modal="true"
         aria-labelledby="connect-title"
         onKeyDown={trapTab}
-        className="overlay w-[480px] rounded-[20px] p-6 dialog-in"
+        className="overlay overlay-solid w-[480px] rounded-[20px] p-6 dialog-in"
       >
         <div className="mb-5 flex items-start justify-between gap-3">
           <h2 id="connect-title" className="text-[17px] font-semibold leading-[22px] tracking-[-0.025em]">

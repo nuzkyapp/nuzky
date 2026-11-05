@@ -165,8 +165,8 @@ def feedback(r):
     webdriver('POST', r.s.path + '/window/rect', {'width': 1440, 'height': 900})
 
     r.s.run("window.__nuzky.store.setState({view: 'editor'})")
-    r.check('in the editor a capsule next to Projects reads Send feedback',
-            wait(lambda: r.s.run("return document.querySelector(arguments[0])?.textContent.trim()", BUTTON), 3) == 'Send feedback')
+    r.check('in the editor a speech bubble in the capsule next to Projects is named Send feedback',
+            wait(lambda: r.s.run("const b = document.querySelector(arguments[0]); return b && [b.getAttribute('aria-label'), b.title]", BUTTON), 3) == ['Send feedback', 'Send feedback'])
     r.s.run(OPEN, BUTTON)
     menu = wait(lambda: r.s.run(MENU), 3)
     r.check('it opens the same menu, with the focus in it', menu == ITEMS and wait(lambda: r.s.run(IN_MENU), 3), menu)

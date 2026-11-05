@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { AlertCircle, AlertTriangle, GalleryVerticalEnd, RefreshCw, ScrollText, Scissors } from "lucide-react";
+import { AlertCircle, AlertTriangle, Check, GalleryVerticalEnd, RefreshCw, ScrollText, Scissors } from "lucide-react";
 import { correctWord, cutWords, removePauses, removeRetakes, speechBlocker, startSpeech, tokenCounts, tokenize, useSpeech, useTranscriptView, type Token } from "../../lib/speech";
 import { offersReels, openReels } from "../../lib/reels";
 import { useEditor } from "../../lib/store";
@@ -138,14 +138,17 @@ export function TranscriptTab() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 flex-col gap-3 border-b border-white/[.07] p-3.5">
-        <div className="flex items-center gap-2">
-          <span className="tabular flex-1 text-[12px] text-muted">{view.words.length} word{view.words.length === 1 ? "" : "s"}</span>
+        {/* What the transcript is, on its own line; under it the actions that work from it, side by side. */}
+        <div className="-my-1 flex items-center gap-2">
+          <span className="tabular flex-1 whitespace-nowrap text-[12px] text-muted">{view.words.length} word{view.words.length === 1 ? "" : "s"}</span>
+          <IconButton label={blocker ?? (busy ? "Wait for speech recognition to finish" : "Transcribe again")} className="h-6 w-6" disabled={!!blocker || busy} onClick={() => startSpeech(null, true)}>
+            <RefreshCw size={13} />
+          </IconButton>
+        </div>
+        <div className="flex gap-2 [&>*]:min-w-0 [&>*]:flex-1">
           <ReelsButton project={project} />
           <SuggestZoomsButton state={zooms} blocker={cutBlocker ?? (busy ? "Wait for speech recognition to finish" : null)} />
           <SuggestBrollButton state={broll} blocker={busy ? "Wait for speech recognition to finish" : null} />
-          <IconButton label={blocker ?? (busy ? "Wait for speech recognition to finish" : "Transcribe again")} className="h-7 w-7" disabled={!!blocker || busy} onClick={() => startSpeech(null, true)}>
-            <RefreshCw size={14} />
-          </IconButton>
         </div>
         {missing > 0 && (
           <div className="flex items-center gap-1.5 text-[12px] text-fg" role="status">
@@ -159,13 +162,12 @@ export function TranscriptTab() {
           </div>
         )}
         {running && <SpeechJobCard job={running} />}
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           <span className="whitespace-nowrap text-[12px] text-muted">Pauses over</span>
           <NumberInput label="Shortest pause to show" value={pauseUs / US} min={0.1} max={5} step={0.1} format={(v) => v.toFixed(1)} onChange={(v) => useSpeech.setState({ pauseUs: Math.round(v * US) })} className="w-11" />
           <span className="text-[12px] text-muted">s</span>
-          <span className="flex-1" />
           <Button
-            className="h-7 px-2 text-[12px]"
+            className="ml-auto h-7 px-2 text-[12px]"
             disabled={pauses.length === 0 || !!cutBlocker}
             disabledReason={cutBlocker ?? `No pauses longer than ${formatDuration(pauseUs)}`}
             title={`Shorten every pause to ${formatDuration(pauseUs)}`}
@@ -174,16 +176,23 @@ export function TranscriptTab() {
             <Scissors size={14} /> {pauses.length > 0 ? `Remove ${pauses.length} pause${pauses.length === 1 ? "" : "s"} · ${formatDuration(total(pauses))}` : "Remove pauses"}
           </Button>
         </div>
-        <Button
-          variant="primary"
-          data-remove-retakes
-          disabled={!retakes || !!retakesBlocker}
-          disabledReason={retakesBlocker ?? `No retakes, filler words, hesitations or pauses over ${formatDuration(pauseUs)}`}
-          title={`Cut earlier attempts of repeated sentences, filler words, hesitations and pauses over ${formatDuration(pauseUs)}`}
-          onClick={removeAllRetakes}
-        >
-          <Scissors size={15} /> Remove retakes and pauses
-        </Button>
+        {/* With nothing left to remove, a line says so in place of a full-width button that could do nothing. */}
+        {!retakes && !retakesBlocker ? (
+          <p role="status" className="flex h-8 items-center gap-1.5 text-[12px] text-muted">
+            <Check size={14} className="shrink-0 text-ok" /> Nothing left to cut
+          </p>
+        ) : (
+          <Button
+            variant="primary"
+            data-remove-retakes
+            disabled={!retakes || !!retakesBlocker}
+            disabledReason={retakesBlocker ?? `No retakes, filler words, hesitations or pauses over ${formatDuration(pauseUs)}`}
+            title={`Cut earlier attempts of repeated sentences, filler words, hesitations and pauses over ${formatDuration(pauseUs)}`}
+            onClick={removeAllRetakes}
+          >
+            <Scissors size={15} /> Remove retakes and pauses
+          </Button>
+        )}
         <KeepTracks project={project} />
         {!running && <JobError job={last} />}
         {errorNote}

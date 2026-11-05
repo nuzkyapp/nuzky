@@ -41,8 +41,10 @@ export const TrackHeader = memo(function TrackHeader({ track, width, locked }: {
     <div className="sticky left-0 z-[47] flex shrink-0 items-center gap-0.5 border-r border-white/[.07] bg-panel pl-2 pr-1" style={{ width }}>
       {/* The main track starts with the Cover tile, where CapCut has it; the toggles keep their columns. */}
       {track.id === MAIN_TRACK ? (
-        <span className="min-w-0 flex-1">
+        // The Cover tile where CapCut has it, then the track's name, so every header reads the same way.
+        <span className="flex min-w-0 flex-1 items-center gap-2">
           <CoverTile />
+          <span className="min-w-0 truncate text-[12px] font-medium text-fg">{track.name || "Video"}</span>
         </span>
       ) : (
         <>

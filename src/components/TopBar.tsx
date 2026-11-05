@@ -228,7 +228,7 @@ function AiToggle() {
       onClick={togglePanel}
       className={open ? "bg-white/[.15]" : ""}
     >
-      {working && !open ? <Loader2 size={15} className="animate-spin text-accent" /> : <Sparkles size={15} />} AI
+      {working && !open ? <Loader2 size={15} className="animate-spin text-accent" /> : <Sparkles size={15} className={open ? "text-accent" : ""} />} AI
     </Button>
   );
 }
@@ -340,8 +340,10 @@ export function TopBar() {
       ) : (
         <>
           <ProjectsButton />
-          <FeedbackButton />
-          <ShareButton />
+          <div className="bar flex items-center rounded-full">
+            <FeedbackButton />
+            <ShareButton />
+          </div>
           <UpdateButton />
         </>
       )}

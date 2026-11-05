@@ -93,7 +93,7 @@ export function LearnDialog() {
   }, []);
 
   return (
-    <div data-exit className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/45" onPointerDown={(e) => e.target === e.currentTarget && close()}>
+    <div data-exit className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/55" onPointerDown={(e) => e.target === e.currentTarget && close()}>
       <div
         ref={dialog}
         role="dialog"
@@ -108,7 +108,7 @@ export function LearnDialog() {
             close();
           }
         }}
-        className="overlay flex max-h-[calc(100vh-48px)] w-[640px] max-w-[calc(100vw-48px)] flex-col rounded-[20px] p-6 dialog-in"
+        className="overlay overlay-solid flex max-h-[calc(100vh-48px)] w-[640px] max-w-[calc(100vw-48px)] flex-col rounded-[20px] p-6 dialog-in"
       >
         <div className="mb-4 flex shrink-0 items-start justify-between gap-3">
           <h2 id="learn-title" className="text-[17px] font-semibold leading-[22px] tracking-[-0.025em]">

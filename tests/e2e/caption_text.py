@@ -247,7 +247,7 @@ def caption_text(r):
             const s = t && getComputedStyle(t.querySelector('span'));
             return s ? {{radius: s.borderTopLeftRadius, align: s.textAlign}} : null""")
         r.check('the saved style\'s tile draws a fully round box and lines its name up right',
-                wait(lambda: swatch() == {'radius': '11px', 'align': 'right'}, 5), swatch())
+                wait(lambda: swatch() == {'radius': '13px', 'align': 'right'}, 5), swatch())
     views(r, 'captions-tab', reveal(f"[...document.querySelectorAll('{LIBRARY} span')].find((s) => s.textContent === 'Font')"))
 
     # An agent can add a second captions track; a caption there styles the captions of its own track only.

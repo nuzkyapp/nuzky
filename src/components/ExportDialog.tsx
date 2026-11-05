@@ -387,7 +387,7 @@ export function ExportDialog() {
   return (
     <div
       data-scrim
-      data-exit className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/45"
+      data-exit className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/55"
       onPointerDown={(e) => e.target === e.currentTarget && close()}
     >
       <div
@@ -396,7 +396,7 @@ export function ExportDialog() {
         aria-modal="true"
         aria-labelledby="export-title"
         onKeyDown={trapTab}
-        className="overlay w-[500px] rounded-[20px] p-6 dialog-in"
+        className="overlay overlay-solid w-[500px] rounded-[20px] p-6 dialog-in"
       >
         <div className="mb-5 flex items-start justify-between gap-3">
           <div className="flex min-w-0 flex-col gap-1">
@@ -405,7 +405,7 @@ export function ExportDialog() {
             </h2>
             <p className="tabular text-[12px] text-muted">
               {what === "video"
-                ? `MP4 · H.264 + AAC · ${formatLabel(project.canvas.width, project.canvas.height)} · ${formatTime(duration)}`
+                ? `MP4 · H.264 + AAC · ${formatLabel(project.canvas.width, project.canvas.height)} · ${size.w}×${size.h} · ${formatTime(duration)}`
                 : what === "recap"
                   ? "MP4 · H.264 + AAC · 9:16"
                   : coverFacts}
@@ -416,8 +416,8 @@ export function ExportDialog() {
           </IconButton>
         </div>
 
-        <div className="mb-4 grid grid-cols-[104px_minmax(0,1fr)] items-center gap-x-3.5">
-          <span className="text-right text-[13px] text-muted">Export</span>
+        {/* What to export switches the whole dialog, so it spans it above the settings of the choice. */}
+        <div className="mb-5">
           <Segmented
             label="What to export"
             value={what}
@@ -554,14 +554,8 @@ export function ExportDialog() {
                   </p>
                 ))}
               <span className="text-right text-[13px] text-muted">Resolution</span>
-              <div className="flex min-w-0 items-center gap-3">
-                <div className="min-w-0 flex-1">
-                  <Segmented label="Resolution" value={options.resolution} onChange={(resolution) => setOption({ resolution })} options={RESOLUTIONS} />
-                </div>
-                <span className="tabular shrink-0 text-[12px] text-muted">
-                  {size.w}×{size.h}
-                </span>
-              </div>
+              {/* The size in pixels is in the line under the title, so every row ends on the same edge. */}
+              <Segmented label="Resolution" value={options.resolution} onChange={(resolution) => setOption({ resolution })} options={RESOLUTIONS} />
               <span className="text-right text-[13px] text-muted">Frame rate</span>
               <Segmented
                 label="Frame rate"

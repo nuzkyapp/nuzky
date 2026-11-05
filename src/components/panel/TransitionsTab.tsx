@@ -147,7 +147,7 @@ export function TransitionsTab() {
   const target = useEditor(useShallow((s) => (s.snap ? transitionTarget(s.snap.project, s.selection, s.cut, s.timeUs) : null)));
   if (!target)
     return (
-      <div className="m-3.5 flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-white/[.1] p-6 text-center">
+      <div className="m-3.5 flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
         <Blend size={28} className="text-muted" />
         <p className="text-[13px] text-fg">No cuts yet</p>
         <p className="text-[12px] text-muted">Put two clips on the main track to add a transition between them.</p>

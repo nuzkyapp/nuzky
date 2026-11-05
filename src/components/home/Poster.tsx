@@ -56,19 +56,19 @@ export function Poster({ p, box, ai = false, compact = false }: { p: LibraryProj
             </div>
           )
         )}
-        {!compact && (
-          // The length keeps the bottom right; on a frame too narrow for both, the other chip sits above it.
-          <div className="absolute inset-x-1.5 bottom-1.5 flex flex-row-reverse flex-wrap-reverse justify-between gap-1">
-            {p.state !== "busy" && <span className={`tabular ${chip}`}>{formatLength(p.durationUs)}</span>}
-            {(ai || p.state === "missing") && (
-              <span className={`whitespace-nowrap ${chip}`}>
-                {ai ? <Sparkles size={11} className="text-accent" /> : <TriangleAlert size={11} className="text-warn" />}
-                {ai ? "AI" : `${p.missing} missing`}
-              </span>
-            )}
-          </div>
-        )}
       </div>
+      {!compact && (
+        // The chips keep the card's corners, whatever the picture's shape, so a row of cards lines its lengths up.
+        <div className="absolute inset-x-2 bottom-2 flex flex-row-reverse flex-wrap-reverse justify-between gap-1">
+          {p.state !== "busy" && <span className={`tabular ${chip}`}>{formatLength(p.durationUs)}</span>}
+          {(ai || p.state === "missing") && (
+            <span className={`whitespace-nowrap ${chip}`}>
+              {ai ? <Sparkles size={11} className="text-accent" /> : <TriangleAlert size={11} className="text-warn" />}
+              {ai ? "AI" : `${p.missing} missing`}
+            </span>
+          )}
+        </div>
+      )}
       {!compact && p.state === "busy" && (
         <span className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap ${chip}`}>
           <Lock size={11} /> In use

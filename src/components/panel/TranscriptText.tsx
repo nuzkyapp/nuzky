@@ -356,7 +356,7 @@ export function TranscriptText({
           if (i !== null) startEdit(i);
         }}
         onKeyDown={onKeyDown}
-        className="min-h-0 flex-1 overflow-y-auto px-3.5 pt-3 pb-1 focus-visible:-outline-offset-2!"
+        className="scroll-shown min-h-0 flex-1 overflow-y-auto px-3.5 pt-3 pb-6 focus-visible:-outline-offset-2!"
       >
         {paras.map(([from, to]) => (
           <Paragraph

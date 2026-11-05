@@ -71,7 +71,7 @@ import { FINISH_DRAFT } from "../../lib/capcut";
 import { downloadModels, useCover } from "../../lib/cover";
 import { chose } from "../../lib/exit";
 import { openRecap, undoAction, undoStep, useEditor } from "../../lib/store";
-import { formatTime } from "../../lib/time";
+import { formatLength, formatTime } from "../../lib/time";
 import { whenLabel } from "../../lib/library";
 import { Button, IconButton, LockReason, ProgressBar, Segmented } from "../ui";
 import { MODEL_QUESTION, answerModelQuestion } from "../ModelQuestionDialog";
@@ -444,7 +444,8 @@ function ChangeRow({ change, undone, past }: { change: RunChange; undone: boolea
         className={`flex w-full items-start gap-2 rounded-md py-1 pl-[30px] pr-1.5 text-left text-[12px] leading-[17px] enabled:hover:bg-white/[.06] disabled:cursor-default ${undone ? "text-fg/45" : "text-fg/90"}`}
       >
         <span className="flex-1">{change.text}</span>
-        {change.atUs !== null && <span className="tabular shrink-0 text-muted">{formatTime(change.atUs, false)}</span>}
+        {/* A time says where a change is; one at the very start says nothing the list does not. */}
+        {change.atUs !== null && change.atUs >= 500_000 && <span className="tabular shrink-0 text-muted">{formatLength(change.atUs)}</span>}
       </button>
     </li>
   );

@@ -3,7 +3,7 @@ import { AtSign, Bug, ClipboardCopy, FolderOpen, Lightbulb, MessageSquare } from
 import { api, errorText, type FeedbackKind } from "../lib/api";
 import { copyDiagnostics, openLogs, reportBug } from "../lib/diagnostics";
 import { useEditor } from "../lib/store";
-import { Button, Menu, type MenuEntry } from "./ui";
+import { IconButton, Menu, type MenuEntry } from "./ui";
 
 type ShowMenu = (items: MenuEntry[], at: { x: number; y: number; above?: boolean }, label: string, keyboard: boolean) => void;
 
@@ -47,9 +47,10 @@ export function FeedbackButton() {
   const [menu, setMenu] = useState<{ at: { x: number; y: number }; keyboard: boolean; back: HTMLElement } | null>(null);
   return (
     <>
-      <Button
-        variant="bar"
-        pill
+      {/* An icon in the top bar's capsule beside Edit from your phone; the home sidebar names it in full. */}
+      <IconButton
+        round
+        label="Send feedback"
         data-feedback
         aria-haspopup="menu"
         aria-expanded={!!menu}
@@ -59,8 +60,8 @@ export function FeedbackButton() {
         }}
         className={menu ? "bg-white/[.13]" : ""}
       >
-        <MessageSquare size={15} /> Send feedback
-      </Button>
+        <MessageSquare size={16} />
+      </IconButton>
       {menu && (
         <Menu
           items={feedbackMenu()}

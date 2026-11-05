@@ -58,7 +58,7 @@ export function SwitchDialog() {
         void resolveSwitch("cancel");
       }}
       onKeyDown={trapTab}
-      className="dialog-in overlay fixed inset-0 m-auto w-[500px] rounded-[20px] p-6 text-fg backdrop:bg-black/45"
+      className="dialog-in overlay overlay-solid fixed inset-0 m-auto w-[500px] rounded-[20px] p-6 text-fg backdrop:bg-black/45"
     >
       <SwitchChoice pending={pending} dialog />
     </dialog>

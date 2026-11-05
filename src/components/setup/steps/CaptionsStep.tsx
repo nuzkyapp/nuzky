@@ -209,7 +209,7 @@ function Step() {
                 <span className="min-w-0 flex-1">
                   <span className="flex items-baseline gap-2 leading-5">
                     <span className="text-[13px] font-medium text-fg">{m.label}</span>
-                    {m.id === recommended && <span className="text-[12px] font-medium text-fg">Recommended</span>}
+                    {m.id === recommended && <span className="text-[12px] font-medium text-fg/70">Recommended</span>}
                     <span className="tabular ml-auto text-[12px] text-muted">{m.sizeMb} MB</span>
                   </span>
                   <span className="flex items-center gap-2 text-[12px] leading-4 text-muted">

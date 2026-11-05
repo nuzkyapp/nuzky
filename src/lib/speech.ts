@@ -11,6 +11,8 @@ export const SHORT_CAPTION_CHARS = 15;
 export const MAX_WORD_CHARS = 100;
 /** A gap this long between two words starts a new paragraph in the transcript. */
 const PARAGRAPH_GAP_US = 1_000_000;
+/** A paragraph this many words long ends at its next sentence end, so a long take still reads in blocks, each with its time. */
+const PARAGRAPH_WORDS = 35;
 
 /** Languages offered for recognition, as Whisper codes. */
 export const SPEECH_LANGUAGES: [string, string][] = [
@@ -233,18 +235,26 @@ export function tokenize(view: TranscriptView): Token[] {
   return [...words, ...pauses, ...hesitations].sort((a, b) => a.startUs - b.startUs);
 }
 
-/** Token index ranges [from, to) of paragraphs, split where speech pauses for a second or more. */
+/**
+ * Token index ranges [from, to) of paragraphs, split where speech pauses for a second or more, and after a sentence once a
+ * paragraph has run PARAGRAPH_WORDS words.
+ */
 export function paragraphs(tokens: Token[]): [number, number][] {
   const out: [number, number][] = [];
   let start = 0;
-  let lastWordEnd: number | null = null;
+  let words = 0;
+  let last: { endUs: number; text: string } | null = null;
   tokens.forEach((t, i) => {
     if (t.kind !== "word") return;
-    if (lastWordEnd !== null && t.startUs - lastWordEnd >= PARAGRAPH_GAP_US && i > start) {
+    const pause = last !== null && t.startUs - last.endUs >= PARAGRAPH_GAP_US;
+    const sentence = last !== null && words >= PARAGRAPH_WORDS && /[.!?…]["”»)]*$/.test(last.text);
+    if ((pause || sentence) && i > start) {
       out.push([start, i]);
       start = i;
+      words = 0;
     }
-    lastWordEnd = t.endUs;
+    words++;
+    last = { endUs: t.endUs, text: t.text };
   });
   if (start < tokens.length) out.push([start, tokens.length]);
   return out;
