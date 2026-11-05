@@ -305,6 +305,12 @@ def share_editor(r):
     r.check('Delete removes the clip it names', wait(lambda: [c['id'] for c in r.track()] == [clip['id']], 10), r.track())
     page.act(action='duplicate', clipId=clip['id'])
     r.check('Duplicate copies it', wait(lambda: len(r.track()) == 2, 10))
+    copy = r.track()[1]
+    page.act(action='seek', us=copy['startUs'] + copy['durationUs'] // 2)
+    wait(lambda: r.s.run('return window.__nuzky.store.getState().timeUs') == copy['startUs'] + copy['durationUs'] // 2, 10)
+    page.act(action='split', clipId=clip['id'])
+    time.sleep(1)
+    r.check('Split on a clip the playhead has left cuts nothing, not the clip under the playhead', len(r.track()) == 2, r.track())
     page.act(action='detachAudio', clipId=clip['id'])
     audio = lambda: [c for t in r.state()['tracks'] if t['kind'] == 'audio' for c in t['clips']]
     r.check('Detach audio moves its sound to an audio track', wait(lambda: len(audio()) == 1, 10), r.state()['tracks'])
@@ -418,5 +424,8 @@ def tap_on_phone(r, url):
         r.check('the empty project shows no time left over from the last one', wait(
             lambda: phone.run("return document.getElementById('time-now').textContent + ' / ' + document.getElementById('time-total').textContent") == '0:00.0 / 0:00.0', 10),
             phone.run("return document.getElementById('time-now').textContent + ' / ' + document.getElementById('time-total').textContent"))
+        r.s.call("window.__nuzky.store.getState().edit({type: 'addText', startUs: 0, text: 'Only text', style: {fontSize: 80, color: '#ffffff'}})")
+        r.check('a project with only text on it shows its timeline and can play', wait(lambda: phone.shown('#tl')
+                and phone.run("return !document.getElementById('play').disabled"), 10))
     finally:
         phone.close()

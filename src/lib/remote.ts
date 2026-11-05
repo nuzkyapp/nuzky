@@ -163,7 +163,13 @@ function act(a: Action) {
   if (a.action === "play") return useEditor.getState().togglePlay();
   if (a.action === "undo") return void useEditor.getState().undo();
   if (a.action === "redo") return void useEditor.getState().redo();
-  if (a.action === "split") return onClip(a.clipId, splitAtPlayhead);
+  if (a.action === "split") {
+    // The playhead may have left the clip since the page drew it; the editor would then split the main track instead.
+    const { snap, timeUs } = useEditor.getState();
+    const found = snap && findClip(snap.project, a.clipId);
+    if (found && canSplitClip(found.clip, Math.round(timeUs), snap.project.canvas.fps)) onClip(a.clipId, splitAtPlayhead);
+    return;
+  }
   if (a.action === "duplicate") return onClip(a.clipId, duplicateSelection);
   if (a.action === "detachAudio") {
     const { snap } = useEditor.getState();

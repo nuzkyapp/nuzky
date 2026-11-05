@@ -178,7 +178,7 @@ function loadFrame() {
     const shown = $("frame");
     shown.src = img.src;
     // An empty timeline draws only black.
-    shown.hidden = !state?.clips.length;
+    shown.hidden = !hasContent();
     done();
   };
   img.onerror = done;
@@ -187,11 +187,14 @@ function loadFrame() {
 
 // ---- Rendering ----
 
+/** Anything on any track: a project may have only sound or text, with the main track empty. */
+const hasContent = () => !!state?.tracks.some((t) => t.clips.length > 0);
+
 function render() {
   const s = state;
   $("name").textContent = s?.project || "Nuzky";
   document.title = s?.project ? `${s.project} · Nuzky` : "Nuzky";
-  const hasClips = !!s && s.clips.length > 0;
+  const hasClips = hasContent();
   const busyAdding = uploads.some((u) => u.status !== "failed") || (s?.adding.length ?? 0) > 0;
   $("add-first").hidden = hasClips || busyAdding || !s || closed;
   // The first frame with something on the timeline may come before the state that says so.
