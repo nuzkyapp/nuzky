@@ -29,6 +29,7 @@ mod shortcuts;
 mod sounds;
 mod source_preview;
 mod stickers;
+mod storage;
 mod store;
 mod style;
 #[cfg(all(target_os = "macos", debug_assertions))]
@@ -1461,6 +1462,7 @@ pub fn run() {
             jobs::start_reframe,
             jobs::start_face_check,
             jobs::speech_models,
+            jobs::remove_speech_model,
             jobs::speech_setup,
             jobs::start_speech_setup,
             model_question::answer_model_question,
@@ -1509,12 +1511,17 @@ pub fn run() {
             plugins::run_plugin,
             plugins::remove_plugin,
             plugins::allow_plugin_access,
+            plugins::revoke_plugin_access,
             plugins::show_plugin_folder,
             plugins::gallery_plugins,
             plugins::install_gallery_plugin,
             plugins::cancel_gallery_install,
             style::style_view,
             style::style_act,
+            style::style_settings,
+            style::set_style_settings,
+            storage::storage_usage,
+            storage::clear_storage,
             style::start_style_learning,
             style::style_read_timelines,
             style::style_capcut_drafts,
