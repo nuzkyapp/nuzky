@@ -331,6 +331,7 @@ def flow_tour(r):
     leave_editor(r)
     names = "return (window.__nuzky.library.getState().projects ?? []).map((p) => p.name)"
     r.check('the sample is not among the projects', wait(lambda: 'Sample video' not in r.s.run(names), 5), r.s.run(names))
+    r.shot('9-home-1024')
     r.s.run(TAKE_THE_TOUR)
     r.check('Take the tour opens a fresh sample', wait(lambda: (p := project(r))['epoch'] != after['epoch'] and p['name'] == 'Sample video' and p['captions'] == 0, 20)
             and at_step(r, 'ask'), project(r))
