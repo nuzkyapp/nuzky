@@ -196,13 +196,15 @@ function Dialog() {
         className="dialog-in overlay overlay-solid flex h-[640px] max-h-[calc(100vh-48px)] w-[880px] max-w-[calc(100vw-48px)] overflow-hidden rounded-[20px] text-fg outline-none"
       >
         <div className="flex w-[220px] shrink-0 flex-col gap-3 border-r border-white/[.06] bg-black/[.12] p-3 pt-4">
-          <SearchField
-            value={query}
-            onChange={setQuery}
-            placeholder="Search settings"
-            onEnter={() => results[0] && choose(results[0])}
-            onDown={() => dialog.current?.querySelector<HTMLElement>("[data-results] button")?.focus()}
-          />
+          <div className="flex shrink-0">
+            <SearchField
+              value={query}
+              onChange={setQuery}
+              placeholder="Search settings"
+              onEnter={() => results[0] && choose(results[0])}
+              onDown={() => dialog.current?.querySelector<HTMLElement>("[data-results] button")?.focus()}
+            />
+          </div>
           {query.trim() ? (
             <div data-results role="list" aria-label="Search results" onKeyDown={resultKeys} className="-mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-1">
               <p role="status" className="px-2.5 pb-1 text-[11px] text-muted">

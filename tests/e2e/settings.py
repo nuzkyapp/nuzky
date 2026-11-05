@@ -17,7 +17,7 @@ TAB = "document.querySelector(`#settings-tab-${arguments[0]}`).click()"
 BUTTON = """const scope = document.querySelector(arguments[1]);
 return scope && [...scope.querySelectorAll('button')].find((b) => b.textContent.trim() === arguments[0] && b.getAttribute('aria-disabled') !== 'true') || null;"""
 CLICK = BUTTON.replace('return scope &&', 'const b = scope &&') + '\nif (!b) return false; b.click(); return true;'
-USAGE = "window.__nuzky.api.storageUsage().then((u) => Object.fromEntries(u.groups.map((g) => [g.id, g])))"
+USAGE = "window.__nuzky.api.storageUsage().then((u) => JSON.stringify(Object.fromEntries(u.groups.map((g) => [g.id, g]))))"
 ROW = "return document.querySelector(`[data-storage=${arguments[0]}]`)?.innerText ?? null"
 TEXT = "return document.querySelector(arguments[0])?.innerText ?? ''"
 FITS = """const b = document.querySelector('[data-settings]').getBoundingClientRect();
@@ -32,7 +32,7 @@ def prepare(r):
 
 
 def usage(r):
-    return r.s.call(USAGE)['value']
+    return json.loads(r.s.call(USAGE)['value'])
 
 
 @flow('settings', "Settings: the gear, Ctrl+, and the home screen open it on the pane shown last; search finds settings and keys; "
