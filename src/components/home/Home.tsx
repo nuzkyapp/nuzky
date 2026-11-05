@@ -66,6 +66,7 @@ import { useEditor } from "../../lib/store";
 import { formatLength } from "../../lib/time";
 import type { Collection, LibraryProject, Said } from "../../lib/types";
 import { AiRunBar, JobIndicator } from "../TopBar";
+import { ShareButton } from "../ShareDialog";
 import { Button, IconButton, Menu, type MenuEntry } from "../ui";
 import { ProjectCard } from "./ProjectCard";
 import { DraftsSection } from "./Drafts";
@@ -408,6 +409,10 @@ export function Home() {
           <ChevronLeft size={15} className="shrink-0" />
           <span className="truncate">{current?.project.name ?? "Editor"}</span>
         </Button>
+        {/* Sharing works on the open project, so a phone can start one from here too. */}
+        <div className="bar flex items-center rounded-full">
+          <ShareButton />
+        </div>
         <div className="flex-1" />
         <AiRunBar />
         <JobIndicator />
