@@ -113,7 +113,7 @@ export function ShareDialog() {
                 {connected ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-ok" /> : null}
                 {connected ? `${connected} connected` : <span className="font-normal text-muted">No one is connected yet</span>}
               </p>
-              <p className="mt-auto text-[12px] text-muted">Anyone with the link can add videos to the open project, ask the AI to edit it and download what they export.</p>
+              <p className="mt-auto text-[12px] text-muted">Anyone with the link can open, start and edit your projects, ask the AI to edit them and download what they export.</p>
             </div>
           </div>
         )}
