@@ -73,7 +73,7 @@ export function OpenedDraftDialog() {
         e.stopPropagation();
         trapTab(e);
       }}
-      className="dialog-in overlay fixed inset-0 m-auto w-[480px] max-w-[calc(100vw-48px)] rounded-[20px] p-6 text-fg outline-none backdrop:bg-black/45"
+      className="dialog-in overlay overlay-solid fixed inset-0 m-auto w-[480px] max-w-[calc(100vw-48px)] rounded-[20px] p-6 text-fg outline-none backdrop:bg-black/45"
     >
       {shown && (
         <>

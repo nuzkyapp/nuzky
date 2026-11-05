@@ -45,7 +45,7 @@ function reach(tab: PanelTab, selector = `#${tabIds("library", tab).tab}`) {
 
 function Step({ icon: Icon, done, title, detail, children }: { icon: LucideIcon; done?: boolean; title: string; detail?: string; children?: ReactNode }) {
   return (
-    <li className="flex min-h-10 items-center gap-2.5">
+    <li className="flex min-h-10 items-center gap-2.5 [@media(max-height:720px)]:min-h-9">
       {done ? <Check size={16} className="shrink-0 text-ok" aria-hidden /> : <Icon size={16} className="shrink-0 text-muted" aria-hidden />}
       <div className="flex min-w-0 flex-1 flex-col leading-[17px]">
         <span className="text-fg">
@@ -59,7 +59,7 @@ function Step({ icon: Icon, done, title, detail, children }: { icon: LucideIcon;
   );
 }
 
-const STEP_BUTTON = "h-7 shrink-0 px-2.5 text-[12px]";
+const STEP_BUTTON = "h-7 min-w-[76px] shrink-0 px-2.5 text-[12px]";
 
 function SpeechStep({ project, view, error }: { project: Project; view: TranscriptView | null; error: string | null }) {
   const blocker = speechBlocker(project);
@@ -67,7 +67,7 @@ function SpeechStep({ project, view, error }: { project: Project; view: Transcri
   if (error)
     return (
       <Step icon={Scissors} title="Speech" detail={error}>
-        <Button className={STEP_BUTTON} aria-label="Open Transcript" onClick={() => reach("transcript")}>
+        <Button variant="plain" className={STEP_BUTTON} aria-label="Open Transcript" onClick={() => reach("transcript")}>
           Open
         </Button>
       </Step>
@@ -147,6 +147,7 @@ function ProjectStatus({ project }: { project: Project }) {
         <SpeechStep project={project} view={view} error={error} />
         <Step icon={Captions} done={captions.count > 0} title="Captions" detail={captions.count ? count(captions.count, "caption") + (captions.style ? ` · ${captions.style}` : "") : "None"}>
           <Button
+            variant="plain"
             className={STEP_BUTTON}
             aria-label={captions.count ? "Edit captions" : "Add captions"}
             title={captions.count ? "Open Captions" : "Open Captions to generate them"}
@@ -159,8 +160,9 @@ function ProjectStatus({ project }: { project: Project }) {
         {zoomed ? (
           <Step icon={ZoomIn} done title="Zooms" detail={count(zoomed, "zoomed clip")} />
         ) : (
-          <Step icon={ZoomIn} title="Zooms" detail={transcribed ? undefined : "Needs a transcript"}>
+          <Step icon={ZoomIn} title="Zooms" detail={transcribed ? "None" : "Needs a transcript"}>
             <Button
+              variant="plain"
               className={STEP_BUTTON}
               aria-label="Suggest zooms"
               disabled={!transcribed}
@@ -175,6 +177,7 @@ function ProjectStatus({ project }: { project: Project }) {
         <Step icon={Music} done={sounds.length > 0} title="Music" detail={sounds.length === 1 ? sounds[0] : sounds.length ? count(sounds.length, "sound") : "None"}>
           {music && (
             <Button
+              variant="plain"
               className={STEP_BUTTON}
               aria-label="Cut to beat"
               title={`Cut the video to the beat of ${music.name}`}
@@ -187,17 +190,18 @@ function ProjectStatus({ project }: { project: Project }) {
             </Button>
           )}
           {sounds.length ? (
-            <Button className={STEP_BUTTON} aria-label="Edit music" title="Open the sounds in the project" onClick={() => openAudio("project")}>
+            <Button variant="plain" className={STEP_BUTTON} aria-label="Edit music" title="Open the sounds in the project" onClick={() => openAudio("project")}>
               Edit
             </Button>
           ) : (
-            <Button className={STEP_BUTTON} aria-label="Add music" title="Open free music in Audio" onClick={() => openAudio("music", 'input[placeholder="Search free music"]')}>
+            <Button variant="plain" className={STEP_BUTTON} aria-label="Add music" title="Open free music in Audio" onClick={() => openAudio("music", 'input[placeholder="Search free music"]')}>
               Add
             </Button>
           )}
         </Step>
         <Step icon={ImagePlus} done={covers.length > 0} title="Cover" detail={covers.length ? covers.map((f) => f.short).join(" and ") : "None"}>
           <Button
+            variant="plain"
             className={STEP_BUTTON}
             disabled={empty}
             disabledReason="Add a clip to the timeline first"
@@ -234,10 +238,10 @@ function ProjectSettings() {
           title="Change the canvas ratio"
           onClick={() => useEditor.setState({ ratioOpen: true })}
           {...lockedProps(lock)}
-          className="tabular -mx-1.5 -my-1 inline-flex h-6 items-center gap-1 self-start rounded-md px-1.5 text-[12px] text-fg transition-colors duration-[120ms] ease-out hover:bg-white/[.08] aria-disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:hover:bg-transparent"
+          className="tabular flex h-8 items-center justify-between gap-2 rounded-lg border border-white/[.08] bg-white/[.055] px-2.5 text-[13px] text-fg transition-colors duration-[120ms] ease-out hover:bg-white/[.08] aria-disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:hover:bg-white/[.055]"
         >
           {formatLabel(canvas.width, canvas.height)} · {canvas.width}×{canvas.height}
-          <ChevronDown size={13} className="text-muted" />
+          <ChevronDown size={14} className="shrink-0 text-muted" />
         </button>
       </Section>
       <Section title="Background">
@@ -275,7 +279,7 @@ export function ProjectSection() {
   return (
     <>
       <InspectorHeader icon={Film} title="Project" detail={`${formatLength(projectDuration(project))} · ${fps} fps`} />
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="scroll-shown min-h-0 flex-1 overflow-y-auto">
         {/* The steps only open the tab that does the work; that tab is locked while the AI edits. */}
         <ProjectStatus project={project} />
         <AiLock>

@@ -490,7 +490,7 @@ export function Home() {
                     {sections.map((section) => (
                       <section key={section.title ?? "all"} role="group" aria-label={section.title ?? undefined}>
                         {(section.title ?? (searching || hasDrafts ? "Projects" : null)) && <h2 className="mb-3 text-[13px] font-semibold text-fg">{section.title ?? "Projects"}</h2>}
-                        <div className="grid grid-cols-[repeat(auto-fill,minmax(148px,168px))] gap-x-4 gap-y-5">
+                        <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] [@media(max-height:720px)]:grid-cols-[repeat(auto-fill,minmax(140px,156px))] gap-x-4 gap-y-5">
                           {section.items.map((p) => (
                             <ProjectCard
                               key={p.path}
@@ -536,7 +536,7 @@ export function Home() {
           {selection.length > 0 && page === "projects" && <SelectionBar showMenu={showMenu} newCollection={setCreating} />}
           {fileDrag && (
             <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-[12px] bg-black/45">
-              <div className="overlay flex w-[320px] flex-col items-center gap-2 rounded-[20px] px-6 py-7 text-center">
+              <div className="overlay overlay-solid flex w-[320px] flex-col items-center gap-2 rounded-[20px] px-6 py-7 text-center">
                 <Upload size={28} className="text-accent" />
                 <div className="text-[15px] font-semibold text-fg">Drop to start a new project</div>
                 <div className="text-[13px] text-muted">It takes the format of the first video.</div>
@@ -673,10 +673,10 @@ export function Quote({ hit }: { hit: Said["hits"][number] }) {
 /** The shapes of cards while the list loads, so nothing jumps when it arrives. */
 function Skeleton() {
   return (
-    <div aria-busy aria-label="Loading projects" className="grid grid-cols-[repeat(auto-fill,minmax(148px,168px))] gap-x-4 gap-y-5 pt-1">
+    <div aria-busy aria-label="Loading projects" className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] [@media(max-height:720px)]:grid-cols-[repeat(auto-fill,minmax(140px,156px))] gap-x-4 gap-y-5 pt-1">
       {Array.from({ length: 6 }, (_, i) => (
         <div key={i}>
-          <div className="w-full rounded-[10px] bg-white/[.04]" style={{ aspectRatio: `${152 / 180}` }} />
+          <div className="w-full rounded-[10px] bg-white/[.04]" style={{ aspectRatio: "4 / 5" }} />
           <div className="mt-2.5 h-3 w-3/5 rounded bg-white/[.05]" />
           <div className="mt-2 h-2.5 w-2/5 rounded bg-white/[.04]" />
         </div>

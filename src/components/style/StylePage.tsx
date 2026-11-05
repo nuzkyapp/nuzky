@@ -425,7 +425,7 @@ function ResetDialog({ view, onClose }: { view: StyleView; onClose: () => void }
   const dialog = useRef<HTMLDivElement>(null);
   useEffect(() => dialog.current?.querySelector("button")?.focus(), []);
   return (
-    <div data-exit className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/45" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div data-exit className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/55" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
       <div
         ref={dialog}
         role="alertdialog"
@@ -437,7 +437,7 @@ function ResetDialog({ view, onClose }: { view: StyleView; onClose: () => void }
           e.stopPropagation();
           onClose();
         }}
-        className="overlay w-[420px] rounded-[20px] p-6 dialog-in"
+        className="overlay overlay-solid w-[420px] rounded-[20px] p-6 dialog-in"
       >
         <h2 id="reset-title" className="text-[17px] font-semibold leading-[22px] tracking-[-0.025em]">
           Go back to the default style?

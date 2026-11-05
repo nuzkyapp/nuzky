@@ -38,13 +38,13 @@ function TextField({ clipId, text }: { clipId: string; text: string }) {
       disabled={!!lock}
       title={lock ?? undefined}
       value={draft ?? text}
-      rows={3}
+      rows={2}
       onChange={(e) => {
         setDraft(e.target.value);
         edit({ type: "updateClip", clipId, text: e.target.value }, `${clipId}:text`);
       }}
       onBlur={() => setDraft(null)}
-      className="resize-y rounded-lg border border-white/[.08] bg-white/[.055] px-2.5 py-2 text-[13px] leading-[18px] text-fg outline-offset-0 focus:border-accent disabled:opacity-40"
+      className="resize-none rounded-lg border border-white/[.08] bg-white/[.055] px-2.5 py-2 text-[13px] leading-[18px] text-fg outline-offset-0 focus:border-accent disabled:opacity-40"
     />
   );
 }
@@ -122,9 +122,10 @@ export function TextSection({ clip, text, style, caption }: { clip: Clip; text: 
         <MainStyle style={style} styles={styles} setStyle={setStyle} unit={unit} />
         <div className="grid grid-cols-3 gap-2">
           {presets.map((p) => (
-            <PresetTile key={p.name} label={p.name} selected={selected(p)} title={everyCaption ? `Apply ${p.name} to all captions` : `Apply ${p.name} style`} onClick={() => apply(p)}>
-              <span className="absolute inset-0 flex items-center justify-center bg-line">
-                <TextSwatch style={{ ...p.style, fontFamily: p.style.fontFamily ?? style.fontFamily }} label="Aa" />
+            <PresetTile key={p.name} named label={p.name} selected={selected(p)} title={everyCaption ? `Apply ${p.name} to all captions` : `Apply ${p.name} style`} onClick={() => apply(p)}>
+              {/* As the Captions tab draws its styles: the name in the style, so the two lists read as one. */}
+              <span className="absolute inset-0 flex items-center justify-center px-1">
+                <TextSwatch style={{ ...p.style, fontFamily: p.style.fontFamily ?? style.fontFamily }} label={p.name} size={13} />
               </span>
             </PresetTile>
           ))}

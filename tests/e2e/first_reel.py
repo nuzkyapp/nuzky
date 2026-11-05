@@ -235,6 +235,10 @@ def first_reel(r):
         whole = r.s.run(f'const b = {FIND}; const box = b.getBoundingClientRect();'
                         'return box.right <= innerWidth && box.bottom <= innerHeight && b.scrollWidth <= b.clientWidth', 'Remove retakes and pauses')
         r.check('in the smallest window, 1024 x 640, the button shows whole', whole)
+        pauses = r.s.run("""const b = [...document.querySelectorAll('button')].find((b) => /^Remove \\d+ pauses?/.test(b.textContent.trim()));
+            const pane = b?.closest('.pane')?.getBoundingClientRect(); const box = b?.getBoundingClientRect();
+            return b ? [box.right <= pane.right, b.scrollWidth <= b.clientWidth, box.right, pane.right] : null""")
+        r.check('and Remove pauses stays whole inside the library', pauses and pauses[0] and pauses[1], pauses)
         resize(r, 1440, 900)
     if not check_recognition(r, transcript_view(r), truths):
         return

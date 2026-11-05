@@ -27,6 +27,8 @@ const TABS: { id: PanelTab; label: string; icon: typeof Film }[] = [
 ];
 
 const TAB_IDS = TABS.map((t) => t.id);
+/** Under this width eight labels in one row would read as one line, so they take two rows. */
+const COMPACT_BELOW = 420;
 
 export function LeftPanel({ width }: { width: number }) {
   const tab = useEditor((s) => s.panelTab);
@@ -35,6 +37,8 @@ export function LeftPanel({ width }: { width: number }) {
   const cover = useCover((s) => s.open);
   // Choosing reels, it holds the words of the reel shown, to trim.
   const reels = useReels((s) => s.open);
+  // Narrower than eight labels need in one row, the tabs sit in two rows of four, each still with its name.
+  const compact = width < COMPACT_BELOW;
   if (reels)
     return (
       <aside className="pane flex shrink-0 flex-col overflow-hidden" style={{ width }} aria-label="Reel">
@@ -51,10 +55,9 @@ export function LeftPanel({ width }: { width: number }) {
     );
   return (
     <aside data-tour="library" className="pane flex shrink-0 flex-col overflow-hidden" style={{ width }}>
-      {/* Tabs size to their labels and share the leftover width, so no two labels touch at 360 px, the narrowest, also where
-          WebKitGTK sets Inter a little wider than Chromium. */}
-      <div className="seg-track relative mx-1.5 mt-1.5 flex shrink-0 rounded-[13px] p-0.5" role="tablist" aria-label="Library" onKeyDown={tabListKeys(TAB_IDS, tab, setTab)}>
-        <SegThumb value={tab} className="rounded-[11px]" />
+      {/* In one row the tabs size to their labels and share the leftover width; in a narrower library, two rows of four. */}
+      <div className={`relative mx-1.5 mt-1.5 shrink-0 rounded-[13px] p-0.5 ${compact ? "mb-0.5 grid grid-cols-4 gap-x-1 gap-y-1" : "mb-0.5 flex"}`} role="tablist" aria-label="Library" onKeyDown={tabListKeys(TAB_IDS, tab, setTab)}>
+        <SegThumb value={tab} className="rounded-[11px] bg-white/[.11]" />
         {TABS.map((t) => (
           <button
             key={t.id}
@@ -67,11 +70,11 @@ export function LeftPanel({ width }: { width: number }) {
             aria-controls={tab === t.id ? tabIds("library", t.id).panel : undefined}
             tabIndex={tab === t.id ? 0 : -1}
             onClick={() => setTab(t.id)}
-            className={`relative flex flex-auto flex-col items-center gap-[3px] rounded-[11px] px-px pt-1.5 pb-[5px] text-[11px] leading-[13px] font-medium tracking-[-0.02em] whitespace-nowrap transition-colors duration-[120ms] ease-out ${
-              tab === t.id ? "text-fg" : "text-muted hover:text-fg"
+            className={`relative flex flex-auto flex-col items-center rounded-[11px] px-px text-[11px] leading-[13px] font-medium ${compact ? "h-10 justify-center gap-[3px]" : "gap-[3px] pt-1.5 pb-[5px] tracking-[-0.02em]"} whitespace-nowrap transition-colors duration-[120ms] ease-out ${
+              tab === t.id ? "text-fg" : "text-fg/70 hover:text-fg"
             }`}
           >
-            <t.icon size={17} className={`transition-colors duration-[120ms] ease-out ${tab === t.id ? "text-accent" : ""}`} />
+            <t.icon size={compact ? 16 : 17} className={`transition-colors duration-[120ms] ease-out ${tab === t.id ? "text-accent" : ""}`} />
             <span>{t.label}</span>
           </button>
         ))}

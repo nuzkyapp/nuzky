@@ -19,7 +19,7 @@ const WORDS = [
 ];
 
 const BUSY = "Wait for speech recognition to finish";
-const GRID = "grid grid-cols-[repeat(auto-fill,minmax(72px,1fr))] gap-2";
+const GRID = "grid grid-cols-[repeat(auto-fill,minmax(96px,1fr))] gap-2";
 
 /**
  * The captions on the timeline and the look the controls show: the selected caption's, else the first one's.
@@ -133,11 +133,11 @@ export function CaptionsTab() {
               openMenu({ x: r.left, y: r.bottom + 4 }, true);
             }
           }}
-          className={`relative flex h-11 w-full min-w-0 items-center justify-center rounded-[10px] border bg-line transition-colors duration-[120ms] ease-out aria-disabled:cursor-not-allowed aria-disabled:opacity-40 px-1 ${
+          className={`relative flex h-12 w-full min-w-0 items-center justify-center rounded-[10px] border bg-white/[.06] transition-colors duration-[120ms] ease-out aria-disabled:cursor-not-allowed aria-disabled:opacity-40 px-1 ${
             current ? "border-accent shadow-[0_0_0_1px_var(--color-accent)]" : disabled ? "border-white/[.08]" : "border-white/[.08] hover:border-white/30"
           }`}
         >
-          <TextSwatch style={{ ...preset.style, fontFamily: preset.style.fontFamily ?? font }} label={preset.name} size={11} lines={2} />
+          <TextSwatch style={{ ...preset.style, fontFamily: preset.style.fontFamily ?? font }} label={preset.name} size={13} />
           {current && (
             <span aria-hidden className="absolute top-1 right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-accent-strong text-white shadow-[0_1px_2px_rgb(0_0_0/.5)]">
               <Check size={10} strokeWidth={3} />
@@ -165,14 +165,16 @@ export function CaptionsTab() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto p-3.5">
+      <div className="scroll-shown flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto p-3.5 pb-6">
         <SpeechFields disabled={busy} />
         <div className="flex flex-col gap-1.5">
-          <span className="text-[12px] text-muted">{hasCaptions ? "Words per caption · applies when you regenerate" : "Words per caption"}</span>
+          <span className="truncate text-[12px] text-muted" title={hasCaptions ? "Applies when you regenerate" : undefined}>
+            Words per caption
+          </span>
           <Segmented label="Words per caption" value={captionWords} onChange={(n) => useSpeech.setState({ captionWords: n })} options={WORDS} disabled={busy} disabledReason={BUSY} />
         </div>
         <div className="flex flex-col gap-1.5">
-          <span className="text-[12px] text-muted">Style</span>
+          <h3 className="text-[13px] font-semibold text-fg">Style</h3>
           <div className={GRID}>{CAPTION_STYLES.map((s) => tile(s))}</div>
         </div>
         {/* Saved like the built-in ones, for 1080p, so a style looks the same on any canvas. */}
@@ -193,24 +195,27 @@ export function CaptionsTab() {
         </LockReason.Provider>
       </div>
       {/* Below the choices, in view however many styles there are. */}
-      <div className="flex shrink-0 flex-col gap-2 border-t border-white/[.07] p-3.5">
+      <div className="flex shrink-0 flex-col gap-2 border-t border-white/[.1] bg-panel p-3.5">
         {running ? (
           <SpeechJobCard job={running} />
         ) : (
           <span className="flex">
-            <Button variant="primary" className="flex-1" data-generate-captions disabled={!!blocker} disabledReason={blocker ?? undefined} onClick={start}>
+            {/* Prominent until there are captions; regenerating replaces them, so it is then a secondary action. */}
+            <Button variant={hasCaptions ? "secondary" : "primary"} className="flex-1" data-generate-captions disabled={!!blocker} disabledReason={blocker ?? undefined} onClick={start}>
               <Captions size={15} /> {hasCaptions ? "Regenerate captions" : "Generate captions"}
             </Button>
           </span>
         )}
         {!running && <JobError job={last} />}
         <Button
+          variant="plain"
+          className="text-[12px]"
           data-check-faces
           disabled={!!faceBlocker || checking || reframing || busy}
           disabledReason={faceBlocker ?? (checking ? "Looking for faces" : reframing ? "Wait for the reframe to finish" : BUSY)}
           onClick={() => void checkFaces()}
         >
-          <ScanFace size={15} /> Find text over faces
+          <ScanFace size={14} /> Find text over faces
         </Button>
       </div>
     </div>
@@ -287,7 +292,7 @@ function MyStyles({ look, mine, tile }: { look: CaptionLook; mine: ReturnType<ty
               type="button"
               {...lockedProps(lock)}
               onClick={lock ? undefined : () => setNaming({ from: null })}
-              className="flex h-11 min-w-0 items-center justify-center gap-1 whitespace-nowrap rounded-[10px] border border-dashed border-white/[.15] text-[11px] text-muted transition-colors duration-[120ms] hover:border-white/30 hover:text-fg aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
+              className="flex h-12 min-w-0 items-center justify-center gap-1 whitespace-nowrap rounded-[10px] border border-dashed border-white/[.15] text-[11px] text-muted transition-colors duration-[120ms] hover:border-white/30 hover:text-fg aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
             >
               <Plus size={12} /> Save look
             </button>

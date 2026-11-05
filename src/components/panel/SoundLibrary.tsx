@@ -483,7 +483,7 @@ function RightsDialog() {
         if (e.key === "Enter" && e.target === e.currentTarget) answerRights(true);
         trapTab(e);
       }}
-      className="dialog-in overlay fixed inset-0 m-auto w-[440px] rounded-[20px] p-6 text-fg outline-none backdrop:bg-black/45"
+      className="dialog-in overlay overlay-solid fixed inset-0 m-auto w-[440px] rounded-[20px] p-6 text-fg outline-none backdrop:bg-black/45"
     >
       {/* Always there, so it fades out whole when it closes. Answering edits no project, so an agent's run does not lock it. */}
       <LockReason.Provider value={null}>

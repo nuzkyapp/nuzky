@@ -166,7 +166,7 @@ export function MultiInspector({ ids }: { ids: string[] }) {
   return (
     <>
       <InspectorHeader icon={Layers} title={`${found.length} clips selected`} detail={detail} />
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="scroll-shown min-h-0 flex-1 overflow-y-auto">
         <div className="grid grid-cols-2 gap-2 border-b border-white/[.07] px-4 pb-4 pt-1">
           <Button onClick={duplicateSelection} title={withKey("Duplicate", "duplicate")}>
             <Copy size={14} /> Duplicate

@@ -142,6 +142,9 @@ def flow_tour(r):
     relaunch(r)
     r.check('a profile with nothing remembered opens Get set up by itself again', wait(lambda: r.s.run(FIRST_LAUNCH) is True and r.s.run(SETUP_OPEN), 15))
     r.check('the window is 1440 × 900 again', resize(r, 1440, 900))
+    # Someone who docks the AI panel as a column at the right edge; its default place, the inspector's, is the one a
+    # narrower window falls back to below.
+    r.s.run("window.__nuzky.dock.setState({mode: 'right'})")
     hands = Hands(r)
     # Through to the end from the keyboard, as a person reaches the footer.
     for _ in range(4):
@@ -200,7 +203,7 @@ def flow_tour(r):
     r.check('the three steps are done', steps == [['Read the transcript', 'done'], ['Cutting long pauses', 'done'], ['Adding captions', 'done']], steps)
     seconds = f"{(before['durationUs'] - after['durationUs']) / 1e6:.1f} s shorter"
     r.check('the reply counts what the edit did, and no retakes, as the sample has none',
-            reply.startswith('Done. I cut') and seconds in reply and f"added {after['captions']} caption" in reply and 'retake' not in reply,
+            reply.startswith('Done. I cut') and seconds in reply.replace('\u00a0', ' ') and f"added {after['captions']} caption" in reply and 'retake' not in reply,
             {'reply': reply, 'expected': seconds})
     r.check('the demo keeps no chat with the project', a['chat'] is None, a)
     r.check('the ring around the spotlight is a white hairline, not blue', r.s.run(

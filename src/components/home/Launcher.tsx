@@ -271,7 +271,7 @@ export function Launcher() {
   let index = 0;
   return (
     <div data-exit className="fixed inset-0 z-[80]" onKeyDown={onKeyDown}>
-      <div className="scrim-in absolute inset-0 bg-black/45" onPointerDown={close} />
+      <div className="scrim-in absolute inset-0 bg-black/55" onPointerDown={close} />
       <div className="pointer-events-none absolute inset-x-0 top-[88px] flex justify-center px-6">
         <div
           role="dialog"
@@ -348,21 +348,25 @@ export function Launcher() {
             </div>
           ) : (
             <>
-              <div className="mt-1 flex shrink-0 items-center gap-1.5 border-t border-white/[.08] px-1 pt-2.5">
-                <span className="pr-1 pl-1 text-[12px] text-muted">Empty project</span>
-                {FORMATS.map((f) => (
-                  <Button key={f.label} pill title={`New empty ${f.label} project · ${f.hint}`} onClick={() => newProject(f.width, f.height)} className="tabular h-7 gap-1.5 px-2.5 text-[12px]">
-                    <FormatShape width={f.width} height={f.height} size={11} />
-                    {f.label}
+              {/* Two ways in on their own row, then the empty project in each format. */}
+              <div className="mt-1 flex shrink-0 flex-col gap-2 border-t border-white/[.08] px-1 pt-2.5">
+                <div className="flex items-center gap-1.5">
+                  <Button variant="ghost" pill onClick={() => void pickVideosForNewProject()} className="h-7 px-2.5 text-[12px]">
+                    <Upload size={13} /> From videos…
                   </Button>
-                ))}
-                <Button variant="ghost" pill onClick={() => void pickVideosForNewProject()} className="h-7 px-2.5 text-[12px]">
-                  <Upload size={13} /> From videos…
-                </Button>
-                <div className="flex-1" />
-                <Button variant="ghost" pill onClick={() => void openProjectFile()} className="h-7 px-2.5 text-[12px]">
-                  <FolderOpen size={13} /> Open file…
-                </Button>
+                  <Button variant="ghost" pill onClick={() => void openProjectFile()} className="h-7 px-2.5 text-[12px]">
+                    <FolderOpen size={13} /> Open file…
+                  </Button>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="pr-1 pl-2.5 text-[12px] text-muted">Empty project</span>
+                  {FORMATS.map((f) => (
+                    <Button key={f.label} pill title={`New empty ${f.label} project · ${f.hint}`} onClick={() => newProject(f.width, f.height)} className="tabular h-7 gap-1.5 px-2.5 text-[12px]">
+                      <FormatShape width={f.width} height={f.height} size={11} />
+                      {f.label}
+                    </Button>
+                  ))}
+                </div>
               </div>
               <div className="flex shrink-0 justify-end px-2 pt-2 pb-0.5 text-[11px] text-muted">↑↓ move · ↵ open · Esc keep editing</div>
             </>

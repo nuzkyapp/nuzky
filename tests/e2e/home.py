@@ -204,7 +204,7 @@ def home(r):
     r.check('an empty untitled project nobody has open is cleared away', not (projects_dir(r) / 'empty.nuzky').exists())
     r.check('the damaged project says why and cannot open', (card(r, 'broken.nuzky') or {}).get('meta') == 'Damaged file'
             and card(r, 'broken.nuzky')['disabled'], card(r, 'broken.nuzky'))
-    r.check('the open project says so', (card(r, 'Talk to camera') or {}).get('meta') == 'Open now', card(r, 'Talk to camera'))
+    r.check('the open project says its shape and that it is open', (card(r, 'Talk to camera') or {}).get('meta') == '9:16 · Open now', card(r, 'Talk to camera'))
     sections = r.s.run(SECTIONS)
     order = [c['name'] for c in cards(r)]
     r.check('a few projects show newest first, without date groups', sections == [] and order[0] == 'Talk to camera'
@@ -763,6 +763,6 @@ def first_run(r):
     r.check('it opens the editor with the video on the timeline', v and assets and 'talk' in assets[0], (view(r), assets))
     r.s.run("window.__nuzky.store.setState({view: 'home'})")
     r.check('after the first video, home shows the project instead of the first start',
-            wait(lambda: OPEN_VIDEO not in text() and any(c['path'] == view(r)['path'] and c['meta'] == 'Open now' for c in cards(r)), 10), (text(), cards(r)))
+            wait(lambda: OPEN_VIDEO not in text() and any(c['path'] == view(r)['path'] and c['meta'].endswith('Open now') for c in cards(r)), 10), (text(), cards(r)))
     time.sleep(0.5)
     r.shot('home-after-first-video')

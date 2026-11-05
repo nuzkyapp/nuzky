@@ -83,10 +83,10 @@ function InProject() {
     <>
       <ImportTile label="Add music or sound" onClick={() => pickAndImport(true)} className="mx-3.5" />
       {audio.length === 0 && importing.length === 0 ? (
-        <div className="mx-3.5 mb-3.5 flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-white/[.1] p-6 text-center">
+        <div className="mx-3.5 mb-3.5 flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
           <Music size={28} className="text-muted" />
           <p className="text-[13px] text-fg">No music yet</p>
-          <p className="text-[12px] text-muted">MP3, WAV, M4A, FLAC or OGG files you add show up here, and so do sounds from Music and Sound effects.</p>
+          <p className="max-w-[240px] text-[12px] text-balance text-muted" title="MP3, WAV, M4A, FLAC or OGG">Add a song, or pick one in Music or Sound effects.</p>
         </div>
       ) : (
         <div className="flex min-h-0 flex-col gap-0.5 overflow-y-auto px-2 pb-3.5">

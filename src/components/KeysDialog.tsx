@@ -92,7 +92,7 @@ function Dialog() {
   const changed = Object.keys(s.changed).length > 0;
 
   return (
-    <div data-scrim data-exit className="scrim-in fixed inset-0 z-[100] flex items-center justify-center bg-black/45" onPointerDown={(e) => e.target === e.currentTarget && close()}>
+    <div data-scrim data-exit className="scrim-in fixed inset-0 z-[100] flex items-center justify-center bg-black/55" onPointerDown={(e) => e.target === e.currentTarget && close()}>
     <div
       ref={dialog}
       role="dialog"
@@ -106,7 +106,7 @@ function Dialog() {
         }
         trapTab(e);
       }}
-      className="dialog-in overlay flex max-h-[calc(100vh-48px)] w-[560px] max-w-[calc(100vw-48px)] flex-col rounded-[20px] p-6 text-fg"
+      className="dialog-in overlay overlay-solid flex max-h-[calc(100vh-48px)] w-[560px] max-w-[calc(100vw-48px)] flex-col rounded-[20px] p-6 text-fg"
     >
       <div className="flex items-center justify-between gap-3">
         <h2 id="keys-title" className="text-[17px] font-semibold leading-[22px] tracking-[-0.025em]">

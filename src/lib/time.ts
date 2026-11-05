@@ -36,9 +36,10 @@ export function formatLength(us: number): string {
   return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
 }
 
+/** A length in seconds under a minute (4.8 s), and as a video's length beyond it (1:01). */
 export function formatDuration(us: number): string {
   const s = us / US;
-  return s < 60 ? `${s.toFixed(1)} s` : formatTime(us, false);
+  return s < 60 ? `${s.toFixed(1)} s` : formatLength(us);
 }
 
 /** The time of day, with the date when it was not today. */

@@ -19,9 +19,10 @@ window.dispatchEvent(at('pointermove', arguments[1], arguments[2]));
 window.dispatchEvent(at('pointerup', arguments[1], arguments[2]));"""
 SLIDERS = """const inspector = document.querySelector('aside[aria-label=Inspector]'); const full = inspector.getBoundingClientRect().width;
 return [...inspector.querySelectorAll('input[type=range]')].map((range) => {
-  const label = range.closest('div.flex-col').firstElementChild;
+  const label = range.parentElement.parentElement.parentElement.firstElementChild;
   const l = label.getBoundingClientRect(), t = range.getBoundingClientRect();
   return {label: label.textContent, above: l.bottom <= t.top && Math.abs(l.left - t.left) < 2,
+          beside: l.right <= t.left && Math.abs((l.top + l.bottom) / 2 - (t.top + t.bottom) / 2) < 3,
           whole: label.scrollWidth <= label.clientWidth, share: Math.round(t.width / full * 100) / 100};
 });"""
 
@@ -119,14 +120,14 @@ def resize(r, width, height):
 
 
 @flow('layout', "The library, inspector and timeline start in CapCut's proportions, resize from the gaps between them by "
-      'pointer and keyboard, never squeeze the preview under 340 px, are remembered, and sliders carry their label above',
+      'pointer and keyboard, never squeeze the preview under 340 px, are remembered, and sliders carry their short labels beside them',
       before=setup)
 def layout(r):
     first = sizes(r)
     columns = r.s.run(COLUMNS)
     w, h = first['window']
-    r.check("by default the library and the inspector take 28 % of the window's width and the timeline 35 % of its height",
-            first['library'] == round(w * 0.28) and first['inspector'] == round(w * 0.28) and first['timeline'] == round(h * 0.35), first)
+    r.check("by default the library takes 21 % and the inspector 22 % of the window's width and the timeline 26 % of its height, at least 200 px",
+            first['library'] == round(w * 0.21) and first['inspector'] == round(w * 0.22) and first['timeline'] == max(200, round(h * 0.26)), first)
     r.shot('default')
     look = r.s.run(LOOK)
     stage = preview_crop(r.work / 'default.png', look['stage']).getpixel((1, 1))
@@ -165,7 +166,7 @@ def layout(r):
             wide['preview'] == 340 and wide['inspector'] == first['inspector'] + 24, wide)
     tabs = r.s.run("return [...document.querySelectorAll('[role=tablist][aria-label=Library] [role=tab]')].map((t) => t.getBoundingClientRect().width)")
     r.check('the library tabs share the extra width', min(tabs) > 50, tabs)
-    r.check('the wider library shows more media in a row instead of larger tiles', columns == 3 and r.s.run(COLUMNS) >= 5, [columns, r.s.run(COLUMNS)])
+    r.check('the wider library shows more media in a row instead of larger tiles', columns == 2 and r.s.run(COLUMNS) >= 5, [columns, r.s.run(COLUMNS)])
     r.shot('resized')
 
     r.s.run('window.__oldPage = true; location.reload()')
@@ -178,18 +179,16 @@ def layout(r):
 
     if r.check('the window gets to 1024 x 640', resize(r, 1024, 640)):
         # The panes follow on the render after the resize event; the library, back on its share, shows it.
-        wait(lambda: sizes(r)['library'] == 360, 5)
+        wait(lambda: sizes(r)['library'] == 280, 5)
         small = sizes(r)
-        r.check('in the smallest window the inspector gives way first and the preview keeps 340 px',
-                small['preview'] == 340 and small['library'] == 360 and small['inspector'] == 300, small)
+        r.check('in the smallest window the library goes down to its narrowest and the preview keeps at least 340 px',
+                small['preview'] >= 340 and small['library'] == 280, small)
         r.check('the timeline leaves 300 px above it for the preview', small['timeline'] == 640 - 48 - 300 - 12, small)
-        tabs = r.s.run("const list = document.querySelector('[role=tablist][aria-label=Library]').getBoundingClientRect();"
-                       "return {list: [list.left, list.right], labels: [...document.querySelectorAll('[role=tablist][aria-label=Library] [role=tab] span')]"
-                       ".map((s) => { const r = s.getBoundingClientRect(); return [r.left, r.right, s.scrollWidth]; })}")
-        labels = tabs['labels']
-        gaps = [b[0] - a[1] for a, b in zip(labels, labels[1:])]
-        r.check('in the narrowest library every tab label shows whole and no two touch',
-                len(labels) == 8 and min(gaps) >= 2 and labels[0][0] >= tabs['list'][0] and labels[-1][1] <= tabs['list'][1], tabs)
+        tabs = r.s.run("return [...document.querySelectorAll('[role=tablist][aria-label=Library] [role=tab]')].map((t) => { const s = t.querySelector('span');"
+                       " const b = t.getBoundingClientRect(); return {top: Math.round(b.top), whole: s.scrollWidth <= s.clientWidth + 1 && s.getBoundingClientRect().right <= b.right + 1}; })")
+        rows = sorted({t['top'] for t in tabs})
+        r.check('in the narrowest library the tabs take two rows of four, every label whole inside its tab',
+                len(tabs) == 8 and len(rows) == 2 and all(t['whole'] for t in tabs) and [t['top'] for t in tabs].count(rows[0]) == 4, tabs)
         r.shot('small-window')
         resize(r, w, h)
         r.check('back in the large window the inspector and the timeline are as the user left them',
@@ -207,15 +206,15 @@ def layout(r):
     moved = slide(r, INSPECTOR_TABS, 'Adjust')
     r.check("choosing Adjust slides the inspector tabs' plate from Video to Adjust, where it settles", slid(moved), moved)
     sliders = wait(lambda: (lambda s: s if len(s) == 10 else None)(r.s.run(SLIDERS)), 5) or r.s.run(SLIDERS)
-    r.check('every Adjust slider has its name above it, from the same left edge, in full',
-            len(sliders) == 10 and all(s['above'] and s['whole'] for s in sliders), sliders)
-    r.check('the sliders run across most of the inspector', all(s['share'] >= 0.7 for s in sliders), [s['share'] for s in sliders])
+    r.check('every Adjust slider has its short name on its own row, beside it, in full, as in CapCut',
+            len(sliders) == 10 and all(s['beside'] and s['whole'] for s in sliders), sliders)
+    r.check('the sliders take the room the name and the value leave', all(s['share'] >= 0.4 for s in sliders), [s['share'] for s in sliders])
     r.shot('adjust')
     header = r.s.run(HEADER)
     tile = preview_crop(r.work / 'adjust.png', header['tile']).getpixel((1, 1))
     r.check("the inspector's header shows the clip's kind on a tile in the video clips' blue",
             all(abs(a - b) <= 6 for a, b in zip(tile, (0x24, 0x58, 0x91))), tile)
-    r.check("the Adjust sliders sit in a section's rounded group", header['group'] not in ('rgba(0, 0, 0, 0)', 'transparent') and header['radius'] == '10px', header)
+    r.check("the Adjust sliders sit straight on the inspector, without a box around them", header['group'] in ('rgba(0, 0, 0, 0)', 'transparent'), header)
 
     moved = slide(r, LIBRARY_TABS, 'Text')
     r.check("choosing Text slides the library tabs' plate there", slid(moved), moved)
@@ -223,7 +222,7 @@ def layout(r):
     font = wait(lambda: r.s.run("""const l = [...document.querySelectorAll('aside[aria-label=Inspector] span')].find((s) => s.textContent === 'Font');
         if (!l) return null; const a = l.getBoundingClientRect(), b = l.nextElementSibling.getBoundingClientRect();
         return {above: a.bottom <= b.top, left: Math.round(b.left - a.left), height: Math.round(b.height)};"""), 5)
-    r.check('the font picker has its label above it too, like the sliders, at its full 32 px height',
+    r.check('the font picker has its label above it, at its full 32 px height',
             font and font['above'] and font['left'] == 0 and font['height'] == 32, font)
     # The inspector settles on the new clip first, then shows the Style section for the proof.
     time.sleep(1)

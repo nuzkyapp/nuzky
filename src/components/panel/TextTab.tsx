@@ -19,7 +19,7 @@ function TextStyles() {
   const edit = useEditor((s) => s.edit);
   const lock = useLockReason();
   return (
-    <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] content-start gap-2 overflow-y-auto px-3.5 pt-1 pb-3.5">
+    <div className="scroll-shown grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] content-start gap-x-2 gap-y-3 overflow-y-auto px-3.5 pt-1 pb-6">
       {TEXT_PRESETS.map((p) => (
         <button
           key={p.name}
@@ -27,9 +27,13 @@ function TextStyles() {
           title={`Add "${p.name}" text at the playhead`}
           onClick={() => edit((project) => ({ type: "addText", startUs: useEditor.getState().timeUs, text: p.text, style: scaleStyle(p.style, canvasUnit(project.canvas)) }))}
           {...lockedProps(lock)}
-          className="flex h-16 min-w-0 items-center justify-center rounded-[10px] border border-white/[.08] bg-white/[.1] px-2 transition-colors duration-[120ms] ease-out hover:border-white/30 aria-disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:hover:border-white/[.08]"
+          className="group flex min-w-0 flex-col gap-1.5 text-left aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
         >
-          <TextSwatch style={p.style} label={p.name === "Title" ? "TITLE" : p.name} />
+          {/* The text each preset adds, drawn large in its style, with the preset's name under the tile. */}
+          <span className="flex h-20 w-full items-center justify-center rounded-[10px] border border-white/[.08] bg-white/[.06] px-2 transition-colors duration-[120ms] ease-out group-hover:border-white/30 group-aria-disabled:group-hover:border-white/[.08]">
+            <TextSwatch style={p.style} label={p.text} size={19} />
+          </span>
+          <span className="truncate text-[11px] text-muted">{p.name}</span>
         </button>
       ))}
     </div>

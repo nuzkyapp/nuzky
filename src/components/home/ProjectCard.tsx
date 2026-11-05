@@ -1,19 +1,21 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
 import { Check, Ellipsis } from "lucide-react";
 import { blocked, renameProject, useLibrary, whenLabel } from "../../lib/library";
+import { formatLabel } from "../../lib/presets";
 import { useEditor } from "../../lib/store";
 import type { LibraryProject } from "../../lib/types";
 import { Poster } from "./Poster";
 
-/** Width over height of a card's picture box: room for a 9:16 video at full height. */
-const CARD_BOX = 152 / 180;
+/** Width over height of a card's picture box; the picture keeps its own shape inside it, on the stage's black. */
+const CARD_BOX = 4 / 5;
 
 /** The line under the name: when, and its collection; or what keeps it from opening. */
 function meta(p: LibraryProject, open: boolean, collection: string | undefined) {
   if (p.state === "busy") return "In use elsewhere";
   if (p.state === "broken") return "Damaged file";
   const when = open ? "Open now" : whenLabel(p.modifiedMs);
-  return collection ? `${when} · ${collection}` : when;
+  const shape = p.width > 0 && p.height > 0 ? `${formatLabel(p.width, p.height)} · ` : "";
+  return shape + (collection ? `${when} · ${collection}` : when);
 }
 
 export function ProjectCard({
