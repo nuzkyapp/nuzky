@@ -540,7 +540,8 @@ def press(key):
     for window, name in _windows(d):
         if name == 'Nuzky' or name.endswith(' — Nuzky'):
             window.set_input_focus(X.RevertToParent, X.CurrentTime)
-    keysym = XK.string_to_keysym(key)
+    # Xlib names punctuation (minus, period), and a character's Latin-1 keysym is its code point.
+    keysym = XK.string_to_keysym(key) or (ord(key) if len(key) == 1 else 0)
     code = d.keysym_to_keycode(keysym)
     shift = d.keycode_to_keysym(code, 0) != keysym
     if shift:

@@ -10,6 +10,7 @@ import json, time
 
 from e2e.harness import AI_EDITING, Bridge, flow, press, wait, webdriver
 from e2e.snap import FRAME, POINTER
+from e2e.adjust import select_all
 from e2e.text_style import engine_frame, grey, type_value
 
 SECTION = 'aside[aria-label=Inspector]'
@@ -230,8 +231,7 @@ def caption_text(r):
                    wait(lambda: r.s.run(f"return !!{group(LIBRARY, 'Case')}") and pressed(r, LIBRARY, 'Case') == 'AB', 10)):
         r.shot('captions-tab-missing')
         return
-    r.s.run(f"""const input = document.querySelector('{LIBRARY} input[aria-label="Size value"]');
-        input.focus(); input.select();""")
+    wait(lambda: select_all(r, f"""document.querySelector('{LIBRARY} input[aria-label="Size value"]')"""), 5)
     for key in '120':
         press(key)
     press('Return')
