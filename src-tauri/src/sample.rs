@@ -80,11 +80,19 @@ pub async fn open_sample(app: AppHandle) -> CmdResult<ImportResult> {
     crate::open_new_project(&app, path, PROJECT, vec![asset], Vec::new())
 }
 
+/// Whether `path` is a tour's own project, `<id>.nuzky` in the tour folder; reels made of it sit beside it as
+/// `<id>-reel-<n>.nuzky` and are the person's.
+pub(crate) fn is_tour_project(path: &Path) -> bool {
+    let parent = path.parent().and_then(Path::file_name).is_some_and(|name| name == "tour");
+    let id = path.file_stem().and_then(|s| s.to_str()).is_some_and(|s| s.chars().all(|c| c.is_ascii_hexdigit()));
+    parent && id && path.extension().is_some_and(|x| x == store::EXTENSION)
+}
+
 /// A new project file in `dir`, after removing the earlier tours' projects there that nothing has open.
 fn tour_project(dir: &Path) -> PathBuf {
     for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
         let path = entry.path();
-        if path.extension().is_none_or(|x| x != store::EXTENSION) {
+        if !is_tour_project(&path) {
             continue;
         }
         let Ok(lock) = nuzky_session::lock_project(&path, true) else { continue };
@@ -306,8 +314,11 @@ mod tests {
         crate::store::create(&earlier, &project).unwrap();
         let history = store::sidecar(&earlier, nuzky_session::HISTORY_SUFFIX);
         std::fs::write(&history, "{}").unwrap();
+        let reel = tours.join(format!("{}-reel-1.nuzky", new_id()));
+        crate::store::create(&reel, &project).unwrap();
         let open = tour_project(&tours);
         assert!(!earlier.exists() && !history.exists() && !store::sidecar(&earlier, ".lock").exists());
+        assert!(reel.exists() && !is_tour_project(&reel) && is_tour_project(&open));
         crate::store::create(&open, &project).unwrap();
         let session = ProjectSession::open(&open, Mode::Write, None).unwrap();
         let next = tour_project(&tours);
