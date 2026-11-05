@@ -1,20 +1,12 @@
-The fifth alpha of Nuzky, a free, open-source video editor for your computer. It's early, so expect rough edges. Nuzky never changes or deletes your original videos.
+The sixth alpha of Nuzky, a free, open-source video editor for your computer. It's early, so expect rough edges. Nuzky never changes or deletes your original videos.
 
 ## What's new
 
-- **Edit from your phone.** The QR code button in the top bar shows a code and a link. Open it on a phone or another computer on the same Wi-Fi to add videos to the timeline, ask the AI to edit, watch the preview, export and download the result. Nuzky on your computer does all the work. Sharing stays off until you turn it on and ends when you click Stop sharing or quit.
-- **Reels that come out finished.** Make reels in Reels now also cuts retakes, fillers and hesitations, adds captions in your style and zooms on the sentences you stress. The Each reel gets menu turns any of them off.
-- **Your own keyboard shortcuts.** Keyboard shortcuts (Ctrl+, or Cmd+, on a Mac, or the gear in the editor's top bar) lets you change the key of every editor action, switch to the keys of Premiere Pro, Final Cut Pro or DaVinci Resolve, or import a keyboard file exported from them.
-- **Font weights.** A Weight menu beside the font picker offers every weight the font has, from Thin to Black, for texts, captions and covers.
-- **4K projects.** Ratio under the preview offers 1080p or 4K. Texts, outlines and borders keep their size on the picture when you switch.
-- **Preview a file before you use it.** Click a video in Media and it plays in the preview without being added to the timeline. Esc brings the timeline back, and a double-click still adds the file.
-- **Plugins with full access.** A plugin can ask to read and write files, use the internet and run other programs, for example to export the timeline for Premiere or Resolve. Nuzky asks you before its first run and again after any change to the plugin, and the AI can never run it.
-- **Updates in one click.** When you click Update and leave Nuzky alone while it downloads, it restarts into the new version by itself.
-- **Send feedback is labelled** in the editor's top bar, so Report a bug… is easy to find.
-
-## Fixed
-
-- The AI panel works with Codex installed by its own installer. Every message used to fail with "Operation not permitted".
+- **Record your screen.** Record screen in Media records the whole screen or one window on a Mac and adds it to Media when you click Stop in the top bar. On Linux and Windows the button stays off for now.
+- **B-roll where you name an app.** The Transcript tab suggests where to show a silent video from Media: when you say a word of its name, for example "now I open Claude", Add puts the recording over the picture for that sentence. Your voice and captions stay as they were.
+- **Text that covers a face.** Find text over faces, under Generate in the Captions tab, finds every caption, text and sticker over the speaker's face and suggests a clear place inside the Reels and TikTok safe area. Nothing moves until you click Move all, which you can undo.
+- **Mono for one-sided sound.** A voice recorded on one side, for example by a lavalier in one channel, plays in one ear. Mono in the Audio tab plays it in both, and Nuzky tells you when a file has sound on one side only.
+- **One file per hook.** Ask the AI to export each opening of a reel as its own file, with the same body and captions in every one, to try them as Instagram Trial Reels.
 
 ## Not yet
 
@@ -42,4 +34,4 @@ Open an issue at https://github.com/nuzkyapp/nuzky/issues, or use Send feedback 
 
 ## Source
 
-Nuzky is GPL-3.0-or-later, and its source is the Source code archive below. The installers include FFmpeg, ONNX Runtime and other libraries. Their source, and what each installer was built from, is in [Third-party source for Nuzky v0.1.5-alpha](https://github.com/nuzkyapp/nuzky/releases/tag/third-party-source-0.1.5-alpha).
+Nuzky is GPL-3.0-or-later, and its source is the Source code archive below. The installers include FFmpeg, ONNX Runtime and other libraries. Their source, and what each installer was built from, is in [Third-party source for Nuzky v0.1.6-alpha](https://github.com/nuzkyapp/nuzky/releases/tag/third-party-source-0.1.6-alpha).
