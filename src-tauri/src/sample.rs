@@ -2,7 +2,7 @@
 //! edit is Nuzky's own, with no agent, network or model: a real run of the project's session, live on the
 //! timeline, that the user can stop and undo in one step like any agent's.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -15,7 +15,7 @@ use nuzky_session::{EndAction, Expect, host::Host, transcripts::TranscriptStore}
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
-use crate::{AppState, CmdResult, ImportResult, OpenSession, err};
+use crate::{AppState, CmdResult, ImportResult, OpenSession, err, store};
 
 const VIDEO: &[u8] = include_bytes!("../../assets/sample/spotlight-effect.mp4");
 /// In a numbered folder of Nuzky's data folder, the first one free or holding this video, so a file that
@@ -65,17 +65,38 @@ pub(crate) fn install(data: &Path, transcripts: &TranscriptStore) -> Result<Asse
     Ok(asset)
 }
 
-/// A new project of the sample video, opened like one made from media; each call makes a new one, uncut.
+/// A new project of the sample video, opened like one made from media; each call makes a new one, uncut. It
+/// lives outside the projects folder, so it never shows among the projects or opens at the next start.
 #[tauri::command]
 pub async fn open_sample(app: AppHandle) -> CmdResult<ImportResult> {
     log::info!(target: "action", "open the sample video");
-    let asset = tauri::async_runtime::spawn_blocking(|| {
-        install(&nuzky_engine::data_dir().context("Nuzky has no folder for its data")?, &TranscriptStore::open()?)
+    let (path, asset) = tauri::async_runtime::spawn_blocking(|| {
+        let data = nuzky_engine::data_dir().context("Nuzky has no folder for its data")?;
+        anyhow::Ok((tour_project(&data.join("tour")), install(&data, &TranscriptStore::open()?)?))
     })
     .await
     .map_err(err)?
     .map_err(err)?;
-    crate::open_new_project(&app, PROJECT, vec![asset], Vec::new())
+    crate::open_new_project(&app, path, PROJECT, vec![asset], Vec::new())
+}
+
+/// A new project file in `dir`, after removing the earlier tours' projects there that nothing has open.
+fn tour_project(dir: &Path) -> PathBuf {
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let path = entry.path();
+        if path.extension().is_none_or(|x| x != store::EXTENSION) {
+            continue;
+        }
+        let Ok(lock) = nuzky_session::lock_project(&path, true) else { continue };
+        let _ = std::fs::remove_dir_all(crate::agent_panel::chats_dir(&path));
+        for suffix in [nuzky_session::HISTORY_SUFFIX, ".checkpoint.json"] {
+            let _ = std::fs::remove_file(store::sidecar(&path, suffix));
+        }
+        let _ = std::fs::remove_file(&path);
+        drop(lock);
+        let _ = std::fs::remove_file(store::sidecar(&path, ".lock"));
+    }
+    dir.join(format!("{}.{}", new_id(), store::EXTENSION))
 }
 
 /// The tour's AI edit of the open sample project. Stop in the top bar ends it with what it did so far, and
@@ -192,7 +213,6 @@ mod tests {
     use nuzky_engine::edit::{EditCmd, TimeRange};
     use nuzky_session::{Mode, ProjectSession};
     use sha2::{Digest, Sha256};
-    use std::path::PathBuf;
 
     /// A data folder of its own, with no models in it, and the sample installed there.
     fn installed(name: &str) -> (PathBuf, TranscriptStore, Asset) {
@@ -274,6 +294,25 @@ mod tests {
         assert_ne!(beside.path, asset.path);
         assert!(std::fs::read(&beside.path).unwrap() == VIDEO);
         assert_eq!(install(&dir, &store).unwrap().path, beside.path);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_new_tour_removes_the_earlier_tours_projects_but_the_open_one() {
+        let (dir, _, asset) = installed("again");
+        let tours = dir.join("tour");
+        let project = crate::project_from_media(PROJECT, vec![asset]).unwrap();
+        let earlier = tour_project(&tours);
+        crate::store::create(&earlier, &project).unwrap();
+        let history = store::sidecar(&earlier, nuzky_session::HISTORY_SUFFIX);
+        std::fs::write(&history, "{}").unwrap();
+        let open = tour_project(&tours);
+        assert!(!earlier.exists() && !history.exists() && !store::sidecar(&earlier, ".lock").exists());
+        crate::store::create(&open, &project).unwrap();
+        let session = ProjectSession::open(&open, Mode::Write, None).unwrap();
+        let next = tour_project(&tours);
+        assert!(open.exists() && next != open);
+        drop(session);
         std::fs::remove_dir_all(dir).unwrap();
     }
 
