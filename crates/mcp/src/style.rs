@@ -1416,6 +1416,9 @@ pub struct Moment {
     path: PathBuf,
     edited: bool,
     runs: Option<(Project, Option<Project>)>,
+    /// Where the creator's settings are read again when the lesson is worked out, as they may turn learning off
+    /// while an export runs.
+    style: PathBuf,
 }
 
 /// What learning from a project the creator exported, or `edited` after an AI cut it, needs, taken
@@ -1450,7 +1453,7 @@ fn moment_for(
     if edited && runs.is_none() {
         return Ok(None);
     }
-    Ok(Some(Moment { project, path: session.path(), edited, runs }))
+    Ok(Some(Moment { project, path: session.path(), edited, runs, style: store.dir.clone() }))
 }
 
 impl Moment {
@@ -1458,6 +1461,9 @@ impl Moment {
     /// only learn its own cut. Edits that undo the run teach nothing either, while an export of
     /// the creator's own cut from before the run does.
     pub fn lesson(&self, transcripts: &TranscriptStore) -> Result<Option<Evidence>> {
+        if !Store::at(&self.style).settings().learn_from_edits {
+            return Ok(None);
+        }
         let Some(evidence) = project_evidence(&self.project, &self.path, transcripts)? else { return Ok(None) };
         if let Some((after, before)) = &self.runs {
             for other in std::iter::once(after).chain(before.as_ref().filter(|_| self.edited)) {
@@ -2086,7 +2092,11 @@ mod tests {
             moment_for(&store, &host.session, state.project, false, false).unwrap().is_some()
         };
         assert!(learns(), "an install without the setting learns as before");
+        // Turned off while the export that took the moment still runs: what it would teach is not kept.
+        let state = host.session.state().unwrap();
+        let taken = moment_for(&store, &host.session, state.project, false, false).unwrap().unwrap();
         store.save_settings(&StyleSettings { learn_from_edits: false }).unwrap();
+        assert!(taken.lesson(&host.transcripts).unwrap().is_none(), "a lesson after it was turned off");
         assert!(!store.settings().learn_from_edits);
         assert!(!learns(), "nothing from an export once it is off");
         store.save_settings(&StyleSettings::default()).unwrap();
