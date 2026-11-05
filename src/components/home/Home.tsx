@@ -695,36 +695,19 @@ function Empty({ icon, title, children }: { icon: ReactNode; title: string; chil
   );
 }
 
-const FIRST_STEPS = [
-  ["Captions in your language", "Pick the language in Captions. Nuzky starts with your computer's, or detects it."],
-  ["Cut pauses and retakes", "In the transcript, or let an AI agent cut them."],
-  ["Export for Reels & TikTok", "1080p in 9:16. Switch Ratio first for any other shape."],
-];
-
-/** No projects yet: the way from a talking head video to a post, and the formats to start empty. */
+/** No projects yet: a video or the sample to start with, AI to cut it, and the formats to start empty. */
 function FirstRun() {
   return (
     <div className="mx-auto flex max-w-[748px] flex-col items-center gap-6 pt-20 text-center">
       <h2 className="text-[17px] font-semibold text-fg">Start your first video</h2>
       <div className="-mt-2 flex gap-2">
         <Button variant="primary" onClick={() => void pickVideosForNewProject()} className="h-9 px-4">
-          <Film size={16} /> Open a talking head video…
+          <Film size={16} /> Open a video…
         </Button>
         <Button onClick={trySample} className="h-9 px-4">
           Try the sample video
         </Button>
       </div>
-      <ol className="grid w-full grid-cols-3 gap-6 text-left">
-        {FIRST_STEPS.map(([title, line], i) => (
-          <li key={title} className="flex gap-2.5">
-            <span className="tabular flex size-5 shrink-0 items-center justify-center rounded-full bg-white/[.09] text-[11px] font-semibold text-fg">{i + 1}</span>
-            <span>
-              <span className="block text-[13px] font-semibold text-fg">{title}</span>
-              <span className="mt-0.5 block text-[12px] text-muted">{line}</span>
-            </span>
-          </li>
-        ))}
-      </ol>
       <div className="flex flex-col items-center gap-2 text-[13px] text-muted">
         <p>
           Want AI to do the cutting?{" "}
@@ -734,10 +717,9 @@ function FirstRun() {
           or{" "}
           <button type="button" onClick={() => useEditor.setState({ connectOpen: true })} className="text-accent hover:underline">
             connect an agent
-          </button>{" "}
-          you already use, like Claude Code, Codex or Gemini.
+          </button>
+          .
         </p>
-        <p>Or drop videos from your phone anywhere in this window.</p>
         <div className="flex items-center gap-1">
           Or start empty:
           {FORMATS.map((f) => (

@@ -1011,19 +1011,19 @@ async fn new_project_from_media(app: AppHandle, paths: Vec<String>) -> CmdResult
         let reasons: Vec<String> = failed.iter().map(|f| f.error.clone()).collect();
         return Err(format!("None of those files could be opened: {}", reasons.join("; ")));
     }
-    open_new_project(&app, library::UNTITLED, assets, failed)
+    open_new_project(&app, store::new_project_path(), library::UNTITLED, assets, failed)
 }
 
-/// Opens a new project named `name` with the media on its timeline.
+/// Opens a new project at `path` named `name` with the media on its timeline.
 fn open_new_project(
     app: &AppHandle,
+    path: PathBuf,
     name: &str,
     assets: Vec<nuzky_engine::model::Asset>,
     failed: Vec<ImportFailure>,
 ) -> CmdResult<ImportResult> {
     let added: Vec<String> = assets.iter().map(|a| a.id.clone()).collect();
     let project = project_from_media(name, assets).map_err(err)?;
-    let path = store::new_project_path();
     store::create(&path, &project).map_err(err)?;
     // The panel's agent works on the open project only; never stopped while holding the session.
     app.state::<agent_panel::AgentPanel>().stop();

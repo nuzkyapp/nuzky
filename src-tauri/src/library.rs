@@ -412,10 +412,10 @@ impl Library {
         true
     }
 
-    /// Projects opened from elsewhere stay in the list.
+    /// Projects opened from elsewhere stay in the list; the tour's own never joins it.
     pub fn remember(&self, path: &Path) {
         let path_key = key(path);
-        if path_key.starts_with(&key(&store::projects_dir())) {
+        if path_key.starts_with(&key(&store::projects_dir())) || crate::sample::is_tour_project(path) {
             return;
         }
         let added = self.update(|index| {

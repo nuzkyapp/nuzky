@@ -328,11 +328,11 @@ export function newProjectFromMedia(paths: string[], then?: () => void) {
   });
 }
 
-/** A new project of the sample video Nuzky ships, then `then`. */
+/** A new project of the sample video Nuzky ships, then `then`; it joins no projects, so no collection either. */
 export function newSampleProject(then?: () => void) {
   switchTo({
     what: "open the sample video",
-    verb: "start",
+    verb: "open",
     run: async () => {
       const result = await api.openSample();
       if (result.failed.length > 0) toast({ kind: "error", text: importFailures(result.failed) });
