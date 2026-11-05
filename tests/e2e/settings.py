@@ -75,6 +75,8 @@ def settings(r):
     # Storage: Clear deletes what the open project no longer uses and keeps the rest.
     r.s.run(TAB, 'storage')
     row = wait(lambda: (t := r.s.run(ROW, 'sound')) and 'Prepared sound' in t and t, 10)
+    data = usage(r)['data']
+    r.check('the projects, plugins and style count, also when the data folder is a link, as it is here', data['bytes'] > 0 and data['path'], data)
     r.check('Storage lists the prepared sound with its size and what the open project keeps', row and 'kept for the open project' in row, row)
     time.sleep(0.5)
     r.shot('storage')

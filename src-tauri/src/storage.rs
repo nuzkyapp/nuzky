@@ -177,8 +177,10 @@ fn usage(cache: &Path, blocked: &[(StorageGroupId, String)], keep: &[String]) ->
         let (bytes, kept_bytes) = measure(cache, folders, keep);
         StorageGroup { id, bytes, kept_bytes, clearable: true, blocked: reason(id), path: None }
     };
-    let data = store::data_dir();
-    let models = nuzky_analysis::models_dir();
+    // The folders themselves may be links (a moved Library folder); what is inside them is walked without following any.
+    let real = |dir: PathBuf| dir.canonicalize().unwrap_or(dir);
+    let data = real(store::data_dir());
+    let models = real(nuzky_analysis::models_dir());
     let whole = |id, dir: &Path, bytes| StorageGroup {
         id,
         bytes,

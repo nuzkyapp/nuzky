@@ -113,7 +113,7 @@ function Row({ group: g, clearing, cleared, onClear }: { group: StorageGroup; cl
               {kept}
             </span>
           ) : (
-            `${formatBytes(g.bytes)} · ${detail}${kept}`
+            `${g.bytes ? formatBytes(g.bytes) : "Empty"} · ${detail}${kept}`
           )}
         </span>
         {id && g.blocked && <span className="text-[12px] text-fg">{g.blocked}</span>}
