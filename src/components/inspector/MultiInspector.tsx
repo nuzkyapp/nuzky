@@ -7,7 +7,7 @@ import type { Adjust, Clip, EditCmd, Project, Track, Transform } from "../../lib
 import { Button, IconButton, Section, Slider } from "../ui";
 import { InspectorHeader, QUIET } from "./Header";
 import { BackgroundSection } from "./BackgroundSection";
-import { DuckingRow, VoiceSection } from "./MediaSections";
+import { DuckingRow, MonoRow, VoiceSection } from "./MediaSections";
 import { StyleSection } from "./TextSection";
 import { useKeyLabels } from "../../lib/keys";
 
@@ -137,6 +137,7 @@ function VolumeRow({ found, coalesce }: { found: Found[]; coalesce: string }) {
         onChange={(v) => editClips(ids, (c) => ({ type: "updateClip", clipId: c.id, volume: v / 100 }), `${coalesce}:volume`)}
       />
       <DuckingRow clips={found.map((f) => f.clip)} coalesce={coalesce} />
+      <MonoRow clips={found.map((f) => f.clip)} />
     </Section>
   );
 }

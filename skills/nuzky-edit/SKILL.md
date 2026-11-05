@@ -174,4 +174,6 @@ To hold a moment, such as a reaction or a product, apply `{"type":"freezeFrame",
 
 To speed up a talking head, 1.1–1.25 is common: `{"type":"updateClip","clipId":…,"speed":1.2}`. A clip moved off 1x keeps the pitch of its voice (`keepPitch` turns on); add `"keepPitch":false` only when the user wants the voice higher or lower with the speed. Captions and word times follow the speed either way.
 
+When a voice is heard in one ear only, the microphone recorded on one side: get_state then gives its file `"soundOnlyIn":"left"` (or `"right"`) once its sound is prepared, as any tool that listens to the sound prepares it. Set `{"type":"updateClip","clipId":…,"mono":"left"}` on every clip of that file to play that side in both ears. `"both"` mixes the two sides into one, `"off"` plays the file as recorded.
+
 For music under speech, set `{"type":"updateClip","clipId":…,"duckDb":12}` on the music clip instead of lowering its volume by hand: it goes 12 dB down while a video's own sound has speech and comes back in the pauses, the same in playback and export. Speech is any sound in video clips above -40 dBFS, never an imported audio file. 6 is gentle, 18 strong, up to 40; 0 turns it off.

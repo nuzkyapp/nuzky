@@ -948,6 +948,7 @@ pub fn plan_correction(
         leveler: None,
         shape: None,
         duck_db: None,
+        mono: None,
         background: None,
     }));
     Ok(Correction { edits, words, captions: changed, captions_kept })

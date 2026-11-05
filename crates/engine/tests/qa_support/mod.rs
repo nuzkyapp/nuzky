@@ -98,6 +98,7 @@ pub fn clip(id: &str, asset: &str, start: i64, duration: i64) -> Clip {
             leveler: 0.0,
             shape: None,
             duck_db: 0.0,
+            mono: Default::default(),
             background: Default::default(),
         },
     )

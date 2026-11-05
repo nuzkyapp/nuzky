@@ -699,6 +699,10 @@ pub enum ClipContent {
         /// a video's own sound, coming back in the pauses. 0 turns it off.
         #[serde(default, skip_serializing_if = "is_zero")]
         duck_db: f32,
+        /// Mono: the clip plays one sound in both ears, made from both sides of its file or only from
+        /// one, for a microphone recorded on one side.
+        #[serde(default, skip_serializing_if = "Mono::is_off")]
+        mono: Mono,
         /// Blur or replace what is behind the person (video and image clips).
         #[serde(default, skip_serializing_if = "Background::is_none")]
         background: Background,
@@ -715,6 +719,29 @@ pub enum ClipContent {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         words: Vec<CaptionWord>,
     },
+}
+
+/// Which sound a clip plays in both ears.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+pub enum Mono {
+    /// Stereo, as recorded.
+    #[default]
+    Off,
+    /// Both sides mixed into one.
+    Both,
+    /// Only the left side.
+    Left,
+    /// Only the right side.
+    Right,
+}
+
+impl Mono {
+    pub fn is_off(&self) -> bool {
+        *self == Mono::Off
+    }
 }
 
 /// One spoken word of a caption. Times are relative to the clip start, like keyframes, so moving

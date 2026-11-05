@@ -427,6 +427,11 @@ export type ClipContent = {
    */
   duckDb?: number,
   /**
+   * Mono: the clip plays one sound in both ears, made from both sides of its file or only from
+   * one, for a microphone recorded on one side.
+   */
+  mono?: Mono,
+  /**
    * Blur or replace what is behind the person (video and image clips).
    */
   background?: Background,
@@ -700,6 +705,11 @@ export type EditCmd = {
    * 0 turns it off. 12 suits music under speech.
    */
   duckDb?: number | null,
+  /**
+   * Clips with sound: play one sound in both ears, from both sides of the file (`both`) or from
+   * one (`left`, `right`) when the microphone recorded on one side only; `off` plays it as recorded.
+   */
+  mono?: Mono | null,
   /**
    * Video and image clips: blur what is behind the person, or put a colour or an image of the
    * project there; `{"type": "none"}` shows the picture as recorded. The person's outline is made
@@ -1089,6 +1099,11 @@ export type ModelQuestion = {
    */
   sizeMb: number,
 };
+
+/**
+ * Which sound a clip plays in both ears.
+ */
+export type Mono = "off" | "both" | "left" | "right";
 
 export type MotionKind = "pushIn" | "pullOut" | "kenBurns";
 

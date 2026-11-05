@@ -13,7 +13,7 @@ use crate::effects::transition_window;
 use crate::level::{self, Levels};
 use crate::loudness::db_to_gain;
 use crate::media::extract_pcm_with_peaks;
-use crate::model::{Asset, AssetKind, CHANNELS, Clip, ClipContent, Project, SAMPLE_RATE, Track, TrackKind};
+use crate::model::{Asset, AssetKind, CHANNELS, Clip, ClipContent, Mono, Project, SAMPLE_RATE, Track, TrackKind};
 use crate::speech::is_heard;
 use crate::stretch::Stretch;
 
@@ -246,6 +246,64 @@ pub fn match_gain_db(cache_dir: &Path, project: &Project, clip: &Clip) -> Option
     levels_of(&dry, wet.as_deref(), *dereverb, true, *leveler)?.match_db
 }
 
+/// A side is heard as missing when it is this much quieter than the other: 30 dB, in power.
+const SILENT_SIDE: f64 = 1e-3;
+/// Below this mean power of the louder side (-50 dBFS) a file is too quiet to tell.
+const AUDIBLE_POWER: f64 = 1e-5;
+/// How many stretches of `SIDE_LOOK` frames spread over a file are compared, so a file of an hour is
+/// read as little as one of a minute.
+const SIDE_LOOKS: usize = 64;
+const SIDE_LOOK: usize = SAMPLE_RATE as usize / 4;
+
+/// The side of `asset`'s sound that has it all, `Mono::Left` or `Mono::Right`, when a microphone
+/// recorded on one side only; None for sound on both sides and until its cache is prepared. Each cache
+/// is read once per process.
+pub fn sound_only_in(cache_dir: &Path, asset: &Asset) -> Option<Mono> {
+    static KNOWN: std::sync::Mutex<Option<HashMap<PathBuf, Option<Mono>>>> = std::sync::Mutex::new(None);
+    if !has_audio(asset) {
+        return None;
+    }
+    let path = pcm_path(cache_dir, asset);
+    if let Some(known) = KNOWN.lock().unwrap().get_or_insert_default().get(&path) {
+        return *known;
+    }
+    // A cache appears whole by a rename, so one that opens is complete.
+    let side = one_side(&path).ok()?;
+    KNOWN.lock().unwrap().get_or_insert_default().insert(path, side);
+    side
+}
+
+fn one_side(path: &Path) -> Result<Option<Mono>> {
+    let mut file = File::open(path)?;
+    let frames = file.metadata()?.len() as usize / (CHANNELS * 4);
+    let look = SIDE_LOOK.min(frames);
+    let looks = if frames <= SIDE_LOOK * SIDE_LOOKS { frames.div_ceil(look.max(1)) } else { SIDE_LOOKS };
+    let mut buffer = vec![0f32; look * CHANNELS];
+    let mut power = [0f64; CHANNELS];
+    let mut counted = 0usize;
+    for i in 0..looks {
+        let first = if looks > 1 { (frames - look) * i / (looks - 1) } else { 0 };
+        file.seek(SeekFrom::Start((first * CHANNELS * 4) as u64))?;
+        let read = read_full(&mut file, bytemuck::cast_slice_mut(&mut buffer))? / 4 / CHANNELS;
+        for frame in buffer[..read * CHANNELS].as_chunks::<CHANNELS>().0 {
+            for (sum, s) in power.iter_mut().zip(frame) {
+                *sum += (*s as f64).powi(2);
+            }
+        }
+        counted += read;
+    }
+    let [left, right] = power.map(|p| p / counted.max(1) as f64);
+    Ok(if left.max(right) < AUDIBLE_POWER {
+        None
+    } else if right < left * SILENT_SIDE {
+        Some(Mono::Left)
+    } else if left < right * SILENT_SIDE {
+        Some(Mono::Right)
+    } else {
+        None
+    })
+}
+
 pub struct Mixer {
     cache_dir: PathBuf,
     /// Keyed by cache file, which names the source revision, so media rebound under the same
@@ -355,6 +413,7 @@ impl Mixer {
                     dereverb,
                     normalize,
                     leveler,
+                    mono,
                     ..
                 } = &clip.content
                 else {
@@ -455,15 +514,18 @@ impl Mixer {
                         gain *= level::gain_at(levels, src);
                     }
                     let o = ((i - start) as usize) * CHANNELS;
-                    for ch in 0..CHANNELS {
+                    let frame = std::array::from_fn(|ch| {
                         let read = |samples| match stretch {
                             Some((place, stretch, kept)) => stretch.sample(samples, i - place, ch, kept),
                             None => sample_at(samples, src, ch),
                         };
-                        let mut sample = read(samples);
-                        if let Some(wet) = wet {
-                            sample += (read(wet) - sample) * *dereverb;
+                        let sample = read(samples);
+                        match wet {
+                            Some(wet) => sample + (read(wet) - sample) * *dereverb,
+                            None => sample,
                         }
+                    });
+                    for (ch, sample) in heard(*mono, frame).into_iter().enumerate() {
                         out[o + ch] += sample * gain;
                     }
                 }
@@ -505,6 +567,16 @@ fn sample_at(samples: &[f32], position: f64, channel: usize) -> f32 {
     a + (b - a) * p
 }
 
+/// A stereo frame of a clip's file as a clip set to `mono` plays it.
+fn heard(mono: Mono, [left, right]: [f32; CHANNELS]) -> [f32; CHANNELS] {
+    match mono {
+        Mono::Off => [left, right],
+        Mono::Both => [(left + right) / 2.0; CHANNELS],
+        Mono::Left => [left; CHANNELS],
+        Mono::Right => [right; CHANNELS],
+    }
+}
+
 fn fade_gain(i: i64, start: i64, end: i64, fade_in: i64, fade_out: i64) -> f32 {
     let ramp = |n: i64, d: i64| if d > 0 { (n as f32 / d as f32).clamp(0.0, 1.0) } else { 1.0 };
     ramp(i - start, fade_in) * ramp(end - 1 - i, fade_out)
@@ -529,6 +601,7 @@ fn continues(clip: &Clip, next: &Clip) -> bool {
             volume: volume_a,
             speed: speed_a,
             duck_db: duck_a,
+            mono: mono_a,
             dereverb: dereverb_a,
             normalize: normalize_a,
             leveler: leveler_a,
@@ -540,6 +613,7 @@ fn continues(clip: &Clip, next: &Clip) -> bool {
             volume: volume_b,
             speed: speed_b,
             duck_db: duck_b,
+            mono: mono_b,
             dereverb: dereverb_b,
             normalize: normalize_b,
             leveler: leveler_b,
@@ -555,6 +629,7 @@ fn continues(clip: &Clip, next: &Clip) -> bool {
         && speed_a == speed_b
         && volume_a == volume_b
         && duck_a == duck_b
+        && mono_a == mono_b
         && (dereverb_a, normalize_a, leveler_a) == (dereverb_b, normalize_b, leveler_b)
         && cleans_voice(clip) == cleans_voice(next)
         && keeps_pitch(clip) == keeps_pitch(next)
@@ -1133,6 +1208,7 @@ mod tests {
                     leveler: 0.0,
                     shape: None,
                     duck_db: 0.0,
+                    mono: Default::default(),
                     background: Default::default(),
                 },
             );
@@ -1205,6 +1281,7 @@ mod tests {
                     leveler: 0.0,
                     shape: None,
                     duck_db: 0.0,
+                    mono: Default::default(),
                     background: Default::default(),
                 },
             );

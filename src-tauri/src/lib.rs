@@ -813,6 +813,17 @@ async fn match_gain(app: AppHandle, clip_id: String) -> CmdResult<Option<f64>> {
     .map_err(err)
 }
 
+/// The side of the file's sound that has it all, when a microphone recorded on one side only.
+#[tauri::command]
+async fn sound_only_in(app: AppHandle, asset_id: String) -> CmdResult<Option<nuzky_engine::model::Mono>> {
+    let state = app.state::<AppState>();
+    let project = state.project()?;
+    let cache = state.cache_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || nuzky_engine::audio::sound_only_in(&cache, project.asset(&asset_id)?))
+        .await
+        .map_err(err)
+}
+
 #[tauri::command]
 fn play(state: State<'_, AppState>) {
     log::info!(target: "action", "play");
@@ -1412,6 +1423,7 @@ pub fn run() {
             thumbnail,
             waveform,
             match_gain,
+            sound_only_in,
             play,
             pause,
             seek,

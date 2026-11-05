@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::{
     Adjust, Animation, Asset, AssetKind, Background, CAPTIONS_TRACK, Canvas, CaptionWord, Clip, ClipContent, Ease,
-    Effect, Keyframe, Keywords, LetterCase, MAX_CANVAS_SIDE, MAX_CLIP_EFFECTS, Project, ReelCandidate, Shape,
+    Effect, Keyframe, Keywords, LetterCase, MAX_CANVAS_SIDE, MAX_CLIP_EFFECTS, Mono, Project, ReelCandidate, Shape,
     TextAlign, TextShadow, TextStyle, Thumbnail, ThumbnailFormat, Track, TrackKind, Transform, Transition,
     WordCorrection,
 };
@@ -211,6 +211,9 @@ pub enum EditCmd {
         /// Ducking: how many dB the clip goes down while a video's own sound has speech, up to 40;
         /// 0 turns it off. 12 suits music under speech.
         duck_db: Option<f32>,
+        /// Clips with sound: play one sound in both ears, from both sides of the file (`both`) or from
+        /// one (`left`, `right`) when the microphone recorded on one side only; `off` plays it as recorded.
+        mono: Option<Mono>,
         /// Video and image clips: blur what is behind the person, or put a colour or an image of the
         /// project there; `{"type": "none"}` shows the picture as recorded. The person's outline is made
         /// once per file in the background.
@@ -658,6 +661,7 @@ pub fn media(asset: &Asset, transform: Transform, shape: Option<Shape>) -> ClipC
         leveler: 0.0,
         shape,
         duck_db: 0.0,
+        mono: Mono::Off,
         background: Default::default(),
     }
 }
@@ -1247,12 +1251,20 @@ impl Project {
                 };
                 let sound = crate::audio::has_audio(&asset);
                 if let ClipContent::Media {
-                    asset_id: a, source_in_us, clean_voice, dereverb, normalize, leveler, ..
+                    asset_id: a,
+                    source_in_us,
+                    clean_voice,
+                    dereverb,
+                    normalize,
+                    leveler,
+                    mono,
+                    ..
                 } = &mut self.tracks[ti].clips[ci].content
                 {
                     *a = asset.id;
                     *source_in_us = source_in;
                     if !sound {
+                        *mono = Mono::Off;
                         *clean_voice = false;
                         *dereverb = 0.0;
                         *normalize = false;
@@ -1488,9 +1500,11 @@ impl Project {
                     normalize,
                     leveler,
                     duck_db,
+                    mono,
                     ..
                 } = &mut still.content
                 {
+                    *mono = Mono::Off;
                     *source_in_us = crate::effects::source_time(&clip, at_us).min(last);
                     (*speed, *volume, *keep_pitch, *clean_voice, *normalize) = (0.0, 0.0, false, false, false);
                     (*fade_in_us, *fade_out_us, *dereverb, *leveler, *duck_db) = (0, 0, 0.0, 0.0, 0.0);
@@ -1575,6 +1589,7 @@ impl Project {
                 leveler,
                 shape,
                 duck_db,
+                mono,
                 background,
             } => {
                 let (ti, ci) = self.find_clip(&clip_id).ok_or_else(|| anyhow!("Unknown clip"))?;
@@ -1586,7 +1601,8 @@ impl Project {
                             && volume.is_none_or(|v| v == 0.0)
                             && fade_in_us.is_none_or(|f| f == 0)
                             && fade_out_us.is_none_or(|f| f == 0)
-                            && duck_db.is_none_or(|d| d == 0.0)),
+                            && duck_db.is_none_or(|d| d == 0.0)
+                            && mono.is_none_or(|m| m.is_off())),
                     "A freeze frame has no sound or speed; trim it to change how long it lasts"
                 );
                 ensure!(
@@ -1613,6 +1629,7 @@ impl Project {
                     || dereverb.is_some_and(|x| x > 0.0)
                     || normalize == Some(true)
                     || leveler.is_some_and(|x| x > 0.0)
+                    || mono.is_some_and(|m| !m.is_off())
                 {
                     let clip = &self.tracks[ti].clips[ci];
                     let sound = match &clip.content {
@@ -1642,6 +1659,7 @@ impl Project {
                         leveler: l,
                         shape: sh,
                         duck_db: duck,
+                        mono: mo,
                         background: bg,
                         ..
                     } => {
@@ -1677,6 +1695,9 @@ impl Project {
                         }
                         if let Some(x) = duck_db {
                             *duck = x.clamp(0.0, MAX_DUCK_DB);
+                        }
+                        if let Some(x) = mono {
+                            *mo = x;
                         }
                         if let Some(x) = background {
                             *bg = *x;
@@ -2240,6 +2261,7 @@ impl Project {
                         normalize,
                         leveler,
                         duck_db,
+                        mono,
                         ..
                     },
                     ClipContent::Media {
@@ -2251,6 +2273,7 @@ impl Project {
                         normalize: n,
                         leveler: l,
                         duck_db: d,
+                        mono: mo,
                         ..
                     },
                 ) if kind == TrackKind::Audio => {
@@ -2259,7 +2282,7 @@ impl Project {
                     *fo = (*fade_out_us).clamp(0, span / 2);
                     *d = *duck_db;
                     if sound {
-                        (*cv, *dr, *n, *l) = (*clean_voice, *dereverb, *normalize, *leveler);
+                        (*cv, *dr, *n, *l, *mo) = (*clean_voice, *dereverb, *normalize, *leveler, *mono);
                     }
                     pasted += 1;
                     continue;
@@ -3589,6 +3612,7 @@ mod tests {
             leveler: None,
             shape: None,
             duck_db: None,
+            mono: None,
             background: None,
         }
     }
@@ -3620,6 +3644,7 @@ mod tests {
             leveler: None,
             shape: None,
             duck_db: None,
+            mono: None,
             background: None,
         })
         .unwrap();
@@ -3665,6 +3690,7 @@ mod tests {
             leveler: None,
             shape: None,
             duck_db: None,
+            mono: None,
             background: None,
         };
         assert!(e.apply(slower, None).is_err());
@@ -3698,6 +3724,7 @@ mod tests {
             leveler: None,
             shape: None,
             duck_db: None,
+            mono: None,
             background: None,
         })
         .unwrap();
@@ -3878,6 +3905,7 @@ mod tests {
                     leveler: None,
                     shape: None,
                     duck_db: None,
+                    mono: None,
                     background: None,
                 },
                 "split_left" => EditCmd::SplitClip { clip_id, at_us: 5_500_000 },
@@ -3949,6 +3977,7 @@ mod tests {
                 leveler: None,
                 shape: None,
                 duck_db: None,
+                mono: None,
                 background: None,
             };
             e.apply(cmd, Some("vol".into())).unwrap();

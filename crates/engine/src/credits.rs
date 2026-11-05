@@ -18,6 +18,7 @@ struct Changes {
     trimmed: bool,
     faded: bool,
     volume: bool,
+    mono: bool,
     speed: bool,
 }
 
@@ -27,6 +28,7 @@ impl Changes {
             (self.trimmed, "trimmed"),
             (self.faded, "faded"),
             (self.volume, "volume changed"),
+            (self.mono, "made mono"),
             (self.speed, "speed changed"),
         ]
         .into_iter()
@@ -41,6 +43,7 @@ impl Changes {
             (self.trimmed, "cut"),
             (self.faded, "faded"),
             (self.volume, "volume changed"),
+            (self.mono, "made mono"),
             (self.speed, "speed changed"),
         ]
         .into_iter()
@@ -100,6 +103,7 @@ pub fn credits(project: &Project) -> Option<String> {
             duck_db,
             normalize,
             leveler,
+            mono,
             ..
         } = &clip.content
         else {
@@ -123,6 +127,7 @@ pub fn credits(project: &Project) -> Option<String> {
         if heard {
             entry.faded |= *fade_in_us > 0 || *fade_out_us > 0;
             entry.volume |= *volume != 1.0 || *duck_db != 0.0 || *normalize || *leveler > 0.0;
+            entry.mono |= !mono.is_off();
         }
     }
     let lines = |license: License, kinds: &[bool]| -> String {

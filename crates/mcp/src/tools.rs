@@ -207,6 +207,15 @@ impl Backend {
                 if unfiltered {
                     share_text_defaults(&mut value);
                 }
+                // Files whose sound is prepared and was recorded on one side say which, so a clip of one can play it in
+                // both ears with mono.
+                if let Some(assets) = value["assets"].as_array_mut() {
+                    for (json, asset) in assets.iter_mut().zip(&state.project.assets) {
+                        if let Some(side) = nuzky_engine::audio::sound_only_in(&self.host.cache_dir, asset) {
+                            json["soundOnlyIn"] = json!(side);
+                        }
+                    }
+                }
                 Ok(value)
             }
             "begin_run" => {

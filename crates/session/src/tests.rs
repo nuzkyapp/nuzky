@@ -322,6 +322,7 @@ fn media_clip() -> Clip {
             leveler: 0.0,
             shape: None,
             duck_db: 0.0,
+            mono: Default::default(),
             background: Default::default(),
         },
     )
