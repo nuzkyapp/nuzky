@@ -104,7 +104,6 @@ pub fn remote_start(app: AppHandle, state: State<'_, AppState>, remote: State<'_
     }
     let ip = local_address().ok_or("Connect this computer to Wi-Fi or a network first")?;
     let listener = TcpListener::bind((ip, 0)).map_err(err)?;
-    listener.set_nonblocking(true).map_err(err)?;
     let port = listener.local_addr().map_err(err)?.port();
     let share = Arc::new(Share {
         app: app.clone(),
@@ -192,6 +191,10 @@ fn local_address() -> Option<IpAddr> {
 impl Share {
     fn stop(&self) {
         self.stopped.store(true, Ordering::SeqCst);
+        // Wakes accept(), which then lets the listener go. Without the network it cannot, and nobody reaches it either.
+        if let Ok(addr) = self.host.parse() {
+            TcpStream::connect_timeout(&addr, Duration::from_secs(1)).ok();
+        }
         self.app.emit("remote-pages", Vec::<&str>::new()).ok();
     }
 
@@ -219,34 +222,32 @@ fn same(a: &str, b: &str) -> bool {
 }
 
 fn accept(listener: TcpListener, share: Arc<Share>) {
-    while !share.stopped.load(Ordering::SeqCst) {
-        match listener.accept() {
-            Ok((stream, _)) => {
-                // macOS and Windows hand out accepted sockets in the listener's non-blocking mode.
-                if stream.set_nonblocking(false).is_err() {
-                    continue;
-                }
-                if share.connections.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
-                    share.connections.fetch_sub(1, Ordering::SeqCst);
-                    continue;
-                }
-                let share = share.clone();
-                let spawned = thread::Builder::new().name("share-request".into()).spawn({
-                    let share = share.clone();
-                    move || {
-                        serve(&share, stream);
-                        share.connections.fetch_sub(1, Ordering::SeqCst);
-                    }
-                });
-                if spawned.is_err() {
-                    share.connections.fetch_sub(1, Ordering::SeqCst);
-                }
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => thread::sleep(Duration::from_millis(100)),
+    // Blocking, so a request is served the moment it comes; stop() wakes it with a connection of its own.
+    for stream in listener.incoming() {
+        if share.stopped.load(Ordering::SeqCst) {
+            break;
+        }
+        let stream = match stream {
+            Ok(stream) => stream,
             Err(e) => {
-                log::warn!("Sharing stopped accepting: {e}");
+                log::warn!("Sharing could not accept a connection: {e}");
                 thread::sleep(Duration::from_millis(500));
+                continue;
             }
+        };
+        if share.connections.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
+            share.connections.fetch_sub(1, Ordering::SeqCst);
+            continue;
+        }
+        let spawned = thread::Builder::new().name("share-request".into()).spawn({
+            let share = share.clone();
+            move || {
+                serve(&share, stream);
+                share.connections.fetch_sub(1, Ordering::SeqCst);
+            }
+        });
+        if spawned.is_err() {
+            share.connections.fetch_sub(1, Ordering::SeqCst);
         }
     }
 }

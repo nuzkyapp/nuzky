@@ -165,14 +165,24 @@ function renderStrip(shown) {
   strip.hidden = !shown;
   if (!shown) return;
   const clips = $("clips");
-  clips.replaceChildren();
   const total = state?.durationUs || 1;
-  for (const c of state?.clips ?? []) {
-    const d = el("div", `clip ${c.kind}`);
+  // A clip keeps its element between states: a new one, or one moved out and back, fetches its thumbnail again
+  // (no-store), and until it arrives the clip shows its bare colour, which blinked on every state the editor published.
+  const old = new Map([...clips.querySelectorAll(".clip:not(.pending)")].map((d) => [d.dataset.id, d]));
+  const elements = (state?.clips ?? []).map((c) => {
+    const d = old.get(c.id) ?? el("div");
+    d.dataset.id = c.id;
+    d.className = `clip ${c.kind}`;
     d.style.flex = `${c.durationUs / total} 1 0`;
-    if (c.assetId && c.kind !== "audio") d.style.backgroundImage = `url("/thumb/${encodeURIComponent(c.assetId)}")`;
-    clips.append(d);
-  }
+    const thumb = c.assetId && c.kind !== "audio" ? `url("/thumb/${encodeURIComponent(c.assetId)}")` : "";
+    if (d.dataset.thumb !== thumb) {
+      d.dataset.thumb = thumb;
+      d.style.backgroundImage = thumb;
+    }
+    return d;
+  });
+  if (elements.length !== old.size || elements.some((d, i) => clips.children[i] !== d)) clips.replaceChildren(...elements);
+  for (const d of clips.querySelectorAll(".clip.pending")) d.remove();
   const waiting = [...uploads.filter((u) => u.status !== "done"), ...(state?.adding ?? []).map((name) => ({ name, sent: 1, size: 1 }))];
   for (const u of waiting) {
     const d = el("div", u.status === "failed" ? "clip pending failed" : "clip pending");
