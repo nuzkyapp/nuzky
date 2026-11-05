@@ -331,6 +331,9 @@ const PLAIN: Record<string, string | ((detail: string) => string)> = {
   SCREEN_PERMISSION: (detail) => detail,
   SCREEN_UNSUPPORTED: (detail) => detail,
   RECORDING: "The screen is already being recorded.",
+  STORAGE_BUSY: (detail) => detail,
+  MODEL_IN_USE: (detail) => detail,
+  SETTINGS_UNWRITABLE: (detail) => detail,
   EPOCH_CHANGED: "Another project was opened meanwhile, so this did not happen.",
   EDIT_REJECTED: (detail) => {
     const what = detail.replace(/; project unchanged$/, "").replace(/\.$/, "");

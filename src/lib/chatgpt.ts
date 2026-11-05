@@ -38,7 +38,15 @@ export function openChatGpt() {
 }
 
 /** `renew`: as Settings does; the AI panel only reads what is stored, so opening it needs no network. */
-export async function check(renew = true) {
+let checking: Promise<void> | null = null;
+
+/** One check at a time: a renewal rotates the refresh token, so a second one at once would use a spent token. */
+export function check(renew = true) {
+  checking ??= checkNow(renew).finally(() => (checking = null));
+  return checking;
+}
+
+async function checkNow(renew: boolean) {
   useChatGpt.setState({ checking: true });
   try {
     useChatGpt.setState({ status: await api.chatgptStatus(renew) });

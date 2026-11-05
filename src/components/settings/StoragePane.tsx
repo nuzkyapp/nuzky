@@ -10,7 +10,7 @@ import { formatBytes } from "./parts";
 
 const GROUPS: Record<StorageGroupId, { title: string; detail: string; colour: string }> = {
   sound: { title: "Prepared sound of your videos", detail: "Made again when a video plays or exports", colour: "bg-white/80" },
-  pictures: { title: "Thumbnails, filmstrips and previews", detail: "Made again as you work", colour: "bg-white/55" },
+  pictures: { title: "Preview copies, cut-outs and project pictures", detail: "Made again as you work", colour: "bg-white/55" },
   youtube: { title: "Videos from YouTube", detail: "What Nuzky downloaded to cut a part from", colour: "bg-white/35" },
   models: { title: "Models", detail: "Remove one in Models", colour: "bg-white/20" },
   data: { title: "Projects, sounds, plugins and your style", detail: "Never cleared here", colour: "bg-white/10" },
