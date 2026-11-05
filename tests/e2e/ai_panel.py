@@ -341,11 +341,11 @@ def ai_panel_chatgpt(r):
               and r.s.run("return document.querySelector('aside[aria-label=AI] textarea').value") == 'Hello after sign-out', panel(r)['text'])
         r.shot('chatgpt-not-signed-in')
         click(r, 'Sign in…')
-        dialog = "return document.querySelector('[role=dialog][aria-labelledby=chatgpt-title]')?.innerText ?? ''"
-        check('Sign in… starts signing in again, with the ChatGPT dialog showing it',
+        dialog = "return document.querySelector('[role=dialog][data-settings] [data-setting=chatgpt]')?.innerText ?? ''"
+        check('Sign in… starts signing in again, with Settings › AI showing it',
               wait(lambda: 'Sign in to ChatGPT in your browser' in r.s.run(dialog), 10), r.s.run(dialog))
-        click(r, 'Cancel', '[role=dialog][aria-labelledby=chatgpt-title]')
-        check('cancelled, the dialog offers Continue with ChatGPT', wait(lambda: 'Continue with ChatGPT' in r.s.run(dialog), 10), r.s.run(dialog))
+        click(r, 'Cancel', '[role=dialog][data-settings] [data-setting=chatgpt]')
+        check('cancelled, Settings offers Continue with ChatGPT', wait(lambda: 'Continue with ChatGPT' in r.s.run(dialog), 10), r.s.run(dialog))
         r.key('Escape')
         wait(lambda: not r.s.run(dialog), 3)
         r.s.run("window.__nuzky.agent.setState({draft: ''})")

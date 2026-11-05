@@ -10,7 +10,7 @@ import {
   Folder,
   FolderInput,
   FolderOpen,
-  Keyboard,
+  Settings,
   FolderPlus,
   GalleryVerticalEnd,
   Film,
@@ -74,7 +74,7 @@ import { Poster } from "./Poster";
 import { VersionRow } from "../Updates";
 import { FeedbackRow } from "../Feedback";
 import { useWindowButtons } from "../../lib/window";
-import { openKeys } from "../../lib/keys";
+import { openSettings } from "../../lib/settings";
 
 type MenuState = { items: MenuEntry[]; at: { x: number; y: number; align?: "start" | "end"; above?: boolean }; label: string; keyboard: boolean; back: HTMLElement | null; /** The card it acts on. */ target?: string };
 
@@ -720,7 +720,7 @@ function FirstRun() {
             Get set up
           </button>{" "}
           or{" "}
-          <button type="button" onClick={() => useEditor.setState({ connectOpen: true })} className="text-accent hover:underline">
+          <button type="button" onClick={() => openSettings("ai", "agents")} className="text-accent hover:underline">
             connect an agent
           </button>
           .
@@ -850,7 +850,7 @@ function Sidebar({
           onKeyDown={rowKeys}
         />
         <Row icon={<Compass size={16} />} label="Take the tour" count={undefined} on={false} onClick={trySample} onKeyDown={rowKeys} />
-        <Row icon={<Keyboard size={16} />} label="Keyboard shortcuts" count={undefined} on={false} onClick={openKeys} onKeyDown={rowKeys} />
+        <Row icon={<Settings size={16} />} label="Settings" count={undefined} on={false} onClick={() => openSettings()} onKeyDown={rowKeys} />
         <div className="mt-4 mb-1 flex h-7 items-center justify-between pl-2.5">
           <h2 className="text-[13px] font-semibold text-fg">Collections</h2>
           <IconButton label="New collection" onClick={() => setCreating([])} className="h-7 w-7">

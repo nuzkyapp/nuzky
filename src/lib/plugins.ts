@@ -557,6 +557,12 @@ export async function allowPlugin(p: Plugin) {
   await loadPlugins();
 }
 
+/** Takes back full access: the plugin asks again before its next run. */
+export async function revokePlugin(p: Plugin) {
+  await api.revokePluginAccess(p.id);
+  await loadPlugins();
+}
+
 /** What a stopped or failed run left as it was: with full access it may already have written a file or sent something. */
 const unchanged = (p: Plugin) => (p.fullAccess ? "The project didn't change." : "Nothing changed.");
 

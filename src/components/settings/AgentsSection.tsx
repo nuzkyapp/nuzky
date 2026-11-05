@@ -1,0 +1,158 @@
+import { useEffect, useRef, useState } from "react";
+import { AlertTriangle, Check } from "lucide-react";
+import { api, errorText } from "../../lib/api";
+import { copyText } from "../../lib/clipboard";
+import { useEditor } from "../../lib/store";
+import type { AgentAccess, AgentConnection, AgentKind, AgentSetup } from "../../lib/types";
+import { AiLock, Button, Checkbox, Switch } from "../ui";
+
+const STATE_TEXT: Record<AgentConnection["state"], string> = {
+  connected: "Connected",
+  other: "Set up for another copy of Nuzky or turned off",
+  missing: "Not connected",
+  unreadable: "Its settings file could not be read",
+};
+
+const COPIES: { setup: AgentSetup; label: string; name: string }[] = [
+  { setup: "claude", label: "Claude Desktop", name: "Claude Desktop" },
+  { setup: "cursor", label: "Cursor", name: "Cursor" },
+  { setup: "opencode", label: "OpenCode", name: "OpenCode" },
+  { setup: "other", label: "Other agent", name: "your agent" },
+];
+
+/** Agents outside Nuzky, in Settings › AI: one click writes Nuzky into Claude Code's, Codex's or Antigravity CLI's own settings, a copy serves any other agent, and Agent access decides whether they may edit. */
+export function AgentsSection() {
+  const [rows, setRows] = useState<AgentConnection[] | null>(null);
+  const [access, setAccess] = useState<AgentAccess | null>(null);
+  // Read when the pane shows, so a copy happens within the click: WebKit copies only from something the user did.
+  const [setups, setSetups] = useState<Record<AgentSetup, string> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<AgentKind | null>(null);
+  const section = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    api.agentConnections().then(setRows, (e) => setError(errorText(e)));
+    api.agentAccess().then(setAccess, (e) => setError(errorText(e)));
+    Promise.all(COPIES.map((c) => api.agentSetup(c.setup))).then(
+      (texts) => setSetups(Object.fromEntries(COPIES.map((c, i) => [c.setup, texts[i]])) as Record<AgentSetup, string>),
+      (e) => setError(errorText(e)),
+    );
+  }, []);
+
+  // A connected agent's button goes away, so focus moves on to the next Connect, else to Agent access.
+  const refocus = useRef(false);
+  useEffect(() => {
+    if (!refocus.current) return;
+    refocus.current = false;
+    (section.current?.querySelector<HTMLElement>("[data-autofocus]") ?? section.current?.querySelector<HTMLElement>("[role=switch]"))?.focus();
+  }, [rows]);
+
+  const connect = async (row: AgentConnection) => {
+    setBusy(row.agent);
+    setError(null);
+    try {
+      const done = await api.connectAgent(row.agent);
+      refocus.current = !!section.current?.contains(document.activeElement);
+      setRows((all) => all?.map((r) => (r.agent === done.agent ? done : r)) ?? null);
+      // Connecting turns Agent access on, now and at every launch.
+      setAccess(await api.agentAccess());
+      const old = done.backups.length > 1 ? " Your old settings are backed up next to them." : done.backups.length ? ` Your old settings are in ${done.backups[0]}.` : "";
+      // agy may not be on a new terminal's PATH yet, so the AI panel's Gemini guide gives the command to paste.
+      const next = done.agent === "antigravity" ? "Choose Gemini in the AI panel to see how to ask it in a terminal." : `Restart ${done.name}, then ask it to edit your video.`;
+      useEditor.getState().toast({ kind: "success", text: `${done.name} is connected. ${next}${old}` });
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const changeAccess = async (on: boolean, atLaunch: boolean) => {
+    setError(null);
+    try {
+      setAccess(await api.setAgentAccess(on, atLaunch));
+    } catch (e) {
+      setError(errorText(e));
+    }
+  };
+
+  const copy = async (name: string, text: string) => {
+    setError(null);
+    try {
+      await copyText(text, "The clipboard is not available here.");
+      const next = !access?.on ? " Turn on Agent access so it can edit." : !access.atLaunch ? " Check Turn on when Nuzky starts so it can edit after a restart too." : "";
+      useEditor.getState().toast({ kind: "success", text: `Copied the setup for ${name}.${next}` });
+    } catch (e) {
+      setError(errorText(e));
+    }
+  };
+
+  const first = rows?.find((r) => r.state !== "connected" && r.state !== "unreadable");
+  return (
+    <div ref={section} className="flex flex-col gap-3">
+      <div className="flex flex-col rounded-xl bg-white/[.055] shadow-[inset_0_0_0_1px_rgb(255_255_255/.06)]">
+        {access && (
+          <AiLock>
+            <div role="group" aria-label="Agent access" data-setting="agent-access" className="flex flex-col gap-2.5 px-3.5 py-3">
+              <div className="flex items-center gap-3">
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="text-[13px] font-medium text-fg">Agent access</span>
+                  <span className={`text-[12px] ${access.on ? "text-fg" : "text-muted"}`}>
+                    {access.on ? "Agents outside Nuzky can edit the open project" : "Off. Agents outside Nuzky can't edit"}
+                  </span>
+                </div>
+                <Switch label="Agent access" checked={access.on} onChange={(on) => void changeAccess(on, access.atLaunch)} />
+              </div>
+              <Checkbox label="Turn on when Nuzky starts" checked={access.atLaunch} onChange={(atLaunch) => void changeAccess(access.on, atLaunch)} />
+            </div>
+          </AiLock>
+        )}
+        {rows === null && !error && <p className="border-t border-white/[.06] px-3.5 py-3 text-[12px] text-muted">Reading the agents' settings…</p>}
+        {rows?.map((row) => (
+          <div key={row.agent} role="group" aria-label={row.name} className="flex min-h-[44px] items-center gap-3 border-t border-white/[.06] px-3.5 py-2.5">
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span className="text-[13px] font-medium text-fg">{row.name}</span>
+              <span className={`flex min-w-0 items-center gap-1 text-[12px] ${row.state === "connected" && access?.on ? "text-fg" : "text-muted"}`} title={row.problem ?? row.path}>
+                {row.state === "connected" && access?.on && <Check size={13} className="shrink-0 text-ok" />}
+                {row.state === "unreadable" && <AlertTriangle size={13} className="shrink-0 text-warn" />}
+                <span className="shrink-0">{row.state === "connected" && access && !access.on ? "Connected. Agent access is off" : STATE_TEXT[row.state]}</span>
+                <span className="min-w-0 truncate text-muted">· {row.path}</span>
+              </span>
+            </div>
+            {/* A connected agent needs nothing more here; "Connected" says so. */}
+            {row.state !== "connected" && (
+              <Button
+                pill
+                data-autofocus={row === first || undefined}
+                disabled={row.state === "unreadable" || busy !== null}
+                disabledReason={row.state === "unreadable" ? `Fix ${row.path} first; Nuzky does not change a file it cannot read` : "Connecting…"}
+                onClick={() => void connect(row)}
+              >
+                {row.state === "other" ? "Reconnect" : "Connect"}
+              </Button>
+            )}
+          </div>
+        ))}
+      </div>
+      <div role="group" aria-labelledby="connect-copy" className="mt-1 flex flex-col gap-2">
+        <span id="connect-copy" className="text-[12px] text-muted">
+          Copy the setup for another agent
+        </span>
+        <div className="flex flex-wrap gap-2">
+          {COPIES.map((c) => (
+            <Button key={c.setup} pill disabled={!setups} disabledReason="Reading this app's location…" onClick={() => setups && void copy(c.name, setups[c.setup])}>
+              {c.label}
+            </Button>
+          ))}
+        </div>
+      </div>
+      {error && (
+        <p className="flex items-start gap-1.5 text-[12px] text-fg" role="alert">
+          <AlertTriangle size={14} className="mt-px shrink-0 text-danger" />
+          {error}
+        </p>
+      )}
+      <p className="text-[12px] text-muted">Connect backs up the agent's settings and adds only Nuzky. For Gemini, it also lets Antigravity CLI use Nuzky's tools without asking.</p>
+    </div>
+  );
+}

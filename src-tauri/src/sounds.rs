@@ -23,6 +23,13 @@ pub struct Sounds {
     downloads: Mutex<std::collections::HashMap<String, Arc<AtomicBool>>>,
 }
 
+impl Sounds {
+    /// No sound is being downloaded to be added.
+    pub fn idle(&self) -> bool {
+        self.downloads.lock().unwrap().is_empty()
+    }
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct Progress<'a> {

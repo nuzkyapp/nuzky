@@ -5,7 +5,7 @@ use std::time::{Duration, SystemTime};
 
 use nuzky_analysis::style as learning;
 use nuzky_interchange::capcut;
-use nuzky_mcp::style::{Evidence, Moment, Store, StyleAction, StyleView, TimelinePlan, moment, plan};
+use nuzky_mcp::style::{Evidence, Moment, Store, StyleAction, StyleSettings, StyleView, TimelinePlan, moment, plan};
 use nuzky_session::host::Host;
 use nuzky_session::transcripts::TranscriptStore;
 use serde::Serialize;
@@ -24,6 +24,24 @@ pub async fn style_view() -> CmdResult<StyleView> {
 #[tauri::command]
 pub async fn style_act(action: StyleAction) -> CmdResult<StyleView> {
     tauri::async_runtime::spawn_blocking(move || Store::default().act(action)).await.map_err(err)?.map_err(err)
+}
+
+#[tauri::command]
+pub async fn style_settings() -> CmdResult<StyleSettings> {
+    tauri::async_runtime::spawn_blocking(|| Store::default().settings()).await.map_err(err)
+}
+
+/// Turning learning from edits off also drops what an edit of an AI's cut would have taught 10 s later.
+#[tauri::command]
+pub async fn set_style_settings(settings: StyleSettings) -> CmdResult<StyleSettings> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = Store::default();
+        store.save_settings(&settings)?;
+        anyhow::Ok(store.settings())
+    })
+    .await
+    .map_err(err)?
+    .map_err(err)
 }
 
 #[tauri::command]

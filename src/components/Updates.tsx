@@ -1,14 +1,15 @@
 import { useState, type MouseEvent } from "react";
 import { CircleArrowDown, Loader2, RotateCw } from "lucide-react";
 import { useWindowSize } from "../lib/dock";
-import { cancelUpdate, checkForUpdates, downloadUpdate, installUpdate, restartBlocker, restartToUpdate, setAutoCheck, useRestartBlocker, useUpdates, waitFor } from "../lib/updates";
+import { openSettings } from "../lib/settings";
+import { cancelUpdate, checkForUpdates, downloadUpdate, installUpdate, restartBlocker, restartToUpdate, useRestartBlocker, useUpdates, waitFor } from "../lib/updates";
 import { Button, IconButton, Menu, type MenuEntry } from "./ui";
 
 type ShowMenu = (items: MenuEntry[], at: { x: number; y: number; above?: boolean }, label: string, keyboard: boolean) => void;
 
-/** Updating when there is something newer (or its download where this copy can't), stopping its download or restarting into it; what's new; a check now; the automatic check on or off. */
+/** Updating when there is something newer (or its download where this copy can't), stopping its download or restarting into it; what's new; a check now; the automatic check in Settings. */
 function updateMenu(): MenuEntry[] {
-  const { latest, canInstall, checking, auto, install } = useUpdates.getState();
+  const { latest, canInstall, checking, install } = useUpdates.getState();
   const blocked = restartBlocker();
   const update: MenuEntry[] = !latest
     ? []
@@ -24,13 +25,13 @@ function updateMenu(): MenuEntry[] {
           "separator",
         ];
   const busy = checking ? "Checking for updates…" : install?.stage === "downloading" ? "The update is downloading." : install ? `Nuzky ${latest} is ready to install.` : null;
-  return [...update, { label: "Check for updates", disabled: busy, run: () => void checkForUpdates(true) }, { label: "Check automatically", checked: auto, run: () => setAutoCheck(!auto) }];
+  return [...update, { label: "Check for updates", disabled: busy, run: () => void checkForUpdates(true) }, { label: "Update settings…", run: () => openSettings("general", "auto-update") }];
 }
 
 /**
  * The foot of the home sidebar: this version, or the newer one to update to in an accent row, which
  * shows the download's progress beside its Stop, then Restart to update, or why it waits. Its menu
- * updates, stops the download, restarts, checks for updates and turns the automatic check on or off.
+ * updates, stops the download, restarts, checks for updates and opens the update settings.
  * Nuzky starts on the home screen, so a new version is seen at the next launch.
  */
 export function VersionRow({ showMenu }: { showMenu: ShowMenu }) {

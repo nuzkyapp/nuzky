@@ -712,7 +712,7 @@ CLIPPED = """const pane = document.querySelector('main .overflow-y-auto'), p = p
 const out = [...pane.querySelectorAll('h2, button, p')].filter((el) => {
   const b = el.getBoundingClientRect(); return b.width && (b.left < p.left || b.right > p.right || el.scrollWidth > el.clientWidth + 1); }).map((el) => el.textContent);
 return pane.scrollWidth > pane.clientWidth ? [...out, `the pane scrolls sideways: ${pane.scrollWidth} > ${pane.clientWidth}`] : out;"""
-CONNECT_OPEN = "return !!document.querySelector('[role=dialog][aria-labelledby=connect-title]')"
+CONNECT_OPEN = "return !!document.querySelector('[role=dialog][data-settings] [data-setting=agents]')"
 SETUP_OPEN = "return !!document.querySelector('[role=dialog][aria-labelledby=setup-title]')"
 
 
@@ -739,9 +739,9 @@ def first_run(r):
 
     r.check('the first start asks Want AI to do the cutting?', 'Want AI to do the cutting?' in text(), text())
     r.check('connect an agent is a button', click(r, 'connect an agent', 'main'))
-    if r.check('it opens the Connect dialog', wait(lambda: r.s.run(CONNECT_OPEN), 5)):
+    if r.check('it opens Settings at Agents outside Nuzky', wait(lambda: r.s.run(CONNECT_OPEN), 5)):
         r.key('Escape')
-        r.check('Esc closes the Connect dialog', wait(lambda: not r.s.run(CONNECT_OPEN), 5))
+        r.check('Esc closes Settings', wait(lambda: not r.s.run(CONNECT_OPEN), 5))
     r.check('Get set up is a button', click(r, 'Get set up', 'main'))
     r.check('it opens Get set up over the first start', wait(lambda: r.s.run(SETUP_OPEN), 5) and view(r)['view'] == 'home', view(r))
     r.s.run("document.querySelector('[aria-labelledby=setup-title] button[aria-label=Close]').click()")

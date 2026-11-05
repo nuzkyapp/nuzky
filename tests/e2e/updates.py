@@ -28,6 +28,8 @@ if (!i) return false; i.click(); return true;"""
 OPEN_MENU = "const b = document.querySelector('[data-version]'); b.focus(); b.click();"
 OPEN_EDITOR_MENU = "const b = document.querySelector('[data-update-button]'); b.focus(); b.click();"
 IN_MENU = "return !!document.activeElement?.closest('[role=menu][aria-label=Updates]')"
+AUTO_SWITCH = """const b = document.querySelector('[role=dialog][data-settings] [data-setting=auto-update] [role=switch]');
+return b && {on: b.getAttribute('aria-checked') === 'true', focused: document.activeElement === b};"""
 TOASTS = "return window.__nuzky.store.getState().toasts.map((t) => ({kind: t.kind, text: t.text}));"
 CHOICES = """return window.__nuzky.store.getState().toasts.map((t) => ({kind: t.kind, text: t.text,
   choices: [t.secondary?.label, t.action?.label].filter(Boolean)}));"""
@@ -214,9 +216,9 @@ def updates(r):
 
         r.s.run(OPEN_MENU)
         menu = wait(lambda: r.s.run(MENU), 3)
-        r.check("its menu offers to update to it, what's new, a check and the automatic check, which is on",
+        r.check("its menu offers to update to it, what's new, a check and the update settings",
                 menu == [{'label': 'Update to Nuzky 99.0.0', 'checked': None}, {'label': "What's new in Nuzky 99.0.0…", 'checked': None},
-                         {'label': 'Check for updates', 'checked': None}, {'label': 'Check automatically', 'checked': 'true'}], menu)
+                         {'label': 'Check for updates', 'checked': None}, {'label': 'Update settings…', 'checked': None}], menu)
         r.check('opened from the keyboard, the menu has the focus', wait(lambda: r.s.run(IN_MENU), 3))
         # The menu fades in.
         time.sleep(0.5)
@@ -294,13 +296,15 @@ def updates(r):
         wait(lambda: r.s.run(IN_MENU), 3)
         r.key('End')
         r.key('Enter')
-        r.check('chosen from the keyboard, Check automatically turns off and focus returns to the row',
-                wait(lambda: not r.s.run(MENU) and row(r).get('focused'), 3)
-                and r.s.run('return window.__nuzky.updates.getState().auto') is False, row(r))
-        r.s.run(OPEN_MENU)
-        menu = wait(lambda: r.s.run(MENU), 3)
-        r.check('the menu shows it off', (menu or [{}])[-1].get('checked') == 'false', menu)
+        r.check('chosen from the keyboard, Update settings… opens Settings › General with the keyboard on Check automatically, which is on',
+                wait(lambda: r.s.run(AUTO_SWITCH) == {'on': True, 'focused': True}, 5), r.s.run(AUTO_SWITCH))
+        time.sleep(0.5)
+        r.shot('update-settings')
+        press('space')
+        r.check('Space turns it off', wait(lambda: r.s.run('return window.__nuzky.updates.getState().auto') is False
+                                            and (r.s.run(AUTO_SWITCH) or {}).get('on') is False, 3), r.s.run(AUTO_SWITCH))
         r.key('Escape')
+        r.check('Esc closes Settings', wait(lambda: not r.s.run(AUTO_SWITCH), 3))
         # A day passes.
         r.s.run("const s = JSON.parse(localStorage.getItem('nuzky.updates')); s.checkedAt = Date.now() - 25 * 3600e3;"
                 "localStorage.setItem('nuzky.updates', JSON.stringify(s));" + RELOAD)
@@ -310,7 +314,10 @@ def updates(r):
 
         r.s.run(OPEN_MENU)
         wait(lambda: r.s.run(MENU), 3)
-        r.s.run(CHOOSE, 'Check automatically')
+        r.s.run(CHOOSE, 'Update settings…')
+        wait(lambda: r.s.run(AUTO_SWITCH), 5)
+        r.s.run("document.querySelector('[data-setting=auto-update] [role=switch]').click()")
+        r.key('Escape')
         r.check('turned on again a day after the last check, it asks at once and finds the newer version',
                 wait(lambda: row(r).get('text') == 'Update available99.0.0', 15) and server.requests == asked + 1 and toasts(r) == [],
                 (row(r), server.requests, toasts(r)))

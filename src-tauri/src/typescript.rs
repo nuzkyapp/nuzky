@@ -169,6 +169,8 @@ fn generate() -> String {
     types.visit::<crate::connect::Setup>();
     types.visit::<nuzky_mcp::style::StyleView>();
     types.visit::<nuzky_mcp::style::StyleAction>();
+    types.visit::<nuzky_mcp::style::StyleSettings>();
+    types.visit::<crate::storage::StorageUsage>();
     types.visit::<crate::jobs::StylePair>();
     types.visit::<crate::jobs::StylePairResult>();
     types.visit::<crate::cover::CoverView>();

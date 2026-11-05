@@ -1,9 +1,9 @@
 import { useEffect, useRef } from "react";
-import { AlertCircle, AlertTriangle, Check, ExternalLink, Loader2, X } from "lucide-react";
+import { AlertCircle, AlertTriangle, Check, ExternalLink, Loader2 } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { cancelSignIn, signIn, signOut, useChatGpt } from "../lib/chatgpt";
-import { ChatGptLogo } from "./ChatGptLogo";
-import { Button, IconButton, trapTab } from "./ui";
+import { cancelSignIn, check, signIn, signOut, useChatGpt } from "../../lib/chatgpt";
+import { ChatGptLogo } from "../ChatGptLogo";
+import { Button } from "../ui";
 
 export const USAGE_PAGE = "https://chatgpt.com/settings/usage";
 const CARD = "rounded-xl bg-white/[.055] shadow-[inset_0_0_0_1px_rgb(255_255_255/.06)]";
@@ -119,93 +119,63 @@ function SignedIn({ email, plan }: { email: string | null; plan: boolean }) {
   );
 }
 
-/** The ChatGPT account: Continue with ChatGPT to sign in, or who is signed in, Manage usage and Sign out. */
-export function ChatGptDialog() {
-  const open = useChatGpt((s) => s.open);
+/** The ChatGPT account in Settings › AI: Continue with ChatGPT to sign in, or who is signed in, Manage usage and Sign out. */
+export function ChatGptSection() {
   const status = useChatGpt((s) => s.status);
   const checking = useChatGpt((s) => s.checking);
-  const action = useChatGpt((s) => s.action);
   const error = useChatGpt((s) => s.error);
-  const dialog = useRef<HTMLDivElement>(null);
-  const close = () => useChatGpt.setState({ open: false });
 
+  // Showing the account checks the sign-in, renewing it when it is about to expire.
   useEffect(() => {
-    if (!open) return;
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      e.stopPropagation();
-      close();
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => {
-      window.removeEventListener("keydown", onKey, true);
-      opener?.focus();
-    };
-  }, [open]);
+    if (!useChatGpt.getState().action) void check();
+  }, []);
 
-  // The main action takes focus once it shows, and again when the state changes it; until then the dialog itself.
-  const shown = open ? `${checking && !status ? "checking" : status?.state}:${action}` : null;
+  // The main action takes the keyboard once it shows, and again when the state changes it, while the keyboard is here.
+  const action = useChatGpt((s) => s.action);
+  const section = useRef<HTMLDivElement>(null);
+  const shown = `${checking && !status ? "checking" : status?.state}:${action}`;
   useEffect(() => {
-    if (shown) (dialog.current?.querySelector<HTMLElement>("[data-autofocus]") ?? dialog.current)?.focus();
+    const at = document.activeElement;
+    if (at && (at === document.body || section.current?.contains(at) || at.matches("[data-settings-body]"))) section.current?.querySelector<HTMLElement>("[data-autofocus]")?.focus();
   }, [shown]);
 
-  if (!open) return null;
   const notice = status?.state === "signedOut" ? status.notice : null;
-  const done = status?.state === "signedIn" && status.plan;
   return (
-    <div data-exit className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/55" onPointerDown={(e) => e.target === e.currentTarget && close()}>
-      <div ref={dialog} role="dialog" aria-modal="true" aria-labelledby="chatgpt-title" tabIndex={-1} onKeyDown={trapTab} className="overlay overlay-solid w-[440px] rounded-[20px] p-6 outline-none dialog-in">
-        <div className="mb-5 flex items-start justify-between gap-3">
-          <h2 id="chatgpt-title" className="text-[17px] font-semibold leading-[22px] tracking-[-0.025em]">
-            ChatGPT
-          </h2>
-          <IconButton label="Close" round className="-mr-2 -mt-1" onClick={close}>
-            <X size={16} />
-          </IconButton>
-        </div>
-        <div className="flex flex-col gap-3">
-          {checking && !status ? (
-            <p role="status" className="flex h-[45px] items-center gap-2 text-[12px] text-muted">
-              <Loader2 size={14} className="animate-spin" />
-              Checking your ChatGPT sign-in…
-            </p>
-          ) : status?.state === "signedIn" ? (
-            <SignedIn email={status.email} plan={status.plan} />
-          ) : (
-            <>
-              {notice && (
-                <p className="flex items-start gap-1.5 text-[12px] leading-[18px] text-fg" role="status">
-                  <AlertTriangle size={14} className="mt-0.5 shrink-0 text-warn" />
-                  {notice === "ended" ? (
-                    "Your ChatGPT sign-in ended. Continue with ChatGPT to sign in again."
-                  ) : (
-                    <span>
-                      Signed out here, but Nuzky couldn't reach ChatGPT to end the sign-in there. You can disconnect Nuzky in{" "}
-                      <button type="button" onClick={() => void openUrl(USAGE_PAGE)} className="text-accent hover:underline">
-                        ChatGPT settings
-                      </button>
-                      .
-                    </span>
-                  )}
-                </p>
+    <div ref={section} className="flex flex-col gap-3">
+      {checking && !status ? (
+        <p role="status" className="flex h-[45px] items-center gap-2 text-[12px] text-muted">
+          <Loader2 size={14} className="animate-spin" />
+          Checking your ChatGPT sign-in…
+        </p>
+      ) : status?.state === "signedIn" ? (
+        <SignedIn email={status.email} plan={status.plan} />
+      ) : (
+        <>
+          {notice && (
+            <p className="flex items-start gap-1.5 text-[12px] leading-[18px] text-fg" role="status">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0 text-warn" />
+              {notice === "ended" ? (
+                "Your ChatGPT sign-in ended. Continue with ChatGPT to sign in again."
+              ) : (
+                <span>
+                  Signed out here, but Nuzky couldn't reach ChatGPT to end the sign-in there. You can disconnect Nuzky in{" "}
+                  <button type="button" onClick={() => void openUrl(USAGE_PAGE)} className="text-accent hover:underline">
+                    ChatGPT settings
+                  </button>
+                  .
+                </span>
               )}
-              <SignedOut />
-            </>
-          )}
-          {error && (
-            <p className="flex items-start gap-1.5 text-[12px] leading-[18px] text-fg" role="alert">
-              <AlertCircle size={14} className="mt-0.5 shrink-0 text-danger" />
-              {error}
             </p>
           )}
-        </div>
-        <div className="mt-6 flex justify-end">
-          <Button pill variant={done ? "primary" : undefined} data-autofocus={done || undefined} onClick={close}>
-            Done
-          </Button>
-        </div>
-      </div>
+          <SignedOut />
+        </>
+      )}
+      {error && (
+        <p className="flex items-start gap-1.5 text-[12px] leading-[18px] text-fg" role="alert">
+          <AlertCircle size={14} className="mt-0.5 shrink-0 text-danger" />
+          {error}
+        </p>
+      )}
     </div>
   );
 }

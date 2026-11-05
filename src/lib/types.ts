@@ -1632,6 +1632,33 @@ export type StickerItem = {
   tones: Array<string> | null,
 };
 
+export type StorageGroup = {
+  id: StorageGroupId,
+  bytes: number,
+  /**
+   * Part of `bytes` that Clear keeps, as the open project uses it.
+   */
+  keptBytes: number,
+  /**
+   * Nuzky makes the group again by itself, so Settings offers Clear; models and data are never cleared there.
+   */
+  clearable: boolean,
+  /**
+   * Why Clear cannot run now, as a sentence that says what to do.
+   */
+  blocked: string | null,
+  /**
+   * The folder, for Show in folder: the data folder and the models.
+   */
+  path: string | null,
+};
+
+export type StorageGroupId = "sound" | "pictures" | "youtube" | "models" | "data";
+
+export type StorageUsage = {
+  groups: Array<StorageGroup>,
+};
+
 /**
  * What the creator, or an agent they agreed with, does to the style.
  */
@@ -1750,6 +1777,16 @@ export type StyleRule = {
  * What learning finds now for a rule of the style.
  */
 export type StyleRuleState = "backed" | "changeSuggested" | "kept" | "notSeen";
+
+/**
+ * Kept in `style/settings.json`, where the app, the CLI and agents' MCP servers all read it.
+ */
+export type StyleSettings = {
+  /**
+   * Learn from every export and from edits of a kept AI cut. Off, the style learns only when asked to.
+   */
+  learnFromEdits: boolean,
+};
 
 export type StyleSource = {
   title: string,

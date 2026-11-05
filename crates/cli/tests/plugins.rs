@@ -247,6 +247,16 @@ fn a_plugin_with_full_access_exports_xml_once_allowed() {
     let slash = if take.starts_with('/') { "" } else { "/" };
     assert_eq!(path, format!("file://localhost{slash}{take}"));
 
+    // Revoking in Settings: the next run asks again, and allowing it again works as the first time.
+    std::fs::remove_file(&target).unwrap();
+    nuzky_mcp::plugin_system::forget("export-xml").unwrap();
+    assert!(!listed().allowed, "the plugin list still shows the access as allowed");
+    let revoked = plugins::run_in_app(&f.host, "export-xml", &Map::new(), None, vec![], 0, file.clone()).unwrap_err();
+    assert!(format!("{revoked:#}").starts_with("PLUGIN_NOT_ALLOWED"), "{revoked:#}");
+    assert!(!target.exists(), "a revoked plugin wrote the file");
+    nuzky_mcp::plugin_system::allow("export-xml", &key).unwrap();
+    assert!(listed().allowed);
+
     let folder = plugins::dir().unwrap().join("export-xml");
     let script = std::fs::read_to_string(folder.join("plugin.js")).unwrap();
     std::fs::write(folder.join("plugin.js"), format!("{script}\n// changed\n")).unwrap();

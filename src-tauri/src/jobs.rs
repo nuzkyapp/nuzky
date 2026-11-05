@@ -22,7 +22,7 @@ use nuzky_session::{host::Host, transcripts::TranscriptStore};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::AppState;
+use crate::{AppState, CmdResult, err};
 
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[derive(Serialize, Clone)]
@@ -555,16 +555,92 @@ fn model_path(id: &str) -> PathBuf {
 
 #[tauri::command]
 pub fn speech_models() -> Vec<SpeechModel> {
+    speech_models_in(&models_dir())
+}
+
+fn speech_models_in(dir: &Path) -> Vec<SpeechModel> {
     MODELS
         .iter()
         .map(|(id, label, integrity)| SpeechModel {
             id,
             label,
             size_mb: mb(integrity.size),
-            downloaded: std::fs::metadata(model_path(id))
+            downloaded: std::fs::metadata(dir.join(format!("ggml-{id}.bin")))
                 .is_ok_and(|file| file.is_file() && file.len() == integrity.size),
         })
         .collect()
+}
+
+/// Deletes a downloaded speech model, and what was downloaded of it, to free its space; the next transcript with it
+/// downloads it again. Refused while speech is recognised, here or in another Nuzky process, or a model downloads.
+#[tauri::command]
+pub async fn remove_speech_model(app: AppHandle, id: String) -> CmdResult<Vec<SpeechModel>> {
+    let id = MODELS.iter().find(|(model, ..)| *model == id).map(|(id, ..)| *id).ok_or("Unknown speech model")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let host = state.session.lock().unwrap().host.clone();
+        // Held while the files go, so no recognition or download in this app starts in between.
+        let jobs = state.jobs.lock().unwrap();
+        let mut kinds = jobs.keys().map(|id| id.split(':').next().unwrap_or(id)).chain(host.jobs.running());
+        let busy = |kind: &str| matches!(kind, "captions" | "transcript" | "transcription" | "style" | "speech-model");
+        if let Some(kind) = kinds.find(|kind| busy(kind)) {
+            return Err(if kind == "speech-model" {
+                "MODEL_IN_USE: Wait for the speech model download to finish, then remove the model.".into()
+            } else {
+                "MODEL_IN_USE: Wait for speech recognition to finish, then remove the model.".into()
+            });
+        }
+        let dir = models_dir();
+        // Recognition anywhere on this computer holds this lock, the CLI's and agents' too.
+        let _slot = match std::fs::File::options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(dir.join(".recognition.lock"))
+        {
+            Ok(lock) => match lock.try_lock() {
+                Ok(()) => Some(lock),
+                Err(std::fs::TryLockError::WouldBlock) => {
+                    return Err("MODEL_IN_USE: Wait for speech recognition to finish, then remove the model.".into());
+                }
+                Err(std::fs::TryLockError::Error(_)) => None,
+            },
+            Err(_) => None,
+        };
+        remove_speech_files(&dir, id).map_err(err)?;
+        drop(jobs);
+        Ok(speech_models_in(&dir))
+    })
+    .await
+    .map_err(err)?
+}
+
+/// Removes speech model `id` and its partial downloads from `dir`. Once no speech model is left, the voice detector
+/// and the word timing models go too: only recognition uses them, and it downloads them again when needed.
+fn remove_speech_files(dir: &Path, id: &str) -> std::io::Result<()> {
+    let remove = |file: &str| -> std::io::Result<()> {
+        let partial = format!("{file}.");
+        for entry in std::fs::read_dir(dir)?.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let ours = name == file || (name.starts_with(&partial) && name.ends_with(".part"));
+            if ours && entry.file_type()?.is_file() {
+                std::fs::remove_file(entry.path())?;
+            }
+        }
+        Ok(())
+    };
+    if !dir.is_dir() {
+        return Ok(());
+    }
+    remove(&format!("ggml-{id}.bin"))?;
+    if MODELS.iter().all(|(id, ..)| !dir.join(format!("ggml-{id}.bin")).exists()) {
+        remove(VAD_MODEL)?;
+        for model in nuzky_analysis::ALIGN_MODELS {
+            remove(model.file)?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg_attr(test, derive(ts_rs::TS))]
@@ -1448,6 +1524,37 @@ mod tests {
             "statvfs available: {measured} bytes, df available: {} bytes",
             available_kb * 1024
         );
+    }
+
+    #[test]
+    fn removing_a_speech_model_frees_it_and_the_helpers_only_with_the_last_one() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tmp-test").join(format!("speech-remove-{}", new_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Sparse files of the models' real sizes, so they count as downloaded without taking the space.
+        let file = |name: &str, size: u64| std::fs::File::create(dir.join(name)).unwrap().set_len(size).unwrap();
+        for (id, _, integrity) in &MODELS[..2] {
+            file(&format!("ggml-{id}.bin"), integrity.size);
+        }
+        file("ggml-base.bin.part", 10);
+        file(VAD_MODEL, VAD_INTEGRITY.size);
+        let align = nuzky_analysis::ALIGN_MODELS[0].file;
+        file(align, 10);
+        file("person.onnx", 10);
+        file(".recognition.lock", 0);
+        let downloaded =
+            || speech_models_in(&dir).into_iter().filter(|m| m.downloaded).map(|m| m.id).collect::<Vec<_>>();
+        assert_eq!(downloaded(), ["base", "small"]);
+
+        remove_speech_files(&dir, "base").unwrap();
+        assert_eq!(downloaded(), ["small"]);
+        assert!(!dir.join("ggml-base.bin.part").exists(), "its partial download stays behind");
+        assert!(dir.join(VAD_MODEL).exists() && dir.join(align).exists(), "the other model still needs the helpers");
+
+        remove_speech_files(&dir, "small").unwrap();
+        assert!(downloaded().is_empty());
+        assert!(!dir.join(VAD_MODEL).exists() && !dir.join(align).exists(), "nothing needs the helpers any more");
+        assert!(dir.join("person.onnx").exists() && dir.join(".recognition.lock").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

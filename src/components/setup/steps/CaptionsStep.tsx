@@ -7,7 +7,7 @@ import { useEditor } from "../../../lib/store";
 import type { SpeechModel, SpeechSetup } from "../../../lib/types";
 import { JobError, Select } from "../../panel/SpeechControls";
 import { AiLock, Button, Field, LockReason, ProgressBar, useLockReason } from "../../ui";
-import { StepActions } from "../StepActions";
+import { StepActions, useInSettings } from "../StepActions";
 
 const JOB = "speech-model:setup";
 const STOP = "Stop downloading the speech model";
@@ -62,16 +62,20 @@ function note(model: string, language: string, gpu: boolean) {
   return [wer !== undefined && `${Math.round(wer)}% of words wrong`, times && `${times}× quicker`].filter(Boolean).join(" · ");
 }
 
-/** Captions model: the spoken language, the model, and Download for everything the first transcript needs. */
-export function CaptionsStep() {
+/**
+ * Captions model: the spoken language, the model, and Download for everything the first transcript needs. In Settings
+ * (`manage`) a downloaded model not in use also offers Remove.
+ */
+export function CaptionsStep({ manage = false }: { manage?: boolean }) {
   return (
     <AiLock>
-      <Step />
+      <Step manage={manage} />
     </AiLock>
   );
 }
 
-function Step() {
+function Step({ manage }: { manage: boolean }) {
+  const quiet = useInSettings();
   const lock = useLockReason();
   const language = useSpeech((s) => s.language);
   const model = useSpeech((s) => s.model);
@@ -151,6 +155,16 @@ function Step() {
     if (model === recommended && !(downloaded && MODEL_ORDER.indexOf(model) >= MODEL_ORDER.indexOf(to))) setSpeechModel(to);
     setSpeechLanguage(next);
   };
+  const remove = async (m: SpeechModel) => {
+    setError(null);
+    try {
+      setModels(await api.removeSpeechModel(m.id));
+      setSetup(await api.speechSetup(language));
+    } catch (e) {
+      asked = { model, language };
+      setError(plainError(errorText(e)));
+    }
+  };
   const download = () => {
     asked = { model, language };
     setError(null);
@@ -181,49 +195,64 @@ function Step() {
         <div role="radiogroup" aria-label="Model" className="flex flex-col gap-1.5">
           {models.map((m) => {
             const on = m.id === model;
+            const removable = manage && m.downloaded && !on;
             return (
-              <label
-                key={m.id}
-                title={lock ?? busy ?? undefined}
-                className={`flex cursor-pointer items-start gap-2.5 rounded-xl px-3 py-2 transition-colors duration-[120ms] ease-out has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-40 ${
-                  on ? "bg-white/[.08] shadow-[inset_0_0_0_1.5px_var(--color-accent)]" : "bg-white/[.055] shadow-[inset_0_0_0_1px_rgb(255_255_255/.06)] has-[:enabled]:hover:bg-white/[.08]"
-                }`}
-              >
-                <span className="relative mt-0.5 inline-flex">
-                  <input
-                    type="radio"
-                    name="captions-model"
-                    value={m.id}
-                    checked={on}
-                    disabled={!!(lock ?? busy)}
-                    onChange={() => setSpeechModel(m.id)}
-                    className="peer absolute inset-0 m-0 h-full w-full cursor-[inherit] opacity-0"
-                  />
-                  <span
-                    aria-hidden
-                    className={`size-4 rounded-full border transition-colors duration-[120ms] ease-out peer-focus-visible:outline-2 peer-focus-visible:outline-offset-1 peer-focus-visible:outline-accent ${
-                      on ? "border-[5px] border-accent-strong bg-white" : "border-white/25 bg-white/[.07]"
-                    }`}
-                  />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-baseline gap-2 leading-5">
-                    <span className="text-[13px] font-medium text-fg">{m.label}</span>
-                    {m.id === recommended && <span className="text-[12px] font-medium text-fg/70">Recommended</span>}
-                    <span className="tabular ml-auto text-[12px] text-muted">{m.sizeMb} MB</span>
+              <div key={m.id} className="relative">
+                <label
+                  title={lock ?? busy ?? undefined}
+                  className={`flex cursor-pointer items-start gap-2.5 rounded-xl px-3 py-2 transition-colors duration-[120ms] ease-out has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-40 ${
+                    on ? "bg-white/[.08] shadow-[inset_0_0_0_1.5px_var(--color-accent)]" : "bg-white/[.055] shadow-[inset_0_0_0_1px_rgb(255_255_255/.06)] has-[:enabled]:hover:bg-white/[.08]"
+                  }`}
+                >
+                  <span className="relative mt-0.5 inline-flex">
+                    <input
+                      type="radio"
+                      name="captions-model"
+                      value={m.id}
+                      checked={on}
+                      disabled={!!(lock ?? busy)}
+                      onChange={() => setSpeechModel(m.id)}
+                      className="peer absolute inset-0 m-0 h-full w-full cursor-[inherit] opacity-0"
+                    />
+                    <span
+                      aria-hidden
+                      className={`size-4 rounded-full border transition-colors duration-[120ms] ease-out peer-focus-visible:outline-2 peer-focus-visible:outline-offset-1 peer-focus-visible:outline-accent ${
+                        on ? "border-[5px] border-accent-strong bg-white" : "border-white/25 bg-white/[.07]"
+                      }`}
+                    />
                   </span>
-                  <span className="flex items-center gap-2 text-[12px] leading-4 text-muted">
-                    <span className="tabular min-w-0 flex-1">{note(m.id, language, setup.gpu)}</span>
-                    {m.downloaded ? (
-                      <span className="flex shrink-0 items-center gap-1 text-fg">
-                        <Check size={12} strokeWidth={3} className="text-ok" /> Downloaded
-                      </span>
-                    ) : (
-                      <span className="shrink-0">Not downloaded</span>
-                    )}
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-baseline gap-2 leading-5">
+                      <span className="text-[13px] font-medium text-fg">{m.label}</span>
+                      {m.id === recommended && <span className="text-[12px] font-medium text-fg/70">Recommended</span>}
+                      <span className="tabular ml-auto text-[12px] text-muted">{m.sizeMb} MB</span>
+                    </span>
+                    <span className="flex items-center gap-2 text-[12px] leading-4 text-muted">
+                      <span className="tabular min-w-0 flex-1">{note(m.id, language, setup.gpu)}</span>
+                      {m.downloaded ? (
+                        <span className="flex shrink-0 items-center gap-1 text-fg">
+                          <Check size={12} strokeWidth={3} className="text-ok" /> Downloaded
+                        </span>
+                      ) : (
+                        <span className="shrink-0">Not downloaded</span>
+                      )}
+                      {removable && <span className="w-[68px] shrink-0" />}
+                    </span>
                   </span>
-                </span>
-              </label>
+                </label>
+                {removable && (
+                  <Button
+                    variant="ghost"
+                    disabled={!!busy}
+                    disabledReason={busy ?? undefined}
+                    aria-label={`Remove the ${m.label} model, ${m.sizeMb} MB`}
+                    onClick={() => void remove(m)}
+                    className="absolute right-2 bottom-1 h-6 px-2 text-[12px] text-accent! hover:text-accent!"
+                  >
+                    Remove
+                  </Button>
+                )}
+              </div>
             );
           })}
         </div>
@@ -264,7 +293,7 @@ function Step() {
       {/* A stop while the last file was checked leaves nothing to fetch, only to install. */}
       {!running && (missing > 0 || !downloaded) && (
         <StepActions>
-          <Button pill variant={done ? "secondary" : "primary"} onClick={download}>
+          <Button pill variant={done || quiet ? "secondary" : "primary"} onClick={download}>
             {again === "failed" ? "Try again" : again === "cancelled" ? "Resume download" : missing > 0 ? `Download ${missing} MB` : "Download"}
           </Button>
         </StepActions>
