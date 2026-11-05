@@ -44,6 +44,7 @@ fn update_speed(id: &str, speed: f32) -> EditCmd {
         leveler: None,
         shape: None,
         duck_db: None,
+        mono: None,
         background: None,
     }
 }

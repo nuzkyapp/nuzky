@@ -576,3 +576,92 @@ fn keep_pitch_does_not_bring_back_cut_sound() {
         assert!(loudest < 0.001, "{speed}x brings back cut-away sound at {loudest}");
     }
 }
+
+/// A microphone recorded on one side: Nuzky finds the side in the prepared sound of an AAC phone video, and mono
+/// plays a file's sides as FFmpeg's `pan` of the same file does, in the mix and in the export, where both channels
+/// then carry the voice that only the left one had.
+#[test]
+fn mono_plays_one_side_in_both_ears() {
+    use nuzky_engine::audio::{Mixer, sound_only_in};
+    use nuzky_engine::export::{ExportOptions, export};
+    use std::sync::atomic::AtomicBool;
+    if !available() {
+        return;
+    }
+    let d = dir("mono");
+    let cache = d.join("cache");
+    let picture = ["-f", "lavfi", "-i", "color=c=0x2b3a4a:s=108x192:r=30:d=4"];
+    let video = ["-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-pix_fmt", "yuv420p"];
+    let make = |name: &str, sound: &str, codec: &str| {
+        let path = d.join(name);
+        let sound = format!("aevalsrc={sound}:s=48000:d=4");
+        ff(&[&picture[..], &["-f", "lavfi", "-i", &sound], &video[..], &["-c:a", codec]].concat(), &path);
+        path
+    };
+    let tone = "0.25*sin(2*PI*440*t)";
+    let lav = make("lav.mp4", &format!("{tone}|0"), "aac");
+    let right = make("right.mp4", &format!("0|{tone}"), "aac");
+    let wide = make("wide.mkv", &format!("{tone}|0.25*sin(2*PI*660*t)"), "pcm_f32le");
+    let single = make("single.mp4", tone, "aac");
+    let prepared = |path: &std::path::Path| {
+        let p = project(path, 4_000_000);
+        ensure_pcm(&cache, &p.assets[0], |_| Ok(())).unwrap();
+        p
+    };
+    let sides = [&lav, &right, &wide, &single].map(|path| sound_only_in(&cache, &prepared(path).assets[0]));
+    assert_eq!(
+        sides,
+        [Some(Mono::Left), Some(Mono::Right), None, None],
+        "the sides found in lav, right, wide and single"
+    );
+
+    let set = |p: &mut Project, side: Mono| {
+        let ClipContent::Media { mono, .. } = &mut p.tracks[0].clips[0].content else { unreachable!() };
+        *mono = side;
+    };
+    let mut p = prepared(&wide);
+    for (side, pan) in [
+        (Mono::Both, "pan=stereo|c0=0.5*c0+0.5*c1|c1=0.5*c0+0.5*c1"),
+        (Mono::Left, "pan=stereo|c0=c0|c1=c0"),
+        (Mono::Right, "pan=stereo|c0=c1|c1=c1"),
+    ] {
+        set(&mut p, side);
+        let mut mixed = vec![0.0; 4 * 48_000 * CHANNELS];
+        let mut mixer = Mixer::new(cache.clone());
+        for (index, part) in mixed.chunks_mut(1024 * CHANNELS).enumerate() {
+            mixer.mix(&p, (index * 1024) as i64, part);
+        }
+        let reference = run(Command::new("ffmpeg")
+            .args(["-v", "error", "-i"])
+            .arg(&wide)
+            .args(["-vn", "-af", pan, "-f", "f32le", "-ac", "2", "-ar", "48000", "-"]))
+        .stdout;
+        let reference: Vec<f32> = reference.as_chunks::<4>().0.iter().map(|&b| f32::from_le_bytes(b)).collect();
+        // Away from the 5 ms fades at the clip's edges.
+        let span = 2400 * CHANNELS..(4 * 48_000 - 2400) * CHANNELS;
+        let error = mixed[span.clone()].iter().zip(&reference[span]).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+        eprintln!("QA mono {side:?}: largest difference from FFmpeg's pan {error}");
+        assert!(error < 1e-4, "mono {side:?} differs from FFmpeg's pan by {error}");
+    }
+
+    let mut p = prepared(&lav);
+    let levels = |p: &Project, name: &str| {
+        let out = d.join(name);
+        let options = ExportOptions { replace_existing: true, ..ExportOptions::default() };
+        export(p, &cache, &out, &options, &AtomicBool::new(false), |_| {}).unwrap();
+        let decoded = run(Command::new("ffmpeg")
+            .args(["-v", "error", "-i"])
+            .arg(&out)
+            .args(["-vn", "-f", "f32le", "-ac", "2", "-ar", "48000", "-"]))
+        .stdout;
+        let decoded: Vec<f32> = decoded.as_chunks::<4>().0.iter().map(|&b| f32::from_le_bytes(b)).collect();
+        [tone_db(&decoded, 440.0, 1.0, 0.5), tone_db(&decoded[1..], 440.0, 1.0, 0.5)]
+    };
+    let [left, right] = levels(&p, "stereo.mp4");
+    eprintln!("QA mono export as recorded: left {left:.2} dBFS, right {right:.2} dBFS");
+    assert!((left + 12.0).abs() < 0.5 && right < -60.0, "the recording is not on the left only");
+    set(&mut p, Mono::Left);
+    let [left, right] = levels(&p, "mono.mp4");
+    eprintln!("QA mono export from the left: left {left:.2} dBFS, right {right:.2} dBFS");
+    assert!((left + 12.0).abs() < 0.5 && (right - left).abs() < 0.1, "the left side does not play in both ears");
+}

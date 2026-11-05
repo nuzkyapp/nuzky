@@ -299,6 +299,7 @@ fn media(clip: &MediaClip, track: TrackKind, assets: &Assets, project: &Project,
         leveler: 0.0,
         shape: None,
         duck_db: 0.0,
+        mono: Default::default(),
         background: Default::default(),
     };
     let mut out = Clip::new(new_id(), clip.start_us.max(0), clip.duration_us, content);

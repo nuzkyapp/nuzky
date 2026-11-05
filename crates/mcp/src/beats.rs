@@ -430,6 +430,7 @@ fn fade_out(clip_id: &str, fade_out_us: i64) -> EditCmd {
         leveler: None,
         shape: None,
         duck_db: None,
+        mono: None,
         background: None,
     }
 }

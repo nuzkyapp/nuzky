@@ -1038,6 +1038,7 @@ impl Sound {
                 leveler: 0.0,
                 shape: None,
                 duck_db: 0.0,
+                mono: Default::default(),
                 background: Background::None,
             };
             Clip::new(format!("{}-{at}", asset.id), at.max(0), asset.duration_us, content)

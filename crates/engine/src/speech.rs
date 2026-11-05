@@ -171,6 +171,7 @@ mod tests {
             leveler: None,
             shape: None,
             duck_db: None,
+            mono: None,
             background: None,
         })
         .unwrap();
@@ -267,6 +268,7 @@ mod tests {
             leveler: None,
             shape: None,
             duck_db: None,
+            mono: None,
             background: None,
         })
         .unwrap();

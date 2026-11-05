@@ -123,6 +123,7 @@ pub const COMMANDS: &[&str] = &[
     "sound_downloaded",
     "sound_library",
     "sound_link",
+    "sound_only_in",
     "sound_preview",
     "sound_search",
     "sound_settings",
