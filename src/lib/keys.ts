@@ -247,8 +247,6 @@ function tidy(preset: PresetId, changed: Partial<Keymap>): Partial<Keymap> {
   return Object.fromEntries(Object.entries(changed).filter(([id, keys]) => !same(keys, PRESETS[preset].keys[id as ActionId]))) as Partial<Keymap>;
 }
 
-export const useKeysDialog = create<{ open: boolean }>(() => ({ open: false }));
-export const openKeys = () => useKeysDialog.setState({ open: true });
 
 /**
  * Takes the keys a file from another editor gives Nuzky's actions, on top of that editor's set. A key the file gives

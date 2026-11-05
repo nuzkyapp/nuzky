@@ -128,14 +128,14 @@ def preview(r):
             wait(lambda: layout(r)['section'] == normal['section'], 5) and [c['id'] for c in r.track()][:1] == [clip]
             and r.s.run('return document.activeElement?.dataset.clipId') == clip, r.track())
 
-    r.s.run("window.__nuzky.store.setState({connectOpen: true})")
+    r.s.run("window.__nuzky.openSettings()")
     wait(lambda: r.s.run("return !!document.querySelector('[aria-modal=true]')"), 5)
     r.key('m')
     r.key('f')
     time.sleep(0.3)
     r.check('with a dialog open, M and F leave the preview alone',
             pressed(r, 'Mute') == 'false' and layout(r)['section'] == normal['section'], layout(r))
-    r.s.run("window.__nuzky.store.setState({connectOpen: false})")
+    r.s.run("window.__nuzky.settings.setState({open: false})")
 
     size = layout(r)['window']
     webdriver('POST', r.s.path + '/window/rect', {'width': 1024, 'height': 640})

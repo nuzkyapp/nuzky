@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { AlertCircle, Check, Loader2 } from "lucide-react";
 import { api, plainError } from "../../../lib/api";
+import { paneShown } from "../../../lib/settings";
 import { checkYtdlp, useSetup } from "../../../lib/setup";
 import { installYtdlp, useSounds } from "../../../lib/sounds";
 import { useEditor } from "../../../lib/store";
@@ -14,7 +15,7 @@ async function download() {
   await installYtdlp(false);
   const { installError: error, link } = useSounds.getState();
   const { open, current } = useSetup.getState();
-  if (error && !error.startsWith("CANCELLED") && !(open && current === "music") && link.error !== error) useEditor.getState().toast({ kind: "error", text: plainError(error) });
+  if (error && !error.startsWith("CANCELLED") && !(open && current === "music") && !paneShown("sounds") && link.error !== error) useEditor.getState().toast({ kind: "error", text: plainError(error) });
 }
 
 export function MusicStep() {

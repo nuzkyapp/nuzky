@@ -41,7 +41,8 @@ import { onBeatsFound } from "./lib/beats";
 import { closeSource, seekSource, sourceDuration, useSource } from "./lib/source";
 import { appWindow, toggleFullPreview, toggleMuted, usePreview } from "./lib/preview";
 import { titleWindow } from "./lib/window";
-import { actionOf, chordsOf, openKeys, useKeys, type ActionId } from "./lib/keys";
+import { actionOf, chordsOf, useKeys, type ActionId } from "./lib/keys";
+import { openSettings, useSettings } from "./lib/settings";
 
 const isMedia = (path: string) => MEDIA_EXTENSIONS.includes(path.split(".").pop()?.toLowerCase() ?? "");
 
@@ -83,10 +84,10 @@ function useShortcuts() {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const s = useEditor.getState();
-      // Keyboard shortcuts open from anywhere, as settings do in other apps.
+      // Settings open from anywhere, as in other apps.
       if (chordsOf(e).includes("Ctrl+,") && !document.querySelector("dialog[open], [aria-modal='true']")) {
         e.preventDefault();
-        openKeys();
+        openSettings();
         return;
       }
       // The home screen and the launcher have their own keys. While an update installs, a key would change the project it is saving.
@@ -532,7 +533,7 @@ useEditor.subscribe((s, prev) => {
 // Test hook for WebDriver runs; native file dialogs cannot be automated.
 if (import.meta.env.DEV)
   Object.assign(window, {
-    __nuzky: { importPaths, exportVideo, plugins: usePlugins, runPlugin, gallery: useGallery, store: useEditor, cover: useCover, reels: useReels, openReelsToFind, speech: useSpeech, api, agent: useAgent, dock: useDock, setup: useSetup, library: useLibrary, style: useStyle, addProjects, findDrafts, newProjectFromMedia, capcut: useCapCut, openDraft, openDraftFolder, openProject, refreshLibrary, trashProjects, updates: useUpdates, checkForUpdates, sounds: useSounds, stickers: useStickers, tour: useTour, youtube: useYoutube, previewWindow: appWindow, remote: useRemote, source: useSource, keys: useKeys },
+    __nuzky: { importPaths, exportVideo, plugins: usePlugins, runPlugin, gallery: useGallery, store: useEditor, cover: useCover, reels: useReels, openReelsToFind, speech: useSpeech, api, agent: useAgent, dock: useDock, setup: useSetup, library: useLibrary, style: useStyle, addProjects, findDrafts, newProjectFromMedia, capcut: useCapCut, openDraft, openDraftFolder, openProject, refreshLibrary, trashProjects, updates: useUpdates, checkForUpdates, sounds: useSounds, stickers: useStickers, tour: useTour, youtube: useYoutube, previewWindow: appWindow, remote: useRemote, source: useSource, keys: useKeys, settings: useSettings, openSettings },
   });
 
 async function startEditor() {

@@ -1,14 +1,12 @@
 import { useStyle } from "../lib/style";
 import { useEditor } from "../lib/store";
 import { BugReportDialog } from "./BugReportDialog";
-import { ChatGptDialog } from "./ChatGptDialog";
-import { ConnectAgentDialog } from "./ConnectAgentDialog";
 import { ExportDialog } from "./ExportDialog";
-import { KeysDialog } from "./KeysDialog";
 import { Launcher } from "./home/Launcher";
 import { OpenedDraftDialog } from "./home/OpenedDraftDialog";
 import { SwitchDialog } from "./home/SwitchConfirm";
 import { ModelQuestionDialog } from "./ModelQuestionDialog";
+import { SettingsDialog } from "./settings/SettingsDialog";
 import { SetupDialog } from "./setup/SetupDialog";
 import { ShareDialog } from "./ShareDialog";
 import { LearnDialog } from "./style/LearnDialog";
@@ -24,8 +22,6 @@ export default function Dialogs() {
       <ExportDialog />
       <YoutubeDialog />
       <SetupDialog />
-      <ConnectAgentDialog />
-      <ChatGptDialog />
       {learnOpen && <LearnDialog />}
       <SwitchDialog />
       <ModelQuestionDialog kind="speech" />
@@ -33,7 +29,7 @@ export default function Dialogs() {
       <OpenedDraftDialog />
       <BugReportDialog />
       <ShareDialog />
-      <KeysDialog />
+      <SettingsDialog />
     </>
   );
 }

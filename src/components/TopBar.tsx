@@ -15,7 +15,8 @@ import { ShareButton } from "./ShareDialog";
 import { UpdateButton } from "./Updates";
 import { FeedbackButton } from "./Feedback";
 import { useWindowButtons } from "../lib/window";
-import { openKeys, useKeyLabels } from "../lib/keys";
+import { useKeyLabels } from "../lib/keys";
+import { openSettings } from "../lib/settings";
 
 function SaveStatus() {
   const saveState = useEditor((s) => s.saveState);
@@ -382,7 +383,7 @@ export function TopBar() {
           </>
         )}
         <VersionsButton />
-        <IconButton round aria-haspopup="dialog" label="Keyboard shortcuts (Ctrl+,)" onClick={openKeys}>
+        <IconButton round aria-haspopup="dialog" label="Settings (Ctrl+,)" onClick={() => openSettings()}>
           <Settings size={16} />
         </IconButton>
       </div>

@@ -1,4 +1,4 @@
-"""Keyboard shortcuts: a key recorded for Split splits and the old one does not, a key another action holds moves only
+"""Settings › Keyboard: a key recorded for Split splits and the old one does not, a key another action holds moves only
 after Use it here, tooltips name the new key, a set of another editor (DaVinci Resolve) puts its keys in place, and a
 Premiere Pro file takes its keys over that set; a file of no editor changes nothing and says so."""
 import time
@@ -6,7 +6,10 @@ import time
 from e2e.harness import FIXTURES, flow, press, wait
 from e2e.home import resize
 
-DIALOG = "return !!document.querySelector('[role=dialog] #keys-title')"
+OPEN = "return !!document.querySelector('[role=dialog][data-settings]')"
+# Settings is open on its Keyboard pane.
+DIALOG = "return document.querySelector('[role=dialog][data-settings] #settings-title')?.textContent === 'Keyboard'"
+KEYBOARD_TAB = "document.querySelector('#settings-tab-keyboard').click()"
 # The menu's item is what the pointer would hit at its middle, and the menu has the keyboard.
 MENU_ON_TOP = """const item = [...document.querySelectorAll('[role=menu] [role^=menuitem]')].find((el) => el.textContent.includes('DaVinci Resolve'));
 if (!item) return false;
@@ -58,7 +61,7 @@ def split_with(r, key, **modifiers):
     return split
 
 
-@flow('keys', 'Keyboard shortcuts: record a key for Split, move a key from another action, a set of another editor, '
+@flow('keys', 'Settings › Keyboard: record a key for Split, move a key from another action, a set of another editor, '
       'a Premiere Pro file, and tooltips that name the keys as they are')
 def keys(r):
     r.import_media(FIXTURES / 'talk.mp4')
@@ -66,7 +69,9 @@ def keys(r):
     r.check('S splits with the keys Nuzky starts with', split_with(r, 's'))
 
     r.key(',', ctrlKey=True)
-    r.check('Ctrl+, opens Keyboard shortcuts', wait(lambda: r.s.run(DIALOG), 5))
+    r.check('Ctrl+, opens Settings', wait(lambda: r.s.run(OPEN), 5))
+    r.s.run(KEYBOARD_TAB)
+    r.check('its Keyboard pane lists the keys', wait(lambda: r.s.run(DIALOG) and r.s.run("return !!document.querySelector('[data-keys=split]')"), 5))
     time.sleep(0.5)
     r.shot('dialog')
     r.s.run(RECORD, 'split')
@@ -90,14 +95,14 @@ def keys(r):
     r.check('the keys stay for the next launch', r.s.run(SAVED) == state, r.s.run(SAVED))
 
     r.key('Escape')
-    r.check('Esc closes it', wait(lambda: not r.s.run(DIALOG), 3))
+    r.check('Esc closes it', wait(lambda: not r.s.run(OPEN), 3))
     r.check('the Split button\'s tooltip names Ctrl+K', r.s.run(SPLIT_TIP) == 'Split at playhead (Ctrl+K)', r.s.run(SPLIT_TIP))
     r.check('S no longer splits', not split_with(r, 's'))
     r.check('Ctrl+K splits and opens no launcher', split_with(r, 'k', ctrlKey=True) and not r.s.run(LAUNCHER))
 
     # Another editor's set: DaVinci Resolve splits with Ctrl+\ and deletes left of the playhead with Ctrl+Shift+[.
     r.key(',', ctrlKey=True)
-    wait(lambda: r.s.run(DIALOG), 5)
+    r.check('Ctrl+, opens Settings again on Keyboard, the pane shown last', wait(lambda: r.s.run(DIALOG), 5))
     # Real key presses: Enter on Keys like, then type-ahead and Enter in its menu, which must lie over the dialog.
     r.s.run("document.querySelector('[role=dialog] [data-preset]').focus()")
     press('Return')
@@ -114,7 +119,7 @@ def keys(r):
     time.sleep(0.5)
     r.shot('resolve')
     r.key('Escape')
-    wait(lambda: not r.s.run(DIALOG), 3)
+    wait(lambda: not r.s.run(OPEN), 3)
     r.check('Ctrl+\\ splits in the Resolve set', split_with(r, '\\', ctrlKey=True))
     r.s.run("const field = document.createElement('input'); field.id = 'typing'; document.body.append(field); field.focus()")
     r.key('!', code='Digit1', shiftKey=True)
@@ -166,21 +171,21 @@ def keys(r):
     r.check('a file of no editor says so and changes nothing',
             status and status.startswith("Couldn't import “notes.txt”. This file has no keyboard shortcuts") and r.s.run(KEYS) == state, status)
     r.key('Escape')
-    wait(lambda: not r.s.run(DIALOG), 3)
+    wait(lambda: not r.s.run(OPEN), 3)
     r.check('X splits after the import', split_with(r, 'x'))
     r.check('no error toast', not r.errors(), r.errors())
 
     # The gear in the editor's top bar opens it too.
     r.shot('topbar')
-    r.s.run("document.querySelector('header button[aria-label^=\"Keyboard shortcuts\"]')?.click()")
+    r.s.run("document.querySelector('header button[aria-label^=\"Settings\"]')?.click()")
     r.check("the top bar's gear opens it", wait(lambda: r.s.run(DIALOG), 5))
     r.key('Escape')
-    wait(lambda: not r.s.run(DIALOG), 3)
+    wait(lambda: not r.s.run(OPEN), 3)
 
-    # The home screen's sidebar row opens the same dialog.
+    # The home screen's Settings row opens the same window.
     r.s.run("window.__nuzky.store.setState({view: 'home'})")
     time.sleep(1)
-    r.s.run("[...document.querySelectorAll('nav[aria-label=Collections] button')].find((b) => b.textContent.includes('Keyboard shortcuts'))?.click()")
-    r.check("the home screen's Keyboard shortcuts row opens it", wait(lambda: r.s.run(DIALOG), 5))
+    r.s.run("[...document.querySelectorAll('nav[aria-label=Collections] button')].find((b) => b.textContent.trim() === 'Settings')?.click()")
+    r.check("the home screen's Settings row opens it", wait(lambda: r.s.run(DIALOG), 5))
     time.sleep(0.5)
     r.shot('home')

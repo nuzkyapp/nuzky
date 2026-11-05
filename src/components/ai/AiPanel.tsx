@@ -70,6 +70,7 @@ import { copyText } from "../../lib/clipboard";
 import { FINISH_DRAFT } from "../../lib/capcut";
 import { downloadModels, useCover } from "../../lib/cover";
 import { chose } from "../../lib/exit";
+import { openSettings } from "../../lib/settings";
 import { openRecap, undoAction, undoStep, useEditor } from "../../lib/store";
 import { formatLength, formatTime } from "../../lib/time";
 import { whenLabel } from "../../lib/library";
@@ -78,7 +79,7 @@ import { MODEL_QUESTION, answerModelQuestion } from "../ModelQuestionDialog";
 import { Markdown } from "./Markdown";
 import { IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from "../panel/assets";
 import { ChatGptLogo } from "../ChatGptLogo";
-import { ContinueButton, USAGE_PAGE } from "../ChatGptDialog";
+import { ContinueButton, USAGE_PAGE } from "../settings/ChatGptSection";
 import { continueWithChatGpt, openChatGpt, planReady, useChatGpt } from "../../lib/chatgpt";
 import { EFFORTS, chooseEffort, chooseModel, effortLabel, loadModels, ownDefault, resolved, useModels } from "../../lib/models";
 import { moveFloatBy, startMove } from "./AiDock";
@@ -327,7 +328,7 @@ function AgentMenu() {
           <MenuItem
             onClick={() => {
               close();
-              useEditor.setState({ connectOpen: true });
+              openSettings("ai", "agents");
             }}
           >
             <Plug size={14} className="text-muted" />

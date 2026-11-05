@@ -8,6 +8,7 @@ import { useDock } from "../../lib/dock";
 import { useLibrary } from "../../lib/library";
 import { useTranscriptView } from "../../lib/speech";
 import { REEL_LIMIT_US, candidates, choose, findBlocked, findReels, makeReels, moved, openReel, pickAll, setFinish, setFraming, setPicked, setRejected, toggleReelPlay, useReels } from "../../lib/reels";
+import { openSettings } from "../../lib/settings";
 import { useEditor } from "../../lib/store";
 import { formatDuration } from "../../lib/time";
 import type { ReelCandidate, ReelFinish } from "../../lib/types";
@@ -214,7 +215,7 @@ function NoReels() {
             <Button pill className="h-7 px-3 text-[12px]" onClick={() => void loadAgents()}>
               Check again
             </Button>
-            <Button variant="ghost" className="h-7 px-2 text-[12px] text-accent! hover:text-accent!" onClick={() => useEditor.setState({ connectOpen: true })}>
+            <Button variant="ghost" className="h-7 px-2 text-[12px] text-accent! hover:text-accent!" onClick={() => openSettings("ai", "agents")}>
               <Plug size={14} /> Connect an agent in a terminal…
             </Button>
           </>

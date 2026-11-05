@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { AlertCircle, AlertTriangle, Check, Loader2 } from "lucide-react";
 import { api, plainError } from "../../../lib/api";
 import { downloadModels, loadModels, useCover } from "../../../lib/cover";
+import { paneShown } from "../../../lib/settings";
 import { useSetup } from "../../../lib/setup";
 import { useEditor } from "../../../lib/store";
 import { Button, ProgressBar } from "../../ui";
@@ -15,7 +16,7 @@ let shown: string | null = null;
 
 export const showsVisionDownload = (id: string) => {
   const { open, current } = useSetup.getState();
-  return open && current === "vision" && id === shown;
+  return ((open && current === "vision") || paneShown("models")) && id === shown;
 };
 
 /** Face and person models: what they are for and Download for all of them, so neither covers nor an agent ask later. */

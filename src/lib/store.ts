@@ -67,7 +67,6 @@ interface EditorState {
   exportRecap: { runId: string | null } | null;
   /** Open the export dialog on this preset, such as Reels & TikTok for a reel just made, without remembering it. */
   exportPreset: Delivery | null;
-  connectOpen: boolean;
   exportJobId: string | null;
   panelTab: PanelTab;
   ratioOpen: boolean;
@@ -428,7 +427,6 @@ export const useEditor = create<EditorState>((set, get) => ({
   exportOpen: false,
   exportRecap: null,
   exportPreset: null,
-  connectOpen: false,
   exportJobId: null,
   panelTab: "media",
   ratioOpen: false,
