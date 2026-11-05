@@ -271,7 +271,7 @@ const MONO_FROM: { id: Exclude<Mono, "off">; label: string; title: string }[] = 
 
 /**
  * Mono for one or more clips with sound: one sound in both ears, from both sides of the file or from one. With one
- * clip whose file has sound on one side only, a line says so and offers to play that side in both ears.
+ * clip whose file has sound on one side only, the row says which side, and checking it plays that side in both ears.
  */
 export function MonoRow({ clips }: { clips: Clip[] }) {
   const sides = clips.map((c) => (c.content.type === "media" ? (c.content.mono ?? "off") : "off"));
@@ -280,24 +280,28 @@ export function MonoRow({ clips }: { clips: Clip[] }) {
   const ids = clips.map((c) => c.id);
   const single = clips.length === 1 && clips[0].content.type === "media" ? clips[0].content : undefined;
   const onlyIn = useSoundOnlyIn(single?.assetId);
+  const oneEar = !!onlyIn && (single?.mono ?? "off") === "off";
   const set = (mono: Mono) => editClips(ids, (c) => ({ type: "updateClip", clipId: c.id, mono }));
   // Checking keeps the side of clips that already have one, and starts a file recorded on one side on that side.
   const turn = (v: boolean) =>
     editClips(ids, (c) => (c.content.type !== "media" || (v && (c.content.mono ?? "off") !== "off") ? null : { type: "updateClip", clipId: c.id, mono: v ? (onlyIn ?? "both") : "off" }));
   return (
     <>
-      {onlyIn && single && (single.mono ?? "off") === "off" && (
-        <div className="flex flex-col items-start gap-1.5">
-          <p role="status" className="flex items-start gap-1.5 text-[12px] text-muted">
-            <AlertTriangle size={14} className="mt-px shrink-0 text-warn" />
-            <span>{`Only the ${onlyIn} side has sound, so it plays in one ear.`}</span>
-          </p>
-          <Button variant="ghost" className="ml-3 h-7 px-2 text-[12px] text-accent! hover:text-accent!" onClick={() => set(onlyIn)}>
-            Play it on both sides
-          </Button>
-        </div>
-      )}
-      <Checkbox label="Mono" checked={all} mixed={!all && on.length > 0} title="Plays one sound in both ears" onChange={turn} />
+      <Checkbox
+        label="Mono"
+        checked={all}
+        mixed={!all && on.length > 0}
+        title={oneEar ? `Only the ${onlyIn} side has sound, so it plays in one ear. Mono plays it in both.` : "Plays one sound in both ears"}
+        onChange={turn}
+        detail={
+          oneEar && (
+            <span role="status" className="flex items-center gap-1">
+              <AlertTriangle size={12} className="shrink-0 text-warn" />
+              {onlyIn === "left" ? "Left side only" : "Right side only"}
+            </span>
+          )
+        }
+      />
       {all && (
         <div className="flex flex-col gap-1.5">
           <span className="text-[12px] text-muted">From</span>

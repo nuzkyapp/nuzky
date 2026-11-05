@@ -1,5 +1,5 @@
 """Mono on a phone video whose microphone recorded on the left only: once its sound is prepared, the Audio tab says
-it plays in one ear, Play it on both sides turns Mono on from the left by keyboard, the project file keeps it and the
+only the left side has sound, Space on Mono turns it on from the left, the project file keeps it and the
 export carries the voice in both channels, then From and Ctrl+Z change it back."""
 import json, subprocess, time
 
@@ -10,9 +10,9 @@ from e2e.harness import export, flow, press, wait, webdriver
 RATE = 48_000
 CONTENT = "return window.__nuzky.store.getState().snap.project.tracks[0].clips[0].content"
 INSPECTOR = "document.querySelector('aside[aria-label=Inspector]')"
-CHECKBOX = (f"[...{INSPECTOR}.querySelectorAll('label')].find((l) => l.textContent === 'Mono')?.querySelector('input')")
+CHECKBOX = (f"[...{INSPECTOR}.querySelectorAll('label')].find((l) => l.textContent.startsWith('Mono'))?.querySelector('input')")
 BUTTON = f"[...{INSPECTOR}.querySelectorAll('button')].find((b) => b.textContent.trim() === arguments[0])"
-NOTICE = f"return [...{INSPECTOR}.querySelectorAll('[role=status]')].map((e) => e.textContent).find((t) => t.includes('side has sound')) ?? null"
+NOTICE = f"return [...{INSPECTOR}.querySelectorAll('[role=status]')].map((e) => e.textContent).find((t) => t.includes('side only')) ?? null"
 FROM = f"return {INSPECTOR}.querySelector('[role=group][aria-label=\"Mono from\"] [aria-pressed=true]')?.textContent ?? null"
 
 
@@ -24,7 +24,7 @@ def channels(path):
     return [10 * np.log10(np.mean(stereo[:, ch] ** 2) + 1e-20) for ch in (0, 1)]
 
 
-@flow('mono', 'Mono plays a voice recorded on the left only in both ears: the inspector finds the side, Play it on both sides fixes it by keyboard, and the export has the voice in both channels')
+@flow('mono', 'Mono plays a voice recorded on the left only in both ears: the inspector names the side, Space on Mono plays it in both ears, and the export has the voice in both channels')
 def mono(r):
     source = r.work / 'lav.mp4'
     voice = '0.2*sin(2*PI*180*t)*(0.6+0.4*sin(2*PI*3*t))'
@@ -50,8 +50,7 @@ def mono(r):
     r.check('Mono is there, off', wait(lambda: r.s.run(f'return {CHECKBOX}?.checked ?? null') is False, 5),
             r.s.run(f'return {CHECKBOX}?.checked ?? null'))
     notice = wait(lambda: r.s.run(NOTICE), 60) or r.s.run(NOTICE)
-    r.check('once the sound is prepared, a line says only the left side has sound',
-            notice == 'Only the left side has sound, so it plays in one ear.', notice)
+    r.check('once the sound is prepared, the Mono row says only the left side has sound', notice == 'Left side only', notice)
     r.check('From stays hidden while Mono is off', r.s.run(FROM) is None, r.s.run(FROM))
     for width, height, suffix in ((1024, 640, '-1024'), (1440, 900, '')):
         webdriver('POST', r.s.path + '/window/rect', {'width': width, 'height': height})
@@ -59,12 +58,12 @@ def mono(r):
         time.sleep(1)
         r.shot(f'inspector-one-side{suffix}')
 
-    r.s.run(f'{BUTTON}.focus()', 'Play it on both sides')
-    press('Return')
-    r.check('Enter on Play it on both sides turns Mono on from the left', wait(lambda: content().get('mono') == 'left', 5), content())
+    r.s.run(f'{CHECKBOX}.focus()')
+    press('space')
+    r.check('Space on Mono turns it on from the left side', wait(lambda: content().get('mono') == 'left', 5), content())
     r.check('Mono is checked and From marks Left', wait(lambda: r.s.run(f'return {CHECKBOX}?.checked') and r.s.run(FROM) == 'Left', 5),
             r.s.run(FROM))
-    r.check('the line about one side goes away', wait(lambda: r.s.run(NOTICE) is None, 5), r.s.run(NOTICE))
+    r.check('the note about one side goes away', wait(lambda: r.s.run(NOTICE) is None, 5), r.s.run(NOTICE))
     r.shot('inspector-mono-left')
     saved = lambda: json.loads(r.saved_project().read_text())['tracks'][0]['clips'][0]['content'].get('mono')
     r.check('the project file on disk plays the left side in both ears', wait(lambda: saved() == 'left', 10), saved())
@@ -81,5 +80,5 @@ def mono(r):
     r.check('Ctrl+Z takes it back to Left', wait(lambda: content().get('mono') == 'left', 5), content())
     r.key('z', ctrlKey=True)
     r.check('a second Ctrl+Z turns Mono off', wait(lambda: content().get('mono', 'off') == 'off', 5), content())
-    r.check('and the line about one side comes back', wait(lambda: r.s.run(NOTICE) is not None, 5), r.s.run(NOTICE))
+    r.check('and the note about one side comes back', wait(lambda: r.s.run(NOTICE) is not None, 5), r.s.run(NOTICE))
     r.check('no error toast', not r.errors(), r.errors())
