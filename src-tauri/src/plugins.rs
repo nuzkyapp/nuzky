@@ -123,6 +123,18 @@ pub async fn allow_plugin_access(app: AppHandle, id: String, key: String) -> Cmd
     .map_err(err)?
 }
 
+/// Takes back the full access allowed to the plugin, so it must be allowed again before its next run, from its button
+/// or automatically. A run already going was allowed when it started and finishes; Stop ends it sooner.
+#[tauri::command]
+pub async fn revoke_plugin_access(app: AppHandle, id: String) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || {
+        plugin_system::forget(&id).map_err(err)?;
+        app.emit("plugins-changed", ()).map_err(err)
+    })
+    .await
+    .map_err(err)?
+}
+
 #[tauri::command]
 pub async fn remove_plugin(app: AppHandle, id: String) -> CmdResult<()> {
     tauri::async_runtime::spawn_blocking(move || {
