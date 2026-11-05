@@ -59,7 +59,7 @@ def settings(r):
     r.s.run(TYPE, SEARCH, 'split')
     results = wait(lambda: r.s.run(RESULTS), 3) or []
     r.check('typing "split" lists the Split action with its key and its pane',
-            any(x.split()[:2] == ['Split', 'S'] and x.split()[-1] == 'Keyboard' for x in results), results)
+            any(x.split('\n') == ['Split at the playhead', 'S', 'Keyboard'] for x in results), results)
     time.sleep(0.3)
     r.shot('search')
     press('Return')
@@ -101,8 +101,10 @@ def settings(r):
     r.shot('pane-ai')
 
     # Plugins: an allowed plugin with full access is revoked here and asks again; its run after import turns on.
-    plugin = wait(lambda: r.s.run(PLUGIN), 10)
-    r.s.call("window.__nuzky.api.allowPluginAccess('export-xml', arguments[0]).then(() => window.__nuzky.plugins.getState().list && null)", plugin['accessKey'])
+    listed = r.s.call("window.__nuzky.api.listPlugins().then((l) => JSON.stringify(l.find((p) => p.id === 'export-xml')))")
+    plugin = json.loads(listed['value']) if listed['ok'] else {}
+    r.check('Export XML is installed and asks for full access', plugin.get('accessKey') and not plugin.get('allowed'), listed)
+    r.s.call("window.__nuzky.api.allowPluginAccess('export-xml', arguments[0])", plugin.get('accessKey'))
     r.s.run(TAB, 'plugins')
     r.check('Plugins lists Export XML as allowed, with Revoke', wait(lambda: r.s.run(BUTTON, 'Revoke', '[data-setting=plugins-access]'), 10))
     time.sleep(0.5)
