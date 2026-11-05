@@ -267,8 +267,10 @@ def open_page(r):
       'and detaches the sound of clips, picks the agent and lists past chats, starts a new project in a format and opens '
       'the earlier one again, and nothing is edited while the AI edits', before=setup, home=True)
 def share_editor(r):
-    r.check('the home screen offers sharing', r.s.run(f"return !!document.querySelector('{BUTTON}')"))
-    r.s.run(f"document.querySelector('{BUTTON}').click()")
+    # The editor stays drawn under the home screen with its own button; this one is the home screen's.
+    on_home = f"[...document.querySelectorAll('{BUTTON}')].find((b) => b.closest('[aria-label=Projects]'))"
+    r.check('the home screen offers sharing', r.s.run(f"return !!{on_home}"))
+    r.s.run(f"{on_home}.click()")
     sharing, page = open_page(r)
     r.check('it opens the dialog with the code', sharing and '/?k=' in sharing['url'])
     time.sleep(0.5)
