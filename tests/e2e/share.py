@@ -1,8 +1,8 @@
-import http.client, json, socket, time
+import base64, http.client, json, socket, time, urllib.request
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
-from e2e.harness import FIXTURES, MACOS, ffprobe, flow, wait
+from e2e.harness import FIXTURES, LINUX, MACOS, WEBKIT_DRIVER, ffprobe, flow, start, started, stop, wait
 from e2e.ai_panel import FAKE
 
 BUTTON = 'button[aria-label="Edit from your phone or another computer"], button[title="Edit from your phone or another computer"]'
@@ -51,6 +51,75 @@ class Page:
             return None
         finally:
             connection.close()
+
+
+class Phone:
+    """The page in a real browser: WebKit, the engine of Safari on an iPhone, at an iPhone's size. Linux only, where
+    WebKitGTK's MiniBrowser runs under the WebDriver inside the run's headless gamescope."""
+
+    BROWSER = Path('/usr/libexec/webkit2gtk-4.1/MiniBrowser')
+
+    def __init__(self, r):
+        with socket.socket() as s:
+            s.bind(('127.0.0.1', 0))
+            self.port = s.getsockname()[1]
+        self.driver = start([WEBKIT_DRIVER, f'--port={self.port}', '--host=127.0.0.1'], r.work / 'phone-driver.log', r.launch_env())
+        if not started(self.driver, self.port, 20):
+            raise RuntimeError('the phone\'s WebDriver did not start, see phone-driver.log')
+        caps = {'capabilities': {'alwaysMatch': {'webkitgtk:browserOptions': {'binary': str(self.BROWSER), 'args': ['--automation', '--private']}}}}
+        self.path = '/session/' + self.call('POST', '/session', caps)['sessionId']
+        self.call('POST', self.path + '/window/rect', {'width': 402, 'height': 874})
+
+    def call(self, method, path, body=None):
+        request = urllib.request.Request(f'http://127.0.0.1:{self.port}{path}', data=json.dumps(body).encode() if body is not None else None,
+                                         method=method, headers={'Content-Type': 'application/json'})
+        with urllib.request.urlopen(request, timeout=120) as response:
+            return json.loads(response.read() or b'{}').get('value')
+
+    def open(self, url):
+        self.call('POST', self.path + '/url', {'url': url})
+
+    def run(self, script):
+        return self.call('POST', self.path + '/execute/sync', {'script': script, 'args': []})
+
+    def shot(self, path):
+        path.write_bytes(base64.b64decode(self.call('GET', self.path + '/screenshot')))
+
+    def close(self):
+        try:
+            self.call('DELETE', self.path)
+        finally:
+            stop(self.driver)
+
+
+THUMBS = "return performance.getEntriesByType('resource').filter((e) => e.name.includes('/thumb/')).length"
+LOADED = """const f = document.getElementById('frame');
+return !f.hidden && f.complete && f.naturalWidth > 0 && document.querySelectorAll('.clip:not(.pending)').length === 2"""
+
+
+def on_phone(r, url, page):
+    phone = Phone(r)
+    try:
+        began = time.monotonic()
+        phone.open(url)
+        loaded = wait(lambda: phone.run(LOADED), 30, step=0.05)
+        took = time.monotonic() - began
+        timing = phone.run("""return performance.getEntriesByType('resource').concat(performance.getEntriesByType('navigation'))
+            .map((e) => [e.name.replace(location.origin, ''), Math.round(e.startTime), Math.round(e.duration), e.encodedBodySize])""")
+        r.check('the page opens on a phone with the preview and the clips', loaded, timing)
+        print(f'  phone page ready in {took:.2f} s: {timing}', flush=True)
+        wait(lambda: phone.run(THUMBS) >= 2, 10)
+        fetched = phone.run(THUMBS)
+        # Each seek publishes a new state and a new frame, as playing does several times a second.
+        for us in range(250_000, 2_500_000, 250_000):
+            page.act(action='seek', us=us)
+            time.sleep(0.4)
+        r.check('the strip keeps its thumbnails while the playhead moves, so the clips do not blink',
+                fetched == 2 and phone.run(THUMBS) == fetched, [fetched, phone.run(THUMBS)])
+        phone.shot(r.work / 'share-phone.png')
+        r.shots.append('share-phone.png')
+    finally:
+        phone.close()
 
 
 def page_state(page, check, timeout=60):
@@ -112,6 +181,8 @@ def share(r):
     frame = wait(lambda: (got := page.request('GET', '/frame.jpg'))[0] == 200 and got, 10)
     r.check('the page gets the preview frame', frame and frame[2].startswith(b'\xff\xd8'), frame and frame[0])
     r.check('the page cannot seek before the start', page.act(action='seek', us=-1) == 400)
+    if LINUX:
+        on_phone(r, sharing['url'], page)
 
     duration = sum(c['durationUs'] for c in clips)
     r.check('a message from the page goes to the AI', page.act(action='send', text='cut the pause') == 200)
