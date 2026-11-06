@@ -63,7 +63,12 @@ def ticks(r, clip_id):
 def tick_columns(r, name, clip_id, beat_from):
     """Columns with a white tick in the top 12 px of the music clip's waveform, under its name: (in the intro before the
     beat, after it). The drop's flag chip and the fade dots in the waveform's corners are left out."""
-    r.s.run("document.querySelector(`[data-clip-id='${arguments[0]}']`).scrollIntoView({block: 'nearest'})", clip_id)
+    # As the timeline reveals a clip: WebKitGTK does not scroll its track area for scrollIntoView.
+    r.s.run("""const clip = document.querySelector(`[data-clip-id='${arguments[0]}']`);
+        const box = clip.closest('.overflow-auto');
+        const below = clip.getBoundingClientRect().bottom - (box.getBoundingClientRect().top + box.clientHeight);
+        if (below > 0) box.scrollTop += below;""", clip_id)
+    time.sleep(0.3)
     r.shot(name)
     t = ticks(r, clip_id)
     image = np.asarray(Image.open(r.work / f'{name}.png').convert('RGB')).astype(int)
