@@ -71,8 +71,8 @@ function ClipInspector({ clip, kind, asset, music, chosen, onChoose }: { clip: C
   return (
     <>
       <InspectorHeader icon={KIND_ICON[kind]} title={title} detail={detail} tone={kind} />
-      <TabBar group="clip" label="Clip settings" className="mx-2.5 mb-1" tabs={tabs} value={tab} onChange={(id) => onChoose({ ...chosen, [kind]: id })} />
-      <TabPanel group="clip" id={tab} className="min-h-0 flex-1 overflow-y-auto">
+      <TabBar group="clip" label="Clip settings" className="mx-3 mb-1" tabs={tabs} value={tab} onChange={(id) => onChoose({ ...chosen, [kind]: id })} />
+      <TabPanel group="clip" id={tab} className="scroll-shown min-h-0 flex-1 overflow-y-auto">
         <AiLock>
           {(tab === "video" || tab === "transform") && <TransformSection clip={clip} asset={asset} caption={kind === "caption"} />}
           {tab === "video" && c.type === "media" && (
@@ -117,7 +117,7 @@ function CutInspector({ clipId }: { clipId: string }) {
         title={t ? (TRANSITIONS.find((k) => k.kind === t.kind)?.label ?? "Transition") : "Cut"}
         detail={`${t ? "Transition · " : ""}cut at ${formatTime(cut.atUs)}`}
       />
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="scroll-shown min-h-0 flex-1 overflow-y-auto">
         <AiLock>
           <TransitionSettings cut={cut} />
         </AiLock>

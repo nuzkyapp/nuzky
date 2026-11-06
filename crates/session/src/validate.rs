@@ -425,6 +425,7 @@ fn validate_clip(project: &Project, clip: &Clip, kind: TrackKind) -> Result<()> 
             leveler,
             shape,
             duck_db,
+            mono,
             background,
         } => {
             let asset =
@@ -471,7 +472,7 @@ fn validate_clip(project: &Project, clip: &Clip, kind: TrackKind) -> Result<()> 
                 clip.id
             );
             ensure!(
-                !(*clean_voice || *dereverb > 0.0 || *normalize || *leveler > 0.0)
+                !(*clean_voice || *dereverb > 0.0 || *normalize || *leveler > 0.0 || !mono.is_off())
                     || nuzky_engine::audio::has_audio(asset),
                 "INVALID_PROJECT: clip {} changes media without sound",
                 clip.id
@@ -1026,11 +1027,14 @@ mod tests {
             project.apply(EditCmd::AddClip { asset_id: id.into(), start_us: None, track_id: None }).unwrap();
         }
         validate(&project).unwrap();
-        for field in ["cleanVoice", "dereverb", "normalize", "leveler"] {
+        for field in ["cleanVoice", "dereverb", "normalize", "leveler", "mono"] {
             for index in [0, 1] {
                 let mut changed = serde_json::to_value(&project).unwrap();
-                changed["tracks"][0]["clips"][index]["content"][field] =
-                    if field == "cleanVoice" || field == "normalize" { true.into() } else { 0.5.into() };
+                changed["tracks"][0]["clips"][index]["content"][field] = match field {
+                    "cleanVoice" | "normalize" => true.into(),
+                    "mono" => "left".into(),
+                    _ => 0.5.into(),
+                };
                 let changed: Project = serde_json::from_value(changed).unwrap();
                 if index == 1 {
                     validate(&changed).unwrap();

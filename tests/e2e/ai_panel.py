@@ -341,11 +341,11 @@ def ai_panel_chatgpt(r):
               and r.s.run("return document.querySelector('aside[aria-label=AI] textarea').value") == 'Hello after sign-out', panel(r)['text'])
         r.shot('chatgpt-not-signed-in')
         click(r, 'Sign in…')
-        dialog = "return document.querySelector('[role=dialog][aria-labelledby=chatgpt-title]')?.innerText ?? ''"
-        check('Sign in… starts signing in again, with the ChatGPT dialog showing it',
+        dialog = "return document.querySelector('[role=dialog][data-settings] [data-setting=chatgpt]')?.innerText ?? ''"
+        check('Sign in… starts signing in again, with Settings › AI showing it',
               wait(lambda: 'Sign in to ChatGPT in your browser' in r.s.run(dialog), 10), r.s.run(dialog))
-        click(r, 'Cancel', '[role=dialog][aria-labelledby=chatgpt-title]')
-        check('cancelled, the dialog offers Continue with ChatGPT', wait(lambda: 'Continue with ChatGPT' in r.s.run(dialog), 10), r.s.run(dialog))
+        click(r, 'Cancel', '[role=dialog][data-settings] [data-setting=chatgpt]')
+        check('cancelled, Settings offers Continue with ChatGPT', wait(lambda: 'Continue with ChatGPT' in r.s.run(dialog), 10), r.s.run(dialog))
         r.key('Escape')
         wait(lambda: not r.s.run(dialog), 3)
         r.s.run("window.__nuzky.agent.setState({draft: ''})")
@@ -1094,8 +1094,9 @@ def ai_panel(r):
     r.s.run('document.body.focus()')
     r.key('j', ctrlKey=True)
     p = wait(lambda: panel(r), 5)
-    r.check('Ctrl+J opens it as a column at the right edge, under the top bar to the bottom, beside the inspector',
-            p and p['right'] == 6 and p['top'] == 48 and p['bottom'] == 6 and p['width'] == 360 and p['inspector'], p)
+    r.check("Ctrl+J opens it in the inspector's place, under the top bar to the bottom, as wide as the inspector",
+            p and p['right'] == 6 and p['top'] == 48 and p['bottom'] == 6 and p['width'] == round(p['windowWidth'] * 0.22)
+            and p['slot'] == 'inspector' and not p['inspector'], p)
     r.check('the field takes focus', wait(lambda: r.s.run('return document.activeElement?.tagName') == 'TEXTAREA', 3))
     agents = wait(lambda: r.s.run('return window.__nuzky.agent.getState().agents'), 10) or []
     r.check('Claude Code is found and Codex and OpenCode are not installed', [(a['name'], bool(a['path'])) for a in agents] == [('Claude Code', True), ('Codex', False), ('OpenCode', False)], agents)
@@ -1269,7 +1270,7 @@ def ai_panel(r):
     r.check('it is answered once, by that process', len(runs(r)) == count and 'Rozumím: also split' not in panel(r)['text'],
             {'runs': len(runs(r)), 'text': panel(r)['text']})
     text = panel(r)['text']
-    r.check('both splits are one run with one card', text.count('Steerable edit') == 1 and 'Split talk.mp4\n00:02' in text and '00:04' in text
+    r.check('both splits are one run with one card', text.count('Steerable edit') == 1 and 'Split talk.mp4\n0:02' in text and '0:04' in text
             and len(r.track()) == len(before) + 2, text)
     r.shot('steered')
     r.s.run("[...document.querySelectorAll('aside[aria-label=AI] button')].filter((b) => b.textContent.trim() === 'Undo').at(-1).click()")
@@ -1288,7 +1289,7 @@ def ai_panel(r):
         r.check(f'{where} ends the agent and the bridge it started within seconds and unlocks the editor',
                 gone and wait(lambda: not r.state()['aiRun'], 3), {'seconds': took, 'agent': alive(pid), 'bridge': alive(bridge)})
         r.check(f'what it did so far stays, and the stopped card says what ({where})',
-                wait(lambda: idle(r) and 'Stopped: Slow edit' in panel(r)['text'] and 'Split talk.mp4\n00:02' in panel(r)['text'], 5), panel(r)['text'])
+                wait(lambda: idle(r) and 'Stopped: Slow edit' in panel(r)['text'] and 'Split talk.mp4\n0:02' in panel(r)['text'], 5), panel(r)['text'])
         if where == 'Stop':
             r.shot('stopped')
         r.s.run('window.__nuzky.store.getState().undo()')
@@ -1326,9 +1327,9 @@ def ai_panel(r):
     r.check('after a restart it opens where it was, as wide as it was', wait(lambda: (panel(r) or {}).get('left') == 6 and panel(r)['width'] == 384, 10), panel(r))
     inspector = r.s.run("const b = document.querySelector('aside[aria-label=Inspector]').getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]")
     r.s.run(DRAG, inspector[0], inspector[1], True)
-    # As wide as the inspector, which with the column gone from the left edge takes 28 % of the window again.
+    # As wide as the inspector, which with the column gone from the left edge takes 22 % of the window again.
     r.check("dropped on the inspector it takes the inspector's place and width, running down beside the timeline",
-            wait(lambda: panel(r)['slot'] == 'inspector' and not panel(r)['inspector'] and panel(r)['width'] == round(panel(r)['windowWidth'] * 0.28)
+            wait(lambda: panel(r)['slot'] == 'inspector' and not panel(r)['inspector'] and panel(r)['width'] == round(panel(r)['windowWidth'] * 0.22)
                  and panel(r)['bottom'] == 6, 3), panel(r))
     r.shot('in-inspector-place')
     r.s.run("document.querySelector('aside[aria-label=AI] button[aria-label=\"Move panel\"]').dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}))")

@@ -911,6 +911,7 @@ fn clip_sound_settings_apply_and_reject_silent_media_over_stdio() {
         json!({"dereverb": 0.8}),
         json!({"normalize": true}),
         json!({"leveler": 0.5}),
+        json!({"mono": "left"}),
     ]
     .into_iter()
     .enumerate()
@@ -950,6 +951,42 @@ fn clip_sound_settings_apply_and_reject_silent_media_over_stdio() {
     assert_eq!(clip["content"]["dereverb"], 1.0);
     assert!(clip["content"].get("leveler").is_none());
     c.call("end_run", json!({"run_id": run, "action": "keep"}));
+    c.finish();
+}
+
+/// A video recorded with a microphone on the left only: once its sound is prepared, get_state says so, and the
+/// agent plays that side in both ears with updateClip mono, which the saved project keeps.
+#[test]
+fn a_recording_on_one_side_is_named_and_plays_mono_over_stdio() {
+    let mut c = Client::new(true);
+    let lav = ffmpeg_media(
+        &c,
+        "lav.mp4",
+        &["testsrc2=s=360x640:r=30:d=2", "aevalsrc=0.25*sin(2*PI*440*t)|0:s=48000:d=2"],
+        &["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac"],
+    );
+    let run = c.call("begin_run", json!({"label": "Mono"}))["run_id"].clone();
+    let id = c.call("import_media", json!({"run_id": run, "paths": [lav]}))["asset_ids"][0].clone();
+    c.call("apply_edits", json!({"run_id": run, "request_id": "place", "edits": [{"type": "addClip", "assetId": id}]}));
+    let state = c.call("get_state", json!({}));
+    let asset: nuzky_engine::model::Asset = serde_json::from_value(state["assets"][0].clone()).unwrap();
+    assert!(state["assets"][0].get("soundOnlyIn").is_none(), "named before the sound is prepared: {state}");
+    nuzky_engine::audio::ensure_pcm(&c.dir.join("cache"), &asset, |_| Ok(())).unwrap();
+    let state = c.call("get_state", json!({}));
+    assert_eq!(state["assets"][0]["soundOnlyIn"], "left", "{state}");
+    let clip = state["tracks"][0]["clips"][0]["id"].clone();
+    c.call(
+        "apply_edits",
+        json!({"run_id": run, "request_id": "mono", "edits": [
+            {"type": "updateClip", "clipId": clip, "mono": "left"}
+        ]}),
+    );
+    c.call("end_run", json!({"run_id": run, "action": "keep"}));
+    let disk: Project = serde_json::from_slice(&std::fs::read(c.dir.join("project.nuzky")).unwrap()).unwrap();
+    assert!(matches!(
+        disk.tracks[0].clips[0].content,
+        nuzky_engine::model::ClipContent::Media { mono: nuzky_engine::model::Mono::Left, .. }
+    ));
     c.finish();
 }
 

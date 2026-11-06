@@ -3,7 +3,9 @@
   --bg: #060607;
   --stage: #000;
   --panel: #18181b;
+  --well: #111113;
   --raised: #2c2c30;
+  --sheet: #242428;
   --fg: #f2f2f5;
   --muted: #a1a1a9;
   --subtle: #6e6e75;
@@ -15,7 +17,10 @@
   --clip-video: #245891;
   --clip-image: #43468e;
   --clip-audio: #17603c;
+  --clip-title: #865316;
+  --clip-captions: #4b3a80;
   --hair: rgb(255 255 255 / 0.07);
+  --off: rgb(242 242 245 / 0.35);
   color-scheme: dark;
 }
 * {
@@ -61,6 +66,9 @@ svg.fill {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+.grow {
+  flex: 1;
+}
 
 .app {
   height: var(--vh, 100dvh);
@@ -69,16 +77,37 @@ svg.fill {
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 
+/* ---- Top bar ---- */
 .top {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 14px;
+  gap: 8px;
+  min-height: 58px;
+  padding: 4px 12px 4px 4px;
   flex: none;
 }
 .title {
   flex: 1;
   min-width: 0;
+  min-height: 44px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+}
+.namebtn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.namebtn svg {
+  width: 15px;
+  height: 15px;
+  color: var(--muted);
 }
 .name {
   font-size: 17px;
@@ -99,6 +128,7 @@ svg.fill {
   height: 6px;
   border-radius: 50%;
   background: var(--subtle);
+  flex: none;
 }
 .conn.on .dot {
   background: var(--ok);
@@ -110,13 +140,14 @@ svg.fill {
   background: var(--danger);
 }
 
+/* ---- Buttons ---- */
 .pill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  height: 36px;
-  padding: 0 16px;
+  height: 44px;
+  padding: 0 18px;
   border: 0;
   border-radius: 999px;
   font-weight: 500;
@@ -132,7 +163,6 @@ svg.fill {
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18);
 }
 .pill:disabled,
-.pill.prominent:disabled,
 .pill[aria-disabled="true"] {
   background: rgb(255 255 255 / 0.08);
   color: rgb(242 242 245 / 0.4);
@@ -144,26 +174,45 @@ svg.fill {
   color: var(--fg);
 }
 .pill.big {
-  height: 44px;
   padding: 0 20px;
   font-size: 16px;
 }
 .pill.small {
-  height: 36px;
-  padding: 0 14px;
   font-size: 14px;
-}
-.pill.small svg {
-  width: 13px;
-  height: 13px;
+  padding: 0 14px;
 }
 .pill:active:not(:disabled) {
   filter: brightness(0.9);
 }
-.grow {
-  flex: 1;
+.round {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  background: rgb(255 255 255 / 0.09);
+}
+.round.bare {
+  background: none;
+}
+.round.send {
+  background: var(--accent-strong);
+  color: #fff;
+}
+.round:disabled,
+.round[aria-disabled="true"] {
+  color: var(--off);
+  cursor: default;
+}
+.round.send:disabled {
+  background: rgb(255 255 255 / 0.08);
 }
 
+/* ---- Preview and transport ---- */
 .work {
   flex: 1;
   min-height: 0;
@@ -188,38 +237,245 @@ svg.fill {
   height: 100%;
   object-fit: contain;
 }
-
-.strip {
-  position: relative;
-  height: 48px;
-  margin: 10px 14px 0;
-  touch-action: none;
+.transport {
   flex: none;
-  cursor: pointer;
-}
-.clips {
+  height: 52px;
   display: flex;
-  gap: 2px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px 0 16px;
+}
+.transport .time {
+  flex: 1;
+}
+.time {
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.time b {
+  color: var(--fg);
+  font-weight: 500;
+}
+#play svg {
+  width: 20px;
+  height: 20px;
+}
+#play .pause-icon,
+#play.playing .play-icon {
+  display: none;
+}
+#play.playing .pause-icon {
+  display: block;
+}
+
+/* ---- Timeline: the playhead stays in the middle and the tracks move under it, as in CapCut on a phone ---- */
+.tl {
+  position: relative;
+  flex: none;
+  background: var(--well);
+  border-block: 1px solid var(--hair);
+  overflow: hidden;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.tl-scroll {
+  max-height: min(40vh, 330px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  touch-action: pan-y;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+.ruler {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  height: 22px;
+  background: var(--well);
+  overflow: hidden;
+}
+.ruler::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 36px;
+  background: var(--panel);
+  z-index: 1;
+}
+.ticks {
+  position: absolute;
+  top: 0;
+  left: 36px;
   height: 100%;
 }
-.clip {
+.tick {
+  position: absolute;
+  top: 0;
+  width: 1px;
+  height: 4px;
+  background: var(--subtle);
+}
+.tick.l {
+  height: 7px;
+}
+.tlab {
+  position: absolute;
+  top: 5px;
+  font-size: 10px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  transform: translateX(4px);
+  white-space: nowrap;
+}
+.tl-body {
   position: relative;
-  min-width: 6px;
-  border-radius: 6px;
+}
+.heads {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 36px;
+  background: var(--panel);
+  border-right: 1px solid var(--hair);
+  z-index: 3;
+}
+.ti {
+  position: absolute;
+  left: 6px;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18);
+  background: var(--clip-video);
+}
+.ti svg {
+  width: 13px;
+  height: 13px;
+}
+.ti.text {
+  background: var(--clip-title);
+}
+.ti.captions {
+  background: var(--clip-captions);
+}
+.ti.audio {
+  background: var(--clip-audio);
+}
+.lanes {
+  position: absolute;
+  inset: 0 0 0 36px;
+  overflow: hidden;
+}
+.tracks {
+  position: absolute;
+  inset: 0 auto auto 0;
+}
+.ph {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--fg);
+  z-index: 6;
+  pointer-events: none;
+}
+.ph::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -4px;
+  width: 10px;
+  height: 8px;
+  border-radius: 2px 2px 5px 5px;
+  background: var(--fg);
+}
+
+.clip {
+  position: absolute;
+  border-radius: 4px;
   overflow: hidden;
   background: var(--clip-video) repeat-x left center / auto 100%;
-  outline: 1px solid rgb(255 255 255 / 0.12);
-  outline-offset: -1px;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1), inset 0 1px 0 rgb(255 255 255 / 0.2), inset 0 -1px 0 rgb(0 0 0 / 0.35);
 }
 .clip.image {
   background-color: var(--clip-image);
 }
 .clip.audio {
-  background-color: var(--clip-audio);
+  background: var(--clip-audio);
+}
+.clip.title {
+  background: var(--clip-title);
+}
+.chip {
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  max-width: calc(100% - 6px);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 0.6);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.chip svg {
+  width: 11px;
+  height: 11px;
+}
+.clip.title .chip {
+  background: none;
+  top: 0;
+  bottom: 0;
+  height: 18px;
+  margin: auto 0;
+}
+.clip.audio .chip {
+  position: static;
+  background: none;
+  padding: 3px 5px 0;
+}
+/* A caption shows only the words that fit whole: the rest wraps onto a line that is cut off. */
+.clip.caption {
+  background: rgb(75 58 128 / 0.55);
+  box-shadow: inset 0 1px 0 var(--clip-captions), inset 0 0 0 1px rgb(255 255 255 / 0.1);
+  padding: 0 4px;
+  font-size: 11px;
+  line-height: 30px;
+  color: rgb(242 242 245 / 0.9);
+  overflow-wrap: normal;
+}
+.clip.caption.short::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  margin: -1.5px 0 0 -1.5px;
+  border-radius: 50%;
+  background: rgb(242 242 245 / 0.5);
+}
+.clip.sel {
+  box-shadow: inset 0 0 0 2px var(--accent);
+  z-index: 2;
+}
+.clip.caption.sel {
+  box-shadow: inset 0 1px 0 var(--clip-captions), inset 0 0 0 2px var(--accent);
 }
 .clip.pending {
   background: var(--raised);
-  flex: 0 0 64px;
   display: flex;
   align-items: flex-end;
   padding: 6px;
@@ -228,23 +484,12 @@ svg.fill {
   flex: 1;
 }
 .clip.failed {
-  outline-color: var(--danger);
+  box-shadow: inset 0 0 0 1px var(--danger);
   cursor: pointer;
 }
 .clip.failed .bar i {
   background: var(--danger);
 }
-.head {
-  position: absolute;
-  top: -4px;
-  bottom: -4px;
-  width: 2px;
-  margin-left: -1px;
-  border-radius: 1px;
-  background: var(--fg);
-  pointer-events: none;
-}
-
 .bar {
   height: 3px;
   border-radius: 2px;
@@ -257,17 +502,148 @@ svg.fill {
   background: var(--accent);
 }
 
+/* ---- The dock under the timeline: the AI, or the selected clip's actions at the same height ---- */
+.dock,
+.clipbar {
+  flex: none;
+  border-top: 1px solid var(--hair);
+  padding-top: 6px;
+}
+.app.selecting .dock {
+  display: none;
+}
+.clip-head {
+  display: flex;
+  align-items: center;
+  height: 44px;
+  padding: 0 10px 0 16px;
+  gap: 8px;
+}
+.clip-head .time {
+  flex: 1;
+}
+.acts {
+  display: flex;
+  padding: 6px 6px 8px;
+}
+.act {
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+  border: 0;
+  background: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.act svg {
+  width: 22px;
+  height: 22px;
+}
+.act.danger {
+  color: var(--danger);
+}
+.act[aria-disabled="true"] {
+  color: var(--off);
+  cursor: default;
+}
+.ai-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+}
+.agentchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 44px;
+  max-width: 62%;
+  padding: 0 12px 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.06);
+  box-shadow: inset 0 0 0 1px var(--hair);
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  flex: none;
+  min-width: 0;
+}
+.agentchip .m {
+  font-weight: 400;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agentchip svg {
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+}
+.last {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 44px;
+  padding: 0 6px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: left;
+}
+.upload-row {
+  display: flex;
+  align-items: center;
+  margin: 0 10px;
+}
+#upload {
+  flex: 1;
+  width: auto;
+}
+.last.error {
+  color: var(--danger);
+}
+.last span {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.last svg {
+  width: 16px;
+  height: 16px;
+}
 .lock {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 10px 14px 0;
-  padding: 4px 4px 4px 14px;
+  height: 44px;
+  margin: 0 10px;
   border-radius: 999px;
   background: rgb(255 255 255 / 0.075);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), inset 0 0 0 1px var(--hair);
-  flex: none;
   min-width: 0;
+}
+.lock-open {
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px 0 14px;
+  border: 0;
+  background: none;
+  text-align: left;
 }
 .lock-text {
   font-size: 13px;
@@ -283,6 +659,14 @@ svg.fill {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.lock .pill {
+  font-size: 14px;
+  padding: 0 16px;
+}
+.lock .pill svg {
+  width: 13px;
+  height: 13px;
+}
 .spin {
   width: 14px;
   height: 14px;
@@ -297,36 +681,8 @@ svg.fill {
     transform: rotate(360deg);
   }
 }
-
-.bottom {
-  flex: none;
-  padding: 6px 10px 8px;
-}
-.last {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 36px;
-  padding: 4px 6px;
-  border: 0;
-  background: none;
-  color: var(--muted);
-  font-size: 13px;
-  text-align: left;
-}
-.last.error {
-  color: var(--danger);
-}
-.last span {
-  flex: 1;
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 .note {
-  margin: 0 6px 6px;
+  margin: 4px 16px 0;
   font-size: 12px;
   color: var(--muted);
 }
@@ -334,15 +690,17 @@ svg.fill {
   display: flex;
   align-items: flex-end;
   gap: 8px;
+  padding: 6px 10px 8px;
 }
 .composer textarea {
   flex: 1;
-  min-height: 40px;
+  min-width: 0;
+  min-height: 44px;
   max-height: 140px;
   resize: none;
   border: 0;
-  border-radius: 20px;
-  padding: 9px 14px;
+  border-radius: 22px;
+  padding: 11px 16px;
   background: var(--raised);
   font-size: 16px;
   line-height: 22px;
@@ -353,33 +711,12 @@ svg.fill {
 }
 .composer textarea::placeholder {
   color: var(--muted);
-}
-.round {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  border: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  background: rgb(255 255 255 / 0.09);
-}
-.round.quiet {
-  width: 36px;
-  height: 36px;
-}
-.round.send {
-  background: var(--accent-strong);
-  color: #fff;
-}
-.round:disabled {
-  background: rgb(255 255 255 / 0.08);
-  color: rgb(242 242 245 / 0.4);
-  cursor: default;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* The conversation: a sheet over the work on a phone, a column beside it on a wide screen. */
+/* ---- The conversation: a sheet over the editor on a phone, a column beside it on a wide screen ---- */
 .chat {
   display: none;
   flex-direction: column;
@@ -388,13 +725,9 @@ svg.fill {
 .chat-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
+  gap: 2px;
+  padding: 6px 8px 6px 12px;
   border-bottom: 1px solid var(--hair);
-}
-.agent {
-  font-weight: 600;
-  font-size: 15px;
 }
 .items {
   flex: 1;
@@ -439,6 +772,9 @@ svg.fill {
 .step svg {
   width: 14px;
   height: 14px;
+}
+.step.done svg {
+  color: var(--ok);
 }
 .step.running {
   color: var(--fg);
@@ -488,29 +824,29 @@ svg.fill {
   .chat.open {
     display: flex;
     position: fixed;
-    inset: 12% 0 var(--kb, 0px);
+    inset: calc(env(safe-area-inset-top) + 64px) 0 var(--kb, 0px);
     z-index: 10;
-    background: #242428;
+    background: var(--sheet);
     border-radius: 20px 20px 0 0;
     border-top: 1px solid rgb(255 255 255 / 0.1);
     box-shadow: 0 -8px 30px rgb(0 0 0 / 0.5);
-    padding-bottom: calc(env(safe-area-inset-bottom) + 64px);
+    padding-bottom: var(--dock, 60px);
   }
-  .chat.open ~ .bottom {
+  .chat.open ~ .dock {
     position: fixed;
     left: 0;
     right: 0;
     bottom: var(--kb, 0px);
     z-index: 11;
-    background: #242428;
-    padding-bottom: calc(env(safe-area-inset-bottom) + 8px);
+    background: var(--sheet);
+    padding-bottom: env(safe-area-inset-bottom);
   }
-  .chat.open ~ .bottom .last {
+  .chat.open ~ .dock .ai-row {
     display: none;
   }
 }
 
-/* A computer: the preview and timeline on the left, the conversation always beside them. */
+/* A computer: the editor on the left, the conversation always beside it. */
 @media (min-width: 900px) {
   .app {
     display: grid;
@@ -527,10 +863,12 @@ svg.fill {
     background: var(--panel);
     border-radius: 12px;
     overflow: hidden;
-    padding-bottom: 14px;
   }
   .stage {
     border-top: 0;
+  }
+  .tl {
+    border-bottom: 0;
   }
   .chat {
     display: flex;
@@ -539,32 +877,42 @@ svg.fill {
     background: var(--panel);
     border-radius: 12px 12px 0 0;
   }
-  .chat-head button,
-  .last {
+  #chat-close,
+  .ai-row {
     display: none !important;
   }
-  .bottom {
+  .app.selecting .dock {
+    display: block;
+  }
+  .dock {
     grid-column: 2;
     grid-row: 3;
     background: var(--panel);
     border-radius: 0 0 12px 12px;
-    padding: 8px 10px 10px;
   }
 }
 
+/* ---- Sheets ---- */
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 19;
+  background: rgb(0 0 0 / 0.5);
+}
 .sheet {
   position: fixed;
   left: 0;
   right: 0;
   bottom: var(--kb, 0px);
   z-index: 20;
-  background: #242428;
+  background: var(--sheet);
   border-radius: 20px 20px 0 0;
   border-top: 1px solid rgb(255 255 255 / 0.1);
   box-shadow: 0 -8px 30px rgb(0 0 0 / 0.5);
-  padding: 14px 16px calc(env(safe-area-inset-bottom) + 18px);
-  max-height: 92dvh;
+  padding: 8px 16px calc(env(safe-area-inset-bottom) + 18px);
+  max-height: 88dvh;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 @media (min-width: 900px) {
   .sheet {
@@ -581,13 +929,152 @@ svg.fill {
 .sheet-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 4px;
+  min-height: 48px;
 }
-.sheet h2 {
+.sheet-head h2 {
+  flex: 1;
   margin: 0;
   font-size: 17px;
   font-weight: 600;
 }
+.sec {
+  margin: 14px 2px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.hint {
+  margin: 8px 2px 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.list {
+  border-radius: 12px;
+  background: rgb(255 255 255 / 0.05);
+  overflow: hidden;
+}
+.li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 6px 14px;
+  border: 0;
+  border-top: 1px solid var(--hair);
+  background: none;
+  font-size: 15px;
+  text-align: left;
+}
+.li:first-child {
+  border-top: 0;
+}
+.li .ck {
+  width: 18px;
+  margin-left: -4px;
+  flex: none;
+  color: var(--accent);
+  display: flex;
+}
+.li .ck.lead {
+  color: var(--fg);
+}
+.li .lt {
+  flex: 1;
+  min-width: 0;
+}
+.li .lt div:first-child {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.li .meta,
+.li .lt div + div {
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.li .now {
+  color: var(--accent);
+}
+.li[aria-disabled="true"],
+.li[aria-disabled="true"] .meta,
+.li[aria-disabled="true"] .lt div {
+  color: var(--subtle);
+  cursor: default;
+}
+.li.quiet {
+  color: var(--muted);
+  font-size: 14px;
+  cursor: default;
+}
+.li .chev {
+  color: var(--muted);
+  width: 16px;
+  height: 16px;
+}
+.seg {
+  display: flex;
+  padding: 3px;
+  gap: 2px;
+  border-radius: 12px;
+  background: rgb(255 255 255 / 0.045);
+}
+.seg button {
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.seg button.on {
+  background: rgb(255 255 255 / 0.15);
+  color: var(--fg);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.12), 0 1px 2px rgb(0 0 0 / 0.3);
+}
+.seg button[aria-disabled="true"] {
+  color: var(--off);
+  cursor: default;
+}
+.formats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.fmt {
+  height: 76px;
+  border: 0;
+  border-radius: 12px;
+  background: rgb(255 255 255 / 0.06);
+  box-shadow: inset 0 0 0 1px var(--hair);
+  /* The shapes differ in height; their row does not, so the four labels share a line. */
+  display: grid;
+  grid-template-rows: 30px auto;
+  place-items: center;
+  align-content: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.fmt i {
+  display: block;
+  border: 1.5px solid var(--muted);
+  border-radius: 3px;
+}
+.fmt[aria-disabled="true"] {
+  color: var(--off);
+  cursor: default;
+}
+.fmt[aria-disabled="true"] i {
+  border-color: var(--off);
+}
+
+/* The export sheet. */
 .progress {
   margin-top: 14px;
   height: 4px;
@@ -633,8 +1120,11 @@ svg.fill {
   gap: 8px;
   margin-top: 16px;
 }
-.actions .pill {
-  height: 44px;
+#export-again {
+  width: 100%;
+  margin-top: 8px;
+  background: none;
+  color: var(--muted);
 }
 
 .toast {
@@ -643,6 +1133,7 @@ svg.fill {
   top: calc(env(safe-area-inset-top) + 10px);
   transform: translateX(-50%);
   z-index: 30;
+  width: max-content;
   max-width: calc(100% - 28px);
   padding: 10px 14px;
   border-radius: 12px;

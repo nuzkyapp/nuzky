@@ -38,11 +38,11 @@ const out = [...d.querySelectorAll('h2, h3, p, button, [role=tab]')].filter((el)
 if (b.top < 0 || b.bottom > innerHeight || b.left < 0 || b.right > innerWidth) out.push(`the dialog leaves the window: ${JSON.stringify(b)}`);
 return out;"""
 CLOSED = "return !document.querySelector('[aria-labelledby=setup-title], #setup-panel')"
-CONNECT_OPEN = "return !!document.querySelector('[role=dialog][aria-labelledby=connect-title]')"
-CONNECT_ON_TOP = """const c = document.querySelector('[role=dialog][aria-labelledby=connect-title]');
+CONNECT_OPEN = "return !!document.querySelector('[role=dialog][data-settings]')"
+CONNECT_ON_TOP = """const c = document.querySelector('[role=dialog][data-settings]');
 if (!c) return false;
 const b = c.getBoundingClientRect();
-return !!document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)?.closest('[role=dialog][aria-labelledby=connect-title]');"""
+return !!document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)?.closest('[role=dialog][data-settings]');"""
 TALL = """const box = document.querySelector('[aria-labelledby=setup-title]'), title = box.querySelector('#setup-title');
 const region = box.querySelector('[role=tabpanel] > .overflow-y-auto'), top = title.getBoundingClientRect().top;
 const tall = document.createElement('div');
@@ -143,11 +143,11 @@ def setup(r):
     press('End')
     r.check('End reaches Connect your AI', wait(lambda: (dialog(r) or {}).get('panel') == 'Connect your AI', 3), dialog(r))
 
-    r.s.run("window.__nuzky.store.setState({connectOpen: true})")
-    r.check('a dialog a step opens, Connect, shows above Get set up', wait(lambda: r.s.run(CONNECT_ON_TOP), 5))
+    r.s.run("window.__nuzky.openSettings('ai', 'agents')")
+    r.check('Settings, opened over it, shows above Get set up', wait(lambda: r.s.run(CONNECT_ON_TOP), 5))
     time.sleep(0.5)
     press('Escape')
-    if r.check('Esc closes only the Connect dialog; Get set up stays open', wait(lambda: not r.s.run(CONNECT_OPEN), 3) and dialog(r), dialog(r)):
+    if r.check('Esc closes only Settings; Get set up stays open', wait(lambda: not r.s.run(CONNECT_OPEN), 3) and dialog(r), dialog(r)):
         press('Escape')
         r.check('Esc again closes Get set up', wait(lambda: not dialog(r), 3), dialog(r))
     r.s.run(CLICK, 'Get set up', 'nav[aria-label=Collections]')

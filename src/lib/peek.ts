@@ -56,6 +56,7 @@ const FIELDS: Record<string, string> = {
   normalize: "Voice",
   leveler: "Voice",
   duckDb: "Lower under speech",
+  mono: "Mono",
 };
 const CLIP_FIELDS: [keyof Clip, string][] = [
   ["keyframes", "Keyframes"],

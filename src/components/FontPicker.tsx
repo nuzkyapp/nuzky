@@ -49,7 +49,7 @@ export function FontPicker({
         onClick={disabled ? undefined : () => setOpen(!open)}
         className={`flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-lg bg-white/[.09] pl-2.5 pr-2 text-left text-fg shadow-[inset_0_1px_0_rgb(255_255_255/.06),inset_0_0_0_1px_rgb(255_255_255/.06)] transition-colors duration-[120ms] ease-out aria-disabled:cursor-not-allowed aria-disabled:opacity-40 ${disabled ? "" : "hover:bg-white/[.14]"}`}
       >
-        <span className="min-w-0 flex-1 truncate text-[15px] leading-5" style={{ fontFamily: mixed ? undefined : fontCss(current) }}>
+        <span className="min-w-0 flex-1 truncate text-[13px] leading-5" style={{ fontFamily: mixed ? undefined : fontCss(current) }}>
           {mixed ? "—" : current}
         </span>
         {missing && <AlertTriangle size={14} className="shrink-0 text-warn" aria-label="Not installed" />}

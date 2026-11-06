@@ -166,6 +166,7 @@ mod tests {
                 leveler: 0.0,
                 shape: None,
                 duck_db: 0.0,
+                mono: Default::default(),
                 background: Default::default(),
             },
         )

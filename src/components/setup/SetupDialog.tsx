@@ -42,7 +42,7 @@ export function SetupDialog() {
   return (
     <div
       data-scrim
-      data-exit className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/45"
+      data-exit className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/55"
       onPointerDown={(e) => {
         if (e.target !== e.currentTarget) return;
         // Otherwise the press would take the focus that closing gives back to the opener.
@@ -63,7 +63,7 @@ export function SetupDialog() {
           if (e.key === "Escape") closeSetup();
           else trapTab(e);
         }}
-        className="dialog-in overlay flex h-[560px] max-h-[calc(100vh-48px)] w-[640px] flex-col rounded-[20px] p-6 text-fg outline-none"
+        className="dialog-in overlay overlay-solid flex h-[560px] max-h-[calc(100vh-48px)] w-[640px] flex-col rounded-[20px] p-6 text-fg outline-none"
       >
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -122,7 +122,7 @@ export function SetupDialog() {
             <footer className="mt-4 flex justify-end gap-2">
               {/* Left of the step's own buttons, which the steps' focus finds by `footer button:not([data-sample])`. */}
               {!toSample && (
-                <Button variant="ghost" data-sample className="mr-auto -ml-3 text-accent! hover:text-accent!" onClick={trySample}>
+                <Button variant="ghost" data-sample className="mr-auto -ml-3 text-accent! hover:text-accent! hover:underline" onClick={trySample}>
                   Try the sample video
                 </Button>
               )}

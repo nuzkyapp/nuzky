@@ -69,7 +69,7 @@ export function RatioMenu() {
         disabled={locked}
         onClick={() => setOpen(!open)}
         className={`flex h-8 items-center gap-1.5 rounded-full px-3 text-[12px] font-medium transition-colors duration-[120ms] ease-out disabled:cursor-not-allowed disabled:opacity-40 ${
-          open ? "bg-white/[.14] text-fg" : "bg-white/[.06] text-fg enabled:hover:bg-white/[.12]"
+          open ? "bg-white/[.14] text-fg" : "text-fg enabled:hover:bg-white/[.08]"
         }`}
       >
         <RectangleHorizontal size={14} className="text-muted @max-[560px]:hidden" />

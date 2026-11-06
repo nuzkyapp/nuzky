@@ -8,6 +8,35 @@ import { BeatTicks } from "./BeatTicks";
 import { Waveform } from "./Waveform";
 
 /** Width of the trim handles, and of the zone at each end that trims instead of moving. */
+
+/** Width of `text` in px in the timeline's 11 px Inter at `weight`, measured once per text. */
+const measured = new Map<string, number>();
+let pen: CanvasRenderingContext2D | null = null;
+function labelWidth(text: string, weight: number) {
+  const key = `${weight} ${text}`;
+  let w = measured.get(key);
+  if (w === undefined) {
+    pen ??= document.createElement("canvas").getContext("2d");
+    if (!pen) return text.length * 6.5;
+    pen.font = `${weight} 11px "Inter UI"`;
+    w = Math.ceil(pen.measureText(text).width);
+    if (measured.size > 4000) measured.clear();
+    measured.set(key, w);
+  }
+  return w;
+}
+
+/** The leading words of `text` that fit whole in `room` px; null when not even the first does. */
+function fitWords(text: string, room: number) {
+  if (labelWidth(text, 400) <= room) return text;
+  const words = text.split(" ");
+  for (let n = words.length - 1; n > 0; n--) {
+    const part = words.slice(0, n).join(" ");
+    if (labelWidth(part, 400) <= room) return part;
+  }
+  return null;
+}
+
 export const EDGE = 8;
 /** Size of the zone at each top corner of a sound clip's waveform that drags its fade instead of trimming. */
 const FADE_HANDLE = 16;
@@ -126,10 +155,18 @@ export const ClipView = memo(function ClipView({
   const width = Math.max(2, (durationUs / US) * zoom - 2);
   const innerH = height - 8;
   const isCaption = c.type === "text" && isCaptionTrack(track);
-  const bg = c.type === "text" ? (isCaption ? "bg-clip-captions" : "bg-clip-title") : sound ? "bg-clip-audio" : asset?.kind === "image" ? "bg-clip-image" : "bg-clip-video";
+  // Captions run the video's length, so they are a quiet tint of their colour with a full-colour top edge; selected, solid.
+  const bg = c.type === "text" ? (isCaption ? (selected ? "bg-clip-captions" : "bg-clip-captions/55 shadow-[inset_0_1px_0_var(--color-clip-captions)]") : "bg-clip-title") : sound ? "bg-clip-audio" : asset?.kind === "image" ? "bg-clip-image" : "bg-clip-video";
   const speed = c.type === "media" ? c.speed : 1;
   const Icon = c.type === "text" ? Type : sound ? AudioLines : asset?.kind === "image" ? ImageIcon : speed === 0 ? Snowflake : Film;
   const label = c.type === "text" ? c.text : (asset?.name ?? "Missing media");
+  // A caption shows the words that fit whole, else a small dot, never a cut word; every caption keeps the same fill and top
+  // edge, so the row reads as one band whatever room a block has for its text.
+  const captionText = isCaption ? (fitWords(label, width - 8) ?? "") : "";
+  // A piece cut from the same file as the clip right before it keeps only its length; the run's first piece, and a
+  // selected one, name the file, so a row of cuts does not repeat one name over every picture.
+  const continues =
+    c.type === "media" && !selected && track.clips.some((o) => o !== clip && o.content.type === "media" && o.content.assetId === c.assetId && Math.abs(o.startUs + o.durationUs - startUs) < 1000);
   const sourceInUs = timing?.sourceInUs ?? (c.type === "media" ? c.sourceInUs : 0);
   const soundStrip = visual && c.type === "media" && asset.kind === "video" && asset.hasAudio && c.volume > 0;
   const local: [number, number] = [visible[0] - left, visible[1] - left];
@@ -149,7 +186,7 @@ export const ClipView = memo(function ClipView({
       onPointerDown={onPointerDown ? (e) => onPointerDown(e, clip, track) : undefined}
       onContextMenu={onContextMenu ? (e) => onContextMenu(e, clip) : undefined}
       // No blur or large shadow here: there is one of these per clip. Only the dragged copy casts a small shadow.
-      className={`group absolute top-1 bottom-1 overflow-hidden rounded-[7px] ${bg} ${ghost ? "z-30 opacity-85 shadow-[0_4px_12px_rgb(0_0_0/.5)]" : selected ? "z-10" : ""} ${
+      className={`group absolute top-1 bottom-1 overflow-hidden ${"rounded-[4px]"} ${bg} ${ghost ? "z-30 opacity-85 shadow-[0_4px_12px_rgb(0_0_0/.5)]" : selected ? "z-10" : ""} ${
         track.hidden ? "opacity-40" : dimmed ? "opacity-35" : ""
       } ${locked ? "cursor-default" : "cursor-grab active:cursor-grabbing"}`}
       style={{
@@ -187,29 +224,34 @@ export const ClipView = memo(function ClipView({
         </div>
       )}
       {soundStrip && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-3.5 bg-black/55">
-          <Waveform assetId={asset.id} sourceInUs={sourceInUs} durationUs={durationUs} speed={speed} gain={c.volume} width={width} visible={local} color="#7ee2a8" />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-3.5 bg-[#141416]">
+          <Waveform assetId={asset.id} sourceInUs={sourceInUs} durationUs={durationUs} speed={speed} gain={c.volume} width={width} visible={local} color="#a1a1a9" />
         </div>
       )}
 
       {c.type === "text" ? (
         // Text sits straight on its colour, centred; caption clips are short and the track header carries their icon, so the text gets the room.
-        <div className={`pointer-events-none absolute inset-0 flex items-center gap-1.5 px-2 text-[11px] text-fg ${isCaption ? "" : "font-medium"}`}>
+        <div className={`pointer-events-none absolute inset-0 flex items-center gap-1.5 text-[11px] text-fg ${isCaption ? "px-1" : "px-2 font-medium"}`}>
           {!isCaption && <Icon size={11} className="shrink-0" />}
-          <span className="truncate">{label}</span>
+          {isCaption ? (
+            captionText ? <span className="whitespace-nowrap text-fg/90">{captionText}</span> : <span aria-hidden className="mx-auto size-[3px] shrink-0 rounded-full bg-fg/50" />
+          ) : (
+            <span className="truncate">{label}</span>
+          )}
           {width > 110 && <span className="tabular shrink-0 font-normal text-fg/70">{formatDuration(durationUs)}</span>}
         </div>
       ) : (
         // Over pictures the name sits in a dark chip, readable over bright footage. A plain fill, not a blur: there is one per clip.
         // On sound it sits on the clip's colour in the row above the waveform.
         <div className={`pointer-events-none absolute inset-x-0 ${sound ? "top-0.5" : "top-1"} flex items-center gap-1 px-2.5 text-[11px] font-medium text-fg`}>
-          <span className={`flex min-w-0 items-center gap-1 ${sound ? "h-3.5" : "h-[17px] rounded-[5px] bg-black/60 pl-[5px] pr-1.5"}`}>
-            <Icon size={11} className="shrink-0" />
-            <span className="truncate">{label}</span>
-            {width > 110 && <span className="tabular shrink-0 pl-0.5 font-normal text-fg/80">{formatDuration(durationUs)}</span>}
+          <span className={`flex min-w-0 items-center gap-1 ${continues && width <= 72 ? "hidden" : ""} ${sound ? "h-3.5" : `h-[17px] rounded-[3px] bg-black/60 ${continues ? "px-1.5" : "pl-[5px] pr-1.5"}`}`}>
+            {!continues && <Icon size={11} className="shrink-0" />}
+            {/* The name shows whole, or the chip keeps only the length: a file name cut to "The…" says nothing. */}
+            {!continues && labelWidth(label, 500) + (width > 110 ? 76 : 40) <= width && <span className="truncate">{label}</span>}
+            {width > 72 && <span className={`tabular shrink-0 font-normal text-fg/80 ${continues ? "" : "pl-0.5"}`}>{formatDuration(durationUs)}</span>}
           </span>
           {speed !== 1 && speed !== 0 && width > 40 && (
-            <span className={`tabular ml-auto flex shrink-0 items-center gap-0.5 font-semibold ${sound ? "h-3.5" : "h-[17px] rounded-[5px] bg-black/60 px-1"}`}>
+            <span className={`tabular ml-auto flex shrink-0 items-center gap-0.5 font-semibold ${sound ? "h-3.5" : "h-[17px] rounded-[3px] bg-black/60 px-1"}`}>
               <Gauge size={11} />
               {Number(speed.toFixed(2))}x
             </span>
@@ -219,7 +261,7 @@ export const ClipView = memo(function ClipView({
 
       {/* The edge goes over the frames: a hairline, or the selection ring. */}
       <span
-        className={`pointer-events-none absolute inset-0 rounded-[7px] ${
+        className={`pointer-events-none absolute inset-0 rounded-[4px] ${
           mark === "back"
             ? "border-2 border-dashed border-accent"
             : mark === "gone"
@@ -279,10 +321,15 @@ export const ClipView = memo(function ClipView({
         (["left-0", "right-0"] as const).map((side) => (
           <div
             key={side}
-            className={`absolute inset-y-0 ${side} flex cursor-ew-resize items-center justify-center ${selected ? "bg-accent" : "group-hover:bg-white/25"}`}
+            className={`absolute inset-y-0 ${side} flex cursor-ew-resize items-center justify-center ${isCaption ? "" : selected ? "bg-accent" : "group-hover:bg-white/25"}`}
             style={{ width: EDGE }}
           >
-            {selected && <span className="h-3.5 w-0.5 rounded-full bg-black/55" />}
+            {/* On a caption, a word or two wide, the handle shows as a 3 px bar so it does not cover the word; it still grabs 8 px. */}
+            {isCaption ? (
+              <span className={`absolute inset-y-0 w-[3px] ${side === "left-0" ? "left-0" : "right-0"} ${selected ? "bg-accent" : "group-hover:bg-white/30"}`} />
+            ) : (
+              selected && <span className="h-3.5 w-0.5 rounded-full bg-black/55" />
+            )}
           </div>
         ))}
 

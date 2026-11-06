@@ -60,7 +60,9 @@ def ink(image):
             dark.append(i)
     centre = lambda found: (sum(i % w for i in found) / len(found) / w, sum(i // w for i in found) / len(found) / h) if found else None
     span = (max(i % w for i in yellow) - min(i % w for i in yellow)) / w if yellow else 0
-    return centre(yellow), centre(dark), len(dark) / (w * h), span
+    # The middle of the yellow's extent: where the line is centred, whatever share of the letters the shadow covers.
+    middle = (max(i % w for i in yellow) + min(i % w for i in yellow)) / 2 / w if yellow else None
+    return centre(yellow), centre(dark), len(dark) / (w * h), span, middle
 
 
 def shadow_shift(image):
@@ -242,10 +244,10 @@ def text_style(r):
     shifts = {'preview': shadow_shift(shown), 'engine': shadow_shift(drawn)}
     near = lambda a, b: a and b and all(abs(x - y) < 0.02 for x, y in zip(a, b))
     r.check('the preview draws text and shadow where the engine does',
-            near(preview[0], engine[0]) and all(dx > 0 and dy > 0 for dx, dy in shifts.values()),
+            preview[0] and engine[0] and near((preview[4], preview[0][1]), (engine[4], engine[0][1])) and all(dx > 0 and dy > 0 for dx, dy in shifts.values()),
             {'preview': preview, 'engine': engine, 'shifts': shifts})
     r.check('capitals and spacing make the text wider, still centred where it was',
-            preview[3] > plain[3] * 1.15 and preview[0] and abs(preview[0][0] - plain[0][0]) < 0.01, {'now': preview, 'typed': plain})
+            preview[3] > plain[3] * 1.15 and preview[4] is not None and abs(preview[4] - plain[4]) < 0.01, {'now': preview, 'typed': plain})
     target = export(r, 'text-style.mp4')
     exported = r.work / 'export-shadow.png'
     subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', str(target), '-vf', 'select=eq(n\\,30)', '-frames:v', '1', '-update', '1',

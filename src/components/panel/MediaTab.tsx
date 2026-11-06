@@ -123,7 +123,7 @@ function MediaItem({ asset }: { asset: Asset }) {
             )}
           </div>
         </div>
-        <span className="truncate text-[11px] leading-[13px] text-muted">{asset.name}</span>
+        <span className="line-clamp-2 text-[12px] leading-[15px] break-words text-fg/85">{asset.name}</span>
       </div>
       {menu && (
         <Menu
@@ -162,7 +162,7 @@ function YoutubeTile({ compact = false, className = "" }: { compact?: boolean; c
       title={lock ?? "Video from YouTube"}
       onClick={() => openYoutube()}
       {...lockedProps(lock)}
-      className={`flex h-[46px] shrink-0 items-center justify-center gap-2 rounded-xl bg-white/[.055] px-4 text-[13px] font-semibold text-fg shadow-[inset_0_0_0_1px_rgb(255_255_255/.07)] transition-colors duration-[120ms] ease-out hover:bg-white/[.09] aria-disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:hover:bg-white/[.055] ${compact ? "@max-[380px]:w-[46px] @max-[380px]:px-0" : ""} ${className}`}
+      className={`flex h-9 shrink-0 items-center justify-center gap-2 rounded-[10px] bg-white/[.055] px-4 text-[13px] font-semibold text-fg shadow-[inset_0_0_0_1px_rgb(255_255_255/.07)] transition-colors duration-[120ms] ease-out hover:bg-white/[.09] aria-disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:hover:bg-white/[.055] ${compact ? "@max-[380px]:w-9 @max-[380px]:px-0" : ""} ${className}`}
     >
       <Link2 size={16} className="shrink-0 text-muted" />
       <span className={compact ? "@max-[380px]:hidden" : ""}>From YouTube</span>
@@ -171,7 +171,7 @@ function YoutubeTile({ compact = false, className = "" }: { compact?: boolean; c
 }
 
 const MAC = navigator.userAgent.includes("Mac");
-const TILE = "flex h-[46px] shrink-0 items-center justify-center gap-2 rounded-xl bg-white/[.055] px-4 text-[13px] font-semibold text-fg shadow-[inset_0_0_0_1px_rgb(255_255_255/.07)] transition-colors duration-[120ms] ease-out hover:bg-white/[.09] aria-disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:hover:bg-white/[.055]";
+const TILE = "flex h-9 shrink-0 items-center justify-center gap-2 rounded-[10px] bg-white/[.055] px-4 text-[13px] font-semibold text-fg shadow-[inset_0_0_0_1px_rgb(255_255_255/.07)] transition-colors duration-[120ms] ease-out hover:bg-white/[.09] aria-disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:hover:bg-white/[.055]";
 
 const windowLabel = (w: ScreenWindow) => (w.title && w.title !== w.app ? `${w.app} · ${w.title}` : w.app);
 
@@ -205,7 +205,7 @@ function RecordTile({ compact = false, className = "" }: { compact?: boolean; cl
         onClick={(e) => void open(e.currentTarget, e.detail === 0)}
         {...lockedProps(reason)}
         data-record-screen
-        className={`${TILE} ${compact ? "w-[46px] px-0" : ""} ${className}`}
+        className={`${TILE} ${compact ? "w-9 px-0" : ""} ${className}`}
       >
         <MonitorDot size={16} className="shrink-0 text-muted" />
         {!compact && <span>Record screen</span>}
@@ -254,7 +254,7 @@ export function MediaTab() {
             <YoutubeTile compact />
             <RecordTile compact />
           </div>
-          <div className="grid min-h-0 grid-cols-[repeat(auto-fill,minmax(100px,1fr))] content-start gap-x-2 gap-y-3 overflow-y-auto px-3.5 pb-3.5">
+          <div className="scroll-shown grid min-h-0 grid-cols-[repeat(auto-fill,minmax(106px,1fr))] content-start gap-x-2 gap-y-3 overflow-y-auto px-3.5 pb-6">
             {assets.map((a) => (
               <MediaItem key={a.id} asset={a} />
             ))}

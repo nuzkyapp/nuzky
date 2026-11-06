@@ -360,6 +360,21 @@ pub struct Store {
     dir: PathBuf,
 }
 
+/// Kept in `style/settings.json`, where the app, the CLI and agents' MCP servers all read it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase", default)]
+pub struct StyleSettings {
+    /// Learn from every export and from edits of a kept AI cut. Off, the style learns only when asked to.
+    pub learn_from_edits: bool,
+}
+
+impl Default for StyleSettings {
+    fn default() -> Self {
+        Self { learn_from_edits: true }
+    }
+}
+
 impl Default for Store {
     fn default() -> Self {
         Self::at(learning::style_path().parent().expect("EDIT.md lives in a folder"))
@@ -391,6 +406,21 @@ impl Store {
 
     fn versions_path(&self) -> PathBuf {
         self.own_dir().join("versions.jsonl")
+    }
+
+    fn settings_path(&self) -> PathBuf {
+        self.own_dir().join("settings.json")
+    }
+
+    /// How the style learns. A missing or unreadable file is the default, as an install from before the setting has.
+    pub fn settings(&self) -> StyleSettings {
+        fs::read(self.settings_path()).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default()
+    }
+
+    pub fn save_settings(&self, settings: &StyleSettings) -> Result<()> {
+        fs::create_dir_all(self.own_dir()).with_context(|| format!("Cannot create {}", self.own_dir().display()))?;
+        nuzky_session::write_json_atomic(&self.settings_path(), settings)
+            .context("SETTINGS_UNWRITABLE: Nuzky couldn't save the setting. Check that the disk has free space.")
     }
 
     /// Names the version whose EDIT.md is being written, until it is.
@@ -1386,13 +1416,29 @@ pub struct Moment {
     path: PathBuf,
     edited: bool,
     runs: Option<(Project, Option<Project>)>,
+    /// Where the creator's settings are read again when the lesson is worked out, as they may turn learning off
+    /// while an export runs.
+    style: PathBuf,
 }
 
 /// What learning from a project the creator exported, or `edited` after an AI cut it, needs, taken
-/// now. None while an AI run is open, for a project with the tour's sample video on its timeline, which is
-/// nobody's own cut, or for edits when no AI run was kept. It costs a look at the project's newest versions,
-/// so the slow part is left to `Moment::lesson`.
+/// now. None while the creator turned off learning from their edits, while an AI run is open, for a project with the
+/// tour's sample video on its timeline, which is nobody's own cut, or for edits when no AI run was kept. It costs a
+/// look at the project's newest versions, so the slow part is left to `Moment::lesson`.
 pub fn moment(session: &ProjectSession, project: Project, run_open: bool, edited: bool) -> Result<Option<Moment>> {
+    moment_for(&Store::default(), session, project, run_open, edited)
+}
+
+fn moment_for(
+    store: &Store,
+    session: &ProjectSession,
+    project: Project,
+    run_open: bool,
+    edited: bool,
+) -> Result<Option<Moment>> {
+    if !store.settings().learn_from_edits {
+        return Ok(None);
+    }
     let on_timeline = |asset: &Asset| {
         project
             .tracks
@@ -1407,7 +1453,7 @@ pub fn moment(session: &ProjectSession, project: Project, run_open: bool, edited
     if edited && runs.is_none() {
         return Ok(None);
     }
-    Ok(Some(Moment { project, path: session.path(), edited, runs }))
+    Ok(Some(Moment { project, path: session.path(), edited, runs, style: store.dir.clone() }))
 }
 
 impl Moment {
@@ -1415,6 +1461,9 @@ impl Moment {
     /// only learn its own cut. Edits that undo the run teach nothing either, while an export of
     /// the creator's own cut from before the run does.
     pub fn lesson(&self, transcripts: &TranscriptStore) -> Result<Option<Evidence>> {
+        if !Store::at(&self.style).settings().learn_from_edits {
+            return Ok(None);
+        }
         let Some(evidence) = project_evidence(&self.project, &self.path, transcripts)? else { return Ok(None) };
         if let Some((after, before)) = &self.runs {
             for other in std::iter::once(after).chain(before.as_ref().filter(|_| self.edited)) {
@@ -2029,6 +2078,29 @@ mod tests {
             [true, true, true, true, true, false],
             "exporting the creator's own cut does"
         );
+        drop(host);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn turning_off_learning_from_edits_stops_every_automatic_lesson() {
+        let (dir, host) = talk();
+        host.session.edit(cut_silence(), None, Default::default()).unwrap();
+        let store = Store::at(dir.join("style-home"));
+        let learns = || {
+            let state = host.session.state().unwrap();
+            moment_for(&store, &host.session, state.project, false, false).unwrap().is_some()
+        };
+        assert!(learns(), "an install without the setting learns as before");
+        // Turned off while the export that took the moment still runs: what it would teach is not kept.
+        let state = host.session.state().unwrap();
+        let taken = moment_for(&store, &host.session, state.project, false, false).unwrap().unwrap();
+        store.save_settings(&StyleSettings { learn_from_edits: false }).unwrap();
+        assert!(taken.lesson(&host.transcripts).unwrap().is_none(), "a lesson after it was turned off");
+        assert!(!store.settings().learn_from_edits);
+        assert!(!learns(), "nothing from an export once it is off");
+        store.save_settings(&StyleSettings::default()).unwrap();
+        assert!(learns());
         drop(host);
         fs::remove_dir_all(dir).unwrap();
     }

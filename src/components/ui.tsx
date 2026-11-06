@@ -8,12 +8,14 @@ import { weightOf } from "../lib/presets";
 import { AI_EDITING, useAiLocked } from "../lib/store";
 import type { TextShadow, TextStyle } from "../lib/types";
 
-type Variant = "primary" | "secondary" | "ghost" | "danger" | "bar";
+type Variant = "primary" | "secondary" | "ghost" | "plain" | "danger" | "bar";
 
 const variants: Record<Variant, string> = {
   primary: "btn-prominent font-semibold",
   secondary: "bg-white/[.09] text-fg shadow-[inset_0_1px_0_rgb(255_255_255/.07),inset_0_0_0_1px_rgb(255_255_255/.07)] hover:bg-white/[.14]",
   ghost: "text-muted hover:bg-white/[.08] hover:text-fg",
+  /** A quiet action in a list of rows, as Edit in Project status: a faint fill without the secondary's edge. */
+  plain: "bg-white/[.06] text-fg hover:bg-white/[.12]",
   danger: "bg-danger/15 text-danger shadow-[inset_0_0_0_1px_rgb(255_69_58/.4)] hover:bg-danger/25",
   /** A floating toolbar capsule, e.g. in the top bar. */
   bar: "bar text-fg hover:bg-white/[.13]",
@@ -481,6 +483,8 @@ export function NumberInput({
 }
 
 const THUMB = 22;
+/** The longest label, in characters, that fits a property row's 76 px label column at 12 px ("Temperature", "Position X"). */
+const INLINE_LABEL = 12;
 
 /**
  * Range input with a filled track. One-sided ranges fill from the left; two-sided ones
@@ -535,7 +539,10 @@ export function RangeInput({
   );
 }
 
-/** The label above, then the slider and a typeable value on one row, like CapCut's property rows. */
+/**
+ * A property row as in CapCut: a short label, the slider and a typeable value on one line; a label too long for its
+ * 76 px column, and a narrow row beside another, put it above.
+ */
 export function Slider({
   label,
   name = label,
@@ -572,11 +579,11 @@ export function Slider({
 }) {
   const lock = useLockReason();
   disabled = disabled || !!lock;
+  const inline = !narrow && label.length <= INLINE_LABEL;
   return (
-    // 8 px between two sliders instead of the section's 12 px, so a column of them reads as one list.
-    <div className="flex flex-col gap-0.5 [&+&]:-mt-1" title={lock ?? title}>
-      <span className={`truncate text-[12px] leading-4 ${disabled && !lock ? "text-subtle" : "text-muted"}`}>{label}</span>
-      <div className="flex items-center gap-2">
+    <div className={inline ? "flex min-h-7 items-center gap-2" : "flex flex-col gap-0.5"} title={lock ?? title}>
+      <span className={`truncate text-[12px] leading-4 ${inline ? "w-[76px] shrink-0" : ""} ${disabled && !lock ? "text-subtle" : "text-muted"}`}>{label}</span>
+      <div className={`flex items-center gap-2 ${inline ? "min-w-0 flex-1" : ""}`}>
         <RangeInput
           label={name}
           value={value}
@@ -588,29 +595,30 @@ export function Slider({
           valueText={mixed ? "Mixed" : `${format(value)}${unit && ` ${unit}`}`}
           className="min-w-0 flex-1"
         />
-        <span className="flex shrink-0 items-center gap-0.5">
-          <NumberInput label={`${name} value`} value={value} min={min} max={max} step={step} onChange={onChange} format={format} parse={parse} disabled={disabled} mixed={mixed} className={narrow ? "w-11" : undefined} />
-          <span className="w-3 text-[11px] text-muted">{unit}</span>
+        {/* The unit sits inside the field, after the number, so the column of fields ends on one edge. */}
+        <span className="relative flex shrink-0 items-center">
+          <NumberInput label={`${name} value`} value={value} min={min} max={max} step={step} onChange={onChange} format={format} parse={parse} disabled={disabled} mixed={mixed} className={`${narrow ? "w-12" : "w-16"} ${unit ? "pr-[18px]" : ""}`} />
+          {unit && <span aria-hidden className="pointer-events-none absolute right-1.5 text-[11px] text-muted">{unit}</span>}
         </span>
       </div>
     </div>
   );
 }
 
-/** The inset group a section's controls sit in, like a grouped list in macOS Settings. */
-export const GROUP = "flex flex-col gap-3 rounded-[10px] bg-white/[.035] p-2 shadow-[inset_0_0_0_1px_rgb(255_255_255/.05)]";
+/** A section's controls sit straight on the pane: the section's title and the hairline between sections group them. */
+export const GROUP = "flex flex-col gap-2";
 
-/** The title above the group; without one, for a group the inspector's header already names. */
-export function Section({ title, children, actions, bare = false, ref }: { title?: string; children: ReactNode; actions?: ReactNode; /** One quiet control that needs no group around it, such as Format's menu. */ bare?: boolean; ref?: Ref<HTMLElement> }) {
+/** The title above the controls; without one, for controls the inspector's header already names. */
+export function Section({ title, children, actions, ref }: { title?: string; children: ReactNode; actions?: ReactNode; /** One quiet control under its title, such as Format's menu; it looks as any other section now. */ bare?: boolean; ref?: Ref<HTMLElement> }) {
   return (
-    <section ref={ref} className="flex flex-col gap-2 px-2.5 py-2 first:pt-3 last:pb-4">
+    <section ref={ref} className="flex flex-col gap-2 px-4 pt-3 pb-3.5 [&+&]:border-t [&+&]:border-white/[.06] last:pb-7 [@media(max-height:720px)]:pt-2.5 [@media(max-height:720px)]:pb-3">
       {title && (
-        <div className="flex min-h-6 items-center justify-between gap-2 px-2">
+        <div className="flex min-h-6 items-center justify-between gap-2">
           <h3 className="text-[13px] font-semibold text-fg">{title}</h3>
-          {actions && <div className="flex items-center gap-0.5">{actions}</div>}
+          {actions && <div className="-mr-1 flex items-center gap-0.5">{actions}</div>}
         </div>
       )}
-      {bare ? <div className="flex flex-col gap-3 px-2">{children}</div> : <div className={GROUP}>{children}</div>}
+      <div className={GROUP}>{children}</div>
     </section>
   );
 }
@@ -633,12 +641,12 @@ export function Notice({ kind, children, className = "" }: { kind: keyof typeof 
  */
 export function Disclosure({ title, summary, open, onToggle, flush = false, children }: { title: string; summary: string; open: boolean; onToggle: () => void; flush?: boolean; children: ReactNode }) {
   return (
-    <section className={`flex flex-col ${flush ? "gap-3" : "gap-2 px-2.5 py-2 first:pt-3 last:pb-4"}`}>
+    <section className={`flex flex-col ${flush ? "gap-3" : "gap-2 px-4 pt-2.5 pb-3 [section+&]:border-t [section+&]:border-white/[.06] last:pb-7"}`}>
       <button
         type="button"
         aria-expanded={open}
         onClick={onToggle}
-        className={`flex h-8 min-w-0 items-center gap-1.5 rounded-md text-left text-[13px] font-semibold text-fg transition-colors duration-[120ms] ease-out hover:bg-white/[.05] ${flush ? "-mx-2 px-2" : "px-2"}`}
+        className={`flex h-8 min-w-0 items-center gap-1.5 rounded-md text-left text-[13px] font-semibold text-fg transition-colors duration-[120ms] ease-out hover:bg-white/[.05] -mx-2 px-2`}
       >
         {open ? <ChevronDown size={14} className="shrink-0 text-muted" /> : <ChevronRight size={14} className="shrink-0 text-muted" />}
         <span className="shrink-0">{title}</span>
@@ -659,7 +667,7 @@ export function ColorInput({ label, name = label, value, onChange, mixed = false
         <span className="tabular text-[12px] text-muted">{mixed ? "—" : value.slice(0, 7).toUpperCase()}</span>
         {/* WebKitGTK draws the colour well like a switch, so a plain swatch sits over a see-through input. */}
         <span
-          className="relative h-5 w-8 rounded-[5px] shadow-[inset_0_0_0_1px_rgb(255_255_255/.18)] has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent"
+          className="relative h-5 w-8 rounded-[5px] shadow-[inset_0_0_0_1px_rgb(255_255_255/.28)] has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent"
           style={{ background: mixed ? "transparent" : value.slice(0, 7) }}
         >
           <input
@@ -997,6 +1005,7 @@ export function PresetTile({
   onClick,
   disabled,
   title,
+  named = false,
   children,
 }: {
   label: string;
@@ -1004,6 +1013,8 @@ export function PresetTile({
   onClick: () => void;
   disabled?: boolean;
   title?: string;
+  /** The preview names itself, as a caption style's name drawn in the style: a 48 px tile without a label under it. */
+  named?: boolean;
   children: ReactNode;
 }) {
   const lock = useLockReason();
@@ -1017,7 +1028,7 @@ export function PresetTile({
       className="group flex min-w-0 flex-col gap-1.5 rounded-[10px] text-left disabled:cursor-not-allowed disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
     >
       <span
-        className={`relative block aspect-[4/3] w-full overflow-hidden rounded-[10px] border bg-bg ${
+        className={`relative block w-full overflow-hidden rounded-[10px] border ${named ? "h-12 bg-white/[.06]" : "aspect-[4/3] bg-bg"} ${
           selected ? "border-accent shadow-[0_0_0_1px_var(--color-accent)]" : disabled ? "border-white/[.08]" : "border-white/[.08] group-enabled:group-hover:border-white/30"
         }`}
       >
@@ -1028,7 +1039,7 @@ export function PresetTile({
           </span>
         )}
       </span>
-      <span className={`truncate text-[11px] ${selected ? "font-medium text-fg" : "text-muted"}`}>{label}</span>
+      {!named && <span className={`truncate text-[11px] ${selected ? "font-medium text-fg" : "text-muted"}`}>{label}</span>}
     </button>
   );
 }

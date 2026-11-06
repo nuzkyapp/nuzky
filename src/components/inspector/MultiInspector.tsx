@@ -7,7 +7,7 @@ import type { Adjust, Clip, EditCmd, Project, Track, Transform } from "../../lib
 import { Button, IconButton, Section, Slider } from "../ui";
 import { InspectorHeader, QUIET } from "./Header";
 import { BackgroundSection } from "./BackgroundSection";
-import { DuckingRow, VoiceSection } from "./MediaSections";
+import { DuckingRow, MonoRow, VoiceSection } from "./MediaSections";
 import { StyleSection } from "./TextSection";
 import { useKeyLabels } from "../../lib/keys";
 
@@ -137,6 +137,7 @@ function VolumeRow({ found, coalesce }: { found: Found[]; coalesce: string }) {
         onChange={(v) => editClips(ids, (c) => ({ type: "updateClip", clipId: c.id, volume: v / 100 }), `${coalesce}:volume`)}
       />
       <DuckingRow clips={found.map((f) => f.clip)} coalesce={coalesce} />
+      <MonoRow clips={found.map((f) => f.clip)} />
     </Section>
   );
 }
@@ -165,7 +166,7 @@ export function MultiInspector({ ids }: { ids: string[] }) {
   return (
     <>
       <InspectorHeader icon={Layers} title={`${found.length} clips selected`} detail={detail} />
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="scroll-shown min-h-0 flex-1 overflow-y-auto">
         <div className="grid grid-cols-2 gap-2 border-b border-white/[.07] px-4 pb-4 pt-1">
           <Button onClick={duplicateSelection} title={withKey("Duplicate", "duplicate")}>
             <Copy size={14} /> Duplicate

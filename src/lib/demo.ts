@@ -31,7 +31,8 @@ export function demoReply(r: SampleRun): string {
   const captions = r.captions > 0 ? `added ${count(r.captions, "caption")}` : "";
   if (!cut.length) return captions ? `Done. I found nothing to cut and ${captions}.` : "Done. I found nothing to cut.";
   const shorter = ((r.beforeUs - r.afterUs) / 1_000_000).toFixed(1);
-  return `Done. I cut ${cut.join(" and ")}, so the video is ${shorter} s shorter${captions ? `, and ${captions}` : ""}.`;
+  // A no-break space keeps the number and its unit on one line.
+  return `Done. I cut ${cut.join(" and ")}, so the video is ${shorter}\u00a0s shorter${captions ? `, and ${captions}` : ""}.`;
 }
 
 /** Why the request cannot be sent now, or null. */

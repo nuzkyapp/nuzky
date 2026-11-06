@@ -309,6 +309,7 @@ pub fn summarize(before: &Project, after: &Project) -> Vec<RunChange> {
                 leveler: l1,
                 shape: sh1,
                 duck_db: d1,
+                mono: m1,
                 background: b1,
                 ..
             },
@@ -325,6 +326,7 @@ pub fn summarize(before: &Project, after: &Project) -> Vec<RunChange> {
                 leveler: l2,
                 shape: sh2,
                 duck_db: d2,
+                mono: m2,
                 background: b2,
                 ..
             },
@@ -381,6 +383,13 @@ pub fn summarize(before: &Project, after: &Project) -> Vec<RunChange> {
                     (false, true) => "Turned on Lower under speech for",
                     (true, false) => "Turned off Lower under speech for",
                     _ => "Changed how much speech lowers",
+                });
+            }
+            if m1 != m2 {
+                push(match (m1.is_off(), m2.is_off()) {
+                    (true, false) => "Turned on Mono for",
+                    (false, true) => "Turned off Mono for",
+                    _ => "Changed which side Mono plays in",
                 });
             }
             if b1 != b2 {

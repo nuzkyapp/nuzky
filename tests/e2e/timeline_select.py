@@ -44,7 +44,7 @@ def timeline_select(r):
     fps = r.s.run(FPS)
     rect = lambda clip: r.s.run(RECT, clip)
     a, b = rect(first), rect(second)
-    below = a[3] + 40
+    below = a[3] + 20
     r.check('the space below the last track is empty lane space', r.s.run(EMPTY, a[0] + 30, below), below)
 
     # A click below the tracks, 1.2 s into the first clip.
@@ -100,8 +100,8 @@ def timeline_select(r):
     clock.sleep(0.3)
     r.check('Esc in the middle of a box keeps a selected transition selected', r.s.run(CUT) == second, r.s.run(CUT))
     # A box that replaces the selection takes a selected transition out of it too, even when it touches no clip.
-    r.s.run(PRESS, start[0], below + 10, {}, [(start[0] + 40, below + 30)])
-    r.s.run(RELEASE, start[0] + 40, below + 30, {})
+    r.s.run(PRESS, start[0], below - 10, {}, [(start[0] + 40, below + 6)])
+    r.s.run(RELEASE, start[0] + 40, below + 6, {})
     clock.sleep(0.3)
     r.check('a box over empty space clears a selected transition', r.s.run(CUT) is None and r.s.run(SELECTION) == [],
             [r.s.run(CUT), r.s.run(SELECTION)])
@@ -122,7 +122,7 @@ def timeline_select(r):
     a = rect(first)
     r.check('zoomed in, the second clip starts past the right edge', rect(second)[0] > view[2], (rect(second), view))
     edge = (view[2] - 4, a[1] + 10)
-    r.s.run(PRESS, a[0] + 100, a[3] + 30, {}, [(a[0] + 120, a[3] + 30), edge])
+    r.s.run(PRESS, a[0] + 100, a[3] + 16, {}, [(a[0] + 120, a[3] + 16), edge])
     reached = wait(lambda: second in r.s.run(SELECTION), 15)
     r.check('holding the box at the right edge scrolls the timeline until it reaches the second clip', reached,
             (r.s.run(SELECTION), r.s.run(VIEW)))
@@ -134,7 +134,7 @@ def timeline_select(r):
     r.seek(0)
     r.s.run('window.__nuzky.store.getState().togglePlay()')
     r.check('playback runs', wait(lambda: r.s.run('return window.__nuzky.store.getState().playing'), 5))
-    r.s.run(PRESS, a[0] + 100, a[3] + 30, {}, [(a[0] + 300, a[1] + 10)])
+    r.s.run(PRESS, a[0] + 100, a[3] + 16, {}, [(a[0] + 300, a[1] + 10)])
     wait(lambda: r.s.run(BOX), 5)
     r.seek(16_000_000)
     clock.sleep(0.6)

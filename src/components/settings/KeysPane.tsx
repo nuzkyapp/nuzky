@@ -1,14 +1,10 @@
-import { Fragment, useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { AlertCircle, Check, ChevronDown, RotateCcw, X } from "lucide-react";
+import { Fragment, useRef, useState, type KeyboardEvent } from "react";
+import { AlertCircle, Check, ChevronDown, RotateCcw } from "lucide-react";
 import { open as pickFile } from "@tauri-apps/plugin-dialog";
-import { api, errorText } from "../lib/api";
-import { ACTIONS, PRESETS, choosePreset, chordsOf, keysOf, reserved, resetKey, setKey, takeImported, useKeys, useKeysDialog, type ActionId, type PresetId, type Saved } from "../lib/keys";
-import { Button, IconButton, Menu, SearchField, trapTab } from "./ui";
+import { api, errorText } from "../../lib/api";
+import { ACTIONS, PRESETS, choosePreset, chordsOf, keysOf, reserved, resetKey, setKey, takeImported, useKeys, type ActionId, type PresetId, type Saved } from "../../lib/keys";
+import { Button, IconButton, Menu, SearchField } from "../ui";
 
-export function KeysDialog() {
-  const open = useKeysDialog((s) => s.open);
-  return open ? <Dialog /> : null;
-}
 
 const GROUPS = [...new Set(ACTIONS.map((a) => a.group))];
 const labelOf = (id: ActionId) => ACTIONS.find((a) => a.id === id)!.label;
@@ -18,7 +14,8 @@ type Pending = { id: ActionId; chord: string; from: ActionId; reset?: boolean };
 /** The action other than `id` that holds `chord` now. */
 const holder = (chord: string, id?: ActionId) => ACTIONS.find((a) => a.id !== id && keysOf(a.id).includes(chord))?.id;
 
-function Dialog() {
+/** Settings › Keyboard: the editor's keys, a set like another editor's, a file of keys from one, and each key by hand. */
+export function KeysPane() {
   const s = useKeys();
   const [query, setQuery] = useState("");
   const [recording, setRecording] = useState<ActionId | null>(null);
@@ -30,17 +27,6 @@ function Dialog() {
   const dialog = useRef<HTMLDivElement>(null);
   // Space released after it was recorded would click the keys again and start waiting anew.
   const spaceTaken = useRef(false);
-  const opener = useRef<HTMLElement | null>(null);
-
-  useEffect(() => {
-    opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    dialog.current?.querySelector<HTMLElement>("input[type=search]")?.focus();
-  }, []);
-
-  const close = () => {
-    opener.current?.focus();
-    useKeysDialog.setState({ open: false });
-  };
   const keyButton = (id: ActionId) => dialog.current?.querySelector<HTMLButtonElement>(`[data-keys="${id}"]`);
 
   const record = (id: ActionId, e: KeyboardEvent<HTMLButtonElement>) => {
@@ -92,31 +78,8 @@ function Dialog() {
   const changed = Object.keys(s.changed).length > 0;
 
   return (
-    <div data-scrim data-exit className="scrim-in fixed inset-0 z-[100] flex items-center justify-center bg-black/45" onPointerDown={(e) => e.target === e.currentTarget && close()}>
-    <div
-      ref={dialog}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="keys-title"
-      onKeyDown={(e) => {
-        e.stopPropagation();
-        if (e.key === "Escape") {
-          e.preventDefault();
-          return close();
-        }
-        trapTab(e);
-      }}
-      className="dialog-in overlay flex max-h-[calc(100vh-48px)] w-[560px] max-w-[calc(100vw-48px)] flex-col rounded-[20px] p-6 text-fg"
-    >
-      <div className="flex items-center justify-between gap-3">
-        <h2 id="keys-title" className="text-[17px] font-semibold leading-[22px] tracking-[-0.025em]">
-          Keyboard shortcuts
-        </h2>
-        <IconButton round label="Close" onClick={close} className="h-7 w-7 bg-white/[.07]">
-          <X size={15} />
-        </IconButton>
-      </div>
-      <div className="mt-4 flex items-center gap-2">
+    <div ref={dialog} className="flex min-h-0 flex-1 flex-col">
+      <div className="flex items-center gap-2">
         <Button
           data-preset
           pill
@@ -133,7 +96,7 @@ function Dialog() {
         <Button pill className="shrink-0" onClick={() => void importFile()}>
           Import file…
         </Button>
-        <SearchField value={query} onChange={setQuery} placeholder="Search actions or keys" />
+        <SearchField value={query} onChange={setQuery} placeholder="Filter shortcuts" />
       </div>
       {status && (
         <p role="status" className={`mt-3 flex items-start gap-1.5 text-[12px] ${status.ok ? "text-muted" : "text-danger"}`}>
@@ -153,21 +116,21 @@ function Dialog() {
           )}
         </p>
       )}
-      <div className="-mx-6 mt-3 min-h-0 flex-1 overflow-y-auto px-6" data-keys-list>
+      <div className="mt-3" data-keys-list>
         {shown.length === 0 && <p className="py-6 text-center text-[13px] text-muted">No action or key matches “{query.trim()}”.</p>}
         {GROUPS.map((group) => {
           const rows = shown.filter((a) => a.group === group);
           if (rows.length === 0) return null;
           return (
-            <section key={group} className="mt-3 first:mt-1">
+            <section key={group} className="mt-6 first:mt-1">
               <h3 className="mb-1.5 text-[13px] font-semibold">{group}</h3>
-              <div className="rounded-[10px] bg-white/[.035] px-2.5 shadow-[inset_0_0_0_1px_rgb(255_255_255/.05)]">
+              <div className="rounded-xl bg-white/[.055] px-3.5 shadow-[inset_0_0_0_1px_rgb(255_255_255/.06)]">
                 {rows.map(({ id, label }) => {
                   const keys = keysOf(id, s);
                   const own = !!s.changed[id];
                   return (
                     <Fragment key={id}>
-                      <div className="flex min-h-[38px] items-center gap-2 border-t border-white/[.05] first:border-t-0" data-action={id}>
+                      <div className="flex min-h-[38px] items-center gap-2 border-t border-white/[.06] first:border-t-0" data-action={id}>
                         <span className="min-w-0 flex-1 truncate text-[13px]">{label}</span>
                         <button
                           type="button"
@@ -273,7 +236,6 @@ function Dialog() {
           }))}
         />
       )}
-    </div>
     </div>
   );
 }

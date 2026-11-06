@@ -1,7 +1,8 @@
 import { invoke, type Channel } from "@tauri-apps/api/core";
 import type { GalleryPlugin, GalleryState } from "./gallery";
+import type { StorageUsage, StyleSettings } from "./types";
 import type { EffectIssue, ListedPlugin, PluginRow, PluginValues } from "./plugins";
-import type { AgentAccess, ImportedKeys, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, BeatCutDone, BeatPlans, Boot, BrollChoice, BrollSuggestions, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Part, PreviewStarted, Project, ProjectPoster, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFinish, ReelFraming, Rhythm, Said, SampleRun, ScreenRecording, ScreenWindow, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied } from "./types";
+import type { AgentAccess, ImportedKeys, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, BeatCutDone, BeatPlans, Boot, BrollChoice, BrollSuggestions, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Mono, Part, PreviewStarted, Project, ProjectPoster, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFinish, ReelFraming, Rhythm, Said, SampleRun, ScreenRecording, ScreenWindow, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied } from "./types";
 
 /**
  * The session a change was made for. Mutating commands carry it, so a change still in flight when
@@ -37,6 +38,8 @@ export const api = {
   waveform: (assetId: string, from: number, to: number) => invoke<{ peaks: number[]; complete: boolean } | null>("waveform", { assetId, from, to }),
   /** The gain Match loudness gives the clip in dB, or null until its file's loudness is measured. */
   matchGain: (clipId: string) => invoke<number | null>("match_gain", { clipId }),
+  /** The side of the file's sound that has it all when a microphone recorded on one side only, else null; null until its sound is prepared. */
+  soundOnlyIn: (assetId: string) => invoke<Mono | null>("sound_only_in", { assetId }),
   play: () => invoke<void>("play"),
   pause: () => invoke<void>("pause"),
   seek: (tUs: number) => invoke<void>("seek", { tUs: Math.round(tUs) }),
@@ -300,6 +303,16 @@ export const api = {
   installGalleryPlugin: (id: string, key: string, replacing: GalleryState | null, progress: Channel<number>) =>
     invoke<GalleryPlugin[]>("install_gallery_plugin", { id, key, replacing, progress }),
   cancelGalleryInstall: () => invoke<void>("cancel_gallery_install"),
+  /** Disk use by group. Clear keeps what the open project uses (`keptBytes`); `blocked` says why Clear waits. */
+  storageUsage: () => invoke<StorageUsage>("storage_usage"),
+  /** Clears a group Nuzky makes again by itself and returns the usage after it; fails with STORAGE_BUSY: while it waits for work. */
+  clearStorage: (group: "sound" | "pictures" | "youtube") => invoke<StorageUsage>("clear_storage", { group }),
+  styleSettings: () => invoke<StyleSettings>("style_settings"),
+  setStyleSettings: (settings: StyleSettings) => invoke<StyleSettings>("set_style_settings", { settings }),
+  /** The plugin must be allowed again before its next run; a run already going finishes. */
+  revokePluginAccess: (id: string) => invoke<void>("revoke_plugin_access", { id }),
+  /** Deletes a downloaded speech model; fails with MODEL_IN_USE: while speech is recognised or a model downloads. */
+  removeSpeechModel: (id: string) => invoke<SpeechModel[]>("remove_speech_model", { id }),
 };
 
 /** The error as the backend sent it, "CODE: detail" included; code checks use this. */
@@ -318,6 +331,9 @@ const PLAIN: Record<string, string | ((detail: string) => string)> = {
   SCREEN_PERMISSION: (detail) => detail,
   SCREEN_UNSUPPORTED: (detail) => detail,
   RECORDING: "The screen is already being recorded.",
+  STORAGE_BUSY: (detail) => detail,
+  MODEL_IN_USE: (detail) => detail,
+  SETTINGS_UNWRITABLE: (detail) => detail,
   EPOCH_CHANGED: "Another project was opened meanwhile, so this did not happen.",
   EDIT_REJECTED: (detail) => {
     const what = detail.replace(/; project unchanged$/, "").replace(/\.$/, "");

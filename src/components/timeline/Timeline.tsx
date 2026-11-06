@@ -47,7 +47,7 @@ const ROW_GAP = 4;
 const LANES_AT = { left: HEADER_W, top: RULER_H };
 /** How far into each end of a clip dropped media still goes in beside it instead of replacing it, in px. */
 const REPLACE_END = 24;
-const OVERLAY_LANE_H = 28;
+const OVERLAY_LANE_H = 20;
 const END_TIP = "The video ends here. Sound after this point is not exported.";
 
 function rowHeight(track: Track) {
@@ -289,8 +289,9 @@ function Playhead({ zoom, scroller, follow }: { zoom: number; scroller: RefObjec
       // While playing, the effect above moves it.
       style={{ left: HEADER_W, transform: playing ? undefined : `translateX(${(timeUs / US) * zoom}px)` }}
     >
-      <div className="absolute -left-[0.75px] bottom-0 top-2 w-[1.5px] bg-white shadow-[0_0_0_0.5px_rgb(0_0_0/.4)]" />
-      <div className="absolute -left-1.5 top-0.5 h-[15px] w-3 rounded-t-[2px] bg-white [clip-path:polygon(0_0,100%_0,100%_60%,50%_100%,0_60%)]" />
+      {/* The head sits in the ruler's tick band, under its time labels, so it never covers the time it stands on. */}
+      <div className="absolute -left-[0.75px] bottom-0 top-[20px] w-[1.5px] bg-white shadow-[0_0_0_0.5px_rgb(0_0_0/.4)]" />
+      <div className="absolute -left-[5px] top-[17px] h-[11px] w-[10px] rounded-t-[2px] bg-white [clip-path:polygon(0_0,100%_0,100%_55%,50%_100%,0_55%)]" />
     </div>
   );
 }
@@ -672,7 +673,7 @@ export function Timeline({ height }: { height: number }) {
 
   return (
     <section className="pane flex shrink-0 flex-col overflow-hidden bg-well" style={{ height }} aria-label="Timeline">
-      <div data-tips-above className="flex h-11 shrink-0 items-center gap-1.5 px-2.5">
+      <div data-tips-above className="flex h-11 shrink-0 items-center gap-1.5 px-2.5 [@media(max-height:720px)]:h-9">
         {cover ? (
           <p className="truncate pl-1.5 text-[12px] text-muted">
             {coverFromImage ? "Moving the playhead keeps the image; Use frame takes this frame." : "Click or drag on the timeline to choose the cover's frame."}
@@ -838,7 +839,7 @@ export function Timeline({ height }: { height: number }) {
                     role="listbox"
                     aria-label={`${track.name || track.kind} track`}
                     aria-multiselectable
-                    className={`relative flex-1 ${isMain ? "bg-white/[0.035]" : "bg-white/[0.015]"} ${assetDrag && dropTime !== null && !place?.over ? "outline-1 outline-dashed outline-white/20" : ""}`}
+                    className={`relative flex-1 ${isMain ? "bg-white/[0.035]" : ""} ${assetDrag && dropTime !== null && !place?.over ? "outline-1 outline-dashed outline-white/20" : ""}`}
                     style={{ marginBlock: ROW_GAP / 2 }}
                   >
                     {isMain && emptyTimeline && !peekShown && (

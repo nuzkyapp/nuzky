@@ -10,7 +10,8 @@ CLIENT = 'oaiapp_nuzky_e2e'
 EMAIL = 'editor@example.test'
 SCOPES = 'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct'
 RESOURCE = 'https://api.openai.com/v1'
-DIALOG = '[role=dialog][aria-labelledby=chatgpt-title]'
+# The ChatGPT account in Settings › AI.
+DIALOG = '[role=dialog][data-settings] [data-setting=chatgpt]'
 VIEW = """const d = document.querySelector(arguments[0]);
 return d && {text: d.innerText, alert: d.querySelector('[role=alert]')?.textContent ?? null,
              focused: document.activeElement?.textContent?.trim()};"""
@@ -165,7 +166,7 @@ def open_dialog(r):
     r.s.run("""[...document.querySelectorAll('[role=menu][aria-label=Agent] button')]
         .find((b) => b.textContent.trim() === 'ChatGPT account…').click()""")
     require(wait(lambda: view(r).get('text') and 'Checking your ChatGPT sign-in' not in view(r)['text'], 10),
-            'ChatGPT dialog finishes checking the account')
+            'Settings › AI finishes checking the ChatGPT account')
 
 
 def stored(r):
@@ -284,7 +285,7 @@ def chatgpt(r):
         check_private(r, 'no issued token appears in the DOM, localStorage, registration or app logs after refused plan use')
         shot(r, 'plan-not-allowed')
         r.key('Escape')
-        r.check('Esc closes the ChatGPT dialog', wait(lambda: not view(r), 3))
+        r.check('Esc closes Settings', wait(lambda: not view(r), 3))
         r.check('the fake server rejected no protocol request', not server.errors, server.errors)
     finally:
         server.http.shutdown()

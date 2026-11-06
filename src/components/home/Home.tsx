@@ -10,7 +10,7 @@ import {
   Folder,
   FolderInput,
   FolderOpen,
-  Keyboard,
+  Settings,
   FolderPlus,
   GalleryVerticalEnd,
   Film,
@@ -66,6 +66,7 @@ import { useEditor } from "../../lib/store";
 import { formatLength } from "../../lib/time";
 import type { Collection, LibraryProject, Said } from "../../lib/types";
 import { AiRunBar, JobIndicator } from "../TopBar";
+import { ShareButton } from "../ShareDialog";
 import { Button, IconButton, Menu, type MenuEntry } from "../ui";
 import { ProjectCard } from "./ProjectCard";
 import { DraftsSection } from "./Drafts";
@@ -73,7 +74,7 @@ import { Poster } from "./Poster";
 import { VersionRow } from "../Updates";
 import { FeedbackRow } from "../Feedback";
 import { useWindowButtons } from "../../lib/window";
-import { openKeys } from "../../lib/keys";
+import { openSettings } from "../../lib/settings";
 
 type MenuState = { items: MenuEntry[]; at: { x: number; y: number; align?: "start" | "end"; above?: boolean }; label: string; keyboard: boolean; back: HTMLElement | null; /** The card it acts on. */ target?: string };
 
@@ -408,6 +409,10 @@ export function Home() {
           <ChevronLeft size={15} className="shrink-0" />
           <span className="truncate">{current?.project.name ?? "Editor"}</span>
         </Button>
+        {/* Sharing works on the open project, so a phone can start one from here too. */}
+        <div className="bar flex items-center rounded-full">
+          <ShareButton />
+        </div>
         <div className="flex-1" />
         <AiRunBar />
         <JobIndicator />
@@ -490,7 +495,7 @@ export function Home() {
                     {sections.map((section) => (
                       <section key={section.title ?? "all"} role="group" aria-label={section.title ?? undefined}>
                         {(section.title ?? (searching || hasDrafts ? "Projects" : null)) && <h2 className="mb-3 text-[13px] font-semibold text-fg">{section.title ?? "Projects"}</h2>}
-                        <div className="grid grid-cols-[repeat(auto-fill,minmax(148px,168px))] gap-x-4 gap-y-5">
+                        <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] [@media(max-height:720px)]:grid-cols-[repeat(auto-fill,minmax(140px,156px))] gap-x-4 gap-y-5">
                           {section.items.map((p) => (
                             <ProjectCard
                               key={p.path}
@@ -536,7 +541,7 @@ export function Home() {
           {selection.length > 0 && page === "projects" && <SelectionBar showMenu={showMenu} newCollection={setCreating} />}
           {fileDrag && (
             <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-[12px] bg-black/45">
-              <div className="overlay flex w-[320px] flex-col items-center gap-2 rounded-[20px] px-6 py-7 text-center">
+              <div className="overlay overlay-solid flex w-[320px] flex-col items-center gap-2 rounded-[20px] px-6 py-7 text-center">
                 <Upload size={28} className="text-accent" />
                 <div className="text-[15px] font-semibold text-fg">Drop to start a new project</div>
                 <div className="text-[13px] text-muted">It takes the format of the first video.</div>
@@ -673,10 +678,10 @@ export function Quote({ hit }: { hit: Said["hits"][number] }) {
 /** The shapes of cards while the list loads, so nothing jumps when it arrives. */
 function Skeleton() {
   return (
-    <div aria-busy aria-label="Loading projects" className="grid grid-cols-[repeat(auto-fill,minmax(148px,168px))] gap-x-4 gap-y-5 pt-1">
+    <div aria-busy aria-label="Loading projects" className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] [@media(max-height:720px)]:grid-cols-[repeat(auto-fill,minmax(140px,156px))] gap-x-4 gap-y-5 pt-1">
       {Array.from({ length: 6 }, (_, i) => (
         <div key={i}>
-          <div className="w-full rounded-[10px] bg-white/[.04]" style={{ aspectRatio: `${152 / 180}` }} />
+          <div className="w-full rounded-[10px] bg-white/[.04]" style={{ aspectRatio: "4 / 5" }} />
           <div className="mt-2.5 h-3 w-3/5 rounded bg-white/[.05]" />
           <div className="mt-2 h-2.5 w-2/5 rounded bg-white/[.04]" />
         </div>
@@ -695,36 +700,19 @@ function Empty({ icon, title, children }: { icon: ReactNode; title: string; chil
   );
 }
 
-const FIRST_STEPS = [
-  ["Captions in your language", "Pick the language in Captions. Nuzky starts with your computer's, or detects it."],
-  ["Cut pauses and retakes", "In the transcript, or let an AI agent cut them."],
-  ["Export for Reels & TikTok", "1080p in 9:16. Switch Ratio first for any other shape."],
-];
-
-/** No projects yet: the way from a talking head video to a post, and the formats to start empty. */
+/** No projects yet: a video or the sample to start with, AI to cut it, and the formats to start empty. */
 function FirstRun() {
   return (
     <div className="mx-auto flex max-w-[748px] flex-col items-center gap-6 pt-20 text-center">
       <h2 className="text-[17px] font-semibold text-fg">Start your first video</h2>
       <div className="-mt-2 flex gap-2">
         <Button variant="primary" onClick={() => void pickVideosForNewProject()} className="h-9 px-4">
-          <Film size={16} /> Open a talking head video…
+          <Film size={16} /> Open a video…
         </Button>
         <Button onClick={trySample} className="h-9 px-4">
           Try the sample video
         </Button>
       </div>
-      <ol className="grid w-full grid-cols-3 gap-6 text-left">
-        {FIRST_STEPS.map(([title, line], i) => (
-          <li key={title} className="flex gap-2.5">
-            <span className="tabular flex size-5 shrink-0 items-center justify-center rounded-full bg-white/[.09] text-[11px] font-semibold text-fg">{i + 1}</span>
-            <span>
-              <span className="block text-[13px] font-semibold text-fg">{title}</span>
-              <span className="mt-0.5 block text-[12px] text-muted">{line}</span>
-            </span>
-          </li>
-        ))}
-      </ol>
       <div className="flex flex-col items-center gap-2 text-[13px] text-muted">
         <p>
           Want AI to do the cutting?{" "}
@@ -732,12 +720,11 @@ function FirstRun() {
             Get set up
           </button>{" "}
           or{" "}
-          <button type="button" onClick={() => useEditor.setState({ connectOpen: true })} className="text-accent hover:underline">
+          <button type="button" onClick={() => openSettings("ai", "agents")} className="text-accent hover:underline">
             connect an agent
-          </button>{" "}
-          you already use, like Claude Code, Codex or Gemini.
+          </button>
+          .
         </p>
-        <p>Or drop videos from your phone anywhere in this window.</p>
         <div className="flex items-center gap-1">
           Or start empty:
           {FORMATS.map((f) => (
@@ -863,7 +850,7 @@ function Sidebar({
           onKeyDown={rowKeys}
         />
         <Row icon={<Compass size={16} />} label="Take the tour" count={undefined} on={false} onClick={trySample} onKeyDown={rowKeys} />
-        <Row icon={<Keyboard size={16} />} label="Keyboard shortcuts" count={undefined} on={false} onClick={openKeys} onKeyDown={rowKeys} />
+        <Row icon={<Settings size={16} />} label="Settings" count={undefined} on={false} onClick={() => openSettings()} onKeyDown={rowKeys} />
         <div className="mt-4 mb-1 flex h-7 items-center justify-between pl-2.5">
           <h2 className="text-[13px] font-semibold text-fg">Collections</h2>
           <IconButton label="New collection" onClick={() => setCreating([])} className="h-7 w-7">

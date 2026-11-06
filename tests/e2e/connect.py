@@ -1,4 +1,4 @@
-"""Connect your agent: one click puts Nuzky into Claude Code's, Codex's and Gemini's own settings, after a backup and without
+"""Settings › AI, Agents outside Nuzky: one click puts Nuzky into Claude Code's, Codex's and Gemini's own settings, after a backup and without
 touching anything else there, a copy gives any other agent the same server and a first message, and Agent access
 decides whether an agent attached to the open project may edit it, without restarting the agent."""
 import json, time, tomllib
@@ -13,6 +13,7 @@ SETTINGS = '{\n  "theme": "dark",\n  "permissions": {\n    "allow": ["command(gi
 ROWS = """return [...document.querySelectorAll('[role=dialog] [role=group]')]
   .filter((row) => ['Claude Code', 'Codex', 'Gemini'].includes(row.getAttribute('aria-label')))
   .map((row) => ({text: row.textContent, button: row.querySelector('button')?.textContent}));"""
+FOCUS_ACCESS = "document.querySelector('[role=dialog] [role=group][aria-label=\"Agent access\"] [role=switch]').focus()"
 ACCESS = """const row = document.querySelector('[role=dialog] [role=group][aria-label="Agent access"]');
 const toggle = row && row.querySelector('[role=switch]');
 return toggle && {on: toggle.getAttribute('aria-checked') === 'true', atLaunch: row.querySelector('input[type=checkbox]').checked,
@@ -58,7 +59,7 @@ def server_of(text):
     return json.loads(text[text.index('{'):text.rindex('}') + 1])['mcpServers']['nuzky']
 
 
-@flow('connect', 'Connect an agent outside Nuzky (in the AI panel) writes only the nuzky entry into Claude Code, Codex and Gemini settings, '
+@flow('connect', 'Connect an agent outside Nuzky (in the AI panel) opens Settings › AI, which writes only the nuzky entry into Claude Code, Codex and Gemini settings, '
       'after a backup, a copy gives other agents the same server, and Agent access lets the agent edit the open project live',
       before=home)
 def connect(r):
@@ -74,15 +75,16 @@ def connect(r):
                 r.s.run("document.querySelector('aside[aria-label=AI] button[title=\"Choose the agent\"]').click(); return true")
                 and wait(lambda: r.s.run("""const item = [...document.querySelectorAll('[role=menu] [role=menuitem]')]
                     .find((b) => b.textContent.includes('Connect an agent outside Nuzky')); if (!item) return false; item.click(); return true;"""), 5))
+        r.check('it opens Settings on AI', wait(lambda: r.s.run("return document.querySelector('[data-settings] #settings-title')?.textContent") == 'AI', 5))
         rows = wait(lambda: r.s.run(ROWS) or None, 10)
-        r.check('the dialog lists Claude Code, Codex and Gemini, not yet connected',
+        r.check('Settings lists Claude Code, Codex and Gemini, not yet connected',
                 rows and len(rows) == 3 and all(name in row['text'] and 'Not connected' in row['text']
                 for name, row in zip(('Claude Code', 'Codex', 'Gemini'), rows)), rows)
         access = wait(lambda: r.s.run(ACCESS), 5)
         r.check('Agent access starts off and is not turned on at launch', access and not access['on'] and not access['atLaunch']
                 and "can't edit" in access['text'], access)
         time.sleep(0.3)  # the dialog fades in over 200 ms
-        r.shot('connect-dialog')
+        r.shot('connect-settings')
 
         # Copies for agents Nuzky does not connect itself: the server for their settings and a first message.
         text, toast = copy(r, 'Other agent')
@@ -115,7 +117,7 @@ def connect(r):
         refused = tool(agent, 'get_state', {})
         r.check('with Agent access off the agent is refused, saying how to turn it on',
                 refused.get('isError') and 'AGENT_ACCESS_OFF' in json.dumps(refused) and 'Agent access is off' in json.dumps(refused), refused)
-        r.s.run("document.querySelector('[role=dialog] [role=switch]').focus()")
+        r.s.run(FOCUS_ACCESS)
         press('space')
         r.check('Space on the switch turns Agent access on, not at launch', wait(lambda: (r.s.run(ACCESS) or {}).get('on'), 5)
                 and not r.s.run(ACCESS)['atLaunch'], r.s.run(ACCESS))
@@ -130,7 +132,7 @@ def connect(r):
         agent.call('end_run', {'run_id': run['run_id'], 'action': 'discard'})
         r.check('and the run ends there', wait(lambda: not r.state()['aiRun'], 10))
         r.check('the switch unlocks', wait(lambda: not r.s.run(ACCESS)['locked'], 5))
-        r.s.run("document.querySelector('[role=dialog] [role=switch]').focus()")
+        r.s.run(FOCUS_ACCESS)
         press('space')
         r.check('Space again turns it off', wait(lambda: not r.s.run(ACCESS)['on'], 5), r.s.run(ACCESS))
         # The app lets go of the agent within its next 20 ms round, so a call may still pass just before.
@@ -140,13 +142,13 @@ def connect(r):
         focused = """const el = document.activeElement; return el && el.closest('[role=dialog]')
             ? {text: el.textContent.trim(), row: el.closest('[role=group]')?.getAttribute('aria-label') ?? null} : null;"""
         for name, next_row in (('Claude Code', 'Codex'), ('Codex', 'Gemini'), ('Gemini', None)):
-            next_focus = {'text': 'Connect' if next_row else 'Done', 'row': next_row}
+            next_focus = {'text': 'Connect', 'row': next_row} if next_row else {'text': '', 'row': 'Agent access'}
             r.s.run("""const row = document.querySelector(`[role=dialog] [role=group][aria-label="${arguments[0]}"]`);
                 row.querySelector('button').focus(); row.querySelector('button').click();""", name)
             r.check(f'{name} shows connected', wait(lambda: any(name in x['text'] and 'Connected' in x['text'] for x in r.s.run(ROWS)), 10),
                     r.s.run(ROWS))
             # A connected row has no button, so keyboard focus moves on inside the dialog instead of getting lost.
-            r.check(f"after {name}, focus moves to {next_row + ' Connect' if next_row else 'Done'}", wait(lambda: r.s.run(focused) == next_focus, 3), r.s.run(focused))
+            r.check(f"after {name}, focus moves to {next_row + ' Connect' if next_row else 'the Agent access switch'}", wait(lambda: r.s.run(focused) == next_focus, 3), r.s.run(focused))
         toast = wait(lambda: next((t for t in r.state()['toasts'] if t['text'].startswith('Gemini is connected.')), None), 5)
         r.check("after Gemini connects, the toast points to the AI panel's guide, which gives the command to paste",
                 toast and toast['kind'] == 'success' and 'Choose Gemini in the AI panel' in toast['text'], toast)
@@ -157,7 +159,7 @@ def connect(r):
         state = tool(agent, 'get_state', {})
         r.check('the agent from the copy can edit again, still not restarted', not state.get('isError'), state)
         r.shot('connected')
-        r.s.run("document.querySelector('[role=dialog] [role=switch]').focus()")
+        r.s.run(FOCUS_ACCESS)
         press('space')
         r.check('with access off, a connected agent does not look ready', wait(lambda: all(
             'Connected. Agent access is off' in x['text'] for x in r.s.run(ROWS)), 5), r.s.run(ROWS))
@@ -169,7 +171,7 @@ def connect(r):
         time.sleep(0.5)
         box = r.s.run("const b = document.querySelector('[role=dialog]').getBoundingClientRect(); "
                       "return {top: b.top, bottom: b.bottom, height: innerHeight};")
-        r.check('in the smallest window, 1024 x 640, the whole dialog fits', box['top'] >= 0 and box['bottom'] <= box['height'], box)
+        r.check('in the smallest window, 1024 x 640, the whole Settings window fits', box['top'] >= 0 and box['bottom'] <= box['height'], box)
         r.shot('connected-1024')
         webdriver('POST', r.s.path + '/window/rect', {'width': 1440, 'height': 900})
     finally:
@@ -219,7 +221,8 @@ def connect(r):
         r.check('the agent Claude Code starts sees the project open in the app', state['name'] == open_name, [state['name'], open_name])
     finally:
         connected.close()
-    r.check('Done closes the dialog', click(r, 'Done') and wait(lambda: not r.s.run("return !!document.querySelector('[role=dialog]')"), 5))
+    r.check('Close closes Settings', r.s.run("document.querySelector('[data-settings] button[aria-label=Close]').click(); return true")
+            and wait(lambda: not r.s.run("return !!document.querySelector('[role=dialog]')"), 5))
     r.check('no error toast', not r.errors(), r.errors())
 
 

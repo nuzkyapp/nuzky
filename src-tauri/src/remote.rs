@@ -2,8 +2,9 @@
 //!
 //! Off until the user turns it on. It listens only on this computer's address in the local network, on a random port,
 //! and every request needs the secret from the QR code, which the first visit trades for a cookie. The page adds media,
-//! talks to the AI panel, seeks, exports and downloads that one export. The editor's window does each of those as if
-//! the user had clicked there, so the AI lock, undo and the checks of an import stay the same.
+//! talks to the AI panel, edits clips, starts and opens projects, exports and downloads that one export. The editor's
+//! window does each of those as if the user had clicked there, so the AI lock, undo and the checks of an import stay
+//! the same.
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -75,7 +76,7 @@ pub struct Sharing {
 
 /// What the page asks the editor to do.
 #[derive(Serialize, Deserialize)]
-#[serde(tag = "action", rename_all = "camelCase")]
+#[serde(tag = "action", rename_all = "camelCase", rename_all_fields = "camelCase")]
 enum Action {
     /// Only an upload adds a file, never a request naming a path.
     #[serde(skip_deserializing)]
@@ -94,6 +95,41 @@ enum Action {
     },
     Stop,
     Export,
+    Play,
+    Undo,
+    Redo,
+    Split {
+        clip_id: String,
+    },
+    Duplicate {
+        clip_id: String,
+    },
+    DetachAudio {
+        clip_id: String,
+    },
+    Delete {
+        clip_id: String,
+    },
+    Agent {
+        agent: String,
+    },
+    Model {
+        slug: Option<String>,
+    },
+    Effort {
+        effort: String,
+    },
+    NewChat,
+    Chats,
+    OpenChat {
+        id: String,
+    },
+    NewProject {
+        format: String,
+    },
+    OpenProject {
+        id: String,
+    },
 }
 
 #[tauri::command]
@@ -104,7 +140,6 @@ pub fn remote_start(app: AppHandle, state: State<'_, AppState>, remote: State<'_
     }
     let ip = local_address().ok_or("Connect this computer to Wi-Fi or a network first")?;
     let listener = TcpListener::bind((ip, 0)).map_err(err)?;
-    listener.set_nonblocking(true).map_err(err)?;
     let port = listener.local_addr().map_err(err)?.port();
     let share = Arc::new(Share {
         app: app.clone(),
@@ -192,6 +227,10 @@ fn local_address() -> Option<IpAddr> {
 impl Share {
     fn stop(&self) {
         self.stopped.store(true, Ordering::SeqCst);
+        // Wakes accept(), which then lets the listener go. Without the network it cannot, and nobody reaches it either.
+        if let Ok(addr) = self.host.parse() {
+            TcpStream::connect_timeout(&addr, Duration::from_secs(1)).ok();
+        }
         self.app.emit("remote-pages", Vec::<&str>::new()).ok();
     }
 
@@ -219,34 +258,32 @@ fn same(a: &str, b: &str) -> bool {
 }
 
 fn accept(listener: TcpListener, share: Arc<Share>) {
-    while !share.stopped.load(Ordering::SeqCst) {
-        match listener.accept() {
-            Ok((stream, _)) => {
-                // macOS and Windows hand out accepted sockets in the listener's non-blocking mode.
-                if stream.set_nonblocking(false).is_err() {
-                    continue;
-                }
-                if share.connections.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
-                    share.connections.fetch_sub(1, Ordering::SeqCst);
-                    continue;
-                }
-                let share = share.clone();
-                let spawned = thread::Builder::new().name("share-request".into()).spawn({
-                    let share = share.clone();
-                    move || {
-                        serve(&share, stream);
-                        share.connections.fetch_sub(1, Ordering::SeqCst);
-                    }
-                });
-                if spawned.is_err() {
-                    share.connections.fetch_sub(1, Ordering::SeqCst);
-                }
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => thread::sleep(Duration::from_millis(100)),
+    // Blocking, so a request is served the moment it comes; stop() wakes it with a connection of its own.
+    for stream in listener.incoming() {
+        if share.stopped.load(Ordering::SeqCst) {
+            break;
+        }
+        let stream = match stream {
+            Ok(stream) => stream,
             Err(e) => {
-                log::warn!("Sharing stopped accepting: {e}");
+                log::warn!("Sharing could not accept a connection: {e}");
                 thread::sleep(Duration::from_millis(500));
+                continue;
             }
+        };
+        if share.connections.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
+            share.connections.fetch_sub(1, Ordering::SeqCst);
+            continue;
+        }
+        let spawned = thread::Builder::new().name("share-request".into()).spawn({
+            let share = share.clone();
+            move || {
+                serve(&share, stream);
+                share.connections.fetch_sub(1, Ordering::SeqCst);
+            }
+        });
+        if spawned.is_err() {
+            share.connections.fetch_sub(1, Ordering::SeqCst);
         }
     }
 }
@@ -369,8 +406,10 @@ fn write_head(
     headers: &[(&str, String)],
     length: Option<u64>,
 ) -> std::io::Result<()> {
-    let mut head =
-        format!("HTTP/1.1 {status} {}\r\nConnection: close\r\nCache-Control: no-store\r\n", status_text(status));
+    let mut head = format!("HTTP/1.1 {status} {}\r\nConnection: close\r\n", status_text(status));
+    if !headers.iter().any(|(k, _)| *k == "Cache-Control") {
+        head.push_str("Cache-Control: no-store\r\n");
+    }
     head.push_str("X-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\n");
     for (k, v) in headers {
         head.push_str(&format!("{k}: {v}\r\n"));
@@ -553,7 +592,9 @@ fn thumb(share: &Share, asset_id: &str) -> Response {
         .flatten()
         .and_then(|u| base64::engine::general_purpose::STANDARD.decode(u.strip_prefix("data:image/png;base64,")?).ok());
     match png {
-        Some(png) => Response::new(200, "image/png", png),
+        // The page asks with the file's version in the address, so a kept copy is never another file's picture.
+        // Kept, a clip that a split or a copy made shows its picture at once instead of its bare colour.
+        Some(png) => Response::new(200, "image/png", png).with("Cache-Control", "private, max-age=86400"),
         None => Response::empty(404),
     }
 }
@@ -648,6 +689,17 @@ fn action(share: &Share, stream: &mut TcpStream, req: Request) -> Response {
         Action::Send { text } => !text.trim().is_empty() && text.len() <= MAX_TEXT,
         Action::Choose { id, label } => id.len() <= 200 && !label.is_empty() && label.len() <= MAX_TEXT,
         Action::Seek { us } => *us >= 0,
+        // The editor finds each of these among what it has; the limit only keeps a request small.
+        Action::Split { clip_id }
+        | Action::Duplicate { clip_id }
+        | Action::DetachAudio { clip_id }
+        | Action::Delete { clip_id } => clip_id.len() <= 200,
+        Action::Agent { agent: id }
+        | Action::Effort { effort: id }
+        | Action::OpenChat { id }
+        | Action::NewProject { format: id }
+        | Action::OpenProject { id } => id.len() <= 200,
+        Action::Model { slug } => slug.as_ref().is_none_or(|s| s.len() <= 200),
         _ => true,
     };
     if !valid {

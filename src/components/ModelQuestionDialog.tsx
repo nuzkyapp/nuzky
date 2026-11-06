@@ -68,7 +68,7 @@ export function ModelQuestionDialog({ kind }: { kind: ModelKind }) {
         if (e.key === "Enter" && e.target === e.currentTarget) answer(true);
         trapTab(e);
       }}
-      className="dialog-in overlay fixed inset-0 m-auto w-[440px] rounded-[20px] p-6 text-fg outline-none backdrop:bg-black/45"
+      className="dialog-in overlay overlay-solid fixed inset-0 m-auto w-[440px] rounded-[20px] p-6 text-fg outline-none backdrop:bg-black/45"
     >
       {shown && (
         <>

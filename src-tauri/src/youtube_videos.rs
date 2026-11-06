@@ -29,6 +29,15 @@ pub struct YoutubeVideos {
     preview: Mutex<Option<(Engine, Asset)>>,
 }
 
+impl YoutubeVideos {
+    /// Nothing is downloaded, previewed or added from the dialog's downloads.
+    pub fn idle(&self) -> bool {
+        self.download.lock().unwrap().is_none()
+            && self.preview.lock().unwrap().is_none()
+            && self.adding.lock().unwrap().is_empty()
+    }
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct Progress<'a> {

@@ -244,7 +244,7 @@ export function trySample() {
   });
 }
 
-/** Done's way on: the person's own video, as Open a talking head video… on the first start. */
+/** Done's way on: the person's own video, as Open a video… on the first start. */
 export function openOwnVideo() {
   endTour();
   void pickVideosForNewProject();

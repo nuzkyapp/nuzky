@@ -29,6 +29,7 @@ mod shortcuts;
 mod sounds;
 mod source_preview;
 mod stickers;
+mod storage;
 mod store;
 mod style;
 #[cfg(all(target_os = "macos", debug_assertions))]
@@ -813,6 +814,17 @@ async fn match_gain(app: AppHandle, clip_id: String) -> CmdResult<Option<f64>> {
     .map_err(err)
 }
 
+/// The side of the file's sound that has it all, when a microphone recorded on one side only.
+#[tauri::command]
+async fn sound_only_in(app: AppHandle, asset_id: String) -> CmdResult<Option<nuzky_engine::model::Mono>> {
+    let state = app.state::<AppState>();
+    let project = state.project()?;
+    let cache = state.cache_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || nuzky_engine::audio::sound_only_in(&cache, project.asset(&asset_id)?))
+        .await
+        .map_err(err)
+}
+
 #[tauri::command]
 fn play(state: State<'_, AppState>) {
     log::info!(target: "action", "play");
@@ -1000,19 +1012,19 @@ async fn new_project_from_media(app: AppHandle, paths: Vec<String>) -> CmdResult
         let reasons: Vec<String> = failed.iter().map(|f| f.error.clone()).collect();
         return Err(format!("None of those files could be opened: {}", reasons.join("; ")));
     }
-    open_new_project(&app, library::UNTITLED, assets, failed)
+    open_new_project(&app, store::new_project_path(), library::UNTITLED, assets, failed)
 }
 
-/// Opens a new project named `name` with the media on its timeline.
+/// Opens a new project at `path` named `name` with the media on its timeline.
 fn open_new_project(
     app: &AppHandle,
+    path: PathBuf,
     name: &str,
     assets: Vec<nuzky_engine::model::Asset>,
     failed: Vec<ImportFailure>,
 ) -> CmdResult<ImportResult> {
     let added: Vec<String> = assets.iter().map(|a| a.id.clone()).collect();
     let project = project_from_media(name, assets).map_err(err)?;
-    let path = store::new_project_path();
     store::create(&path, &project).map_err(err)?;
     // The panel's agent works on the open project only; never stopped while holding the session.
     app.state::<agent_panel::AgentPanel>().stop();
@@ -1412,6 +1424,7 @@ pub fn run() {
             thumbnail,
             waveform,
             match_gain,
+            sound_only_in,
             play,
             pause,
             seek,
@@ -1449,6 +1462,7 @@ pub fn run() {
             jobs::start_reframe,
             jobs::start_face_check,
             jobs::speech_models,
+            jobs::remove_speech_model,
             jobs::speech_setup,
             jobs::start_speech_setup,
             model_question::answer_model_question,
@@ -1497,12 +1511,17 @@ pub fn run() {
             plugins::run_plugin,
             plugins::remove_plugin,
             plugins::allow_plugin_access,
+            plugins::revoke_plugin_access,
             plugins::show_plugin_folder,
             plugins::gallery_plugins,
             plugins::install_gallery_plugin,
             plugins::cancel_gallery_install,
             style::style_view,
             style::style_act,
+            style::style_settings,
+            style::set_style_settings,
+            storage::storage_usage,
+            storage::clear_storage,
             style::start_style_learning,
             style::style_read_timelines,
             style::style_capcut_drafts,

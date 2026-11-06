@@ -8,6 +8,7 @@ import { useDock } from "../../lib/dock";
 import { useLibrary } from "../../lib/library";
 import { useTranscriptView } from "../../lib/speech";
 import { REEL_LIMIT_US, candidates, choose, findBlocked, findReels, makeReels, moved, openReel, pickAll, setFinish, setFraming, setPicked, setRejected, toggleReelPlay, useReels } from "../../lib/reels";
+import { openSettings } from "../../lib/settings";
 import { useEditor } from "../../lib/store";
 import { formatDuration } from "../../lib/time";
 import type { ReelCandidate, ReelFinish } from "../../lib/types";
@@ -214,7 +215,7 @@ function NoReels() {
             <Button pill className="h-7 px-3 text-[12px]" onClick={() => void loadAgents()}>
               Check again
             </Button>
-            <Button variant="ghost" className="h-7 px-2 text-[12px] text-accent! hover:text-accent!" onClick={() => useEditor.setState({ connectOpen: true })}>
+            <Button variant="ghost" className="h-7 px-2 text-[12px] text-accent! hover:text-accent!" onClick={() => openSettings("ai", "agents")}>
               <Plug size={14} /> Connect an agent in a terminal…
             </Button>
           </>
@@ -346,7 +347,7 @@ export function ReelList({ height }: { height: number }) {
   return (
     <section className="pane flex flex-col overflow-hidden" style={{ height }} aria-label="Reels from a long video">
       <AiLock>
-        <div className="flex h-11 shrink-0 items-center gap-2 px-3">
+        <div className="flex min-h-11 shrink-0 flex-wrap items-center gap-x-2 gap-y-1.5 px-3 py-2">
           <h2 className="text-[13px] font-semibold text-fg">Reels</h2>
           {list.length > 0 && (
             <span className="tabular text-[13px] text-muted">
@@ -364,9 +365,9 @@ export function ReelList({ height }: { height: number }) {
                 <Sparkles size={14} /> Find again
               </Button>
             ))}
-          <span className="flex-1" />
           {list.length > 0 && (
-            <>
+            // In a narrow pane these wrap together onto a second row instead of running past its edge.
+            <div className="ml-auto flex items-center gap-2">
               <FinishMenu />
               <span className="text-[12px] text-muted">9:16</span>
               <div className="w-[248px]">
@@ -381,7 +382,7 @@ export function ReelList({ height }: { height: number }) {
                 />
               </div>
               <MakeButton picked={picked} blocker={missingText && "Put the missing media back first"} />
-            </>
+            </div>
           )}
         </div>
         {missingText && (

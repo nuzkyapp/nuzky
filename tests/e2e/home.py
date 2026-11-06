@@ -204,7 +204,7 @@ def home(r):
     r.check('an empty untitled project nobody has open is cleared away', not (projects_dir(r) / 'empty.nuzky').exists())
     r.check('the damaged project says why and cannot open', (card(r, 'broken.nuzky') or {}).get('meta') == 'Damaged file'
             and card(r, 'broken.nuzky')['disabled'], card(r, 'broken.nuzky'))
-    r.check('the open project says so', (card(r, 'Talk to camera') or {}).get('meta') == 'Open now', card(r, 'Talk to camera'))
+    r.check('the open project says its shape and that it is open', (card(r, 'Talk to camera') or {}).get('meta') == '9:16 · Open now', card(r, 'Talk to camera'))
     sections = r.s.run(SECTIONS)
     order = [c['name'] for c in cards(r)]
     r.check('a few projects show newest first, without date groups', sections == [] and order[0] == 'Talk to camera'
@@ -701,12 +701,7 @@ def launcher(r):
 
 
 FIRST_RUN_TEXT = "return document.querySelector('main')?.textContent ?? ''"
-FIRST_STEPS = ('Captions in your language', 'Cut pauses and retakes', 'Export for Reels & TikTok')
-OPEN_VIDEO = 'Open a talking head video'
-NAMED_LANGUAGES = """const steps = [...document.querySelectorAll('main ol li')].map((li) => li.textContent).join(' ');
-const names = new Intl.DisplayNames(['en'], {type: 'language'});
-return [...new Set(['en', 'cs', 'de', 'es', 'fr', 'it', 'pt', 'pl', 'ru', 'uk', 'ja', 'zh', 'ko', 'nl', 'sv', 'tr', 'ar', 'hi', navigator.language]
-  .map((code) => names.of(code)))].filter((name) => steps.includes(name));"""
+OPEN_VIDEO = 'Open a video'
 # The native file dialog cannot be driven, so it answers with the given path. Tauri's `invoke` cannot be replaced, so
 # the answer comes from the fetch that carries the call to the app.
 ANSWER_FILE_DIALOG = """const fetch = window.fetch, picked = arguments[0];
@@ -714,21 +709,18 @@ window.fetch = (url, init) => decodeURIComponent(String(url)).includes('plugin:d
   ? Promise.resolve(new Response(JSON.stringify([picked]), {headers: {'Content-Type': 'application/json', 'Tauri-Response': 'ok'}}))
   : fetch(url, init);"""
 CLIPPED = """const pane = document.querySelector('main .overflow-y-auto'), p = pane.getBoundingClientRect();
-const out = [...pane.querySelectorAll('h2, button, ol li, p')].filter((el) => {
-  const b = el.getBoundingClientRect(); return b.width && (b.left < p.left || b.right > p.right); }).map((el) => el.textContent);
+const out = [...pane.querySelectorAll('h2, button, p')].filter((el) => {
+  const b = el.getBoundingClientRect(); return b.width && (b.left < p.left || b.right > p.right || el.scrollWidth > el.clientWidth + 1); }).map((el) => el.textContent);
 return pane.scrollWidth > pane.clientWidth ? [...out, `the pane scrolls sideways: ${pane.scrollWidth} > ${pane.clientWidth}`] : out;"""
-CONNECT_OPEN = "return !!document.querySelector('[role=dialog][aria-labelledby=connect-title]')"
+CONNECT_OPEN = "return !!document.querySelector('[role=dialog][data-settings] [data-setting=agents]')"
 SETUP_OPEN = "return !!document.querySelector('[role=dialog][aria-labelledby=setup-title]')"
 
 
-@flow('first-run', 'The first start leads from a talking head video to captions, cuts and a vertical export; the video '
+@flow('first-run', 'The first start offers a video, the sample and AI to cut it; the video '
       'starts a project, and a format still shapes the project Nuzky made instead of leaving a second empty file', home=True)
 def first_run(r):
     text = lambda: r.s.run(FIRST_RUN_TEXT) or ''
-    r.check('the first start offers Open a talking head video and the three steps',
-            wait(lambda: OPEN_VIDEO in text() and all(step in text() for step in FIRST_STEPS), 10), text())
-    named = r.s.run(NAMED_LANGUAGES)
-    r.check('no step names a language', named == [], named)
+    r.check('the first start offers Open a video', wait(lambda: OPEN_VIDEO in text(), 10), text())
     r.shot('first-run')
     if r.check('the window goes to its smallest size', resize(r, 1024, 640)):
         time.sleep(0.5)
@@ -747,9 +739,9 @@ def first_run(r):
 
     r.check('the first start asks Want AI to do the cutting?', 'Want AI to do the cutting?' in text(), text())
     r.check('connect an agent is a button', click(r, 'connect an agent', 'main'))
-    if r.check('it opens the Connect dialog', wait(lambda: r.s.run(CONNECT_OPEN), 5)):
+    if r.check('it opens Settings at Agents outside Nuzky', wait(lambda: r.s.run(CONNECT_OPEN), 5)):
         r.key('Escape')
-        r.check('Esc closes the Connect dialog', wait(lambda: not r.s.run(CONNECT_OPEN), 5))
+        r.check('Esc closes Settings', wait(lambda: not r.s.run(CONNECT_OPEN), 5))
     r.check('Get set up is a button', click(r, 'Get set up', 'main'))
     r.check('it opens Get set up over the first start', wait(lambda: r.s.run(SETUP_OPEN), 5) and view(r)['view'] == 'home', view(r))
     r.s.run("document.querySelector('[aria-labelledby=setup-title] button[aria-label=Close]').click()")
@@ -757,12 +749,12 @@ def first_run(r):
     r.check('back home, the first start still shows', wait(lambda: OPEN_VIDEO in text(), 5), text())
 
     r.s.run(ANSWER_FILE_DIALOG, str(FIXTURES / 'talk.mp4'))
-    r.check('Open a talking head video is a button', click(r, OPEN_VIDEO, 'main'))
+    r.check('Open a video is a button', click(r, OPEN_VIDEO, 'main'))
     v = wait(lambda: view(r)['view'] == 'editor' and len(r.track()) == 1 and view(r), 15)
     assets = [a['name'] for a in r.state()['assets']]
     r.check('it opens the editor with the video on the timeline', v and assets and 'talk' in assets[0], (view(r), assets))
     r.s.run("window.__nuzky.store.setState({view: 'home'})")
     r.check('after the first video, home shows the project instead of the first start',
-            wait(lambda: OPEN_VIDEO not in text() and any(c['path'] == view(r)['path'] and c['meta'] == 'Open now' for c in cards(r)), 10), (text(), cards(r)))
+            wait(lambda: OPEN_VIDEO not in text() and any(c['path'] == view(r)['path'] and c['meta'].endswith('Open now') for c in cards(r)), 10), (text(), cards(r)))
     time.sleep(0.5)
     r.shot('home-after-first-video')

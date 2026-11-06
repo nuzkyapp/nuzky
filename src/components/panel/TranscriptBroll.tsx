@@ -79,7 +79,7 @@ export function useBrollSuggestions(view: TranscriptView | null): BrollSuggestio
 export function SuggestBrollButton({ state, blocker }: { state: BrollSuggestionState; blocker: string | null }) {
   return (
     <Button
-      className="h-7 px-2"
+      className="h-7 px-2 text-[12px]"
       data-suggest-broll
       disabled={!!blocker || state.pending === "suggesting"}
       disabledReason={blocker ?? "Finding recordings…"}

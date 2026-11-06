@@ -63,7 +63,7 @@ export function useZoomSuggestions(view: TranscriptView | null): ZoomSuggestionS
 export function SuggestZoomsButton({ state, blocker }: { state: ZoomSuggestionState; blocker: string | null }) {
   return (
     <Button
-      className="h-7 px-2"
+      className="h-7 px-2 text-[12px]"
       data-suggest-zooms
       disabled={!!blocker || state.pending === "suggesting"}
       disabledReason={blocker ?? "Finding sentences to zoom on…"}

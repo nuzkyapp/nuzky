@@ -4,10 +4,12 @@ import { create } from "zustand";
 export type Pane = "library" | "inspector" | "timeline";
 
 const KEYS: Record<Pane, string> = { library: "nuzky.libraryWidth", inspector: "nuzky.inspectorWidth", timeline: "nuzky.timelineHeight" };
-/** The library is at least 360 px: at 340 px its tab labels touch. */
-export const PANE_MIN: Record<Pane, number> = { library: 360, inspector: 300, timeline: 160 };
+/** Under 420 px the library's tabs take two rows (LeftPanel), so it can go down to 280 px. */
+export const PANE_MIN: Record<Pane, number> = { library: 280, inspector: 272, timeline: 160 };
 /** The share of the window a pane takes until someone resizes it, close to CapCut's. */
-const SHARE: Record<Pane, number> = { library: 0.28, inspector: 0.28, timeline: 0.35 };
+const SHARE: Record<Pane, number> = { library: 0.21, inspector: 0.22, timeline: 0.26 };
+/** The timeline's default height never goes under this, so a small window still shows two tracks whole. */
+const TIMELINE_DEFAULT_MIN = 200;
 /** The narrowest preview whose transport still shows the current time in full; it keeps 300 px of height. */
 export const PREVIEW_MIN = 340;
 const PREVIEW_MIN_H = 300;
@@ -40,7 +42,7 @@ export function paneLayout(saved: Record<Pane, number | null>, editorW: number, 
   const inspector = Math.max(PANE_MIN.inspector, Math.min(wanted("inspector"), room - wanted("library")));
   const library = Math.max(PANE_MIN.library, Math.min(wanted("library"), room - inspector));
   const timelineMax = Math.max(PANE_MIN.timeline, h - TOP_BAR - PREVIEW_MIN_H - 2 * GAP);
-  const timeline = Math.min(timelineMax, Math.max(PANE_MIN.timeline, saved.timeline ?? Math.round(h * SHARE.timeline)));
+  const timeline = Math.min(timelineMax, Math.max(PANE_MIN.timeline, saved.timeline ?? Math.max(TIMELINE_DEFAULT_MIN, Math.round(h * SHARE.timeline))));
   return {
     library,
     inspector,

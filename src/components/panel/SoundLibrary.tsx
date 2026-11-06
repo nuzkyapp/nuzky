@@ -1,17 +1,17 @@
-import { AlertCircle, AudioLines, Check, Copy, ExternalLink, Link2, Loader2, Pause, Play, Plus, SlidersHorizontal, WifiOff, X } from "lucide-react";
+import { AlertCircle, AudioLines, Check, Copy, Link2, Loader2, Pause, Play, Plus, SlidersHorizontal, WifiOff, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api, errorText, plainError } from "../../lib/api";
 import { addSound, answerRights, copyCredits, installYtdlp, loadBuiltIn, loadDownloaded, openLink, searchSounds, stopPreview, togglePreview, useSounds } from "../../lib/sounds";
 import { useEditor } from "../../lib/store";
+import { FreesoundKey, OPENVERSE, SEARCH_SENDS } from "./FreesoundKey";
 import { formatDuration } from "../../lib/time";
 import { SONG, useTour } from "../../lib/tour";
-import type { Sound, SoundKind, SoundSettings } from "../../lib/types";
-import { Button, Checkbox, IconButton, LockReason, SearchField, lockedProps, trapTab, useLockReason } from "../ui";
+import type { Sound, SoundKind } from "../../lib/types";
+import { Button, IconButton, LockReason, SearchField, lockedProps, trapTab, useLockReason } from "../ui";
 
 /** Round row action, as on the project's own audio. */
 const ACTION = "flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors duration-[120ms] ease-out aria-disabled:cursor-not-allowed aria-disabled:opacity-40";
 const MUSIC_IDEAS = ["Upbeat", "Chill", "Cinematic", "Happy", "Lofi", "Epic", "Acoustic", "Electronic"];
-const FREESOUND_KEYS = "https://freesound.org/apiv2/apply/";
 
 /** One sound: clicking it plays it, + or a double click adds it at the playhead, the licence opens its page. */
 function SoundRow({ sound, inProject, showKind = true }: { sound: Sound; inProject: boolean; showKind?: boolean }) {
@@ -104,29 +104,13 @@ function SoundRow({ sound, inProject, showKind = true }: { sound: Sound; inProje
 
 /** Where online results come from, and the user's own Freesound key. */
 function Sources({ onClose }: { onClose: (keyboard: boolean) => void }) {
-  const [settings, setSettings] = useState<SoundSettings | null>(null);
-  const [key, setKey] = useState("");
-  const [error, setError] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    api.soundSettings().then(setSettings);
     ref.current?.focus();
     const outside = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && !(e.target as Element).closest?.("[data-sources-button]") && onClose(false);
     window.addEventListener("pointerdown", outside, true);
     return () => window.removeEventListener("pointerdown", outside, true);
   }, [onClose]);
-  const save = async (freesound: boolean, newKey?: string) => {
-    try {
-      setSettings(await api.setSoundSettings(freesound, newKey));
-      setError(null);
-      if (newKey !== undefined) setKey("");
-      useSounds.setState((s) => ({ search: { ...s.search, effect: { ...s.search.effect, sounds: [], page: 0, service: null } } }));
-      const query = useSounds.getState().search.effect.query;
-      if (query.trim()) searchSounds("effect", query);
-    } catch (e) {
-      setError(plainError(errorText(e)));
-    }
-  };
   return (
     <div
       ref={ref}
@@ -143,54 +127,12 @@ function Sources({ onClose }: { onClose: (keyboard: boolean) => void }) {
       <p className="text-[13px] font-semibold text-fg">Where to search</p>
       <div className="flex flex-col gap-1">
         <p className="text-[13px] text-fg">Openverse</p>
-        <p className="text-muted">Music and sounds from Freesound and Wikimedia Commons. Only CC0 and CC BY.</p>
+        <p className="text-muted">{OPENVERSE}</p>
       </div>
       <div className="flex flex-col gap-2 border-t border-white/[.07] pt-3">
-        {settings && (
-          <Checkbox
-            label="Search effects on Freesound instead"
-            checked={settings.freesound && settings.hasKey}
-            onChange={(on) => save(on)}
-            disabled={!settings.hasKey}
-            title={settings.hasKey ? undefined : "Save your Freesound API key first"}
-          />
-        )}
-        <p className="text-muted">Needs your own free API key. Freesound offers its API free only for non-commercial use; the sounds stay CC0 or CC BY.</p>
-        {settings?.hasKey ? (
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-fg">Your key is saved</span>
-            <Button className="h-7 text-[12px]" onClick={() => save(settings.freesound, "")}>
-              Remove key
-            </Button>
-          </div>
-        ) : (
-          <form
-            className="flex gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (key.trim()) save(true, key.trim());
-            }}
-          >
-            <input
-              type="password"
-              value={key}
-              onChange={(e) => setKey(e.target.value)}
-              placeholder="Paste your Freesound API key"
-              aria-label="Freesound API key"
-              autoComplete="off"
-              className="h-7 min-w-0 flex-1 rounded-[6px] border border-white/[.08] bg-white/[.055] px-2 text-[12px] text-fg outline-none placeholder:text-muted focus:border-accent"
-            />
-            <Button type="submit" className="h-7 text-[12px]" disabled={!key.trim()}>
-              Save
-            </Button>
-          </form>
-        )}
-        {error && <p className="text-danger">{error}</p>}
-        <button type="button" onClick={() => api.openSoundPage(FREESOUND_KEYS)} className="flex items-center gap-1 self-start font-medium text-accent hover:underline">
-          Get a key <ExternalLink size={12} />
-        </button>
+        <FreesoundKey />
       </div>
-      <p className="border-t border-white/[.07] pt-3 text-muted">Searching sends only what you type, never your project.</p>
+      <p className="border-t border-white/[.07] pt-3 text-muted">{SEARCH_SENDS}</p>
     </div>
   );
 }
@@ -483,7 +425,7 @@ function RightsDialog() {
         if (e.key === "Enter" && e.target === e.currentTarget) answerRights(true);
         trapTab(e);
       }}
-      className="dialog-in overlay fixed inset-0 m-auto w-[440px] rounded-[20px] p-6 text-fg outline-none backdrop:bg-black/45"
+      className="dialog-in overlay overlay-solid fixed inset-0 m-auto w-[440px] rounded-[20px] p-6 text-fg outline-none backdrop:bg-black/45"
     >
       {/* Always there, so it fades out whole when it closes. Answering edits no project, so an agent's run does not lock it. */}
       <LockReason.Provider value={null}>

@@ -6,7 +6,7 @@ built in."""
 import time
 
 from e2e.corrections import Hands
-from e2e.harness import LINUX, flow, leave_editor, pointer, press, wait
+from e2e.harness import FIXTURES, LINUX, flow, leave_editor, pointer, press, wait
 from e2e.home import resize
 from e2e.setup import relaunch
 
@@ -142,6 +142,9 @@ def flow_tour(r):
     relaunch(r)
     r.check('a profile with nothing remembered opens Get set up by itself again', wait(lambda: r.s.run(FIRST_LAUNCH) is True and r.s.run(SETUP_OPEN), 15))
     r.check('the window is 1440 × 900 again', resize(r, 1440, 900))
+    # Someone who docks the AI panel as a column at the right edge; its default place, the inspector's, is the one a
+    # narrower window falls back to below.
+    r.s.run("window.__nuzky.dock.setState({mode: 'right'})")
     hands = Hands(r)
     # Through to the end from the keyboard, as a person reaches the footer.
     for _ in range(4):
@@ -200,7 +203,7 @@ def flow_tour(r):
     r.check('the three steps are done', steps == [['Read the transcript', 'done'], ['Cutting long pauses', 'done'], ['Adding captions', 'done']], steps)
     seconds = f"{(before['durationUs'] - after['durationUs']) / 1e6:.1f} s shorter"
     r.check('the reply counts what the edit did, and no retakes, as the sample has none',
-            reply.startswith('Done. I cut') and seconds in reply and f"added {after['captions']} caption" in reply and 'retake' not in reply,
+            reply.startswith('Done. I cut') and seconds in reply.replace('\u00a0', ' ') and f"added {after['captions']} caption" in reply and 'retake' not in reply,
             {'reply': reply, 'expected': seconds})
     r.check('the demo keeps no chat with the project', a['chat'] is None, a)
     r.check('the ring around the spotlight is a white hairline, not blue', r.s.run(
@@ -326,6 +329,17 @@ def flow_tour(r):
     # The smallest window: the AI panel takes the inspector's place, which Lower under speech needs.
     r.check('the window is 1024 × 640', resize(r, 1024, 640))
     leave_editor(r)
+    names = "return (window.__nuzky.library.getState().projects ?? []).map((p) => p.name)"
+    r.check('the sample is not among the projects', wait(lambda: 'Sample video' not in r.s.run(names), 5), r.s.run(names))
+    r.shot('9-home-1024')
+    # Back to reels on a reel made of the sample opens the sample again by its path, as here.
+    sample = r.s.run('return window.__nuzky.store.getState().snap.path')
+    r.s.run('window.__nuzky.newProjectFromMedia([arguments[0]])', str(FIXTURES / 'talk.mp4'))
+    r.check('another project opens', wait(lambda: r.s.run('return window.__nuzky.store.getState().snap.path') != sample, 15))
+    r.s.run("window.__nuzky.openProject({path: arguments[0], name: 'Sample video'})", sample)
+    r.check('the sample opens again by its path', wait(lambda: project(r)['name'] == 'Sample video' and project(r)['view'] == 'editor', 15), project(r))
+    leave_editor(r)
+    r.check('and still does not join the projects', wait(lambda: (n := r.s.run(names)) and 'Sample video' not in n, 5), r.s.run(names))
     r.s.run(TAKE_THE_TOUR)
     r.check('Take the tour opens a fresh sample', wait(lambda: (p := project(r))['epoch'] != after['epoch'] and p['name'] == 'Sample video' and p['captions'] == 0, 20)
             and at_step(r, 'ask'), project(r))

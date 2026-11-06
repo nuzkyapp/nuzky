@@ -427,6 +427,11 @@ export type ClipContent = {
    */
   duckDb?: number,
   /**
+   * Mono: the clip plays one sound in both ears, made from both sides of its file or only from
+   * one, for a microphone recorded on one side.
+   */
+  mono?: Mono,
+  /**
    * Blur or replace what is behind the person (video and image clips).
    */
   background?: Background,
@@ -700,6 +705,11 @@ export type EditCmd = {
    * 0 turns it off. 12 suits music under speech.
    */
   duckDb?: number | null,
+  /**
+   * Clips with sound: play one sound in both ears, from both sides of the file (`both`) or from
+   * one (`left`, `right`) when the microphone recorded on one side only; `off` plays it as recorded.
+   */
+  mono?: Mono | null,
   /**
    * Video and image clips: blur what is behind the person, or put a colour or an image of the
    * project there; `{"type": "none"}` shows the picture as recorded. The person's outline is made
@@ -1089,6 +1099,11 @@ export type ModelQuestion = {
    */
   sizeMb: number,
 };
+
+/**
+ * Which sound a clip plays in both ears.
+ */
+export type Mono = "off" | "both" | "left" | "right";
 
 export type MotionKind = "pushIn" | "pullOut" | "kenBurns";
 
@@ -1617,6 +1632,33 @@ export type StickerItem = {
   tones: Array<string> | null,
 };
 
+export type StorageGroup = {
+  id: StorageGroupId,
+  bytes: number,
+  /**
+   * Part of `bytes` that Clear keeps, as the open project uses it.
+   */
+  keptBytes: number,
+  /**
+   * Nuzky makes the group again by itself, so Settings offers Clear; models and data are never cleared there.
+   */
+  clearable: boolean,
+  /**
+   * Why Clear cannot run now, as a sentence that says what to do.
+   */
+  blocked: string | null,
+  /**
+   * The folder, for Show in folder: the data folder and the models.
+   */
+  path: string | null,
+};
+
+export type StorageGroupId = "sound" | "pictures" | "youtube" | "models" | "data";
+
+export type StorageUsage = {
+  groups: Array<StorageGroup>,
+};
+
 /**
  * What the creator, or an agent they agreed with, does to the style.
  */
@@ -1735,6 +1777,16 @@ export type StyleRule = {
  * What learning finds now for a rule of the style.
  */
 export type StyleRuleState = "backed" | "changeSuggested" | "kept" | "notSeen";
+
+/**
+ * Kept in `style/settings.json`, where the app, the CLI and agents' MCP servers all read it.
+ */
+export type StyleSettings = {
+  /**
+   * Learn from every export and from edits of a kept AI cut. Off, the style learns only when asked to.
+   */
+  learnFromEdits: boolean,
+};
 
 export type StyleSource = {
   title: string,

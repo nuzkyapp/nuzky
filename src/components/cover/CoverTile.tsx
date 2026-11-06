@@ -68,7 +68,7 @@ export function CoverTile() {
       onClick={empty ? undefined : () => (open ? closeCover() : openCover())}
       data-testid="cover-tile"
       className={`relative shrink-0 overflow-hidden rounded-[7px] aria-disabled:cursor-not-allowed aria-disabled:opacity-40 ${
-        open ? "shadow-[0_0_0_2px_var(--color-accent)]" : format ? "shadow-[inset_0_0_0_1px_rgb(255_255_255/.1)] hover:shadow-[inset_0_0_0_1px_rgb(255_255_255/.3)]" : "border border-dashed border-white/15 hover:border-white/30"
+        open ? "shadow-[0_0_0_2px_var(--color-accent)]" : format ? "shadow-[inset_0_0_0_1px_rgb(255_255_255/.1)] hover:shadow-[inset_0_0_0_1px_rgb(255_255_255/.3)]" : "bg-white/[.05] shadow-[inset_0_0_0_1px_rgb(255_255_255/.1)] hover:bg-white/[.08] hover:shadow-[inset_0_0_0_1px_rgb(255_255_255/.3)]"
       }`}
       style={{ width: W, height: H }}
     >

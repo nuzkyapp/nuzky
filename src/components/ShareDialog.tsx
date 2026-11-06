@@ -19,16 +19,15 @@ export function ShareButton() {
   const sharing = useRemote((s) => !!s.sharing);
   const pages = useRemote((s) => s.pages);
   const label = "Edit from your phone or another computer";
+  // It sits in the top bar's capsule beside Send feedback.
   if (!sharing)
     return (
-      <div className="bar flex rounded-full">
-        <IconButton round label={label} aria-haspopup="dialog" onClick={() => void openSharing()}>
-          <QrCode size={16} />
-        </IconButton>
-      </div>
+      <IconButton round label={label} aria-haspopup="dialog" onClick={() => void openSharing()}>
+        <QrCode size={16} />
+      </IconButton>
     );
   return (
-    <Button variant="bar" pill aria-haspopup="dialog" title={label} onClick={() => void openSharing()} className="max-w-[220px]">
+    <Button variant="ghost" pill aria-haspopup="dialog" title={label} onClick={() => void openSharing()} className="max-w-[220px] text-fg">
       <QrCode size={15} className="shrink-0 text-accent" />
       <span className="truncate text-[12px]">{pagesText(pages) ?? "Sharing"}</span>
     </Button>
@@ -72,8 +71,8 @@ export function ShareDialog() {
   };
   const connected = pagesText(pages);
   return (
-    <div data-exit className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/45" onPointerDown={(e) => e.target === e.currentTarget && close()}>
-      <div ref={dialog} role="dialog" aria-modal="true" aria-labelledby="share-title" onKeyDown={trapTab} className="overlay w-[560px] rounded-[20px] p-6 dialog-in">
+    <div data-exit className="fixed inset-0 z-[100] flex items-center justify-center scrim-in bg-black/55" onPointerDown={(e) => e.target === e.currentTarget && close()}>
+      <div ref={dialog} role="dialog" aria-modal="true" aria-labelledby="share-title" onKeyDown={trapTab} className="overlay overlay-solid w-[560px] rounded-[20px] p-6 dialog-in">
         <div className="mb-5 flex items-start justify-between gap-3">
           <h2 id="share-title" className="text-[17px] leading-[22px] font-semibold tracking-[-0.025em]">
             Edit from your phone
@@ -114,7 +113,7 @@ export function ShareDialog() {
                 {connected ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-ok" /> : null}
                 {connected ? `${connected} connected` : <span className="font-normal text-muted">No one is connected yet</span>}
               </p>
-              <p className="mt-auto text-[12px] text-muted">Anyone with the link can add videos to the open project, ask the AI to edit it and download what they export.</p>
+              <p className="mt-auto text-[12px] text-muted">Anyone with the link can open, start and edit your projects, ask the AI to edit them and download what they export.</p>
             </div>
           </div>
         )}

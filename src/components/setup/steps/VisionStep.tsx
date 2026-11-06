@@ -2,11 +2,12 @@ import { useEffect } from "react";
 import { AlertCircle, AlertTriangle, Check, Loader2 } from "lucide-react";
 import { api, plainError } from "../../../lib/api";
 import { downloadModels, loadModels, useCover } from "../../../lib/cover";
+import { paneShown } from "../../../lib/settings";
 import { useSetup } from "../../../lib/setup";
 import { useEditor } from "../../../lib/store";
 import { Button, ProgressBar } from "../../ui";
 import { LogsButton } from "../../Feedback";
-import { StepActions } from "../StepActions";
+import { StepActions, useInSettings } from "../StepActions";
 
 const STOP = "Stop downloading the face and person models";
 
@@ -15,11 +16,12 @@ let shown: string | null = null;
 
 export const showsVisionDownload = (id: string) => {
   const { open, current } = useSetup.getState();
-  return open && current === "vision" && id === shown;
+  return ((open && current === "vision") || paneShown("models")) && id === shown;
 };
 
 /** Face and person models: what they are for and Download for all of them, so neither covers nor an agent ask later. */
 export function VisionStep() {
+  const quiet = useInSettings();
   const models = useCover((s) => s.models);
   const id = useCover((s) => s.modelsJob);
   if (id) shown = id;
@@ -37,7 +39,7 @@ export function VisionStep() {
   if (!models) return null;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-col gap-3 pt-3 text-[13px] text-fg/85">
+      <div className={`flex flex-col gap-3 pt-3 ${quiet ? "text-[12px] text-muted" : "text-[13px] text-fg/85"}`}>
         <p>
           These models find faces and the person in your video, on this computer. Nuzky uses them to pick a cover frame, put text behind the person, blur the background and follow a
           face when it reframes a video to vertical. Your AI uses them too.
@@ -83,7 +85,7 @@ export function VisionStep() {
         <StepActions>
           <Button
             pill
-            variant="primary"
+            variant={quiet ? "secondary" : "primary"}
             onClick={() => void downloadModels()}
           >
             {failed ? "Try again" : `Download ${models.sizeMb} MB`}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { create } from "zustand";
-import { PANE_MIN, PREVIEW_MIN } from "./layout";
+import { PREVIEW_MIN } from "./layout";
 
 /** Where the AI panel sits: a full-height column at either edge, the inspector's place, or floating. */
 export type DockMode = "right" | "left" | "inspector" | "float";
@@ -13,8 +13,11 @@ const FLOAT_MIN_W = 300;
 const FLOAT_MIN_H = 320;
 const TOP_BAR = 48;
 const GAP = 6;
-/** The editor beside a docked panel: library, inspector, the narrowest preview, and the gaps. */
-const EDITOR_MIN = PANE_MIN.library + PANE_MIN.inspector + PREVIEW_MIN + 4 * GAP;
+/**
+ * The editor beside a docked panel: a 360 px library, a 300 px inspector, the narrowest preview, and the gaps. The library may
+ * go narrower, but a column only docks where the editor keeps this much, so the video beside it stays large enough.
+ */
+const EDITOR_MIN = 360 + 300 + PREVIEW_MIN + 4 * GAP;
 
 type Saved = { open: boolean; mode: DockMode; width: number; float: Rect };
 const KEY = "nuzky.aiPanel";
@@ -22,7 +25,9 @@ const KEY = "nuzky.aiPanel";
 const defaultFloat = (): Rect => ({ x: window.innerWidth - GAP - 380, y: TOP_BAR + GAP, w: 380, h: Math.min(600, window.innerHeight - TOP_BAR - 2 * GAP) });
 
 function load(): Saved {
-  const fallback: Saved = { open: false, mode: "right", width: DOCK_DEFAULT, float: defaultFloat() };
+  // In the inspector's place by default, so the preview keeps its width beside the conversation; a column at either edge
+  // is the user's choice.
+  const fallback: Saved = { open: false, mode: "inspector", width: DOCK_DEFAULT, float: defaultFloat() };
   try {
     const v = JSON.parse(localStorage.getItem(KEY) ?? "null");
     if (!v || typeof v !== "object") return fallback;
@@ -30,7 +35,7 @@ function load(): Saved {
     const float = f && [f.x, f.y, f.w, f.h].every(Number.isFinite) ? f : fallback.float;
     return {
       open: v.open === true,
-      mode: ["right", "left", "inspector", "float"].includes(v.mode) ? v.mode : "right",
+      mode: ["right", "left", "inspector", "float"].includes(v.mode) ? v.mode : "inspector",
       width: Number.isFinite(v.width) ? v.width : DOCK_DEFAULT,
       float,
     };

@@ -55,7 +55,12 @@ function place(hole: Hole | null, side: (typeof STEP)[TourStep]["side"], w: numb
   };
   const fitting = [spots[side], spots.right, spots.left, spots.below, spots.above].filter((spot) => spot !== false);
   const clear = ({ x, y }: { x: number; y: number }) => !video || x >= video.right || x + w <= video.left || y >= video.bottom || y + h <= video.top;
-  return fitting.find(clear) ?? fitting[0] ?? { x: clamp((W - w) / 2, w, W), y: clamp((H - h) / 2, h, H) };
+  // Beside the hole but over the video: the same column under or above the video still keeps off the hole.
+  const slid = video
+    ? [spots.left, spots.right].flatMap((spot) => (spot ? [{ x: spot.x, y: video.bottom + GAP }, { x: spot.x, y: video.top - GAP - h }] : []))
+        .filter(({ y }) => y >= MARGIN && y + h <= H - MARGIN)
+    : [];
+  return fitting.find(clear) ?? slid.find(clear) ?? fitting[0] ?? { x: clamp((W - w) / 2, w, W), y: clamp((H - h) / 2, h, H) };
 }
 
 const FOCUSABLE = "button, input, select, textarea, a[href], [tabindex]:not([tabindex='-1'])";
