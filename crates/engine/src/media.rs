@@ -127,11 +127,15 @@ fn tile_grid(input: &ff::format::context::Input) -> Option<TileGrid> {
             (unsafe { (**group.streams.add(tile.idx as usize)).index } as usize, tile.horizontal, tile.vertical)
         })
         .collect();
+    #[cfg(ffmpeg_8_0)]
     let orientation = unsafe { slice(grid.coded_side_data, grid.nb_coded_side_data as usize) }
         .iter()
         .filter(|sd| sd.type_ == AVPacketSideDataType::AV_PKT_DATA_DISPLAYMATRIX)
         .find_map(|sd| matrix_orientation(unsafe { slice(sd.data, sd.size) }))
         .unwrap_or((0, false));
+    // FFmpeg 7.1 joins no tiles itself and reads no rotation or mirroring of the grid, so the picture stays as stored.
+    #[cfg(not(ffmpeg_8_0))]
+    let orientation = (0, false);
     let size = |v: i32| u32::try_from(v).ok();
     let canvas = (size(grid.coded_width)?, size(grid.coded_height)?);
     let picture = [size(grid.horizontal_offset)?, size(grid.vertical_offset)?, size(grid.width)?, size(grid.height)?];
