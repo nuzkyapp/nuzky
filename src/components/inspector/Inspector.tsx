@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { AudioLines, Blend, Captions, Film, Image as ImageIcon, Type } from "lucide-react";
 import { TRANSITIONS } from "../../lib/presets";
@@ -50,6 +50,8 @@ function tabsFor(kind: Kind, hasSound: boolean, freeze: boolean): { id: TabId; l
 const KIND_ICON = { video: Film, image: ImageIcon, audio: AudioLines, text: Type, caption: Captions };
 
 type Chosen = Partial<Record<Kind, TabId>>;
+// Outside the inspector, which the AI panel replaces while it is open in its place.
+const useChosen = create<Chosen>(() => ({}));
 
 function ClipInspector({ clip, kind, asset, music, chosen, onChoose }: { clip: Clip; kind: Kind; asset?: Asset; /** A song on a music track, which the video can be cut to. */ music: boolean; chosen: Chosen; onChoose: (c: Chosen) => void }) {
   const c = clip.content;
@@ -134,7 +136,7 @@ export function Inspector({ width }: { width: number }) {
   const plugin = usePlugins((s) => s.list?.find((p) => p.id === s.open));
   const shared = useGallery((s) => s.list?.find((p) => p.id === s.open));
   // Remembered per clip kind, so picking another clip keeps the tab you were on, like CapCut.
-  const [chosen, setChosen] = useState<Chosen>({});
+  const chosen = useChosen();
   const found = project && selection.length === 1 ? findClip(project, selection[0]) : null;
 
   let body;
@@ -157,7 +159,7 @@ export function Inspector({ width }: { width: number }) {
     const asset = c.type === "media" ? project.assets.find((a) => a.id === c.assetId) : undefined;
     const kind: Kind = c.type === "text" ? (isCaptionTrack(track) ? "caption" : "text") : track.kind === "audio" ? "audio" : (asset?.kind ?? "video");
     const music = kind === "audio" && track.keepInPlace && !!asset?.hasAudio;
-    body = <ClipInspector key={clip.id} clip={clip} kind={kind} asset={asset} music={music} chosen={chosen} onChoose={setChosen} />;
+    body = <ClipInspector key={clip.id} clip={clip} kind={kind} asset={asset} music={music} chosen={chosen} onChoose={useChosen.setState} />;
   }
 
   return (
