@@ -316,7 +316,8 @@ pub enum EditCmd {
         #[serde(default)]
         transform: Option<TransformPatch>,
     },
-    /// Replaces the clips of an existing captions track.
+    /// Replaces the clips of an existing captions track. With `ranges`, only the captions starting in them go, and
+    /// every new caption must start in them and leave the kept captions clear.
     #[cfg_attr(feature = "ts", ts(optional_fields = nullable))]
     ReplaceCaptions {
         track_id: String,
@@ -328,6 +329,8 @@ pub enum EditCmd {
         anim_out: Option<Animation>,
         #[serde(default)]
         transform: Option<TransformPatch>,
+        #[serde(default)]
+        ranges: Option<Vec<TimeRange>>,
     },
     /// Cuts the timeline ranges out of every track except `keep_track_ids` (by default the
     /// tracks kept in place) and closes the gaps, so video, overlays, audio and captions stay in sync.
@@ -1858,10 +1861,26 @@ impl Project {
                     clips,
                 });
             }
-            EditCmd::ReplaceCaptions { track_id, segments, style, anim_in, anim_out, transform } => {
+            EditCmd::ReplaceCaptions { track_id, segments, style, anim_in, anim_out, transform, ranges } => {
                 let ti = self.caption_track(&track_id)?;
-                let clips = caption_clips(segments, &style, [anim_in, anim_out], transform, &self.canvas, min)?;
+                let mut clips = caption_clips(segments, &style, [anim_in, anim_out], transform, &self.canvas, min)?;
                 out.select = clips.iter().map(|c| c.id.clone()).take(1).collect();
+                if let Some(ranges) = ranges {
+                    let ranges = merge_ranges(ranges);
+                    let inside = |t: i64| ranges.iter().any(|r| r.start_us <= t && t < r.end_us);
+                    ensure!(
+                        clips.iter().all(|c| inside(c.start_us)),
+                        "New captions must start in the ranges they replace"
+                    );
+                    let kept: Vec<Clip> =
+                        self.tracks[ti].clips.iter().filter(|c| !inside(c.start_us)).cloned().collect();
+                    ensure!(
+                        clips.iter().all(|c| kept.iter().all(|k| k.end_us() <= c.start_us || c.end_us() <= k.start_us)),
+                        "New captions would overlap captions kept outside the ranges"
+                    );
+                    clips.extend(kept);
+                    clips.sort_by_key(|c| c.start_us);
+                }
                 self.tracks[ti].clips = clips;
             }
             EditCmd::RippleDeleteRanges { ranges, keep_track_ids } => {
@@ -4063,6 +4082,7 @@ mod tests {
             anim_in: None,
             anim_out: None,
             transform: None,
+            ranges: None,
         })
         .unwrap();
         let caption_tracks: Vec<_> = p.tracks.iter().filter(|t| t.name == "Captions").collect();
@@ -4089,6 +4109,7 @@ mod tests {
             anim_in: None,
             anim_out: None,
             transform: None,
+            ranges: None,
         };
         assert!(p.apply(replace).is_err());
         let captions = p.tracks.iter().find(|t| t.is_captions()).unwrap().id.clone();
@@ -4099,6 +4120,7 @@ mod tests {
             anim_in: None,
             anim_out: None,
             transform: None,
+            ranges: None,
         })
         .unwrap();
         let title = &p.tracks.iter().find(|t| t.id == titles).unwrap().clips[0].content;

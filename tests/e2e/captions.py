@@ -36,3 +36,68 @@ def captions(r):
     changed = changed_share(hidden, shown)
     r.check(f'the caption "{caption["text"]}" shows in the preview', changed > 0.005, f'{changed:.2%} of the preview changes')
     r.check('no error toast', not r.errors(), r.errors())
+
+
+@flow('captions_some_clips', 'Generate makes captions only over the selected clips and keeps the others', before=link_models)
+def captions_some_clips(r):
+    r.import_media(FIXTURES / 'talk.mp4')
+    r.add_clip('talk.mp4')
+    first = r.track()[0]
+    half = first['durationUs'] // 2
+    r.s.call("window.__nuzky.store.getState().edit({type: 'splitClip', clipId: arguments[0], atUs: arguments[1]})", first['id'], half)
+    wait(lambda: len(r.track()) == 2)
+    second = r.track()[1]
+    r.s.run("window.__nuzky.speech.setState({model: 'small', language: 'en'})")
+    r.s.run("[...document.querySelectorAll('[role=tab]')].find((t) => t.textContent.trim() === 'Captions').click()")
+    time.sleep(0.5)
+    generate = "document.querySelector('[data-generate-captions]')"
+
+    def finished(count):
+        done = lambda: [j for j in r.state()['jobs'] if j['kind'] == 'captions' and j['status'] != 'running']
+        wait(lambda: len(done()) >= count, 600, 1)
+        return done()[-1] if done() else None
+
+    def captions():
+        return next(t for t in r.state()['tracks'] if t['name'] == 'Captions')['clips']
+
+    # Splitting selects the second half; with nothing selected Generate captions the whole video.
+    r.s.run('window.__nuzky.store.getState().select([])')
+    time.sleep(0.5)
+    r.check('with nothing selected, Generate is for the whole video', r.s.run(f'return {generate}.textContent').strip() == 'Generate captions')
+    r.s.run(f'{generate}.click()')
+    job = finished(1)
+    r.check('captions for the whole video finish', job and job['status'] == 'done', job)
+    before = [(c['id'], c['text']) for c in captions() if c['startUs'] < half]
+    over = [c for c in captions() if c['startUs'] >= half]
+    r.check('the whole video has captions over both clips', before and over, {'first': len(before), 'second': len(over)})
+
+    r.s.call('window.__nuzky.store.getState().select([arguments[0]])', second['id'])
+    time.sleep(0.5)
+    label = r.s.run(f'return {generate}.textContent')
+    scope = r.s.run("return document.querySelector('[role=group][aria-label=\"Make captions for\"] [aria-pressed=true]')?.textContent")
+    r.check('with a clip selected, Generate is for that clip', scope == '1 clip selected' and label.endswith('for 1 clip'), {'scope': scope, 'button': label})
+    # Whole video holds while the selection stays, also over a visit to another tab, and only until it changes.
+    tab = "[...document.querySelectorAll('[role=tab]')].find((t) => t.textContent.trim() === arguments[0]).click()"
+    r.s.run("document.querySelector('[data-seg=whole]').click()")
+    r.s.run(tab, 'Text')
+    r.s.run(tab, 'Captions')
+    r.s.call("window.__nuzky.store.getState().edit({type: 'updateClip', clipId: arguments[0], volume: 0.9})", second['id'])
+    time.sleep(0.5)
+    r.check('Whole video stays picked after another tab and an edit', r.s.run(f'return {generate}.textContent').strip() == 'Regenerate captions')
+    r.s.call('window.__nuzky.store.getState().select([arguments[0]])', first['id'])
+    r.s.call('window.__nuzky.store.getState().select([arguments[0]])', second['id'])
+    time.sleep(0.5)
+    r.check('a new selection makes captions for the selected clip again', r.s.run(f'return {generate}.textContent').endswith('for 1 clip'))
+    r.shot('captions-some-clips')
+    r.s.run(f'{generate}.click()')
+    job = finished(2)
+    r.check('captions for the selected clip finish', job and job['status'] == 'done', job)
+    after = captions()
+    r.check('the other clip keeps its captions as they were', [(c['id'], c['text']) for c in after if c['startUs'] < half] == before,
+            {'before': before, 'after': [(c['id'], c['text']) for c in after if c['startUs'] < half]})
+    remade = [c for c in after if c['startUs'] >= half]
+    r.check('the selected clip has new captions in its place', remade and not {c['id'] for c in remade} & {c['id'] for c in over},
+            {'old': [c['id'] for c in over], 'new': [c['id'] for c in remade]})
+    toasts = [t['text'] for t in r.state()['toasts']]
+    r.check('the toast names the clip', any(t.startswith('Added') and t.endswith('to 1 clip') for t in toasts), toasts)
+    r.check('no error toast', not r.errors(), r.errors())
