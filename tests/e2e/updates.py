@@ -457,7 +457,7 @@ def install(r, server, version):
     r.check('the capsule keeps its width while the percentage grows', later and progress and later['width'] == progress['width'], (progress, later))
     webdriver('POST', r.s.path + '/window/rect', {'width': 1024, 'height': 640})
     if wait(lambda: r.s.run('return window.innerWidth') == 1024, 5):
-        small = r.s.run(PROGRESS)
+        small = wait(lambda: (p := r.s.run(PROGRESS)) and len(p['shown']) == 2 and p, 3) or r.s.run(PROGRESS)
         r.check('in a 1024 px window it shows only the spinner, the percentage and Stop, and gives the project name the room',
                 small and len(small['shown']) == 2 and re.fullmatch(r'\d{1,3}%', small['shown'][0]) and small['shown'][1] == 'Stop'
                 and small['width'] < progress['width'] - 100 and (h := r.s.run(HEADER))['update'][1] <= h['name'][0], (small, progress, r.s.run(HEADER)))
