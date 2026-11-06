@@ -516,6 +516,8 @@ pub struct Job {
 #[serde(deny_unknown_fields)]
 pub struct Captions {
     pub run_id: String,
+    /// Caption only over these clips, replacing only captions that start there and keeping the rest.
+    pub clip_ids: Option<Vec<String>>,
     /// A full caption style, including optional keywords {color, pick}; leave it out to use style_preset, the
     /// creator's learned look or Reel.
     pub style: Option<TextStyle>,

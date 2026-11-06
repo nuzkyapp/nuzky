@@ -143,10 +143,13 @@ export function useTranscriptView(): { view: TranscriptView | null; error: strin
 export type CaptionLook = { style: TextStyle; animIn: Animation | null; animOut: Animation | null };
 
 /** What each transcript or captions job was asked for and in which project, so Try again repeats that job there. */
-const asked = new Map<string, { captions: CaptionLook | null; refresh: boolean; epoch: string | undefined }>();
+const asked = new Map<string, { captions: CaptionLook | null; refresh: boolean; clipIds: string[] | null; epoch: string | undefined }>();
 
-/** Starts recognition for the transcript, of every heard file with `refresh`, or for captions in `captions`. */
-export async function startSpeech(captions: CaptionLook | null, refresh = false) {
+/**
+ * Starts recognition for the transcript, of every heard file with `refresh`, or for captions in `captions`, only over
+ * `clipIds` when given.
+ */
+export async function startSpeech(captions: CaptionLook | null, refresh = false, clipIds: string[] | null = null) {
   // Captions change the project; a transcript only reads it.
   if (captions && aiLocked()) return;
   const { model, language, captionWords } = useSpeech.getState();
@@ -157,9 +160,9 @@ export async function startSpeech(captions: CaptionLook | null, refresh = false)
   try {
     const words = captionWords || null;
     const job = captions
-      ? await api.startCaptions(model, language, captions, words, words ? SHORT_CAPTION_CHARS : null, epoch)
+      ? await api.startCaptions(model, language, captions, words, words ? SHORT_CAPTION_CHARS : null, clipIds, epoch)
       : await api.startTranscript(model, language, refresh, epoch);
-    asked.set(job, { captions, refresh, epoch });
+    asked.set(job, { captions, refresh, clipIds, epoch });
   } catch (e) {
     useEditor.getState().toast({ kind: "error", text: errorText(e) });
   }
@@ -171,7 +174,7 @@ export const canRetrySpeech = (job: string) => (asked.get(job)?.epoch ?? current
 /** Starts a failed transcript or captions job again as it was asked for, in the same project. */
 export function retrySpeech(job: string) {
   const request = asked.get(job);
-  if (request && canRetrySpeech(job)) void startSpeech(request.captions, request.refresh);
+  if (request && canRetrySpeech(job)) void startSpeech(request.captions, request.refresh, request.clipIds);
 }
 
 /**

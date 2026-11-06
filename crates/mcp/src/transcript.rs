@@ -1798,7 +1798,7 @@ pub(crate) mod tests {
         project.apply(reach).unwrap();
         let before: Vec<_> = captions(&project).into_iter().filter(|c| c.start_us < 4_000_000).collect();
 
-        project.apply(make(&project, &[second.clone()])).unwrap();
+        project.apply(make(&project, std::slice::from_ref(&second))).unwrap();
         let after = captions(&project);
         assert_eq!(after.iter().filter(|c| c.start_us < 4_000_000).cloned().collect::<Vec<_>>(), before);
         let new: Vec<_> = after.iter().filter(|c| c.start_us >= 4_000_000).collect();

@@ -1104,8 +1104,12 @@ fn start_speech(app: AppHandle, request: SpeechRequest, expected_epoch: Option<&
     let cancel = register(&app, &id).ok_or("Speech recognition is already running")?;
     let (worker_app, job_id) = (app.clone(), id.clone());
     let spawn = std::thread::Builder::new().name(kind.into()).spawn(move || {
-        let label = if request.captions.is_some() { "Auto captions" } else { "Transcript" };
-        let mut rep = Reporter::new(&worker_app, &job_id, kind, label.into());
+        let label = match request.captions.as_ref().map(|c| c.clip_ids.as_deref()) {
+            Some(Some(ids)) => format!("Captions for {}", count_label(ids.len(), "clip", "clips")),
+            Some(None) => "Auto captions".into(),
+            None => "Transcript".into(),
+        };
+        let mut rep = Reporter::new(&worker_app, &job_id, kind, label);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             run_speech_job(&host, assets, &request, &cancel, &mut rep)
         }))
@@ -1193,7 +1197,8 @@ fn run_speech_job(
     if let Ok(snap) = current.snapshot(Vec::new()) {
         app.emit("project-changed", snap).ok();
     }
-    Ok(Some(count_label(count, "caption", "captions") + note))
+    let clips = captions.clip_ids.as_ref().map(|ids| format!(" to {}", count_label(ids.len(), "clip", "clips")));
+    Ok(Some(count_label(count, "caption", "captions") + &clips.unwrap_or_default() + note))
 }
 
 /// Recognises each file once, in its own time, storing every transcript as soon as it is ready.

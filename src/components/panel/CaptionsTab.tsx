@@ -21,6 +21,34 @@ const WORDS = [
 const BUSY = "Wait for speech recognition to finish";
 const GRID = "grid grid-cols-[repeat(auto-fill,minmax(96px,1fr))] gap-2";
 
+const clips = (n: number) => `${n} ${n === 1 ? "clip" : "clips"}`;
+
+/** The selected video clips off the captions track, which Generate can caption alone, as their ids joined by spaces. */
+function useSelectedVideos(): string {
+  return useEditor((s) => {
+    const project = s.snap?.project;
+    if (!project) return "";
+    return project.tracks
+      .filter((t) => !isCaptionTrack(t))
+      .flatMap((t) => t.clips)
+      .filter((c) => {
+        const media = c.content;
+        return s.selection.includes(c.id) && media.type === "media" && project.assets.some((a) => a.id === media.assetId && a.kind === "video");
+      })
+      .map((c) => c.id)
+      .join(" ");
+  });
+}
+
+/** How many captions start over the clips `ids`, the ones captions made for them replace. */
+const useCaptionsOver = (ids: string[]) =>
+  useEditor((s) => {
+    const tracks = s.snap?.project.tracks ?? [];
+    const ranges = tracks.flatMap((t) => t.clips).filter((c) => ids.includes(c.id));
+    const over = (c: Clip) => ranges.some((r) => r.startUs <= c.startUs && c.startUs < r.startUs + r.durationUs);
+    return tracks.filter(isCaptionTrack).flatMap((t) => t.clips).filter(over).length;
+  });
+
 /**
  * The captions on the timeline and the look the controls show: the selected caption's, else the first one's.
  * Null without captions.
@@ -83,8 +111,15 @@ export function CaptionsTab() {
   const checking = useFaces((s) => !!s.job);
   const reframing = useReframe((s) => !!s.job);
 
+  // Captions go over the selected videos unless Whole video was picked for this selection.
+  const selected = useSelectedVideos();
+  const [wholeFor, setWholeFor] = useState<string | null>(null);
+  const ids = selected && wholeFor !== selected ? selected.split(" ") : [];
+  const replaced = useCaptionsOver(ids);
+  const remake = ids.length > 0 ? replaced > 0 : hasCaptions;
+
   // Regenerating keeps the look of the captions already there, edits included.
-  const start = () => startSpeech(look);
+  const start = () => startSpeech(look, false, ids.length > 0 ? ids : null);
   const apply = (preset: CaptionPreset) => {
     const next: CaptionLook = { style: preset.style, animIn: preset.animIn ?? null, animOut: preset.animOut ?? null };
     // Captions keep their font and case when the style brings none, each caption its own.
@@ -199,12 +234,30 @@ export function CaptionsTab() {
         {running ? (
           <SpeechJobCard job={running} />
         ) : (
-          <span className="flex">
-            {/* Prominent until there are captions; regenerating replaces them, so it is then a secondary action. */}
-            <Button variant={hasCaptions ? "secondary" : "primary"} className="flex-1" data-generate-captions disabled={!!blocker} disabledReason={blocker ?? undefined} onClick={start}>
-              <Captions size={15} /> {hasCaptions ? "Regenerate captions" : "Generate captions"}
-            </Button>
-          </span>
+          <>
+            {selected && (
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[12px] text-muted">Make captions for</span>
+                <Segmented
+                  label="Make captions for"
+                  value={ids.length > 0 ? "selected" : "whole"}
+                  onChange={(id) => setWholeFor(id === "whole" ? selected : null)}
+                  options={[
+                    { id: "whole", label: "Whole video" },
+                    { id: "selected", label: `${clips(selected.split(" ").length)} selected` },
+                  ]}
+                />
+              </div>
+            )}
+            <span className="flex">
+              {/* Prominent until there are captions to replace; replacing them is then a secondary action. */}
+              <Button variant={remake ? "secondary" : "primary"} className="flex-1" data-generate-captions disabled={!!blocker} disabledReason={blocker ?? undefined} onClick={start}>
+                <Captions size={15} /> {remake ? "Regenerate captions" : "Generate captions"}
+                {ids.length > 0 && ` for ${clips(ids.length)}`}
+              </Button>
+            </span>
+            {replaced > 0 && <span className="text-[12px] text-muted">{`Replaces the ${replaced === 1 ? "caption" : `${replaced} captions`} over them`}</span>}
+          </>
         )}
         {!running && <JobError job={last} />}
         <Button

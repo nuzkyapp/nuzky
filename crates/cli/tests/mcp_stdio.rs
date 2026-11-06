@@ -2398,6 +2398,76 @@ fn caption_texts(c: &mut Client) -> Vec<String> {
 }
 
 #[test]
+fn build_captions_for_selected_clips_keeps_other_captions_over_stdio() {
+    let mut c = Client::start(true, None, Some(None));
+    let run = c.call("begin_run", json!({"label":"caption selected clips"}))["run_id"].clone();
+    place_transcribed_take(&mut c, &["First", "clip.", "Second", "clip."], &run);
+    let clip = c.call("get_state", json!({}))["tracks"][0]["clips"][0]["id"].clone();
+    c.call(
+        "apply_edits",
+        json!({"run_id":run,"request_id":"split","edits":[
+        {"type":"splitClip","clipId":clip,"atUs":2_000_000}]}),
+    );
+    let state = c.call("get_state", json!({}));
+    let second = state["tracks"][0]["clips"][1]["id"].clone();
+    c.call("build_captions", json!({"run_id":run}));
+    let captions = |c: &mut Client, first: bool| {
+        let state = c.call("get_state", json!({}));
+        state["tracks"].as_array().unwrap().iter().find(|t| t["name"] == "Captions").unwrap()["clips"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|clip| (clip["startUs"].as_i64().unwrap() < 2_000_000) == first)
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let first = captions(&mut c, true);
+    let old_second = captions(&mut c, false);
+    assert!(!first.is_empty() && !old_second.is_empty());
+    c.call("build_captions", json!({"run_id":run,"clip_ids":[second],"max_words":1}));
+    assert_eq!(captions(&mut c, true), first);
+    let rebuilt = captions(&mut c, false);
+    assert!(!rebuilt.is_empty() && rebuilt != old_second);
+    let script = format!(
+        "function run(ctx) {{ return {{edits: [], tools: {}}}; }}",
+        json!([{"tool":"build_captions","args":{"clip_ids":[second]}}])
+    );
+    c.call(
+        "save_plugin",
+        json!({"manifest":{"nuzkyPlugin":2,"id":"selected-captions","name":"Selected captions",
+        "description":"Caption selected clips","version":"1","needs":["words"],"tools":["build_captions"],"inputs":[]},
+        "script":script}),
+    );
+    c.call("run_plugin", json!({"run_id":run,"id":"selected-captions"}));
+    assert_eq!(captions(&mut c, true), first);
+    assert_ne!(captions(&mut c, false), rebuilt);
+    let mut missing = state["assets"][0].clone();
+    let path = c.dir.join("untranscribed.mov");
+    std::fs::write(&path, b"untranscribed").unwrap();
+    missing["id"] = json!("untranscribed");
+    missing["path"] = json!(path);
+    c.call(
+        "apply_edits",
+        json!({"run_id":run,"request_id":"untranscribed","edits":[
+        {"type":"addAssets","assets":[missing]},{"type":"addClip","assetId":"untranscribed"}]}),
+    );
+    assert!(c.error("build_captions", json!({"run_id":run})).contains("TRANSCRIPT_MISSING"));
+    c.call("build_captions", json!({"run_id":run,"clip_ids":[second]}));
+    assert_eq!(captions(&mut c, true), first);
+    for (ids, code) in [(json!([]), "NO_CLIPS"), (json!(["missing"]), "CLIP_NOT_FOUND")] {
+        assert!(c.error("build_captions", json!({"run_id":run,"clip_ids":ids})).contains(code));
+    }
+    c.call(
+        "apply_edits",
+        json!({"run_id":run,"request_id":"mute","edits":[
+        {"type":"updateClip","clipId":clip,"volume":0}]}),
+    );
+    assert!(c.error("build_captions", json!({"run_id":run,"clip_ids":[clip]})).contains("NO_CAPTIONS"));
+    c.call("end_run", json!({"run_id":run,"action":"keep"}));
+    c.finish();
+}
+
+#[test]
 fn correct_words_fixes_the_transcript_and_captions_over_stdio() {
     let mut c = Client::start(true, None, Some(None));
     let tools = c.rpc("tools/list", json!({}));
