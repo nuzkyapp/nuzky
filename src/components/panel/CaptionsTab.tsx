@@ -111,10 +111,15 @@ export function CaptionsTab() {
   const checking = useFaces((s) => !!s.job);
   const reframing = useReframe((s) => !!s.job);
 
-  // Captions go over the selected videos unless Whole video was picked for this selection.
+  // Captions go over the selected videos unless Whole video was picked since the selection last changed.
   const selected = useSelectedVideos();
-  const [wholeFor, setWholeFor] = useState<string | null>(null);
-  const ids = selected && wholeFor !== selected ? selected.split(" ") : [];
+  const [whole, setWhole] = useState(false);
+  const [seen, setSeen] = useState(selected);
+  if (seen !== selected) {
+    setSeen(selected);
+    setWhole(false);
+  }
+  const ids = selected && !whole ? selected.split(" ") : [];
   const replaced = useCaptionsOver(ids);
   const remake = ids.length > 0 ? replaced > 0 : hasCaptions;
 
@@ -241,7 +246,7 @@ export function CaptionsTab() {
                 <Segmented
                   label="Make captions for"
                   value={ids.length > 0 ? "selected" : "whole"}
-                  onChange={(id) => setWholeFor(id === "whole" ? selected : null)}
+                  onChange={(id) => setWhole(id === "whole")}
                   options={[
                     { id: "whole", label: "Whole video" },
                     { id: "selected", label: `${clips(selected.split(" ").length)} selected` },

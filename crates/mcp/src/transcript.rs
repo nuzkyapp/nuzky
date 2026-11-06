@@ -1262,18 +1262,25 @@ pub fn caption_edit_in(
     }
     for clip in project.tracks.iter().flat_map(|t| &t.clips).filter(|c| c.duration_us >= min_caption_us) {
         let Some(clip_words) = by_clip.get(clip.id.as_str()) else { continue };
-        let mut grouped = group_words(clip_words, grouping, min_caption_us);
-        for segment in &mut grouped {
-            for word in &mut segment.words {
-                // A part of a word split over captions starts inside that word.
-                let said = clip_words.partition_point(|w| w.start_us <= word.start_us).saturating_sub(1);
-                word.key = keyed.contains(&(clip.id.as_str(), clip_words[said].start_us));
+        // Each range of the scope is captioned on its own, so no caption runs from one into the next.
+        for part in clip_words.chunk_by(|a, b| range_of(a.start_us) == range_of(b.start_us)) {
+            let (from, to) = match range_of(part[0].start_us) {
+                Some(Some(r)) => (r.start_us.max(clip.start_us), r.end_us.min(clip.end_us())),
+                _ => (clip.start_us, clip.end_us()),
+            };
+            let mut grouped = group_words(part, grouping, min_caption_us);
+            for segment in &mut grouped {
+                for word in &mut segment.words {
+                    // A part of a word split over captions starts inside that word.
+                    let said = part.partition_point(|w| w.start_us <= word.start_us).saturating_sub(1);
+                    word.key = keyed.contains(&(clip.id.as_str(), part[said].start_us));
+                }
+                segment.end_us = segment.end_us.min(to);
+                // The engine enforces a one-frame minimum; borrow time before a short tail word.
+                segment.start_us = segment.start_us.min(segment.end_us - min_caption_us).max(from);
             }
-            segment.end_us = segment.end_us.min(clip.end_us());
-            // The engine enforces a one-frame minimum; borrow time before a short tail word.
-            segment.start_us = segment.start_us.min(segment.end_us - min_caption_us).max(clip.start_us);
+            segments.extend(grouped.into_iter().filter(|s| s.end_us > s.start_us));
         }
-        segments.extend(grouped.into_iter().filter(|s| s.end_us > s.start_us));
     }
     let tracks: Vec<_> = project.tracks.iter().filter(|t| t.is_captions()).collect();
     ensure!(tracks.len() <= 1, "AMBIGUOUS_CAPTIONS: multiple caption tracks; use explicit replaceCaptions");
@@ -1281,8 +1288,6 @@ pub fn caption_edit_in(
         let kept: Vec<&Clip> =
             tracks.iter().flat_map(|t| &t.clips).filter(|c| range_of(c.start_us) == Some(None)).collect();
         for segment in &mut segments {
-            let Some(Some(range)) = range_of(segment.start_us) else { continue };
-            segment.end_us = segment.end_us.min(range.end_us);
             for clip in &kept {
                 if clip.start_us <= segment.start_us {
                     segment.start_us = segment.start_us.max(clip.end_us());
@@ -1816,6 +1821,22 @@ pub(crate) mod tests {
         // Made again, the second clip's captions replace each other instead of piling up.
         project.apply(make(&project, &[second])).unwrap();
         assert_eq!(captions(&project).len(), after.len());
+    }
+
+    #[test]
+    fn a_clip_heard_over_two_chosen_ranges_is_captioned_in_each() {
+        let (project, mut sources) = fixture();
+        // Said right after the first word, so they would make one caption.
+        let talk = sources.get_mut("talk").unwrap();
+        (talk[1].start_us, talk[1].end_us) = (950_000, 1_300_000);
+        let words = map_words(&project, &sources);
+        let grouping = CaptionGrouping { max_words: 2, ..CaptionGrouping::default() };
+        let scope = [TimeRange { start_us: 0, end_us: 920_000 }, TimeRange { start_us: 940_000, end_us: 3_000_000 }];
+        let (edit, _) = caption_edit_in(&words, &[], &project, crate::params::reel(), grouping, Some(&scope)).unwrap();
+        let EditCmd::AddCaptions { segments, .. } = edit else { panic!("{edit:?}") };
+        let texts: Vec<_> = segments.iter().map(|s| (s.text.as_str(), s.start_us, s.end_us)).collect();
+        assert_eq!(texts.iter().map(|t| t.0).collect::<Vec<_>>(), ["word0", "word1", "word2."], "{texts:?}");
+        assert!(segments[0].end_us <= 920_000 && segments[1].start_us >= 940_000, "{texts:?}");
     }
 
     #[test]
