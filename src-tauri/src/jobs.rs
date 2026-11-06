@@ -896,9 +896,13 @@ pub struct CaptionRequest {
     /// Most characters per caption; `None` uses the phrase limit of 42.
     #[serde(default)]
     pub max_chars: Option<u8>,
+    /// Makes captions only over these clips, keeping the other captions; `None` captions the whole video.
+    #[serde(default)]
+    pub clip_ids: Option<Vec<String>>,
 }
 
 const PHRASE_MAX_WORDS: usize = 12;
+const GONE: &str = "A selected clip was removed. Select the clips again.";
 const PHRASE_MAX_CHARS: usize = 42;
 
 impl CaptionRequest {
@@ -1080,9 +1084,19 @@ fn start_speech(app: AppHandle, request: SpeechRequest, expected_epoch: Option<&
         let current = crate::lock_session(&state.session, expected_epoch)?;
         (Arc::downgrade(&current.host), current.host.session.state().map_err(crate::err)?.project)
     };
-    let heard = transcript::heard_assets(&project);
+    let heard = match request.captions.as_ref().and_then(|c| c.clip_ids.as_deref()) {
+        Some(ids) => {
+            let ranges = transcript::clip_ranges(&project, ids).map_err(|_| GONE.to_owned())?;
+            transcript::heard_assets_in(&project, &ranges)
+        }
+        None => transcript::heard_assets(&project),
+    };
     if heard.is_empty() {
-        return Err("No video clip with sound on the timeline to transcribe.".into());
+        return Err(if request.captions.as_ref().is_some_and(|c| c.clip_ids.is_some()) {
+            "None of the selected clips has sound to caption.".into()
+        } else {
+            "No video clip with sound on the timeline to transcribe.".into()
+        });
     }
     let assets: Vec<Asset> = project.assets.into_iter().filter(|a| heard.contains(&a.id)).collect();
     let kind = if request.captions.is_some() { "captions" } else { "transcript" };
@@ -1141,8 +1155,14 @@ fn run_speech_job(
     let Some(captions) = &request.captions else {
         return Ok(Some(count_label(derived.words.len(), "word", "words") + note));
     };
+    let scope = captions
+        .clip_ids
+        .as_deref()
+        .map(|ids| transcript::clip_ranges(&view.project, ids).context(GONE))
+        .transpose()?;
+    let needed = scope.as_deref().map(|ranges| transcript::heard_assets_in(&view.project, ranges));
     anyhow::ensure!(
-        derived.untranscribed.is_empty(),
+        derived.untranscribed.iter().all(|id| needed.as_ref().is_some_and(|needed| !needed.contains(id))),
         "A clip was added during recognition. Generate the captions again."
     );
     rep.progress(1.0, Some("Grouping captions"));
@@ -1154,7 +1174,8 @@ fn run_speech_job(
         anim_in: captions.anim_in,
         anim_out: captions.anim_out,
     };
-    let (cmd, count) = transcript::caption_edit(&derived.words, &keys, &view.project, look, captions.grouping())?;
+    let (cmd, count) =
+        transcript::caption_edit_in(&derived.words, &keys, &view.project, look, captions.grouping(), scope.as_deref())?;
     check_cancelled(cancel)?;
     // Edits made meanwhile that move the speech refuse the captions through the speech layout key.
     let current = state.session.lock().unwrap();
@@ -1606,6 +1627,7 @@ mod tests {
             language: "cs".into(),
             max_words,
             max_chars,
+            clip_ids: None,
             anim_in: None,
             anim_out: None,
             style: TextStyle {

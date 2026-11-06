@@ -1189,7 +1189,64 @@ pub fn caption_edit(
     look: CaptionPreset,
     grouping: CaptionGrouping,
 ) -> Result<(EditCmd, usize)> {
+    caption_edit_in(words, keys, project, look, grouping, None)
+}
+
+/// The time the clips `ids` take on the timeline, the clips captions are made for.
+pub fn clip_ranges(project: &Project, ids: &[String]) -> Result<Vec<TimeRange>> {
+    ensure!(!ids.is_empty(), "NO_CLIPS: name at least one clip to caption");
+    let ranges = ids
+        .iter()
+        .map(|id| {
+            let clip = project
+                .tracks
+                .iter()
+                .filter(|t| !t.is_captions())
+                .flat_map(|t| &t.clips)
+                .find(|c| &c.id == id)
+                .with_context(|| format!("CLIP_NOT_FOUND: {id}. Select the clips again"))?;
+            Ok(TimeRange { start_us: clip.start_us, end_us: clip.end_us() })
+        })
+        .collect::<Result<_>>()?;
+    Ok(merge_ranges(ranges))
+}
+
+/// The heard files playing in `ranges`, the ones captions for them need transcribed.
+pub fn heard_assets_in(project: &Project, ranges: &[TimeRange]) -> HashSet<String> {
+    project
+        .tracks
+        .iter()
+        .flat_map(|track| track.clips.iter().map(move |clip| (track, clip)))
+        .filter(|(track, clip)| {
+            is_heard(project, track, clip)
+                && ranges.iter().any(|r| clip.start_us < r.end_us && r.start_us < clip.end_us())
+        })
+        .filter_map(|(_, clip)| match &clip.content {
+            ClipContent::Media { asset_id, .. } => Some(asset_id.clone()),
+            ClipContent::Text { .. } => None,
+        })
+        .collect()
+}
+
+/// As `caption_edit`, only for the words starting in `scope` when given: the captions starting there are replaced
+/// and the others kept, so new captions end with their range and leave room for a kept caption that reaches in.
+pub fn caption_edit_in(
+    words: &[TimelineWord],
+    keys: &[bool],
+    project: &Project,
+    look: CaptionPreset,
+    grouping: CaptionGrouping,
+    scope: Option<&[TimeRange]>,
+) -> Result<(EditCmd, usize)> {
     ensure!(grouping.max_words > 0 && grouping.max_chars > 0, "INVALID_GROUPING: caption limits must be positive");
+    let range_of = |t: i64| scope.map(|ranges| ranges.iter().find(|r| r.start_us <= t && t < r.end_us));
+    let (words, keys): (Vec<TimelineWord>, Vec<bool>) = words
+        .iter()
+        .zip(keys.iter().copied().chain(std::iter::repeat(false)))
+        .filter(|(w, _)| range_of(w.start_us) != Some(None))
+        .map(|(w, key)| (w.clone(), key))
+        .unzip();
+    let (words, keys) = (&words[..], &keys[..]);
     let mut segments = Vec::new();
     let min_caption_us = project.frame_duration_us().ceil() as i64;
     let keyed: HashSet<(&str, i64)> =
@@ -1218,11 +1275,28 @@ pub fn caption_edit(
         }
         segments.extend(grouped.into_iter().filter(|s| s.end_us > s.start_us));
     }
+    let tracks: Vec<_> = project.tracks.iter().filter(|t| t.is_captions()).collect();
+    ensure!(tracks.len() <= 1, "AMBIGUOUS_CAPTIONS: multiple caption tracks; use explicit replaceCaptions");
+    if scope.is_some() {
+        let kept: Vec<&Clip> =
+            tracks.iter().flat_map(|t| &t.clips).filter(|c| range_of(c.start_us) == Some(None)).collect();
+        for segment in &mut segments {
+            let Some(Some(range)) = range_of(segment.start_us) else { continue };
+            segment.end_us = segment.end_us.min(range.end_us);
+            for clip in &kept {
+                if clip.start_us <= segment.start_us {
+                    segment.start_us = segment.start_us.max(clip.end_us());
+                } else {
+                    segment.end_us = segment.end_us.min(clip.start_us);
+                }
+            }
+        }
+        segments.retain(|s| s.end_us - s.start_us >= min_caption_us && range_of(s.start_us) != Some(None));
+        ensure!(!segments.is_empty(), "NO_CAPTIONS: no speech in the selected clips");
+    }
     segments.sort_by_key(|s| s.start_us);
     let count = segments.len();
     ensure!(count > 0, "NO_CAPTIONS: no transcript words in retained media");
-    let tracks: Vec<_> = project.tracks.iter().filter(|t| t.is_captions()).collect();
-    ensure!(tracks.len() <= 1, "AMBIGUOUS_CAPTIONS: multiple caption tracks; use explicit replaceCaptions");
     let CaptionPreset { style, anim_in, anim_out, .. } = look;
     let edit = match tracks.first() {
         Some(track) => EditCmd::ReplaceCaptions {
@@ -1232,6 +1306,7 @@ pub fn caption_edit(
             anim_in,
             anim_out,
             transform: placement(track),
+            ranges: scope.map(<[TimeRange]>::to_vec),
         },
         None => EditCmd::AddCaptions { segments, style, anim_in, anim_out, transform: None },
     };
@@ -1690,6 +1765,57 @@ pub(crate) mod tests {
         project.apply(edit).unwrap();
         let caption = &project.tracks.iter().find(|t| t.name == "Captions").unwrap().clips[0];
         assert_eq!(caption.end_us(), 5_000_000);
+    }
+
+    #[test]
+    fn captions_for_some_clips_keep_the_captions_of_the_others() {
+        let (mut project, sources) = fixture();
+        let id = project.tracks[0].clips[0].id.clone();
+        project.apply(EditCmd::SplitClip { clip_id: id, at_us: 4_000_000 }).unwrap();
+        let second = project.tracks[0].clips[1].id.clone();
+        let words = map_words(&project, &sources);
+        let grouping = CaptionGrouping { max_words: 2, ..CaptionGrouping::default() };
+        let make = |project: &Project, clips: &[String]| {
+            let scope = clip_ranges(project, clips).unwrap();
+            caption_edit_in(&words, &[], project, crate::params::reel(), grouping, Some(&scope)).unwrap().0
+        };
+        let captions = |p: &Project| p.tracks.iter().find(|t| t.is_captions()).unwrap().clips.clone();
+        project.apply(caption_edit(&words, &[], &project, crate::params::reel(), grouping).unwrap().0).unwrap();
+        // The first clip's captions, one edited by hand and the last one reaching into the second clip.
+        let mine: Vec<_> = captions(&project).into_iter().filter(|c| c.start_us < 4_000_000).collect();
+        let theirs: Vec<_> =
+            captions(&project).iter().filter(|c| c.start_us >= 4_000_000).map(|c| c.id.clone()).collect();
+        let edited = serde_json::json!({"type": "updateClip", "clipId": mine[0].id, "text": "Hello"});
+        project.apply(serde_json::from_value(edited).unwrap()).unwrap();
+        project.apply(EditCmd::DeleteClips { clip_ids: theirs }).unwrap();
+        let last = mine.last().unwrap();
+        let reach = EditCmd::TrimClip {
+            clip_id: last.id.clone(),
+            start_us: last.start_us,
+            duration_us: 4_700_000 - last.start_us,
+            source_in_us: None,
+        };
+        project.apply(reach).unwrap();
+        let before: Vec<_> = captions(&project).into_iter().filter(|c| c.start_us < 4_000_000).collect();
+
+        project.apply(make(&project, &[second.clone()])).unwrap();
+        let after = captions(&project);
+        assert_eq!(after.iter().filter(|c| c.start_us < 4_000_000).cloned().collect::<Vec<_>>(), before);
+        let new: Vec<_> = after.iter().filter(|c| c.start_us >= 4_000_000).collect();
+        assert!(
+            !new.is_empty() && new[0].start_us >= 4_700_000,
+            "{:?}",
+            new.iter().map(|c| c.start_us).collect::<Vec<_>>()
+        );
+        assert!(new.iter().all(|c| c.end_us() <= 10_000_000));
+        let text = |c: &Clip| match &c.content {
+            ClipContent::Text { text, .. } => text.clone(),
+            _ => unreachable!(),
+        };
+        assert_eq!(new.iter().map(|c| text(c)).collect::<Vec<_>>().join(" "), "word4 word5. word6 word7");
+        // Made again, the second clip's captions replace each other instead of piling up.
+        project.apply(make(&project, &[second])).unwrap();
+        assert_eq!(captions(&project).len(), after.len());
     }
 
     #[test]

@@ -786,6 +786,7 @@ export type EditCmd = {
   animIn?: Animation | null,
   animOut?: Animation | null,
   transform?: TransformPatch | null,
+  ranges?: Array<TimeRange> | null,
 } | {
   "type": "rippleDeleteRanges",
   ranges: Array<TimeRange>,
