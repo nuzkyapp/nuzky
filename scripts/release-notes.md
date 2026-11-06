@@ -1,12 +1,16 @@
-The sixth alpha of Nuzky, a free, open-source video editor for your computer. It's early, so expect rough edges. Nuzky never changes or deletes your original videos.
+The seventh alpha of Nuzky, a free, open-source video editor for your computer. It's early, so expect rough edges. Nuzky never changes or deletes your original videos.
 
 ## What's new
 
-- **Record your screen.** Record screen in Media records the whole screen or one window on a Mac and adds it to Media when you click Stop in the top bar. On Linux and Windows the button stays off for now.
-- **B-roll where you name an app.** The Transcript tab suggests where to show a silent video from Media: when you say a word of its name, for example "now I open Claude", Add puts the recording over the picture for that sentence. Your voice and captions stay as they were.
-- **Text that covers a face.** Find text over faces, under Generate in the Captions tab, finds every caption, text and sticker over the speaker's face and suggests a clear place inside the Reels and TikTok safe area. Nothing moves until you click Move all, which you can undo.
-- **Mono for one-sided sound.** A voice recorded on one side, for example by a lavalier in one channel, plays in one ear. Mono in the Audio tab plays it in both, and Nuzky tells you when a file has sound on one side only.
-- **One file per hook.** Ask the AI to export each opening of a reel as its own file, with the same body and captions in every one, to try them as Instagram Trial Reels.
+- **Edit from your phone, like CapCut.** The page you open from the QR code is now a small editor: a preview with Undo, Redo and Play, every track under a playhead in the middle, and Split, Duplicate, Detach audio and Delete when you tap a clip. Pick the AI agent, its model and past chats there, start a new project or open one from your list. The QR button is now on the home screen too.
+- **One Settings window.** `Cmd+,` or `Ctrl+,`, the gear in the editor and Settings in the home screen's sidebar open every setting in one place, with search. New there: how much disk Nuzky takes, with Clear for its caches; Learn from my edits, to stop Your style learning from every export; Revoke for a plugin's full access; Remove for a speech model you don't use; and Privacy, one list of everything that goes online and whether it's on.
+- **Captions for some clips only.** Select clips on the timeline and Generate in the Captions tab makes captions only over them. Captions elsewhere stay as they were, hand edits included.
+- **More room for the video.** The side panels and the timeline start smaller, and the AI panel opens in the inspector's place, so the video keeps its size while an agent works.
+
+## Fixed
+
+- Take the tour no longer leaves a "Sample video" project among your projects, and the next start doesn't open it.
+- On the phone, clips no longer blink and the page opens and follows the preview without the delay it had.
 
 ## Not yet
 
@@ -34,4 +38,4 @@ Open an issue at https://github.com/nuzkyapp/nuzky/issues, or use Send feedback 
 
 ## Source
 
-Nuzky is GPL-3.0-or-later, and its source is the Source code archive below. The installers include FFmpeg, ONNX Runtime and other libraries. Their source, and what each installer was built from, is in [Third-party source for Nuzky v0.1.6-alpha](https://github.com/nuzkyapp/nuzky/releases/tag/third-party-source-0.1.6-alpha).
+Nuzky is GPL-3.0-or-later, and its source is the Source code archive below. The installers include FFmpeg, ONNX Runtime and other libraries. Their source, and what each installer was built from, is in [Third-party source for Nuzky v0.1.7-alpha](https://github.com/nuzkyapp/nuzky/releases/tag/third-party-source-0.1.7-alpha).
