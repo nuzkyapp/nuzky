@@ -643,7 +643,7 @@ def install(r, server, version):
     r.check('the top bar offers Restart to update', button and button['label'] == 'Restart to update' and not button['disabled'], button)
     webdriver('POST', r.s.path + '/window/rect', {'width': 1024, 'height': 640})
     if wait(lambda: r.s.run('return window.innerWidth') == 1024, 5):
-        button = r.s.run(EDITOR_BUTTON)
+        button = wait(lambda: (b := r.s.run(EDITOR_BUTTON)) and b['width'] == 32 and b, 3) or r.s.run(EDITOR_BUTTON)
         r.check('in a 1024 px window as a round 32 px button named in its tooltip',
                 button and button['label'] == 'Restart to update to Nuzky 99.0.0' and button['width'] == 32
                 and r.s.run("return document.querySelector('[data-update-button]').title") == button['label']
