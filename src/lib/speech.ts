@@ -85,7 +85,8 @@ export const useSpeech = create<SpeechState>(() => ({
 }));
 
 useEditor.subscribe((s, before) => {
-  if (s.selection !== before.selection && useSpeech.getState().captionsWhole) useSpeech.setState({ captionsWhole: false });
+  // An edit gives the same selection anew, which leaves the choice alone.
+  if (s.selection.join(" ") !== before.selection.join(" ") && useSpeech.getState().captionsWhole) useSpeech.setState({ captionsWhole: false });
 });
 
 /** A word for the transcript to select, by its start on the timeline, once it shows it; the tour picks the first word. */
