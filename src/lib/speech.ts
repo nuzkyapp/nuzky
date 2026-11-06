@@ -70,6 +70,8 @@ interface SpeechState {
   pauseUs: number;
   /** Counts changes to the stored transcripts and prepared sound, so the transcript is fetched again. */
   stored: number;
+  /** Generate captions the whole video although clips are selected, until the selection changes. */
+  captionsWhole: boolean;
 }
 
 export const useSpeech = create<SpeechState>(() => ({
@@ -79,7 +81,12 @@ export const useSpeech = create<SpeechState>(() => ({
   captionLook: { style: { ...CAPTION_STYLES[0].style, fontFamily: null }, animIn: null, animOut: null },
   pauseUs: 500_000,
   stored: 0,
+  captionsWhole: false,
 }));
+
+useEditor.subscribe((s, before) => {
+  if (s.selection !== before.selection && useSpeech.getState().captionsWhole) useSpeech.setState({ captionsWhole: false });
+});
 
 /** A word for the transcript to select, by its start on the timeline, once it shows it; the tour picks the first word. */
 export const useWordPick = create<{ startUs: number | null }>(() => ({ startUs: null }));

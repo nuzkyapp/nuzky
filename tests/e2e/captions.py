@@ -76,8 +76,13 @@ def captions_some_clips(r):
     label = r.s.run(f'return {generate}.textContent')
     scope = r.s.run("return document.querySelector('[role=group][aria-label=\"Make captions for\"] [aria-pressed=true]')?.textContent")
     r.check('with a clip selected, Generate is for that clip', scope == '1 clip selected' and label.endswith('for 1 clip'), {'scope': scope, 'button': label})
-    # Whole video holds only until the selection changes, also back to the same clip.
+    # Whole video holds while the selection stays, also over a visit to another tab, and only until it changes.
+    tab = "[...document.querySelectorAll('[role=tab]')].find((t) => t.textContent.trim() === arguments[0]).click()"
     r.s.run("document.querySelector('[data-seg=whole]').click()")
+    r.s.run(tab, 'Text')
+    r.s.run(tab, 'Captions')
+    time.sleep(0.5)
+    r.check('Whole video stays picked after another tab', r.s.run(f'return {generate}.textContent').strip() == 'Regenerate captions')
     r.s.call('window.__nuzky.store.getState().select([arguments[0]])', first['id'])
     r.s.call('window.__nuzky.store.getState().select([arguments[0]])', second['id'])
     time.sleep(0.5)
