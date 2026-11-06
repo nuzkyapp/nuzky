@@ -63,6 +63,7 @@ def ticks(r, clip_id):
 def tick_columns(r, name, clip_id, beat_from):
     """Columns with a white tick in the top 12 px of the music clip's waveform, under its name: (in the intro before the
     beat, after it). The drop's flag chip and the fade dots in the waveform's corners are left out."""
+    r.s.run("document.querySelector(`[data-clip-id='${arguments[0]}']`).scrollIntoView({block: 'nearest'})", clip_id)
     r.shot(name)
     t = ticks(r, clip_id)
     image = np.asarray(Image.open(r.work / f'{name}.png').convert('RGB')).astype(int)

@@ -5,7 +5,7 @@ export type Pane = "library" | "inspector" | "timeline";
 
 const KEYS: Record<Pane, string> = { library: "nuzky.libraryWidth", inspector: "nuzky.inspectorWidth", timeline: "nuzky.timelineHeight" };
 /** Under 420 px the library's tabs take two rows (LeftPanel), so it can go down to 280 px. */
-export const PANE_MIN: Record<Pane, number> = { library: 280, inspector: 272, timeline: 160 };
+export const PANE_MIN: Record<Pane, number> = { library: 280, inspector: 300, timeline: 160 };
 /** The share of the window a pane takes until someone resizes it, close to CapCut's. */
 const SHARE: Record<Pane, number> = { library: 0.21, inspector: 0.22, timeline: 0.26 };
 /** The timeline's default height never goes under this, so a small window still shows two tracks whole. */
