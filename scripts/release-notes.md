@@ -4,8 +4,8 @@ The seventh alpha of Nuzky, a free, open-source video editor for your computer. 
 
 - **Edit from your phone, like CapCut.** The page you open from the QR code is now a small editor: a preview with Undo, Redo and Play, every track under a playhead in the middle, and Split, Duplicate, Detach audio and Delete when you tap a clip. Pick the AI agent, its model and past chats there, start a new project or open one from your list. The QR button is now on the home screen too.
 - **One Settings window.** `Cmd+,` or `Ctrl+,`, the gear in the editor and Settings in the home screen's sidebar open every setting in one place, with search. New there: how much disk Nuzky takes, with Clear for its caches; Learn from my edits, to stop Your style learning from every export; Revoke for a plugin's full access; Remove for a speech model you don't use; and Privacy, one list of everything that goes online and whether it's on.
-- **Captions for some clips only.** Select clips on the timeline and Generate in the Captions tab makes captions only over them. Captions elsewhere stay as they were, hand edits included.
-- **More room for the video.** The side panels and the timeline start smaller, and the AI panel opens in the inspector's place, so the video keeps its size while an agent works.
+- **Captions for some clips only.** Select video clips on the timeline and Generate in the Captions tab makes captions only over them. Captions elsewhere stay as they were, hand edits included.
+- **More room for the video.** The side panels and the timeline start smaller, and the AI panel opens in the inspector's place by default, so the video keeps its size while an agent works.
 
 ## Fixed
 
@@ -30,7 +30,7 @@ The seventh alpha of Nuzky, a free, open-source video editor for your computer. 
 
 ## Updates
 
-Once a day Nuzky reads the version number of the latest release on this page, and nothing else. When a newer one is out, the version at the bottom of the home screen's sidebar says so. Click it and choose Update: Nuzky downloads the new version from this page and keeps it only if its signature matches the key built into Nuzky. Then it saves your project, installs the new version and restarts. If you keep working while it downloads, it waits until you click Restart to update, and while an export or another job runs, the restart waits for it. Nothing downloads or installs before you click. To turn the check off, untick Check automatically in the same menu.
+Once a day Nuzky reads the version number of the latest release on this page, and nothing else. When a newer one is out, the version at the bottom of the home screen's sidebar says so. Click it and choose Update: Nuzky downloads the new version from this page and keeps it only if its signature matches the key built into Nuzky. Then it saves your project, installs the new version and restarts. If you keep working while it downloads, it waits until you click Restart to update, and while an export or another job runs, the restart waits for it. Nothing downloads or installs before you click. To turn the check off, choose Update settings… in the same menu and untick Check automatically.
 
 ## Found a bug?
 
