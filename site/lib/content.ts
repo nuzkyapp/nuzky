@@ -19,7 +19,7 @@ export const capcutDraftParts = "Clips, cuts, speed, volume, keyframes, texts, c
 export const faq: Faq[] = [
   {
     q: "Which computers does it run on?",
-    a: "Macs with Apple silicon and macOS 14 or newer. 64-bit Intel or AMD PCs with Linux and glibc 2.39 or newer, like Ubuntu 24.04. Windows 10 or 11 on a 64-bit Intel or AMD PC. Intel Macs, and Windows or Linux on ARM, aren't supported.",
+    a: "Macs with Apple silicon and macOS 15 or newer. 64-bit Intel or AMD PCs with Linux and glibc 2.39 or newer, like Ubuntu 24.04. Windows 10 or 11 on a 64-bit Intel or AMD PC. Intel Macs, and Windows or Linux on ARM, aren't supported.",
     link: { label: "See the downloads", href: "#download" },
   },
   {

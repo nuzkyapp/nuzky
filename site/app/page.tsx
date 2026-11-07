@@ -33,7 +33,7 @@ const structuredData = (release: Release) => ({
       image: `${url}/media/icon.png`,
       applicationCategory: "MultimediaApplication",
       applicationSubCategory: "Video editor",
-      operatingSystem: "macOS 14 or newer on Apple silicon, Windows 10 or 11 (64-bit), Linux (x86_64)",
+      operatingSystem: "macOS 15 or newer on Apple silicon, Windows 10 or 11 (64-bit), Linux (x86_64)",
       ...(release.version && { softwareVersion: release.version }),
       releaseNotes: release.notes,
       downloadUrl: [...new Set(systems.flatMap((s) => s.files.map((f) => release.files[f.id].href)))],
