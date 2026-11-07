@@ -47,7 +47,7 @@
     "category": "Video",
     "shortDescription": "A local desktop video editor",
     "macOS": {
-      "minimumSystemVersion": "14.0"
+      "minimumSystemVersion": "15.0"
     },
     "windows": {
       "bundleVCRuntime": true,

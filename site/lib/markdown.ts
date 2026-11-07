@@ -29,7 +29,7 @@ const summary =
   "Nuzky is a free, open source desktop video editor in the spirit of CapCut, for TikTok, Reels, Shorts and YouTube. It opens your CapCut drafts, writes captions locally in your language and lets ChatGPT, Claude Code or Codex make the rough cut in the open project while you watch.";
 
 const status = (r: Release) =>
-  `Status: early, so expect rough edges. ${r.version ? `Current version: ${r.version}. ` : ""}Download it at ${url}/#download for a Mac with Apple silicon and macOS 14 or newer, a 64-bit Intel or AMD PC with Linux and glibc 2.39 or newer or Windows 10 or 11 on a 64-bit Intel or AMD PC. Intel Macs, and Windows or Linux on ARM, aren't supported. License: GPL-3.0-or-later.`;
+  `Status: early, so expect rough edges. ${r.version ? `Current version: ${r.version}. ` : ""}Download it at ${url}/#download for a Mac with Apple silicon and macOS 15 or newer, a 64-bit Intel or AMD PC with Linux and glibc 2.39 or newer or Windows 10 or 11 on a 64-bit Intel or AMD PC. Intel Macs, and Windows or Linux on ARM, aren't supported. License: GPL-3.0-or-later.`;
 
 const downloads = (r: Release) =>
   systems

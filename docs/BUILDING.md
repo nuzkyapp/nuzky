@@ -1,6 +1,6 @@
 # Building and distributing Nuzky
 
-Use current stable Rust (minimum 1.94, which `candle-core` needs for its NEON code on Apple Silicon), Node.js 22.12+ and the committed Cargo/npm lockfiles. Pull requests run lint, types, the app and website builds, clippy, `cargo test --workspace --locked`, the dependency audits and the check without AVX2 on `ubuntu-24.04` (`.github/workflows/checks.yml`) for every pull request that is not a draft and every push to `main`. A release tag runs the tests and a release Tauri build on `ubuntu-24.04` (x86_64), `macos-14` (arm64) and `windows-2022` (x64). It needs no secrets; with the Apple secrets set, the macOS build is also signed with a Developer ID and notarized (macOS, Signing and notarization). This build pipeline is not evidence that editing, playback or export has been tested on all three systems.
+Use current stable Rust (minimum 1.94, which `candle-core` needs for its NEON code on Apple Silicon), Node.js 22.12+ and the committed Cargo/npm lockfiles. Pull requests run lint, types, the app and website builds, clippy, `cargo test --workspace --locked`, the dependency audits and the check without AVX2 on `ubuntu-24.04` (`.github/workflows/checks.yml`) for every pull request that is not a draft and every push to `main`. A release tag runs the tests and a release Tauri build on `ubuntu-24.04` (x86_64), `macos-15` (arm64) and `windows-2022` (x64). It needs no secrets; with the Apple secrets set, the macOS build is also signed with a Developer ID and notarized (macOS, Signing and notarization). This build pipeline is not evidence that editing, playback or export has been tested on all three systems.
 
 ## Worktree dependency builds
 
@@ -80,7 +80,7 @@ npm run tauri dev
 
 These exports match the Darwin environment used by `scripts/check.sh` and `scripts/repro.py`: link against `ffmpeg@8`, use the selected Xcode SDK, and run FFmpeg fixtures with `ffmpeg-full` for `drawtext`. Keep them in the terminal for manual workspace builds and tests.
 
-Use the [versioned Homebrew formula](https://formulae.brew.sh/formula/ffmpeg@8) so a future `brew ffmpeg` upgrade does not silently change the FFmpeg major version. CI installs plain `ffmpeg`, FFmpeg 9.0 on 10 October 2026: the Homebrew metadata of the `macos-14` runner image predates `ffmpeg@8`. Current Homebrew has no bottles for macOS 14, so updating Homebrew on that runner would build FFmpeg and its dependencies from source. The engine tests in CI take `drawtext` from `ffmpeg-full`, as below. The [GitHub runner catalog](https://github.com/actions/runner-images) maps `macos-14` to arm64; CI also asserts `uname -m` is `arm64`.
+Use the [versioned Homebrew formula](https://formulae.brew.sh/formula/ffmpeg@8) so a future `brew ffmpeg` upgrade does not silently change the FFmpeg major version. CI installs plain `ffmpeg` from the Homebrew metadata of the `macos-15` runner image, FFmpeg 9.0.2 on 7 November 2026. Current Homebrew has no bottles for macOS 15, so updating Homebrew on that runner would build FFmpeg and its dependencies from source. GitHub retired the arm64 `macos-14` runner in November 2026. The engine tests in CI take `drawtext` from `ffmpeg-full`, as below. The [GitHub runner catalog](https://github.com/actions/runner-images) maps `macos-15` to arm64; CI also asserts `uname -m` is `arm64`.
 
 If every C link fails with `ld: tapi error: malformed file … libSystem.tbd … unknown architecture arm64e.x1-macos`, the selected Xcode is older than the Command Line Tools SDK the compiler picks (Xcode 26 on macOS 27). Update Xcode, or give the toolchain its own SDK: `export SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"`. Switching to the Command Line Tools 27 instead builds in debug, but its `strip` with the macOS 27 SDK and the 14.0 deployment target writes proc-macro libraries that dyld rejects (`mis-aligned LINKEDIT string pool`), so release builds fail.
 
@@ -92,7 +92,7 @@ node scripts/build-bundles.mjs
 
 The script first builds `target/release/bundle/macos/Nuzky.app`. `bundle-macos-libs.py` walks the executable's `otool -L` dependencies recursively, copies non-system dylibs to `Contents/Frameworks`, rewrites references using `install_name_tool`, and ad-hoc signs the modified libraries and app. It rejects unresolved libraries and basename collisions. It checks `codesign --verify --deep --strict` and creates `dmg/Nuzky_<version>_aarch64.dmg`. Finder lays out the dmg's window, the background from `src-tauri/dmg` with Nuzky and an Applications link beside it, so the build needs a logged-in macOS session and asks once for permission to control Finder; it stops while another disk named Nuzky is mounted, because Finder would lay out that one instead. Copy the app out of the mounted image into Applications. End users do not need Homebrew for these prepared bundles. A raw `npm run tauri build` does not run this relocation step and still requires the build machine's Homebrew libraries.
 
-The deployment minimum is macOS 14.
+The deployment minimum is macOS 15: the Homebrew bottles CI bundles on the `macos-15` runner are built for macOS 15, and dyld refuses them on an older system.
 
 ### Signing and notarization
 
@@ -230,7 +230,7 @@ The version draft carries these six files. Their names change only with the vers
 
 | File | What |
 |---|---|
-| `Nuzky_<version>_aarch64.dmg` | macOS 14 or newer, Apple Silicon |
+| `Nuzky_<version>_aarch64.dmg` | macOS 15 or newer, Apple Silicon |
 | `Nuzky_<version>_aarch64.app.tar.gz` | the notarized app the macOS updater installs |
 | `Nuzky_<version>_x64-setup.exe` | Windows x64 installer |
 | `Nuzky_<version>_amd64.AppImage` | Linux x86_64 |
