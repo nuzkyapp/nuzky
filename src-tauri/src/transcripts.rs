@@ -303,7 +303,7 @@ pub(crate) mod tests {
     use nuzky_engine::{
         Project,
         edit::{EditCmd, new_id},
-        model::{Asset, AssetKind},
+        model::{Asset, AssetKind, Clip, ClipContent, Credit, License},
         speech,
     };
     use nuzky_session::{
@@ -311,41 +311,28 @@ pub(crate) mod tests {
         transcripts::{Record, TranscriptStore, VERSION},
     };
 
-    /// A 10 s talk with a word every second and its stored transcript, plus music on its own track.
-    pub(crate) fn fixture() -> (std::path::PathBuf, Host) {
-        let dir = std::env::temp_dir().join(format!("app-transcripts-{}", new_id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let asset = |id: &str, kind| {
-            let path = dir.join(id);
-            std::fs::write(&path, id).unwrap();
-            Asset {
-                id: id.into(),
-                name: id.into(),
-                path: path.to_string_lossy().into(),
-                kind,
-                duration_us: 10_000_000,
-                width: 1080,
-                height: 1920,
-                fps: 30.0,
-                has_audio: true,
-                rotation: 0,
-                mirror: false,
-                credit: None,
-                part: None,
-            }
-        };
-        let mut project = Project::new("transcript");
-        project
-            .apply(EditCmd::AddAssets {
-                assets: vec![asset("talk", AssetKind::Video), asset("music", AssetKind::Audio)],
-            })
-            .unwrap();
-        project.apply(EditCmd::AddClip { asset_id: "talk".into(), start_us: None, track_id: None }).unwrap();
-        project.apply(EditCmd::AddClip { asset_id: "music".into(), start_us: Some(0), track_id: None }).unwrap();
-        let path = dir.join("project.nuzky");
-        std::fs::write(&path, serde_json::to_vec(&project).unwrap()).unwrap();
-        let store = TranscriptStore::at(dir.join("transcripts")).unwrap();
-        let talk = &project.assets[0];
+    fn file(dir: &std::path::Path, id: &str, kind: AssetKind) -> Asset {
+        let path = dir.join(id);
+        std::fs::write(&path, id).unwrap();
+        Asset {
+            id: id.into(),
+            name: id.into(),
+            path: path.to_string_lossy().into(),
+            kind,
+            duration_us: 10_000_000,
+            width: 1080,
+            height: 1920,
+            fps: 30.0,
+            has_audio: true,
+            rotation: 0,
+            mirror: false,
+            credit: None,
+            part: None,
+        }
+    }
+
+    /// A word every second of `asset`, "w0" at 0.5-0.9 s to "w7", stored as its transcript.
+    fn store_words(store: &TranscriptStore, asset: &Asset) {
         let words = (0..8)
             .map(|i| speech::Word {
                 start_us: 500_000 + i * 1_000_000,
@@ -354,23 +341,98 @@ pub(crate) mod tests {
                 probability: 0.9,
             })
             .collect();
-        store
-            .put(
-                talk,
-                &Record {
-                    version: VERSION,
-                    fingerprint: store.fingerprint(talk).unwrap(),
-                    duration_us: talk.duration_us,
-                    model: "fixture".into(),
-                    language: "cs".into(),
-                    words,
-                    segments: vec![],
-                    alignment: None,
-                },
-            )
-            .unwrap();
+        let record = Record {
+            version: VERSION,
+            fingerprint: store.fingerprint(asset).unwrap(),
+            duration_us: asset.duration_us,
+            model: "fixture".into(),
+            language: "cs".into(),
+            words,
+            segments: vec![],
+            alignment: None,
+        };
+        store.put(asset, &record).unwrap();
+    }
+
+    /// A 10 s talk with a word every second and its stored transcript, plus a song from the sound library on its own
+    /// track.
+    pub(crate) fn fixture() -> (std::path::PathBuf, Host) {
+        let dir = std::env::temp_dir().join(format!("app-transcripts-{}", new_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let music = Asset {
+            credit: Some(Credit {
+                source: "openverse".into(),
+                id: "b386828e".into(),
+                title: "Lofy".into(),
+                author: "macouno".into(),
+                license: License::CcBy,
+                license_version: "3.0".into(),
+                license_url: "https://creativecommons.org/licenses/by/3.0/".into(),
+                url: "https://www.jamendo.com/track/317391".into(),
+            }),
+            ..file(&dir, "music", AssetKind::Audio)
+        };
+        let mut project = Project::new("transcript");
+        project.apply(EditCmd::AddAssets { assets: vec![file(&dir, "talk", AssetKind::Video), music] }).unwrap();
+        project.apply(EditCmd::AddClip { asset_id: "talk".into(), start_us: None, track_id: None }).unwrap();
+        project.apply(EditCmd::AddClip { asset_id: "music".into(), start_us: Some(0), track_id: None }).unwrap();
+        let path = dir.join("project.nuzky");
+        std::fs::write(&path, serde_json::to_vec(&project).unwrap()).unwrap();
+        let store = TranscriptStore::at(dir.join("transcripts")).unwrap();
+        store_words(&store, &project.assets[0]);
         let session = ProjectSession::open(&path, Mode::Write, None).unwrap();
         (dir.clone(), Host { session, jobs: Default::default(), transcripts: store, cache_dir: dir.join("cache") })
+    }
+
+    #[test]
+    fn word_and_pause_cuts_cut_a_voice_over_kept_in_place_with_the_picture() {
+        let (dir, host) = fixture();
+        let talk = host.session.state().unwrap().project.tracks[0].clips[0].id.clone();
+        // A voice memo of the user's own over the talk, whose own sound is turned off.
+        let voice = file(&dir, "voice.m4a", AssetKind::Audio);
+        store_words(&host.transcripts, &voice);
+        let mute = serde_json::from_value(serde_json::json!({"type": "updateClip", "clipId": talk, "volume": 0})).unwrap();
+        host.session
+            .edit(
+                vec![
+                    EditCmd::AddAssets { assets: vec![voice] },
+                    EditCmd::AddClip { asset_id: "voice.m4a".into(), start_us: Some(0), track_id: None },
+                    mute,
+                ],
+                None,
+                Expect::default(),
+            )
+            .unwrap();
+        // How long the talk, the voice-over and the song play, checking the voice-over keeps its place while cutting.
+        let lengths = |host: &Host| {
+            let project = host.session.state().unwrap().project;
+            let plays = |c: &Clip, id: &str| matches!(&c.content, ClipContent::Media { asset_id, .. } if asset_id == id);
+            let voice_track = project.tracks.iter().find(|t| t.clips.iter().any(|c| plays(c, "voice.m4a"))).unwrap();
+            assert!(voice_track.keep_in_place);
+            ["talk", "voice.m4a", "music"].map(|id| {
+                project.tracks.iter().flat_map(|t| &t.clips).filter(|c| plays(c, id)).map(|c| c.duration_us).sum::<i64>()
+            })
+        };
+        let first = view(&host, 300_000).unwrap();
+        assert_eq!(first.words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>(), ["w0", "w1", "w2", "w3", "w4", "w5", "w6", "w7"]);
+        assert!(first.untranscribed.is_empty());
+        assert_eq!(lengths(&host), [10_000_000; 3]);
+
+        let (_, _, removed_us) =
+            cut(&host, &first.key, Target::Words { delete: vec![[2, 3]], hesitations: vec![] }).unwrap();
+        let cut_view = view(&host, 300_000).unwrap();
+        assert_eq!(cut_view.words.len(), 6);
+        assert_eq!(lengths(&host), [10_000_000 - removed_us, 10_000_000 - removed_us, 10_000_000]);
+
+        let before = lengths(&host);
+        cut(&host, &cut_view.key, Target::Pauses { pause_us: 300_000, only: None, hesitations: vec![] }).unwrap();
+        let after = lengths(&host);
+        let tightened = before[1] - after[1];
+        assert!(tightened > 0);
+        assert_eq!(after, [before[0] - tightened, before[1] - tightened, 10_000_000]);
+        assert!(view(&host, 300_000).unwrap().pauses.is_empty());
+        drop(host);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

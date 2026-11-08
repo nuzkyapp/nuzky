@@ -4,7 +4,7 @@ import { api, errorText, plainError } from "../../lib/api";
 import { checkFaces, useFaces } from "../../lib/faces";
 import { useReframe } from "../../lib/reframe";
 import { CAPTION_STYLES, isLook, scaleStyle } from "../../lib/presets";
-import { type CaptionLook, speechBlocker, startSpeech, useSpeech } from "../../lib/speech";
+import { type CaptionLook, speaks, speechBlocker, startSpeech, useSpeech } from "../../lib/speech";
 import { MAIN_TRACK, applyCaptionLook, isCaptionTrack, patched, presetOver, restyleCaptions, useCanvasUnit, useEditor } from "../../lib/store";
 import type { CaptionPreset, Clip } from "../../lib/types";
 import { CaptionPosition, HighlightRows, KeywordRows, MainStyle, MoreStyleFold, type SetStyle } from "../inspector/TextSection";
@@ -23,8 +23,11 @@ const GRID = "grid grid-cols-[repeat(auto-fill,minmax(96px,1fr))] gap-2";
 
 const clips = (n: number) => `${n} ${n === 1 ? "clip" : "clips"}`;
 
-/** The selected video clips off the captions track, which Generate can caption alone, as their ids joined by spaces. */
-function useSelectedVideos(): string {
+/**
+ * The selected video clips and clips of the user's own sound files, such as a voice-over, off the captions track, which
+ * Generate can caption alone, as their ids joined by spaces.
+ */
+function useSelectedClips(): string {
   return useEditor((s) => {
     const project = s.snap?.project;
     if (!project) return "";
@@ -33,7 +36,11 @@ function useSelectedVideos(): string {
       .flatMap((t) => t.clips)
       .filter((c) => {
         const media = c.content;
-        return s.selection.includes(c.id) && media.type === "media" && project.assets.some((a) => a.id === media.assetId && a.kind === "video");
+        return (
+          s.selection.includes(c.id) &&
+          media.type === "media" &&
+          project.assets.some((a) => a.id === media.assetId && (a.kind === "video" || (a.kind === "audio" && speaks(a))))
+        );
       })
       .map((c) => c.id)
       .join(" ");
@@ -112,7 +119,7 @@ export function CaptionsTab() {
   const reframing = useReframe((s) => !!s.job);
 
   // Captions go over the selected videos unless Whole video was picked since the selection last changed.
-  const selected = useSelectedVideos();
+  const selected = useSelectedClips();
   const whole = useSpeech((s) => s.captionsWhole);
   const ids = selected && !whole ? selected.split(" ") : [];
   const replaced = useCaptionsOver(ids);

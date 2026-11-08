@@ -696,7 +696,7 @@ pub enum ClipContent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         shape: Option<Shape>,
         /// Ducking, for music under speech: how many dB the clip goes down while someone speaks in
-        /// a video's own sound, coming back in the pauses. 0 turns it off.
+        /// a video's own sound or a voice-over, coming back in the pauses. 0 turns it off.
         #[serde(default, skip_serializing_if = "is_zero")]
         duck_db: f32,
         /// Mono: the clip plays one sound in both ears, made from both sides of its file or only from

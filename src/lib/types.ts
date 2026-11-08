@@ -423,7 +423,7 @@ export type ClipContent = {
   shape?: Shape | null,
   /**
    * Ducking, for music under speech: how many dB the clip goes down while someone speaks in
-   * a video's own sound, coming back in the pauses. 0 turns it off.
+   * a video's own sound or a voice-over, coming back in the pauses. 0 turns it off.
    */
   duckDb?: number,
   /**
@@ -701,8 +701,8 @@ export type EditCmd = {
    */
   shape?: Shape | null,
   /**
-   * Ducking: how many dB the clip goes down while a video's own sound has speech, up to 40;
-   * 0 turns it off. 12 suits music under speech.
+   * Ducking: how many dB the clip goes down while speech is heard, in a video's own sound or a
+   * voice-over, up to 40; 0 turns it off. 12 suits music under speech.
    */
   duckDb?: number | null,
   /**

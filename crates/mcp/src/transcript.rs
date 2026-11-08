@@ -9,7 +9,7 @@ use nuzky_analysis::{AudioSource, CaptionGrouping, HESITATION_US, group_words};
 use nuzky_engine::{
     Project,
     audio::prepared_peaks,
-    edit::{CaptionPreset, EditCmd, TimeRange, TransformPatch, merge_ranges},
+    edit::{CaptionPreset, EditCmd, TimeRange, TransformPatch, merge_ranges, stays_in_place},
     effects::source_time,
     model::{Asset, Clip, ClipContent, MAX_CORRECTION_CHARS, Track, WordCorrection},
     speech::{TimelineWord, Word, is_heard, map_words},
@@ -1164,9 +1164,17 @@ pub struct Cut {
     pub words: Vec<TimelineWord>,
 }
 
-/// One ripple edit removing `ranges`, checked to remove exactly the words they cover.
+/// One ripple edit removing `ranges`, checked to remove exactly the words they cover. A track kept in place that
+/// plays words, such as a voice-over, is cut too, so its words go and it stays with the picture.
 pub fn plan_cut(project: &Project, derived: &Derived, ranges: Vec<TimeRange>) -> Result<Cut> {
-    let edit = EditCmd::RippleDeleteRanges { ranges: ranges.clone(), keep_track_ids: None };
+    let speaking: HashSet<&str> = derived.words.iter().map(|w| w.clip_id.as_str()).collect();
+    let kept = project
+        .tracks
+        .iter()
+        .filter(|t| stays_in_place(t) && !t.clips.iter().any(|c| speaking.contains(c.id.as_str())))
+        .map(|t| t.id.clone())
+        .collect();
+    let edit = EditCmd::RippleDeleteRanges { ranges: ranges.clone(), keep_track_ids: Some(kept) };
     let mut preview = project.clone();
     preview.apply(edit.clone()).context("EDIT_REJECTED: preview failed")?;
     nuzky_session::validate(&preview)?;
