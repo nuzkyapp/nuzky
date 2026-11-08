@@ -3894,6 +3894,7 @@ dependencies = [
  "tokio",
  "ts-rs",
  "uds_windows",
+ "unicode-normalization",
  "ureq",
  "url",
  "windows-sys 0.61.2",

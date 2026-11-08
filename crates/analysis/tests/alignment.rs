@@ -31,6 +31,7 @@ fn connected_czech_speech_is_timed_to_its_word_boundaries() -> Result<()> {
         &models.join("ggml-large-v3-turbo-q5_0.bin"),
         &models.join(nuzky_analysis::VAD_MODEL),
         "cs",
+        &[],
         || false,
         |_| {},
     )?;
@@ -54,6 +55,7 @@ fn connected_czech_speech_is_timed_to_its_word_boundaries() -> Result<()> {
         &cache,
         &aligner,
         &models.join("ggml-large-v3-turbo-q5_0.bin"),
+        &[],
         &|| false,
         &mut |_| {},
     )?;

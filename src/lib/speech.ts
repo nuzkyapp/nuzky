@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { api, errorText, plainError } from "./api";
 import { aiLocked, currentEpoch, enqueue, undoAction, useEditor, whenIdle } from "./store";
 import { CAPTION_STYLES } from "./presets";
+import { MAX_NAMES, MAX_NAME_CHARS, isSaved, loadNames, nameOf, rememberName, useNames } from "./names";
 import type { Animation, Project, TextStyle, TranscriptCut, TranscriptView, WordsCorrected } from "./types";
 
 /** Characters per caption when captions show 1–3 words, like reels. */
@@ -217,7 +218,17 @@ export async function correctWord(key: string, i: number, text: string, shown: s
   if (!out.done) return false;
   const n = out.done.captions;
   const captions = n > 0 ? `, also in ${n === 1 ? "its caption" : `${n} captions`}` : "";
-  useEditor.getState().toast({ kind: "info", text: `Corrected “${shown}” to “${text}”${captions}`, action: undoAction(out.done.snapshot) });
+  if (useNames.getState().names === null) await loadNames();
+  // Only a word the user chooses to keep is saved: a typo or a reworded sentence is not a name.
+  const name = nameOf(text);
+  const offer =
+    name !== nameOf(shown) && /[\p{L}\p{N}]/u.test(name) && [...name].length <= MAX_NAME_CHARS && !isSaved(name) && (useNames.getState().names?.length ?? 0) < MAX_NAMES;
+  useEditor.getState().toast({
+    kind: "info",
+    text: `Corrected “${shown}” to “${text}”${captions}`,
+    action: undoAction(out.done.snapshot),
+    secondary: offer ? { label: "Save as a name", run: () => void rememberName(name) } : undefined,
+  });
   return true;
 }
 

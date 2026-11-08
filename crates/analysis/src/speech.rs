@@ -19,6 +19,9 @@ const CS: usize = RATE / 100;
 const GAP: usize = RATE / 5;
 /// Audio Whisper encodes in one pass.
 const WINDOW: usize = 30 * RATE;
+/// Most tokens of the user's names one recognition reads: whisper.cpp keeps at most half of its 448-token text
+/// context as the prompt and drops its start beyond that, which would cut the oldest name in half.
+const HINT_TOKENS: usize = 200;
 
 /// Keeps Vulkan on FP32: FP16 moves Whisper word times by up to 330 ms, and FP32 is as fast. ggml reads
 /// `GGML_VK_DISABLE_F16` when its backend starts, so a binary calls this first in `main`.
@@ -114,15 +117,19 @@ pub fn transcribe_words_cancellable(
     cancelled: impl Fn() -> bool,
     progress: impl FnMut(f32),
 ) -> Result<Transcript> {
-    transcribe_with_regions(source, model_path, vad_model_path, language, cancelled, progress).map(|(t, _)| t)
+    transcribe_with_regions(source, model_path, vad_model_path, language, &[], cancelled, progress).map(|(t, _)| t)
 }
 
-/// Recognition plus its original VAD regions, retained only while measuring a new transcript.
+/// Recognition plus its original VAD regions, retained only while measuring a new transcript. `names` are the
+/// user's spellings of names, oldest first, which Whisper reads as text heard just before each region: it then
+/// tends to write a name it hears that way. A hint, not a rule: it never adds a name nobody said.
+#[allow(clippy::too_many_arguments)]
 pub fn transcribe_with_regions(
     source: AudioSource<'_>,
     model_path: &Path,
     vad_model_path: &Path,
     language: &str,
+    names: &[String],
     cancelled: impl Fn() -> bool,
     mut progress: impl FnMut(f32),
 ) -> Result<(Transcript, Vec<(usize, usize)>)> {
@@ -170,7 +177,8 @@ pub fn transcribe_with_regions(
         let (speech, _) = compact_audio(audio, &enough.collect::<Vec<_>>());
         // Its own state: recognising on the detecting one marked the first region as no speech.
         let mut detect = context.create_state().context("Creating speech recognition state")?;
-        let mut params = recognition_params("auto");
+        // Without the names, which are often English and would pull a Czech take towards English.
+        let mut params = recognition_params("auto", &[]);
         params.set_detect_language(true);
         let abort: &dyn Fn() -> bool = &cancelled;
         // SAFETY: `abort` outlives `full`, which calls the callback only while it runs.
@@ -180,6 +188,7 @@ pub fn transcribe_with_regions(
             whisper_rs::get_lang_str(detect.full_lang_id_from_state()).context("Missing detected language")?.into();
         check()?;
     }
+    let hint = hint_tokens(&context, names);
     let mut state = context.create_state().context("Creating speech recognition state")?;
     // Independent decoding prevents tokens from drifting across compacted pauses.
     let total: usize = regions.iter().map(|(start, end)| end - start).sum();
@@ -187,7 +196,7 @@ pub fn transcribe_with_regions(
     for &region in &regions {
         check()?;
         let (compact, mapping) = compact_audio(audio, &[region]);
-        let mut params = recognition_params(&transcript.language);
+        let mut params = recognition_params(&transcript.language, &hint);
         let abort: &dyn Fn() -> bool = &cancelled;
         // SAFETY: `abort` outlives `full`, which calls the callback only while it runs.
         unsafe { stop_on(&mut params, &abort) };
@@ -230,15 +239,17 @@ pub(crate) fn recognise_again(
     audio: &[f32],
     pieces: &[(usize, usize)],
     language: &str,
+    names: &[String],
     cancelled: &dyn Fn() -> bool,
     progress: &mut dyn FnMut(f32),
 ) -> Result<Transcript> {
     let mut transcript = Transcript { language: language.into(), words: Vec::new(), segments: Vec::new() };
+    let hint = hint_tokens(context, names);
     let mut state = context.create_state()?;
     for (i, &piece) in pieces.iter().enumerate() {
         ensure!(!cancelled(), "CANCELLED: transcription cancelled");
         let (audio, mapping) = compact_audio(audio, &[piece]);
-        let mut params = recognition_params(language);
+        let mut params = recognition_params(language, &hint);
         let mut within =
             |percent: i32| progress((i as f32 + percent.clamp(0, 100) as f32 / 100.0) / pieces.len() as f32);
         let mut within: &mut dyn FnMut(i32) = &mut within;
@@ -298,8 +309,24 @@ fn stopped(error: whisper_rs::WhisperError, cancelled: &impl Fn() -> bool, doing
     }
 }
 
-fn recognition_params(language: &str) -> FullParams<'_, '_> {
+/// The newest of `names` that fit in [`HINT_TOKENS`], as Whisper's tokens of " Nůžky, Claude Code.".
+fn hint_tokens(context: &WhisperContext, names: &[String]) -> Vec<i32> {
+    (0..names.len())
+        .find_map(|oldest| {
+            // With the space before it, as openai-whisper tokenizes a prompt: the names then read as words heard
+            // mid-sentence. Without it "Clod Code" was heard where "Claude Code" was said.
+            let text = format!(" {}.", names[oldest..].join(", "));
+            // Every token holds at least one byte, so this many never overflows the buffer.
+            context.tokenize(&text, text.len() + 1).ok().filter(|tokens| tokens.len() <= HINT_TOKENS)
+        })
+        .unwrap_or_default()
+}
+
+fn recognition_params<'a, 'b>(language: &'a str, hint: &'b [i32]) -> FullParams<'a, 'b> {
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+    if !hint.is_empty() {
+        params.set_tokens(hint);
+    }
     params.set_n_threads(4);
     params.set_language((language != "auto").then_some(language));
     params.set_token_timestamps(true);
@@ -550,7 +577,7 @@ mod tests {
             asked.set(asked.get() + 1);
             true
         };
-        let mut params = recognition_params("en");
+        let mut params = recognition_params("en", &[]);
         let abort: &dyn Fn() -> bool = &cancelled;
         // SAFETY: `abort` outlives `full`.
         unsafe { stop_on(&mut params, &abort) };
