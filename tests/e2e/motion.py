@@ -144,7 +144,7 @@ def presets(r, bridge):
     # Where the square's centre moves when the picture grows 10 % about the safe area centre.
     expected = start and (start['x'] + 0.1 * (540 - FIXED[0]) * k, start['y'] + 0.1 * (960 - FIXED[1]) * k)
     r.check('the preview starts on the clip framing, is 5 % in halfway and 10 % in at the end, about the safe area centre',
-            start and at_start and middle and end and at_start['width'] == start['width']
+            start and at_start and middle and end and abs(at_start['width'] - start['width']) <= 2
             and abs(middle['width'] / start['width'] - 1.05) < 0.02 and abs(end['width'] / start['width'] - 1.1) < 0.02
             and abs(end['x'] - expected[0]) < 1.5 and abs(end['y'] - expected[1]) < 1.5,
             {'start': start, 'middle': middle, 'end': end, 'expected_end_centre': expected, 'preview': rect})

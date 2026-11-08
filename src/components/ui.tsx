@@ -483,7 +483,7 @@ export function NumberInput({
 }
 
 const THUMB = 22;
-/** The longest label, in characters, that fits a property row's 76 px label column at 12 px ("Temperature", "Position X"). */
+/** The longest label, in characters, that fits a property row's 80 px label column at 12 px, which WebKitGTK draws wider than WebKit on macOS ("Temperature", "Position X"). */
 const INLINE_LABEL = 12;
 
 /**
@@ -541,7 +541,7 @@ export function RangeInput({
 
 /**
  * A property row as in CapCut: a short label, the slider and a typeable value on one line; a label too long for its
- * 76 px column, and a narrow row beside another, put it above.
+ * 80 px column, and a narrow row beside another, put it above.
  */
 export function Slider({
   label,
@@ -582,7 +582,7 @@ export function Slider({
   const inline = !narrow && label.length <= INLINE_LABEL;
   return (
     <div className={inline ? "flex min-h-7 items-center gap-2" : "flex flex-col gap-0.5"} title={lock ?? title}>
-      <span className={`truncate text-[12px] leading-4 ${inline ? "w-[76px] shrink-0" : ""} ${disabled && !lock ? "text-subtle" : "text-muted"}`}>{label}</span>
+      <span className={`truncate text-[12px] leading-4 ${inline ? "w-20 shrink-0" : ""} ${disabled && !lock ? "text-subtle" : "text-muted"}`}>{label}</span>
       <div className={`flex items-center gap-2 ${inline ? "min-w-0 flex-1" : ""}`}>
         <RangeInput
           label={name}

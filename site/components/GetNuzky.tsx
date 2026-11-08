@@ -163,7 +163,7 @@ export function HeroDownload({ release, base = "" }: { release: Release; base?: 
           true,
           <>
             <Status>
-              <span className="text-muted">For Macs with Apple silicon and macOS 14 or newer</span>
+              <span className="text-muted">For Macs with Apple silicon and macOS 15 or newer</span>
             </Status>
             <Note>
               Also for {also("linux")} and {also("windows")}. {version}

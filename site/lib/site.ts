@@ -60,7 +60,7 @@ export const systems: {
   {
     id: "mac",
     name: "Mac",
-    requirement: "Apple silicon (M1 or newer), macOS 14 or newer",
+    requirement: "Apple silicon (M1 or newer), macOS 15 or newer",
     note: "Apple notarized it, so macOS opens it after one question.",
     files: [{ id: "dmg", label: "Download .dmg", what: "Disk image. Drag Nuzky to Applications.", phone: "A .dmg disk image" }],
   },

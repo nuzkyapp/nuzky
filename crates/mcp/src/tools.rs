@@ -1938,8 +1938,13 @@ pub(crate) fn caption_plan(
     (transcripts, cache): (&nuzky_session::transcripts::TranscriptStore, &Path),
     stopped: &dyn Fn() -> bool,
 ) -> Result<(EditCmd, crate::style::Defaults)> {
+    let scope = args.clip_ids.as_deref().map(|ids| transcript::clip_ranges(project, ids)).transpose()?;
+    let needed = scope.as_deref().map(|ranges| transcript::heard_assets_in(project, ranges));
     let derived = transcript::derive(media, transcripts)?;
-    ensure!(derived.untranscribed.is_empty(), "TRANSCRIPT_MISSING: transcribe all heard assets before captions");
+    ensure!(
+        derived.untranscribed.iter().all(|id| needed.as_ref().is_some_and(|needed| !needed.contains(id))),
+        "TRANSCRIPT_MISSING: transcribe all heard assets before captions"
+    );
     ensure!(!stopped(), "CANCELLED: job cancelled");
     let mut from = crate::style::Defaults::read();
     let grouping = args.grouping(&mut from);
@@ -1947,7 +1952,7 @@ pub(crate) fn caption_plan(
     let energy = nuzky_analysis::prepared_word_energy(media, &derived.words, &derived.sources, cache)?;
     ensure!(!stopped(), "CANCELLED: job cancelled");
     let keys = nuzky_analysis::key_words(&derived.words, &energy);
-    let (mut edit, _) = transcript::caption_edit(&derived.words, &keys, project, look, grouping)?;
+    let (mut edit, _) = transcript::caption_edit_in(&derived.words, &keys, project, look, grouping, scope.as_deref())?;
     // Without a place of their own, captions made again stay where the ones they replace were.
     if let EditCmd::AddCaptions { transform, .. } | EditCmd::ReplaceCaptions { transform, .. } = &mut edit {
         *transform = args.transform.or(*transform);

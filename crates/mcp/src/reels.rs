@@ -483,6 +483,7 @@ fn finish_reel(
     step(finish.captions, "Captions", &|media| {
         let args = crate::params::Captions {
             run_id: String::new(),
+            clip_ids: None,
             style: None,
             style_preset: None,
             max_words: None,

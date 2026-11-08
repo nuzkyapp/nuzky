@@ -197,8 +197,16 @@ export const api = {
   startCoverExport: (format: ThumbnailFormat, path: string, replaceExisting: boolean, epoch: Epoch) =>
     invoke<string>("start_cover_export", { format, path, replaceExisting, expectedEpoch: epoch }),
   /** `maxWords`/`maxChars` null group by phrase, capped at 12 words and 42 characters. */
-  startCaptions: (model: string, language: string, look: { style: TextStyle; animIn: Animation | null; animOut: Animation | null }, maxWords: number | null, maxChars: number | null, epoch: Epoch) =>
-    invoke<string>("start_captions", { request: { model, language, ...look, maxWords, maxChars }, expectedEpoch: epoch }),
+  /** Captions for the whole video, or only over `clipIds`, keeping the other captions. */
+  startCaptions: (
+    model: string,
+    language: string,
+    look: { style: TextStyle; animIn: Animation | null; animOut: Animation | null },
+    maxWords: number | null,
+    maxChars: number | null,
+    clipIds: string[] | null,
+    epoch: Epoch,
+  ) => invoke<string>("start_captions", { request: { model, language, ...look, maxWords, maxChars, clipIds }, expectedEpoch: epoch }),
   /** The user's own caption styles, kept beside the projects; each change returns the list. */
   captionStyles: () => invoke<CaptionPreset[]>("caption_styles"),
   saveCaptionStyle: (style: CaptionPreset) => invoke<CaptionPreset[]>("save_caption_style", { style }),

@@ -191,8 +191,12 @@ def plugin_pauses(r):
     r.check('the inspector says how much shorter the video gets', shown, r.s.run('return document.body.innerText.slice(-600)'))
     r.check('the preview leaves the project unchanged', project(r) == before)
     r.shot('pauses-preview')
-    preview = r.s.call("window.__nuzky.api.previewPlugin('remove-pauses', arguments[0], [], 0).then((p) => JSON.stringify(p.project))",
-                       {'minSeconds': 0.3, 'keepSeconds': 0.05})
+    # The inspector's own preview of the same plugin cancels this one when it starts after it; ask again then.
+    for _ in range(3):
+        preview = r.s.call("window.__nuzky.api.previewPlugin('remove-pauses', arguments[0], [], 0).then((p) => JSON.stringify(p.project))",
+                           {'minSeconds': 0.3, 'keepSeconds': 0.05})
+        if preview['ok'] or not str(preview.get('error', '')).startswith('CANCELLED'):
+            break
     expected = cuts(json.loads(preview['value'])['tracks']) if preview['ok'] else None
     r.check('the preview of these settings cuts pauses out of the main track',
             expected and len(expected[0]) > 1 and expected[0][-1][0] + expected[0][-1][1] < length, preview)
