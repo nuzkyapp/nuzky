@@ -46,7 +46,8 @@ jobs:
           # A new release starts its package at 1; a run by hand keeps the pkgrel of the PKGBUILD it fixes.
           if [ "$EVENT" = release ]; then sed -i 's/^pkgrel=.*/pkgrel=1/' PKGBUILD; fi
           chown -R builder: .
-          su builder -c 'updpkgsums && makepkg --noconfirm && makepkg --printsrcinfo > .SRCINFO'
+          # The container has none of the libraries the installed app needs, and repackaging needs none of them.
+          su builder -c 'updpkgsums && makepkg --noconfirm --nodeps && makepkg --printsrcinfo > .SRCINFO'
           bsdtar -tvf nuzky-bin-*.pkg.tar.zst > contents.txt
           # The AppImage keeps its folders at 0700, which would let only root start Nuzky.
           if awk '$1 ~ /^d/ && $1 != "drwxr-xr-x"' contents.txt | grep .; then
