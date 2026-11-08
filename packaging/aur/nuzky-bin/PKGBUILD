@@ -1,0 +1,49 @@
+# Maintainer: Tomáš Mach <52257177+tomasmach@users.noreply.github.com>
+# .github/workflows/aur.yml sets _tag and the checksum from each published release and pushes this file to the AUR.
+pkgname=nuzky-bin
+_tag=0.1.8-alpha
+# pacman sorts 0.1.8alpha before 0.1.8 and after 0.1.7, as semver sorts 0.1.8-alpha.
+pkgver=${_tag//-/}
+pkgrel=1
+pkgdesc='Desktop video editor in the spirit of CapCut, with local captions and AI agents that cut for you'
+arch=('x86_64')
+url='https://nuzky.app'
+license=('GPL-3.0-or-later')
+# What the AppImage takes from the system; it carries FFmpeg, WebKitGTK, GTK and the rest.
+depends=('alsa-lib' 'e2fsprogs' 'expat' 'fontconfig' 'freetype2' 'fribidi' 'glibc' 'gmp' 'graphite' 'harfbuzz'
+  'hicolor-icon-theme' 'libdrm' 'libgcc' 'libglvnd' 'libgpg-error' 'libstdc++' 'libx11' 'libxau' 'libxcb'
+  'libxdmcp' 'mesa' 'wayland' 'zlib')
+optdepends=('vulkan-driver: preview and speech recognition on the graphics card')
+provides=('nuzky')
+conflicts=('nuzky')
+options=('!strip' '!debug')
+_appimage="Nuzky_${_tag}_amd64.AppImage"
+source=("$_appimage::https://github.com/nuzkyapp/nuzky/releases/download/v$_tag/$_appimage")
+noextract=("$_appimage")
+sha256sums=('9a85ea851072c1602c35e4649c4aa3e48eb7d78e66e9cf5777c54cd62ec78eb7')
+
+prepare() {
+  rm -rf squashfs-root
+  chmod +x "$_appimage"
+  "./$_appimage" --appimage-extract >/dev/null
+}
+
+package() {
+  install -d "$pkgdir/opt"
+  cp -a squashfs-root "$pkgdir/opt/nuzky"
+  # The AppImage's folders are 0700, which only the owner, root once installed, could open.
+  chmod -R u=rwX,go=rX "$pkgdir/opt/nuzky"
+  # AppRun points GTK and WebKit at the libraries inside. pacman updates Nuzky, so the app never offers its own update.
+  install -Dm755 /dev/stdin "$pkgdir/usr/bin/nuzky-app" <<'EOF'
+#!/bin/sh
+export NUZKY_NO_UPDATE_CHECK=1
+exec /opt/nuzky/AppRun "$@"
+EOF
+  # Named after the window's Wayland app_id, so Hyprland and launchers show its icon.
+  install -Dm644 squashfs-root/Nuzky.desktop "$pkgdir/usr/share/applications/nuzky-app.desktop"
+  local icon size
+  for icon in squashfs-root/usr/share/icons/hicolor/*/apps/nuzky-app.png; do
+    size=${icon#squashfs-root/usr/share/icons/hicolor/}
+    install -Dm644 "$icon" "$pkgdir/usr/share/icons/hicolor/${size%%/*}/apps/nuzky-app.png"
+  done
+}

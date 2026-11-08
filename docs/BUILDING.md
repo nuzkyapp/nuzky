@@ -83,6 +83,30 @@ urpmi gamescope python3-xlib espeak-ng
 
 Six engine tests cannot make their fixtures with Mageia 10's FFmpeg and fail: its `libx265` encodes only 8-bit pictures and its `scale` filter has no `out_color_matrix=bt2020nc`, which `qa_describe`, `qa_proxy` and the HDR tests of `qa_video` use, and FFmpeg 7.1 counts the average frame rate of `qa_describe`'s VFR fixture as 900/41, not the 21.43 the test expects; Nuzky reports what `ffprobe` reports. The HDR and 10-bit paths are therefore not tested on Mageia. The `heic` flow fails there too: it makes an HLG photo, and its reference is `ffmpeg`'s own picture of the file, which FFmpeg 7.1 draws as one tile. Nuzky joins the tiles with FFmpeg 7.1 but shows a rotated or mirrored HEIC photo as stored, because FFmpeg reads the rotation and mirroring of a tile grid only from 8.0 on.
 
+### Arch Linux and Omarchy
+
+Arch ships FFmpeg 9 with `libx264`, and Nuzky builds against it as it is:
+
+```sh
+sudo pacman -S --needed base-devel rustup nodejs npm clang cmake ffmpeg webkit2gtk-4.1 alsa-lib \
+  vulkan-headers vulkan-icd-loader shaderc
+npm ci
+node scripts/fetch-onnxruntime.mjs
+npm run tauri dev
+```
+
+The UI flows of `scripts/repro.py` and `scripts/fixtures.sh` also need these. Arch ships `WebKitWebDriver` only in `webkitgtk-6.0`, and the flows drive Nuzky's WebKitGTK 4.1 with it:
+
+```sh
+sudo pacman -S --needed gamescope python-xlib python-pillow python-numpy espeak-ng yt-dlp webkitgtk-6.0
+```
+
+On Omarchy 4.5 with an AMD Radeon RX 6800 XT, the debug build and the `home`, `edit`, `export`, `orientation` and `first-run` flows passed. The ignored tests have not been run on Arch.
+
+Users install `nuzky-bin` from the AUR: `yay -S nuzky-bin`, or Install › AUR in Omarchy's menu. `packaging/aur/nuzky-bin/PKGBUILD` unpacks the release's AppImage into `/opt/nuzky`, with its own FFmpeg, WebKitGTK and ONNX Runtime, and adds `/usr/bin/nuzky-app`, which starts it through `AppRun` with `NUZKY_NO_UPDATE_CHECK=1`, because pacman updates it. The desktop file is `nuzky-app.desktop`, the window's Wayland app_id. Agents get `/opt/nuzky/usr/bin/nuzky-app` as the MCP command, which stays the same across updates.
+
+`.github/workflows/aur.yml` runs when a release is published. Its `build` job builds the package in an `archlinux:base-devel` container from the release's AppImage, writes the checksum, checks that every folder is readable by everyone and that the binary, `AppRun`, ONNX Runtime and the desktop file are there, and keeps `PKGBUILD` and `.SRCINFO`. The `publish` job, on a fresh machine and alone with the `AUR_SSH_PRIVATE_KEY` secret, pushes those two files to `ssh://aur@aur.archlinux.org/nuzky-bin.git` against AUR's pinned host key. A release sets `pkgrel` to 1. To fix the PKGBUILD for a version already out, raise `pkgrel` in a pull request and, once it is merged, run the workflow by hand with that release's tag. The secret is the private half of an SSH key whose public half is in the AUR account that maintains `nuzky-bin` (My Account › SSH Public Key).
+
 On a host with `rpm` whose `/etc/os-release` names neither Debian nor Ubuntu, `build-bundles.mjs` builds only `target/release/bundle/rpm/*.rpm`, linked against the system's FFmpeg like the `.deb`. It bundles ONNX Runtime and the licence notices in `/usr/lib/Nuzky` and no FFmpeg. Its requirements are SONAMEs (`libavcodec.so.61()(64bit)` and the like) taken from `pkg-config`, so it installs only where the FFmpeg it was linked against is, whatever the distribution calls its packages. The verifier checks every bundle it finds in `target/release/bundle`, and on Debian and Ubuntu requires the AppImage and the `.deb`. For the `.rpm` it checks that the package holds the binary and ONNX Runtime as regular files, that it requires every FFmpeg, GTK, WebKitGTK and ALSA library the binary links plus the Vulkan loader, and that this system provides each requirement. It wants one package of each kind; remove an old one the bundler left beside the new. The release builds no `.rpm`, and `latest.json` names none, so an installed `.rpm` does not update itself: Update says to download the new version, and you build it again.
 
 For a local Fedora/Nobara AppImage, or a separate build directory:
@@ -254,7 +278,7 @@ Only the maintainer tags and publishes. A release, `v0.1.0-alpha` included, goes
 3. **Installers.** The maintainer installs the draft's installers on a clean machine of each system and tests importing a phone video, preview with sound, H.264/AAC export and captions, the macOS app with Homebrew absent and Windows with no FFmpeg on PATH. On macOS, a notarized app opens after one question whether to open an app from the internet, and an app that is not notarized opens with Open Anyway. On Windows, More info → Run anyway starts it. Both match the draft's notes, and the foot of the home screen's sidebar shows the new version.
 4. **Third-party source.** The `reuse-third-party-source` job copies the archives that did not change to `third-party-source-<version>`, and its run summary names the rest with the build-info lines that changed. The maintainer collects those and attaches them, as Redistribution below describes, so the draft carries all four.
 5. **Publish** the draft as a regular release, with "Set as a pre-release" off and "Set as the latest release" on. Installed copies and `update-notice.yml` read `releases/latest`, which GitHub never points at a prerelease, so an alpha published as a prerelease would never be announced. The `-alpha` in the version already says what it is. At the same time, publish `third-party-source-<version>` with "Set as a pre-release" on; it must never become the latest release.
-6. **Announcement.** On publishing, `update-notice.yml` reads `latest.json` as an installed copy does and fails, which GitHub reports by email, unless it shows the new tag.
+6. **Announcement.** On publishing, `update-notice.yml` reads `latest.json` as an installed copy does and fails, which GitHub reports by email, unless it shows the new tag. `aur.yml` puts the new version into the AUR's `nuzky-bin` and fails the same way when it cannot.
 
 The updater uses `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Only the release job uses these secrets. The maintainer keeps a backup outside GitHub: losing the key means installed copies can never update themselves again and need a manual reinstall. The public key is in `src-tauri/tauri.conf.json`.
 
