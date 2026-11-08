@@ -13,6 +13,14 @@ const bundle = path.join(target, 'release', 'bundle');
 mkdirSync(bundle, { recursive: true });
 const run = (cmd, args) => execFileSync(cmd, args, { stdio: 'inherit' });
 const output = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8' }).trim();
+const hasCommand = (cmd) => {
+  try {
+    execFileSync('sh', ['-c', `command -v ${cmd}`], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+};
 const { version } = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8'));
 const config = { bundle: {} };
 let bundles;
@@ -29,8 +37,38 @@ const notices = Object.fromEntries([
     .map((d) => [path.join(root, 'assets', 'fonts', d.name, 'OFL.txt'), `licenses/fonts/${d.name}/OFL.txt`]),
 ]);
 
+// A Linux host that is not Debian or Ubuntu but has rpm, such as Mageia 10, builds an .rpm against its own FFmpeg
+// instead. Its own dpkg, if installed, knows none of its libraries.
+const debianLike = () => {
+  try {
+    const release = readFileSync('/etc/os-release', 'utf8');
+    const ids = [...release.matchAll(/^(?:ID|ID_LIKE)="?([^"\n]*)"?$/gm)].flatMap((m) => m[1].split(' '));
+    return ids.some((id) => id === 'debian' || id === 'ubuntu');
+  } catch {
+    return true;
+  }
+};
+const rpmHost = process.platform === 'linux' && !debianLike() && hasCommand('rpm');
+
 switch (process.platform) {
   case 'linux': {
+    if (rpmHost) {
+      bundles = 'rpm';
+      // Requirements by SONAME, which rpm-based distributions provide whatever their packages are called, so the
+      // package installs only where the FFmpeg it was linked against is present. Tauri adds WebKitGTK and GTK itself.
+      const sonames = ['libasound.so.2', 'libvulkan.so.1'];
+      const ffmpegLibs = ['libavcodec', 'libavformat', 'libavutil', 'libswscale', 'libswresample'];
+      for (const lib of ffmpegLibs) {
+        sonames.push(`${lib}.so.${output('pkg-config', ['--modversion', lib]).split('.')[0]}`);
+      }
+      config.bundle.linux = { rpm: { depends: sonames.map((name) => `${name}()(64bit)`) } };
+      const libdir = output('pkg-config', ['--variable=libdir', 'libavcodec']);
+      const avcodec = path.join(libdir, sonames.find((name) => name.startsWith('libavcodec')));
+      ffmpegSource = `The .rpm bundles no FFmpeg; it uses the system's, here ${output('rpm', ['-qf', avcodec])} from ${output('rpm', ['-qf', '--qf', '%{SOURCERPM}', avcodec])}.`;
+      // Resources land in usr/lib/Nuzky, where the app looks.
+      config.bundle.resources = { [ort.library]: path.basename(ort.library), ...notices };
+      break;
+    }
     bundles = 'appimage,deb';
     const dependencies = ['libwebkit2gtk-4.1-0', 'libgtk-3-0t64', 'libasound2t64'];
     for (const lib of ['libavcodec', 'libavformat', 'libavutil', 'libswscale', 'libswresample']) {
@@ -110,7 +148,10 @@ if (process.platform === 'darwin') {
   // Formulae only: the bundled libraries come from them, and a cask from an untrusted tap makes plain `brew list` fail.
   info.push(output('brew', ['list', '--formula', '--versions']));
 }
-if (process.platform === 'linux') {
+if (rpmHost) {
+  info.push(output('cat', ['/etc/os-release']));
+  info.push(output('rpm', ['-qa', '--qf', '%{NAME} %{VERSION}-%{RELEASE}\n']).split('\n').sort().join('\n'));
+} else if (process.platform === 'linux') {
   // linuxdeploy copied these libraries from Ubuntu's packages; docs/BUILDING.md fetches their source by this list.
   const appdir = path.join(bundle, 'appimage', 'Nuzky.AppDir');
   const libs = output('find', [appdir, '-type', 'f', '-name', '*.so*', '-not', '-path', '*/usr/lib/Nuzky/*', '-printf', '%f\n']);
