@@ -1,6 +1,6 @@
 import time as clock
 
-from e2e.harness import FIXTURES, flow, wait
+from e2e.harness import FIXTURES, MACOS, flow, swipe, wait
 from e2e.timeline_select import PRESS, RECT, RELEASE
 
 HEADER_W = 152
@@ -16,11 +16,20 @@ el.dispatchEvent(new WheelEvent('wheel', {bubbles: true, cancelable: true, ctrlK
 SCROLL_ZOOM = "return [document.querySelector('[data-ruler]').closest('.overflow-auto').scrollLeft, window.__nuzky.store.getState().zoom]"
 SCROLL_TO = "document.querySelector('[data-ruler]').closest('.overflow-auto').scrollLeft = arguments[0]"
 TO_END = "const el = document.querySelector('[data-ruler]').closest('.overflow-auto'); el.scrollLeft = el.scrollWidth"
+# The scroll and the first track header's left edge on every frame from now on.
+WATCH_FRAMES = """const el = document.querySelector('[data-ruler]').closest('.overflow-auto'); window.__frames = [];
+const header = () => el.querySelector('[role=listbox]').previousElementSibling.getBoundingClientRect().left;
+const frame = () => { window.__frames.push([el.scrollLeft, header()]); if (window.__frames.length < 300) requestAnimationFrame(frame); };
+requestAnimationFrame(frame);"""
+# 200 px into the lanes, level with the first clip.
+LANE_POINT = """const el = document.querySelector('[data-ruler]').closest('.overflow-auto'); const r = el.getBoundingClientRect();
+const c = el.querySelector('[data-clip-id]').getBoundingClientRect(); return [r.left + 152 + 200, (c.top + c.bottom) / 2];"""
 
 
 @flow('timeline_scroll', 'Scrolling the timeline to its end again and again stops where the lanes end: the ruler does not '
       'stretch it, the last clip ends in the middle of the lanes, the track headers stay put, the ruler has its times up to the right edge '
-      'and zooming out there keeps the moment under the pointer; dragging two captions does not stretch it either')
+      'and zooming out there keeps the moment under the pointer; dragging two captions does not stretch it either. On macOS, '
+      'a trackpad swipe that carries on past either end does not move the lanes and track headers off the edge')
 def timeline_scroll(r):
     r.import_media(FIXTURES / 'talk.mp4')
     r.add_clip('talk.mp4')
@@ -67,3 +76,29 @@ def timeline_scroll(r):
     r.check('dragging two captions while scrolled to the end does not stretch the timeline', len(set(widths)) == 1, widths)
     r.s.run(SCROLL_TO, 0)
     r.s.run(RELEASE, x + 200, y, {})
+
+    if MACOS:
+        # Fast swipes that carry on past each end, fingers still on the trackpad so a stretch holds.
+        r.s.run('window.__nuzky.store.getState().setZoom(200)')
+        clock.sleep(0.3)
+        v = r.s.run(VIEW)
+        last = v['scrollWidth'] - (v['right'] - v['left'])
+        for edge, start, dx, reached, inside in (
+                ('start', 100, 25, lambda s: s <= 0, lambda s: s >= 0),
+                ('end', last - 100, -25, lambda s: s >= last - 1, lambda s: s <= last)):
+            r.s.run(SCROLL_TO, start)
+            clock.sleep(0.3)
+            x, y = r.s.run(LANE_POINT)
+            r.s.run(WATCH_FRAMES)
+            swipe('began', x, y, dx // 10, 0)
+            for _ in range(10):
+                swipe('changed', x, y, dx, 0)
+                clock.sleep(0.016)
+            clock.sleep(0.2)
+            r.shot(f'pulled-past-{edge}')
+            swipe('ended', x, y)
+            clock.sleep(0.3)
+            frames = r.s.run('return window.__frames')
+            r.check(f'the swipe reached the {edge}', any(reached(s) for s, _ in frames), (last, frames))
+            r.check(f'swiping past the {edge} does not move the timeline off its edge',
+                    all(inside(s) and abs(h - v['left']) < 1 for s, h in frames), (v['left'], last, sorted({tuple(f) for f in frames})))

@@ -4,6 +4,7 @@
 //! leaves the person at the Mac alone. The harness sends the same few WebDriver requests it sends WebKitWebDriver
 //! on Linux, plus real key and pointer events, over a private socket like the agents' one: a 0700 folder in
 //! `XDG_RUNTIME_DIR`, a 0600 socket and the secret in every request. Nothing listens on the network.
+use std::ffi::c_void;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -15,6 +16,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context as _, Result, anyhow, bail, ensure};
 use base64::Engine as _;
 use block2::RcBlock;
+use objc2::encode::{Encoding, RefEncode};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject, Bool, Imp, Sel};
 use objc2::{class, ffi, msg_send, sel};
@@ -22,18 +24,49 @@ use objc2_app_kit::{
     NSBitmapImageFileType, NSBitmapImageRep, NSButton, NSEvent, NSEventModifierFlags, NSEventType, NSImage,
     NSSavePanel, NSView, NSWindow, NSWindowCollectionBehavior,
 };
-use objc2_foundation::{NSActivityOptions, NSArray, NSDictionary, NSError, NSPoint, NSProcessInfo, NSString};
+use objc2_foundation::{NSActivityOptions, NSArray, NSDictionary, NSError, NSPoint, NSProcessInfo, NSRect, NSString};
 use objc2_web_kit::WKWebView;
 use serde_json::{Value, json};
 use tauri::{LogicalSize, Manager, WebviewWindow};
 
 static TOKEN: OnceLock<Option<String>> = OnceLock::new();
 
+#[repr(C)]
+struct CGEvent {
+    _opaque: [u8; 0],
+}
+
+// As AppKit's `eventWithCGEvent:` declares its argument.
+unsafe impl RefEncode for CGEvent {
+    const ENCODING_REF: Encoding = Encoding::Pointer(&Encoding::Struct("__CGEvent", &[]));
+}
+
 #[link(name = "CoreGraphics", kind = "framework")]
 unsafe extern "C" {
     fn CGSMainConnectionID() -> i32;
     /// Place 0 orders the window out.
     fn CGSOrderWindow(connection: i32, window: i32, place: i32, relative_to: i32) -> i32;
+    fn CGEventCreateScrollWheelEvent2(
+        source: *const c_void,
+        units: u32,
+        wheels: u32,
+        y: i32,
+        x: i32,
+        z: i32,
+    ) -> *mut CGEvent;
+    fn CGEventSetIntegerValueField(event: *mut CGEvent, field: u32, value: i64);
+    fn CGEventSetLocation(event: *mut CGEvent, location: NSPoint);
+    fn CGMainDisplayID() -> u32;
+    fn CGDisplayBounds(display: u32) -> NSRect;
+}
+
+// CoreGraphics' CGEventField numbers.
+const SCROLL_WHEEL_EVENT_IS_CONTINUOUS: u32 = 88;
+const SCROLL_WHEEL_EVENT_SCROLL_PHASE: u32 = 99;
+
+#[link(name = "CoreFoundation", kind = "framework")]
+unsafe extern "C" {
+    fn CFRelease(object: *const c_void);
 }
 
 /// Takes the secret out of the environment before any other thread exists, so the agents and `nuzky mcp` the
@@ -225,6 +258,7 @@ fn handle(app: &tauri::AppHandle, method: &str, path: &str, body: &Value) -> Res
         }
         ("POST", "nuzky/keys") => keys(&window, serde_json::from_value(body["keys"].clone())?),
         ("POST", "nuzky/pointer") => pointer(&window, body),
+        ("POST", "nuzky/swipe") => swipe(&window, body),
         ("GET", "alert/text") => on_main(&window, |_, ns_window| {
             let sheet = sheet(ns_window)?;
             Ok(json!(sheet_text(&sheet)))
@@ -418,6 +452,41 @@ fn pointer(window: &WebviewWindow, body: &Value) -> Result<Value> {
             NSEventType::LeftMouseDown => target.mouseDown(&event),
             _ => target.mouseUp(&event),
         }
+        Ok(Value::Null)
+    })
+}
+
+/// One step of two fingers on a trackpad at a point of the page: `began`, `changed` by `dx` and `dy` pixels the
+/// fingers moved, or `ended`. Only such a gesture, not a mouse wheel or the page's own events, lets WebKit stretch a
+/// scroller past its edge as macOS does.
+fn swipe(window: &WebviewWindow, body: &Value) -> Result<Value> {
+    let (x, y) = (body["x"].as_f64().context("x")?, body["y"].as_f64().context("y")?);
+    let (dx, dy) = (body["dx"].as_f64().unwrap_or(0.0) as i32, body["dy"].as_f64().unwrap_or(0.0) as i32);
+    let phase = match body["phase"].as_str() {
+        Some("began") => 1,
+        Some("changed") => 2,
+        Some("ended") => 4,
+        phase => bail!("no swipe phase {phase:?}"),
+    };
+    on_main(window, move |_, ns_window| {
+        let content = ns_window.contentView().context("the window has no content")?;
+        let at = NSPoint::new(x, content.frame().size.height - y);
+        let event = unsafe {
+            // In pixels, as a trackpad reports them.
+            let cg = CGEventCreateScrollWheelEvent2(std::ptr::null(), 0, 2, dy, dx, 0);
+            ensure!(!cg.is_null(), "making a scroll event");
+            CGEventSetIntegerValueField(cg, SCROLL_WHEEL_EVENT_IS_CONTINUOUS, 1);
+            CGEventSetIntegerValueField(cg, SCROLL_WHEEL_EVENT_SCROLL_PHASE, phase);
+            // The event names no window, so AppKit gives its screen point as the point in the window.
+            CGEventSetLocation(cg, NSPoint::new(at.x, CGDisplayBounds(CGMainDisplayID()).size.height - at.y));
+            let event: Option<Retained<NSEvent>> = msg_send![class!(NSEvent), eventWithCGEvent: cg];
+            CFRelease(cg.cast());
+            event.context("making a scroll event")?
+        };
+        let got = event.locationInWindow();
+        ensure!((got.x - at.x).abs() < 0.5 && (got.y - at.y).abs() < 0.5, "the swipe landed at {got:?}, not {at:?}");
+        // Straight to the view under the fingers, as `pointer` does.
+        content.hitTest(at).context("nothing is under the pointer")?.scrollWheel(&event);
         Ok(Value::Null)
     })
 }

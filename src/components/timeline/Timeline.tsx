@@ -764,10 +764,13 @@ export function Timeline({ height }: { height: number }) {
         </IconButton>
       </div>
 
-      {/* Inset by 1 px, so the pane's hairline stays visible beside the opaque track headers. */}
+      {/*
+        Inset by 1 px, so the pane's hairline stays visible beside the opaque track headers. Without overscroll-none,
+        a fast trackpad swipe on macOS stretches the lanes past their start and bares the well beside the headers.
+      */}
       <div
         ref={scroller}
-        className="relative mx-px mb-px min-h-0 flex-1 overflow-auto"
+        className="relative mx-px mb-px min-h-0 flex-1 overflow-auto overscroll-none"
         onScroll={(e) => setView({ left: e.currentTarget.scrollLeft, width: e.currentTarget.clientWidth })}
       >
         {/*
