@@ -47,6 +47,7 @@ const ENTRIES: { label: string; pane: Pane; target: string; words?: string }[] =
   { label: "Learn from my edits", pane: "ai", target: "learn", words: "your style export" },
   { label: "Spoken language", pane: "models", target: "speech", words: "captions transcript whisper language" },
   { label: "Captions model", pane: "models", target: "speech", words: "fast balanced most accurate whisper transcript remove delete" },
+  { label: "Names", pane: "models", target: "names", words: "glossary vocabulary spelling words brands tools transcript captions recognition" },
   { label: "Face and person models", pane: "models", target: "vision", words: "faces people cover blur reframe" },
   { label: "Freesound key", pane: "sounds", target: "freesound", words: "api key sound effects search" },
   { label: "yt-dlp", pane: "sounds", target: "ytdlp", words: "youtube music download link" },

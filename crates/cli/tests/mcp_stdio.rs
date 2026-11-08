@@ -4087,7 +4087,7 @@ fn transcript_sentences_and_pages_preserve_long_talk_over_stdio() {
     let full = c.call("get_transcript", json!({}));
     assert_eq!(
         full.as_object().unwrap().keys().map(String::as_str).collect::<Vec<_>>(),
-        ["pauses", "revision", "sentences", "session_epoch", "transcript_key", "untranscribed", "words"]
+        ["names", "pauses", "revision", "sentences", "session_epoch", "transcript_key", "untranscribed", "words"]
     );
     assert_eq!(full["words"].as_array().unwrap().len(), 2200);
     for (i, word) in full["words"].as_array().unwrap().iter().enumerate() {

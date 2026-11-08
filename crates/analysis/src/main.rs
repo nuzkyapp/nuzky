@@ -3,10 +3,10 @@ use std::{io::Write, path::PathBuf};
 use anyhow::{Context, Result, bail};
 use nuzky_analysis::{
     AudioSource, SceneParams, SilenceParams, filler_words, loudness, program_loudness, scene_cuts, silences,
-    transcribe_words,
+    transcribe_with_regions,
 };
 
-const USAGE: &str = "nuzky-analyze <media> <loudness|silences|scenes|beats|words|fillers> [--lang auto|cs|en] [--model path] [--vad-model path] [--cache path]";
+const USAGE: &str = "nuzky-analyze <media> <loudness|silences|scenes|beats|words|fillers> [--lang auto|cs|en] [--model path] [--vad-model path] [--cache path] [--names \"Nůžky, Claude Code\"]";
 
 enum Command {
     Loudness,
@@ -35,6 +35,7 @@ fn main() -> Result<()> {
     let mut model = None;
     let mut vad = None;
     let mut cache = None;
+    let mut names = Vec::new();
     while let Some(arg) = args.next() {
         let value = args.next().with_context(|| format!("Missing value for {arg}"))?;
         match arg.as_str() {
@@ -42,6 +43,7 @@ fn main() -> Result<()> {
             "--model" => model = Some(PathBuf::from(value)),
             "--vad-model" => vad = Some(PathBuf::from(value)),
             "--cache" => cache = Some(PathBuf::from(value)),
+            "--names" => names = value.split(',').map(|n| n.trim().to_owned()).filter(|n| !n.is_empty()).collect(),
             _ => bail!("Unknown argument: {arg}\n{USAGE}"),
         }
     }
@@ -66,8 +68,15 @@ fn main() -> Result<()> {
                 .or_else(|| model.parent().map(|p| p.join(nuzky_analysis::VAD_MODEL)).filter(|p| p.is_file()))
                 .or_else(|| find_model(nuzky_analysis::VAD_MODEL))
                 .context("Pass --vad-model with a local Silero model path")?;
-            let transcript =
-                transcribe_words(AudioSource::Asset { asset: &asset, cache: &cache }, &model, &vad, &language)?;
+            let (transcript, _) = transcribe_with_regions(
+                AudioSource::Asset { asset: &asset, cache: &cache },
+                &model,
+                &vad,
+                &language,
+                &names,
+                || false,
+                |_| {},
+            )?;
             match command {
                 Command::Words => serde_json::to_value(transcript)?,
                 _ => serde_json::to_value(filler_words(&transcript, &language))?,

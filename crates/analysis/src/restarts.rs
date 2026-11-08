@@ -20,6 +20,7 @@ pub fn align_transcript(
     cache: &Path,
     aligner: &Aligner,
     model: &Path,
+    names: &[String],
     cancelled: &dyn Fn() -> bool,
     progress: &mut dyn FnMut(f32),
 ) -> Result<bool> {
@@ -88,6 +89,7 @@ pub fn align_transcript(
                 &audio,
                 &pieces,
                 &transcript.language,
+                names,
                 cancelled,
                 &mut |p| progress(0.8 + 0.2 * (i as f32 + p * 0.5) / count as f32),
             )?;

@@ -1301,6 +1301,7 @@ impl Backend {
             object.remove("pauses");
         }
         result["transcript_key"] = json!(key);
+        result["names"] = json!(crate::glossary::list().unwrap_or_default());
         Ok(result)
     }
 

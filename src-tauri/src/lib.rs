@@ -15,6 +15,7 @@ mod diagnostics;
 mod engine;
 #[cfg(target_os = "macos")]
 mod file_dialogs;
+mod glossary;
 mod jobs;
 mod library;
 mod model_question;
@@ -1364,6 +1365,10 @@ pub fn run() {
             caption_styles::save_caption_style,
             caption_styles::rename_caption_style,
             caption_styles::delete_caption_style,
+            glossary::saved_names,
+            glossary::save_name,
+            glossary::rename_name,
+            glossary::delete_name,
             boot,
             maximize_window,
             set_ui_context,

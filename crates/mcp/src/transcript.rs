@@ -129,11 +129,17 @@ fn recognise_with(
         stage(if waiting { Stage::Waiting } else { Stage::Recognising(0.0) })
     })?;
     let fingerprint = store.fingerprint(asset)?;
+    // A names file that cannot be read leaves recognition as it was without names; Settings shows why.
+    let names = crate::glossary::list().unwrap_or_else(|error| {
+        log::warn!("Recognising without your names: {error:#}");
+        Vec::new()
+    });
     let (mut result, regions) = nuzky_analysis::transcribe_with_regions(
         AudioSource::Asset { asset, cache },
         model_path,
         vad,
         language,
+        &names,
         || cancel.load(Ordering::Relaxed),
         |part| stage(Stage::Recognising(part)),
     )?;
@@ -147,6 +153,7 @@ fn recognise_with(
         cache,
         aligner.as_ref().map(|(a, _)| a),
         model_path,
+        &names,
         cancel,
         &mut |part| stage(Stage::Aligning(part)),
     )?;
@@ -207,6 +214,7 @@ fn measure(
     cache: &Path,
     aligner: Option<&nuzky_analysis::Aligner>,
     model: &Path,
+    names: &[String],
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(f32),
 ) -> Result<bool> {
@@ -221,6 +229,7 @@ fn measure(
                 cache,
                 aligner,
                 model,
+                names,
                 &cancelled,
                 &mut *progress,
             )

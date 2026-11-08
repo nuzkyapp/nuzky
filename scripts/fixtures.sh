@@ -58,6 +58,18 @@ then we remove the pauses and add captions, so everyone can follow along without
 
 say() { espeak-ng -v en-us -s 150 -w "$1" "$speech"; }
 media speech.wav say
+# Names recognition gets wrong without the user's spellings (tests/e2e/names.py): it hears espeak's "Claude Code" as
+# "Cloud Code". Two recordings of the same words at two speeds, so the transcript store tells them apart.
+names() {
+  local dir
+  dir=$(mktemp -d)
+  espeak-ng -v en-us -s "$1" -w "$dir/speech.wav" "Today I cut the video in Nuzky. Claude Code helped me, and then Codex suggested the b-roll."
+  ff -f lavfi -i testsrc2=s=1080x1920:r=30 -i "$dir/speech.wav" -shortest \
+    -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -b:a 128k -f mp4 "$2"
+  rm -rf "$dir"
+}
+media names-1.mp4 names 150
+media names-2.mp4 names 145
 media talk.mp4 ff -f lavfi -i testsrc2=s=1080x1920:r=30 -i "$out/speech.wav" -shortest \
   -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -b:a 128k
 media wide.mp4 ff -f lavfi -i testsrc2=s=1920x1080:r=25:d=5 -f lavfi -i sine=frequency=440:duration=5 \
