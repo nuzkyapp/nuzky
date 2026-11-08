@@ -600,6 +600,12 @@ def pointer(kind, x, y, clicks=1):
     webdriver('POST', '/session/nuzky/nuzky/pointer', {'kind': kind, 'x': x, 'y': y, 'clicks': clicks})
 
 
+def swipe(phase, x, y, dx=0, dy=0):
+    """macOS: one step of two fingers on the trackpad at a point of the page, `began`, `changed` by the pixels they
+    moved, or `ended`. Only such a gesture lets WebKit stretch a scroller past its edge."""
+    webdriver('POST', '/session/nuzky/nuzky/swipe', {'phase': phase, 'x': x, 'y': y, 'dx': dx, 'dy': dy})
+
+
 def close_window(d=None):
     """Closes the app window like the title-bar button."""
     if MACOS:
