@@ -6,6 +6,7 @@ name: Update the AUR package
 on:
   release:
     types: [published]
+  pull_request:
   workflow_dispatch:
     inputs:
       tag:
@@ -22,12 +23,12 @@ concurrency:
 jobs:
   build:
     # The third-party source pre-release has a tag of its own and no AppImage.
-    if: ${{ github.event_name == 'workflow_dispatch' || (!github.event.release.prerelease && startsWith(github.event.release.tag_name, 'v')) }}
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || (!github.event.release.prerelease && startsWith(github.event.release.tag_name, 'v')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     container: archlinux:base-devel@sha256:2de80105abb49f813a85393c6758a4334deb6bcec4a2411bd2f059c0bee6ee4c
     env:
-      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      TAG: ${{ github.event.release.tag_name || inputs.tag || 'v0.1.8-alpha' }}
       EVENT: ${{ github.event_name }}
     steps:
       - name: Build nuzky-bin from the release's AppImage
@@ -70,6 +71,7 @@ jobs:
 
   # Only this job holds the AUR key, on a machine that ran no package or release code.
   publish:
+    if: ${{ github.event_name != 'pull_request' }}
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 10
