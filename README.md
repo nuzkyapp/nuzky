@@ -40,7 +40,7 @@ Download the installer for your system from [Releases](https://github.com/nuzkya
 
 - **macOS 15 or newer on Apple Silicon**: open the `.dmg` and drag Nuzky to Applications. The first time you open it, macOS asks whether to open an app downloaded from the internet; click Open.
 - **Windows 10 or 11, x64**: run the `-setup.exe`. When SmartScreen says "Windows protected your PC", click More info, then Run anyway. The installer downloads Microsoft WebView2 if it is missing.
-- **Linux, x86_64**: on Ubuntu 24.04 or newer, `sudo apt install ./Nuzky_*.deb`. On other distributions with glibc 2.39 or newer, make the `.AppImage` executable with `chmod +x` and run it.
+- **Linux, x86_64**: on Ubuntu 24.04 or newer, `sudo apt install ./Nuzky_*.deb`. On Arch Linux and Omarchy, install `nuzky-bin` from the AUR: `yay -S nuzky-bin`, or Install › AUR in Omarchy's menu; it updates with the system. On other distributions with glibc 2.39 or newer, make the `.AppImage` executable with `chmod +x` and run it.
 
 The first captions or transcript download the speech model once. Nuzky tells you when a newer version is out and downloads it when you click Update, then installs it and restarts. If you keep working while it downloads, it waits until you click Restart to update.
 
