@@ -391,7 +391,8 @@ pub(crate) mod tests {
         // A voice memo of the user's own over the talk, whose own sound is turned off.
         let voice = file(&dir, "voice.m4a", AssetKind::Audio);
         store_words(&host.transcripts, &voice);
-        let mute = serde_json::from_value(serde_json::json!({"type": "updateClip", "clipId": talk, "volume": 0})).unwrap();
+        let mute =
+            serde_json::from_value(serde_json::json!({"type": "updateClip", "clipId": talk, "volume": 0})).unwrap();
         host.session
             .edit(
                 vec![
@@ -406,15 +407,25 @@ pub(crate) mod tests {
         // How long the talk, the voice-over and the song play, checking the voice-over keeps its place while cutting.
         let lengths = |host: &Host| {
             let project = host.session.state().unwrap().project;
-            let plays = |c: &Clip, id: &str| matches!(&c.content, ClipContent::Media { asset_id, .. } if asset_id == id);
+            let plays =
+                |c: &Clip, id: &str| matches!(&c.content, ClipContent::Media { asset_id, .. } if asset_id == id);
             let voice_track = project.tracks.iter().find(|t| t.clips.iter().any(|c| plays(c, "voice.m4a"))).unwrap();
             assert!(voice_track.keep_in_place);
             ["talk", "voice.m4a", "music"].map(|id| {
-                project.tracks.iter().flat_map(|t| &t.clips).filter(|c| plays(c, id)).map(|c| c.duration_us).sum::<i64>()
+                project
+                    .tracks
+                    .iter()
+                    .flat_map(|t| &t.clips)
+                    .filter(|c| plays(c, id))
+                    .map(|c| c.duration_us)
+                    .sum::<i64>()
             })
         };
         let first = view(&host, 300_000).unwrap();
-        assert_eq!(first.words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>(), ["w0", "w1", "w2", "w3", "w4", "w5", "w6", "w7"]);
+        assert_eq!(
+            first.words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>(),
+            ["w0", "w1", "w2", "w3", "w4", "w5", "w6", "w7"]
+        );
         assert!(first.untranscribed.is_empty());
         assert_eq!(lengths(&host), [10_000_000; 3]);
 
