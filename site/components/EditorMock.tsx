@@ -1,6 +1,7 @@
 import { Fragment } from "react";
 import Image from "next/image";
 import {
+  AlertTriangle,
   AudioLines,
   Ban,
   Blend,
@@ -135,11 +136,12 @@ function IconBtn({ i, size = 16, className = "", off = false }: { i: typeof Film
   );
 }
 
-function Seg({ items, on, className = "", icons }: { items: string[]; on: number; className?: string; icons?: (typeof Film | null)[] }) {
+// A segmented control splits evenly; a tab bar (`tabs`) sizes each tab to its label.
+function Seg({ items, on, className = "", icons, tabs = false }: { items: string[]; on: number; className?: string; icons?: (typeof Film | null)[]; tabs?: boolean }) {
   return (
     <div className={`app-seg flex gap-0.5 rounded-[9px] p-0.5 ${className}`}>
       {items.map((t, i) => (
-        <span key={t} className={`flex h-7 flex-auto items-center justify-center gap-1.5 whitespace-nowrap rounded-[7px] px-2 text-[12px] font-medium ${i === on ? "app-seg-on text-fg" : "text-muted"}`}>
+        <span key={t} className={`flex h-7 min-w-0 ${tabs ? "flex-auto" : "flex-1"} items-center justify-center gap-1.5 whitespace-nowrap rounded-[7px] px-2 text-[12px] font-medium ${i === on ? "app-seg-on text-fg" : "text-muted"}`}>
           {icons?.[i] && <Icon i={icons[i]!} size={13} />}
           {t}
         </span>
@@ -291,12 +293,12 @@ function MediaTab({ sizes }: { sizes: Sizes }) {
 // The first caption styles (assets/presets/captions.json), each name drawn in its style as TextSwatch draws it: a
 // karaoke style lights the end of its name, key words its start.
 const captionStyles: { name: string; color: string; bold?: boolean; outline?: number; box?: boolean; lit?: string; key?: string; font?: string }[] = [
-  { name: "Reel", color: "#ffffff", outline: 2 },
+  { name: "Reel", color: "#ffffff", outline: 1.875 },
   { name: "Outline", color: "#ffffff", bold: true, outline: 1.75 },
   { name: "Yellow", color: "#ffe14d", bold: true, outline: 1.75 },
   { name: "Box", color: "#ffffff", bold: true, box: true },
   { name: "Clean", color: "#ffffff", outline: 0.75 },
-  { name: "Karaoke", color: "#ffffff", outline: 2, lit: "#ffe14d" },
+  { name: "Karaoke", color: "#ffffff", outline: 1.875, lit: "#ffe14d" },
   { name: "Green box", color: "#ffffff", bold: true, box: true, lit: "#4ade80" },
   { name: "Hormozi", color: "#ffffff", bold: true, outline: 2, key: "#ffd400" },
 ];
@@ -307,7 +309,7 @@ function StyleName({ s }: { s: (typeof captionStyles)[number] }) {
   return (
     <span
       className={`app-outline truncate rounded px-1 text-[13px] leading-6 ${s.bold ? "font-bold" : ""} ${s.box ? "bg-black/70" : ""}`}
-      style={{ color: s.color, ["--outline" as string]: `${(s.outline ?? 0) * 2}px` }}
+      style={{ color: s.color, ["--outline" as string]: `${s.outline ?? 0}px` }}
     >
       {key > 0 && <span style={{ color: s.key }}>{s.name.slice(0, key)}</span>}
       {s.lit ? (
@@ -327,7 +329,8 @@ function CaptionsTab() {
     <>
       <LibraryTabs on={3} />
       <div className="flex min-h-0 flex-1 flex-col">
-        <Scrolled thumb={[2, 190]} className="flex flex-col gap-3.5 p-3.5">
+        <Scrolled thumb={[30, 190]}>
+          <div className="-mt-11 flex flex-col gap-3.5 p-3.5">
           <Labelled label="Spoken language">
             <Select value="English" />
           </Labelled>
@@ -356,6 +359,7 @@ function CaptionsTab() {
                 );
               })}
             </div>
+          </div>
           </div>
         </Scrolled>
         <div className="flex shrink-0 flex-col gap-2 border-t border-white/[0.1] bg-panel p-3.5">
@@ -386,7 +390,7 @@ const PT = FRAME_W / 1080;
 // picture, a bar along each edge for cropping.
 function SelectionBox({ text = false }: { text?: boolean }) {
   const corner = "absolute size-[9px] bg-fg shadow-[0_0_0_1px_rgb(0_0_0/0.45)]";
-  const bar = "absolute bg-fg shadow-[0_0_0_1px_rgb(0_0_0/0.45)]";
+  const bar = "absolute rounded-full bg-fg shadow-[0_0_0_1px_rgb(0_0_0/0.45)]";
   return (
     <>
       <span className="pointer-events-none absolute inset-0 outline-[1.5px] outline-fg [outline-style:solid]" />
@@ -402,8 +406,8 @@ function SelectionBox({ text = false }: { text?: boolean }) {
           <span className={`${bar} right-[-2.5px] top-1/2 h-[18px] w-[5px] -translate-y-1/2`} />
         </>
       )}
-      {text && <span className="absolute -top-[18px] left-1/2 h-[18px] w-[1.5px] -translate-x-1/2 bg-fg" />}
-      <span className={`absolute left-1/2 size-[11px] -translate-x-1/2 rounded-full border-[1.5px] border-fg ${text ? "-top-[29px] bg-fg" : "top-5 bg-black/30"}`} />
+      <span className={`absolute left-1/2 h-[18px] w-[1.5px] -translate-x-1/2 bg-fg ${text ? "-top-[18px]" : "top-0"}`} />
+      <span className={`absolute left-1/2 size-[11px] -translate-x-1/2 rounded-full border-[1.5px] border-fg ${text ? "-top-[29px] bg-fg" : "top-[18px]"}`} />
     </>
   );
 }
@@ -552,7 +556,7 @@ function Slider({ label, value, unit, at, origin = 0 }: { label: string; value: 
       </div>
       <span className={`relative flex h-6 w-16 shrink-0 items-center justify-end rounded-md border border-white/[0.08] bg-white/[0.055] pl-1.5 text-[12px] tabular-nums ${unit ? "pr-[18px]" : "pr-1.5"}`}>
         {value}
-        {unit && <span className="absolute right-1.5 text-[11px] text-muted">{unit}</span>}
+        {unit && <span className="absolute inset-y-0 right-1.5 flex items-center text-[11px] text-muted">{unit}</span>}
       </span>
     </div>
   );
@@ -562,7 +566,7 @@ function VideoInspector() {
   return (
     <>
       <InspectorHeader tone="bg-clip-video" i={Film} title="IMG_2044.MOV" detail="8.7 s · from 2.0 s of 48.0 s" />
-      <Seg items={["Video", "Adjust", "Speed", "Animation", "Audio"]} on={0} className="mx-3 mb-1" />
+      <Seg items={["Video", "Adjust", "Speed", "Animation", "Audio"]} on={0} tabs className="mx-3 mb-1" />
       <Scrolled thumb={[2, 300]}>
       <Section
         first
@@ -629,7 +633,7 @@ function CaptionInspector() {
   return (
     <>
       <InspectorHeader tone="bg-clip-captions" i={Captions} title="Caption" detail="3.2 s" />
-      <Seg items={["Text", "Animation", "Transform"]} on={0} className="mx-3 mb-1" />
+      <Seg items={["Text", "Animation", "Transform"]} on={0} tabs className="mx-3 mb-1" />
       <Scrolled thumb={[2, 240]}>
       <Section first title="Text">
         <span className="h-[52px] rounded-lg border border-white/[0.08] bg-white/[0.055] px-2.5 py-2 text-[13px] leading-[18px]">we made it</span>
@@ -880,7 +884,7 @@ function CoverTile({ on, sizes }: { on: boolean; sizes: Sizes }) {
   );
 }
 
-function Ruler() {
+function Ruler({ found = [] }: { found?: readonly number[] }) {
   const marks = Array.from({ length: 16 }, (_, k) => k * 2);
   return (
     <div className="relative flex h-7 shrink-0">
@@ -895,6 +899,9 @@ function Ruler() {
             ))}
           </div>
         ))}
+        {found.map((t) => (
+          <span key={t} className="absolute bottom-0.5 size-1.5 -translate-x-1/2 rounded-full bg-fg/60 shadow-[0_0_0_1px_rgb(0_0_0/0.5)]" style={{ left: x(t) }} />
+        ))}
       </div>
     </div>
   );
@@ -906,7 +913,7 @@ function Timeline({ focus, sizes }: { focus: EditorFocus; sizes: Sizes }) {
     <div className="app-pane flex shrink-0 flex-col overflow-hidden bg-well" style={{ height: TIMELINE_H }}>
       <TimelineTools cover={cover} />
       <div className="relative mx-px mb-px flex min-h-0 flex-1 flex-col overflow-hidden">
-        <Ruler />
+        <Ruler found={cover ? frames.map(([, at]) => Number(at.slice(3))) : []} />
         <Lanes focus={focus} sizes={sizes} />
         <div className="flex flex-1">
           <div className="shrink-0 border-r border-white/[0.07] bg-panel" style={{ width: HEADER_W }} />
@@ -1040,7 +1047,10 @@ function ReelList() {
               <div className="flex items-center gap-2">
                 <Checkbox on={r.checked} />
                 <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{r.title}</span>
-                <span className={`flex shrink-0 items-center gap-1 text-[12px] tabular-nums ${r.long ? "text-warn" : "text-muted"}`}>{r.length}</span>
+                <span className={`flex shrink-0 items-center gap-1 text-[12px] tabular-nums ${r.long ? "text-warn" : "text-muted"}`}>
+                  {r.long && <Icon i={AlertTriangle} size={12} />}
+                  {r.length}
+                </span>
               </div>
               <p className="line-clamp-2 text-[13px] leading-[18px] text-fg/90">“{r.hook}”</p>
               <p className="line-clamp-2 text-[12px] leading-4 text-muted">{r.why}</p>
@@ -1049,7 +1059,7 @@ function ReelList() {
                   <ScoreBars lit={r.score >= 75 ? 3 : r.score >= 50 ? 2 : 1} />
                   {r.score}
                 </span>
-                <span className="flex h-6 items-center px-2 text-[12px] font-medium">Reject</span>
+                <span className="flex h-6 items-center px-2 text-[12px] font-medium text-muted">Reject</span>
               </div>
             </div>
           </div>
@@ -1078,8 +1088,8 @@ function CoverFrames({ sizes }: { sizes: Sizes }) {
           Make it with AI
         </span>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-4 pb-4 pt-3">
-        <span className={`flex h-8 items-center justify-center gap-1.5 rounded-lg text-[13px] font-medium ${SECONDARY}`}>
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden pb-4 pl-4 pr-[26px] pt-3">
+        <span className={`flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-lg text-[13px] font-medium ${SECONDARY}`}>
           <Icon i={ScanFace} size={15} />
           Pick again
         </span>
@@ -1143,9 +1153,9 @@ function Switch({ on }: { on: boolean }) {
 
 // The cover's hook, selected: its words, the three cover looks, Behind person and its style (cover/CoverInspector.tsx).
 const coverLooks = [
-  ["Big", "text-white"],
-  ["Yellow box", "rounded-[3px] bg-[#ffd400] px-1 text-[#111]"],
-  ["Outlined", "app-outline text-white"],
+  ["Big", "font-anton text-[26px] text-white", "0px"],
+  ["Yellow box", "rounded px-1 bg-[#ffe14d] text-[16px] font-bold text-[#111]", "0px"],
+  ["Outlined", "app-outline font-anton text-[20px] text-white", "2px"],
 ] as const;
 
 function CoverInspector() {
@@ -1161,12 +1171,12 @@ function CoverInspector() {
       <Section first>
         <span className="h-[52px] rounded-lg border border-white/[0.08] bg-white/[0.055] px-2.5 py-2 text-[13px] leading-[18px]">MORNING RUN</span>
         <div className="grid grid-cols-3 gap-2">
-          {coverLooks.map(([name, look]) => {
+          {coverLooks.map(([name, look, outline]) => {
             const on = name === "Outlined";
             return (
               <div key={name} className="flex flex-col gap-1">
                 <span className={`relative flex h-16 items-center justify-center overflow-hidden rounded-[10px] bg-[#5c5c63] ${on ? "shadow-[inset_0_0_0_2px_var(--color-accent)]" : ""}`}>
-                  <span className={`font-anton text-[22px] leading-none ${look}`} style={{ ["--outline" as string]: "3px" }}>
+                  <span className={`leading-6 ${look}`} style={{ ["--outline" as string]: outline }}>
                     Aa
                   </span>
                   {on && (

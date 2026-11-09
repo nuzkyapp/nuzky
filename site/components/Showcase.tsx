@@ -20,7 +20,7 @@ const tabs: Tab[] = [
     icon: Scissors,
     summary: "A timeline, a live preview and an inspector, laid out the way you know from CapCut.",
     spots: [
-      { x: 1142, y: 667, tip: [870, 395], title: "Magnetic timeline", text: "Clips snap together and every cut lands on the exact frame, even in phone video.", view: { x: 560, y: 660, w: 380 } },
+      { x: 68, y: 575, tip: [16, 440], title: "Magnetic timeline", text: "Clips snap together and every cut lands on the exact frame, even in phone video.", view: { x: 525, y: 660, w: 380 } },
       { x: 285, y: 420, tip: [16, 520], title: "Your media, and YouTube", text: "Drop in video, sound and images, or paste a YouTube link to something that's yours to use.", view: { x: 128, y: 230, w: 300 } },
       { x: 908, y: 433, tip: [614, 470], title: "Inspector", text: "Video, Adjust, Speed, Animation and Audio, with a value you can type beside every slider.", view: { x: 1063, y: 280, w: 300 } },
     ],
@@ -32,7 +32,7 @@ const tabs: Tab[] = [
     summary: "AI on your computer writes the captions and puts each line on the timeline as a clip.",
     spots: [
       { x: 285, y: 358, tip: [16, 520], title: "19 styles, or your own", text: "Pick a style, save your own look, and colour the key words.", view: { x: 128, y: 300, w: 300 } },
-      { x: 822, y: 602, tip: [870, 470], title: "A clip per line", text: "Fix a word or move a line right on the timeline.", view: { x: 560, y: 610, w: 380 } },
+      { x: 822, y: 602, tip: [870, 470], title: "A clip per line", text: "Fix a word or move a line right on the timeline.", view: { x: 525, y: 610, w: 380 } },
       { x: 750, y: 329, tip: [780, 305], title: "The spoken word lights up", text: "Each word lights up as you say it, in the preview and in the export.", view: { x: 593, y: 320, w: 300 } },
     ],
   },
@@ -42,9 +42,9 @@ const tabs: Tab[] = [
     icon: Film,
     summary: "One long video becomes several reels. AI finds the moments, and you trim them by words.",
     spots: [
-      { x: 467, y: 545, tip: [300, 400], title: "AI finds the moments", text: "Each reel opens on a hook and says why it works. Check the ones you want.", view: { x: 215, y: 640, w: 430 } },
+      { x: 467, y: 545, tip: [300, 400], title: "AI finds the moments", text: "Each reel opens on a hook and says why it works. Check the ones you want.", view: { x: 230, y: 660, w: 460 } },
       { x: 283, y: 250, tip: [300, 222], title: "Trim by words", text: "Click a word to play from it, and move the start or the end a word at a time.", view: { x: 128, y: 260, w: 300 } },
-      { x: 1108, y: 492, tip: [880, 350], title: "Each one its own project", text: "Make 2 reels writes two 9:16 projects. The long video stays as it was.", view: { x: 1000, y: 560, w: 470 } },
+      { x: 1108, y: 492, tip: [880, 350], title: "Each one its own project", text: "Make 2 reels writes two 9:16 projects. The long video stays as it was.", view: { x: 1035, y: 600, w: 330 } },
     ],
   },
   {
@@ -64,9 +64,9 @@ const tabs: Tab[] = [
     icon: Upload,
     summary: "Export for Reels, TikTok or YouTube in one click. The file looks exactly like the preview.",
     spots: [
-      { x: 833, y: 392, tip: [860, 410], title: "Made for Reels and TikTok", text: "1080 × 1920 at 30 fps, with the sound as loud as the rest of the feed.", view: { x: 600, y: 375, w: 500 } },
-      { x: 367, y: 492, tip: [16, 470], title: "Same renderer", text: "The same renderer draws the preview and the export.", view: { x: 600, y: 375, w: 500 } },
-      { x: 833, y: 283, tip: [860, 160], title: "Cover and recap too", text: "Export the cover as a picture, or a short video of everything that was cut.", view: { x: 600, y: 375, w: 500 } },
+      { x: 833, y: 392, tip: [860, 410], title: "Made for Reels and TikTok", text: "1080 × 1920 at 30 fps, with the sound as loud as the rest of the feed.", view: { x: 600, y: 380, w: 420 } },
+      { x: 367, y: 417, tip: [16, 470], title: "Same renderer", text: "The same renderer draws the preview and the export.", view: { x: 600, y: 380, w: 420 } },
+      { x: 833, y: 283, tip: [860, 160], title: "Cover and recap too", text: "Export the cover as a picture, or a short video of everything that was cut.", view: { x: 600, y: 380, w: 420 } },
     ],
   },
 ];
