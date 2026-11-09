@@ -1,6 +1,6 @@
 name: Build and test
 
-# The macOS build runs on every push to main; all three systems build installers for release tags
+# macOS and Windows build and test on every push to main; all three systems build installers for release tags
 # (through release.yml) and on request. checks.yml runs Linux checks; scripts/check.sh adds the local gate.
 on:
   push:
@@ -16,7 +16,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && fromJSON('["macos-15"]') || fromJSON('["ubuntu-24.04", "macos-15", "windows-2022"]') }}
+        # Windows on main too: with no cache of its own, 0.1.9-alpha's tag compiled it from scratch for 30 of its tests'
+        # 49 minutes, while everything else had finished, and 0.1.5-alpha's Windows test failure showed only on its tag.
+        os: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && fromJSON('["macos-15", "windows-2022"]') || fromJSON('["ubuntu-24.04", "macos-15", "windows-2022"]') }}
         # One after the other, clippy, the tests and the installers took 71 minutes on Windows, 33 on macOS and 27 on
         # Linux. On machines of their own a release waits only for the longest of them.
         part: [clippy, test, installers]
