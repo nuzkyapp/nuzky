@@ -3,7 +3,6 @@ The ninth alpha of Nuzky, a free, open-source video editor for your computer. It
 ## What's new
 
 - **Captions for a voice-over.** Record your voice apart from the video, for example as a voice memo on your phone, and put the file on an audio track. Generate in the Captions tab now makes captions from it, the Transcript tab shows its words, and deleting a word or the pauses there cuts the voice-over together with the picture. Music set to lower under speech lowers under it too. Songs and effects from the sound library and music from YouTube never turn into captions, but a song you add from your computer counts as your own sound, so its singing does.
-- **Nuzky in the AUR.** On Arch Linux and Omarchy, install `nuzky-bin` with `yay -S nuzky-bin` or Install › AUR in Omarchy's menu. It shows up in your app launcher and updates with the rest of your system.
 
 ## Fixed
 
@@ -18,7 +17,7 @@ The ninth alpha of Nuzky, a free, open-source video editor for your computer. It
 
 - **macOS 15 or newer on Apple Silicon**: the `.dmg`. Open it and drag Nuzky to Applications.
 - **Windows 10 or 11, x64**: the `-setup.exe`. The installer downloads Microsoft WebView2 if it's missing.
-- **Linux, x86_64**: the `.deb` for Ubuntu 24.04 or newer (`sudo apt install ./Nuzky_*.deb`), `nuzky-bin` from the AUR on Arch Linux and Omarchy, or the `.AppImage` for other distributions with glibc 2.39 or newer. Make the AppImage executable with `chmod +x` and run it.
+- **Linux, x86_64**: the `.deb` for Ubuntu 24.04 or newer (`sudo apt install ./Nuzky_*.deb`), or the `.AppImage` for other distributions with glibc 2.39 or newer. Make the AppImage executable with `chmod +x` and run it.
 
 ## Opening an unsigned build
 
