@@ -73,6 +73,10 @@ def preflight(names, jobs):
             or ('first-reel' in names and not all((FIXTURES / f).exists() for f in (
                 'first-reel.mov', 'xdg/data/nuzky/models/ggml-large-v3-turbo-q5_0.bin')))):
         problems.append('test media or models are missing: run scripts/fixtures.sh')
+    for name in names:
+        needs = FLOWS[name][2].needs
+        if needs and (missing := needs()):
+            problems.append(f'{name}: {missing}')
     ports = (1420,) if MACOS else (1420, DRIVER_PORT, DEBUG_PORT) if WINDOWS else (1420, *range(DRIVER_PORT, DRIVER_PORT + jobs))
     problems += [f'port {port} is in use by another session' for port in ports if port_busy(port)]
     return problems

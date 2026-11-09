@@ -6,7 +6,7 @@ model depends on the language, the chosen model follows the language while it is
 downloaded and at least as big. Czech is only the test's system language here."""
 import json, time
 
-from e2e.harness import FIXTURES, MACOS, MODELS, WINDOWS, flow, press, share_recognition_lock, wait
+from e2e.harness import FIXTURES, MACOS, MODELS, WINDOWS, flow, missing_locale, press, share_recognition_lock, system_locale, wait
 from e2e.home import focus_card, make, resize, wait_library
 from e2e.setup import BOX, CLICK, FOCUS_TEXT, relaunch
 from e2e.speech_model import Models
@@ -61,8 +61,8 @@ def before(r):
     (r.work / 'data/nuzky/models').mkdir(parents=True)
     share_recognition_lock(r.work / 'data/nuzky/models')
     r.models = Models(PATHS)
-    r.env.update(NUZKY_MODEL_URL=f'http://127.0.0.1:{r.models.http.server_port}', NUZKY_TEST_FREE_MB=str(FREE_MB),
-                 LANGUAGE='cs', LANG='cs_CZ.UTF-8')
+    r.env.update(NUZKY_MODEL_URL=f'http://127.0.0.1:{r.models.http.server_port}', NUZKY_TEST_FREE_MB=str(FREE_MB))
+    system_locale(r, 'cs_CZ')
     if MACOS:
         r.args = ['-AppleLanguages', '(cs)']
     if WINDOWS:
@@ -115,7 +115,7 @@ def open_setup(r, first_start):
 
 @flow('setup_captions', "Get set up's Captions model step downloads what the first transcript needs, with Stop, resuming, "
       'Try again and a free space check, and keeps the choice after a restart; the first captions download nothing',
-      before=before, home=True)
+      before=before, home=True, needs=lambda: missing_locale('cs_CZ'))
 def setup_captions(r):
     try:
         run(r)

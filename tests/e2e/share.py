@@ -1,4 +1,4 @@
-import base64, http.client, json, socket, time, urllib.request
+import base64, glob, http.client, json, socket, time, urllib.request
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
@@ -53,11 +53,24 @@ class Page:
             connection.close()
 
 
+def mini_browser():
+    """WebKitGTK 4.1's MiniBrowser, in the folder each distribution keeps WebKit's programs in: /usr/libexec on Fedora,
+    /usr/lib on Arch and /usr/lib/<architecture> on Debian and Ubuntu. None when there is none."""
+    found = [p for pattern in ('/usr/libexec', '/usr/lib', '/usr/lib64', '/usr/lib/*')
+             for p in sorted(glob.glob(f'{pattern}/webkit2gtk-4.1/MiniBrowser'))]
+    return Path(found[0]) if found else None
+
+
+def needs_browser():
+    """The phone's browser, on Linux."""
+    if LINUX and not mini_browser():
+        return 'the phone\'s page opens in WebKitGTK 4.1\'s MiniBrowser, which is in no webkit2gtk-4.1 folder under /usr/libexec or /usr/lib'
+    return None
+
+
 class Phone:
     """The page in a real browser: WebKit, the engine of Safari on an iPhone, at an iPhone's size. Linux only, where
     WebKitGTK's MiniBrowser runs under the WebDriver inside the run's headless gamescope."""
-
-    BROWSER = Path('/usr/libexec/webkit2gtk-4.1/MiniBrowser')
 
     def __init__(self, r):
         with socket.socket() as s:
@@ -66,7 +79,7 @@ class Phone:
         self.driver = start([WEBKIT_DRIVER, f'--port={self.port}', '--host=127.0.0.1'], r.work / 'phone-driver.log', r.launch_env())
         if not started(self.driver, self.port, 20):
             raise RuntimeError('the phone\'s WebDriver did not start, see phone-driver.log')
-        caps = {'capabilities': {'alwaysMatch': {'webkitgtk:browserOptions': {'binary': str(self.BROWSER), 'args': ['--automation', '--private']}}}}
+        caps = {'capabilities': {'alwaysMatch': {'webkitgtk:browserOptions': {'binary': str(mini_browser()), 'args': ['--automation', '--private']}}}}
         self.path = '/session/' + self.call('POST', '/session', caps)['sessionId']
         self.call('POST', self.path + '/window/rect', {'width': 402, 'height': 874})
 
@@ -137,7 +150,7 @@ def page_state(page, check, timeout=60):
 @flow('share', 'Edit from your phone: the code opens the page and nothing opens it without the code, phone videos land at the '
       'end of the timeline in the order sent, a message from the page reaches the AI panel and its run shows there, '
       'a choice and Stop work from the page, it seeks and shows the preview, exports and downloads that export, and '
-      'Stop sharing closes it', before=setup)
+      'Stop sharing closes it', before=setup, needs=needs_browser)
 def share(r):
     r.s.run(f"document.querySelector('{BUTTON}').click()")
     sharing = wait(lambda: r.s.run('return window.__nuzky.remote.getState().sharing'), 10)
@@ -265,7 +278,7 @@ def open_page(r):
 
 @flow('share-editor', 'Edit from your phone from the home screen: the page plays, splits, undoes, redoes, deletes, duplicates '
       'and detaches the sound of clips, picks the agent and lists past chats, starts a new project in a format and opens '
-      'the earlier one again, and nothing is edited while the AI edits', before=setup, home=True)
+      'the earlier one again, and nothing is edited while the AI edits', before=setup, home=True, needs=needs_browser)
 def share_editor(r):
     # The editor stays drawn under the home screen with its own button; this one is the home screen's.
     on_home = f"[...document.querySelectorAll('{BUTTON}')].find((b) => b.closest('[aria-label=Projects]'))"

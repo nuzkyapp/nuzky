@@ -103,7 +103,7 @@ The UI flows of `scripts/repro.py` and `scripts/fixtures.sh` also need these. Ar
 sudo pacman -S --needed gamescope python-xlib python-pillow python-numpy espeak-ng yt-dlp webkitgtk-6.0
 ```
 
-On Omarchy 4.5 with an AMD Radeon RX 6800 XT, the debug build and the `home`, `edit`, `export`, `orientation` and `first-run` flows passed. The ignored tests have not been run on Arch.
+On Omarchy 4.5 with an AMD Radeon RX 6800 XT, the debug build and the `home`, `edit`, `export`, `orientation` and `first-run` flows passed, and with WebKitGTK 2.54 also `setup_captions`, `share`, `share-editor`, `names`, `toolbar` and `corrections`. Arch installs only the locales enabled in `/etc/locale.gen`, so `setup_captions`, which starts Nuzky in Czech, makes `cs_CZ.UTF-8` for its run with `localedef`. The ignored tests have not been run on Arch.
 
 Users install `nuzky-bin` from the AUR: `yay -S nuzky-bin`, or Install › AUR in Omarchy's menu. `packaging/aur/nuzky-bin/PKGBUILD` unpacks the release's AppImage into `/opt/nuzky`, with its own FFmpeg, WebKitGTK and ONNX Runtime, and adds `/usr/bin/nuzky-app`, which starts it through `AppRun` with `NUZKY_NO_UPDATE_CHECK=1`, because pacman updates it. The desktop file is `nuzky-app.desktop`, the window's Wayland app_id. Agents get `/opt/nuzky/usr/bin/nuzky-app` as the MCP command, which stays the same across updates.
 

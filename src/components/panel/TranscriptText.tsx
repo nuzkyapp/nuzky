@@ -30,6 +30,19 @@ const optionId = (i: number) => `transcript-token-${i}`;
 function WordField({ word, onDone }: { word: string; onDone: (text: string | null) => void }) {
   const [value, setValue] = useState(word);
   const done = useRef(false);
+  const field = useRef<HTMLInputElement>(null);
+  const touched = useRef(false);
+  // The word stays selected until the user types or clicks in the field. After the transcript had lost focus, WebKitGTK
+  // 2.54 moved the caret to the end a moment after a double-click opened the field, so typing appended; only a
+  // `selectionchange` tells of it, which React's onSelect missed.
+  useLayoutEffect(() => {
+    const keep = () => {
+      const f = field.current;
+      if (f && !touched.current && document.activeElement === f && (f.selectionStart !== 0 || f.selectionEnd !== f.value.length)) f.select();
+    };
+    document.addEventListener("selectionchange", keep, true);
+    return () => document.removeEventListener("selectionchange", keep, true);
+  }, []);
   const finish = (text: string | null) => {
     if (done.current) return;
     done.current = true;
@@ -37,6 +50,7 @@ function WordField({ word, onDone }: { word: string; onDone: (text: string | nul
   };
   return (
     <input
+      ref={field}
       autoFocus
       aria-label={`Correct “${word}”`}
       value={value}
@@ -44,7 +58,9 @@ function WordField({ word, onDone }: { word: string; onDone: (text: string | nul
       spellCheck={false}
       onChange={(e) => setValue(e.target.value)}
       onFocus={(e) => e.currentTarget.select()}
+      onPointerDown={() => (touched.current = true)}
       onKeyDown={(e) => {
+        touched.current = true;
         // The field keeps its keys: arrows, Delete and Space edit the text, not the transcript.
         e.stopPropagation();
         if (e.key === "Enter" || e.key === "Escape") {
