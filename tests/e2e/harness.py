@@ -974,8 +974,8 @@ def missing_locale(name):
     """Linux: why the app cannot start under the locale `name`, such as cs_CZ, or None when `system_locale` can do it."""
     if not LINUX or _locale_installed(name) or (shutil.which('localedef') and Path(f'/usr/share/i18n/locales/{name}').exists()):
         return None
-    return (f'the {name}.UTF-8 locale is not installed, and without glibc\'s locale sources (/usr/share/i18n/locales) and '
-            f'localedef it cannot be made for the run: install either')
+    return (f'the {name}.UTF-8 locale is not installed, and the run cannot make it without localedef and glibc\'s locale '
+            f'sources in /usr/share/i18n/locales: install the locale or those')
 
 
 def system_locale(r, name):
