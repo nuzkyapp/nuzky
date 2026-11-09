@@ -4,11 +4,12 @@
 
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
 use crate::audio::has_audio;
-use crate::model::{AssetKind, Clip, ClipContent, Project, Track};
+use crate::model::{Asset, AssetKind, Clip, ClipContent, Project, Track};
 
 /// A recognised word, timed in its media file.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -34,11 +35,23 @@ pub struct TimelineWord {
     pub source_start_us: i64,
 }
 
-/// The clip plays speech: a video's own sound on an unmuted track, not silenced. Detached sound
-/// counts; the silenced video it came from and imported audio files such as music do not.
+/// The file may hold speech: a video with sound, or the user's own sound file, such as a recorded
+/// voice-over. Sounds from the sound library are music or effects: the credited ones, music from
+/// YouTube and a plugin's own sounds, told apart by the folder Nuzky keeps them in, read from the
+/// path alone since the mix asks for every buffer.
+pub fn speaks(asset: &Asset) -> bool {
+    let path = Path::new(&asset.path);
+    let folder = path.parent().and_then(Path::file_name).and_then(|n| n.to_str());
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+    let library = (folder == Some("sounds") && name.starts_with("youtube-")) || folder == Some("plugin-files");
+    has_audio(asset) && (asset.kind == AssetKind::Video || (asset.credit.is_none() && !library))
+}
+
+/// The clip plays speech: a file that `speaks` on an unmuted track, not silenced. Detached sound
+/// counts; the silenced video it came from does not.
 pub fn is_heard(project: &Project, track: &Track, clip: &Clip) -> bool {
     let ClipContent::Media { asset_id, volume, .. } = &clip.content else { return false };
-    !track.muted && *volume > 0.0 && project.asset(asset_id).is_some_and(|a| a.kind == AssetKind::Video && has_audio(a))
+    !track.muted && *volume > 0.0 && project.asset(asset_id).is_some_and(speaks)
 }
 
 fn heard_clips(project: &Project) -> impl Iterator<Item = &Clip> {
@@ -94,7 +107,7 @@ pub fn speech_layout_key(project: &Project) -> String {
 mod tests {
     use super::*;
     use crate::edit::{EditCmd, TimeRange};
-    use crate::model::{Asset, BOX_RADIUS, TextAlign, TextStyle, Transform};
+    use crate::model::{BOX_RADIUS, Credit, TextAlign, TextStyle, Transform};
 
     const S: i64 = 1_000_000;
 
@@ -119,8 +132,9 @@ mod tests {
     /// A 10 s talking-head video with a word every second ("w0" at 0.2–0.6 s, "w1" at 1.2–1.6 s…).
     fn talk() -> (Project, HashMap<String, Vec<Word>>) {
         let mut p = Project::new("speech");
-        p.apply(EditCmd::AddAssets { assets: vec![asset("v", AssetKind::Video), asset("song", AssetKind::Audio)] })
-            .unwrap();
+        // Music from YouTube, kept in the sound library.
+        let song = Asset { path: "/data/nuzky/sounds/youtube-song.m4a".into(), ..asset("song", AssetKind::Audio) };
+        p.apply(EditCmd::AddAssets { assets: vec![asset("v", AssetKind::Video), song] }).unwrap();
         p.apply(EditCmd::AddClip { asset_id: "v".into(), start_us: None, track_id: None }).unwrap();
         let words = (0..10)
             .map(|i| Word {
@@ -189,6 +203,36 @@ mod tests {
         ripple(&mut p, 20_000, S);
         assert_eq!(p.tracks[0].clips[0].start_us, 0);
         assert_eq!(placed(&p, &words)[0], ("w1".into(), 200_000));
+    }
+
+    #[test]
+    fn own_sound_files_speak_and_the_sound_library_does_not() {
+        let at = |path: &str, kind| Asset { path: path.into(), ..asset("a", kind) };
+        let credit = Credit {
+            source: "nuzky".into(),
+            id: "dancing".into(),
+            title: "Dancing".into(),
+            author: "Nuzky".into(),
+            license: crate::model::License::Cc0,
+            license_version: "1.0".into(),
+            license_url: String::new(),
+            url: String::new(),
+        };
+        let speaking = [
+            at("/Users/me/Voice Memos/voice-over.m4a", AssetKind::Audio),
+            at("/Users/me/Downloads/sounds/youtube-dQw4w9WgXcQ.m4a", AssetKind::Video),
+            at("/Users/me/Music/youtube-mix.mp3", AssetKind::Audio),
+            Asset { credit: Some(credit.clone()), ..at("/data/nuzky/sample/sample.mp4", AssetKind::Video) },
+        ];
+        let silent = [
+            Asset { credit: Some(credit), ..at("/data/nuzky/sounds/nuzky-dancing.ogg", AssetKind::Audio) },
+            at("/data/nuzky/sounds/youtube-dQw4w9WgXcQ.m4a", AssetKind::Audio),
+            at("/data/nuzky/plugin-files/3f2a.wav", AssetKind::Audio),
+            Asset { has_audio: false, ..at("/Users/me/clip.mp4", AssetKind::Video) },
+            at("/Users/me/photo.jpg", AssetKind::Image),
+        ];
+        assert!(speaking.iter().all(speaks), "{speaking:#?}");
+        assert!(!silent.iter().any(speaks), "{silent:#?}");
     }
 
     #[test]

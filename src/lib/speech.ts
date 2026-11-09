@@ -4,7 +4,7 @@ import { api, errorText, plainError } from "./api";
 import { aiLocked, currentEpoch, enqueue, undoAction, useEditor, whenIdle } from "./store";
 import { CAPTION_STYLES } from "./presets";
 import { MAX_NAMES, MAX_NAME_CHARS, isSaved, loadNames, nameOf, rememberName, useNames } from "./names";
-import type { Animation, Project, TextStyle, TranscriptCut, TranscriptView, WordsCorrected } from "./types";
+import type { Animation, Asset, Project, TextStyle, TranscriptCut, TranscriptView, WordsCorrected } from "./types";
 
 /** Characters per caption when captions show 1–3 words, like reels. */
 export const SHORT_CAPTION_CHARS = 15;
@@ -93,6 +93,13 @@ useEditor.subscribe((s, before) => {
 /** A word for the transcript to select, by its start on the timeline, once it shows it; the tour picks the first word. */
 export const useWordPick = create<{ startUs: number | null }>(() => ({ startUs: null }));
 
+/** The file may hold speech: a video with sound or the user's own sound file, as the engine's `speaks` decides. */
+export function speaks(asset: Asset): boolean {
+  const [folder, name] = asset.path.split(/[\\/]/).slice(-2);
+  const library = (folder === "sounds" && !!name?.startsWith("youtube-")) || folder === "plugin-files";
+  return asset.hasAudio && (asset.kind === "video" || (asset.kind === "audio" && !asset.credit && !library));
+}
+
 /** Why the timeline cannot be transcribed, or null. Same rule as the engine's `is_heard`. */
 export function speechBlocker(project: Project): string | null {
   const heard = project.tracks.some(
@@ -102,10 +109,10 @@ export function speechBlocker(project: Project): string | null {
         const m = c.content;
         if (m.type !== "media" || m.volume <= 0) return false;
         const asset = project.assets.find((a) => a.id === m.assetId);
-        return asset?.kind === "video" && asset.hasAudio;
+        return !!asset && speaks(asset);
       }),
   );
-  return heard ? null : "Add a video with sound to the timeline first";
+  return heard ? null : "Add a video with sound or a voice-over to the timeline first";
 }
 
 const sameView = (a: TranscriptView, b: TranscriptView) =>

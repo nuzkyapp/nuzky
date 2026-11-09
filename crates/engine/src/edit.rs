@@ -208,8 +208,8 @@ pub enum EditCmd {
         leveler: Option<f32>,
         /// Video and image clips: corners, border and shadow. The default shape removes them.
         shape: Option<Shape>,
-        /// Ducking: how many dB the clip goes down while a video's own sound has speech, up to 40;
-        /// 0 turns it off. 12 suits music under speech.
+        /// Ducking: how many dB the clip goes down while speech is heard, in a video's own sound or a
+        /// voice-over, up to 40; 0 turns it off. 12 suits music under speech.
         duck_db: Option<f32>,
         /// Clips with sound: play one sound in both ears, from both sides of the file (`both`) or from
         /// one (`left`, `right`) when the microphone recorded on one side only; `off` plays it as recorded.
