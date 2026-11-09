@@ -118,6 +118,9 @@ switch (process.platform) {
   }
   default: throw new Error(`Unsupported platform: ${process.platform}`);
 }
+// ggml builds whisper.cpp for the CPU of the machine it builds on, and GitHub's runners differ: a release built on one
+// with AVX-512 crashed speech recognition on every CPU without it. Off, it uses AVX2, FMA, F16C and BMI2.
+if (process.arch === 'x64') process.env.GGML_NATIVE = 'OFF';
 const configPath = path.join(target, 'bundle-config.json');
 writeFileSync(configPath, JSON.stringify(config, null, 2));
 // Call the installed CLI with Node to avoid Windows .cmd quoting/shell differences.

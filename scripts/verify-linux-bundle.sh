@@ -9,6 +9,12 @@ if grep -q 'not found' "$target/release/ldd.txt"; then
   echo 'Unresolved runtime dependency' >&2
   exit 1
 fi
+# Speech recognition must run on CPUs without AVX-512 (GGML_NATIVE in scripts/build-bundles.mjs).
+avx512="$(objdump -d --no-show-raw-insn "$binary" | awk '/^[0-9a-f]+ <.*>:$/ { ggml = /ggml/ } ggml && /%zmm|%k[1-7]/' | wc -l)"
+if [ "$avx512" -ne 0 ]; then
+  echo "whisper.cpp's ggml uses AVX-512 in $avx512 instructions, so speech recognition crashes on CPUs without it" >&2
+  exit 1
+fi
 shopt -s nullglob
 
 # Exactly one package of a kind, or the check would pass on an old build left beside the new one.
