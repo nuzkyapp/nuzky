@@ -138,12 +138,13 @@ function VersionLabel({ label, version }: { label: string; version: string | nul
 }
 
 /**
- * In the editor's top bar, only while a newer version is out: a quiet button with the same menu;
+ * In the editor's top bar, only while a newer version is out: an accent capsule, Update available, with the same menu;
  * while it downloads, the progress with Stop, as other downloads show it; then Restart to update,
- * or why it waits. Below 1280 px the project's name needs the room, so they lose their words.
+ * or why it waits. Below 1280 px the project's name needs the room, so they lose words.
  */
 export function UpdateButton() {
   const latest = useUpdates((s) => (s.enabled ? s.latest : null));
+  const version = useUpdates((s) => s.version);
   const install = useUpdates((s) => s.install);
   const blocked = useRestartBlocker();
   const compact = useWindowSize().w < 1280;
@@ -192,20 +193,23 @@ export function UpdateButton() {
       </Button>
     );
   return (
-    <div className="bar flex rounded-full">
-      <IconButton
-        round
+    <>
+      <Button
+        variant="accent"
+        pill
         data-update-button
         aria-haspopup="menu"
         aria-expanded={!!menu}
-        label={`Nuzky ${latest} is available`}
+        aria-label={`Update available: Nuzky ${latest}`}
+        title={`Nuzky ${latest} is available. You have ${version}.`}
+        className={`shrink-0 text-[12px] ${compact ? "px-3" : ""}`}
         onClick={(e) => {
           const r = e.currentTarget.getBoundingClientRect();
           setMenu({ at: { x: r.left, y: r.bottom + 6 }, keyboard: e.detail === 0, back: e.currentTarget });
         }}
       >
-        <CircleArrowDown size={16} className="text-accent" />
-      </IconButton>
+        <CircleArrowDown size={14} className="text-accent" /> {compact ? "Update" : "Update available"}
+      </Button>
       {menu && (
         <Menu
           items={updateMenu()}
@@ -225,6 +229,6 @@ export function UpdateButton() {
           }}
         />
       )}
-    </div>
+    </>
   );
 }

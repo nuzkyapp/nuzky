@@ -8,7 +8,7 @@ import { weightOf } from "../lib/presets";
 import { AI_EDITING, useAiLocked } from "../lib/store";
 import type { TextShadow, TextStyle } from "../lib/types";
 
-type Variant = "primary" | "secondary" | "ghost" | "plain" | "danger" | "bar";
+type Variant = "primary" | "secondary" | "ghost" | "plain" | "danger" | "bar" | "accent";
 
 const variants: Record<Variant, string> = {
   primary: "btn-prominent font-semibold",
@@ -19,6 +19,8 @@ const variants: Record<Variant, string> = {
   danger: "bg-danger/15 text-danger shadow-[inset_0_0_0_1px_rgb(255_69_58/.4)] hover:bg-danger/25",
   /** A floating toolbar capsule, e.g. in the top bar. */
   bar: "bar text-fg hover:bg-white/[.13]",
+  /** News the user should not miss, as a newer Nuzky in the top bar: the version row's tint and line. */
+  accent: "bg-accent/[.16] font-semibold text-fg shadow-[inset_0_0_0_1px_rgb(41_151_255/.45)] hover:bg-accent/[.22]",
 };
 
 /** Drops hover styles, so a disabled control does not react to the pointer. */
