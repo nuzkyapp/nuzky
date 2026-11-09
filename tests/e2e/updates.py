@@ -44,8 +44,10 @@ return p && {text: p.textContent, stop: p.querySelector('button')?.textContent ?
 INSTALL = 'return window.__nuzky.updates.getState().install'
 RELOAD = "window.__oldPage = true; location.reload()"
 EDITOR_BUTTON = """const b = document.querySelector('[data-update-button]');
-return b && {label: b.getAttribute('aria-label') ?? b.innerText.trim(), focused: document.activeElement === b,
-             disabled: b.getAttribute('aria-disabled') === 'true', width: Math.round(b.getBoundingClientRect().width)};"""
+return b && {label: b.getAttribute('aria-label') ?? b.innerText.trim(), text: b.innerText.trim(), focused: document.activeElement === b,
+             disabled: b.getAttribute('aria-disabled') === 'true', width: Math.round(b.getBoundingClientRect().width),
+             fill: getComputedStyle(b).backgroundColor};"""
+AVAILABLE = 'Nuzky 99.0.0 is available.'
 # Why Restart to update waits, in the top bar: a status, not a disabled button.
 WAITING = """const w = document.querySelector('[data-update-waiting]');
 return w && {tag: w.tagName, role: w.getAttribute('role'), text: w.textContent, title: w.title, color: getComputedStyle(w).color,
@@ -189,6 +191,15 @@ def toasts(r):
     return r.s.run(TOASTS)
 
 
+def accent_fill(fill):
+    """`accent` at 16 %, as rgba or as the oklab Tailwind writes it."""
+    return fill in ('rgba(41, 151, 255, 0.16)', 'oklab(0.669028 -0.056345 -0.171775 / 0.16)')
+
+
+def available_toasts(r):
+    return [t for t in r.s.run(CHOICES) or [] if t['text'] == AVAILABLE]
+
+
 def manual_check(r):
     """Check for updates from the row's menu; returns the toast it answered with. Earlier toasts go first, as
     an identical toast replaces the one before it."""
@@ -200,7 +211,7 @@ def manual_check(r):
     return (toasts(r) or [None])[-1]
 
 
-@flow('updates', 'the home sidebar says when a newer version is out; checks run daily, quietly, and can be turned off',
+@flow('updates', 'the home sidebar and the editor say when a newer version is out; checks run daily, quietly, and can be turned off',
       before=serve_releases, home=True)
 def updates(r):
     server = r.updates
@@ -236,17 +247,36 @@ def updates(r):
         webdriver('POST', r.s.path + '/window/rect', {'width': 1440, 'height': 900})
 
         r.s.run("window.__nuzky.store.setState({view: 'editor'})")
-        r.check('in the editor a small button next to Projects says so',
-                wait(lambda: r.s.run(EDITOR_BUTTON), 3) == {'label': 'Nuzky 99.0.0 is available', 'focused': False, 'disabled': False, 'width': 32},
-                r.s.run(EDITOR_BUTTON))
+        button = wait(lambda: r.s.run(EDITOR_BUTTON), 3)
+        r.check('in the editor an accent capsule next to Projects says Update available, naming the version to screen readers',
+                button and button['label'] == 'Update available: Nuzky 99.0.0' and button['text'] == 'Update available'
+                and accent_fill(button['fill']) and button['width'] > 100 and not button['focused'], button)
+        r.check('and a toast offers the update once the editor shows',
+                wait(lambda: available_toasts(r) == [{'kind': 'info', 'text': AVAILABLE, 'choices': ['Update']}], 3), r.s.run(CHOICES))
+        time.sleep(0.5)
         r.shot('editor-update')
         r.s.run("const b = document.querySelector('[data-update-button]'); b.focus(); b.click();")
         menu = wait(lambda: r.s.run(MENU), 3)
-        r.check('it opens the same menu, with the focus in it',
+        r.check('the capsule opens the same menu, with the focus in it',
                 (menu or [{}])[0].get('label') == 'Update to Nuzky 99.0.0' and wait(lambda: r.s.run(IN_MENU), 3), menu)
         r.shot('editor-update-menu')
         r.key('Escape')
-        r.check('Esc closes it and focus returns to the button', wait(lambda: not r.s.run(MENU) and (r.s.run(EDITOR_BUTTON) or {}).get('focused'), 3))
+        r.check('Esc closes it and focus returns to the capsule', wait(lambda: not r.s.run(MENU) and (r.s.run(EDITOR_BUTTON) or {}).get('focused'), 3))
+        webdriver('POST', r.s.path + '/window/rect', {'width': 1024, 'height': 640})
+        if wait(lambda: r.s.run('return window.innerWidth') == 1024, 5):
+            button = wait(lambda: (b := r.s.run(EDITOR_BUTTON)) and b['text'] == 'Update' and b, 3) or r.s.run(EDITOR_BUTTON)
+            header = r.s.run(HEADER)
+            r.check('in a 1024 px window the capsule says only Update and leaves the project name clear',
+                    button and button['text'] == 'Update' and accent_fill(button['fill']) and header['update'][1] <= header['name'][0], (button, header))
+            r.shot('editor-update-small')
+        webdriver('POST', r.s.path + '/window/rect', {'width': 1440, 'height': 900})
+        wait(lambda: r.s.run('return window.innerWidth') == 1440, 5)
+        r.s.run("window.__nuzky.store.setState({view: 'home', toasts: []})")
+        time.sleep(0.5)
+        r.s.run("window.__nuzky.store.setState({view: 'editor'})")
+        time.sleep(1)
+        r.check('back in the editor in the same launch, the toast does not come again, only the capsule stays',
+                available_toasts(r) == [] and r.s.run(EDITOR_BUTTON), (r.s.run(CHOICES), r.s.run(EDITOR_BUTTON)))
         r.s.run("window.__nuzky.store.setState({view: 'home'})")
 
         server.serve('99.1.0-alpha.12')

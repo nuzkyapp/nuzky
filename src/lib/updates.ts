@@ -74,7 +74,31 @@ export function startUpdates(version: string, enabled: boolean, note: string | n
   if (!enabled) return;
   window.setTimeout(checkIfDue, FIRST_CHECK_MS);
   window.setInterval(checkIfDue, HOUR_MS);
+  useUpdates.subscribe(announce);
+  useEditor.subscribe(announce);
+  announce();
 }
+
+/** A toast already offered a newer version in this launch. */
+let announced = false;
+
+/**
+ * Once a launch, the first time the editor shows while a newer version is out, a toast offers it,
+ * so someone who edits all day sees it beside the top bar's capsule. The home screen has the sidebar's row.
+ */
+function announce() {
+  const { enabled, latest, canInstall, checking, install } = useUpdates.getState();
+  // A check the user asked for answers with the same toast.
+  if (!enabled || !latest || install || checking === "manual" || announced || useEditor.getState().view !== "editor") return;
+  announced = true;
+  useEditor.getState().toast(available(latest, canInstall));
+}
+
+const available = (latest: string, canInstall: boolean) => ({
+  kind: "info" as const,
+  text: `Nuzky ${latest} is available.`,
+  action: canInstall ? { label: "Update", run: () => void installUpdate(), valid: () => !useUpdates.getState().install } : { label: "Download from GitHub…", run: downloadUpdate },
+});
 
 /** Back where the update was installed from, with what was typed for the AI. */
 function restarted(version: string, text: string) {
@@ -113,13 +137,10 @@ export async function checkForUpdates(manual: boolean) {
     useUpdates.setState({ latest, canInstall: !!found?.canInstall });
     if (asked()) {
       const toast = useEditor.getState().toast;
-      if (latest)
-        toast({
-          kind: "info",
-          text: `Nuzky ${latest} is available.`,
-          action: found?.canInstall ? { label: "Update", run: () => void installUpdate(), valid: () => !useUpdates.getState().install } : { label: "Download from GitHub…", run: downloadUpdate },
-        });
-      else toast({ kind: "success", text: `Nuzky ${version} is the latest version.` });
+      if (latest) {
+        announced = true;
+        toast(available(latest, !!found?.canInstall));
+      } else toast({ kind: "success", text: `Nuzky ${version} is the latest version.` });
     }
   } catch (e) {
     console.warn("Update check failed", errorText(e));
