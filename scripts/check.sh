@@ -91,6 +91,24 @@ from e2e.harness import transcript_pool; print(transcript_pool().name)') || retu
   mkdir -p "$(dirname "$mark")" && printf '%s\n' "$key" >"$mark"
 }
 
+# Beside the other session and the Rust tests, a few flows miss their timing: in one Linux gate, five failed and three
+# of them passed on their own. Each failed flow runs once more, alone; one that fails again fails the gate, and one
+# that passes is named, so its flakiness is still seen.
+rerun_failed_flows() {
+  local failed out status passed
+  failed=$(sed -n 's/^FAILED  \([^ ]*\) .*/\1/p' "$1")
+  [ -n "$failed" ] || return 1
+  echo
+  echo "Running the failed UI flows again, one at a time:" $failed
+  # shellcheck disable=SC2086 # one argument per flow
+  out=$(NUZKY_REPRO_JOBS=1 python3 scripts/repro.py $failed 2>&1)
+  status=$?
+  printf '%s\n' "$out"
+  passed=$(sed -n 's/^passed  \([^ ]*\) .*/\1/p' <<<"$out")
+  [ -z "$passed" ] || echo "These UI flows failed beside the others and passed on their own:" $passed >&2
+  return "$status"
+}
+
 # The Rust tests with media and the UI flows spend their time waiting for speech recognition on the GPU, the app
 # and real time, each with about a tenth of the CPU, so they run side by side. The flows' report follows the tests'.
 media_tests_and_flows() {
@@ -105,6 +123,7 @@ media_tests_and_flows() {
   trap - INT TERM
   echo
   cat "$flows"
+  if [ "$flows_failed" = 1 ] && rerun_failed_flows "$flows"; then flows_failed=0; fi
   [ "$tests_failed" = 0 ] || echo "Rust tests with media and models FAILED" >&2
   [ "$flows_failed" = 0 ] || echo "UI flows FAILED" >&2
   [ "$tests_failed$flows_failed" = 00 ]
