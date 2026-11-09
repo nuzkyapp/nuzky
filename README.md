@@ -9,23 +9,33 @@
   <a href="https://nuzky.app">nuzky.app</a> · <a href="#install">Download</a> · <a href="#build-and-run">Build it</a> · <a href="CONTRIBUTING.md">Contribute</a>
 </p>
 
-<img src="assets/readme/editor.webp" width="100%" alt="An illustration of the Nuzky editor from nuzky.app: imported clips on the left, a vertical video with captions in the middle, clip settings on the right and the timeline below">
+<img src="assets/readme/editor.webp" width="100%" alt="The Nuzky editor as drawn on nuzky.app: imported clips on the left, a vertical video with a caption in the middle, the clip's settings on the right and captions, clips and music on the timeline below">
 <p align="center"><sub>The editor as drawn on nuzky.app. The alpha differs in places.</sub></p>
 
 Cut a talking video by deleting words from its transcript, caption it with speech recognition that runs on your own machine, and let an AI agent do the tedious parts while you watch. Nuzky is licensed under GPLv3 and has a native Rust engine.
 
 **Nuzky is in alpha.** It is early, so expect rough edges. Nuzky never changes or deletes your original videos.
 
+<table>
+  <tr>
+    <td width="50%"><img src="assets/readme/captions.webp" alt="Captions: caption styles on the left, the spoken word highlighted in the preview, the caption's text and style on the right"><br><sub><b>Captions</b> written by Whisper on your computer, with the spoken word lit up.</sub></td>
+    <td width="50%"><img src="assets/readme/reels.webp" alt="Reels: the transcript of a long video on the left and four suggested reels below the preview"><br><sub><b>Reels</b> from one long video. AI finds the moments, and you trim them by words.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="assets/readme/cover.webp" alt="Cover: suggested frames on the left, a 9:16 cover with the title behind the person, and text settings on the right"><br><sub><b>Covers</b> and YouTube thumbnails from a frame of your video, with the title behind you.</sub></td>
+    <td width="50%"><img src="assets/readme/export.webp" alt="Export: the export window with the Reels and TikTok preset, resolution, frame rate and quality"><br><sub><b>Export</b> from the same renderer as the preview, with a preset for each platform.</sub></td>
+  </tr>
+</table>
+
 ## What you can do
 
-- Transcribe the timeline, then delete words or remove every pause straight from the text. Cuts land between words, and captions and overlays stay in sync.
-- Generate captions with Whisper running on your computer. Voice detection keeps music and silence uncaptioned, and captions can highlight the word being spoken.
-- Import footage straight from your phone. Rotated, mirrored and variable-frame-rate HEVC or H.264 clips cut on the exact frame. The canvas starts vertical (9:16), with 16:9, 1:1 and 4:5 a click away.
-- Edit on a magnetic main track with overlay video, audio and text tracks. Move, trim, split and delete with snapping, undo and redo; Nuzky saves after every edit.
-- Style text with an outline, a background box, size, colour, position, rotation and opacity.
-- Export MP4 (H.264 and AAC) from the same renderer as the preview, so the file matches what you saw. Presets for Reels & TikTok, YouTube Shorts, YouTube 1080p and 4K, the Instagram feed and square posts write the platform's size with the sound levelled to −14 LUFS and true peak at most −1 dBTP.
-- Let any MCP-capable AI agent edit the open project while you watch; each run undoes as one step. Connect agent sets up Claude Code, Codex and Gemini (Antigravity CLI) in one click, and the AI panel chats with your own Claude Code, Codex or OpenCode.
-- Teach Nuzky a creator's style from raw recordings and their finished cuts, or from timelines they cut in another editor: CapCut drafts as they are, or exported as OpenTimelineIO (.otio), on Your style in the app or with `nuzky style learn`. It writes an `EDIT.md` that agents follow, takes the creator's own rules in plain words, and lets them talk the style through with the AI.
+- **Cut by text.** Transcribe the timeline, then delete words or remove every pause straight from the text. Cuts land between words, and captions and overlays stay in sync.
+- **Captions on your computer.** Whisper runs locally. Voice detection keeps music and silence uncaptioned, and captions can highlight the word being spoken.
+- **Phone footage just works.** Rotated, mirrored and variable-frame-rate HEVC or H.264 clips cut on the exact frame. The canvas starts vertical (9:16), with 16:9, 1:1 and 4:5 a click away.
+- **Edit the way you know from CapCut.** A magnetic main track with overlay video, audio and text tracks. Move, trim, split and delete with snapping, undo and redo; Nuzky saves after every edit. Text takes an outline, a background box, size, colour, position, rotation and opacity.
+- **Export what you saw.** MP4 (H.264 and AAC) from the preview's renderer. Presets for Reels & TikTok, YouTube Shorts, YouTube 1080p and 4K, the Instagram feed and square posts write the platform's size with the sound levelled to −14 LUFS and true peak at most −1 dBTP.
+- **Let an AI agent edit.** Any MCP-capable agent edits the open project while you watch, and each run undoes as one step. Connect agent sets up Claude Code, Codex and Gemini (Antigravity CLI) in one click, and the AI panel chats with your own Claude Code, Codex or OpenCode.
+- **Learn a creator's style.** From raw recordings and their finished cuts, or from timelines cut in another editor: CapCut drafts as they are, or exported as OpenTimelineIO (.otio), on Your style in the app or with `nuzky style learn`. Nuzky writes an `EDIT.md` that agents follow, takes the creator's own rules in plain words, and lets them talk the style through with the AI.
 
 Nuzky itself sends nothing you edit anywhere. It goes online only to download models with a pinned checksum and, at most once a day, to read the latest version number from GitHub; you can turn that check off on the home screen. An AI agent you connect runs under your own account and sends what it reads to its provider.
 
@@ -38,9 +48,11 @@ Nuzky itself sends nothing you edit anywhere. It goes online only to download mo
 
 Download the installer for your system from [Releases](https://github.com/nuzkyapp/nuzky/releases). Apple has checked the macOS app. Nuzky has no Microsoft signing certificate yet, so Windows warns you the first time you open it.
 
-- **macOS 15 or newer on Apple Silicon**: open the `.dmg` and drag Nuzky to Applications. The first time you open it, macOS asks whether to open an app downloaded from the internet; click Open.
-- **Windows 10 or 11, x64**: run the `-setup.exe`. When SmartScreen says "Windows protected your PC", click More info, then Run anyway. The installer downloads Microsoft WebView2 if it is missing.
-- **Linux, x86_64**: on Ubuntu 24.04 or newer, `sudo apt install ./Nuzky_*.deb`. On other distributions with glibc 2.39 or newer, make the `.AppImage` executable with `chmod +x` and run it.
+| System | Download | First open |
+|---|---|---|
+| macOS 15 or newer, Apple Silicon | `.dmg` | Drag Nuzky to Applications. When macOS asks whether to open an app downloaded from the internet, click Open. |
+| Windows 10 or 11, x64 | `-setup.exe` | When SmartScreen says "Windows protected your PC", click More info, then Run anyway. The installer downloads Microsoft WebView2 if it is missing. |
+| Linux x86_64 | `.deb` or `.AppImage` | On Ubuntu 24.04 or newer, `sudo apt install ./Nuzky_*.deb`. On other distributions with glibc 2.39 or newer, make the `.AppImage` executable with `chmod +x` and run it. |
 
 The first captions or transcript download the speech model once. Nuzky tells you when a newer version is out and downloads it when you click Update, then installs it and restarts. If you keep working while it downloads, it waits until you click Restart to update.
 
