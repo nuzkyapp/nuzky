@@ -105,8 +105,12 @@ def toolbar(r):
     wait(lambda: r.s.run("return !document.querySelector('dialog[open]')"), 5)
     # Projects is closest to the edge; its own tooltip with Ctrl+K is wide enough to be pushed in, so it gets a short one.
     edge = "[...document.querySelectorAll('header button')].find((b) => b.textContent.trim() === 'Projects')"
-    r.s.run(f"{edge}.setAttribute('title', 'Projects'); {edge}.dispatchEvent(new PointerEvent('pointerover', {{bubbles: true, pointerType: 'mouse'}}))")
-    centred = wait(lambda: r.s.run(f"""const t = document.querySelector('[data-tooltip]'); if (!t) return null; const a = t.getBoundingClientRect(), b = {edge}.getBoundingClientRect();
+    # These hovers are only events. The real pointer idles in the window's corner over the header, and on WebKitGTK 2.54
+    # it reaches the header about 200 ms after the dialog closed, which takes the tooltip away as a pointer leaving would.
+    # Each look below puts the pointer back on Projects, which changes nothing while it is still there.
+    rest = f"{edge}.dispatchEvent(new PointerEvent('pointerover', {{bubbles: true, pointerType: 'mouse'}}));"
+    r.s.run(f"{edge}.setAttribute('title', 'Projects'); {rest}")
+    centred = wait(lambda: r.s.run(f"""{rest} const t = document.querySelector('[data-tooltip]'); if (!t) return null; const a = t.getBoundingClientRect(), b = {edge}.getBoundingClientRect();
         return Math.round((a.left + a.width / 2) - (b.left + b.width / 2));"""), 2)
     r.check('a short tooltip near the window\'s left edge stays centred under its button', centred == 0, centred)
     r.s.run(f"{edge}.dispatchEvent(new PointerEvent('pointerout', {{bubbles: true, pointerType: 'mouse', relatedTarget: null}})); {edge}.setAttribute('title', 'Projects (Ctrl+K)')")

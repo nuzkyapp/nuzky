@@ -50,15 +50,18 @@ DEBUG_PORT = 4445  # The webview's on Windows, which Edge WebDriver attaches to.
 DRIVER_PORT = int(os.environ.get('NUZKY_REPRO_DRIVER_PORT', '4444'))
 
 
-def flow(name, description, before=None, home=False, first_launch=False, reuse_transcripts=False):
+def flow(name, description, before=None, home=False, first_launch=False, reuse_transcripts=False, needs=None):
     """`home`: the flow starts on the home screen; others start in the editor of the restored project.
     `first_launch`: Get set up stays open when a fresh profile opens it by itself; other flows start without it.
     `reuse_transcripts`: the flow only reads what was said, so it starts with what an earlier run recognised in the same
-    media with the same model (`transcript_pool`); a flow that checks recognition itself must not set it."""
+    media with the same model (`transcript_pool`); a flow that checks recognition itself must not set it.
+    `needs`: what of this machine the flow needs, as a function that returns what is missing in plain words, or None;
+    scripts/repro.py asks before it builds anything."""
     def register(fn):
         fn.home = home
         fn.first_launch = first_launch
         fn.reuse_transcripts = reuse_transcripts
+        fn.needs = needs
         FLOWS[name] = (description, before, fn)
         return fn
     return register
@@ -960,6 +963,40 @@ def comma_locale(r):
         r.env.pop('LC_ALL', None)
         r.env['LC_NUMERIC'] = found
     return found
+
+
+def _locale_installed(name):
+    listed = subprocess.run(['locale', '-a'], capture_output=True, text=True).stdout.split()
+    return f'{name}.utf8'.lower() in (n.lower().replace('-', '') for n in listed)
+
+
+def missing_locale(name):
+    """Linux: why the app cannot start under the locale `name`, such as cs_CZ, or None when `system_locale` can do it."""
+    if not LINUX or _locale_installed(name) or (shutil.which('localedef') and Path(f'/usr/share/i18n/locales/{name}').exists()):
+        return None
+    return (f'the {name}.UTF-8 locale is not installed, and without glibc\'s locale sources (/usr/share/i18n/locales) and '
+            f'localedef it cannot be made for the run: install either')
+
+
+def system_locale(r, name):
+    """Starts the app under the locale `name`, such as cs_CZ, as on a system set to that language. WebKitGTK takes the
+    page's languages from the locale glibc loads and says English when it is not installed, so on Linux a missing one is
+    made in the run's folder with localedef, which needs no root. LOCPATH then hides the installed locales, and LC_ALL
+    or LC_MESSAGES would win over LANG anyway, so no other locale variable stays."""
+    r.env.update(LANGUAGE=name.split('_')[0], LANG=f'{name}.UTF-8')
+    if not LINUX:
+        return
+    for variable in [v for v in r.env if v.startswith('LC_')]:
+        del r.env[variable]
+    if _locale_installed(name):
+        return
+    made = r.work / 'locales'
+    made.mkdir()
+    # Exit code 1 means warnings only, with the locale written.
+    done = subprocess.run(['localedef', '-i', name, '-f', 'UTF-8', str(made / f'{name}.UTF-8')], capture_output=True, text=True)
+    if done.returncode > 1 or not (made / f'{name}.UTF-8/LC_CTYPE').exists():
+        raise RuntimeError(f'localedef could not make {name}.UTF-8: {done.stderr.strip()}')
+    r.env['LOCPATH'] = str(made)
 
 
 # The word timing models recognition downloads on first use; linked so no flow reaches the network.
