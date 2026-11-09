@@ -1,100 +1,146 @@
+import { Fragment } from "react";
 import Image from "next/image";
 import {
-  ArrowLeft,
-  BetweenHorizontalEnd,
-  BetweenHorizontalStart,
+  AudioLines,
+  Ban,
   Blend,
   Captions,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Copy,
   Diamond,
   Download,
   Eye,
-  FileText,
   Film,
   FolderOpen,
   History,
-  Layers,
   Link2,
   Magnet,
   Maximize,
+  Maximize2,
   MessageSquare,
-  Music2,
+  Minimize,
+  MonitorDot,
+  Music,
+  Palette,
+  PanelLeftClose,
+  PanelRightClose,
   Play,
   Plus,
+  Puzzle,
+  QrCode,
   RectangleHorizontal,
   Redo2,
   RotateCcw,
+  RotateCwSquare,
+  ScanFace,
   Scissors,
+  ScrollText,
+  Settings,
   SkipBack,
   SkipForward,
   Smartphone,
+  Snowflake,
   Sparkles,
-  SunMedium,
   Trash2,
   Type,
   Undo2,
+  Unlink,
   Volume2,
-  WandSparkles,
+  X,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
 import { fitSizes, viewSizes } from "@/lib/fit";
 
-// A still of the Nuzky editor at 1200 × 740, drawn from the app's tokens in DESIGN.md and its screens today.
-// `focus` is the tour tab: Edit and Captions dim what the tab doesn't talk about, while Reels and Cover show those
-// modes of the editor and Export its dialog. `framed` says a phone shows one part of the editor enlarged (Fit's
-// `view`), so its images load for that size.
+// The Nuzky editor as it looks in a 1440 × 900 window on macOS, drawn with the app's own sizes, tokens and materials
+// (DESIGN.md, src/components) and shown at 5/6, so it takes MOCK_W × MOCK_H on the page. Every position the tour
+// gives (Showcase.tsx) is in that page space. `focus` is the tour tab: Edit and Captions show the editor, Reels and
+// Cover those modes of it, and Export the editor under its dialog (Showcase.tsx). `framed` says a phone shows one part
+// of the editor enlarged (Fit's `view`), so its images load for that size.
 
 export type EditorFocus = "edit" | "captions" | "reels" | "cover" | "export";
 
+export const MOCK_W = 1200;
+export const MOCK_H = 750;
+const SCALE = MOCK_W / 1440;
+
 type Sizes = (w: number) => string;
+
+// The window: a 48 px top bar, then the panes 6 px apart, with the timeline as tall as someone dragged it to show
+// every track.
+const TIMELINE_H = 262;
+const LIBRARY_W = 302;
+const INSPECTOR_W = 318;
+
+// The timeline draws 40 px per second (a 2 s ruler step) in lanes that start after the 152 px track headers.
+const PX = 40;
+const HEADER_W = 152;
+const PLAYHEAD = 10.85;
+
+const clips = [
+  { name: "IMG_2041.MOV", start: 0, length: 6.8, image: "tile-1" },
+  { name: "IMG_2044.MOV", start: 6.8, length: 8.7, image: "reel-hike" },
+  { name: "IMG_2047.MOV", start: 15.5, length: 6.2, image: "tile-3" },
+  { name: "IMG_2052.MOV", start: 21.7, length: 6.9, image: "tile-4" },
+];
+const LENGTH = 28.6;
+
+// The caption line under the playhead is the one the preview shows.
+const captionLine = [
+  [0.2, 3.4, "first light"],
+  [3.6, 6.6, "on the ridge"],
+  [9.4, 12.6, "we made it"],
+  [12.8, 16.2, "to the top"],
+  [17, 19.8, "worth it"],
+  [21.4, 25.4, "see you up there"],
+] as const;
 
 const media = [
   ["tile-1", "2:05", "IMG_2041.MOV"],
-  ["tile-2", "0:48", "IMG_2044.MOV"],
+  ["tile-2", "48.0 s", "IMG_2044.MOV"],
   ["tile-3", "1:08", "IMG_2047.MOV"],
-  ["tile-4", "0:21", "IMG_2052.MOV"],
-  ["tile-6", "0:45", "IMG_2058.MOV"],
+  ["tile-4", "21.0 s", "IMG_2052.MOV"],
+  ["tile-6", "45.0 s", "IMG_2058.MOV"],
   ["tile-8", "Image", "coffee.jpg"],
-];
-
-// The timeline draws 110 px per 3 s. The preview shows the frame under the playhead: the selected clip, the caption
-// line it sits in and the time it reads, so change them together.
-const PLAYHEAD = 398;
-const captionLine = [
-  [0, 138, "first light"],
-  [146, 150, "on the ridge"],
-  [304, 128, "we made it"],
-  [440, 190, "to the top"],
-  [640, 150, "worth it"],
-  [800, 132, "see you up there"],
-] as const;
-const clips = [
-  [0, 248, "IMG_2041.MOV", "6.8 s", 1],
-  [250, 318, "IMG_2044.MOV", "8.7 s", 2],
-  [570, 228, "IMG_2047.MOV", "6.2 s", 3],
-  [800, 252, "IMG_2052.MOV", "6.9 s", 4],
 ] as const;
 
+const x = (s: number) => Math.round(s * PX);
+
+// Bars every 3 px from the clip's start, as Waveform.tsx draws them; quiet sound is a 1 px floor.
 const wave = (n: number, seed: number, peak: number) =>
-  Array.from({ length: n }, (_, k) => 2 + Math.round(peak * Math.abs(Math.sin((k + seed * 13) * 0.37) * Math.cos((k + seed * 7) * 0.11))));
+  Array.from({ length: n }, (_, k) => Math.max(1, Math.round(peak * Math.abs(Math.sin((k + seed * 13) * 0.37) * Math.cos((k + seed * 7) * 0.11)))));
 
-function Pane({ className = "", children }: { className?: string; children: React.ReactNode }) {
-  return <div className={`overflow-hidden rounded-xl bg-panel ring-1 ring-inset ring-white/[0.06] ${className}`}>{children}</div>;
-}
-
-function Capsule({ className = "", children }: { className?: string; children: React.ReactNode }) {
-  return <span className={`capsule flex h-[30px] items-center gap-1.5 rounded-full px-3 text-[12px] font-medium ${className}`}>{children}</span>;
-}
-
-function Segmented({ items, on, className = "" }: { items: string[]; on: number; className?: string }) {
+// A pane's scrolling content keeps its 6 px thumb in view (scroll-shown in the app), in a 10 px scrollbar.
+function Scrolled({ thumb, className = "", children }: { thumb: [number, number]; className?: string; children: React.ReactNode }) {
   return (
-    <div className={`flex rounded-[9px] bg-white/[0.045] p-0.5 font-medium ${className}`}>
+    <div className={`relative min-h-0 flex-1 overflow-hidden pr-2.5 ${className}`}>
+      {children}
+      <span className="absolute right-0.5 w-1.5 rounded-full bg-white/[0.14]" style={{ top: thumb[0], height: thumb[1] }} />
+    </div>
+  );
+}
+
+function Icon({ i: I, size = 16, className = "" }: { i: typeof Film; size?: number; className?: string }) {
+  return <I size={size} strokeWidth={2} className={`shrink-0 ${className}`} />;
+}
+
+function IconBtn({ i, size = 16, className = "", off = false }: { i: typeof Film; size?: number; className?: string; off?: boolean }) {
+  return (
+    <span className={`flex size-8 shrink-0 items-center justify-center rounded-full ${off ? "opacity-40" : ""} ${className}`}>
+      <Icon i={i} size={size} />
+    </span>
+  );
+}
+
+function Seg({ items, on, className = "", icons }: { items: string[]; on: number; className?: string; icons?: (typeof Film | null)[] }) {
+  return (
+    <div className={`app-seg flex gap-0.5 rounded-[9px] p-0.5 ${className}`}>
       {items.map((t, i) => (
-        <span key={t} className={`flex-1 rounded-[7px] px-1.5 py-[5px] text-center ${i === on ? "bg-white/15" : "text-muted"}`}>
+        <span key={t} className={`flex h-7 flex-auto items-center justify-center gap-1.5 whitespace-nowrap rounded-[7px] px-2 text-[12px] font-medium ${i === on ? "app-seg-on text-fg" : "text-muted"}`}>
+          {icons?.[i] && <Icon i={icons[i]!} size={13} />}
           {t}
         </span>
       ))}
@@ -102,634 +148,1150 @@ function Segmented({ items, on, className = "" }: { items: string[]; on: number;
   );
 }
 
-function Switch({ on }: { on: boolean }) {
-  return (
-    <span className={`relative h-[18px] w-[30px] shrink-0 rounded-full ${on ? "bg-accent-strong" : "bg-white/[0.14]"}`}>
-      <span className={`absolute top-0.5 size-3.5 rounded-full bg-white shadow-[0_1px_2px_rgb(0_0_0/0.4)] ${on ? "left-[14px]" : "left-0.5"}`} />
-    </span>
-  );
-}
+// ---- Top bar ------------------------------------------------------------------------------------------------
 
 function TopBar({ focus }: { focus: EditorFocus }) {
   const cover = focus === "cover";
+  const reels = focus === "reels";
   return (
-    <div className="relative flex h-11 shrink-0 items-center justify-between">
-      <div className="flex items-center gap-2">
-        <Capsule>
-          {cover ? <ArrowLeft className="size-[15px] text-muted" /> : <FolderOpen className="size-[15px] text-muted" />}
-          {cover ? "Back to video" : "Projects"}
-        </Capsule>
-        <span className="capsule flex size-[30px] items-center justify-center rounded-full">
-          <MessageSquare className="size-[14px] text-muted" />
-        </span>
+    <div className="relative flex h-12 shrink-0 items-center gap-2 pl-[78px] pr-1.5">
+      {/* macOS puts its window buttons in the bar, 18 px in. */}
+      <div className="absolute left-[18px] top-1/2 flex -translate-y-1/2 gap-2">
+        {["#ff5f57", "#febc2e", "#28c840"].map((c) => (
+          <span key={c} className="size-3 rounded-full shadow-[inset_0_0_0_0.5px_rgb(0_0_0/0.25)]" style={{ background: c }} />
+        ))}
       </div>
-      <div className="pointer-events-none absolute inset-x-0 flex items-center justify-center gap-2.5 text-[12px]">
-        <span className="font-semibold">
-          {cover && <span className="font-normal text-muted">Cover · </span>}
-          {focus === "reels" ? "Summit vlog" : "Morning run"}
+      {cover ? (
+        <span className="app-bar flex h-8 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium">
+          <Icon i={ChevronLeft} size={15} />
+          Back to video
         </span>
-        <span className="flex items-center gap-1 text-muted">
-          <Check className="size-3" />
-          Saved
-        </span>
+      ) : (
+        <>
+          <span className="app-bar flex h-8 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium">
+            <Icon i={FolderOpen} size={15} />
+            Projects
+          </span>
+          <span className="app-bar flex items-center rounded-full">
+            <IconBtn i={MessageSquare} />
+            <IconBtn i={QrCode} />
+          </span>
+        </>
+      )}
+      <div className="flex min-w-0 flex-1 justify-center pr-[72px]">
+        <div className="relative flex items-center">
+          {cover ? (
+            <span className="text-[13px]">
+              <span className="font-semibold">Cover</span> <span className="text-muted">· Morning run</span>
+            </span>
+          ) : (
+            <span className="px-1.5 text-[13px] font-semibold">{reels ? "Summit vlog" : "Morning run"}</span>
+          )}
+          <span className="absolute left-full ml-2 flex items-center gap-1.5 whitespace-nowrap text-[12px] text-muted">
+            <span className="size-1.5 rounded-full bg-ok" />
+            Saved
+          </span>
+        </div>
       </div>
-      <div className="flex items-center gap-2">
-        <Capsule>
-          <Sparkles className="size-[15px]" />
-          AI
-        </Capsule>
-        <span className="capsule flex size-[30px] items-center justify-center rounded-full">
-          <History className="size-[14px] text-muted" />
-        </span>
-        <span
-          className={`flex h-[30px] items-center gap-1.5 rounded-full bg-accent-strong pl-3 pr-3.5 text-[12px] font-medium text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.15)] ${focus === "reels" ? "opacity-40" : ""}`}
-        >
-          <Download className="size-3.5" />
+      <span className="app-bar flex h-8 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium">
+        <Icon i={Sparkles} size={15} />
+        AI
+      </span>
+      <span className="app-bar flex items-center rounded-full">
+        {(cover || reels) && (
+          <>
+            <IconBtn i={Undo2} />
+            <IconBtn i={Redo2} off />
+          </>
+        )}
+        <IconBtn i={History} />
+        <IconBtn i={Settings} />
+      </span>
+      {!reels && (
+        <span className="app-prominent flex h-8 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium">
+          <Icon i={Download} size={15} />
           {cover ? "Export cover" : "Export"}
         </span>
-      </div>
+      )}
     </div>
   );
 }
 
+// ---- Library --------------------------------------------------------------------------------------------------
+
 const tabs = [
   [Film, "Media"],
-  [Music2, "Audio"],
+  [Music, "Audio"],
   [Type, "Text"],
   [Captions, "Captions"],
-  [FileText, "Transcript"],
+  [ScrollText, "Transcript"],
   [Blend, "Transitions"],
-  [SunMedium, "Filters"],
+  [Palette, "Filters"],
+  [Puzzle, "Plugins"],
 ] as const;
 
-function LibraryTabs({ on, resting = false }: { on: number; resting?: boolean }) {
+// Under 420 px the eight tabs take two rows of four.
+function LibraryTabs({ on }: { on: number }) {
   return (
-    <div className={`flex gap-0.5 rounded-[10px] bg-white/[0.045] p-0.5 ${resting ? "opacity-40" : ""}`}>
+    <div className="mx-1.5 mb-0.5 mt-1.5 grid shrink-0 grid-cols-4 gap-1 rounded-[13px] p-0.5">
       {tabs.map(([I, t], i) => (
-        <span key={t} className={`flex flex-auto flex-col items-center gap-[3px] rounded-[8px] px-1 py-1.5 ${i === on ? "bg-white/15" : "text-muted"}`}>
-          <I className={`size-3.5 ${i === on ? "text-accent" : ""}`} />
-          <span className="text-[9.5px]">{t}</span>
+        <span key={t} className={`flex h-10 flex-col items-center justify-center gap-[3px] rounded-[11px] text-[11px] font-medium leading-[13px] ${i === on ? "bg-white/[0.11] text-fg" : "text-fg/70"}`}>
+          <Icon i={I} className={i === on ? "text-accent" : ""} />
+          {t}
         </span>
       ))}
     </div>
   );
 }
 
+const SECONDARY = "bg-white/[0.09] shadow-[inset_0_0_0_1px_rgb(255_255_255/0.06)]";
+
+const TILE = "flex h-9 shrink-0 items-center justify-center gap-2 rounded-[10px] bg-white/[0.055] text-[13px] font-semibold shadow-[inset_0_0_0_1px_rgb(255_255_255/0.07)]";
+
 function MediaTab({ sizes }: { sizes: Sizes }) {
+  const used = new Set(clips.map((c) => c.name));
   return (
     <>
       <LibraryTabs on={0} />
-      <div className="flex gap-2">
-        <span className="flex h-10 flex-1 items-center gap-2 rounded-[10px] px-2.5 text-[12px] font-semibold ring-1 ring-inset ring-white/10">
-          <span className="flex size-6 items-center justify-center rounded-full bg-accent-strong">
-            <Plus className="size-3.5" />
+      <div className="flex min-h-0 flex-1 flex-col gap-3.5 pt-3.5">
+        <div className="mx-3.5 flex gap-2">
+          <span className={`${TILE} flex-1`}>
+            <Icon i={Plus} className="text-accent" />
+            Import media
           </span>
-          Import media
-          <span className="ml-auto rounded-[4px] bg-white/[0.07] px-1 text-[10px] font-normal text-muted">⌘ I</span>
-        </span>
-        <span className="flex h-10 flex-1 items-center justify-center gap-2 rounded-[10px] px-2.5 text-[12px] font-semibold ring-1 ring-inset ring-white/10">
-          <Link2 className="size-3.5 text-muted" />
-          From YouTube
-        </span>
-      </div>
-      <div className="grid grid-cols-3 gap-x-2 gap-y-2.5">
-        {media.map(([t, d, name]) => (
-          <div key={t} className="flex flex-col gap-1">
-            <div className={`relative h-[78px] overflow-hidden rounded-[9px] bg-raised ${t === "tile-2" ? "ring-2 ring-accent" : ""}`}>
-              <Image src={`/media/${t}.jpg`} alt="" fill sizes={sizes(106)} className="object-cover" />
-              {d && <span className="absolute bottom-1 right-1 rounded-[4px] bg-black/60 px-1 text-[9.5px] font-medium tabular-nums">{d}</span>}
+          <span className={`${TILE} w-9`}>
+            <Icon i={Link2} className="text-muted" />
+          </span>
+          <span className={`${TILE} w-9`}>
+            <Icon i={MonitorDot} className="text-muted" />
+          </span>
+        </div>
+        <Scrolled thumb={[2, 300]}>
+        <div className="grid grid-cols-2 gap-x-2 gap-y-3 px-3.5">
+          {media.map(([image, length, name]) => (
+            <div key={name} className="flex flex-col gap-1.5">
+              <div className="relative aspect-square overflow-hidden rounded-[10px] bg-window outline-1 -outline-offset-1 outline-white/[0.08]">
+                <Image src={`/media/${image}.jpg`} alt="" fill sizes={sizes(133)} className="object-cover" />
+                <span className="absolute bottom-1 right-1 rounded-[4px] bg-black/60 px-1 text-[11px] font-semibold leading-[15px] tabular-nums">{length}</span>
+                {used.has(name) && (
+                  <span className="absolute left-1.5 top-1.5 flex size-4 items-center justify-center rounded-full bg-black/60 shadow-[inset_0_0_0_1px_rgb(255_255_255/0.2)]"><Check size={10} strokeWidth={3} />
+                  </span>
+                )}
+              </div>
+              <span className="text-[12px] leading-[15px] text-fg/85">{name}</span>
             </div>
-            {name && <span className="truncate text-[10px] text-muted">{name}</span>}
-          </div>
-        ))}
+          ))}
+        </div>
+        </Scrolled>
       </div>
     </>
   );
 }
 
-// Nine of the 19 caption styles, drawn roughly in their own colours (assets/presets/captions.json).
-const styles = [
-  ["Reel", "text-white"],
-  ["Yellow", "text-[#ffe14d]"],
-  ["Hormozi", "text-white", "text-[#ffd400]"],
-  ["Spotlight", "text-white", "text-[#3ce35a]"],
-  ["Impact", "text-white font-black tracking-tight"],
-  ["Neon", "text-[#ff8cf0]"],
-  ["Yellow box", "rounded-[3px] bg-[#ffd400] px-1 text-[#111]"],
-  ["White box", "rounded-[3px] bg-white px-1 text-[#111]"],
-  ["Typewriter", "font-mono font-medium text-white"],
-] as const;
+// The first caption styles (assets/presets/captions.json), each name drawn in its style as TextSwatch draws it: a
+// karaoke style lights the end of its name, key words its start.
+const captionStyles: { name: string; color: string; bold?: boolean; outline?: number; box?: boolean; lit?: string; key?: string; font?: string }[] = [
+  { name: "Reel", color: "#ffffff", outline: 2 },
+  { name: "Outline", color: "#ffffff", bold: true, outline: 1.75 },
+  { name: "Yellow", color: "#ffe14d", bold: true, outline: 1.75 },
+  { name: "Box", color: "#ffffff", bold: true, box: true },
+  { name: "Clean", color: "#ffffff", outline: 0.75 },
+  { name: "Karaoke", color: "#ffffff", outline: 2, lit: "#ffe14d" },
+  { name: "Green box", color: "#ffffff", bold: true, box: true, lit: "#4ade80" },
+  { name: "Hormozi", color: "#ffffff", bold: true, outline: 2, key: "#ffd400" },
+];
+
+function StyleName({ s }: { s: (typeof captionStyles)[number] }) {
+  const split = s.name.lastIndexOf(" ") + 1 || Math.ceil(s.name.length / 2);
+  const key = s.key ? Math.floor(s.name.length / 2) : 0;
+  return (
+    <span
+      className={`app-outline truncate rounded px-1 text-[13px] leading-6 ${s.bold ? "font-bold" : ""} ${s.box ? "bg-black/70" : ""}`}
+      style={{ color: s.color, ["--outline" as string]: `${(s.outline ?? 0) * 2}px` }}
+    >
+      {key > 0 && <span style={{ color: s.key }}>{s.name.slice(0, key)}</span>}
+      {s.lit ? (
+        <>
+          {s.name.slice(key, split)}
+          <span style={{ color: s.lit }}>{s.name.slice(split)}</span>
+        </>
+      ) : (
+        s.name.slice(key)
+      )}
+    </span>
+  );
+}
 
 function CaptionsTab() {
   return (
     <>
       <LibraryTabs on={3} />
-      <div className="grid grid-cols-3 gap-2">
-        {styles.map(([name, cls, key]) => (
-          <span
-            key={name}
-            className={`flex h-[44px] items-center justify-center rounded-[10px] bg-raised text-[11.5px] font-extrabold ${name === "Spotlight" ? "ring-2 ring-accent" : "ring-1 ring-inset ring-white/[0.06]"}`}
-          >
-            {key ? (
-              <span className={cls}>
-                {name.slice(0, 4)}
-                <span className={key}>{name.slice(4)}</span>
-              </span>
-            ) : (
-              <span className={cls}>{name}</span>
-            )}
-          </span>
-        ))}
-      </div>
-      <div className="flex items-center justify-between text-[11.5px]">
-        <span className="text-muted">My styles</span>
-        <Plus className="size-3.5 text-muted" />
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <span className="text-[11.5px] text-muted">Key words</span>
-        <Segmented items={["Off", "Emphasis", "First", "Last", "Longest"]} on={1} className="text-[10.5px]" />
-      </div>
-      <span className="mt-auto flex h-8 items-center justify-center gap-2 rounded-[8px] bg-accent-strong text-[12px] font-medium text-white">
-        <Captions className="size-3.5" />
-        Regenerate captions
-      </span>
-    </>
-  );
-}
-
-// The words of the reel picked, marked in what is said around them (Reels from a long video, Trimming).
-const words = [
-  ["so we left at five, the car was freezing and", 0],
-  ["honestly I almost turned back.", 0],
-  ["Nobody tells you the last hour is the best part.", 1],
-  ["You stop thinking about your legs and you just", 1],
-  ["look up, and the whole ridge is lit.", 1],
-  ["Anyway, the coffee at the top was", 0],
-] as const;
-
-function ReelWords() {
-  return (
-    <>
-      <LibraryTabs on={4} resting />
-      <div className="flex items-baseline justify-between">
-        <span className="text-[13px] font-semibold">The last hour</span>
-        <span className="text-[11px] tabular-nums text-muted">0:38 once cut</span>
-      </div>
-      <p className="text-[13px] leading-[1.75]">
-        {words.map(([t, inReel], i) => (
-          <span key={i} className={inReel ? "rounded-[3px] bg-accent/25 box-decoration-clone px-0.5" : "text-muted"}>
-            {t}{" "}
-          </span>
-        ))}
-      </p>
-      <span className="mt-auto text-[11px] leading-[1.45] text-muted">Click a word to play from it. Shift-click moves the start or the end of the reel to it.</span>
-    </>
-  );
-}
-
-const frames = [
-  ["timeline-1", "00:04.2", "Sharp, well framed"],
-  ["timeline-2", "00:11.8", ""],
-  ["timeline-3", "00:17.0", ""],
-  ["timeline-4", "00:24.6", ""],
-  ["tile-2", "00:08.1", ""],
-  ["tile-6", "00:27.3", ""],
-] as const;
-
-function CoverFrames({ sizes }: { sizes: Sizes }) {
-  return (
-    <>
-      <LibraryTabs on={0} resting />
-      <div className="flex items-center justify-between">
-        <span className="text-[13px] font-semibold">Frames</span>
-        <span className="flex items-center gap-1.5 text-[11.5px] font-medium text-accent">
-          <WandSparkles className="size-3.5" />
-          Make it with AI
-        </span>
-      </div>
-      <span className="capsule flex h-8 items-center justify-center gap-1.5 rounded-[8px] text-[12px] font-medium">
-        <Sparkles className="size-3.5 text-accent" />
-        Pick again
-      </span>
-      <div className="grid grid-cols-3 gap-x-2 gap-y-2.5">
-        {frames.map(([t, time, why], i) => (
-          <div key={t} className="flex flex-col gap-1">
-            <div className={`relative h-[92px] overflow-hidden rounded-[9px] bg-raised ${i === 0 ? "ring-2 ring-accent" : ""}`}>
-              <Image src={`/media/${t}.jpg`} alt="" fill sizes={sizes(106)} className="object-cover" />
-              <span className="absolute bottom-1 right-1 rounded-[4px] bg-black/60 px-1 text-[9.5px] font-medium tabular-nums">{time}</span>
+      <div className="flex min-h-0 flex-1 flex-col">
+        <Scrolled thumb={[2, 190]} className="flex flex-col gap-3.5 p-3.5">
+          <Labelled label="Spoken language">
+            <Select value="English" />
+          </Labelled>
+          <Labelled label="Accuracy">
+            <Select value="Most accurate (547 MB)" />
+          </Labelled>
+          <Labelled label="Words per caption">
+            <Seg items={["1", "2", "3", "Phrases"]} on={1} />
+          </Labelled>
+          <div className="flex flex-col gap-1.5">
+            <h3 className="text-[13px] font-semibold">Style</h3>
+            <div className="grid grid-cols-2 gap-2">
+              {captionStyles.map((s) => {
+                const on = s.name === "Karaoke";
+                return (
+                  <span
+                    key={s.name}
+                    className={`relative flex h-12 min-w-0 items-center justify-center rounded-[10px] border bg-white/[0.06] px-1 ${on ? "border-accent shadow-[0_0_0_1px_var(--color-accent)]" : "border-white/[0.08]"}`}
+                  >
+                    <StyleName s={s} />
+                    {on && (
+                      <span className="absolute right-1 top-1 flex size-3.5 items-center justify-center rounded-full bg-accent-strong shadow-[0_1px_2px_rgb(0_0_0/0.5)]"><Check size={10} strokeWidth={3} />
+                      </span>
+                    )}
+                  </span>
+                );
+              })}
             </div>
-            <span className="truncate text-[10px] text-muted">{why || " "}</span>
           </div>
-        ))}
+        </Scrolled>
+        <div className="flex shrink-0 flex-col gap-2 border-t border-white/[0.1] bg-panel p-3.5">
+          <span className={`flex h-8 items-center justify-center gap-1.5 rounded-lg text-[13px] font-medium ${SECONDARY}`}>
+            <Icon i={Captions} size={15} />
+            Regenerate captions
+          </span>
+          <span className="flex h-8 items-center justify-center gap-1.5 rounded-lg bg-white/[0.06] text-[12px] font-medium">
+            <Icon i={ScanFace} size={14} />
+            Find text over faces
+          </span>
+        </div>
       </div>
     </>
   );
 }
 
-function Handles() {
+// ---- Preview --------------------------------------------------------------------------------------------------
+
+// The frame: 9:16 as tall as the preview box (the pane less 12 px above and the 64 px transport row).
+const PANES_H = 900 - 48 - TIMELINE_H - 12;
+const FRAME_H = PANES_H - 12 - 64;
+const FRAME_W = Math.round((FRAME_H * 9) / 16);
+// What the canvas's 1080 px are on screen.
+const PT = FRAME_W / 1080;
+
+// The preview's selection box: corner handles, the rotate handle (inside the box while it fills the frame) and, on a
+// picture, a bar along each edge for cropping.
+function SelectionBox({ text = false }: { text?: boolean }) {
+  const corner = "absolute size-[9px] bg-fg shadow-[0_0_0_1px_rgb(0_0_0/0.45)]";
+  const bar = "absolute bg-fg shadow-[0_0_0_1px_rgb(0_0_0/0.45)]";
   return (
     <>
-      <span className="absolute inset-0 ring-1 ring-white/80" />
-      {["-left-[3px] -top-[3px]", "-right-[3px] -top-[3px]", "-bottom-[3px] -left-[3px]", "-bottom-[3px] -right-[3px]"].map((c) => (
-        <span key={c} className={`absolute size-1.5 bg-white ${c}`} />
-      ))}
-      <span className="absolute -top-[3px] left-1/2 h-1.5 w-3.5 -translate-x-1/2 rounded-full bg-white" />
+      <span className="pointer-events-none absolute inset-0 outline-[1.5px] outline-fg [outline-style:solid]" />
+      <span className={`${corner} -left-[4.5px] -top-[4.5px]`} />
+      <span className={`${corner} -right-[4.5px] -top-[4.5px]`} />
+      <span className={`${corner} -bottom-[4.5px] -left-[4.5px]`} />
+      <span className={`${corner} -bottom-[4.5px] -right-[4.5px]`} />
+      {!text && (
+        <>
+          <span className={`${bar} left-1/2 top-[-2.5px] h-[5px] w-[18px] -translate-x-1/2`} />
+          <span className={`${bar} bottom-[-2.5px] left-1/2 h-[5px] w-[18px] -translate-x-1/2`} />
+          <span className={`${bar} left-[-2.5px] top-1/2 h-[18px] w-[5px] -translate-y-1/2`} />
+          <span className={`${bar} right-[-2.5px] top-1/2 h-[18px] w-[5px] -translate-y-1/2`} />
+        </>
+      )}
+      {text && <span className="absolute -top-[18px] left-1/2 h-[18px] w-[1.5px] -translate-x-1/2 bg-fg" />}
+      <span className={`absolute left-1/2 size-[11px] -translate-x-1/2 rounded-full border-[1.5px] border-fg ${text ? "-top-[29px] bg-fg" : "top-5 bg-black/30"}`} />
     </>
   );
 }
 
-const shadow = "drop-shadow(0 2px 6px rgb(0 0 0 / 0.75))";
+// A caption as the engine draws it on the 1080 × 1920 canvas: Reel, the style new captions get, is 95 px Inter in
+// white with a 7.5 px black outline; Karaoke is the same with the word being said in yellow.
+const CAPTION_AT = 0.62;
 
-function Preview({ focus, sizes }: { focus: EditorFocus; sizes: Sizes }) {
-  const cover = focus === "cover";
-  const reels = focus === "reels";
+function Caption({ words, said }: { words: string[]; said?: number }) {
   return (
-    <div className="flex min-w-0 flex-1 flex-col items-center justify-center gap-3.5 rounded-xl bg-stage p-3.5 ring-1 ring-inset ring-white/[0.06]">
-      <div className="relative h-[313px] w-[176px]">
-        <Image src="/media/reel-hike.jpg" alt="" fill sizes={sizes(176)} className="object-cover" />
-        {cover ? (
-          <div className="absolute inset-x-0 top-[46px] flex flex-col items-center text-[30px] font-black uppercase leading-[0.95] tracking-[-0.02em] text-white" style={{ filter: shadow, WebkitTextStroke: "1px #000" }}>
-            <span>Morning</span>
-            <span>run</span>
-          </div>
-        ) : reels ? (
-          <div className="absolute inset-x-3 bottom-[70px] flex flex-wrap justify-center gap-x-[0.26em] text-[15px] font-black uppercase leading-[1.1] tracking-[-0.015em]" style={{ filter: shadow }}>
-            <span>the</span>
-            <span>last</span>
-            <span className="text-caption-yellow">hour</span>
-          </div>
-        ) : (
-          <div className="absolute inset-x-0 bottom-[72px] flex justify-center gap-[0.26em] text-[17px] font-black uppercase tracking-[-0.015em]" style={{ filter: shadow }}>
-            <span>we</span>
-            <span>made</span>
-            <span className="text-caption-yellow">it</span>
-          </div>
-        )}
-        {focus === "edit" && <Handles />}
-        {cover && <span className="absolute inset-x-[18px] top-[38px] h-[76px] ring-1 ring-white/80" />}
+    <div
+      className="app-outline absolute inset-x-3 flex flex-wrap justify-center gap-x-[0.26em] leading-[1.2]"
+      style={{ top: Math.round(FRAME_H * CAPTION_AT), fontSize: 95 * PT, ["--outline" as string]: `${7.5 * PT * 2}px` }}
+    >
+      {words.map((w, i) => (
+        <span key={i} className={i === said ? "text-[#ffe14d]" : "text-white"}>
+          {w}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// The preview pane: black around the 9:16 frame, and the bar under it. `over` sits over the frame's edges.
+function Stage({ children, over, bar }: { children: React.ReactNode; over?: React.ReactNode; bar: React.ReactNode }) {
+  return (
+    <div className="flex min-w-0 flex-1 flex-col rounded-xl bg-stage shadow-[inset_0_0_0_1px_rgb(255_255_255/0.05)]">
+      <div className="mx-4 mt-3 flex min-h-0 flex-1 items-center justify-center">
+        <div className="relative shrink-0" style={{ width: FRAME_W, height: FRAME_H }}>
+          <div className="absolute inset-0 overflow-hidden bg-black shadow-[0_0_0_1px_rgb(255_255_255/0.07)]">{children}</div>
+          {over}
+        </div>
       </div>
-      <div className="capsule flex h-10 w-full items-center justify-between gap-3 rounded-full px-3.5">
-        {cover ? (
-          <>
-            <span className="text-[12px] font-medium tabular-nums">
-              Frame <span className="text-muted">00:04.20</span>
-            </span>
-            <span className="flex h-7 items-center rounded-full bg-white/[0.06] p-0.5 text-[11px] font-medium">
-              <span className="rounded-full bg-white/15 px-2.5 py-1">9:16 Cover</span>
-              <span className="px-2.5 py-1 text-muted">16:9 YouTube</span>
-            </span>
-            <span className="flex items-center gap-1.5 text-[11px] text-muted">
-              <Smartphone className="size-3.5" />
-              What the apps cover
-            </span>
-          </>
-        ) : (
-          <>
-            <span className="w-[118px] text-[12px] font-medium tabular-nums">
-              {reels ? "06:12.40" : "00:10.85"} <span className="font-normal text-muted">/ {reels ? "12:40.00" : "00:30.00"}</span>
-            </span>
-            <span className="flex items-center gap-3.5">
-              <SkipBack className="size-3.5" />
-              <span className="flex size-7 items-center justify-center rounded-full bg-fg text-bg">
-                <Play className="size-[13px] fill-current" />
-              </span>
-              <SkipForward className="size-3.5" />
-            </span>
-            {reels ? (
-              <span className="flex items-center gap-2.5 text-[11px]">
-                <span className="text-muted">Reel start</span>
-                <span className="text-muted">Hear the ending</span>
-                <span className="flex h-6 items-center rounded-full bg-white/[0.12] px-2.5 font-medium">Done</span>
-              </span>
-            ) : (
-              <span className="flex items-center gap-2.5 text-muted">
-                <Volume2 className="size-3.5" />
-                <Smartphone className="size-3.5" />
-                <span className="flex h-6 items-center gap-1 rounded-full bg-white/[0.07] px-2 text-[11px] text-fg">
-                  <RectangleHorizontal className="size-3 text-muted" />
-                  Ratio <span className="text-muted">9:16</span>
-                </span>
-                <Maximize className="size-3.5" />
-              </span>
-            )}
-          </>
-        )}
+      <div className="flex shrink-0 justify-center px-5 py-2.5">
+        <div className="app-bar grid h-11 w-full max-w-[620px] grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-full pl-[18px] pr-1.5">{bar}</div>
       </div>
     </div>
   );
 }
 
-const sliders = [
-  ["Scale", "100", "%", 0.32],
-  ["Position X", "0.0", "%", 0.5],
-  ["Position Y", "0.0", "%", 0.5],
-  ["Rotation", "0", "°", 0.5],
-  ["Opacity", "100", "%", 0.94],
-] as const;
+function PlayControls({ size = 38 }: { size?: number }) {
+  return (
+    <span className="flex items-center gap-2.5">
+      <IconBtn i={SkipBack} />
+      <span className="flex items-center justify-center rounded-full bg-fg text-black shadow-[0_1px_3px_rgb(0_0_0/0.4)]" style={{ width: size, height: size }}>
+        <Play size={16} fill="currentColor" className="translate-x-px" />
+      </span>
+      <IconBtn i={SkipForward} />
+    </span>
+  );
+}
+
+function Preview({ focus, sizes }: { focus: EditorFocus; sizes: Sizes }) {
+  return (
+    <Stage
+      over={
+        focus === "captions" ? (
+          <div className="absolute inset-x-[52px]" style={{ top: Math.round(FRAME_H * CAPTION_AT) - 4, height: Math.round(95 * PT * 1.2) + 8 }}>
+            <SelectionBox text />
+          </div>
+        ) : (
+          <SelectionBox />
+        )
+      }
+      bar={
+        <>
+          <span className="truncate text-[13px] tabular-nums">
+            <span className="text-[15px] font-semibold">
+              00:10<span className="font-medium text-muted">.85</span>
+            </span>
+            <span className="text-muted"> / 00:28.60</span>
+          </span>
+          <PlayControls />
+          <span className="flex items-center justify-end gap-1">
+            <IconBtn i={Volume2} />
+            <IconBtn i={Smartphone} />
+            <span className="flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium">
+              <Icon i={RectangleHorizontal} size={14} className="text-muted" />
+              Ratio <span className="text-muted">9:16</span>
+              <Icon i={ChevronDown} size={13} className="text-muted" />
+            </span>
+            <IconBtn i={Maximize} size={15} />
+          </span>
+        </>
+      }
+    >
+      <Image src="/media/reel-hike.jpg" alt="" fill sizes={sizes(FRAME_W)} className="object-cover" />
+      <Caption words={["we", "made", "it"]} said={focus === "captions" ? 1 : undefined} />
+    </Stage>
+  );
+}
+
+// ---- Inspector ------------------------------------------------------------------------------------------------
+
+function InspectorHeader({ tone, i, title, detail }: { tone: string; i: typeof Film; title: string; detail: string }) {
+  return (
+    <div className="flex shrink-0 items-center gap-3 px-4 pb-3 pt-3.5">
+      <span className={`flex size-8 shrink-0 items-center justify-center rounded-lg shadow-[inset_0_0_0_1px_rgb(255_255_255/0.12)] ${tone}`}>
+        <Icon i={i} />
+      </span>
+      <div className="min-w-0">
+        <div className="truncate text-[15px] font-semibold leading-5 tracking-[-0.015em]">{title}</div>
+        <div className="mt-px truncate text-[12px] tabular-nums text-muted">{detail}</div>
+      </div>
+    </div>
+  );
+}
+
+function Section({ title, actions, children, first = false }: { title?: string; actions?: React.ReactNode; children: React.ReactNode; first?: boolean }) {
+  return (
+    <section className={`flex flex-col gap-2 px-4 pb-3.5 pt-3 ${first ? "" : "border-t border-white/[0.06]"}`}>
+      {title && (
+        <div className="flex min-h-6 items-center justify-between gap-2">
+          <h3 className="text-[13px] font-semibold">{title}</h3>
+          {actions && <div className="-mr-1 flex items-center gap-0.5 text-muted">{actions}</div>}
+        </div>
+      )}
+      <div className="flex flex-col gap-2">{children}</div>
+    </section>
+  );
+}
+
+function Quiet({ i, className = "" }: { i: typeof Film; className?: string }) {
+  return (
+    <span className={`flex size-6 items-center justify-center rounded-md ${className}`}>
+      <Icon i={i} size={14} />
+    </span>
+  );
+}
+
+// One property row: the label in an 80 px column, the slider, and the value with its unit in a 64 px field.
+// `origin` is where the fill starts, 0.5 for a range around zero, which marks it with a tick.
+function Slider({ label, value, unit, at, origin = 0 }: { label: string; value: string; unit?: string; at: number; origin?: number }) {
+  const [from, to] = at < origin ? [at, origin] : [origin, at];
+  return (
+    <div className="flex min-h-7 items-center gap-2">
+      <span className="w-20 shrink-0 truncate text-[12px] leading-4 text-muted">{label}</span>
+      <div className="relative h-4 min-w-0 flex-1">
+        <div className="absolute inset-x-0 top-1.5 h-1 rounded-full bg-white/[0.13]" />
+        {origin > 0 && <div className="absolute top-[3px] h-2.5 w-px bg-white/30" style={{ left: `${origin * 100}%` }} />}
+        <div className="absolute top-1.5 h-1 bg-accent" style={{ left: `${from * 100}%`, width: `${(to - from) * 100}%` }} />
+        <div
+          className="absolute top-px h-3.5 w-[22px] rounded-[7px] bg-[#f7f7f9] shadow-[0_0_0_0.5px_rgb(0_0_0/0.35),0_1px_3px_rgb(0_0_0/0.5)]"
+          style={{ left: `calc(${at * 100}% - ${at * 22}px)` }}
+        />
+      </div>
+      <span className={`relative flex h-6 w-16 shrink-0 items-center justify-end rounded-md border border-white/[0.08] bg-white/[0.055] pl-1.5 text-[12px] tabular-nums ${unit ? "pr-[18px]" : "pr-1.5"}`}>
+        {value}
+        {unit && <span className="absolute right-1.5 text-[11px] text-muted">{unit}</span>}
+      </span>
+    </div>
+  );
+}
 
 function VideoInspector() {
   return (
     <>
-      <div className="flex flex-col gap-0.5">
-        <span className="flex items-center gap-2 text-[14px] font-semibold">
-          <Film className="size-3.5 text-muted" />
-          IMG_2044.MOV
-        </span>
-        <span className="text-[11px] text-muted">8.7 s · from 2.0 s of 48.0 s</span>
-      </div>
-      <Segmented items={["Video", "Adjust", "Speed", "Animation", "Audio"]} on={0} className="text-[11px]" />
-      <div className="flex items-center justify-between pt-1">
-        <span className="text-[12.5px] font-semibold">Transform</span>
-        <span className="flex items-center gap-2.5 text-muted">
-          <ChevronLeft className="size-3.5" />
-          <Diamond className="size-3 text-fg" />
-          <ChevronRight className="size-3.5" />
-          <span className="h-3 w-px bg-white/15" />
-          <RotateCcw className="size-3.5" />
-        </span>
-      </div>
-      <Segmented items={["Fit", "Fill"]} on={0} className="text-[11.5px]" />
-      <div className="flex flex-col gap-1.5">
-        {sliders.map(([label, value, unit, p]) => (
-          <div key={label} className="flex flex-col gap-0.5">
-            <span className="text-[11px] text-muted">{label}</span>
-            <div className="flex items-center gap-2">
-              <div className="relative h-3.5 flex-1">
-                <div className="absolute inset-x-0 top-[5px] h-1 rounded-full bg-white/[0.13]" />
-                {p !== 0.5 && <div className="absolute left-0 top-[5px] h-1 rounded-full bg-accent" style={{ width: `${p * 100}%` }} />}
-                <div className="absolute top-0 h-3.5 w-[22px] -translate-x-1/2 rounded-full bg-white shadow-[0_1px_3px_rgb(0_0_0/0.4)]" style={{ left: `${p * 100}%` }} />
-              </div>
-              <span className="flex h-[22px] w-[50px] items-center justify-end rounded-md bg-white/[0.055] px-[7px] text-[11.5px] tabular-nums ring-1 ring-inset ring-white/[0.08]">{value}</span>
-              <span className="w-2.5 text-[11px] text-muted">{unit}</span>
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="mt-1 flex items-center justify-between border-t border-white/[0.07] pt-3">
-        <span className="text-[12.5px] font-semibold">Crop and shape</span>
-        <RotateCcw className="size-3.5 text-muted" />
-      </div>
-      <Segmented items={["Rectangle", "Rounded", "Circle"]} on={0} className="text-[11px]" />
+      <InspectorHeader tone="bg-clip-video" i={Film} title="IMG_2044.MOV" detail="8.7 s · from 2.0 s of 48.0 s" />
+      <Seg items={["Video", "Adjust", "Speed", "Animation", "Audio"]} on={0} className="mx-3 mb-1" />
+      <Scrolled thumb={[2, 300]}>
+      <Section
+        first
+        title="Transform"
+        actions={
+          <>
+            <Quiet i={ChevronLeft} className="opacity-40" />
+            <Quiet i={Diamond} />
+            <Quiet i={ChevronRight} className="opacity-40" />
+            <Quiet i={RotateCcw} />
+          </>
+        }
+      >
+        <Seg items={["Fit", "Fill"]} on={0} icons={[Minimize, Maximize]} />
+        <Slider label="Scale" value="100" unit="%" at={0.23} />
+        <Slider label="Position X" value="0.0" unit="%" at={0.5} origin={0.5} />
+        <Slider label="Position Y" value="0.0" unit="%" at={0.5} origin={0.5} />
+        <Slider label="Rotation" value="0" unit="°" at={0.5} origin={0.5} />
+        <Slider label="Opacity" value="100" unit="%" at={1} />
+      </Section>
+      <Section title="Crop and shape" actions={<Quiet i={RotateCcw} />}>
+        <Seg items={["Rectangle", "Rounded", "Circle"]} on={0} />
+        <Slider label="Crop left" value="0" unit="%" at={0} />
+        <Slider label="Crop right" value="0" unit="%" at={0} />
+        <Slider label="Crop top" value="0" unit="%" at={0} />
+        <Slider label="Crop bottom" value="0" unit="%" at={0} />
+      </Section>
+      </Scrolled>
     </>
   );
 }
 
-function CoverInspector() {
+// A label over its control, as a row whose label is long or whose control is wide has it.
+function Labelled({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-[12px] text-muted">{label}</span>
+      {children}
+    </div>
+  );
+}
+
+function Select({ value, className = "", off = false, font = "" }: { value: string; className?: string; off?: boolean; font?: string }) {
+  return (
+    <span className={`flex h-8 min-w-0 items-center justify-between gap-2 rounded-lg px-2.5 text-[13px] ${SECONDARY} ${off ? "opacity-40" : ""} ${className}`}>
+      <span className={`truncate ${font}`}>{value}</span>
+      <Icon i={ChevronDown} size={14} className="text-muted" />
+    </span>
+  );
+}
+
+// A label in the 80 px column of a property row, and its control.
+function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex min-h-7 items-center gap-2">
+      <span className="w-20 shrink-0 truncate text-[12px] text-muted">{label}</span>
+      <div className="flex min-w-0 flex-1 items-center gap-2">{children}</div>
+    </div>
+  );
+}
+
+// The selected caption: its words, where its style goes, and the style itself (inspector/TextSection.tsx).
+function CaptionInspector() {
   return (
     <>
-      <div className="flex items-center justify-between">
-        <span className="text-[14px] font-semibold">Text</span>
-        <span className="flex items-center gap-1 text-[11.5px] font-medium text-accent">
-          <Plus className="size-3.5" />
-          Add text
-        </span>
-      </div>
-      <span className="flex h-9 items-center rounded-[8px] bg-white/[0.055] px-2.5 text-[12px] font-semibold ring-1 ring-inset ring-accent/60">MORNING RUN</span>
-      <div className="grid grid-cols-3 gap-1.5">
-        {[
-          ["Big", "text-white"],
-          ["Yellow box", "rounded-[3px] bg-[#ffd400] px-1 text-[#111]"],
-          ["Outlined", "text-white [-webkit-text-stroke:0.6px_#000]"],
-        ].map(([name, cls]) => (
-          <span key={name} className={`flex h-10 items-center justify-center rounded-[9px] bg-raised text-[11px] font-black ${name === "Outlined" ? "ring-2 ring-accent" : "ring-1 ring-inset ring-white/[0.06]"}`}>
-            <span className={cls}>{name}</span>
-          </span>
-        ))}
-      </div>
-      {[
-        ["Behind person", true],
-        ["Line around person", false],
-      ].map(([label, on]) => (
-        <div key={label as string} className="flex items-center justify-between text-[12px]">
-          {label as string}
-          <Switch on={on as boolean} />
+      <InspectorHeader tone="bg-clip-captions" i={Captions} title="Caption" detail="3.2 s" />
+      <Seg items={["Text", "Animation", "Transform"]} on={0} className="mx-3 mb-1" />
+      <Scrolled thumb={[2, 240]}>
+      <Section first title="Text">
+        <span className="h-[52px] rounded-lg border border-white/[0.08] bg-white/[0.055] px-2.5 py-2 text-[13px] leading-[18px]">we made it</span>
+        <Labelled label="Apply style to">
+          <Seg items={["All captions", "This caption"]} on={0} />
+        </Labelled>
+      </Section>
+      <Section title="Style">
+        <Labelled label="Font">
+          <div className="flex gap-2">
+            <Select value="Inter" className="flex-1" />
+            <Select value="Regular" className="w-[118px]" />
+          </div>
+        </Labelled>
+        <Slider label="Size" value="95" at={0.29} />
+        <FieldRow label="Color">
+          <span className="ml-auto text-[12px] tabular-nums text-muted">#FFFFFF</span>
+          <span className="h-5 w-8 rounded-[5px] bg-white shadow-[inset_0_0_0_1px_rgb(255_255_255/0.18)]" />
+        </FieldRow>
+        <Labelled label="Case">
+          <Seg items={["", "AB", "ab", "Ab"]} icons={[Ban, null, null, null]} on={0} />
+        </Labelled>
+        <div className="grid grid-cols-3 gap-2">
+          {captionStyles.slice(0, 6).map((s) => (
+            <span
+              key={s.name}
+              className={`flex h-12 min-w-0 items-center justify-center rounded-[10px] border bg-white/[0.06] px-1 ${s.name === "Karaoke" ? "border-accent shadow-[0_0_0_1px_var(--color-accent)]" : "border-white/[0.08]"}`}
+            >
+              <StyleName s={s} />
+            </span>
+          ))}
         </div>
-      ))}
-      <div className="mt-1 flex flex-col gap-2 border-t border-white/[0.07] pt-3">
-        <span className="text-[12.5px] font-semibold">Background</span>
-        <Segmented items={["As filmed", "Blurred", "Color"]} on={0} className="text-[11px]" />
-      </div>
-      <div className="mt-1 flex flex-col gap-2 border-t border-white/[0.07] pt-3">
-        <span className="text-[12.5px] font-semibold">Export</span>
-        <Segmented items={["PNG", "JPEG"]} on={1} className="text-[11px]" />
-      </div>
+      </Section>
+      </Scrolled>
     </>
   );
 }
 
-function TimelineToolbar() {
-  const tools = [[Undo2, Redo2], [Scissors, BetweenHorizontalStart, BetweenHorizontalEnd, Trash2], [Copy, Layers]] as const;
+// ---- Timeline -------------------------------------------------------------------------------------------------
+
+function Divider() {
+  return <span className="mx-1 h-4 w-px bg-white/[0.12]" />;
+}
+
+function TimelineTools({ cover = false }: { cover?: boolean }) {
   return (
-    <div className="flex h-11 shrink-0 items-center justify-between px-2.5">
-      <div className="capsule flex h-[30px] items-center gap-3 rounded-full px-3 text-fg/90">
-        {tools.map((group, g) => (
-          <span key={g} className="flex items-center gap-3">
-            {group.map((I, i) => (
-              <I key={i} className={`size-3.5 ${I === Redo2 ? "text-subtle" : ""}`} />
-            ))}
-            <span className="h-3.5 w-px bg-white/15" />
-          </span>
-        ))}
-        <span className="-mr-1.5 flex size-6 items-center justify-center rounded-full bg-accent/25">
-          <Magnet className="size-3.5 text-accent" />
-        </span>
+    <div className="flex h-11 shrink-0 items-center gap-1.5 px-2.5">
+      {cover ? (
+        <p className="truncate pl-1.5 text-[12px] text-muted">Click or drag on the timeline to choose the cover&apos;s frame.</p>
+      ) : (
+      <div className="app-bar flex items-center rounded-full">
+        <IconBtn i={Undo2} />
+        <IconBtn i={Redo2} off />
+        <Divider />
+        <IconBtn i={Scissors} />
+        <IconBtn i={Snowflake} />
+        <IconBtn i={PanelLeftClose} />
+        <IconBtn i={PanelRightClose} />
+        <IconBtn i={Trash2} />
+        <Divider />
+        <IconBtn i={Copy} size={15} />
+        <IconBtn i={Unlink} size={15} />
+        <IconBtn i={RotateCwSquare} size={15} />
+        <Divider />
+        <IconBtn i={Magnet} className="bg-accent/20 text-accent" />
       </div>
-      <div className="flex items-center gap-2.5 text-muted">
-        <ZoomOut className="size-3.5" />
-        <div className="relative h-3 w-[90px]">
-          <div className="absolute inset-x-0 top-1 h-1 rounded-full bg-white/[0.13]" />
-          <div className="absolute left-0 top-1 h-1 w-10 rounded-full bg-accent" />
-          <div className="absolute left-[30px] top-0 h-3 w-5 rounded-full bg-white" />
-        </div>
-        <ZoomIn className="size-3.5" />
-        <Maximize className="ml-1 size-3.5" />
+      )}
+      <div className="flex-1" />
+      <IconBtn i={ZoomOut} />
+      <div className="relative h-4 w-24">
+        <div className="absolute inset-x-0 top-1.5 h-1 rounded-full bg-white/[0.13]" />
+        <div className="absolute left-0 top-1.5 h-1 w-[45%] rounded-l-full bg-accent" />
+        <div className="absolute left-[calc(45%-10px)] top-px h-3.5 w-[22px] rounded-[7px] bg-[#f7f7f9] shadow-[0_1px_3px_rgb(0_0_0/0.5)]" />
+      </div>
+      <IconBtn i={ZoomIn} />
+      <IconBtn i={Maximize2} size={15} />
+    </div>
+  );
+}
+
+function TrackTile({ tone, i }: { tone: string; i: typeof Film }) {
+  return (
+    <span className={`mr-1.5 flex size-6 shrink-0 items-center justify-center rounded-[7px] shadow-[inset_0_1px_0_rgb(255_255_255/0.18)] ${tone}`}>
+      <Icon i={i} size={13} />
+    </span>
+  );
+}
+
+function Toggle({ i }: { i?: typeof Film }) {
+  return <span className="flex size-[22px] shrink-0 items-center justify-center text-muted">{i && <Icon i={i} size={14} />}</span>;
+}
+
+// A track's row: its header pinned left and its lane, 4 px apart from the next row.
+function Row({ h, header, children, main = false }: { h: number; header: React.ReactNode; children?: React.ReactNode; main?: boolean }) {
+  return (
+    <div className="relative flex shrink-0" style={{ height: h + 4 }}>
+      <div className="flex shrink-0 items-center gap-0.5 border-r border-white/[0.07] bg-panel pl-2 pr-1" style={{ width: HEADER_W }}>
+        {header}
+      </div>
+      <div className={`relative flex-1 ${main ? "bg-white/[0.035]" : ""}`} style={{ marginBlock: 2 }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+const EDGE = "shadow-[inset_0_1px_0_rgb(255_255_255/0.2),inset_0_-1px_0_rgb(0_0_0/0.35),inset_0_0_0_1px_rgb(255_255_255/0.1)]";
+
+function ClipBox({ left, width, className = "", selected = false, children }: { left: number; width: number; className?: string; selected?: boolean; children?: React.ReactNode }) {
+  return (
+    <div className={`absolute bottom-1 top-1 overflow-hidden rounded-[4px] ${className}`} style={{ left: left + 1, width: width - 2 }}>
+      {children}
+      <span className={`pointer-events-none absolute inset-0 rounded-[4px] ${selected ? "shadow-[inset_0_0_0_2px_var(--color-accent)]" : EDGE}`} />
+    </div>
+  );
+}
+
+// A picture clip's frames, 9:16 at the clip's height, cut from its picture.
+function Frames({ image, n, sizes }: { image: string; n: number; sizes: Sizes }) {
+  return (
+    <div className="absolute inset-0 flex">
+      {Array.from({ length: n }, (_, k) => (
+        <span key={k} className="relative h-full w-[31.5px] shrink-0">
+          <Image src={`/media/${image}.jpg`} alt="" fill sizes={sizes(32)} className="object-cover" />
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function Bars({ n, seed, peak, color }: { n: number; seed: number; peak: number; color: string }) {
+  return (
+    <div className="absolute inset-x-0 bottom-0 flex h-full items-end gap-px">
+      {wave(n, seed, peak).map((h, k) => (
+        <span key={k} className="w-[2px] shrink-0" style={{ height: h, background: color }} />
+      ))}
+    </div>
+  );
+}
+
+function Lanes({ focus, sizes }: { focus: EditorFocus; sizes: Sizes }) {
+  const captionsOn = focus === "captions";
+  const editOn = focus === "edit" || focus === "export";
+  return (
+    <>
+      <Row
+        h={34}
+        header={
+          <>
+            <TrackTile tone="bg-clip-captions" i={Captions} />
+            <span className="min-w-0 flex-1 truncate text-[12px] font-medium">Captions</span>
+            <Toggle i={Eye} />
+            <Toggle />
+          </>
+        }
+      >
+        {captionLine.map(([from, to, text]) => {
+          const selected = captionsOn && text === "we made it";
+          return (
+            <ClipBox key={text} left={x(from)} width={x(to) - x(from)} selected={selected} className={selected ? "bg-clip-captions" : "bg-clip-captions/55"}>
+              <span className="absolute inset-0 flex items-center gap-1.5 px-1 text-[11px]">
+                <span className="whitespace-nowrap text-fg/90">{text}</span>
+                {x(to) - x(from) > 110 && <span className="shrink-0 tabular-nums text-fg/70">{(to - from).toFixed(1)} s</span>}
+              </span>
+            </ClipBox>
+          );
+        })}
+      </Row>
+      {/* The blank lane over the video, where a picture dragged in goes. */}
+      <Row h={20} header={null} />
+      <Row
+        h={64}
+        main
+        header={
+          <>
+            <span className="flex min-w-0 flex-1 items-center gap-2">
+              <CoverTile on={focus === "cover"} sizes={sizes} />
+              <span className="truncate text-[12px] font-medium">Main</span>
+            </span>
+            <Toggle i={Eye} />
+            <Toggle i={Volume2} />
+          </>
+        }
+      >
+        {clips.map((c, n) => {
+          const selected = editOn && n === 1;
+          const w = x(c.length);
+          return (
+            <ClipBox key={c.name} left={x(c.start)} width={w} selected={selected} className="bg-clip-video">
+              <Frames image={c.image} n={Math.ceil(w / 31.5)} sizes={sizes} />
+              <div className="absolute inset-x-0 bottom-0 h-3.5 overflow-hidden bg-[#141416]">
+                <Bars n={Math.floor(w / 3)} seed={n + 1} peak={11} color="#a1a1a9" />
+              </div>
+              <span className="absolute left-2.5 top-1 flex h-[17px] items-center gap-1 rounded-[3px] bg-black/60 pl-[5px] pr-1.5 text-[11px] font-medium">
+                <Icon i={Film} size={11} />
+                {c.name}
+                <span className="pl-0.5 font-normal tabular-nums text-fg/80">{c.length.toFixed(1)} s</span>
+              </span>
+              {selected && (
+                <>
+                  <span className="absolute inset-y-0 left-0 flex w-2 items-center justify-center bg-accent">
+                    <span className="h-3.5 w-0.5 rounded-full bg-black/55" />
+                  </span>
+                  <span className="absolute inset-y-0 right-0 flex w-2 items-center justify-center bg-accent">
+                    <span className="h-3.5 w-0.5 rounded-full bg-black/55" />
+                  </span>
+                </>
+              )}
+            </ClipBox>
+          );
+        })}
+      </Row>
+      <Row
+        h={58}
+        header={
+          <>
+            <TrackTile tone="bg-clip-audio" i={AudioLines} />
+            <span className="min-w-0 flex-1 truncate text-[12px] font-medium">Music</span>
+            <Toggle />
+            <Toggle i={Volume2} />
+          </>
+        }
+      >
+        <ClipBox left={0} width={x(LENGTH)} className="bg-clip-audio">
+          <span className="absolute left-2.5 top-0.5 flex h-3.5 items-center gap-1 text-[11px] font-medium">
+            <Icon i={AudioLines} size={11} />
+            Sunrise.m4a
+            <span className="font-normal tabular-nums text-fg/80">28.6 s</span>
+          </span>
+          <div className="absolute inset-x-0 bottom-[3px] top-[17px]">
+            <Bars n={Math.floor(x(LENGTH) / 3)} seed={9} peak={28} color="#5fd497" />
+          </div>
+        </ClipBox>
+      </Row>
+    </>
+  );
+}
+
+function CoverTile({ on, sizes }: { on: boolean; sizes: Sizes }) {
+  return (
+    <span className={`relative h-14 w-11 shrink-0 overflow-hidden rounded-[7px] ${on ? "shadow-[0_0_0_2px_var(--color-accent)]" : "shadow-[inset_0_0_0_1px_rgb(255_255_255/0.1)]"}`}>
+      <Image src="/media/reel-hike.jpg" alt="" fill sizes={sizes(44)} className="object-cover" />
+      <span className="app-outline absolute inset-x-0 top-[34px] text-center font-anton text-[7px] leading-none text-white" style={{ ["--outline" as string]: "1px" }}>
+        MORNING RUN
+      </span>
+      <span className="absolute inset-x-0.5 bottom-0.5 rounded-[4px] bg-black/60 text-center text-[11px] leading-[14px]">Cover</span>
+    </span>
+  );
+}
+
+function Ruler() {
+  const marks = Array.from({ length: 16 }, (_, k) => k * 2);
+  return (
+    <div className="relative flex h-7 shrink-0">
+      <div className="shrink-0 border-b border-r border-white/[0.07] bg-panel" style={{ width: HEADER_W }} />
+      <div className="relative flex-1 overflow-hidden border-b border-white/[0.07]">
+        {marks.map((t) => (
+          <div key={t} className="absolute top-0 h-full" style={{ left: x(t) }}>
+            <span className="absolute left-1 top-[5px] text-[11px] leading-[13px] tabular-nums text-muted">00:{String(t).padStart(2, "0")}</span>
+            <span className="absolute bottom-0 h-2 w-px bg-subtle" />
+            {[1, 2, 3, 4].map((i) => (
+              <span key={i} className="absolute bottom-0 h-1 w-px bg-subtle/60" style={{ left: (i * 2 * PX) / 5 }} />
+            ))}
+          </div>
+        ))}
       </div>
     </div>
   );
 }
 
 function Timeline({ focus, sizes }: { focus: EditorFocus; sizes: Sizes }) {
-  const dim = (on: boolean) => `transition-opacity duration-300 ${on ? "opacity-100" : "opacity-35"}`;
   const cover = focus === "cover";
   return (
-    <Pane className="flex h-[244px] shrink-0 flex-col">
-      <div className={cover ? "opacity-35" : ""}>
-        <TimelineToolbar />
-      </div>
-      <div className="flex min-h-0 flex-1">
-        <div className="relative w-[136px] shrink-0 text-muted">
-          <span className={`absolute left-3 right-3 top-[26px] flex h-[22px] items-center gap-1.5 text-[11px] text-fg/85 ${dim(focus !== "cover")}`}>
-            <Captions className="size-3 text-muted" />
-            Captions
-            <Eye className="ml-auto size-3 text-muted" />
-          </span>
-          {/* The Cover tile starts the main track; a made cover shows its picture. */}
-          <span className={`absolute left-2.5 top-[54px] flex h-[60px] w-[44px] flex-col overflow-hidden rounded-[7px] bg-raised ${cover ? "ring-2 ring-accent" : "ring-1 ring-white/20"}`}>
-            <span className="relative h-[44px] w-full">
-              <Image src="/media/reel-hike.jpg" alt="" fill sizes={sizes(44)} className="object-cover" />
-              <span className="absolute inset-x-0 top-[5px] text-center text-[6.5px] font-black leading-[1.05] text-white">
-                MORNING
-                <br />
-                RUN
-              </span>
-            </span>
-            <span className="text-center text-[9px] leading-4 text-fg">Cover</span>
-          </span>
-          <span className={`absolute right-3 top-[76px] flex items-center gap-2 ${dim(!cover)}`}>
-            <Eye className="size-3" />
-            <Volume2 className="size-3" />
-          </span>
-          <span className={`absolute left-3 right-3 top-[122px] flex h-8 items-center gap-1.5 text-[11px] text-fg/85 ${dim(focus === "edit")}`}>
-            <Music2 className="size-3 text-muted" />
-            Music
-            <Volume2 className="ml-auto size-3 text-muted" />
-          </span>
+    <div className="app-pane flex shrink-0 flex-col overflow-hidden bg-well" style={{ height: TIMELINE_H }}>
+      <TimelineTools cover={cover} />
+      <div className="relative mx-px mb-px flex min-h-0 flex-1 flex-col overflow-hidden">
+        <Ruler />
+        <Lanes focus={focus} sizes={sizes} />
+        <div className="flex flex-1">
+          <div className="shrink-0 border-r border-white/[0.07] bg-panel" style={{ width: HEADER_W }} />
         </div>
-        <div className="relative min-w-0 flex-1 overflow-hidden">
-          {Array.from({ length: 10 }, (_, s) => (
-            <div key={s} className="absolute top-0.5" style={{ left: s * 110 }}>
-              <span className="block pl-1 text-[10px] tabular-nums text-muted">00:{String(s * 3).padStart(2, "0")}</span>
-              <span className="mt-0.5 block h-1.5 w-px bg-white/20" />
-            </div>
-          ))}
-          <div className={dim(focus === "edit" || focus === "captions")}>
-            {captionLine.map(([x, w, t]) => (
-              <span
-                key={t}
-                className={`absolute top-[26px] flex h-[22px] items-center truncate rounded-[6px] bg-clip-captions px-2 text-[10.5px] ${focus === "captions" && t === "we made it" ? "ring-2 ring-accent" : "ring-1 ring-inset ring-white/10"}`}
-                style={{ left: x, width: w - 2 }}
-              >
-                {t}
-              </span>
-            ))}
-          </div>
-          <div className={dim(focus === "edit")}>
-            {clips.map(([x, w, name, length, n]) => {
-              const selected = n === 2 && focus === "edit";
-              return (
-                <div
-                  key={name}
-                  className={`absolute top-[54px] h-[60px] overflow-hidden rounded-[7px] bg-clip-video ${selected ? "ring-2 ring-accent" : "ring-1 ring-inset ring-white/10"}`}
-                  style={{ left: x, width: w - 2 }}
-                >
-                  <div className="absolute inset-x-0 top-0 flex h-[44px]">
-                    {Array.from({ length: Math.ceil(w / 176) }, (_, k) => (
-                      <Image key={k} src={`/media/timeline-${n}.jpg`} alt="" width={176} height={44} sizes={sizes(176)} className="h-[44px] w-[176px] max-w-none shrink-0 object-cover" />
-                    ))}
-                  </div>
-                  <div className="absolute inset-x-0 bottom-0 flex h-4 items-end gap-px bg-black/40 px-1 pb-0.5">
-                    {wave(Math.floor((w - 8) / 3), n, 9).map((h, k) => (
-                      <span key={k} className="w-[2px] shrink-0 rounded-[1px] bg-ok/70" style={{ height: h }} />
-                    ))}
-                  </div>
-                  <span className="absolute left-1.5 top-1 flex items-center gap-1 rounded bg-black/60 px-[5px] py-px text-[10px] font-medium">
-                    {name}
-                    <span className="font-normal text-white/60">{length}</span>
-                  </span>
-                  {selected && (
-                    <>
-                      <span className="absolute inset-y-0 left-0 w-1.5 rounded-l-[6px] bg-accent" />
-                      <span className="absolute inset-y-0 right-0 w-1.5 rounded-r-[6px] bg-accent" />
-                    </>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-          <div className={dim(focus === "edit")}>
-            <div className="absolute left-0 top-[122px] h-8 w-[1040px] overflow-hidden rounded-[7px] bg-clip-audio ring-1 ring-inset ring-white/10">
-              <div className="absolute inset-x-1 bottom-1 flex h-3 items-end gap-[3px]">
-                {wave(200, 0, 10).map((h, k) => (
-                  <span key={k} className="w-[2px] shrink-0 rounded-[1px] bg-ok/60" style={{ height: h }} />
-                ))}
-              </div>
-              <span className="absolute left-1.5 top-1 rounded bg-black/60 px-[5px] py-px text-[10px] font-medium">Sunrise.m4a</span>
-            </div>
-          </div>
-          <span className="absolute top-4 h-[184px] w-[1.5px] bg-white" style={{ left: cover ? 152 : PLAYHEAD }} />
-          <span className="absolute top-3 size-[11px] rounded-full bg-white" style={{ left: (cover ? 152 : PLAYHEAD) - 5 }} />
+        {/* The playhead: its head in the ruler's tick band, under the time labels. */}
+        <div className="pointer-events-none absolute bottom-0 top-0" style={{ left: HEADER_W + x(cover ? 8.2 : PLAYHEAD) }}>
+          <div className="absolute -left-[0.75px] bottom-0 top-5 w-[1.5px] bg-white shadow-[0_0_0_0.5px_rgb(0_0_0/0.4)]" />
+          <div className="absolute -left-[5px] top-[17px] h-[11px] w-[10px] rounded-t-[2px] bg-white [clip-path:polygon(0_0,100%_0,100%_55%,50%_100%,0_55%)]" />
         </div>
       </div>
-    </Pane>
+    </div>
   );
 }
 
-// The reels it found take the timeline's place (Reels from a long video, A card).
+// ---- Reels from a long video --------------------------------------------------------------------------------
+
+// What is said around the reel; the reel's words are lit (Reels from a long video, Trimming).
+const said = [
+  ["06:01", "So we left at five, the car was freezing and honestly I almost turned back.", 0],
+  ["06:07", "Nobody tells you the last hour is the best part.", 1],
+  ["06:12", "You stop thinking about your legs and you just |look| up, and the whole ridge is lit.", 1],
+  ["06:21", "That's when it clicks, why you get up at four for this.", 1],
+  ["06:29", "Anyway, the coffee at the top was terrible.", 0],
+  ["06:34", "Next time I'm bringing a better stove.", 0],
+] as const;
+
+function ReelTrim() {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 flex-col gap-0.5 border-b border-white/[0.07] px-3.5 py-3">
+        <h2 className="text-[13px] font-semibold">The last hour</h2>
+        <p className="text-[12px] tabular-nums text-muted">38.4 s once cut · 06:07–06:29</p>
+      </div>
+      <div className="min-h-0 flex-1 overflow-hidden px-3.5 pb-1 pt-3">
+        {said.map(([at, text, inReel]) => (
+          <p key={at} className="mb-3 grid grid-cols-[40px_1fr] text-[13px] leading-[22px]">
+            <span className="text-[11px] tabular-nums text-muted">{at}</span>
+            <span>
+              {inReel ? (
+                <span className="rounded-sm bg-accent/30 box-decoration-clone">
+                  {text.split("|").map((part, i) => (i === 1 ? <span key={i} className="bg-accent text-black">{part}</span> : part))}
+                </span>
+              ) : (
+                <span className="text-muted">{text}</span>
+              )}
+            </span>
+          </p>
+        ))}
+      </div>
+      <p className="shrink-0 border-t border-white/[0.07] px-3.5 py-2 text-[12px] text-muted">Shift-click a word to start or end the reel there.</p>
+    </div>
+  );
+}
+
+// The long vlog, playing the reel shown.
+function ReelPreview({ sizes }: { sizes: Sizes }) {
+  return (
+    <Stage
+      bar={
+        <>
+          <span className="text-[13px] font-medium tabular-nums">06:12.40</span>
+          <PlayControls size={36} />
+          <span className="flex justify-end">
+            <span className={`flex h-8 items-center rounded-full px-3.5 text-[13px] font-medium ${SECONDARY}`}>Done</span>
+          </span>
+        </>
+      }
+    >
+      <Image src="/media/reel-hike.jpg" alt="" fill sizes={sizes(FRAME_W)} className="object-cover" />
+      <Caption words={["you", "just", "look", "up"]} />
+    </Stage>
+  );
+}
+
 const reels = [
-  { title: "The last hour", hook: "“Nobody tells you the last hour is the best part.”", length: "0:38", why: "A clear hook and a payoff", score: 92, checked: true, image: "reel-hike" },
-  { title: "Turning back", hook: "“Honestly, I almost turned back.”", length: "0:24", why: "Honest and short", score: 84, checked: true, image: "tile-2" },
-  { title: "Coffee at the top", hook: "“The coffee at the top was terrible.”", length: "0:31", why: "Funny, ends on a laugh", score: 71, checked: false, image: "tile-8" },
-  { title: "Gear I carry", hook: "“People ask what's in the bag.”", length: "1:12", why: "Useful, but long", score: 58, checked: false, image: "tile-6", long: true },
+  { title: "The last hour", length: "38.4 s", hook: "Nobody tells you the last hour is the best part.", why: "Opens on a strong line and ends on the payoff.", score: 92, checked: true },
+  { title: "Turning back", length: "24.1 s", hook: "Honestly, I almost turned back.", why: "Honest and short, it works without the rest.", score: 84, checked: true },
+  { title: "Coffee at the top", length: "31.0 s", hook: "Anyway, the coffee at the top was terrible.", why: "Funny, and it ends on a laugh.", score: 71, checked: false },
+  { title: "What's in the bag", length: "1:12", hook: "People always ask what I carry up there.", why: "Useful, but over a minute once cut.", score: 58, checked: false, long: true },
 ];
 
-function ReelCards({ sizes }: { sizes: Sizes }) {
+function Checkbox({ on }: { on: boolean }) {
   return (
-    <Pane className="flex h-[244px] shrink-0 flex-col gap-3 p-3">
-      <div className="flex items-center justify-between">
-        <span className="text-[13px] font-semibold">
-          Reels <span className="font-normal text-muted">· 4 found, best first</span>
+    <span className={`flex size-4 shrink-0 items-center justify-center rounded-[4px] ${on ? "bg-accent-strong" : "border border-white/25 bg-white/[0.07]"}`}>
+      {on && (<Check size={10} strokeWidth={3} />
+      )}
+    </span>
+  );
+}
+
+function ScoreBars({ lit }: { lit: number }) {
+  return (
+    <span className="flex h-3 shrink-0 items-end gap-[2px]">
+      {[5, 8, 11].map((h, i) => (
+        <span key={h} className={`w-[3px] rounded-[1px] ${i < lit ? "bg-fg/85" : "bg-white/20"}`} style={{ height: h }} />
+      ))}
+    </span>
+  );
+}
+
+function ReelList() {
+  return (
+    <div className="app-pane flex flex-col overflow-hidden" style={{ height: TIMELINE_H }}>
+      <div className="flex min-h-11 shrink-0 items-center gap-x-2 px-3 py-2">
+        <h2 className="text-[13px] font-semibold">Reels</h2>
+        <span className="text-[13px] tabular-nums text-muted">4 · 2 checked</span>
+        <span className="flex h-7 items-center gap-1.5 px-2 text-[12px] font-medium text-accent">
+          <Icon i={Sparkles} size={14} />
+          Find again
         </span>
-        <div className="flex items-center gap-2">
-          <Segmented items={["Center crop", "Blurred background"]} on={0} className="w-[250px] text-[11px]" />
-          <span className="flex h-[30px] items-center rounded-full bg-accent-strong px-3.5 text-[12px] font-medium text-white">Make 2 reels</span>
+        <div className="ml-auto flex items-center gap-2">
+          <span className={`flex h-7 items-center gap-1.5 rounded-full px-3 text-[12px] font-medium ${SECONDARY}`}>
+            Each reel gets <span className="text-muted">all</span>
+            <Icon i={ChevronDown} size={14} className="text-muted" />
+          </span>
+          <span className="text-[12px] text-muted">9:16</span>
+          <Seg items={["Center crop", "Blurred background"]} on={0} className="w-[248px]" />
+          <span className="app-prominent flex h-8 items-center rounded-full px-3.5 text-[13px] font-medium">Make 2 reels</span>
         </div>
       </div>
-      <div className="grid min-h-0 flex-1 grid-cols-4 gap-2.5">
+      <div className="grid min-h-0 flex-1 auto-rows-min grid-cols-4 gap-2 p-2 pt-0">
         {reels.map((r, i) => (
-          <div key={r.title} className={`flex gap-2.5 rounded-[12px] bg-white/[0.035] p-2.5 ${i === 0 ? "ring-2 ring-accent" : "ring-1 ring-inset ring-white/[0.07]"}`}>
-            <div className="relative h-[150px] w-[84px] shrink-0 overflow-hidden rounded-[8px]">
-              <Image src={`/media/${r.image}.jpg`} alt="" fill sizes={sizes(84)} className="object-cover" />
-            </div>
-            <div className="flex min-w-0 flex-1 flex-col gap-1.5 text-[11px]">
-              <span className="flex items-center gap-1.5 text-[12px] font-semibold">
-                <span className={`flex size-3.5 shrink-0 items-center justify-center rounded-[4px] ${r.checked ? "bg-accent-strong" : "ring-1 ring-inset ring-white/30"}`}>
-                  {r.checked && <Check className="size-2.5" strokeWidth={3} />}
+          <div
+            key={r.title}
+            className={`flex gap-3 rounded-xl p-2.5 ${i === 0 ? "bg-raised shadow-[inset_0_0_0_2px_var(--color-accent)]" : "bg-white/[0.055] shadow-[inset_0_0_0_1px_rgb(255_255_255/0.06)]"}`}
+          >
+            <span className="flex h-[100px] w-14 shrink-0 items-center justify-center rounded-[7px] border border-dashed border-white/15 text-muted">
+              <Icon i={Film} size={14} />
+            </span>
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              <div className="flex items-center gap-2">
+                <Checkbox on={r.checked} />
+                <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{r.title}</span>
+                <span className={`flex shrink-0 items-center gap-1 text-[12px] tabular-nums ${r.long ? "text-warn" : "text-muted"}`}>{r.length}</span>
+              </div>
+              <p className="line-clamp-2 text-[13px] leading-[18px] text-fg/90">“{r.hook}”</p>
+              <p className="line-clamp-2 text-[12px] leading-4 text-muted">{r.why}</p>
+              <div className="mt-auto flex items-center gap-2 pt-1">
+                <span className="flex flex-1 items-center gap-1.5 text-[12px] tabular-nums text-muted">
+                  <ScoreBars lit={r.score >= 75 ? 3 : r.score >= 50 ? 2 : 1} />
+                  {r.score}
                 </span>
-                <span className="truncate">{r.title}</span>
-              </span>
-              <span className="leading-[1.35] text-fg/85">{r.hook}</span>
-              <span className="mt-auto leading-[1.35] text-muted">{r.why}</span>
-              <span className="flex justify-between tabular-nums text-muted">
-                <span className={r.long ? "text-warn" : ""}>{r.length}</span>
-                <span>{r.score}</span>
-              </span>
+                <span className="flex h-6 items-center px-2 text-[12px] font-medium">Reject</span>
+              </div>
             </div>
           </div>
         ))}
       </div>
-    </Pane>
+    </div>
   );
 }
 
+// ---- Cover ----------------------------------------------------------------------------------------------------
+
+const frames = [
+  ["reel-hike", "00:08.2", "Sharp, well lit, well framed"],
+  ["tile-1", "00:01.6", "Sharp, well lit"],
+  ["tile-3", "00:17.0", "Well lit, well framed"],
+  ["tile-4", "00:24.6", "Sharp"],
+] as const;
+
+function CoverFrames({ sizes }: { sizes: Sizes }) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-white/[0.07] pl-4 pr-2">
+        <h2 className="text-[13px] font-semibold">Frames</h2>
+        <span className="flex h-7 items-center gap-1 px-2 text-[12px] font-medium text-accent">
+          <Icon i={Sparkles} size={13} />
+          Make it with AI
+        </span>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-4 pb-4 pt-3">
+        <span className={`flex h-8 items-center justify-center gap-1.5 rounded-lg text-[13px] font-medium ${SECONDARY}`}>
+          <Icon i={ScanFace} size={15} />
+          Pick again
+        </span>
+        <div className="grid grid-cols-2 gap-x-2 gap-y-3">
+          {frames.map(([image, at, why], i) => (
+            <div key={at} className="flex min-w-0 flex-col gap-1">
+              <div className={`relative aspect-[9/16] overflow-hidden rounded-[10px] border ${i === 0 ? "border-accent shadow-[0_0_0_1px_var(--color-accent)]" : "border-white/[0.08]"}`}>
+                <Image src={`/media/${image}.jpg`} alt="" fill sizes={sizes(131)} className="object-cover" />
+                <span className="absolute bottom-1 right-1 rounded bg-black/60 px-1 text-[11px] leading-4 tabular-nums">{at}</span>
+                {i === 0 && (
+                  <span className="absolute right-1 top-1 flex size-4 items-center justify-center rounded-full bg-accent-strong shadow-[0_1px_2px_rgb(0_0_0/0.5)]"><Check size={10} strokeWidth={3} />
+                  </span>
+                )}
+              </div>
+              <span className={`truncate text-[11px] leading-[14px] ${i === 0 ? "text-fg" : "text-muted"}`}>{why}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// The cover as it exports: the hook in Outlined, 170 px Anton with a 14 px black outline, behind the hikers.
+const COVER_TOP = Math.round(FRAME_H * 0.575);
+
+function CoverPreview({ sizes }: { sizes: Sizes }) {
+  return (
+    <Stage
+      over={
+        <div className="absolute inset-x-[26px]" style={{ top: COVER_TOP - 8, height: Math.round(170 * PT) + 14 }}>
+          <SelectionBox text />
+        </div>
+      }
+      bar={
+        <>
+          <span className="text-[13px] tabular-nums">
+            <span className="text-muted">Frame </span>
+            <span className="font-medium">00:08.20</span>
+          </span>
+          <Seg items={["9:16 Cover", "16:9 YouTube"]} on={0} className="w-[200px]" />
+          <span />
+        </>
+      }
+    >
+      <Image src="/media/reel-hike.jpg" alt="" fill sizes={sizes(FRAME_W)} className="object-cover" />
+      <div className="app-outline absolute inset-x-0 text-center font-anton leading-none text-white" style={{ top: COVER_TOP, fontSize: 170 * PT, ["--outline" as string]: `${14 * PT * 2}px` }}>
+        MORNING RUN
+      </div>
+    </Stage>
+  );
+}
+
+function Switch({ on }: { on: boolean }) {
+  return (
+    <span className={`relative h-[22px] w-[38px] shrink-0 rounded-full ${on ? "bg-accent-strong" : "bg-white/[0.16]"}`}>
+      <span className={`absolute top-0.5 size-[18px] rounded-full bg-white shadow-[0_1px_3px_rgb(0_0_0/0.4)] ${on ? "left-[18px]" : "left-0.5"}`} />
+    </span>
+  );
+}
+
+// The cover's hook, selected: its words, the three cover looks, Behind person and its style (cover/CoverInspector.tsx).
+const coverLooks = [
+  ["Big", "text-white"],
+  ["Yellow box", "rounded-[3px] bg-[#ffd400] px-1 text-[#111]"],
+  ["Outlined", "app-outline text-white"],
+] as const;
+
+function CoverInspector() {
+  return (
+    <>
+      <div className="flex items-start justify-between pr-2">
+        <InspectorHeader tone="bg-raised" i={Type} title="Text" detail="On the 9:16 cover" />
+        <div className="flex items-center gap-0.5 pt-3 text-muted">
+          <IconBtn i={Copy} size={15} />
+          <IconBtn i={Trash2} size={15} />
+        </div>
+      </div>
+      <Section first>
+        <span className="h-[52px] rounded-lg border border-white/[0.08] bg-white/[0.055] px-2.5 py-2 text-[13px] leading-[18px]">MORNING RUN</span>
+        <div className="grid grid-cols-3 gap-2">
+          {coverLooks.map(([name, look]) => {
+            const on = name === "Outlined";
+            return (
+              <div key={name} className="flex flex-col gap-1">
+                <span className={`relative flex h-16 items-center justify-center overflow-hidden rounded-[10px] bg-[#5c5c63] ${on ? "shadow-[inset_0_0_0_2px_var(--color-accent)]" : ""}`}>
+                  <span className={`font-anton text-[22px] leading-none ${look}`} style={{ ["--outline" as string]: "3px" }}>
+                    Aa
+                  </span>
+                  {on && (
+                    <span className="absolute right-1 top-1 flex size-3.5 items-center justify-center rounded-full bg-accent-strong shadow-[0_1px_2px_rgb(0_0_0/0.5)]"><Check size={10} strokeWidth={3} />
+                    </span>
+                  )}
+                </span>
+                <span className={`text-[11px] ${on ? "font-medium text-fg" : "text-muted"}`}>{name}</span>
+              </div>
+            );
+          })}
+        </div>
+        <div className="flex min-h-6 items-center justify-between gap-2 text-[13px]">
+          Behind person
+          <Switch on />
+        </div>
+      </Section>
+      <Section>
+        <Labelled label="Font">
+          <div className="flex gap-2">
+            <Select value="Anton" font="font-anton text-[15px]" className="flex-1" />
+            <Select value="Regular" off className="w-[118px]" />
+          </div>
+        </Labelled>
+        <Slider label="Size" value="170" at={0.55} />
+        <FieldRow label="Color">
+          <span className="ml-auto text-[12px] tabular-nums text-muted">#FFFFFF</span>
+          <span className="h-5 w-8 rounded-[5px] bg-white shadow-[inset_0_0_0_1px_rgb(255_255_255/0.18)]" />
+        </FieldRow>
+        <Labelled label="Case">
+          <Seg items={["", "AB", "ab", "Ab"]} icons={[Ban, null, null, null]} on={0} />
+        </Labelled>
+      </Section>
+      {[
+        ["More style", "Outline, box, shadow, spacing, alignment"],
+        ["Position", "Scale, rotation, opacity"],
+      ].map(([title, inside]) => (
+        <div key={title} className="flex h-[54px] items-center gap-2 border-t border-white/[0.06] px-4 text-[12px]">
+          <Icon i={ChevronRight} size={14} className="text-muted" />
+          <span className="shrink-0 text-[13px] font-semibold">{title}</span>
+          <span className="truncate text-muted">{inside}</span>
+        </div>
+      ))}
+    </>
+  );
+}
+
+// ---- Export ---------------------------------------------------------------------------------------------------
+
+// The Export dialog on the Reels & TikTok preset. About 16 MB is the app's estimate for 28.6 s at 1080 × 1920, 30 fps,
+// Recommended.
+function ExportDialog() {
+  const rows: [string, React.ReactNode][] = [
+    ["Resolution", <Seg key="r" items={["720p", "1080p", "1440p", "4K"]} on={1} />],
+    ["Frame rate", <Seg key="f" items={["24", "25", "30", "50", "60"]} on={2} />],
+    ["Quality", <Seg key="q" items={["High", "Recommended", "Smaller file"]} on={1} />],
+  ];
+  return (
+    <div className="absolute inset-0 flex items-center justify-center bg-black/55">
+      <div className="app-dialog w-[500px] rounded-[20px] p-6">
+        <div className="mb-5 flex items-start justify-between gap-3">
+          <div className="flex flex-col gap-1">
+            <span className="text-[17px] font-semibold leading-[22px] tracking-[-0.025em]">Export video</span>
+            <span className="text-[12px] tabular-nums text-muted">MP4 · H.264 + AAC · 9:16 · 1080×1920 · 00:28.60</span>
+          </div>
+          <IconBtn i={X} className="-mr-2 -mt-1 text-fg" />
+        </div>
+        <Seg items={["Video", "Cover", "Recap"]} on={0} className="mb-5" />
+        <div className="grid grid-cols-[104px_minmax(0,1fr)] items-center gap-x-3.5 gap-y-3">
+          <span className="text-right text-[13px] text-muted">Preset</span>
+          <span className="flex h-8 items-center gap-2 rounded-lg bg-white/[0.09] px-2.5 text-[13px] shadow-[inset_0_0_0_1px_rgb(255_255_255/0.06),inset_0_1px_0_rgb(255_255_255/0.06)]">
+            <span className="flex-1">Reels &amp; TikTok</span>
+            <Icon i={ChevronDown} size={14} className="text-muted" />
+          </span>
+          <span className="col-start-2 -mt-1 flex items-center gap-1.5 text-[12px] text-muted">
+            <Icon i={AudioLines} size={14} />
+            Loudness −14 LUFS, applied to the file
+          </span>
+          {rows.map(([label, control]) => (
+            <Fragment key={label}>
+              <span className="text-right text-[13px] text-muted">{label}</span>
+              {control}
+            </Fragment>
+          ))}
+        </div>
+        <div className="mt-6 flex items-center justify-between gap-3 border-t border-white/[0.08] pt-4">
+          <span className="text-[13px] tabular-nums text-muted">
+            about <span className="font-semibold text-fg">16 MB</span>
+          </span>
+          <div className="flex gap-2.5">
+            <span className={`flex h-8 items-center rounded-full px-3.5 text-[13px] font-medium ${SECONDARY}`}>Close</span>
+            <span className="app-prominent flex h-8 items-center rounded-full px-3.5 text-[13px] font-medium">Export…</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- The window -----------------------------------------------------------------------------------------------
+
 export function EditorMock({ focus = "edit", framed = false }: { focus?: EditorFocus; framed?: boolean }) {
-  const sizes: Sizes = (w) => (framed ? viewSizes : fitSizes)(w, 1200);
-  const dim = (on: boolean) => `transition-opacity duration-300 ${on ? "opacity-100" : "opacity-35"}`;
+  // Image sizes in the page's space, where the window is drawn at SCALE.
+  const sizes: Sizes = (w) => (framed ? viewSizes : fitSizes)(Math.ceil(w * SCALE), MOCK_W);
   const reels = focus === "reels";
+  const cover = focus === "cover";
 
   return (
-    <div className="flex h-[740px] w-[1200px] flex-col gap-1.5 overflow-hidden rounded-[14px] bg-bg px-1.5 pb-1.5 text-left text-fg ring-1 ring-white/10">
-      {/* The macOS window controls. */}
-      <div className="-mx-1.5 flex h-7 shrink-0 items-center gap-2 border-b border-white/[0.06] bg-white/[0.025] px-3.5">
-        {["#ff5f57", "#febc2e", "#28c840"].map((c) => (
-          <span key={c} className="size-3 rounded-full ring-[0.5px] ring-black/20" style={{ background: c }} />
-        ))}
+    <div className="relative overflow-hidden rounded-[14px] text-left text-fg ring-1 ring-white/10" style={{ width: MOCK_W, height: MOCK_H }}>
+      <div className="relative flex origin-top-left flex-col bg-window text-[13px] leading-[1.25] [font-feature-settings:normal]" style={{ width: 1440, height: 900, transform: `scale(${SCALE})` }}>
+        <TopBar focus={focus} />
+        <div className="flex min-h-0 flex-1 gap-1.5 px-1.5">
+          <div className="app-pane flex shrink-0 flex-col overflow-hidden" style={{ width: LIBRARY_W }}>
+            {reels ? <ReelTrim /> : cover ? <CoverFrames sizes={sizes} /> : focus === "captions" ? <CaptionsTab /> : <MediaTab sizes={sizes} />}
+          </div>
+          {reels ? <ReelPreview sizes={sizes} /> : cover ? <CoverPreview sizes={sizes} /> : <Preview focus={focus} sizes={sizes} />}
+          {!reels && (
+            <div className="app-pane flex shrink-0 flex-col overflow-hidden" style={{ width: INSPECTOR_W }}>
+              {cover ? <CoverInspector /> : focus === "captions" ? <CaptionInspector /> : <VideoInspector />}
+            </div>
+          )}
+        </div>
+        <div className="shrink-0 px-1.5 pb-1.5 pt-1.5">{reels ? <ReelList /> : <Timeline focus={focus} sizes={sizes} />}</div>
+        {focus === "export" && <ExportDialog />}
       </div>
-
-      <TopBar focus={focus} />
-
-      <div className="flex min-h-0 flex-1 gap-1.5">
-        <Pane className={`flex w-[350px] shrink-0 flex-col gap-2.5 p-2.5 ${dim(focus !== "export")}`}>
-          {focus === "captions" ? <CaptionsTab /> : reels ? <ReelWords /> : focus === "cover" ? <CoverFrames sizes={sizes} /> : <MediaTab sizes={sizes} />}
-        </Pane>
-        <Preview focus={focus} sizes={sizes} />
-        {!reels && (
-          <Pane className={`flex w-[290px] shrink-0 flex-col gap-2.5 p-3 ${dim(focus === "edit" || focus === "cover")}`}>
-            {focus === "cover" ? <CoverInspector /> : <VideoInspector />}
-          </Pane>
-        )}
-      </div>
-
-      {reels ? <ReelCards sizes={sizes} /> : <Timeline focus={focus} sizes={sizes} />}
     </div>
   );
 }

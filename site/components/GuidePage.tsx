@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Check } from "lucide-react";
-import { EditorMock } from "./EditorMock";
+import { EditorMock, MOCK_H, MOCK_W } from "./EditorMock";
 import { FaqList } from "./Faq";
 import { Fit } from "./Fit";
 import { Footer } from "./Footer";
@@ -73,7 +73,7 @@ export async function GuidePage({ path }: { path: string }) {
             <div className="mt-10 w-full">
               <HeroDownload release={release} base="/" />
             </div>
-            <Fit width={1200} height={740} className="mt-10 sm:mt-12">
+            <Fit width={MOCK_W} height={MOCK_H} className="mt-10 sm:mt-12">
               <div className="relative size-full rounded-[14px] shadow-[0_50px_140px_rgb(0_0_0/0.9),0_0_0_1px_rgb(255_255_255/0.08)]">
                 <EditorMock focus={g.focus} />
               </div>
