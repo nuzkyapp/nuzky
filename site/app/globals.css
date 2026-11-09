@@ -1,12 +1,15 @@
 @import "tailwindcss";
 
-/* The app's own tokens (DESIGN.md), plus the page background a shade below the app window. */
+/* The app's own tokens (DESIGN.md), plus the page's own darks: `site` behind everything and `bg`, a shade above it, for
+   the page's frames. `window` is the app's window behind its panes, as the editor mock draws it. */
 @theme {
   --color-site: #08080a;
   --color-bg: #0c0c0e;
-  --color-stage: #121214;
+  --color-window: #060607;
+  --color-stage: #000000;
   --color-card: #111113;
-  --color-panel: #1c1c1f;
+  --color-panel: #18181b;
+  --color-well: #111113;
   --color-raised: #2c2c30;
   --color-fg: #f2f2f5;
   --color-muted: #a1a1a9;
@@ -18,13 +21,15 @@
   --color-caption-yellow: #ffd60a;
   /* Claude Code's brand orange, only on its logo. */
   --color-claude: #d97757;
-  --color-clip-video: #20466d;
-  --color-clip-audio: #144a31;
-  --color-clip-title: #6a4314;
-  --color-clip-captions: #4a3478;
+  --color-clip-video: #245891;
+  --color-clip-image: #43468e;
+  --color-clip-audio: #17603c;
+  --color-clip-title: #865316;
+  --color-clip-captions: #4b3a80;
 
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-mono-face), ui-monospace, monospace;
+  --font-anton: var(--font-anton-face), Impact, sans-serif;
 }
 
 @layer base {
@@ -101,6 +106,50 @@
     box-shadow:
       inset 0 1px 0 rgb(255 255 255 / 0.1),
       inset 0 0 0 1px rgb(255 255 255 / 0.07);
+  }
+
+  /* The app's materials (src/index.css), for the editor mock. */
+  .app-pane {
+    background: var(--color-panel);
+    border-radius: 12px;
+    outline: 1px solid rgb(255 255 255 / 0.07);
+    outline-offset: -1px;
+  }
+  .app-bar {
+    background: rgb(255 255 255 / 0.075);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.1),
+      inset 0 0 0 1px rgb(255 255 255 / 0.07),
+      0 4px 12px rgb(0 0 0 / 0.25);
+  }
+  .app-seg {
+    background: rgb(255 255 255 / 0.045);
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.05);
+  }
+  .app-seg-on {
+    background: rgb(255 255 255 / 0.15);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.1),
+      0 1px 3px rgb(0 0 0 / 0.4);
+  }
+  .app-prominent {
+    background: var(--color-accent-strong);
+    color: #fff;
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.2),
+      0 1px 3px rgb(0 0 0 / 0.45);
+  }
+  .app-dialog {
+    background: rgb(36 36 41);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.12),
+      inset 0 0 0 1px rgb(255 255 255 / 0.1),
+      0 18px 50px rgb(0 0 0 / 0.55);
+  }
+  /* An outlined word as the engine draws it: the outline behind the fill, so the inside of a letter stays clean. */
+  .app-outline {
+    -webkit-text-stroke: var(--outline) #000;
+    paint-order: stroke fill;
   }
 
   .btn-light {

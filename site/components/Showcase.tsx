@@ -1,15 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Captions, ChevronDown, Film, ImagePlus, Plus, Scissors, Upload, X } from "lucide-react";
-import { EditorMock, type EditorFocus } from "./EditorMock";
+import { Captions, Film, ImagePlus, Plus, Scissors, Upload } from "lucide-react";
+import { EditorMock, MOCK_H, MOCK_W, type EditorFocus } from "./EditorMock";
 import { Fit, type FitView } from "./Fit";
 import { usePlaying } from "@/lib/playing";
 
-// Positions are in the editor's own 1200 × 740 space. A hotspot sits on a gap beside what it describes, never on a
+// Positions are in the editor's own 1200 × 750 space (EditorMock's MOCK_W × MOCK_H). A hotspot sits on a gap beside what it describes, never on a
 // control or a label, and `tip` is its tooltip's top left corner, placed where it covers neither that nor the
 // picture. A phone has no room for hotspots and shows `view`, the part of the editor the spot talks about, with the
-// text in a card below. Its 16:15 window fits the editor's 740 px height only up to `w` 789.
+// text in a card below. Its 16:15 window fits the editor's 750 px height only up to `w` 800.
 type Spot = { x: number; y: number; tip: [number, number]; title: string; text: string; view: FitView };
 type Tab = { id: EditorFocus; label: string; icon: typeof Scissors; summary: string; spots: Spot[] };
 
@@ -20,9 +20,9 @@ const tabs: Tab[] = [
     icon: Scissors,
     summary: "A timeline, a live preview and an inspector, laid out the way you know from CapCut.",
     spots: [
-      { x: 330, y: 512, tip: [16, 404], title: "Magnetic timeline", text: "Clips snap together and every cut lands on the exact frame, even in phone video.", view: { x: 640, y: 610, w: 360 } },
-      { x: 360, y: 440, tip: [16, 404], title: "Your media, and YouTube", text: "Drop in video, sound and images, or paste a YouTube link to something that's yours to use.", view: { x: 181, y: 230, w: 350 } },
-      { x: 960, y: 512, tip: [900, 546], title: "Inspector", text: "Video, Adjust, Speed, Animation and Audio, with a value you can type beside every slider.", view: { x: 1049, y: 284, w: 300 } },
+      { x: 68, y: 575, tip: [16, 440], title: "Magnetic timeline", text: "Clips snap together and every cut lands on the exact frame, even in phone video.", view: { x: 525, y: 660, w: 380 } },
+      { x: 285, y: 420, tip: [16, 520], title: "Your media, and YouTube", text: "Drop in video, sound and images, or paste a YouTube link to something that's yours to use.", view: { x: 128, y: 230, w: 300 } },
+      { x: 908, y: 433, tip: [614, 470], title: "Inspector", text: "Video, Adjust, Speed, Animation and Audio, with a value you can type beside every slider.", view: { x: 1063, y: 280, w: 300 } },
     ],
   },
   {
@@ -31,9 +31,9 @@ const tabs: Tab[] = [
     icon: Captions,
     summary: "AI on your computer writes the captions and puts each line on the timeline as a clip.",
     spots: [
-      { x: 180, y: 418, tip: [16, 488], title: "19 styles, or your own", text: "Pick a style, save your own look, and colour the key words.", view: { x: 181, y: 220, w: 350 } },
-      { x: 1130, y: 570, tip: [880, 600], title: "A clip per line", text: "Fix a word or move a line right on the timeline.", view: { x: 480, y: 580, w: 360 } },
-      { x: 745, y: 329, tip: [775, 305], title: "The spoken word lights up", text: "Each word lights up as you say it, in the preview and in the export.", view: { x: 630, y: 260, w: 330 } },
+      { x: 285, y: 358, tip: [16, 520], title: "19 styles, or your own", text: "Pick a style, save your own look, and colour the key words.", view: { x: 128, y: 300, w: 300 } },
+      { x: 822, y: 602, tip: [870, 470], title: "A clip per line", text: "Fix a word or move a line right on the timeline.", view: { x: 525, y: 610, w: 380 } },
+      { x: 750, y: 329, tip: [780, 305], title: "The spoken word lights up", text: "Each word lights up as you say it, in the preview and in the export.", view: { x: 593, y: 320, w: 300 } },
     ],
   },
   {
@@ -42,9 +42,9 @@ const tabs: Tab[] = [
     icon: Film,
     summary: "One long video becomes several reels. AI finds the moments, and you trim them by words.",
     spots: [
-      { x: 359, y: 488, tip: [60, 340], title: "AI finds the moments", text: "Each reel opens on a hook and says why it works. Check the ones you want.", view: { x: 300, y: 620, w: 430 } },
-      { x: 181, y: 310, tip: [211, 286], title: "Trim by words", text: "Click a word to play from it, and move the start or the end a word at a time.", view: { x: 181, y: 250, w: 350 } },
-      { x: 1130, y: 484, tip: [880, 322], title: "Each one its own project", text: "Make 2 reels writes two 9:16 projects. The long video stays as it was.", view: { x: 960, y: 560, w: 470 } },
+      { x: 467, y: 545, tip: [300, 400], title: "AI finds the moments", text: "Each reel opens on a hook and says why it works. Check the ones you want.", view: { x: 230, y: 660, w: 460 } },
+      { x: 283, y: 250, tip: [300, 222], title: "Trim by words", text: "Click a word to play from it, and move the start or the end a word at a time.", view: { x: 128, y: 260, w: 300 } },
+      { x: 1108, y: 492, tip: [880, 350], title: "Each one its own project", text: "Make 2 reels writes two 9:16 projects. The long video stays as it was.", view: { x: 1035, y: 600, w: 330 } },
     ],
   },
   {
@@ -53,9 +53,9 @@ const tabs: Tab[] = [
     icon: ImagePlus,
     summary: "A 9:16 cover and a 16:9 YouTube thumbnail, made from a frame of your video.",
     spots: [
-      { x: 78, y: 625, tip: [108, 601], title: "Cover first", text: "The cover sits before your first clip, as in CapCut. Click it to make one.", view: { x: 200, y: 610, w: 380 } },
-      { x: 180, y: 462, tip: [100, 490], title: "Pick for me", text: "Nuzky looks through the video for sharp, well framed frames of you, best first. Or let AI make the whole cover.", view: { x: 181, y: 260, w: 350 } },
-      { x: 1050, y: 462, tip: [880, 490], title: "Text behind you", text: "Put the title behind the person, draw a line around them, or blur what's behind. Export it as PNG or JPEG.", view: { x: 1049, y: 230, w: 300 } },
+      { x: 71, y: 628, tip: [100, 470], title: "Cover first", text: "The cover sits before your first clip, as in CapCut. Click it to make one.", view: { x: 200, y: 640, w: 380 } },
+      { x: 283, y: 433, tip: [300, 478], title: "Pick for me", text: "Nuzky looks through the video for sharp, well framed frames of you, best first. Or let AI make the whole cover.", view: { x: 128, y: 300, w: 300 } },
+      { x: 904, y: 392, tip: [612, 478], title: "Text behind you", text: "Put the title behind the person, draw a line around them, or blur what's behind. Export it as PNG or JPEG.", view: { x: 1063, y: 230, w: 300 } },
     ],
   },
   {
@@ -64,77 +64,15 @@ const tabs: Tab[] = [
     icon: Upload,
     summary: "Export for Reels, TikTok or YouTube in one click. The file looks exactly like the preview.",
     spots: [
-      { x: 866, y: 378, tip: [896, 354], title: "Made for Reels and TikTok", text: "1080 × 1920 at 30 fps, with the sound as loud as the rest of the feed.", view: { x: 600, y: 370, w: 500 } },
-      { x: 334, y: 532, tip: [12, 508], title: "Same renderer", text: "The same renderer draws the preview and the export.", view: { x: 600, y: 370, w: 500 } },
-      { x: 866, y: 271, tip: [896, 247], title: "Cover and recap too", text: "Export the cover as a picture, or a short video of everything that was cut.", view: { x: 600, y: 370, w: 500 } },
+      { x: 833, y: 392, tip: [860, 410], title: "Made for Reels and TikTok", text: "1080 × 1920 at 30 fps, with the sound as loud as the rest of the feed.", view: { x: 600, y: 380, w: 420 } },
+      { x: 367, y: 417, tip: [16, 470], title: "Same renderer", text: "The same renderer draws the preview and the export.", view: { x: 600, y: 380, w: 420 } },
+      { x: 833, y: 283, tip: [860, 160], title: "Cover and recap too", text: "Export the cover as a picture, or a short video of everything that was cut.", view: { x: 600, y: 380, w: 420 } },
     ],
   },
 ];
 
 // Each hotspot opens in turn for this long; after the last one the tour moves to the next tab.
 const SPOT_MS = 3200;
-
-function Choice({ items, on }: { items: string[]; on: number }) {
-  return (
-    <div className="flex flex-1 rounded-[9px] bg-white/[0.045] p-0.5">
-      {items.map((t, i) => (
-        <span key={t} className={`flex-1 rounded-[7px] py-1.5 text-center text-[12px] font-medium ${i === on ? "bg-white/15" : "text-muted"}`}>
-          {t}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-// The app's Export dialog on the Reels & TikTok preset.
-function ExportDialog() {
-  const rows: [string, React.ReactNode][] = [
-    ["Export", <Choice key="e" items={["Video", "Cover", "Recap"]} on={0} />],
-    [
-      "Preset",
-      <span key="p" className="flex h-[30px] flex-1 items-center justify-between rounded-[8px] bg-white/[0.07] px-3 text-[12px] ring-1 ring-inset ring-white/[0.08]">
-        Reels &amp; TikTok
-        <ChevronDown className="size-3.5 text-muted" />
-      </span>,
-    ],
-    ["Resolution", <Choice key="r" items={["720p", "1080p", "1440p", "4K"]} on={1} />],
-    ["Frame rate", <Choice key="f" items={["24", "25", "30", "50", "60"]} on={2} />],
-    ["Quality", <Choice key="q" items={["High", "Recommended", "Smaller file"]} on={1} />],
-  ];
-  return (
-    <div className="absolute inset-0 flex items-center justify-center rounded-[14px] bg-black/45 animate-[fade-up_200ms_ease-out]">
-      <div className="flex w-[480px] flex-col gap-4 rounded-[20px] bg-[#232327] p-6 text-left shadow-[0_24px_60px_rgb(0_0_0/0.6)] ring-1 ring-white/10">
-        <div className="flex items-start justify-between">
-          <div className="flex flex-col gap-1">
-            <span className="text-[17px] font-semibold">Export video</span>
-            <span className="text-[12px] tabular-nums text-muted">MP4 · H.264 + AAC · 9:16 · 00:30.00</span>
-          </div>
-          <X className="size-4 text-muted" />
-        </div>
-        <div className="flex flex-col gap-2.5">
-          {rows.map(([label, control], i) => (
-            <div key={label} className="flex flex-col gap-1.5">
-              <div className="flex items-center gap-3">
-                <span className="w-[76px] shrink-0 text-right text-[12px] text-muted">{label}</span>
-                {control}
-              </div>
-              {i === 1 && <span className="pl-[88px] text-[11.5px] text-muted">Loudness −14 LUFS, applied to the file</span>}
-            </div>
-          ))}
-        </div>
-        <div className="flex items-center justify-between border-t border-white/[0.07] pt-4">
-          <span className="text-[12px] text-muted">
-            about <span className="font-semibold text-fg">12 MB</span>
-          </span>
-          <div className="flex gap-2.5">
-            <span className="flex h-8 items-center rounded-full bg-white/[0.09] px-4 text-[13px] font-medium ring-1 ring-inset ring-white/[0.07]">Close</span>
-            <span className="flex h-8 items-center rounded-full bg-accent-strong px-4 text-[13px] font-medium text-white">Export…</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export function Showcase() {
   const [active, setActive] = useState(0);
@@ -259,14 +197,13 @@ export function Showcase() {
           className="w-full"
         >
           <Fit
-            width={1200}
-            height={740}
+            width={MOCK_W}
+            height={MOCK_H}
             view={current.view}
             className="mx-auto max-md:overflow-hidden max-md:rounded-[18px] max-md:ring-1 max-md:ring-white/10"
           >
             <div className="relative size-full rounded-[14px] shadow-[0_50px_140px_rgb(0_0_0/0.9),0_0_0_1px_rgb(255_255_255/0.08)]">
               <EditorMock focus={tab.id} framed />
-              {tab.id === "export" && <ExportDialog />}
 
               {tab.spots.map((s, i) => (
                 <button

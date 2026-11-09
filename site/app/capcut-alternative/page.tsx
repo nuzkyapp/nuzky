@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import { Check } from "lucide-react";
-import { EditorMock } from "@/components/EditorMock";
+import { EditorMock, MOCK_H, MOCK_W } from "@/components/EditorMock";
 import { FaqList } from "@/components/Faq";
 import { Fit } from "@/components/Fit";
 import { Footer } from "@/components/Footer";
@@ -82,7 +82,7 @@ export default async function CapcutAlternative() {
               <HeroDownload release={release} base="/" />
             </div>
 
-            <Fit width={1200} height={740} className="mt-10 sm:mt-12">
+            <Fit width={MOCK_W} height={MOCK_H} className="mt-10 sm:mt-12">
               <div className="relative size-full rounded-[14px] shadow-[0_50px_140px_rgb(0_0_0/0.9),0_0_0_1px_rgb(255_255_255/0.08)]">
                 <EditorMock focus="edit" />
               </div>

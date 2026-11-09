@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { Anton, Inter, JetBrains_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { description, url } from "@/lib/site";
 import "./globals.css";
@@ -8,6 +8,8 @@ import "./globals.css";
 // page, so it loads when that card needs it instead of competing with the hero for the first bytes.
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
 const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono-face", display: "swap", preload: false });
+// The cover's hook in the editor mock, in the face the app's Outlined text uses.
+const anton = Anton({ subsets: ["latin"], weight: "400", variable: "--font-anton-face", display: "swap", preload: false });
 
 // Search results show the title, which names what people search for. Shares show the slogan.
 const slogan = "Recording is the fun part. Nuzky does the boring one.";
@@ -27,7 +29,7 @@ export const viewport: Viewport = { themeColor: "#08080a", colorScheme: "dark" }
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     // The download block's script names the visitor's system on <html> before React hydrates (components/GetNuzky.tsx).
-    <html lang="en" className={`${inter.variable} ${mono.variable}`} suppressHydrationWarning>
+    <html lang="en" className={`${inter.variable} ${mono.variable} ${anton.variable}`} suppressHydrationWarning>
       <body className="min-h-dvh overflow-x-hidden bg-site">
         {children}
         {/* Vercel Web Analytics counts visits without cookies or stored identifiers. */}
