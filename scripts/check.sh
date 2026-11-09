@@ -95,14 +95,18 @@ from e2e.harness import transcript_pool; print(transcript_pool().name)') || retu
 # of them passed on their own. Each failed flow runs once more, alone; one that fails again fails the gate, and one
 # that passes is named, so its flakiness is still seen.
 rerun_failed_flows() {
-  local failed
+  local failed out status passed
   failed=$(sed -n 's/^FAILED  \([^ ]*\) .*/\1/p' "$1")
   [ -n "$failed" ] || return 1
   echo
   echo "Running the failed UI flows again, one at a time:" $failed
   # shellcheck disable=SC2086 # one argument per flow
-  NUZKY_REPRO_JOBS=1 python3 scripts/repro.py $failed || return 1
-  echo "These UI flows failed beside the others and passed on their own:" $failed >&2
+  out=$(NUZKY_REPRO_JOBS=1 python3 scripts/repro.py $failed 2>&1)
+  status=$?
+  printf '%s\n' "$out"
+  passed=$(sed -n 's/^passed  \([^ ]*\) .*/\1/p' <<<"$out")
+  [ -z "$passed" ] || echo "These UI flows failed beside the others and passed on their own:" $passed >&2
+  return "$status"
 }
 
 # The Rust tests with media and the UI flows spend their time waiting for speech recognition on the GPU, the app
