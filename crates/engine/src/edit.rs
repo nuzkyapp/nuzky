@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::{
     Adjust, Animation, Asset, AssetKind, Background, CAPTIONS_TRACK, Canvas, CaptionWord, Clip, ClipContent, Ease,
-    Effect, Keyframe, Keywords, LetterCase, MAX_CANVAS_SIDE, MAX_CLIP_EFFECTS, Mono, Project, ReelCandidate, Shape,
+    Effect, Keyframe, Keywords, LetterCase, MAX_CANVAS_SIDE, MAX_CLIP_EFFECTS, MAX_FPS, Mono, Project, ReelCandidate, Shape,
     TextAlign, TextShadow, TextStyle, Thumbnail, ThumbnailFormat, Track, TrackKind, Transform, Transition,
     WordCorrection, word_ranges,
 };
@@ -296,12 +296,15 @@ pub enum EditCmd {
         style: Option<TextStylePatch>,
         transform: Option<TransformPatch>,
     },
+    /// `fps` sets the frame rate the preview plays and the export writes, and makes this resolution and frame rate
+    /// the video's chosen quality, which the export dialog starts from.
     #[cfg_attr(feature = "ts", ts(optional_fields = nullable))]
     SetCanvas {
         width: u32,
         height: u32,
         background: Option<String>,
         background_blur: Option<f32>,
+        fps: Option<u32>,
     },
     /// Adds a new captions track; existing tracks are left alone. Every caption gets the animations, and the
     /// transform fields given over its place a little below the middle.
@@ -1831,12 +1834,17 @@ impl Project {
                     t.keep_in_place = k;
                 }
             }
-            EditCmd::SetCanvas { width, height, background, background_blur } => {
+            EditCmd::SetCanvas { width, height, background, background_blur, fps } => {
+                if width < 16 || height < 16 || width > MAX_CANVAS_SIDE || height > MAX_CANVAS_SIDE {
+                    bail!("Unsupported canvas size");
+                }
+                ensure!(fps.is_none_or(|f| (1..=MAX_FPS).contains(&f)), "Frame rate must be between 1 and {MAX_FPS} fps");
                 if let Some(b) = background_blur {
                     self.canvas.background_blur = b.clamp(0.0, 1.0);
                 }
-                if width < 16 || height < 16 || width > MAX_CANVAS_SIDE || height > MAX_CANVAS_SIDE {
-                    bail!("Unsupported canvas size");
+                if let Some(fps) = fps {
+                    self.canvas.fps = fps;
+                    self.canvas.quality_chosen = true;
                 }
                 let before = self.canvas.unit();
                 self.canvas.width = width & !1;
@@ -3271,7 +3279,7 @@ mod tests {
         // A video is never longer than its file.
         assert_eq!(pip(&mut p, "wide", 9_000_000, Some(60_000_000)).2, 4_000_000);
         // 16:9: a small gap from the top and right edges of the canvas.
-        p.apply(EditCmd::SetCanvas { width: 1920, height: 1080, background: None, background_blur: None }).unwrap();
+        p.apply(EditCmd::SetCanvas { width: 1920, height: 1080, background: None, background_blur: None, fps: None }).unwrap();
         let (.., [_, tr, ..]) = pip(&mut p, "photo", 20_000_000, None);
         assert!((tr[0] - (1920.0 - 0.04 * 1080.0)).abs() < 0.01 && (tr[1] - 0.04 * 1080.0).abs() < 0.01, "{tr:?}");
         let sound = EditCmd::AddPictureInPicture { asset_id: "m".into(), start_us: 0, duration_us: None };
@@ -3328,7 +3336,7 @@ mod tests {
         .unwrap();
         p.apply(EditCmd::AddText { start_us: 0, text: "Title".into(), style }).unwrap();
         for (width, height, k) in [(2160, 3840, 2.0), (3840, 2160, 2.0), (1080, 1920, 1.0)] {
-            p.apply(EditCmd::SetCanvas { width, height, background: None, background_blur: None }).unwrap();
+            p.apply(EditCmd::SetCanvas { width, height, background: None, background_blur: None, fps: None }).unwrap();
             let ClipContent::Text { style, .. } = &p.tracks[1].clips[0].content else { panic!() };
             assert_eq!(style.font_size, 95.0 * k);
             assert_eq!(style.stroke_width, 7.5 * k);
@@ -3336,6 +3344,21 @@ mod tests {
             let ClipContent::Media { shape, .. } = &p.tracks[0].clips[0].content else { panic!() };
             assert_eq!(shape.as_ref().unwrap().border_width, 6.0 * k);
         }
+    }
+
+    #[test]
+    fn set_canvas_with_a_frame_rate_chooses_the_quality() {
+        let mut p = project();
+        let set = |fps| EditCmd::SetCanvas { width: 1080, height: 1920, background: None, background_blur: None, fps };
+        for fps in [0, MAX_FPS + 1] {
+            assert!(p.apply(set(Some(fps))).is_err(), "{fps} fps");
+        }
+        assert_eq!((p.canvas.fps, p.canvas.quality_chosen), (30, false));
+        p.apply(set(Some(60))).unwrap();
+        assert_eq!((p.canvas.fps, p.canvas.quality_chosen), (60, true));
+        // A format or background change keeps the chosen frame rate.
+        p.apply(set(None)).unwrap();
+        assert_eq!((p.canvas.fps, p.canvas.quality_chosen), (60, true));
     }
 
     #[test]
@@ -4950,7 +4973,7 @@ mod tests {
         assert_eq!(p.tracks[0].clips[0].keyframes.iter().map(|k| k.t_us).collect::<Vec<_>>(), [-1_000_000, 1_000_000]);
 
         // Other canvases have no safe area: the canvas centre, and its right edge for Ken Burns.
-        p.apply(EditCmd::SetCanvas { width: 1920, height: 1080, background: None, background_blur: None }).unwrap();
+        p.apply(EditCmd::SetCanvas { width: 1920, height: 1080, background: None, background_blur: None, fps: None }).unwrap();
         p.apply(EditCmd::SetKeyframes { clip_id: id.clone(), keyframes: vec![] }).unwrap();
         p.apply(motion(Some(&id), None, MotionKind::KenBurns, 0.1)).unwrap();
         assert_keys(motion_keys(&p, 0), [(0, 1.0, 0.0, 0.0), (3_000_000, 1.1, -0.05, 0.0)]);

@@ -1,11 +1,12 @@
-"""A 4K canvas from the Ratio menu. A 9:16 project with a grey picture in a red 20 px border and the Classic text
+"""A 4K canvas from the quality chip. A 9:16 project with a grey picture in a red 20 px border and the Classic text
 switches to 4K: the canvas becomes 2160x3840, the text, its outline and the border double in canvas pixels, so the
 preview looks as it did, and Classic is still the text's style. Title added on 4K comes out twice its 1080p size.
-16:9 keeps 4K, Export opens at 4K although the last export was 1080p, and 1080p brings back the sizes exactly."""
+16:9 in Ratio keeps 4K, Export opens at 4K although the last export was 1080p, and FHD brings back the sizes exactly."""
 import subprocess, time
 
 from e2e.harness import FIXTURES, changed_share, flow, link_models, preview_crop, preview_rect, wait
 from e2e.home import resize
+from e2e.quality import chip, quality
 
 PROJECT = 'return window.__nuzky.store.getState().snap.project'
 RATIO = 'section[aria-label=Preview] button[aria-haspopup=menu]'
@@ -49,8 +50,8 @@ def preview(r, name):
     return preview_crop(r.work / f'{name}.png', preview_rect(r))
 
 
-@flow('resolution', 'Switch a 9:16 project to a 4K canvas from Ratio: text, outline and border keep their size in the '
-      'preview, Classic stays recognised, Title comes out at 4K size, 16:9 keeps 4K, Export opens at 4K and 1080p '
+@flow('resolution', 'Switch a 9:16 project to a 4K canvas from the quality chip: text, outline and border keep their size '
+      'in the preview, Classic stays recognised, Title comes out at 4K size, 16:9 keeps 4K, Export opens at 4K and FHD '
       'brings the sizes back', before=picture)
 def resolution(r):
     r.import_media(r.grey)
@@ -65,9 +66,9 @@ def resolution(r):
     r.s.run('window.__nuzky.store.getState().select([])')
     hd = preview(r, 'resolution-1080p')
 
-    ratio(r, '4K', 'resolution-menu')
+    quality(r, resolution='4K', shot='resolution-menu')
     four_k = canvas_is(r, 2160, 3840)
-    r.check('4K in Ratio makes the 9:16 canvas 2160x3840', four_k, four_k or r.s.run(PROJECT)['canvas'])
+    r.check('4K in the quality chip makes the 9:16 canvas 2160x3840', four_k, four_k or r.s.run(PROJECT)['canvas'])
     style = r.s.run(TEXTS)[0]
     r.check('the text and its outline double in canvas pixels', (style['fontSize'], style['strokeWidth']) == (168, 14), style)
     r.check('the border doubles too', r.s.run(BORDER) == 40, r.s.run(BORDER))
@@ -86,8 +87,7 @@ def resolution(r):
     ratio(r, '16:9')
     wide = canvas_is(r, 3840, 2160)
     r.check('16:9 keeps 4K: 3840x2160', wide, wide or r.s.run(PROJECT)['canvas'])
-    label = r.s.run(f'return document.querySelector("{RATIO}").textContent')
-    r.check('the Ratio button names the resolution', label.endswith('16:9 · 4K'), label)
+    r.check('the quality chip names the resolution', chip(r) == '4K 30', chip(r))
 
     r.s.run("localStorage.setItem('nuzky.export', JSON.stringify({resolution: 1080, quality: 'recommended', preset: null}))")
     r.s.run("window.__nuzky.store.setState({exportOpen: true})")
@@ -103,16 +103,16 @@ def resolution(r):
     r.s.run("[...document.querySelectorAll('[role=group][aria-label=Quality] button')].find((b) => b.textContent === 'High').click()")
     r.s.run("window.__nuzky.store.setState({exportOpen: false})")
 
-    ratio(r, '1080p')
+    quality(r, resolution='FHD')
     back = canvas_is(r, 1920, 1080)
     styles = r.s.run(TEXTS)
-    r.check('1080p brings back 1920x1080 and the exact sizes',
+    r.check('FHD brings back 1920x1080 and the exact sizes',
             back and [(s['fontSize'], s['strokeWidth']) for s in styles] == [(84, 7), (130, 0)] and r.s.run(BORDER) == 20,
             [back, styles, r.s.run(BORDER)])
     r.s.run("window.__nuzky.store.setState({exportOpen: true})")
     picked = wait(lambda: shown() == '1080p', 5) and shown()
     remembered = r.s.run("return JSON.parse(localStorage.getItem('nuzky.export'))")
-    r.check('Export on 1080p still opens at the remembered 1080p, with the quality picked on 4K', picked == '1080p'
+    r.check('Export on 1080p opens at 1080p and keeps the quality picked on 4K', picked == '1080p'
             and remembered['quality'] == 'high', [picked, remembered])
 
 
@@ -121,7 +121,7 @@ def resolution(r):
 def resolution_captions(r):
     r.import_media(FIXTURES / 'talk.mp4')
     r.add_clip('talk.mp4')
-    ratio(r, '4K')
+    quality(r, resolution='4K')
     r.check('the canvas is 2160x3840', canvas_is(r, 2160, 3840), r.s.run(PROJECT)['canvas'])
     r.s.run("window.__nuzky.speech.setState({model: 'small', language: 'en'})")
     r.s.run("[...document.querySelectorAll('[role=tab]')].find((t) => t.textContent.trim() === 'Captions').click()")

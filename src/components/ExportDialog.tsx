@@ -15,14 +15,14 @@ import { US, formatTime } from "../lib/time";
 import type { Canvas, Delivery, ExportRequest, RecapInfo } from "../lib/types";
 import { Button, Checkbox, IconButton, Menu, type MenuEntry, Notice, ProgressBar, Segmented, trapTab } from "./ui";
 
-const RESOLUTIONS = [
+export const RESOLUTIONS = [
   { id: 720, label: "720p" },
   { id: 1080, label: "1080p" },
   { id: 1440, label: "1440p" },
   { id: 2160, label: "4K" },
 ];
-const FRAME_RATES = [24, 25, 30, 50, 60];
-const QUALITIES: { id: ExportRequest["quality"]; label: string; bitsPerPixel: number }[] = [
+export const FRAME_RATES = [24, 25, 30, 50, 60];
+export const QUALITIES: { id: ExportRequest["quality"]; label: string; bitsPerPixel: number }[] = [
   { id: "high", label: "High", bitsPerPixel: 0.12 },
   { id: "recommended", label: "Recommended", bitsPerPixel: 0.07 },
   { id: "small", label: "Smaller file", bitsPerPixel: 0.035 },
@@ -67,14 +67,14 @@ export function outputSize(canvas: Canvas, shortSide: number) {
 }
 
 /** Typical H.264 bitrates at these CRFs; real size depends on how much the picture moves. */
-function estimateBytes(w: number, h: number, fps: number, quality: ExportRequest["quality"], durationUs: number) {
+export function estimateBytes(w: number, h: number, fps: number, quality: ExportRequest["quality"], durationUs: number) {
   const bpp = QUALITIES.find((q) => q.id === quality)!.bitsPerPixel;
   return ((w * h * fps * bpp + AUDIO_BPS) * (durationUs / US)) / 8;
 }
 
 const fileName = (path: string) => path.split(/[\\/]/).pop() || path;
 
-function formatBytes(b: number) {
+export function formatBytes(b: number) {
   if (b >= 1e9) return `${(b / 1e9).toFixed(1)} GB`;
   return `${Math.max(1, Math.round(b / 1e6))} MB`;
 }
@@ -87,10 +87,13 @@ function savedOptions() {
   }
 }
 
-/** A canvas above 1080p that an export resolution matches exports at its own. */
+/**
+ * A canvas that exports at its own resolution: one whose quality someone chose in the top bar, or one above 1080p,
+ * when an export resolution matches it.
+ */
 function ownResolution(canvas: Canvas) {
   const short = Math.min(canvas.width, canvas.height);
-  return short > 1080 && RESOLUTIONS.some((r) => r.id === short);
+  return (canvas.qualityChosen || short > 1080) && RESOLUTIONS.some((r) => r.id === short);
 }
 
 /** The settings the last export used, or the project's own; `asked`'s preset where the video fits it. */
@@ -104,11 +107,14 @@ export function loadOptions(canvas: Canvas, asked: Delivery | null): ExportReque
   };
   try {
     const saved = savedOptions();
-    // A project made in 4K exports in 4K: the remembered resolution, and a preset of another one, are for the others.
+    // A project made in 4K, or whose quality was chosen, exports at it: the remembered resolution, and a preset of
+    // another resolution or frame rate, are for the others.
     const own = ownResolution(canvas);
     const options = { ...fallback, ...(!own && saved?.resolution && { resolution: saved.resolution }), ...(saved?.quality && { quality: saved.quality }) };
     // The preset comes back where it applies; a project in another format starts from its own settings.
-    const preset = asked ?? PRESETS.find((p) => p.id === saved?.preset && (!own || p.resolution === short))?.id;
+    const preset =
+      asked ??
+      PRESETS.find((p) => p.id === saved?.preset && (!own || (p.resolution === short && (!canvas.qualityChosen || p.fps === null || p.fps === canvas.fps))))?.id;
     return preset && fits(preset, canvas) ? { ...options, ...presetOptions(preset, canvas), quality: options.quality } : options;
   } catch {
     return fallback;
@@ -292,7 +298,8 @@ export function ExportDialog() {
     const preset = next.preset && presetOf(next.preset);
     if (preset && (next.resolution !== preset.resolution || (preset.fps !== null && next.fps !== preset.fps))) next.preset = null;
     setOptions(next);
-    // A 4K project's own resolution is not a choice to remember for the others; one picked here is.
+    // A project's own resolution (4K, or the quality chosen in the top bar) is not a choice to remember for the others;
+    // one picked here is.
     const resolution = patch.resolution ?? (ownResolution(project.canvas) ? savedOptions()?.resolution : next.resolution);
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ resolution, quality: next.quality, preset: next.preset ?? null }));
   };

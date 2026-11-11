@@ -141,6 +141,7 @@ impl Renderer {
             fps: 30,
             background: thumbnail.background.color.clone(),
             background_blur: 0.0,
+            quality_chosen: false,
         };
 
         let t = thumbnail.frame;

@@ -207,8 +207,14 @@ fn shade_unsafe(pixels: &mut [u8], width: u32, height: u32, canvas: &nuzky_engin
 /// the bottom right corner.
 pub fn shade_thumbnail_zones(pixels: &mut [u8], width: u32, height: u32, format: ThumbnailFormat) {
     let (tw, th) = format.size();
-    let canvas =
-        nuzky_engine::model::Canvas { width: tw, height: th, fps: 30, background: String::new(), background_blur: 0.0 };
+    let canvas = nuzky_engine::model::Canvas {
+        width: tw,
+        height: th,
+        fps: 30,
+        background: String::new(),
+        background_blur: 0.0,
+        quality_chosen: false,
+    };
     let area = canvas.safe_area();
     let grid = (th as f32 - tw as f32 * 4.0 / 3.0) / 2.0;
     for y in 0..height {

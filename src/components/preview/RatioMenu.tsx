@@ -1,16 +1,15 @@
 import { useEffect, useRef, type KeyboardEvent } from "react";
 import { Check, ChevronDown, RectangleHorizontal } from "lucide-react";
 import { chose } from "../../lib/exit";
-import { CANVAS_RESOLUTIONS, FORMATS, canvasSize, formatLabel, sameRatio } from "../../lib/presets";
+import { FORMATS, canvasSize, formatLabel, sameRatio } from "../../lib/presets";
 import { picturedClips, reframe, useReframe } from "../../lib/reframe";
 import { AI_EDITING, useAiLocked, useEditor } from "../../lib/store";
 import { Button } from "../ui";
 
 /**
  * CapCut's "Ratio" control next to the player: the one place to change the canvas format, and beside each format
- * Reframe, which also places the clips to follow the face; under them the resolution. A format keeps the resolution
- * and a resolution keeps the format. Open state lives in the store so the Format row in the Project inspector can
- * open it too.
+ * Reframe, which also places the clips to follow the face. A format keeps the resolution, which the quality chip in the
+ * top bar sets. Open state lives in the store so the Format row in the Project inspector can open it too.
  */
 export function RatioMenu() {
   const canvas = useEditor((s) => s.snap!.project.canvas);
@@ -47,7 +46,7 @@ export function RatioMenu() {
     };
   }, [open]);
 
-  // Like the clip menu: ↑/↓ move, through each format and its Reframe, and no key reaches the editor's shortcuts.
+  // Like the clip menu: ↑/↓ move through each format and its Reframe, and no key reaches the editor's shortcuts.
   const onMenuKey = (e: KeyboardEvent<HTMLDivElement>) => {
     e.stopPropagation();
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
@@ -74,11 +73,7 @@ export function RatioMenu() {
       >
         <RectangleHorizontal size={14} className="text-muted @max-[560px]:hidden" />
         <span className="@max-[560px]:hidden">Ratio</span>
-        <span className="tabular font-normal whitespace-nowrap text-muted">
-          {formatLabel(canvas.width, canvas.height)}
-          {/* Too long beside the timecode in a narrow preview; the Project inspector's Format row still says it. */}
-          {short !== CANVAS_RESOLUTIONS[0].id && <span className="@max-[560px]:hidden"> · {CANVAS_RESOLUTIONS.find((r) => r.id === short)?.label ?? `${short}p`}</span>}
-        </span>
+        <span className="tabular font-normal whitespace-nowrap text-muted">{formatLabel(canvas.width, canvas.height)}</span>
         <ChevronDown size={13} className="text-muted" />
       </button>
       {open && (
@@ -120,36 +115,6 @@ export function RatioMenu() {
                   >
                     Reframe
                   </Button>
-                </span>
-              </div>
-            );
-          })}
-          <div role="separator" className="mx-2 my-1 h-px bg-white/[.08]" />
-          {CANVAS_RESOLUTIONS.map((r) => {
-            const on = short === r.id;
-            const size = canvasSize(canvas, r.id);
-            return (
-              <div key={r.id} className="flex items-center gap-1 rounded-md pr-1 hover:bg-white/[.08] has-[:focus-visible]:bg-white/[.08]">
-                <button
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={on}
-                  onClick={(e) => {
-                    chose(e.currentTarget);
-                    if (!on) edit({ type: "setCanvas", ...size });
-                    closeToTrigger();
-                  }}
-                  className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-left focus-visible:outline-offset-[-2px]"
-                >
-                  <span className="w-11 shrink-0 text-[13px] font-medium text-fg">{r.label}</span>
-                  <span className="tabular flex-1 truncate text-[12px] text-muted">
-                    {size.width}×{size.height}
-                  </span>
-                  {on && <Check size={14} className="shrink-0 text-accent" />}
-                </button>
-                {/* Keeps the check where the formats have theirs, left of Reframe. */}
-                <span aria-hidden className="invisible h-6 shrink-0 px-2.5 text-[12px] font-medium">
-                  Reframe
                 </span>
               </div>
             );
