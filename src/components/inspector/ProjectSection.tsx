@@ -7,6 +7,7 @@ import { useSounds } from "../../lib/sounds";
 import { speechBlocker, useTranscriptView } from "../../lib/speech";
 import { isCaptionTrack, mainClips, projectDuration, useEditor, type PanelTab } from "../../lib/store";
 import { formatLength } from "../../lib/time";
+import { isRecordedVoiceover } from "../../lib/voiceover";
 import type { Clip, Project, TranscriptView } from "../../lib/types";
 import { AiLock, Button, ColorInput, Section, Segmented, Slider, lockedProps, tabIds, useLockReason } from "../ui";
 import { InspectorHeader } from "./Header";
@@ -112,7 +113,7 @@ function soundsOf(project: Project) {
     .flatMap((c) => {
       const content = c.content;
       const asset = content.type === "media" ? project.assets.find((a) => a.id === content.assetId) : undefined;
-      return asset?.kind === "audio" ? [asset.name] : [];
+      return asset?.kind === "audio" && !isRecordedVoiceover(asset) ? [asset.name] : [];
     });
 }
 

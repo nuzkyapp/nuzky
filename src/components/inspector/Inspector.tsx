@@ -7,6 +7,7 @@ import { useGallery } from "../../lib/gallery";
 import { usePlugins } from "../../lib/plugins";
 import { findClip, isCaptionTrack, isFreeze, mainCuts, useEditor } from "../../lib/store";
 import { formatDuration, formatTime } from "../../lib/time";
+import { isRecordedVoiceover } from "../../lib/voiceover";
 import type { Asset, Clip } from "../../lib/types";
 import { CoverInspector } from "../cover/CoverInspector";
 import { TransitionSettings } from "../panel/TransitionsTab";
@@ -159,7 +160,7 @@ export function Inspector({ width }: { width: number }) {
     const c = clip.content;
     const asset = c.type === "media" ? project.assets.find((a) => a.id === c.assetId) : undefined;
     const kind: Kind = c.type === "text" ? (isCaptionTrack(track) ? "caption" : "text") : track.kind === "audio" ? "audio" : (asset?.kind ?? "video");
-    const music = kind === "audio" && track.keepInPlace && !!asset?.hasAudio;
+    const music = kind === "audio" && track.keepInPlace && !!asset?.hasAudio && !isRecordedVoiceover(asset);
     body = <ClipInspector key={clip.id} clip={clip} kind={kind} asset={asset} music={music} chosen={chosen} onChoose={useChosen.setState} />;
   }
 

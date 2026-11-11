@@ -134,7 +134,7 @@ fn job_blocks(group: StorageGroupId, kinds: &[String]) -> Option<String> {
         StorageGroupId::Sound => &["proxy", "matte", "cover-mask", "cover-pick", "faces", "reframe"],
         _ => &["audio", "voice", "dereverb", "level"],
     };
-    let never = ["speech-model", "vision-models", "screen-recording"];
+    let never = ["speech-model", "vision-models", "screen-recording", "voiceover"];
     let kind = kinds.iter().find(|kind| !unrelated.contains(&kind.as_str()) && !never.contains(&kind.as_str()))?;
     let uses = if group == StorageGroupId::Sound { "the prepared sound" } else { "these pictures" };
     let what = match kind.as_str() {

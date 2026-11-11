@@ -1,6 +1,7 @@
 import { Blend, Captions, Film, Music, Palette, Puzzle, ScrollText, Type } from "lucide-react";
 import { useCover } from "../../lib/cover";
 import { useReels } from "../../lib/reels";
+import { closeVoiceover, useVoiceover } from "../../lib/voiceover";
 import { useEditor, type PanelTab } from "../../lib/store";
 import { CoverFrames } from "../cover/CoverFrames";
 import { ReelTrim } from "../reels/ReelTrim";
@@ -13,6 +14,8 @@ import { PluginsTab } from "./PluginsTab";
 import { TextTab } from "./TextTab";
 import { TranscriptTab } from "./TranscriptTab";
 import { TransitionsTab } from "./TransitionsTab";
+import { VoiceoverPanel } from "./VoiceoverPanel";
+import { useEffect } from "react";
 
 // CapCut's order.
 const TABS: { id: PanelTab; label: string; icon: typeof Film }[] = [
@@ -39,6 +42,14 @@ export function LeftPanel({ width }: { width: number }) {
   const reels = useReels((s) => s.open);
   // Narrower than eight labels need in one row, the tabs sit in two rows of four, each still with its name.
   const compact = width < COMPACT_BELOW;
+  const voiceover = useVoiceover((s) => s.phase !== "closed");
+  const home = useEditor((s) => s.view === "home");
+  const epoch = useEditor((s) => s.snap?.sessionEpoch);
+  // The voiceover gives the library back when another view takes the pane, the editor goes, or another project opens.
+  useEffect(() => {
+    if (reels || cover || home) void closeVoiceover();
+  }, [reels, cover, home]);
+  useEffect(() => () => void closeVoiceover(), [epoch]);
   if (reels)
     return (
       <aside className="pane flex shrink-0 flex-col overflow-hidden" style={{ width }} aria-label="Reel">
@@ -51,6 +62,14 @@ export function LeftPanel({ width }: { width: number }) {
     return (
       <aside className="pane flex shrink-0 flex-col overflow-hidden" style={{ width }} aria-label="Cover frames">
         <CoverFrames format={cover} />
+      </aside>
+    );
+  if (voiceover)
+    return (
+      <aside className="pane flex shrink-0 flex-col overflow-hidden" style={{ width }} aria-label="Voiceover">
+        <AiLock>
+          <VoiceoverPanel />
+        </AiLock>
       </aside>
     );
   return (

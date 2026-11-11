@@ -157,6 +157,8 @@ fn generate() -> String {
     types.visit::<crate::broll::BrollChoice>();
     types.visit::<crate::screen::ScreenWindow>();
     types.visit::<crate::screen::ScreenRecording>();
+    types.visit::<crate::voiceover::MicLevel>();
+    types.visit::<crate::voiceover::VoiceoverState>();
     types.visit::<crate::beats::BeatPlans>();
     types.visit::<crate::beats::BeatCutDone>();
     types.visit::<nuzky_mcp::reels::MadeReel>();
