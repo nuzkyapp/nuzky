@@ -151,10 +151,15 @@ fn photo_exif_tells_when_and_where_as_ffprobe_reads_it() {
     let probe = run(Command::new("ffprobe").args(["-v", "error", "-show_frames", "-of", "json"]).arg(&path)).stdout;
     let frame: serde_json::Value = serde_json::from_slice(&probe).unwrap();
     let tags = &frame["frames"][0]["tags"];
+    // FFmpeg 8 and later prefix the directory ("ExifIFD/DateTimeOriginal"); FFmpeg 6.1 does not.
+    let tag = |name: &str| {
+        tags.as_object()
+            .and_then(|t| t.iter().find(|(k, _)| k.rsplit('/').next() == Some(name)).map(|(_, v)| v.clone()))
+    };
     if tags.is_object() {
-        assert_eq!(tags["ExifIFD/DateTimeOriginal"], "2024:05:12 14:03:22", "{tags}");
-        assert_eq!(tags["GPSInfo/GPSLatitudeRef"], "N", "{tags}");
-        assert_eq!(tags["Model"], "iPhone 15 Pro", "{tags}");
+        assert_eq!(tag("DateTimeOriginal"), Some("2024:05:12 14:03:22".into()), "{tags}");
+        assert_eq!(tag("GPSLatitudeRef"), Some("N".into()), "{tags}");
+        assert_eq!(tag("Model"), Some("iPhone 15 Pro".into()), "{tags}");
     } else {
         eprintln!("this ffprobe shows no EXIF tags; checking against the values written");
     }
