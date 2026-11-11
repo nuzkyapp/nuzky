@@ -754,10 +754,10 @@ export function Timeline({ height }: { height: number }) {
             >
               <Copy size={15} />
             </IconButton>
-            <IconButton round label={locked ? lockedLabel("Detach audio") : detachLabel} disabled={locked || detachable.length === 0} onClick={() => void detachAudio(detachable)}>
+            <IconButton round label={locked ? lockedLabel("Detach audio") : detachLabel} disabled={locked || detachable.length === 0} onClick={() => void detachAudio(detachable)} data-detach-audio>
               <Unlink size={15} />
             </IconButton>
-            <IconButton round label={locked ? lockedLabel("Rotate") : rotateLabel} disabled={locked || !rotatable} onClick={rotateSelection}>
+            <IconButton round label={locked ? lockedLabel("Rotate") : rotateLabel} disabled={locked || !rotatable} onClick={rotateSelection} data-rotate>
               <RotateCwSquare size={15} />
             </IconButton>
             <span aria-hidden className="mx-1 h-4 w-px bg-white/[.12]" />
