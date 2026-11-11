@@ -297,6 +297,7 @@ fn layer(image: Image, corners: Quad, opacity: f32, rect: [f32; 4]) -> Layer {
         clip: None,
         transfer: Transfer::Sdr,
         mask,
+        shape_mask: None,
         matte: None,
         effects: Vec::new(),
         color: Default::default(),

@@ -274,7 +274,7 @@ pub enum EditCmd {
         clips: Vec<Clip>,
     },
     /// Gives clips of the source's kind its look. Text: style, font, transform, keyframes and animations, never
-    /// the text; a caption keeps its wrap width. Video and images: log profile, LUT, Adjust, effects, background, crop and shape, motion
+    /// the text; a caption keeps its wrap width. Video and images: log profile, LUT, Adjust, effects, background, crop and shape, mask, motion
     /// (keyframes, moving each clip from its own framing) and animations. Sound: volume, fades, Voice and
     /// ducking. Keyframes stretch to each clip's length, and what the source lacks the clips lose. Clips of
     /// another kind are left alone and listed in the outcome's `skipped`.
@@ -2448,7 +2448,7 @@ impl Project {
                     (*lg, *lt) = (*log, lut.clone());
                     *b = background.clone();
                     *sh = shape.clone();
-                    t.crop = transform.crop;
+                    (t.crop, t.mask) = (transform.crop, transform.mask);
                     clip.effects = from.effects.clone();
                     let t = &*t;
                     clip.keyframes = from
@@ -2542,7 +2542,7 @@ impl Project {
 
 /// Where `key` takes a clip framed as `to` when it takes one framed as `base` there: zoomed as much about the same
 /// canvas point, so a motion keeps zooming into what it zoomed into; shifted, turned and faded as much; with the
-/// key's crop.
+/// key's crop and mask.
 fn follow(base: &Transform, key: &Transform, to: &Transform) -> Transform {
     let zoom = if base.scale > 0.0 { key.scale / base.scale } else { 1.0 };
     Transform {
@@ -2552,6 +2552,7 @@ fn follow(base: &Transform, key: &Transform, to: &Transform) -> Transform {
         rotation: to.rotation + key.rotation - base.rotation,
         opacity: (to.opacity + key.opacity - base.opacity).clamp(0.0, 1.0),
         crop: key.crop,
+        mask: key.mask,
     }
 }
 
@@ -5293,7 +5294,7 @@ mod tests {
         p.apply(EditCmd::AddClip { asset_id: "a".into(), start_us: None, track_id: None }).unwrap();
         p.apply(EditCmd::AddClip { asset_id: "b".into(), start_us: None, track_id: None }).unwrap();
         let (first, second) = (p.tracks[0].clips[0].id.clone(), p.tracks[0].clips[1].id.clone());
-        let framed = Transform { x: 0.1, y: -0.05, scale: 1.2, rotation: 5.0, opacity: 0.9, crop: None };
+        let framed = Transform { x: 0.1, y: -0.05, scale: 1.2, rotation: 5.0, opacity: 0.9, ..Transform::default() };
         p.apply(changes(&first, serde_json::json!({"transform": framed}))).unwrap();
 
         p.apply(motion(Some(&first), None, MotionKind::PushIn, 0.1)).unwrap();
@@ -5539,8 +5540,9 @@ mod tests {
         let crop = crate::model::Crop { left: 0.1, ..crate::model::Crop::default() };
         let adjust = Adjust { contrast: 0.4, ..Adjust::default() };
         let round = Shape { radius: 0.3, ..Shape::default() };
+        let circle = crate::model::Mask { x: 0.2, feather: 0.1, ..Default::default() };
         let look = serde_json::json!({
-            "transform": Transform { crop: Some(crop), ..Transform::default() },
+            "transform": Transform { crop: Some(crop), mask: Some(circle), ..Transform::default() },
             "adjust": adjust,
             "shape": round,
             "background": Background::Blur { strength: 0.5 },
@@ -5568,8 +5570,10 @@ mod tests {
         let clip = &p.tracks[1].clips[0];
         let ClipContent::Media { adjust: a, background, shape, transform, .. } = &clip.content else { panic!() };
         assert_eq!((*a, background, shape), (adjust, &Background::Blur { strength: 0.5 }, &Some(round)));
-        // The window keeps its place and size, takes the crop, and zooms in over its own 3 s as the motion would.
-        assert_eq!(*transform, Transform { crop: Some(crop), ..own });
+        // The window keeps its place and size, takes the crop and mask, and zooms in over its own 3 s as the motion
+        // would, the mask in every keyframe.
+        assert_eq!(*transform, Transform { crop: Some(crop), mask: Some(circle), ..own });
+        assert!(clip.keyframes.iter().all(|k| k.transform.mask == Some(circle)), "{:?}", clip.keyframes);
         let mut expected = p.clone();
         expected.tracks[1].clips[0].keyframes.clear();
         expected.apply(motion(&target)).unwrap();

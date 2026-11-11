@@ -1179,6 +1179,46 @@ export type MadeReel = {
 };
 
 /**
+ * A shape over the picture as it shows after rotation and mirroring, before the crop: the layer shows inside it and
+ * fades out over `feather` at its edge. It moves, scales and turns with the layer.
+ */
+export type Mask = {
+  kind: MaskKind,
+  /**
+   * Offset of the shape's centre from the layer's centre, as a fraction of the layer's width. Positive moves right.
+   */
+  x: number,
+  /**
+   * Offset of the shape's centre from the layer's centre, as a fraction of the layer's height. Positive moves down.
+   */
+  y: number,
+  /**
+   * The shape's width as a fraction of the layer's width; a circle with the same width and height in pixels is
+   * round. A linear mask has no size.
+   */
+  width: number,
+  /**
+   * The shape's height as a fraction of the layer's height.
+   */
+  height: number,
+  /**
+   * Degrees, clockwise, about the shape's centre.
+   */
+  rotation: number,
+  /**
+   * How far the edge fades from shown to hidden, centred on it, as a fraction of the layer's shorter side; 0 is a
+   * sharp edge, 1 the softest.
+   */
+  feather: number,
+  /**
+   * Shows the layer outside the shape and hides it inside.
+   */
+  invert?: boolean,
+};
+
+export type MaskKind = "circle" | "rectangle" | "linear";
+
+/**
  * The microphone as the meter shows it, 20 times a second.
  */
 export type MicLevel = {
@@ -2419,6 +2459,10 @@ export type Transform = {
    * Edges cut off the layer. Part of the transform, so keyframes can animate it.
    */
   crop?: Crop | null,
+  /**
+   * A shape that shows only part of the layer. Part of the transform, so keyframes can animate it.
+   */
+  mask?: Mask | null,
 };
 
 /**

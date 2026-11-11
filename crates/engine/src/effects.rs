@@ -1,4 +1,4 @@
-use crate::model::{AnimationKind, Clip, ClipContent, Crop, Track, Transform, Transition};
+use crate::model::{AnimationKind, Clip, ClipContent, Crop, Mask, Track, Transform, Transition};
 
 const ZOOM_MAX_SCALE: f32 = 1.5;
 const POP_MAX_SCALE: f32 = 1.1;
@@ -71,7 +71,8 @@ fn keyframed(clip: &Clip, u: i64) -> Option<Transform> {
     }
     for pair in clip.keyframes.windows(2) {
         let (a, b) = (&pair[0], &pair[1]);
-        if u <= b.t_us {
+        // At a keyframe's own time it holds, mask shape and inversion included.
+        if u < b.t_us {
             let p = a.ease.at((u - a.t_us) as f32 / (b.t_us - a.t_us).max(1) as f32);
             let lerp = |a: f32, b: f32| a + (b - a) * p;
             // A keyframe without a crop shows the whole layer.
@@ -84,6 +85,19 @@ fn keyframed(clip: &Clip, u: i64) -> Option<Transform> {
                     bottom: lerp(a.bottom, b.bottom),
                 }
             });
+            // The shape and its inversion hold until the next keyframe; its place, size, turn and feather move.
+            let mask = match (a.transform.mask, b.transform.mask) {
+                (Some(m), Some(n)) if (m.kind, m.invert) == (n.kind, n.invert) => Some(Mask {
+                    x: lerp(m.x, n.x),
+                    y: lerp(m.y, n.y),
+                    width: lerp(m.width, n.width),
+                    height: lerp(m.height, n.height),
+                    rotation: lerp(m.rotation, n.rotation),
+                    feather: lerp(m.feather, n.feather),
+                    ..m
+                }),
+                (mask, _) => mask,
+            };
             return Some(Transform {
                 x: lerp(a.transform.x, b.transform.x),
                 y: lerp(a.transform.y, b.transform.y),
@@ -91,6 +105,7 @@ fn keyframed(clip: &Clip, u: i64) -> Option<Transform> {
                 rotation: lerp(a.transform.rotation, b.transform.rotation),
                 opacity: lerp(a.transform.opacity, b.transform.opacity),
                 crop,
+                mask,
             });
         }
     }
@@ -141,7 +156,7 @@ fn animate(t: &mut Transform, kind: AnimationKind, p: f32, exiting: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Animation, Ease, Keyframe, TransitionKind};
+    use crate::model::{Animation, Ease, Keyframe, MaskKind, TransitionKind};
 
     fn clip() -> Clip {
         Clip::new(
@@ -192,8 +207,18 @@ mod tests {
         assert_eq!(source_time(&c, 2_000_000), 2_500_000);
         assert_eq!(source_time(&c, 0), 500_000);
         let crop = Crop { left: 0.2, top: 0.0, right: 0.4, bottom: 0.1 };
-        let a = Transform { x: -0.5, y: 0.2, scale: 0.5, rotation: -90.0, opacity: 0.2, crop: Some(crop) };
-        let b = Transform { x: 0.5, y: 0.6, scale: 1.5, rotation: 90.0, opacity: 0.8, crop: None };
+        let circle = Mask { x: 0.1, width: 0.2, height: 0.4, feather: 0.2, ..Mask::default() };
+        let a = Transform {
+            x: -0.5,
+            y: 0.2,
+            scale: 0.5,
+            rotation: -90.0,
+            opacity: 0.2,
+            crop: Some(crop),
+            mask: Some(circle),
+        };
+        let wide = Mask { x: 0.3, width: 0.6, rotation: 90.0, ..circle };
+        let b = Transform { x: 0.5, y: 0.6, scale: 1.5, rotation: 90.0, opacity: 0.8, crop: None, mask: Some(wide) };
         c.keyframes = vec![
             Keyframe { t_us: 0, transform: a, ease: Ease::Linear },
             Keyframe { t_us: 2_000_000, transform: b, ease: Ease::Linear },
@@ -207,6 +232,17 @@ mod tests {
         assert_eq!(mid.crop, Some(Crop { left: 0.1, top: 0.0, right: 0.2, bottom: 0.05 }));
         c.keyframes[0].transform.crop = None;
         assert_eq!(transform_at(&c, 2_000_000).0.crop, None);
+        // The mask moves, grows and turns; another shape or an inverted one holds until its keyframe.
+        let m = mid.mask.unwrap();
+        assert!((m.x - 0.2).abs() < 1e-6 && (m.width - 0.4).abs() < 1e-6 && m.rotation == 45.0 && m.height == 0.4);
+        let linear = Mask { kind: MaskKind::Linear, ..wide };
+        c.keyframes[1].transform.mask = Some(linear);
+        assert_eq!(transform_at(&c, 2_000_000).0.mask, Some(circle));
+        assert_eq!(transform_at(&c, 2_999_999).0.mask, Some(circle));
+        assert_eq!(transform_at(&c, 3_000_000).0.mask, Some(linear), "the keyframe's own frame shows its shape");
+        c.keyframes[1].transform.mask = Some(Mask { invert: true, ..wide });
+        assert_eq!(transform_at(&c, 2_000_000).0.mask, Some(circle));
+        c.keyframes[1].transform.mask = Some(wide);
         // A smooth keyframe starts and ends its way to the next one gently: a quarter of the time
         // covers 15.6 % of the way, half the time half of it.
         c.keyframes[0].ease = Ease::Smooth;

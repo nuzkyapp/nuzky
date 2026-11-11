@@ -914,13 +914,79 @@ pub struct Transform {
     /// Edges cut off the layer. Part of the transform, so keyframes can animate it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crop: Option<Crop>,
+    /// A shape that shows only part of the layer. Part of the transform, so keyframes can animate it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional = nullable))]
+    pub mask: Option<Mask>,
 }
 
 impl Default for Transform {
     fn default() -> Self {
-        Self { x: 0.0, y: 0.0, scale: 1.0, rotation: 0.0, opacity: 1.0, crop: None }
+        Self { x: 0.0, y: 0.0, scale: 1.0, rotation: 0.0, opacity: 1.0, crop: None, mask: None }
     }
 }
+
+/// A shape over the picture as it shows after rotation and mirroring, before the crop: the layer shows inside it and
+/// fades out over `feather` at its edge. It moves, scales and turns with the layer.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Mask {
+    pub kind: MaskKind,
+    /// Offset of the shape's centre from the layer's centre, as a fraction of the layer's width. Positive moves right.
+    pub x: f32,
+    /// Offset of the shape's centre from the layer's centre, as a fraction of the layer's height. Positive moves down.
+    pub y: f32,
+    /// The shape's width as a fraction of the layer's width; a circle with the same width and height in pixels is
+    /// round. A linear mask has no size.
+    pub width: f32,
+    /// The shape's height as a fraction of the layer's height.
+    pub height: f32,
+    /// Degrees, clockwise, about the shape's centre.
+    pub rotation: f32,
+    /// How far the edge fades from shown to hidden, centred on it, as a fraction of the layer's shorter side; 0 is a
+    /// sharp edge, 1 the softest.
+    pub feather: f32,
+    /// Shows the layer outside the shape and hides it inside.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub invert: bool,
+}
+
+impl Default for Mask {
+    fn default() -> Self {
+        Self {
+            kind: MaskKind::Circle,
+            x: 0.0,
+            y: 0.0,
+            width: 0.5,
+            height: 0.5,
+            rotation: 0.0,
+            feather: 0.0,
+            invert: false,
+        }
+    }
+}
+
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+pub enum MaskKind {
+    /// An ellipse filling `width` × `height`.
+    #[default]
+    Circle,
+    /// `width` × `height`.
+    Rectangle,
+    /// Everything on one side of a line through the centre: above it at rotation 0, to its right at 90. With a
+    /// feather it is a linear gradient.
+    Linear,
+}
+
+/// The widest and tallest mask, as a fraction of the layer's width and height, and how far its centre may sit from
+/// the layer's.
+pub const MAX_MASK_SIZE: f32 = 4.0;
+pub const MAX_MASK_OFFSET: f32 = 2.0;
 
 /// How much of each edge is cut off, as a fraction of the layer's width (left, right) or height (top,
 /// bottom), on the picture as it shows after rotation and mirroring. The rest stays where it was.
@@ -1505,6 +1571,12 @@ mod tests {
             serde_json::json!({"left": 0.25, "top": 0.0, "right": 0.0, "bottom": 0.0})
         );
         assert_eq!(serde_json::from_value::<Option<Shape>>(json["shape"].clone()).unwrap(), shape);
+        // A transform from before masks has none and saves without one; a mask given by its shape alone takes the
+        // rest from the default.
+        assert!(saved["transform"].get("mask").is_none() && transform.mask.is_none());
+        let linear: Mask = serde_json::from_str(r#"{"kind":"linear","feather":0.3}"#).unwrap();
+        assert_eq!(linear, Mask { kind: MaskKind::Linear, feather: 0.3, ..Mask::default() });
+        assert!(serde_json::to_value(linear).unwrap().get("invert").is_none());
     }
 
     #[test]

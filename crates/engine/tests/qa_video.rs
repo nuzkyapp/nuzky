@@ -1100,6 +1100,107 @@ fn crop_circle_border_and_shadow_match_ffmpeg() {
     assert!(red < 140, "red {red} of the cut-off half shows in the background");
 }
 
+fn masked(p: &mut Project, mask: Option<Mask>) {
+    let ClipContent::Media { transform, .. } = &mut p.tracks[0].clips[0].content else { unreachable!() };
+    transform.mask = mask;
+}
+
+/// The gradient over black with FFmpeg's alpha `a` (0 to 255 of X and Y, the pixel's top-left corner).
+fn ffmpeg_mask(source: &Path, a: &str) -> Vec<u8> {
+    let graph = format!(
+        "color=black:s=320x180[bg];[0]format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='{a}'[fg];[bg][fg]overlay=format=auto"
+    );
+    raw(source, &["-filter_complex", &graph, "-frames:v", "1"])
+}
+
+#[test]
+fn circle_rectangle_and_linear_masks_match_ffmpeg_in_preview_and_export() {
+    if !available() {
+        return;
+    }
+    let d = dir("mask");
+    let gradient = "color=black:s=320x180,format=rgb24,geq=r='X*255/W':g='Y*255/H':b=128";
+    let source = d.join("gradient.png");
+    ff(&["-f", "lavfi", "-i", gradient, "-frames:v", "1"], &source);
+    let mut p = project(&source, 200_000);
+    let mut renderer = Renderer::new().unwrap();
+    let mut frame = |p: &Project, w, h| renderer.render(p, 0, w, h, Wait::Exact, false).unwrap();
+    let mut failures = Vec::new();
+    let mut check = |what: &str, ours: &[u8], theirs: &[u8], most: f64| {
+        let error = mae(ours, theirs);
+        if error >= most {
+            failures.push(format!("{what}: pixel MAE={error}"));
+        }
+    };
+
+    // A round circle of radius 48 px right of and above the middle, cut to the pixel.
+    let circle = Mask { x: 0.1, y: -0.1, width: 0.3, height: 0.3 * 320.0 / 180.0, ..Mask::default() };
+    masked(&mut p, Some(circle));
+    let ours = frame(&p, 320, 180);
+    check("circle", &ours, &ffmpeg_mask(&source, "255*lte(hypot(X+0.5-192,Y+0.5-72),48)"), 1.0);
+    // The preview at half the size draws the same circle, half as large.
+    let half = frame(&p, 160, 90);
+    let shrunk: Vec<u8> = (0..90 * 160 * 4)
+        .map(|i| {
+            let (c, x, y) = (i % 4, i / 4 % 160, i / 640);
+            let at = |dx: usize, dy: usize| ours[((2 * y + dy) * 320 + 2 * x + dx) * 4 + c] as u32;
+            ((at(0, 0) + at(1, 0) + at(0, 1) + at(1, 1) + 2) / 4) as u8
+        })
+        .collect();
+    check("circle at half size", &half, &shrunk, 2.0);
+
+    // A rectangle 160 × 72 px turned 30° clockwise, inverted: the picture shows only around it.
+    let turned =
+        Mask { kind: MaskKind::Rectangle, width: 0.5, height: 0.4, rotation: 30.0, invert: true, ..Mask::default() };
+    masked(&mut p, Some(turned));
+    let (dx, dy) = ("(X+0.5-160)", "(Y+0.5-90)");
+    let (c, s) = (30f64.to_radians().cos(), 30f64.to_radians().sin());
+    let inside = format!("lte(abs({dx}*{c}+{dy}*{s}),80)*lte(abs({dy}*{c}-{dx}*{s}),36)");
+    check("inverted turned rectangle", &frame(&p, 320, 180), &ffmpeg_mask(&source, &format!("255*(1-{inside})")), 1.5);
+
+    // A linear mask with half the shorter side of feather: the top shows, fading out over 90 px around the middle.
+    let linear = Mask { kind: MaskKind::Linear, feather: 0.5, ..Mask::default() };
+    masked(&mut p, Some(linear));
+    let t = "clip((Y+0.5-45)/90,0,1)";
+    let fade = format!("255*(1-{t}*{t}*(3-2*{t}))");
+    let ours = frame(&p, 320, 180);
+    check("linear with feather", &ours, &ffmpeg_mask(&source, &fade), 1.0);
+
+    // The export draws the same mask: the frame through BT.709 4:2:0 as FFmpeg's reference goes through it.
+    let out = d.join("linear.mp4");
+    let options = nuzky_engine::export::ExportOptions {
+        preset: "ultrafast".into(),
+        replace_existing: true,
+        ..Default::default()
+    };
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    nuzky_engine::export::export(&p, &d.join("cache"), &out, &options, &cancel, |_| {}).unwrap();
+    let reference = d.join("linear-reference.png");
+    std::fs::write(d.join("linear-reference.rgba"), &ours).unwrap();
+    ff(
+        &[
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgba",
+            "-s",
+            "320x180",
+            "-i",
+            d.join("linear-reference.rgba").to_str().unwrap(),
+        ],
+        &reference,
+    );
+    let through_yuv = format!(
+        "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p,scale=in_color_matrix=bt709:in_range=tv:flags={SWS_FLAGS}"
+    );
+    check("exported", &raw(&out, &["-frames:v", "1"]), &raw(&reference, &["-vf", &through_yuv]), 1.5);
+
+    // Without a mask the clip shows whole again.
+    masked(&mut p, None);
+    check("no mask", &frame(&p, 320, 180), &raw(&source, &["-vf", "format=rgba"]), 0.5);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 #[test]
 fn crop_follows_the_picture_as_shown_after_exif_rotation_and_mirroring() {
     if !available() {

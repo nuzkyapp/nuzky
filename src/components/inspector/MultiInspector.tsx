@@ -1,5 +1,6 @@
 import { useShallow } from "zustand/react/shallow";
 import { Copy, Layers, RotateCcw, Trash2 } from "lucide-react";
+import { cropAndMask } from "../../lib/keyframes";
 import { LIMITS } from "../../lib/limits";
 import { ADJUST_ROWS, DEFAULT_TRANSFORM, NO_ADJUST, sameAdjust } from "../../lib/presets";
 import { deleteSelection, duplicateSelection, editClips, findClip, isCaptionTrack, patched, readoutTime, transformAtPlayhead, useCanvasUnit, useEditor, type StylePatch } from "../../lib/store";
@@ -68,7 +69,7 @@ function TransformRows({ found, coalesce }: { found: Found[]; coalesce: string }
       {
         type: "updateClip",
         clipId: clip.id,
-        transform: { ...DEFAULT_TRANSFORM, y: isCaptionTrack(track) ? LIMITS.captionY : 0, crop: transformAtPlayhead(clip, useEditor.getState().timeUs).crop },
+        transform: { ...DEFAULT_TRANSFORM, y: isCaptionTrack(track) ? LIMITS.captionY : 0, ...cropAndMask(transformAtPlayhead(clip, useEditor.getState().timeUs)) },
       },
       { type: "setKeyframes", clipId: clip.id, keyframes: [] },
     ]);

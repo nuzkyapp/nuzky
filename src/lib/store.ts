@@ -1162,7 +1162,7 @@ export function restyleCaptions(patch: StylePatch, coalesce?: string, trackId?: 
 }
 
 /** Moves, scales, turns or fades every caption the same way, as one undo step; captions with keyframes keep theirs. */
-export function placeCaptions(transform: Partial<Omit<Transform, "crop">>, coalesce?: string, trackId?: string) {
+export function placeCaptions(transform: Partial<Omit<Transform, "crop" | "mask">>, coalesce?: string, trackId?: string) {
   return useEditor.getState().edit((project) => {
     const track = captionTrack(project, trackId);
     return track ? { type: "restyleTrack", trackId: track.id, transform } : null;

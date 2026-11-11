@@ -1,6 +1,6 @@
 import { LIMITS } from "./limits";
 import { NO_CROP } from "./presets";
-import type { Canvas, Clip, Ease, Keyframe, MotionKind, Transform } from "./types";
+import type { Canvas, Clip, Ease, Keyframe, Mask, MotionKind, Transform } from "./types";
 import { US } from "./time";
 
 /** Keyframes closer than half a frame to the playhead count as "at the playhead". */
@@ -13,9 +13,19 @@ function eased(ease: Ease, p: number) {
   return ease === "smooth" ? p * p * (3 - 2 * p) : p;
 }
 
+const MASK_VALUES = ["x", "y", "width", "height", "rotation", "feather"] as const;
+
+/** The mask between two keyframes, as the engine's `keyframed`: the shape and its inversion hold until the next one. */
+function lerpMask(a: Mask | null | undefined, b: Mask | null | undefined, m: (x: number, y: number) => number): Mask | null | undefined {
+  if (!a || !b || a.kind !== b.kind || !a.invert !== !b.invert) return a;
+  return { ...a, ...Object.fromEntries(MASK_VALUES.map((k) => [k, m(a[k], b[k])])) };
+}
+
 function lerp(a: Transform, b: Transform, f: number): Transform {
   const m = (x: number, y: number) => x + (y - x) * f;
   const t: Transform = { x: m(a.x, b.x), y: m(a.y, b.y), scale: m(a.scale, b.scale), rotation: m(a.rotation, b.rotation), opacity: m(a.opacity, b.opacity) };
+  const mask = lerpMask(a.mask, b.mask, m);
+  if (mask) t.mask = mask;
   // A keyframe without a crop shows the whole layer.
   if (!a.crop && !b.crop) return t;
   const [ca, cb] = [a.crop ?? NO_CROP, b.crop ?? NO_CROP];
@@ -63,11 +73,14 @@ function motionCentre(canvas: Canvas, kind: MotionKind): [number, number] {
 }
 
 const near = (a: number, b: number) => Math.abs(a - b) < 1e-4;
-/** The same transform, crop included, so a keyframe edited by hand never passes for a preset. */
+const sameMask = (a: Mask | null | undefined, b: Mask | null | undefined) =>
+  !a || !b ? !a === !b : a.kind === b.kind && !a.invert === !b.invert && MASK_VALUES.every((k) => near(a[k], b[k]));
+/** The same transform, crop and mask included, so a keyframe edited by hand never passes for a preset. */
 const close = (a: Transform, b: Transform) =>
   (["x", "y", "scale", "rotation", "opacity"] as const).every((k) => near(a[k], b[k])) &&
   !a.crop === !b.crop &&
-  (!a.crop || !b.crop || (["left", "top", "right", "bottom"] as const).every((k) => near(a.crop![k], b.crop![k])));
+  (!a.crop || !b.crop || (["left", "top", "right", "bottom"] as const).every((k) => near(a.crop![k], b.crop![k]))) &&
+  sameMask(a.mask, b.mask);
 
 /**
  * The motion preset the clip's keyframes are, with its strength, or null for none or keyframes of
@@ -89,3 +102,6 @@ export function motionOf(clip: Clip, canvas: Canvas): { kind: MotionKind; streng
   }
   return null;
 }
+
+/** A transform's crop and mask, which have sections of their own, so Reset transform keeps them. */
+export const cropAndMask = ({ crop, mask }: Transform): Pick<Transform, "crop" | "mask"> => ({ crop, mask });

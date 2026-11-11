@@ -524,7 +524,7 @@ export function CaptionPosition({ clips, trackId, title = "Position", flush }: {
     const values = free.map((c) => c.content.transform[k]);
     return { value: values[0] ?? 0, mixed: values.some((v) => Math.abs(v - values[0]) > 1e-4) };
   };
-  const set = (patch: Partial<Omit<Transform, "crop">>, key: string) => placeCaptions(patch, `captions:place:${key}`, trackId);
+  const set = (patch: Partial<Omit<Transform, "crop" | "mask">>, key: string) => placeCaptions(patch, `captions:place:${key}`, trackId);
   const none = free.length === 0;
   const why = none ? "Every caption has keyframes, which decide where it is" : undefined;
   const [x, y, scale, rotation, opacity] = PLACE.map(field);
