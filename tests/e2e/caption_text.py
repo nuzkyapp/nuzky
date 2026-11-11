@@ -266,11 +266,13 @@ def caption_text(r):
     r.check('Enter on it selects the caption at the playhead and shows its Text tab, though Animation was last open',
             wait(lambda: r.s.run('return window.__nuzky.store.getState().selection') == [third] and inspector_tab() == 'Text', 5),
             [r.s.run('return window.__nuzky.store.getState().selection'), inspector_tab()])
-    r.check('the keyboard lands on its style tiles', wait(lambda: r.s.run(
-        "return !!document.activeElement?.closest('aside[aria-label=Inspector] [data-style-tile]')"), 5))
-    top = r.s.run(f"""const h = [...document.querySelectorAll('{SECTION} section h3')].find((h) => h.textContent === 'Style');
-        const pane = h.closest('.overflow-y-auto'); return Math.round(h.getBoundingClientRect().top - pane.getBoundingClientRect().top)""")
-    r.check('with the Style section at the top of the inspector, Font and Size above the tiles', top is not None and 0 <= top <= 24, top)
+    r.check('the keyboard lands on Font, first in its Style section', wait(lambda: r.s.run(
+        "return !!document.activeElement?.closest('aside[aria-label=Inspector] section') && document.activeElement.getAttribute('aria-label')?.startsWith('Font:')"), 5),
+        r.s.run("return document.activeElement?.getAttribute('aria-label')"))
+    style_top = lambda: r.s.run(f"""const h = [...document.querySelectorAll('{SECTION} section h3')].find((h) => h.textContent === 'Style');
+        const pane = h?.closest('.overflow-y-auto'); return pane ? Math.round(h.getBoundingClientRect().top - pane.getBoundingClientRect().top) : null""")
+    on_font = lambda: r.s.run("return document.activeElement?.getAttribute('aria-label')?.startsWith('Font:') ?? false")
+    r.check('with the Style section at the top of the inspector, Font and Size above the tiles', (top := style_top()) is not None and 0 <= top <= 24, top)
     views(r, 'inspector-edit-style', 'document.activeElement?.blur()')
     wait(lambda: select_all(r, f"""document.querySelector('{SECTION} input[aria-label="Size value"]')"""), 5)
     for key in '120':
@@ -295,6 +297,16 @@ def caption_text(r):
     r.check('and the Captions tab names the saved style as their look',
             wait(lambda: r.s.run(f"return document.querySelector('{LIBRARY} [data-caption-look]')?.textContent") == 'Round box', 5),
             r.s.run(f"return document.querySelector('{LIBRARY} [data-caption-look]')?.textContent"))
+    # With that saved style checked under every built-in one, in the smallest window, Style and Font still show.
+    webdriver('POST', r.s.path + '/window/rect', {'width': 1024, 'height': 640})
+    wait(lambda: r.s.run('return window.innerWidth') == 1024, 5)
+    r.s.run('window.__nuzky.store.getState().select([])')
+    r.s.run(f'{edit_style}.click()')
+    r.check('at 1024 × 640 with Round box checked, Edit style shows Style from its heading with the keyboard on Font',
+            wait(lambda: (top := style_top()) is not None and 0 <= top <= 24 and on_font(), 5), [style_top(), on_font()])
+    r.shot('inspector-edit-style-own-1024')
+    webdriver('POST', r.s.path + '/window/rect', {'width': 1440, 'height': 900})
+    wait(lambda: r.s.run('return window.innerWidth') == 1440, 5)
 
     # An agent can add a second captions track; a caption there styles the captions of its own track only.
     tracks = lambda: r.s.run("""return window.__nuzky.store.getState().snap.project.tracks.filter((t) => t.kind === 'text' && t.name === 'Captions')

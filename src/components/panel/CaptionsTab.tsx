@@ -227,7 +227,7 @@ function lookName(clips: Clip[], translation: boolean, own: CaptionPreset[], uni
 
 /**
  * Shows the captions of `track` in the inspector: selects the caption at the playhead, else the next one, moving the
- * playhead to it so the preview shows it, with its Style section in view and the keyboard on the style it has.
+ * playhead to it so the preview shows it, with its Style section in view and the keyboard on its Font.
  */
 function editStyle(track: Track) {
   const { timeUs, seek, select } = useEditor.getState();
@@ -239,13 +239,11 @@ function editStyle(track: Track) {
   showCaptionText();
   select([caption.id]);
   window.setTimeout(() => {
-    const tiles = [...document.querySelectorAll<HTMLElement>("aside[aria-label=Inspector] [data-style-tile]")];
-    const tile = tiles.find((t) => t.getAttribute("aria-pressed") === "true") ?? tiles[0];
-    // The Style section from its heading, so Font, Size and Color show above the tiles.
-    const section = tile?.closest("section");
+    // The Style section from its heading, with the keyboard on Font right under it, so both stay in view.
+    const section = document.querySelector("aside[aria-label=Inspector] [data-style-tile]")?.closest("section");
     const pane = section?.parentElement?.closest<HTMLElement>(".overflow-y-auto");
     if (section && pane) pane.scrollTop += section.getBoundingClientRect().top - pane.getBoundingClientRect().top;
-    tile?.focus();
+    section?.querySelector<HTMLElement>('button[aria-label^="Font:"]')?.focus({ preventScroll: true });
   }, 0);
 }
 
