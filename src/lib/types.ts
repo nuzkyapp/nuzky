@@ -325,6 +325,11 @@ export type CaptionWord = {
    * `style.keywords` with `KeywordPick::Emphasis` colours it.
    */
   key?: boolean,
+  /**
+   * Chosen by hand: `true` colours the word as a key word and `false` leaves it plain, whatever
+   * `style.keywords` picks, and also without a pick or without `keywords`; `None` follows the pick.
+   */
+  marked?: boolean | null,
 };
 
 export type ChatGptNotice = "ended" | "notRevoked";
@@ -798,6 +803,11 @@ export type EditCmd = {
   "type": "correctWords",
   corrections: Array<WordCorrection>,
 } | {
+  "type": "markKeyWord",
+  clipId: string,
+  word: number,
+  marked?: boolean | null,
+} | {
   "type": "zoomRanges",
   ranges: Array<ZoomRange>,
 } | {
@@ -978,7 +988,11 @@ export type Keywords = {
    * `#rrggbb` fill of the key words.
    */
   color: string,
-  pick: KeywordPick,
+  /**
+   * Which words are key besides those marked by hand; `null` only those (Manual). Left out, Emphasis, as
+   * projects saved before there was a choice have it.
+   */
+  pick: KeywordPick | null,
 };
 
 /**

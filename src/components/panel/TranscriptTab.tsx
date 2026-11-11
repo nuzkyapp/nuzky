@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { AlertCircle, AlertTriangle, Check, GalleryVerticalEnd, RefreshCw, ScrollText, Scissors } from "lucide-react";
 import { correctWord, cutWords, removePauses, removeRetakes, speechBlocker, startSpeech, tokenCounts, tokenize, useSpeech, useTranscriptView, type Token } from "../../lib/speech";
+import { captionWordsIn } from "../../lib/keywords";
 import { offersReels, openReels } from "../../lib/reels";
 import { useEditor } from "../../lib/store";
 import { US, formatDuration } from "../../lib/time";
@@ -79,6 +80,8 @@ export function TranscriptTab() {
   const { running, last } = useSpeechJobs("transcript");
   const blocker = speechBlocker(project);
   const tokens = useMemo(() => (view ? tokenize(view) : []), [view]);
+  const tracks = project.tracks;
+  const captions = useMemo(() => captionWordsIn(tracks, tokens.map((t) => (t.kind === "word" ? t : { startUs: 0, endUs: 0 }))), [tracks, tokens]);
   const pauses = tokens.filter((t) => t.kind === "pause");
   const missing = view ? missingClips(project, view.untranscribed) : 0;
   const cutBlocker = missing > 0 ? "Transcribe the remaining clips first" : null;
@@ -204,6 +207,7 @@ export function TranscriptTab() {
         blocker={cutBlocker}
         onDelete={deleteRange}
         marks={zooms.zooms}
+        captions={captions}
         onCorrect={(i, text, shown) => (view ? correctWord(view.key, i, text, shown) : Promise.resolve(false))}
       />
     </div>

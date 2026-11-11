@@ -183,7 +183,7 @@ fn placement(
             let wrap = style.max_width.unwrap_or(canvas.width as f32 * 0.9);
             // Karaoke: the word being said, by its place in the whole text, which a typewriter reveals from the start.
             let spoken = style.highlight.as_ref().and_then(|_| spoken_word(text, words, t_us - clip.start_us));
-            let keys = style.keywords.as_ref().map(|k| key_words(text, words, k.pick)).unwrap_or_default();
+            let keys = key_words(text, words, style.keywords.as_ref().and_then(|k| k.pick));
             let text = text_renderer.render_spoken(&text[..end], &style, scale, wrap * scale, spoken, &keys);
             ((text.image.width as f32 / text.scale, text.image.height as f32 / text.scale), Some(text.image))
         }
@@ -1462,6 +1462,7 @@ mod tests {
             start_us: KARAOKE_START + start,
             end_us: KARAOKE_START + end,
             key: false,
+            marked: None,
         };
         let segment = CaptionSegment {
             start_us: KARAOKE_START,
@@ -1573,7 +1574,7 @@ mod tests {
         let mut renderer = Renderer::new().unwrap();
         let mut project = karaoke_project(Some("#ffe14d"));
         let ClipContent::Text { style, words, .. } = &mut project.tracks[1].clips[0].content else { panic!() };
-        style.keywords = Some(Keywords { color: "#3ce35a".into(), pick: KeywordPick::Emphasis });
+        style.keywords = Some(Keywords { color: "#3ce35a".into(), pick: Some(KeywordPick::Emphasis) });
         words[1].key = true;
         let mut frame =
             |project: &Project, t: i64| renderer.render(project, KARAOKE_START + t, w, h, Wait::Exact, false).unwrap();
@@ -1590,7 +1591,7 @@ mod tests {
         assert!(green_pixels(&frame(&project, 550_000)).is_empty() && pixel_box(&spoken) == Some(area));
         // The longest word, whatever the scoring said; none once the text is edited by hand.
         let ClipContent::Text { style, .. } = &mut project.tracks[1].clips[0].content else { panic!() };
-        style.keywords = Some(Keywords { color: "#3ce35a".into(), pick: KeywordPick::Longest });
+        style.keywords = Some(Keywords { color: "#3ce35a".into(), pick: Some(KeywordPick::Longest) });
         let longest = project.clone();
         assert_eq!(pixel_box(&green_pixels(&frame(&longest, 350_000))), Some(area));
         let ClipContent::Text { text, .. } = &mut project.tracks[1].clips[0].content else { panic!() };

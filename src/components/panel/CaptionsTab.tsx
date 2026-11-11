@@ -228,7 +228,7 @@ export function CaptionsTab() {
           </div>
           <div className="flex flex-col gap-1.5">
             <span className="text-[12px] text-muted">Key words</span>
-            <KeywordRows style={look.style} styles={styles} setStyle={setStyle} />
+            <KeywordRows style={look.style} styles={styles} setStyle={setStyle} clips={captions?.clips} />
           </div>
           <div className="flex flex-col">
             <MoreStyleFold style={look.style} styles={styles} setStyle={setStyle} unit={unit} flush />

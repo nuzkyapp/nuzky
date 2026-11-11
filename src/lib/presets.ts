@@ -124,7 +124,7 @@ export function isLook(preset: CaptionPreset, style: TextStyle, animIn: Animatio
 
 /** Which words of a caption the key word colour marks. */
 export const KEYWORD_PICKS: { id: KeywordPick | "off"; label: string; title: string }[] = [
-  { id: "off", label: "Off", title: "No key words" },
+  { id: "off", label: "Manual", title: "Only the words you mark" },
   { id: "emphasis", label: "Emphasis", title: "Numbers and words said louder than the rest" },
   { id: "first", label: "First", title: "The first word of every caption" },
   { id: "last", label: "Last", title: "The last word of every caption" },

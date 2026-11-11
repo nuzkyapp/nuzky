@@ -1103,6 +1103,29 @@ fn get_state_shares_caption_defaults_and_keeps_filtered_clips_full_over_stdio() 
 }
 
 #[test]
+fn keyword_marks_apply_and_refuse_an_out_of_range_word_over_stdio() {
+    let mut c = Client::start(true, None, Some(None));
+    let run = c.call("begin_run", json!({"label":"Mark a caption word"}))["run_id"].clone();
+    c.call("apply_edits", json!({"run_id":run,"request_id":"captions","edits":[{
+        "type":"addCaptions","segments":[{"startUs":1_000_000,"endUs":2_000_000,"text":"read this",
+        "words":[{"text":"read","startUs":1_000_000,"endUs":1_400_000},{"text":"this","startUs":1_500_000,"endUs":2_000_000}]}],
+        "style":{"fontSize":64.0,"color":"#ffffff"}}]}));
+    let state = c.call("get_state", json!({"range":{"startUs":1_000_000,"endUs":2_000_000}}));
+    let id = state["tracks"][1]["clips"][0]["id"].clone();
+    c.call(
+        "apply_edits",
+        json!({"run_id":run,"request_id":"mark","edits":[{"type":"markKeyWord","clipId":id,"word":1,"marked":true}]}),
+    );
+    let marked = c.call("get_state", json!({"clip_ids":[id]}));
+    assert_eq!(marked["tracks"][1]["clips"][0]["content"]["words"][1]["marked"], true);
+    let error = c.error("apply_edits", json!({"run_id":run,"request_id":"bad-word","edits":[{"type":"markKeyWord","clipId":id,"word":2,"marked":true}]}));
+    assert!(error.contains("has 2 words") && error.contains("no word 2"), "{error}");
+    assert_eq!(c.call("get_state", json!({"clip_ids":[id]})), marked);
+    c.call("end_run", json!({"run_id":run,"action":"keep"}));
+    c.finish();
+}
+
+#[test]
 fn apply_edits_accepts_a_stringified_array_over_stdio() {
     let mut c = Client::new(true);
     let list = c.rpc("tools/list", json!({}));

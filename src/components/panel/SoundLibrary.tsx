@@ -7,7 +7,7 @@ import { FreesoundKey, OPENVERSE, SEARCH_SENDS } from "./FreesoundKey";
 import { formatDuration } from "../../lib/time";
 import { SONG, useTour } from "../../lib/tour";
 import type { Sound, SoundKind } from "../../lib/types";
-import { Button, IconButton, LockReason, SearchField, lockedProps, trapTab, useLockReason } from "../ui";
+import { Button, Chip, IconButton, LockReason, SearchField, lockedProps, trapTab, useLockReason } from "../ui";
 
 /** Round row action, as on the project's own audio. */
 const ACTION = "flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors duration-[120ms] ease-out aria-disabled:cursor-not-allowed aria-disabled:opacity-40";
@@ -240,17 +240,9 @@ function Effects() {
       {!query && (
         <div role="group" aria-label="Kinds of sound effects" className="flex flex-wrap gap-1.5 px-1.5 pb-2">
           {[null, ...categories].map((c) => (
-            <button
-              key={c ?? "all"}
-              type="button"
-              aria-pressed={category === c}
-              onClick={() => setCategory(c)}
-              className={`h-[26px] rounded-full px-2.5 text-[12px] font-medium transition-colors duration-[120ms] ease-out ${
-                category === c ? "bg-accent/[.18] text-fg shadow-[inset_0_0_0_1px_rgb(41_151_255/.5)]" : "bg-white/[.06] text-muted hover:text-fg"
-              }`}
-            >
+            <Chip key={c ?? "all"} pressed={category === c} onClick={() => setCategory(c)}>
               {c ?? "All"}
-            </button>
+            </Chip>
           ))}
         </div>
       )}
