@@ -6,7 +6,8 @@ use anyhow::{Context, Result, bail, ensure};
 use nuzky_engine::{
     Project,
     audio::{Mixer, us_to_samples},
-    model::{Asset, AssetKind, CHANNELS, ClipContent},
+    model::{Asset, AssetKind, CHANNELS, ClipContent, SpeedPoint},
+    retime::Retime,
     speech::is_heard,
 };
 use serde_json::{Value, json};
@@ -25,17 +26,23 @@ pub struct OnTimeline {
     start_us: i64,
     duration_us: i64,
     source_in_us: i64,
-    speed: f64,
+    speed: f32,
+    reverse: bool,
+    ramp: Vec<SpeedPoint>,
 }
 
 impl OnTimeline {
-    /// The timeline time the clip shows file time `t` at, if it shows it at all.
+    /// The timeline time the clip shows file time `t` at, if it shows it at all, through its speed, ramp and
+    /// direction.
     pub fn timeline(&self, t: i64) -> Option<i64> {
         if self.speed <= 0.0 {
             return (t == self.source_in_us).then_some(self.start_us);
         }
-        let at = self.start_us + ((t - self.source_in_us) as f64 / self.speed).round() as i64;
-        (at >= self.start_us && at < self.start_us + self.duration_us && t >= self.source_in_us).then_some(at)
+        let map = Retime::new(self.source_in_us, self.duration_us, self.speed, self.reverse, &self.ramp);
+        let at = self.start_us + map.offset_of(t as f64).round() as i64;
+        let source_end = self.source_in_us + (self.duration_us as f64 * self.speed as f64).round() as i64;
+        (at >= self.start_us && at < self.start_us + self.duration_us && (self.source_in_us..source_end).contains(&t))
+            .then_some(at)
     }
 }
 
@@ -66,7 +73,7 @@ pub fn part(project: &Project, clip_id: Option<&str>, asset_id: Option<&str>, ra
                 .flat_map(|t| &t.clips)
                 .find(|c| c.id == id)
                 .with_context(|| format!("UNKNOWN_CLIP: {id}"))?;
-            let ClipContent::Media { asset_id, source_in_us, speed, .. } = &clip.content else {
+            let ClipContent::Media { asset_id, source_in_us, speed, reverse, ramp, .. } = &clip.content else {
                 bail!("INVALID_ARGUMENTS: {id} is a text clip; give a video, image or sound clip");
             };
             let asset = project.asset(asset_id).with_context(|| format!("UNKNOWN_ASSET: {asset_id}"))?;
@@ -75,7 +82,9 @@ pub fn part(project: &Project, clip_id: Option<&str>, asset_id: Option<&str>, ra
                 start_us: clip.start_us,
                 duration_us: clip.duration_us,
                 source_in_us: *source_in_us,
-                speed: f64::from(*speed),
+                speed: *speed,
+                reverse: *reverse,
+                ramp: ramp.clone(),
             };
             (asset, Some(on))
         }
@@ -94,9 +103,11 @@ pub fn part(project: &Project, clip_id: Option<&str>, asset_id: Option<&str>, ra
         }
         (None, _) if asset.kind == AssetKind::Image => (0, 1),
         (None, Some(clip)) if clip.speed <= 0.0 => fit(clip.source_in_us, clip.source_in_us + 1, length),
-        (None, Some(clip)) => {
-            fit(clip.source_in_us, clip.source_in_us + (clip.duration_us as f64 * clip.speed).round() as i64, length)
-        }
+        (None, Some(clip)) => fit(
+            clip.source_in_us,
+            clip.source_in_us + (clip.duration_us as f64 * clip.speed as f64).round() as i64,
+            length,
+        ),
         (None, None) => asset.part.map_or((0, length), |p| fit(p.start_us, p.end_us, length)),
     };
     Ok(Part { asset: asset.clone(), range, clip })
@@ -256,11 +267,18 @@ mod tests {
             duration_us: 2_000_000,
             source_in_us: 5_000_000,
             speed: 2.0,
+            reverse: false,
+            ramp: Vec::new(),
         };
         assert_eq!(clip.timeline(5_000_000), Some(10_000_000));
         assert_eq!(clip.timeline(7_000_000), Some(11_000_000));
         assert_eq!(clip.timeline(9_000_000), None);
         assert_eq!(clip.timeline(4_999_999), None);
+        // Played backwards it shows the end of its part of the file first.
+        let backwards = OnTimeline { reverse: true, ..clip.clone() };
+        assert_eq!(backwards.timeline(8_000_000), Some(10_500_000));
+        assert_eq!(backwards.timeline(6_000_000), Some(11_500_000));
+        assert_eq!(backwards.timeline(9_000_000), None);
         let freeze = OnTimeline { speed: 0.0, ..clip };
         assert_eq!((freeze.timeline(5_000_000), freeze.timeline(5_000_001)), (Some(10_000_000), None));
     }

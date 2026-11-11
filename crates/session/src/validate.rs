@@ -427,6 +427,8 @@ fn validate_clip(project: &Project, clip: &Clip, kind: TrackKind) -> Result<()> 
             source_in_us,
             speed,
             keep_pitch: _,
+            reverse,
+            ramp,
             volume,
             transform: t,
             fade_in_us,
@@ -461,6 +463,17 @@ fn validate_clip(project: &Project, clip: &Clip, kind: TrackKind) -> Result<()> 
                 clip.id
             );
             ensure!(*source_in_us >= 0, "INVALID_PROJECT: negative source range");
+            ensure!(
+                nuzky_engine::retime::valid_ramp(ramp),
+                "INVALID_PROJECT: the speed ramp of {} needs 2 to {} points from 0 to 1 in order, at speeds from 0.1 to 10",
+                clip.id,
+                nuzky_engine::retime::MAX_RAMP_POINTS
+            );
+            ensure!(
+                !(*reverse || !ramp.is_empty()) || (!freeze && asset.kind != AssetKind::Image),
+                "INVALID_PROJECT: clip {} plays backwards or on a ramp without a source time",
+                clip.id
+            );
             // AddClip extends short sources to one whole canvas frame.
             let source_end = *source_in_us as f64 + clip.duration_us as f64 * *speed as f64;
             let minimum_clip_duration_us = project.frame_duration_us().ceil();

@@ -1027,6 +1027,7 @@ export function PresetTile({
   disabled,
   title,
   named = false,
+  short = false,
   children,
 }: {
   label: string;
@@ -1036,6 +1037,8 @@ export function PresetTile({
   title?: string;
   /** The preview names itself, as a caption style's name drawn in the style: a 48 px tile without a label under it. */
   named?: boolean;
+  /** A 36 px drawing over its label, as a speed ramp's shape, where a picture's 4:3 would only add height. */
+  short?: boolean;
   children: ReactNode;
 }) {
   const lock = useLockReason();
@@ -1049,7 +1052,7 @@ export function PresetTile({
       className="group flex min-w-0 flex-col gap-1.5 rounded-[10px] text-left disabled:cursor-not-allowed disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
     >
       <span
-        className={`relative block w-full overflow-hidden rounded-[10px] border ${named ? "h-12 bg-white/[.06]" : "aspect-[4/3] bg-bg"} ${
+        className={`relative block w-full overflow-hidden rounded-[10px] border ${named ? "h-12 bg-white/[.06]" : short ? "h-9 bg-white/[.06]" : "aspect-[4/3] bg-bg"} ${
           selected ? "border-accent shadow-[0_0_0_1px_var(--color-accent)]" : disabled ? "border-white/[.08]" : "border-white/[.08] group-enabled:group-hover:border-white/30"
         }`}
       >

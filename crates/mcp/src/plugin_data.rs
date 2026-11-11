@@ -187,10 +187,13 @@ impl<'a> Place<'a> {
         (self.source_in..self.source_end).contains(&source_us)
     }
 
-    /// A time of the file on the timeline, kept within the clip.
+    /// A time of the file on the timeline, kept within the clip, through its speed, ramp and direction.
     fn at(&self, source_us: i64) -> i64 {
-        let at = self.clip.start_us + ((source_us - self.source_in) as f64 / self.speed).round() as i64;
-        at.clamp(self.clip.start_us, self.clip.end_us())
+        let offset = match nuzky_engine::retime::Retime::of(self.clip) {
+            Some(map) => map.offset_of(source_us as f64),
+            None => 0.0,
+        };
+        (self.clip.start_us + offset.round() as i64).clamp(self.clip.start_us, self.clip.end_us())
     }
 
     fn named(&self, mut value: Value) -> Value {
@@ -204,7 +207,10 @@ impl<'a> Place<'a> {
         ranges
             .iter()
             .filter(|range| range.end_us > self.source_in && range.start_us < self.source_end)
-            .map(|range| (self.at(range.start_us), self.at(range.end_us)))
+            .map(|range| {
+                let (a, b) = (self.at(range.start_us), self.at(range.end_us));
+                (a.min(b), a.max(b))
+            })
             .filter(|(start, end)| end > start)
             .map(|(start, end)| self.named(json!({"start_us": start, "end_us": end})))
             .collect()
@@ -214,7 +220,7 @@ impl<'a> Place<'a> {
     fn loudness(&self, window_us: i64, step_us: i64, dbfs: &[f32]) -> Value {
         // The analysis measures whole samples, so a step of a long file is a little shorter than `step_us`.
         let step = us_to_samples(step_us).max(1);
-        let (mut times, mut levels) = (Vec::new(), Vec::new());
+        let mut windows = Vec::new();
         let mut start = self.source_in;
         while start < self.source_end {
             let end = (start + window_us).min(self.source_end);
@@ -225,17 +231,23 @@ impl<'a> Place<'a> {
                 break;
             }
             let power = steps.iter().map(|db| 10f64.powf(*db as f64 / 10.0)).sum::<f64>() / steps.len() as f64;
-            times.push(self.at(start));
-            levels.push((10.0 * power.log10()).max(-120.0) as f32);
+            // Played backwards, a window starts on the timeline where it ends in the file.
+            windows.push((self.at(start).min(self.at(end)), (10.0 * power.log10()).max(-120.0) as f32));
             start = end;
         }
+        windows.sort_by_key(|w| w.0);
+        let (times, levels): (Vec<i64>, Vec<f32>) = windows.into_iter().unzip();
         self.named(json!({"start_us": self.clip.start_us, "end_us": self.clip.end_us(), "times_us": times,
             "dbfs": levels}))
     }
 
     fn beats(&self, beats: &Beats) -> Value {
         let heard: Vec<usize> = (0..beats.beats_us.len()).filter(|&i| self.holds(beats.beats_us[i])).collect();
-        let times = |beats: &mut dyn Iterator<Item = i64>| beats.map(|t| self.at(t)).collect::<Vec<_>>();
+        let times = |beats: &mut dyn Iterator<Item = i64>| {
+            let mut times = beats.map(|t| self.at(t)).collect::<Vec<_>>();
+            times.sort_unstable();
+            times
+        };
         let beats_us = times(&mut heard.iter().map(|&i| beats.beats_us[i]));
         let downbeats_us = times(
             &mut heard

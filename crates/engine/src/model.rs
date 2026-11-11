@@ -591,6 +591,18 @@ pub struct Keyframe {
     pub ease: Ease,
 }
 
+/// One point of a speed ramp.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeedPoint {
+    /// Where along the clip, as a share of its length from 0 (its start) to 1 (its end).
+    pub at: f32,
+    /// The speed there, 0.1 to 10.
+    pub speed: f32,
+}
+
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -704,13 +716,22 @@ pub enum ClipContent {
         #[serde(default)]
         transform: Transform,
         /// Playback speed; the clip covers `duration_us * speed` of source. Sound follows it. 0 is a freeze
-        /// frame (`Clip::is_freeze`), always at volume 0.
+        /// frame (`Clip::is_freeze`), always at volume 0. With a `ramp` it is the ramp's average speed.
         #[serde(default = "one")]
         speed: f32,
         /// Sound at another speed keeps its pitch; off, it gets higher when faster and lower
-        /// when slower. Projects from before it have it off, so they sound as they did.
+        /// when slower. Projects from before it have it off, so they sound as they did. Only a steady speed
+        /// forwards keeps it: on a ramp or played backwards the pitch follows the speed.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         keep_pitch: bool,
+        /// Plays the clip's part of its file from its end to its start, sound included (`crate::retime`).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reverse: bool,
+        /// A speed ramp: the speed moves evenly from point to point along the clip and holds before the first
+        /// and after the last. Its average is `speed`, so the clip still covers `duration_us * speed` of source.
+        /// Empty plays at `speed` throughout (`crate::retime`).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        ramp: Vec<SpeedPoint>,
         #[serde(default)]
         adjust: Adjust,
         /// Audio fades at the clip edges.
@@ -1465,12 +1486,17 @@ mod tests {
         let content: ClipContent = serde_json::from_str(old).unwrap();
         assert_eq!(serde_json::to_string(&content).unwrap(), old);
         let saved = serde_json::to_value(&content).unwrap();
-        assert!(["dereverb", "normalize", "leveler", "log", "lut"].iter().all(|key| saved.get(key).is_none()));
-        let ClipContent::Media { mut transform, dereverb, normalize, leveler, log, lut, .. } = content else {
+        assert!(
+            ["dereverb", "normalize", "leveler", "log", "lut", "reverse", "ramp"]
+                .iter()
+                .all(|key| saved.get(key).is_none())
+        );
+        let ClipContent::Media { mut transform, dereverb, normalize, leveler, log, lut, reverse, ramp, .. } = content
+        else {
             panic!()
         };
-        assert_eq!((dereverb, normalize, leveler), (0.0, false, 0.0));
-        assert!(log.is_none() && lut.is_none());
+        assert_eq!((dereverb, normalize, leveler, reverse), (0.0, false, 0.0, false));
+        assert!(log.is_none() && lut.is_none() && ramp.is_empty());
         transform.crop = Some(Crop { left: 0.25, ..Crop::default() });
         let shape = Some(Shape { radius: 1.0, border_width: 8.0, border_color: "#ff0000".into(), shadow: 0.5 });
         let json = serde_json::json!({"transform": transform, "shape": shape});

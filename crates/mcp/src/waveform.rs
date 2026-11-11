@@ -234,6 +234,11 @@ fn parts(speech: &Project, start: i64, end: i64) -> (Vec<Part<'_>>, Vec<i64>) {
         for (i, clip) in track.clips.iter().enumerate() {
             let ClipContent::Media { asset_id, source_in_us, speed, volume, .. } = &clip.content else { continue };
             let Some(asset) = speech.asset(asset_id) else { continue };
+            // The sound beyond the edges of a clip played backwards or on a ramp plays at another speed or on the
+            // other side, so none shows.
+            if nuzky_engine::retime::is_retimed(clip) {
+                continue;
+            }
             let speed = f64::from(*speed);
             let shown = (SHOWN_US as f64 * speed) as i64;
             let out = source_in_us + (clip.duration_us as f64 * speed).round() as i64;
@@ -289,6 +294,9 @@ fn parts(speech: &Project, start: i64, end: i64) -> (Vec<Part<'_>>, Vec<i64>) {
 /// Whether `next` plays on where `clip` stops in the same file, as the halves of a split do, also at
 /// another speed: nothing of the file is thrown away between them.
 fn plays_on(clip: &Clip, next: &Clip) -> bool {
+    if nuzky_engine::retime::is_retimed(clip) || nuzky_engine::retime::is_retimed(next) {
+        return nuzky_engine::retime::plays_on(clip, next, samples_to_us(1) as f64);
+    }
     let (
         ClipContent::Media { asset_id: a, source_in_us: in_a, speed, .. },
         ClipContent::Media { asset_id: b, source_in_us: in_b, .. },
@@ -314,12 +322,15 @@ fn place_words<'a>(
         match part {
             Part::Heard { from, to } => {
                 for clip in speech.tracks.iter().flat_map(|track| &track.clips) {
-                    let ClipContent::Media { asset_id, source_in_us, speed, .. } = &clip.content else { continue };
+                    let ClipContent::Media { asset_id, .. } = &clip.content else { continue };
                     let (a, b) = ((*from).max(clip.start_us), (*to).min(clip.end_us()));
                     let Some((asset, words)) = words.get_key_value(asset_id).filter(|_| a < b) else { continue };
-                    let speed = f64::from(*speed);
-                    let source = |t: i64| source_in_us + ((t - clip.start_us) as f64 * speed).round() as i64;
-                    let x = |s: i64| (at + (clip.start_us - from) as f64 + (s - source_in_us) as f64 / speed) / per_px;
+                    // A clip played backwards says no words (`speech::map_words`).
+                    let Some(retime) = nuzky_engine::retime::Retime::of(clip).filter(|r| !r.reverse()) else {
+                        continue;
+                    };
+                    let source = |t: i64| retime.source_at((t - clip.start_us) as f64).round() as i64;
+                    let x = |s: i64| (at + (clip.start_us - from) as f64 + retime.offset_of(s as f64)) / per_px;
                     let (s0, s1) = (source(a), source(b));
                     for word in words.iter().filter(|w| w.start_us < s1 && w.end_us > s0) {
                         let (ws, we) = (word.start_us.max(s0), word.end_us.min(s1));

@@ -46,6 +46,8 @@ const FIELDS: Record<string, string> = {
   volume: "Volume",
   speed: "Speed",
   keepPitch: "Speed",
+  reverse: "Speed",
+  ramp: "Speed",
   fadeInUs: "Fade in",
   fadeOutUs: "Fade out",
   shape: "Crop and shape",

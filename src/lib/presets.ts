@@ -183,3 +183,13 @@ export function adjustCss(a: Adjust): { filter: string; tint: string | null; vig
 }
 
 export const SPEED_PRESETS = [0.5, 1, 1.5, 2, 3];
+
+/** Shapes of a speed ramp, at the speeds they start from; the points' `at` runs from 0, the clip's start, to 1, its end. */
+export const RAMP_PRESETS: { name: string; points: { at: number; speed: number }[] }[] = [
+  { name: "Slow-mo", points: [{ at: 0, speed: 1 }, { at: 0.4, speed: 0.25 }, { at: 0.6, speed: 0.25 }, { at: 1, speed: 1 }] },
+  { name: "Slow down", points: [{ at: 0, speed: 1.5 }, { at: 1, speed: 0.3 }] },
+  { name: "Speed up", points: [{ at: 0, speed: 0.3 }, { at: 1, speed: 2 }] },
+  { name: "Burst in", points: [{ at: 0, speed: 5 }, { at: 0.3, speed: 1 }, { at: 1, speed: 1 }] },
+  { name: "Burst out", points: [{ at: 0, speed: 1 }, { at: 0.7, speed: 1 }, { at: 1, speed: 5 }] },
+  { name: "Pulse", points: [{ at: 0, speed: 2 }, { at: 0.3, speed: 0.5 }, { at: 0.5, speed: 2 }, { at: 0.8, speed: 0.5 }, { at: 1, speed: 2 }] },
+];

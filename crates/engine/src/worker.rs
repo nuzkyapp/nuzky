@@ -7,24 +7,33 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use crate::media::{RgbaFrame, VideoDecoder};
+use crate::media::{DecodedFrame, RgbaFrame, VideoDecoder};
 
 const LOOKAHEAD_PLAYING: usize = 4;
 /// Jumping further ahead than this seeks instead of decoding through.
 const FORWARD_SEEK_US: i64 = 1_000_000;
 const BLOCKING_TIMEOUT: Duration = Duration::from_secs(8);
+/// A clip played backwards decodes its file forwards in pieces of about this many bytes of converted frames, at least
+/// 4 frames, and keeps about two pieces, so playback neither seeks for every frame nor holds a whole file's frames.
+const BACKWARD_BYTES: usize = 48 << 20;
+const BACKWARD_FRAMES: std::ops::RangeInclusive<usize> = 4..=32;
 
 #[derive(Default)]
 struct State {
     want_us: i64,
     size: (u32, u32),
     playing: bool,
+    /// The clip plays its file backwards, so frames before the wanted one are decoded ahead.
+    backward: bool,
     /// Ascending by time. frames[i] is shown for [frames[i].t, frames[i+1].t).
     frames: VecDeque<RgbaFrame>,
     /// Time the queue was seeked to; frames[0] also covers [base_us, frames[0].t).
     base_us: i64,
     /// The decoder has no frames after the last queued one.
     eof: bool,
+    /// The decoder's next frame does not follow the last queued one: it decoded a piece before the queue, or frames
+    /// after the shown one were dropped while playing backwards. Frames after the queue then need a seek.
+    detached: bool,
     /// Bumped when the queue is invalidated, so in-flight work is discarded.
     epoch: u64,
     error: Option<String>,
@@ -49,13 +58,34 @@ impl State {
     fn needs_seek(&self) -> bool {
         match (self.frames.front(), self.frames.back()) {
             (Some(_), Some(last)) => {
-                self.want_us < self.base_us || (!self.eof && self.want_us > last.t_us + FORWARD_SEEK_US)
+                self.want_us < self.base_us
+                    || (!self.eof && self.want_us > last.t_us + FORWARD_SEEK_US)
+                    || (self.detached && (self.want_us > last.t_us || (!self.reads_backward() && self.needs_ahead())))
             }
             _ => true,
         }
     }
 
+    /// Converted frames in one piece of backward decoding.
+    fn backward_frames(&self) -> usize {
+        (BACKWARD_BYTES / (self.size.0 as usize * self.size.1 as usize * 4).max(1))
+            .clamp(*BACKWARD_FRAMES.start(), *BACKWARD_FRAMES.end())
+    }
+
+    fn reads_backward(&self) -> bool {
+        self.backward && self.playing
+    }
+
     fn needs_more(&self) -> bool {
+        if self.reads_backward() {
+            let before = self.frames.iter().filter(|f| f.t_us <= self.want_us).count();
+            return self.base_us > 0 && before <= self.backward_frames() / 2;
+        }
+        self.needs_ahead()
+    }
+
+    /// Frames after the wanted one, as playing forwards decodes them.
+    fn needs_ahead(&self) -> bool {
         if self.eof {
             return false;
         }
@@ -113,8 +143,16 @@ impl VideoWorker {
     }
 
     /// Returns the frame to show at `t_us`. With `blocking`, waits for the exact frame;
-    /// otherwise returns the nearest ready frame or `None` and lets decoding catch up.
-    pub fn get(&mut self, t_us: i64, size: (u32, u32), playing: bool, blocking: bool) -> Option<RgbaFrame> {
+    /// otherwise returns the nearest ready frame or `None` and lets decoding catch up. `backward` when the clip
+    /// plays its file backwards.
+    pub fn get(
+        &mut self,
+        t_us: i64,
+        size: (u32, u32),
+        playing: bool,
+        blocking: bool,
+        backward: bool,
+    ) -> Option<RgbaFrame> {
         self.last_used = Instant::now();
         self.exact = false;
         let deadline = Instant::now() + BLOCKING_TIMEOUT;
@@ -126,16 +164,28 @@ impl VideoWorker {
         }
         st.want_us = t_us;
         st.playing = playing;
+        st.backward = backward;
         loop {
             if let Some((idx, exact)) = st.covering(t_us) {
-                // Drop frames that can no longer be shown.
-                for _ in 0..idx {
-                    st.frames.pop_front();
-                }
-                if idx > 0 {
-                    st.base_us = st.frames[0].t_us;
-                }
-                let frame = st.frames[0].clone();
+                // Drop frames that can no longer be shown: those already passed, and played backwards those after
+                // the next one, which only tells the shown frame is exact.
+                let shown = if backward {
+                    if st.frames.len() > idx + 2 {
+                        st.frames.truncate(idx + 2);
+                        st.eof = false;
+                        st.detached = true;
+                    }
+                    idx
+                } else {
+                    for _ in 0..idx {
+                        st.frames.pop_front();
+                    }
+                    if idx > 0 {
+                        st.base_us = st.frames[0].t_us;
+                    }
+                    0
+                };
+                let frame = st.frames[shown].clone();
                 if exact || !blocking {
                     self.exact = exact;
                     self.shared.cv.notify_all();
@@ -143,13 +193,17 @@ impl VideoWorker {
                 }
             }
             self.shared.cv.notify_all();
+            let nearest = |st: &State| match backward {
+                true => st.frames.back().cloned(),
+                false => st.frames.front().cloned(),
+            };
             if !blocking || st.error.is_some() {
-                return st.frames.front().cloned();
+                return nearest(&st);
             }
             let now = Instant::now();
             if now >= deadline {
                 log::warn!("Timed out waiting for frame at {t_us} us");
-                return st.frames.front().cloned();
+                return nearest(&st);
             }
             st = self.shared.cv.wait_timeout(st, deadline - now).unwrap().0;
         }
@@ -183,7 +237,7 @@ fn run(shared: Arc<Shared>, path: PathBuf, proxy: bool, seeking: bool) {
     };
 
     loop {
-        let (want, size, seek, epoch) = {
+        let (want, size, seek, epoch, backward, first, span) = {
             let mut st = shared.state.lock().unwrap();
             while !st.shutdown && !st.has_work() {
                 st = shared.cv.wait(st).unwrap();
@@ -191,10 +245,31 @@ fn run(shared: Arc<Shared>, path: PathBuf, proxy: bool, seeking: bool) {
             if st.shutdown {
                 return;
             }
-            (st.want_us, st.size, st.needs_seek(), st.epoch)
+            let span = st.backward_frames() as i64 * decoder.frame_duration_us.max(1);
+            (
+                st.want_us,
+                st.size,
+                st.needs_seek(),
+                st.epoch,
+                st.reads_backward(),
+                st.frames.front().map(|f| f.t_us),
+                span,
+            )
         };
 
-        let result = if seek { seek_to(&mut decoder, want, size) } else { decode_next(&mut decoder, size) };
+        let result = match (seek, backward, first) {
+            (true, true, _) => decode_piece(&mut decoder, (want - span).max(0), want, size),
+            (true, false, _) => seek_to(&mut decoder, want, size),
+            (false, true, Some(first)) => {
+                decode_piece(&mut decoder, (first - span).max(0), first - 1, size).map(|step| match step {
+                    Step::Piece { frames, base, .. } => {
+                        Step::Before { frames: frames.into_iter().filter(|f| f.t_us < first).collect(), base, first }
+                    }
+                    other => other,
+                })
+            }
+            (false, _, _) => decode_next(&mut decoder, size),
+        };
         let mut st = shared.state.lock().unwrap();
         if st.epoch != epoch {
             continue;
@@ -204,6 +279,24 @@ fn run(shared: Arc<Shared>, path: PathBuf, proxy: bool, seeking: bool) {
                 st.frames = frames.into();
                 st.base_us = want;
                 st.eof = eof;
+                st.detached = false;
+            }
+            Ok(Step::Piece { frames, base, eof }) => {
+                st.frames = frames.into();
+                st.base_us = base;
+                st.eof = eof;
+                st.detached = false;
+            }
+            // Only onto the piece it was decoded before; its start moves back even without a frame, so the next
+            // piece starts earlier.
+            Ok(Step::Before { frames, base, first }) => {
+                if st.frames.front().is_some_and(|f| f.t_us == first) {
+                    for frame in frames.into_iter().rev() {
+                        st.frames.push_front(frame);
+                    }
+                    st.base_us = base.min(st.frames[0].t_us);
+                    st.detached = true;
+                }
             }
             Ok(Step::Next(Some(frame))) => st.frames.push_back(frame),
             Ok(Step::Next(None)) => st.eof = true,
@@ -217,8 +310,46 @@ fn run(shared: Arc<Shared>, path: PathBuf, proxy: bool, seeking: bool) {
 }
 
 enum Step {
-    Seeked { frames: Vec<RgbaFrame>, eof: bool },
+    Seeked {
+        frames: Vec<RgbaFrame>,
+        eof: bool,
+    },
+    /// The frames from the one covering `base` on, for playing backwards.
+    Piece {
+        frames: Vec<RgbaFrame>,
+        base: i64,
+        eof: bool,
+    },
+    /// Frames before the queue's first frame `first`.
+    Before {
+        frames: Vec<RgbaFrame>,
+        base: i64,
+        first: i64,
+    },
     Next(Option<RgbaFrame>),
+}
+
+/// Decodes from the frame covering `from` up to the frame after `until`, or to the end of the file, and converts
+/// them. A file whose frame rate says less than it has keeps only the last frames, so memory stays bounded.
+fn decode_piece(decoder: &mut VideoDecoder, from: i64, until: i64, size: (u32, u32)) -> anyhow::Result<Step> {
+    decoder.seek(from)?;
+    let [covering, next] = decoder.frame_covering(from, [None, None])?;
+    let mut decoded: VecDeque<DecodedFrame> = [covering, next].into_iter().flatten().collect();
+    while decoded.back().is_some_and(|(t, _)| *t <= until) {
+        match decoder.next_frame()? {
+            Some(frame) => decoded.push_back(frame),
+            None => break,
+        }
+        if decoded.len() > *BACKWARD_FRAMES.end() * 2 {
+            decoded.pop_front();
+        }
+    }
+    let base = decoded.front().map_or(from, |(t, _)| (*t).min(from));
+    let mut frames = Vec::with_capacity(decoded.len());
+    for (t, frame) in &decoded {
+        frames.push(decoder.convert(frame, *t, size.0, size.1)?);
+    }
+    Ok(Step::Piece { frames, base, eof: decoder.is_eof() })
 }
 
 /// Seeks to the frame covering `want`, keeping any decoded successor.

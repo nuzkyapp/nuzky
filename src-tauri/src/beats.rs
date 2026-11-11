@@ -272,7 +272,9 @@ fn plans(cuts: &BeatCuts, host: &Host, clip_id: &str) -> Result<Option<BeatPlans
     let ClipContent::Media { source_in_us, speed, .. } = music.content else {
         unreachable!("music_clip returns media")
     };
-    let on_timeline = |s: i64| music.start_us + ((s - source_in_us) as f64 / speed as f64).round() as i64;
+    let retime = nuzky_engine::retime::Retime::of(music).context("INVALID_PROJECT: the music has no speed")?;
+    let on_timeline = |s: i64| music.start_us + retime.offset_of(s as f64).round() as i64;
+    let source_end = source_in_us + (music.duration_us as f64 * speed as f64).round() as i64;
     let steady_index = beats.beats_us.iter().position(|&b| b == beats.steady_from_us).unwrap_or(0);
     let heard = beats.beats_us.get(steady_index..).unwrap_or_default().to_vec();
     let first_bar = (beats.first_downbeat as isize - steady_index as isize).rem_euclid(4) as usize;
@@ -340,7 +342,7 @@ fn plans(cuts: &BeatCuts, host: &Host, clip_id: &str) -> Result<Option<BeatPlans
             rhythms.push(plan);
         }
     }
-    let in_song = |s: i64| s >= source_in_us && on_timeline(s) < music.end_us();
+    let in_song = |s: i64| (source_in_us..source_end).contains(&s);
     let builds_drop = beats
         .drops
         .iter()

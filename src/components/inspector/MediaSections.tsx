@@ -1,13 +1,15 @@
 import { AlertTriangle, RotateCcw, Unlink, X } from "lucide-react";
 import { LIMITS } from "../../lib/limits";
 import { loadLuts, lutOf, profileOf, useLuts } from "../../lib/color";
-import { ADJUST_ROWS, NO_ADJUST, SPEED_PRESETS, sameAdjust } from "../../lib/presets";
+import { ADJUST_ROWS, NO_ADJUST, RAMP_PRESETS, SPEED_PRESETS, sameAdjust } from "../../lib/presets";
+import { rampSpeed } from "../../lib/retime";
+import { RampCurve, movePoint } from "./RampCurve";
 import { useEffect, useState } from "react";
 import { api, plainError } from "../../lib/api";
 import { detachAudio, detachBlocker, editClip, editClips, findClip, maxFadeUs, setVoice, useEditor, useJobs, type VoiceChange } from "../../lib/store";
 import { US, formatDuration } from "../../lib/time";
-import type { Adjust, Asset, Clip, Mono } from "../../lib/types";
-import { Button, Checkbox, IconButton, ProgressBar, Section, Segmented, Slider } from "../ui";
+import type { Adjust, Asset, Clip, Mono, SpeedPoint } from "../../lib/types";
+import { Button, Checkbox, IconButton, PresetTile, ProgressBar, Section, Segmented, Slider } from "../ui";
 import { QUIET } from "./Header";
 
 type Media = Extract<Clip["content"], { type: "media" }>;
@@ -97,44 +99,126 @@ export function AdjustSection({ clip, content }: { clip: Clip; content: Media })
   );
 }
 
+const speedSlider = {
+  min: Math.log10(LIMITS.minSpeed),
+  max: Math.log10(LIMITS.maxSpeed),
+  step: 0.01,
+  unit: "x",
+  format: (v: number) => (10 ** v).toFixed(2),
+  parse: (s: string) => Math.log10(Number(s.replace(",", ".").replace(/[^\d.]/g, ""))),
+};
+
+/** Ramp points equal to a preset's, so its tile shows chosen. */
+const samePoints = (a: SpeedPoint[], b: SpeedPoint[]) => a.length === b.length && a.every((p, i) => Math.abs(p.at - b[i].at) < 1e-3 && Math.abs(p.speed - b[i].speed) < 5e-3);
+
+/** A preset's shape in its tile, on the curve's logarithmic scale. */
+function RampShape({ points }: { points: SpeedPoint[] }) {
+  const y = (s: number) => 4 + (1 - (Math.log10(s) + 1) / 2) * 28;
+  const line = Array.from({ length: 41 }, (_, k) => k / 40)
+    .concat(points.map((p) => p.at))
+    .sort((a, b) => a - b)
+    .map((x) => `${(x * 100).toFixed(1)},${y(rampSpeed(points, x)).toFixed(1)}`)
+    .join(" ");
+  return (
+    // Clear of the chosen tile's check in the top right corner.
+    <svg aria-hidden className="absolute inset-y-0 left-2 h-full w-[calc(100%-32px)]" viewBox="0 0 100 36" preserveAspectRatio="none">
+      <polyline points={line} fill="none" vectorEffect="non-scaling-stroke" strokeWidth={1.5} strokeLinejoin="round" className="stroke-fg/80" />
+    </svg>
+  );
+}
+
 export function SpeedSection({ clip, content, asset }: { clip: Clip; content: Media; asset?: Asset }) {
   const edit = useEditor((s) => s.edit);
+  const [point, setPoint] = useState(1);
   const speed = content.speed;
+  const ramp = content.ramp ?? [];
+  const reverse = content.reverse ?? false;
   const set = (v: number, key = "speed") => edit({ type: "updateClip", clipId: clip.id, speed: Math.round(v * 100) / 100 }, `${clip.id}:${key}`);
+  const setRamp = (points: SpeedPoint[], key: string) => edit({ type: "updateClip", clipId: clip.id, ramp: points }, `${clip.id}:${key}`);
   const sourceUs = clip.durationUs * speed;
+  const chosen = Math.min(point, ramp.length - 1);
+  const sel = ramp[chosen];
+  const pointName = chosen === 0 ? "Start" : chosen === ramp.length - 1 ? "End" : `Point ${chosen + 1}`;
   return (
     <Section title="Speed">
       <Segmented
-        label="Speed presets"
-        value={SPEED_PRESETS.find((p) => Math.abs(p - speed) < 0.005) ?? null}
-        onChange={(p) => set(p, `speed-preset:${Date.now()}`)}
-        options={SPEED_PRESETS.map((p) => ({ id: p, label: `${p}x` }))}
+        label="Speed mode"
+        value={ramp.length ? "ramp" : "steady"}
+        onChange={(m) => {
+          if (m === "steady") setRamp([], `ramp-off:${Date.now()}`);
+          else if (!ramp.length) {
+            setPoint(1);
+            setRamp(RAMP_PRESETS[0].points, `ramp-preset:${Date.now()}`);
+          }
+        }}
+        options={[
+          { id: "steady", label: "Steady", title: "One speed for the whole clip" },
+          { id: "ramp", label: "Ramp", title: "The speed changes smoothly along the clip" },
+        ]}
       />
-      {/* Logarithmic so 0.1x–1x gets as much travel as 1x–10x. */}
-      <Slider
-        label="Speed"
-        value={Math.log10(speed)}
-        min={Math.log10(LIMITS.minSpeed)}
-        max={Math.log10(LIMITS.maxSpeed)}
-        step={0.01}
-        unit="x"
-        format={(v) => (10 ** v).toFixed(2)}
-        parse={(s) => Math.log10(Number(s.replace(",", ".").replace(/[^\d.]/g, "")))}
-        onChange={(v) => set(10 ** v)}
-      />
+      {/* Right under the mode, so it stays in the same place in both and in view in a small window. */}
+      <Checkbox label="Play backwards" checked={reverse} onChange={(v) => edit({ type: "updateClip", clipId: clip.id, reverse: v })} />
+      {ramp.length ? (
+        <>
+          <div className="grid grid-cols-3 gap-x-2 gap-y-3" role="group" aria-label="Ramp shapes">
+            {RAMP_PRESETS.map((p) => (
+              <PresetTile
+                key={p.name}
+                label={p.name}
+                short
+                selected={samePoints(ramp, p.points)}
+                onClick={() => {
+                  setPoint(1);
+                  setRamp(p.points, `ramp-preset:${Date.now()}`);
+                }}
+              >
+                <RampShape points={p.points} />
+              </PresetTile>
+            ))}
+          </div>
+          <RampCurve points={ramp} selected={chosen} onSelect={setPoint} onChange={(points, key) => setRamp(points, key)} />
+          {sel && (
+            <Slider
+              label={pointName}
+              name="Speed at the chosen point"
+              value={Math.log10(sel.speed)}
+              {...speedSlider}
+              onChange={(v) => setRamp(movePoint(ramp, chosen, sel.at, 10 ** v), `ramp-point:${chosen}`)}
+            />
+          )}
+        </>
+      ) : (
+        <>
+          <Segmented
+            label="Speed presets"
+            value={SPEED_PRESETS.find((p) => Math.abs(p - speed) < 0.005) ?? null}
+            onChange={(p) => set(p, `speed-preset:${Date.now()}`)}
+            options={SPEED_PRESETS.map((p) => ({ id: p, label: `${p}x` }))}
+          />
+          {/* Logarithmic so 0.1x–1x gets as much travel as 1x–10x. */}
+          <Slider label="Speed" value={Math.log10(speed)} {...speedSlider} onChange={(v) => set(10 ** v)} />
+        </>
+      )}
       <dl className="tabular grid grid-cols-[78px_1fr] gap-x-2 gap-y-1.5 text-[12px]">
         <dt className="text-muted">Duration</dt>
         <dd className="text-fg">{formatDuration(clip.durationUs)}</dd>
         <dt className="text-muted">Source used</dt>
         <dd className="text-fg">{formatDuration(sourceUs)}</dd>
       </dl>
-      {asset?.hasAudio && speed !== 1 && (
+      {asset?.hasAudio && !ramp.length && speed !== 1 && (
+        // Keep pitch stretches sound at one speed forwards; backwards it plays as a tape would.
         <Checkbox
           label="Keep pitch"
-          checked={content.keepPitch ?? false}
-          title="The voice sounds as high as at 1x. Off, it gets higher when faster and lower when slower."
+          checked={(content.keepPitch ?? false) && !reverse}
+          disabled={reverse}
+          title={reverse ? "Keep pitch works when the clip plays forwards" : "The voice sounds as high as at 1x. Off, it gets higher when faster and lower when slower."}
           onChange={(v) => edit({ type: "updateClip", clipId: clip.id, keepPitch: v })}
         />
+      )}
+      {asset?.hasAudio && (ramp.length > 0 || reverse) && (
+        <p className="text-[12px] leading-4 text-muted">
+          {[ramp.length > 0 && "On a ramp the pitch rises and falls with the speed.", reverse && "Played backwards, the sound is reversed too."].filter(Boolean).join(" ")}
+        </p>
       )}
     </Section>
   );

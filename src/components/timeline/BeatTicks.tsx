@@ -1,19 +1,25 @@
 import { memo } from "react";
 import { Flag } from "lucide-react";
 import { useBeats } from "../../lib/beats";
+import { retime } from "../../lib/retime";
 import { US } from "../../lib/time";
+import type { SpeedPoint } from "../../lib/types";
 
 /** Closer than this the beats would blur into a band, so only bar starts show. */
 const MIN_GAP_PX = 4;
 
 /**
  * The song's beat over its clip, once found: a short tick per beat, a taller one where a bar starts, and a flag at each
- * drop. Source times go through the clip's source in and speed, as the waveform's do. Not subscribed to the playhead.
+ * drop. Source times go through the clip's source in, speed, ramp and direction, as the waveform's do. Not subscribed to
+ * the playhead.
  */
 export const BeatTicks = memo(function BeatTicks({
   path,
   sourceInUs,
   speed,
+  reverse,
+  ramp,
+  durationUs,
   zoom,
   width,
   height,
@@ -23,6 +29,9 @@ export const BeatTicks = memo(function BeatTicks({
   path: string;
   sourceInUs: number;
   speed: number;
+  reverse?: boolean;
+  ramp?: SpeedPoint[];
+  durationUs: number;
   zoom: number;
   width: number;
   height: number;
@@ -31,8 +40,9 @@ export const BeatTicks = memo(function BeatTicks({
 }) {
   const song = useBeats((s) => s.songs[path]);
   if (!song || song.beatsUs.length < 2) return null;
-  const x = (us: number) => ((us - sourceInUs) / speed / US) * zoom;
-  const gap = x(song.beatsUs[1]) - x(song.beatsUs[0]);
+  const map = retime({ sourceInUs, speed, reverse, ramp }, durationUs);
+  const x = (us: number) => (map.offsetOf(us) / US) * zoom;
+  const gap = Math.abs(x(song.beatsUs[1]) - x(song.beatsUs[0]));
   const beats = gap >= MIN_GAP_PX;
   if (!beats && gap * 4 < MIN_GAP_PX) return null;
   const from = Math.max(0, visible[0]);

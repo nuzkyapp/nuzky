@@ -326,6 +326,8 @@ fn media_clip() -> Clip {
             background: Default::default(),
             log: Default::default(),
             lut: Default::default(),
+            reverse: false,
+            ramp: Vec::new(),
         },
     )
 }

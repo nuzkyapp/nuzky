@@ -1,5 +1,6 @@
 import { memo, useEffect } from "react";
-import { AudioLines, Film, Gauge, Image as ImageIcon, Snowflake, Type } from "lucide-react";
+import { AudioLines, Film, Gauge, Image as ImageIcon, Rewind, Snowflake, Type } from "lucide-react";
+import { retime, type Timing } from "../../lib/retime";
 import { MAIN_TRACK, isCaptionTrack, useEditor } from "../../lib/store";
 import { US, formatDuration } from "../../lib/time";
 import { PEEK_WORDS, type PeekMark } from "../../lib/peek";
@@ -51,16 +52,17 @@ export function clipAsset(project: Project, clip: Clip): Asset | undefined {
 /** Frames from the filmstrip sprite matching the source time under each tile. */
 function FilmstripTiles({
   strip,
-  sourceInUs,
-  speed,
+  timing,
+  durationUs,
   zoom,
   width,
   height,
   visible,
 }: {
   strip: Filmstrip;
-  sourceInUs: number;
-  speed: number;
+  /** Where the clip plays its file, ramp and direction included. */
+  timing: Timing;
+  durationUs: number;
   zoom: number;
   width: number;
   height: number;
@@ -70,8 +72,9 @@ function FilmstripTiles({
   const first = Math.max(0, Math.floor(visible[0] / tileW));
   const last = Math.min(Math.ceil(width / tileW), Math.ceil(visible[1] / tileW));
   const tiles = [];
+  const map = retime(timing, durationUs);
   for (let i = first; i < last; i++) {
-    const sourceUs = sourceInUs + (((i + 0.5) * tileW) / zoom) * US * speed;
+    const sourceUs = map.sourceAt((((i + 0.5) * tileW) / zoom) * US);
     const frame = Math.max(0, Math.min(strip.count - 1, Math.round(sourceUs / strip.intervalUs)));
     tiles.push(
       <div
@@ -198,12 +201,12 @@ export const ClipView = memo(function ClipView({
       }}
       aria-label={`${label}, ${formatDuration(durationUs)}`}
     >
-      {strip && c.type === "media" && <FilmstripTiles strip={strip} sourceInUs={sourceInUs} speed={speed} zoom={zoom} width={width} height={innerH} visible={local} />}
+      {strip && c.type === "media" && <FilmstripTiles strip={strip} timing={{ ...c, sourceInUs }} durationUs={durationUs} zoom={zoom} width={width} height={innerH} visible={local} />}
       {sound && asset && c.type === "media" && (
         // The name gets its own row above the sound, so the bars, beats and fades below it are never covered.
         <div className="pointer-events-none absolute inset-x-0" style={{ top: WAVE_TOP, height: waveH }}>
-          <Waveform assetId={asset.id} sourceInUs={sourceInUs} durationUs={durationUs} speed={speed} gain={c.volume} width={width} visible={local} color="#5fd497" className="absolute top-0 h-full" />
-          <BeatTicks path={asset.path} sourceInUs={sourceInUs} speed={speed} zoom={zoom} width={width} height={waveH} visible={local} />
+          <Waveform assetId={asset.id} sourceInUs={sourceInUs} durationUs={durationUs} speed={speed} reverse={c.reverse} ramp={c.ramp} gain={c.volume} width={width} visible={local} color="#5fd497" className="absolute top-0 h-full" />
+          <BeatTicks path={asset.path} sourceInUs={sourceInUs} speed={speed} reverse={c.reverse} ramp={c.ramp} durationUs={durationUs} zoom={zoom} width={width} height={waveH} visible={local} />
           {(fadeIn > 0 || fadeOut > 0) && (
             // The fades as ramps over the waveform: the shaded corner above the line is how much quieter the sound plays there.
             // The line has a dark edge, like the snap guide, so it stays visible over loud sound.
@@ -225,7 +228,7 @@ export const ClipView = memo(function ClipView({
       )}
       {soundStrip && (
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-3.5 bg-[#141416]">
-          <Waveform assetId={asset.id} sourceInUs={sourceInUs} durationUs={durationUs} speed={speed} gain={c.volume} width={width} visible={local} color="#a1a1a9" />
+          <Waveform assetId={asset.id} sourceInUs={sourceInUs} durationUs={durationUs} speed={speed} reverse={c.reverse} ramp={c.ramp} gain={c.volume} width={width} visible={local} color="#a1a1a9" />
         </div>
       )}
 
@@ -250,10 +253,13 @@ export const ClipView = memo(function ClipView({
             {!continues && labelWidth(label, 500) + (width > 110 ? 76 : 40) <= width && <span className="truncate">{label}</span>}
             {width > 72 && <span className={`tabular shrink-0 font-normal text-fg/80 ${continues ? "" : "pl-0.5"}`}>{formatDuration(durationUs)}</span>}
           </span>
-          {speed !== 1 && speed !== 0 && width > 40 && (
-            <span className={`tabular ml-auto flex shrink-0 items-center gap-0.5 font-semibold ${sound ? "h-3.5" : "h-[17px] rounded-[3px] bg-black/60 px-1"}`}>
-              <Gauge size={11} />
-              {Number(speed.toFixed(2))}x
+          {c.type === "media" && (speed !== 1 || c.reverse || !!c.ramp?.length) && speed !== 0 && width > 40 && (
+            <span className={`tabular ml-auto flex shrink-0 items-center gap-1 font-semibold ${sound ? "h-3.5" : "h-[17px] rounded-[3px] bg-black/60 px-1"}`}>
+              {c.reverse && <Rewind size={11} aria-label="Plays backwards" />}
+              {(speed !== 1 || !!c.ramp?.length) && <Gauge size={11} />}
+              {c.ramp?.length
+                ? `${Number(Math.min(...c.ramp.map((p) => p.speed)).toFixed(2))}–${Number(Math.max(...c.ramp.map((p) => p.speed)).toFixed(2))}x`
+                : speed !== 1 && `${Number(speed.toFixed(2))}x`}
             </span>
           )}
         </div>

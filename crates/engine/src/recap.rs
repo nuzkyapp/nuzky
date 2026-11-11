@@ -1043,6 +1043,8 @@ impl Sound {
                 background: Background::None,
                 log: Default::default(),
                 lut: Default::default(),
+                reverse: false,
+                ramp: Vec::new(),
             };
             Clip::new(format!("{}-{at}", asset.id), at.max(0), asset.duration_us, content)
         };
@@ -1144,9 +1146,11 @@ fn soundtrack(after: &Project, start: i64, end: i64, fade: i64) -> (Project, Pro
     let bed_gain = db_to_gain(BED_DB);
     let length = after.duration_us();
     let assets: std::collections::HashMap<&str, &Asset> = after.assets.iter().map(|a| (a.id.as_str(), a)).collect();
+    // Music played backwards or on a ramp plays as the finished cut has it, since it cannot simply play on.
     let is_music = |track: &Track, clip: &Clip| {
         matches!(&clip.content, ClipContent::Media { duck_db, .. }
             if track.kind == TrackKind::Audio && (*duck_db > 0.0 || clip.duration_us >= MUSIC_US))
+            && !crate::retime::is_retimed(clip)
     };
     // The music starts with the recap even when the finished cut brings it in later.
     let lead = after.tracks.iter().flat_map(|t| t.clips.iter().filter(|c| is_music(t, c))).map(|c| c.start_us).min();

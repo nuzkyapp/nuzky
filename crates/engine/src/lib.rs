@@ -22,6 +22,7 @@ pub mod plugin_effects;
 pub mod proxy;
 pub mod recap;
 pub mod render;
+pub mod retime;
 pub mod speech;
 mod stretch;
 pub mod subtitles;

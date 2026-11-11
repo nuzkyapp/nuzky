@@ -303,6 +303,8 @@ fn media(clip: &MediaClip, track: TrackKind, assets: &Assets, project: &Project,
         background: Default::default(),
         log: Default::default(),
         lut: Default::default(),
+        reverse: false,
+        ramp: Vec::new(),
     };
     let mut out = Clip::new(new_id(), clip.start_us.max(0), clip.duration_us, content);
     out.keyframes = keyframes(clip);

@@ -319,6 +319,8 @@ pub fn summarize(before: &Project, after: &Project) -> Vec<RunChange> {
                 volume: v1,
                 speed: s1,
                 keep_pitch: k1,
+                reverse: r1,
+                ramp: rp1,
                 adjust: a1,
                 fade_in_us: fi1,
                 fade_out_us: fo1,
@@ -338,6 +340,8 @@ pub fn summarize(before: &Project, after: &Project) -> Vec<RunChange> {
                 volume: v2,
                 speed: s2,
                 keep_pitch: k2,
+                reverse: r2,
+                ramp: rp2,
                 adjust: a2,
                 fade_in_us: fi2,
                 fade_out_us: fo2,
@@ -365,10 +369,15 @@ pub fn summarize(before: &Project, after: &Project) -> Vec<RunChange> {
             if v1 != v2 {
                 push("Changed the volume of");
             }
-            if s1 != s2 {
+            if rp1 != rp2 {
+                push(if rp2.is_empty() { "Removed the speed ramp of" } else { "Ramped the speed of" });
+            } else if s1 != s2 {
                 push("Changed the speed of");
             } else if k1 != k2 {
                 push(if *k2 { "Turned on Keep pitch for" } else { "Turned off Keep pitch for" });
+            }
+            if r1 != r2 {
+                push(if *r2 { "Reversed" } else { "Turned off Reverse for" });
             }
             if a1 != a2 || lg1 != lg2 || lt1 != lt2 {
                 push("Changed the colour of");

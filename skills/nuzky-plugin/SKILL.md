@@ -180,7 +180,7 @@ Move a clip to a time, optionally on another track.
 {"type": "moveClip", "clipId": "clip-3", "startUs": 4000000}
 ```
 
-Change a clip: any of `transform`, `volume`, `text`, `style`, `speed`, `adjust`, `fadeInUs`, `fadeOutUs`, `cleanVoice`, `normalize`…; what you leave out stays.
+Change a clip: any of `transform`, `volume`, `text`, `style`, `speed`, `reverse`, `ramp`, `adjust`, `fadeInUs`, `fadeOutUs`, `cleanVoice`, `normalize`…; what you leave out stays.
 
 ```json
 {"type": "updateClip", "clipId": "clip-1", "volume": 0.5, "fadeOutUs": 500000}

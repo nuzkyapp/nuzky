@@ -66,8 +66,9 @@ pub fn needed(project: &Project) -> Vec<(Asset, BTreeSet<i64>)> {
                 let next = track.clips.get(i + 1).filter(|_| track.id == crate::edit::MAIN_TRACK);
                 let end = next.and_then(transition_window).map_or(clip.end_us(), |w| w.1.max(clip.end_us()));
                 let last = (asset.duration_us - 1).max(0);
-                chunk_of(source_time(clip, clip.start_us).clamp(0, last))
-                    ..=chunk_of(source_time(clip, end).clamp(0, last))
+                // Played backwards, the clip starts at the end of its part of the file.
+                let (a, b) = (source_time(clip, clip.start_us).clamp(0, last), source_time(clip, end).clamp(0, last));
+                chunk_of(a.min(b))..=chunk_of(a.max(b))
             };
             match files.iter_mut().find(|(a, _)| a.path == asset.path) {
                 Some((_, set)) => set.extend(chunks),

@@ -695,7 +695,14 @@ impl Renderer {
                 continue;
             };
             let size = decode_resolution(project, clip, asset, k, self.gpu.max_texture_dimension());
-            self.worker(&clip.id, &asset.path, false).get(source_time(clip, clip.start_us), size, false, false);
+            let backward = crate::retime::Retime::of(clip).is_some_and(|map| map.reverse());
+            self.worker(&clip.id, &asset.path, false).get(
+                source_time(clip, clip.start_us),
+                size,
+                false,
+                false,
+                backward,
+            );
         }
     }
 
@@ -761,8 +768,9 @@ impl Renderer {
                 } else {
                     source_time(clip, t_us).min((asset.duration_us - 1).max(0))
                 };
+                let backward = crate::retime::Retime::of(clip).is_some_and(|map| map.reverse());
                 let worker = self.worker(&clip.id, &asset.path, wait == Wait::Exact);
-                let frame = worker.get(source_t, size, playing, wait == Wait::Exact);
+                let frame = worker.get(source_t, size, playing, wait == Wait::Exact, backward);
                 if wait == Wait::Exact {
                     if let Some(error) = worker.error() {
                         if matches!(self.mattes, Some((_, Pending::Original))) {
@@ -1325,6 +1333,8 @@ mod tests {
                     background: Default::default(),
                     log: Default::default(),
                     lut: Default::default(),
+                    reverse: false,
+                    ramp: Vec::new(),
                 },
             ));
         }
