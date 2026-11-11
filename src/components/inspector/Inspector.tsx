@@ -54,6 +54,9 @@ type Chosen = Partial<Record<Kind, TabId>>;
 // Outside the inspector, which the AI panel replaces while it is open in its place.
 const useChosen = create<Chosen>(() => ({}));
 
+/** Shows a caption's Text tab, where its style is, the next time a caption is in the inspector. */
+export const showCaptionText = () => useChosen.setState({ caption: "text" });
+
 function ClipInspector({ clip, kind, asset, music, chosen, onChoose }: { clip: Clip; kind: Kind; asset?: Asset; /** A song on a music track, which the video can be cut to. */ music: boolean; chosen: Chosen; onChoose: (c: Chosen) => void }) {
   const c = clip.content;
   const hasSound = kind === "video" && !!asset?.hasAudio;

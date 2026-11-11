@@ -1,16 +1,17 @@
-import { Captions, Check, Ellipsis, Languages, Plus, ScanFace } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
-import { api, errorText, plainError } from "../../lib/api";
+import { Captions, Languages, ScanFace, SlidersHorizontal } from "lucide-react";
+import { useState } from "react";
 import { checkFaces, useFaces } from "../../lib/faces";
 import { useReframe } from "../../lib/reframe";
-import { CAPTION_STYLES, isLook, scaleStyle } from "../../lib/presets";
+import { isLook, scaleStyle } from "../../lib/presets";
 import { translateBlocked, translateCaptions, useAgent } from "../../lib/agent";
 import { type CaptionLook, languageName, speaks, speechBlocker, startSpeech, useSpeech } from "../../lib/speech";
-import { MAIN_TRACK, applyCaptionLook, isCaptionTrack, isSpeechCaptionTrack, patched, presetOver, restyleCaptions, useCanvasUnit, useEditor } from "../../lib/store";
+import { MAIN_TRACK, isCaptionTrack, isSpeechCaptionTrack, presetOver, useCanvasUnit, useEditor } from "../../lib/store";
 import type { CaptionPreset, Clip, Track } from "../../lib/types";
-import { CaptionLanguages, TRANSLATION_SIZE, useSpeechLanguage } from "./CaptionLanguages";
-import { CaptionPosition, HighlightRows, KeywordRows, MainStyle, MoreStyleFold, type SetStyle } from "../inspector/TextSection";
-import { Button, IconButton, LockReason, Menu, Segmented, TextSwatch, lockedProps, useLockReason } from "../ui";
+import { CaptionLanguages, useSpeechLanguage } from "./CaptionLanguages";
+import { MyStyles, STYLE_GRID, StyleTile, builtInStyles, forTrack, useMyStyles, type Tile } from "../inspector/CaptionStyles";
+import { showCaptionText } from "../inspector/Inspector";
+import { showInspector } from "../../lib/dock";
+import { Button, LockReason, Segmented, useLockReason } from "../ui";
 import { JobError, SpeechFields, SpeechJobCard, useSpeechJobs } from "./SpeechControls";
 
 const WORDS = [
@@ -21,7 +22,6 @@ const WORDS = [
 ];
 
 const BUSY = "Wait for speech recognition to finish";
-const GRID = "grid grid-cols-[repeat(auto-fill,minmax(96px,1fr))] gap-2";
 
 const clips = (n: number) => `${n} ${n === 1 ? "clip" : "clips"}`;
 
@@ -59,7 +59,7 @@ const useCaptionsOver = (ids: string[]) =>
   });
 
 /**
- * The captions of `track` and the look the controls show: the selected caption's, else the first one's.
+ * The captions of `track` and the look regenerating keeps: the selected caption's, else the first one's.
  * Null without captions.
  */
 function useCaptions(track: Track | undefined): { clips: Clip[]; look: CaptionLook } | null {
@@ -70,32 +70,6 @@ function useCaptions(track: Track | undefined): { clips: Clip[]; look: CaptionLo
   return { clips, look: { style: clip.content.style, animIn: clip.animIn ?? null, animOut: clip.animOut ?? null } };
 }
 
-/** The user's own caption styles, read once per visit to the tab. */
-function useMyStyles() {
-  const [styles, setStyles] = useState<CaptionPreset[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    api.captionStyles().then(setStyles, (e) => setError(plainError(errorText(e))));
-  }, []);
-  /** Runs a change and shows the list it returns; resolves to why it failed, or null. */
-  const change = async (run: () => Promise<CaptionPreset[]>) => {
-    try {
-      setStyles(await run());
-      setError(null);
-      return null;
-    } catch (e) {
-      return plainError(errorText(e));
-    }
-  };
-  return { styles, error, change };
-}
-
-/** A style tile; the user's own get a menu (…, right click, the context menu key), F2 to rename and a ref for focus. */
-type Tile = (
-  preset: CaptionPreset,
-  own?: { menu: (at: { x: number; y: number }, keyboard: boolean) => void; rename: () => void; ref: (el: HTMLButtonElement | null) => void },
-) => ReactNode;
-
 export function CaptionsTab() {
   const lock = useLockReason();
   const captionWords = useSpeech((s) => s.captionWords);
@@ -103,7 +77,7 @@ export function CaptionsTab() {
   const tracks = useEditor((s) => s.snap?.project.tracks);
   const speech = tracks?.find(isSpeechCaptionTrack);
   const translations = tracks?.filter((t) => isCaptionTrack(t) && !!t.translation) ?? [];
-  // The captions the controls style: the speech's unless a translation was picked.
+  // The captions the tab is about, whose style Edit style shows: the speech's unless a translation was picked.
   const [picked, setPicked] = useState<string | null>(null);
   const translation = translations.find((t) => t.id === picked);
   const editing = translation ?? speech;
@@ -114,10 +88,8 @@ export function CaptionsTab() {
   const blocker = useEditor((s) => (s.snap ? speechBlocker(s.snap.project) : null));
   const hasCaptions = onTimeline !== null;
   const unit = useCanvasUnit();
-  // With captions on the timeline, the highlighted style and the font are the ones they use. The look waiting for
-  // Generate is made for 1080p, like a preset; the controls show it in this canvas's pixels.
+  // The look Generate gives: that of the captions on the timeline, or the one waiting, made for 1080p like a preset.
   const look = onTimeline ?? { ...pending, style: scaleStyle(pending.style, unit) };
-  const font = look.style.fontFamily ?? null;
   const mine = useMyStyles();
   const busy = !!running;
   const faceBlocker = useEditor((s) =>
@@ -137,89 +109,22 @@ export function CaptionsTab() {
 
   // Regenerating keeps the look of the captions already there, edits included.
   const start = () => startSpeech(look, false, ids.length > 0 ? ids : null);
-  // A translation has no spoken words to highlight or colour, and stays smaller than the speech under it; a style of
-  // the user's own keeps its size, saved as it was.
-  const shown = (preset: CaptionPreset, own: boolean): CaptionPreset =>
-    translation ? { ...preset, style: { ...(own ? preset.style : scaleStyle(preset.style, TRANSLATION_SIZE)), highlight: null, keywords: null } } : preset;
-  const builtIn = translation ? CAPTION_STYLES.filter((s) => !s.style.highlight && !s.style.keywords) : CAPTION_STYLES;
-  const apply = (preset: CaptionPreset) => {
-    const next: CaptionLook = { style: preset.style, animIn: preset.animIn ?? null, animOut: preset.animOut ?? null };
-    // Captions keep their font and case when the style brings none, each caption its own.
-    if (hasCaptions) void applyCaptionLook(next, preset.name, editing?.id);
-    else useSpeech.setState({ captionLook: { ...next, style: presetOver(preset.style, pending.style, 1) } });
-  };
-  // Every caption at once, or the look waiting for Generate, read when the change goes out so quick changes both stick.
-  const setStyle: SetStyle = captions
-    ? (patch, key) => restyleCaptions(patch, `captions:style:${key}`, editing?.id)
-    : (patch) => {
-        const waiting = useSpeech.getState().captionLook;
-        useSpeech.setState({ captionLook: { ...waiting, style: scaleStyle(patched(scaleStyle(waiting.style, unit), patch), 1 / unit) } });
-      };
-  const styles = captions?.clips.flatMap((c) => (c.content.type === "text" ? [c.content.style] : []));
-
-  const tile: Tile = (original, own) => {
-    const preset = shown(original, !!own);
-    // Checked when every caption has the look.
-    const current = captions
-      ? captions.clips.every((c) => c.content.type === "text" && isLook(preset, c.content.style, c.animIn, c.animOut, unit))
-      : isLook(preset, pending.style, pending.animIn, pending.animOut);
-    const disabled = busy || !!lock;
-    // The user's own styles are not the project: recognition running leaves renaming and deleting them alone.
-    const openMenu = (at: { x: number; y: number }, keyboard: boolean) => !lock && own?.menu(at, keyboard);
-    return (
-      <div key={preset.name} className="group relative min-w-0">
-        <button
-          type="button"
-          ref={own?.ref}
-          aria-pressed={current}
-          aria-disabled={disabled || undefined}
-          title={lock ?? (busy ? BUSY : hasCaptions ? `Apply ${preset.name} to all captions` : `Use ${preset.name} for new captions`)}
-          onClick={disabled ? undefined : () => apply(preset)}
-          onContextMenu={(e) => {
-            if (!own) return;
-            e.preventDefault();
-            openMenu({ x: e.clientX, y: e.clientY }, false);
-          }}
-          onKeyDown={(e) => {
-            if (!own || lock) return;
-            if (e.key === "F2") {
-              e.preventDefault();
-              own.rename();
-            } else if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
-              e.preventDefault();
-              const r = e.currentTarget.getBoundingClientRect();
-              openMenu({ x: r.left, y: r.bottom + 4 }, true);
-            }
-          }}
-          className={`relative flex h-12 w-full min-w-0 items-center justify-center rounded-[10px] border bg-white/[.06] transition-colors duration-[120ms] ease-out aria-disabled:cursor-not-allowed aria-disabled:opacity-40 px-1 ${
-            current ? "border-accent shadow-[0_0_0_1px_var(--color-accent)]" : disabled ? "border-white/[.08]" : "border-white/[.08] hover:border-white/30"
-          }`}
-        >
-          <TextSwatch style={{ ...original.style, fontFamily: original.style.fontFamily ?? font }} label={preset.name} size={13} />
-          {current && (
-            <span aria-hidden className="absolute top-1 right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-accent-strong text-white shadow-[0_1px_2px_rgb(0_0_0/.5)]">
-              <Check size={10} strokeWidth={3} />
-            </span>
-          )}
-        </button>
-        {own && !lock && (
-          <button
-            type="button"
-            tabIndex={-1}
-            aria-hidden
-            title="More"
-            onClick={(e) => {
-              const r = e.currentTarget.getBoundingClientRect();
-              openMenu({ x: r.left, y: r.bottom + 4 }, false);
-            }}
-            className="absolute right-1 bottom-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/55 text-fg opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100 hover:bg-black/75"
-          >
-            <Ellipsis size={12} />
-          </button>
-        )}
-      </div>
-    );
-  };
+  // Before there are captions, a style is the look waiting for Generate; a style without its own font or case keeps the one waiting.
+  const choose = (preset: CaptionPreset) =>
+    useSpeech.setState({ captionLook: { style: presetOver(preset.style, pending.style, 1), animIn: preset.animIn ?? null, animOut: preset.animOut ?? null } });
+  const tile: Tile = (preset, own) => (
+    <StyleTile
+      key={preset.name}
+      preset={preset}
+      font={pending.style.fontFamily}
+      current={isLook(preset, pending.style, pending.animIn, pending.animOut)}
+      disabled={busy || !!lock}
+      title={lock ?? (busy ? BUSY : `Use ${preset.name} for new captions`)}
+      onApply={() => choose(preset)}
+      own={own}
+    />
+  );
+  const heading = translations.length > 0 && editing ? `Style · ${editing.translation ? languageName(editing.translation) : (spoken ?? "Captions")}` : "Style";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -236,29 +141,35 @@ export function CaptionsTab() {
             </div>
           </>
         )}
-        <div className="flex flex-col gap-1.5">
-          <h3 className="text-[13px] font-semibold text-fg">{translations.length > 0 && editing ? `Style · ${editing.translation ? languageName(editing.translation) : (spoken ?? "Captions")}` : "Style"}</h3>
-          <div className={GRID}>{builtIn.map((s) => tile(s))}</div>
-        </div>
-        {/* Saved like the built-in ones, for 1080p, so a style looks the same on any canvas. */}
-        <MyStyles look={{ ...look, style: scaleStyle(look.style, 1 / unit) }} mine={mine} tile={tile} />
-        <LockReason.Provider value={lock ?? (busy ? BUSY : null)}>
-          <div className="flex flex-col gap-3">
-            <MainStyle style={look.style} styles={styles} setStyle={setStyle} unit={unit} />
-            {/* Highlights and key words follow spoken words, which a translation has none of. */}
-            {!translation && <HighlightRows style={look.style} styles={styles} setStyle={setStyle} />}
-          </div>
-          {!translation && (
-            <div className="flex flex-col gap-1.5">
-              <span className="text-[12px] text-muted">Key words</span>
-              <KeywordRows style={look.style} styles={styles} setStyle={setStyle} clips={captions?.clips} />
+        {captions && editing ? (
+          // Captions on the timeline are styled in the inspector, the one place for their look.
+          <div className="flex flex-col gap-1.5">
+            <div className="flex min-w-0 items-baseline justify-between gap-2">
+              <h3 className="shrink-0 text-[13px] font-semibold text-fg">{heading}</h3>
+              <span className="truncate text-[12px] text-muted" data-caption-look>
+                {lookName(captions.clips, !!translation, mine.styles, unit) ?? "Custom"}
+              </span>
             </div>
-          )}
-          <div className="flex flex-col">
-            <MoreStyleFold style={look.style} styles={styles} setStyle={setStyle} unit={unit} flush />
-            {captions && <CaptionPosition clips={captions.clips} trackId={editing?.id} flush />}
+            {/* It only selects a caption, so it works while the AI edits. */}
+            <LockReason.Provider value={null}>
+              <span className="flex">
+                <Button className="flex-1" data-edit-caption-style onClick={() => editStyle(editing)}>
+                  <SlidersHorizontal size={14} /> Edit style in the inspector
+                </Button>
+              </span>
+            </LockReason.Provider>
           </div>
-        </LockReason.Provider>
+        ) : (
+          !translation && (
+            <>
+              <div className="flex flex-col gap-1.5">
+                <h3 className="text-[13px] font-semibold text-fg">{heading}</h3>
+                <div className={STYLE_GRID}>{builtInStyles(false).map((s) => tile(s))}</div>
+              </div>
+              <MyStyles look={pending} mine={mine} tile={tile} />
+            </>
+          )
+        )}
       </div>
       {/* Below the choices, in view however many styles there are. */}
       <div className="flex shrink-0 flex-col gap-2 border-t border-white/[.1] bg-panel p-3.5">
@@ -308,6 +219,36 @@ export function CaptionsTab() {
   );
 }
 
+/** The name of the style every caption of `clips` has, built in or the user's own, or null. */
+function lookName(clips: Clip[], translation: boolean, own: CaptionPreset[], unit: number) {
+  const has = (p: CaptionPreset) => clips.every((c) => c.content.type === "text" && isLook(p, c.content.style, c.animIn, c.animOut, unit));
+  return builtInStyles(translation).find((p) => has(forTrack(p, translation, false)))?.name ?? own.find((p) => has(forTrack(p, translation, true)))?.name ?? null;
+}
+
+/**
+ * Shows the captions of `track` in the inspector: selects the caption at the playhead, else the next one, moving the
+ * playhead to it so the preview shows it, with its Style section in view and the keyboard on the style it has.
+ */
+function editStyle(track: Track) {
+  const { timeUs, seek, select } = useEditor.getState();
+  const on = track.clips.find((c) => c.startUs <= timeUs && timeUs < c.startUs + c.durationUs);
+  const caption = on ?? track.clips.find((c) => c.startUs >= timeUs) ?? track.clips[track.clips.length - 1];
+  if (!caption) return;
+  if (!on) seek(caption.startUs);
+  showInspector();
+  showCaptionText();
+  select([caption.id]);
+  window.setTimeout(() => {
+    const tiles = [...document.querySelectorAll<HTMLElement>("aside[aria-label=Inspector] [data-style-tile]")];
+    const tile = tiles.find((t) => t.getAttribute("aria-pressed") === "true") ?? tiles[0];
+    // The Style section from its heading, so Font, Size and Color show above the tiles.
+    const section = tile?.closest("section");
+    const pane = section?.parentElement?.closest<HTMLElement>(".overflow-y-auto");
+    if (section && pane) pane.scrollTop += section.getBoundingClientRect().top - pane.getBoundingClientRect().top;
+    tile?.focus();
+  }, 0);
+}
+
 /** Translates the speech captions again into the language of the translation picked, replacing it. */
 function TranslateAgain({ language }: { language: string }) {
   useAgent((s) => s.status);
@@ -331,136 +272,5 @@ function TranslateAgain({ language }: { language: string }) {
       {/* On a short window the styles need the room; the button's tooltip still says it. */}
       <span className="text-[12px] text-muted [@media(max-height:720px)]:hidden">{`Replaces your edits of the ${name} captions. Undo brings them back.`}</span>
     </>
-  );
-}
-
-/** The user's own styles: save the current look under a name, apply, rename and delete. */
-function MyStyles({ look, mine, tile }: { look: CaptionLook; mine: ReturnType<typeof useMyStyles>; tile: Tile }) {
-  const lock = useLockReason();
-  const [naming, setNaming] = useState<{ from: string | null; error?: string } | null>(null);
-  const [menu, setMenu] = useState<{ name: string; at: { x: number; y: number }; keyboard: boolean } | null>(null);
-  const add = useRef<HTMLButtonElement>(null);
-  const tiles = useRef(new Map<string, HTMLButtonElement>());
-  const [focus, setFocus] = useState<{ name: string | null } | null>(null);
-  useEffect(() => {
-    if (!focus) return;
-    ((focus.name && tiles.current.get(focus.name)) || add.current)?.focus();
-    setFocus(null);
-  }, [focus]);
-  const unique = (base: string) => {
-    for (let n = 1; ; n++) if (!mine.styles.some((s) => s.name.toLowerCase() === `${base} ${n}`.toLowerCase())) return `${base} ${n}`;
-  };
-  const done = (name: string | null) => {
-    setNaming(null);
-    setFocus({ name });
-  };
-  const save = async (name: string) => {
-    const from = naming?.from ?? null;
-    if (lock || from === name) return done(from);
-    const error = from ? await mine.change(() => api.renameCaptionStyle(from, name)) : await mine.change(() => api.saveCaptionStyle({ name, style: look.style, animIn: look.animIn, animOut: look.animOut }));
-    if (error) setNaming({ from, error });
-    else done(name);
-  };
-  const remove = async (name: string) => {
-    const at = mine.styles.findIndex((s) => s.name === name);
-    const style = mine.styles[at];
-    if (!style) return;
-    const error = await mine.change(() => api.deleteCaptionStyle(name));
-    if (error) return useEditor.getState().toast({ kind: "error", text: error });
-    const rest = mine.styles.filter((s) => s.name !== name);
-    setFocus({ name: (rest[at] ?? rest[at - 1])?.name ?? null });
-    useEditor.getState().toast({ kind: "info", text: `Deleted “${name}”`, action: { label: "Undo", run: () => void undo(style) } });
-  };
-  const undo = async (style: CaptionPreset) => {
-    const error = await mine.change(() => api.saveCaptionStyle(style));
-    if (error) useEditor.getState().toast({ kind: "error", text: error });
-  };
-
-  return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex min-h-6 items-center justify-between gap-2">
-        <span className="text-[12px] text-muted">My styles</span>
-        <IconButton ref={add} label="Save the current look as a style" disabled={!!naming} onClick={() => setNaming({ from: null })} className="h-6 w-6">
-          <Plus size={14} />
-        </IconButton>
-      </div>
-      {naming && <NameField key={naming.from ?? ""} initial={naming.from ?? unique("My style")} error={naming.error} onSave={save} onCancel={() => done(naming.from)} />}
-      {mine.error && <p className="text-[12px] text-danger">{mine.error}</p>}
-      {mine.styles.length > 0 ? (
-        <div className={GRID}>
-          {mine.styles.map((s) =>
-            tile(s, {
-              menu: (at, keyboard) => setMenu({ name: s.name, at, keyboard }),
-              rename: () => setNaming({ from: s.name }),
-              ref: (el) => void (el ? tiles.current.set(s.name, el) : tiles.current.delete(s.name)),
-            }),
-          )}
-        </div>
-      ) : (
-        !naming &&
-        !mine.error && (
-          <div className={GRID}>
-            <button
-              type="button"
-              {...lockedProps(lock)}
-              onClick={lock ? undefined : () => setNaming({ from: null })}
-              className="flex h-12 min-w-0 items-center justify-center gap-1 whitespace-nowrap rounded-[10px] border border-dashed border-white/[.15] text-[11px] text-muted transition-colors duration-[120ms] hover:border-white/30 hover:text-fg aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
-            >
-              <Plus size={12} /> Save look
-            </button>
-          </div>
-        )
-      )}
-      {menu && (
-        <Menu
-          label={`${menu.name} style`}
-          at={menu.at}
-          keyboard={menu.keyboard}
-          onClose={(chose) => {
-            if (!chose) setFocus({ name: menu.name });
-            setMenu(null);
-          }}
-          items={[
-            { label: "Rename", shortcut: "F2", run: () => setNaming({ from: menu.name }) },
-            { label: "Delete", danger: true, run: () => void remove(menu.name) },
-          ]}
-        />
-      )}
-    </div>
-  );
-}
-
-function NameField({ initial, error, onSave, onCancel }: { initial: string; error?: string; onSave: (name: string) => void; onCancel: () => void }) {
-  const [name, setName] = useState(initial);
-  const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => ref.current?.select(), []);
-  useEffect(() => {
-    if (error) ref.current?.focus();
-  }, [error]);
-  const submit = () => (name.trim() ? onSave(name.trim()) : onCancel());
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-1.5">
-        <input
-          ref={ref}
-          aria-label="Style name"
-          aria-invalid={!!error || undefined}
-          value={name}
-          maxLength={40}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => {
-            e.stopPropagation();
-            if (e.key === "Enter") submit();
-            else if (e.key === "Escape") onCancel();
-          }}
-          className={`h-8 min-w-0 flex-1 rounded-lg border bg-white/[.055] px-2.5 text-[13px] text-fg outline-none ${error ? "border-danger" : "border-white/[.08] focus:border-accent"}`}
-        />
-        <Button onClick={submit}>Save</Button>
-        <Button variant="ghost" onClick={onCancel}>
-          Cancel
-        </Button>
-      </div>
-      {error && <p className="text-[12px] text-danger">{error}</p>}
-    </div>
   );
 }

@@ -81,12 +81,19 @@ export function useWindowSize() {
  * takes the inspector's place instead; the chosen place comes back once the window is wide enough.
  * In the inspector's place it is as wide as the inspector, not `width`.
  */
+/** Where the panel shows in a window `windowW` wide: a side column that does not fit takes the inspector's place. */
+export const shownMode = (mode: DockMode, windowW: number): DockMode => ((mode === "left" || mode === "right") && dockMax(windowW) === null ? "inspector" : mode);
+
+/** Puts the AI panel away when it shows in the inspector's place, so the inspector shows. */
+export function showInspector() {
+  const { open, mode } = useDock.getState();
+  if (open && shownMode(mode, window.innerWidth) === "inspector") useDock.setState({ open: false });
+}
+
 export function useDockLayout() {
   const { open, mode, width, float } = useDock();
   const { w, h } = useWindowSize();
-  const sideFits = dockMax(w) !== null;
-  const shown: DockMode = (mode === "left" || mode === "right") && !sideFits ? "inspector" : mode;
-  return { open, mode: shown, width: clampWidth(width, w), float: clampFloat(float, w, h), sideFits };
+  return { open, mode: shownMode(mode, w), width: clampWidth(width, w), float: clampFloat(float, w, h), sideFits: dockMax(w) !== null };
 }
 
 export const DOCK_LABELS: Record<DockMode, string> = {
