@@ -26,13 +26,23 @@ import { Button, trapTab } from "../ui";
 import { FormatShape, Quote, SpeechNote } from "./Home";
 import { Poster } from "./Poster";
 import { SwitchChoice } from "./SwitchConfirm";
-import { actionOf, chordsOf } from "../../lib/keys";
+import { actionOf, chordsOf, keysOf, useKeys } from "../../lib/keys";
+import { findCommands, type Command } from "../../lib/commands";
+import { Keycap } from "../settings/KeysPane";
 
 const RECENT = 5;
 const FOUND = 6;
 const SAID = 6;
+const ACTIONS_SHOWN = 6;
 
-type Option = { id: string; run: () => void; node: (active: boolean) => ReactNode; disabled?: string | null };
+type Option = {
+  id: string;
+  run: () => void;
+  node: (active: boolean) => ReactNode;
+  disabled?: string | null;
+  /** Its row says why it is off, so Enter points at that instead of a toast. */
+  saysWhy?: boolean;
+};
 
 function Thumb({ p }: { p: LibraryProject }) {
   return (
@@ -61,16 +71,20 @@ function detail(p: LibraryProject, collection: string | undefined): ReactNode {
   return <span className="tabular">{parts.join(" · ")}</span>;
 }
 
-function Row({ active, thumb, title, sub, end }: { active: boolean; thumb: ReactNode; title: ReactNode; sub: ReactNode; end?: ReactNode }) {
+/** `off`: it cannot run now, and `sub` says why, so only the rest dims; `nudged` lights the reason up after Enter. */
+function Row({ active, thumb, title, sub, end, off, nudged }: { active: boolean; thumb: ReactNode; title: ReactNode; sub: ReactNode; end?: ReactNode; off?: boolean; nudged?: boolean }) {
+  const dim = off ? "opacity-60" : "";
   return (
     <div className={`flex h-12 items-center gap-3 rounded-[10px] px-2 ${active ? "bg-white/[.08]" : ""}`}>
-      {thumb}
+      <span className={`flex shrink-0 ${dim}`}>{thumb}</span>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[13px] font-medium text-fg">{title}</div>
-        <div className="flex min-w-0 items-center gap-1 truncate text-[12px] text-muted">{sub}</div>
+        <div className={`truncate text-[13px] font-medium text-fg ${dim}`}>{title}</div>
+        <div className={`flex min-w-0 items-center gap-1 truncate text-[12px] transition-colors duration-300 ease-out ${nudged ? "text-fg" : "text-muted"}`} data-nudged={nudged || undefined}>
+          {sub}
+        </div>
       </div>
-      {end && <div className="flex shrink-0 items-center gap-2 text-[12px] text-muted">{end}</div>}
-      {active && (
+      {end && <div className={`flex shrink-0 items-center gap-2 text-[12px] text-muted ${dim}`}>{end}</div>}
+      {active && !off && (
         <span aria-hidden className="flex h-5 w-6 shrink-0 items-center justify-center rounded-[5px] border border-white/15 text-muted">
           <CornerDownLeft size={11} />
         </span>
@@ -81,8 +95,8 @@ function Row({ active, thumb, title, sub, end }: { active: boolean; thumb: React
 
 /**
  * Over the editor (Projects, Ctrl+K): the open project, the recent ones, new projects in each format,
- * and search through names and what was said. The keyboard stays in the search field: ↑/↓ move,
- * Enter opens, Esc goes back to editing.
+ * and search through the editor's actions, names and what was said. The keyboard stays in the search
+ * field: ↑/↓ move, Enter opens or runs, Esc goes back to editing.
  */
 export function Launcher() {
   const projects = useLibrary((s) => s.projects);
@@ -93,10 +107,18 @@ export function Launcher() {
   const [query, setQuery] = useState("");
   const said = useSaidSearch(query);
   const [active, setActive] = useState(0);
+  const [nudged, setNudged] = useState<string | null>(null);
+  useEffect(() => {
+    if (!nudged) return;
+    const timer = window.setTimeout(() => setNudged(null), 700);
+    return () => window.clearTimeout(timer);
+  }, [nudged]);
   const input = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
 
   const plugins = usePlugins((s) => s.list);
+  // Rows name the keys as they are now.
+  const keys = useKeys();
   useEffect(() => {
     void refreshLibrary();
     void loadPlugins();
@@ -192,14 +214,57 @@ export function Launcher() {
             node: (on: boolean) => <Row active={on} thumb={<span className="flex w-9 justify-center"><PluginMark plugin={p} size={28} /></span>} title={p.name} sub={p.error ? `Can’t load: ${plainDetail(p.error)}` : p.description} end="Plugin" />,
           }))
       : [];
+  // Actions work on the open project, so they are offered only over the editor.
+  const commands = searching && snap ? findCommands(query).slice(0, ACTIONS_SHOWN) : [];
+  const commandOption = (command: Command): Option => {
+    const why = command.why();
+    const key = command.key && keysOf(command.key, keys)[0];
+    const id = `action:${command.id}`;
+    return {
+      id,
+      disabled: why,
+      saysWhy: true,
+      run: () => {
+        useEditor.setState({ launcherOpen: false });
+        // Once the launcher has given the keyboard back, so a control it moves to keeps it.
+        requestAnimationFrame(command.run);
+      },
+      node: (on) => (
+        <Row
+          active={on}
+          thumb={
+            <span className="flex w-9 shrink-0 justify-center text-muted">
+              <command.icon size={18} />
+            </span>
+          }
+          title={command.label}
+          sub={why ?? command.group}
+          end={key ? <span className="flex items-center gap-0.5"><Keycap chord={key} changed={false} or={false} /></span> : undefined}
+          off={!!why}
+          nudged={nudged === id}
+        />
+      ),
+    };
+  };
+  const actionsGroup = commands.length ? [{ title: "Actions", options: commands.map((c) => commandOption(c.command)) }] : [];
+  // A project whose name was typed goes before actions found only through a typo.
+  const actionsFirst = found.length === 0 || commands[0]?.exact;
   const groups: { title: string; options: Option[] }[] = searching
     ? [
+        ...(actionsFirst ? actionsGroup : []),
         ...(pluginOptions.length ? [{ title: "Plugins", options: pluginOptions }] : []),
-        { title: "Projects", options: found.map((p) => projectOption(p)) },
-        {
-          title: "Said in your videos",
-          options: [...hits.map(hitOption).filter((o): o is Option => !!o), ...(allFound > FOUND || allHits > SAID ? [moreOption] : [])],
-        },
+        // Typing an action's name, a line saying no project has it is only in the way.
+        ...(found.length || !commands.length ? [{ title: "Projects", options: found.map((p) => projectOption(p)) }] : []),
+        ...(actionsFirst ? [] : actionsGroup),
+        // Nor does a note on what was said, once an action is found and nothing was said.
+        ...(commands.length && !hits.length && !(allFound > FOUND || allHits > SAID)
+          ? []
+          : [
+              {
+                title: "Said in your videos",
+                options: [...hits.map(hitOption).filter((o): o is Option => !!o), ...(allFound > FOUND || allHits > SAID ? [moreOption] : [])],
+              },
+            ]),
       ]
     : [
         ...(currentProject
@@ -245,6 +310,7 @@ export function Launcher() {
 
   const choose = (option: Option | undefined) => {
     if (!option) return;
+    if (option.disabled && option.saysWhy) return setNudged(option.id);
     if (option.disabled) return useEditor.getState().toast({ kind: "info", text: option.disabled });
     option.run();
   };
@@ -287,8 +353,8 @@ export function Launcher() {
               aria-expanded
               aria-controls="launcher-list"
               aria-activedescendant={options.length > 0 ? `launcher-option-${at}` : undefined}
-              aria-label="Search projects and what was said in them"
-              placeholder="Search projects and what was said"
+              aria-label="Search actions, projects and what was said in them"
+              placeholder="Search actions, projects and what was said"
               value={query}
               disabled={!!pending}
               onChange={(e) => setQuery(e.target.value)}
@@ -320,17 +386,17 @@ export function Launcher() {
                       // While the question about an AI run is open, Enter answers it, so no row looks chosen.
                       aria-selected={i === at && !pending}
                       aria-disabled={option.disabled ? true : undefined}
-                      title={option.disabled ?? undefined}
+                      title={(!option.saysWhy && option.disabled) || undefined}
                       onPointerMove={() => i !== at && setActive(i)}
                       onClick={() => choose(option)}
-                      className={option.disabled ? "opacity-60" : ""}
+                      className={option.disabled && !option.saysWhy ? "opacity-60" : ""}
                     >
                       {option.node(i === at && !pending)}
                     </div>
                   );
                 })}
                 {searching && group.title === "Projects" && group.options.length === 0 && <div className="px-2 py-1.5 text-[13px] text-muted">No project names match.</div>}
-                {searching && group.title !== "Projects" && (
+                {searching && group.title === "Said in your videos" && (
                   <div className="px-2">
                     {fold(query).replace(/\s+/g, "").length < 2 ? (
                       <p className="py-1 text-[13px] text-muted">Type a little more to search what was said.</p>
@@ -368,7 +434,7 @@ export function Launcher() {
                   ))}
                 </div>
               </div>
-              <div className="flex shrink-0 justify-end px-2 pt-2 pb-0.5 text-[11px] text-muted">↑↓ move · ↵ open · Esc keep editing</div>
+              <div className="flex shrink-0 justify-end px-2 pt-2 pb-0.5 text-[11px] text-muted">↑↓ move · ↵ {options[at]?.id.startsWith("action:") ? "run" : "open"} · Esc keep editing</div>
             </>
           )}
         </div>

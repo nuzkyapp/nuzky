@@ -10,14 +10,15 @@ import { onReframeJob } from "./lib/reframe";
 import { canRetrySpeech, retrySpeech, useSpeech } from "./lib/speech";
 import { useNames } from "./lib/names";
 import { reportBug } from "./lib/diagnostics";
-import { copySelection, currentEpoch, cutSelection, deleteSelection, deleteSide, duplicateSelection, freezeAtPlayhead, openExport, pasteAttributes, pasteClips, edgeBeside, PLUGIN_RUN, projectDuration, runWasDiscarded, splitAtPlayhead, undoAction, useEditor } from "./lib/store";
-import { US, formatDuration, lastFrame, nearestFrame, stepFrame } from "./lib/time";
+import { currentEpoch, PLUGIN_RUN, runWasDiscarded, undoAction, useEditor } from "./lib/store";
+import { formatDuration } from "./lib/time";
+import { MOVES_SOURCE, RESTS_IN_COVER, RESTS_IN_FULL, WORKS_IN_REELS, isClipboard, runAction } from "./lib/actions";
 import type { Asset, JobEvent, ProjectSummary, Snapshot, ModelQuestion, Transport } from "./lib/types";
 import { AGENT_VISION_MODELS } from "./components/ModelQuestionDialog";
 import { showsVisionDownload } from "./components/setup/steps/VisionStep";
 import { useYoutube } from "./lib/youtube";
 import { importLutPaths, useLuts } from "./lib/color";
-import { MEDIA_EXTENSIONS, importPaths, mediaKind, pickAndImport, resolveDrop } from "./components/panel/assets";
+import { MEDIA_EXTENSIONS, importPaths, mediaKind, resolveDrop } from "./components/panel/assets";
 import { Toasts } from "./components/Toasts";
 import { Tour } from "./components/Tour";
 import { listenAgentEvents, panelRunEnded, useAgent } from "./lib/agent";
@@ -37,13 +38,13 @@ import { useGallery } from "./lib/gallery";
 import { listenEffects, listenPlugins, runPlugin, usePlugins, warnExported } from "./lib/plugins";
 import { exportVideo } from "./components/ExportDialog";
 import { addProjects, findDrafts, listenStyle, loadStyle, useStyle } from "./lib/style";
-import { closeCover, closeExport, deleteOverlay, deleteText, exportCover, loadModels as loadVisionModels, onCoverJob, selectedOverlay, useCover } from "./lib/cover";
+import { closeCover, closeExport, deleteOverlay, deleteText, loadModels as loadVisionModels, onCoverJob, selectedOverlay, useCover } from "./lib/cover";
 import { candidateOf, closeReels, onReelsJob, openReelsToFind, playEnding, toggleReelPlay, useReels } from "./lib/reels";
 import { onBeatsFound } from "./lib/beats";
-import { closeSource, seekSource, sourceDuration, useSource } from "./lib/source";
-import { appWindow, toggleFullPreview, toggleMuted, usePreview } from "./lib/preview";
+import { closeSource, useSource } from "./lib/source";
+import { appWindow, toggleFullPreview, usePreview } from "./lib/preview";
 import { titleWindow } from "./lib/window";
-import { actionOf, chordsOf, useKeys, type ActionId } from "./lib/keys";
+import { actionOf, chordsOf, useKeys } from "./lib/keys";
 import { useKeysQuestion } from "./lib/keysQuestion";
 import { openSettings, useSettings } from "./lib/settings";
 import { useMicLevel, useVoiceover } from "./lib/voiceover";
@@ -75,14 +76,6 @@ function suppressSpaceRelease() {
   window.addEventListener("keyup", up, true);
 }
 
-const CLIPBOARD = { copy: copySelection, cut: cutSelection, paste: pasteClips, pasteAttributes } as const;
-/** What the cover editor holds back: nothing plays there, and the clips are not shown. */
-const RESTS_IN_COVER = new Set<ActionId>(["playPause", "split", "deleteLeft", "deleteRight", "freeze", "duplicate", "copy", "cut", "paste", "pasteAttributes", "delete"]);
-/** What choosing reels lets through to the editor. */
-const WORKS_IN_REELS = new Set<ActionId>(["undo", "redo", "framePrev", "frameNext", "secondBack", "secondForward"]);
-/** What would change the hidden timeline unseen in the full screen preview. */
-const RESTS_IN_FULL = new Set<ActionId>(["delete", "split", "deleteLeft", "deleteRight", "freeze", "duplicate", "import", "undo", "redo", "cut", "paste", "pasteAttributes"]);
-
 function useShortcuts() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -111,10 +104,9 @@ function useShortcuts() {
       }
       // The editor's keys stay with an open dialog.
       if (isTyping(target) || document.querySelector("dialog[open], [aria-modal='true']")) return;
-      const fps = s.snap?.project.canvas.fps ?? 30;
       const escape = e.key === "Escape";
       // The transcript's words are not clips, and selected text, such as an error message, copies as text.
-      if (action && action in CLIPBOARD && (target?.closest("#library-panel-transcript") || (action === "copy" && window.getSelection()?.toString()))) return;
+      if (action && isClipboard(action) && (target?.closest("#library-panel-transcript") || (action === "copy" && window.getSelection()?.toString()))) return;
       // A focused slider keeps its own arrow, Home and End keys.
       if (target instanceof HTMLInputElement && target.type === "range" && /^(Arrow|Home$|End$|Page)/.test(e.key)) return;
       // In the cover editor the playhead is the cover's frame and nothing plays; the clip keys rest.
@@ -154,19 +146,13 @@ function useShortcuts() {
       // A media item in the preview takes the playback keys; Esc shows the timeline again.
       const source = useSource.getState();
       if (source.asset) {
-        const step = action === "framePrev" || action === "secondBack" ? -1 : action === "frameNext" || action === "secondForward" ? 1 : 0;
         if (escape && !usePreview.getState().full) {
           closeSource();
           return;
         }
-        if (step) {
-          e.preventDefault();
-          const second = action === "secondBack" || action === "secondForward";
-          seekSource(second ? source.timeUs + step * US : stepFrame(source.timeUs, step, source.preview?.fps || 30));
-          return;
-        }
-        if (action === "goStart" || action === "goEnd") {
-          seekSource(action === "goStart" ? 0 : sourceDuration(source));
+        if (action && MOVES_SOURCE.has(action)) {
+          if (action !== "goStart" && action !== "goEnd") e.preventDefault();
+          runAction(action);
           return;
         }
       }
@@ -185,9 +171,7 @@ function useShortcuts() {
         // A focused clip keeps these keys to move between tracks.
         if (cover.open || e.defaultPrevented || !s.snap) return;
         e.preventDefault();
-        const edge = edgeBeside(s.snap.project, s.timeUs, action === "cutPrev" ? -1 : 1);
-        if (edge !== null) s.seek(edge);
-        return;
+        return runAction(action);
       }
       if (e.key === " " && usesSpace(target)) return;
       e.preventDefault();
@@ -197,58 +181,7 @@ function useShortcuts() {
         if (e.repeat) return;
         suppressSpaceRelease();
       }
-      switch (action) {
-        case "playPause":
-          // Holding the key plays or pauses once.
-          return e.repeat ? undefined : s.togglePlay();
-        case "undo":
-          return s.undo();
-        case "redo":
-          return s.redo();
-        case "import":
-          return pickAndImport();
-        case "export":
-          return cover.open ? void exportCover() : openExport();
-        case "copy":
-        case "cut":
-        case "paste":
-        case "pasteAttributes":
-          return void CLIPBOARD[action]();
-        case "duplicate":
-          return duplicateSelection();
-        case "split":
-          return splitAtPlayhead();
-        case "freeze":
-          return e.repeat ? undefined : void freezeAtPlayhead();
-        case "deleteLeft":
-        case "deleteRight":
-          return deleteSide(action === "deleteLeft" ? "left" : "right");
-        case "delete":
-          return deleteSelection();
-        case "framePrev":
-        case "frameNext":
-        case "secondBack":
-        case "secondForward": {
-          const dir = action === "framePrev" || action === "secondBack" ? -1 : 1;
-          const second = action === "secondBack" || action === "secondForward";
-          const end = s.snap ? projectDuration(s.snap.project) : 0;
-          const to = Math.min(second ? nearestFrame(s.timeUs + dir * US, fps) : stepFrame(s.timeUs, dir, fps), lastFrame(end, fps));
-          if (dir > 0 ? to > s.timeUs : to < s.timeUs) s.seek(to);
-          return;
-        }
-        case "goStart":
-          return s.seek(0);
-        case "goEnd":
-          return s.snap ? s.seek(projectDuration(s.snap.project)) : undefined;
-        case "mute":
-          return e.repeat ? undefined : toggleMuted();
-        case "fullScreen":
-          return e.repeat ? undefined : void toggleFullPreview();
-        case "zoomIn":
-          return s.setZoom(s.zoom * 1.3);
-        case "zoomOut":
-          return s.setZoom(s.zoom / 1.3);
-      }
+      runAction(action, e.repeat);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

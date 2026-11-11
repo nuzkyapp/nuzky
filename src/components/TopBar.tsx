@@ -280,6 +280,7 @@ function VersionsButton() {
         round
         aria-haspopup="menu"
         aria-expanded={!!menu}
+        data-versions
         label={aiRun ? "Versions are available when the AI is done" : "Versions"}
         disabled={!!aiRun}
         onClick={async (e) => {

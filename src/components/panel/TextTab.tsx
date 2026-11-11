@@ -25,6 +25,7 @@ function TextStyles() {
           key={p.name}
           type="button"
           title={`Add "${p.name}" text at the playhead`}
+          data-text-preset
           onClick={() => edit((project) => ({ type: "addText", startUs: useEditor.getState().timeUs, text: p.text, style: scaleStyle(p.style, canvasUnit(project.canvas)) }))}
           {...lockedProps(lock)}
           className="group flex min-w-0 flex-col gap-1.5 text-left aria-disabled:cursor-not-allowed aria-disabled:opacity-40"

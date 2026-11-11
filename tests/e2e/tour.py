@@ -308,7 +308,7 @@ def flow_tour(r):
     r.check('Ctrl+K opens the launcher, and the tour steps aside without ending', wait(
         lambda: r.s.run("return !!document.querySelector('[role=dialog][aria-label=Projects]')") and tour(r)['aside'], 5) and tour(r)['step'] == 'export', tour(r))
     r.check("a real click reaches the launcher's search field",
-            click_at(hands, '[aria-label="Search projects and what was said in them"]') and r.s.run("return document.activeElement?.getAttribute('role')") == 'combobox')
+            click_at(hands, '[role=dialog][aria-label=Projects] [role=combobox]') and r.s.run("return document.activeElement?.getAttribute('role')") == 'combobox')
     r.shot('8-launcher-1440')
     press('Escape')
     r.check('Esc closes the launcher and the tour comes back on the same step', wait(

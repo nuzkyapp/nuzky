@@ -430,6 +430,7 @@ export function Preview() {
                 active={compare !== null}
                 disabled={compare === null && !adjusted}
                 onClick={toggleCompare}
+                data-compare
               >
                 <SquareSplitHorizontal size={16} />
               </IconButton>

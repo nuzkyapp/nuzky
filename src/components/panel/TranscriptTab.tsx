@@ -144,7 +144,7 @@ export function TranscriptTab() {
         {/* What the transcript is, on its own line; under it the actions that work from it, side by side. */}
         <div className="-my-1 flex items-center gap-2">
           <span className="tabular flex-1 whitespace-nowrap text-[12px] text-muted">{view.words.length} word{view.words.length === 1 ? "" : "s"}</span>
-          <IconButton label={blocker ?? (busy ? "Wait for speech recognition to finish" : "Transcribe again")} className="h-6 w-6" disabled={!!blocker || busy} onClick={() => startSpeech(null, true)}>
+          <IconButton label={blocker ?? (busy ? "Wait for speech recognition to finish" : "Transcribe again")} className="h-6 w-6" disabled={!!blocker || busy} onClick={() => startSpeech(null, true)} data-transcribe>
             <RefreshCw size={13} />
           </IconButton>
         </div>
