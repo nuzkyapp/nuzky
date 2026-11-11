@@ -71,7 +71,8 @@ fn keyframed(clip: &Clip, u: i64) -> Option<Transform> {
     }
     for pair in clip.keyframes.windows(2) {
         let (a, b) = (&pair[0], &pair[1]);
-        if u <= b.t_us {
+        // At a keyframe's own time it holds, mask shape and inversion included.
+        if u < b.t_us {
             let p = a.ease.at((u - a.t_us) as f32 / (b.t_us - a.t_us).max(1) as f32);
             let lerp = |a: f32, b: f32| a + (b - a) * p;
             // A keyframe without a crop shows the whole layer.
@@ -234,8 +235,11 @@ mod tests {
         // The mask moves, grows and turns; another shape or an inverted one holds until its keyframe.
         let m = mid.mask.unwrap();
         assert!((m.x - 0.2).abs() < 1e-6 && (m.width - 0.4).abs() < 1e-6 && m.rotation == 45.0 && m.height == 0.4);
-        c.keyframes[1].transform.mask = Some(Mask { kind: MaskKind::Linear, ..wide });
+        let linear = Mask { kind: MaskKind::Linear, ..wide };
+        c.keyframes[1].transform.mask = Some(linear);
         assert_eq!(transform_at(&c, 2_000_000).0.mask, Some(circle));
+        assert_eq!(transform_at(&c, 2_999_999).0.mask, Some(circle));
+        assert_eq!(transform_at(&c, 3_000_000).0.mask, Some(linear), "the keyframe's own frame shows its shape");
         c.keyframes[1].transform.mask = Some(Mask { invert: true, ..wide });
         assert_eq!(transform_at(&c, 2_000_000).0.mask, Some(circle));
         c.keyframes[1].transform.mask = Some(wide);
