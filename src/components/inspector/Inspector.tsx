@@ -19,6 +19,7 @@ import { EffectsSection } from "./EffectsSection";
 import { InspectorHeader } from "./Header";
 import { AdjustSection, AudioSection, ColorSection, SpeedSection, VoiceSection } from "./MediaSections";
 import { FollowSection } from "./FollowSection";
+import { MaskSection } from "./MaskSection";
 import { MotionSection } from "./MotionSection";
 import { MultiInspector } from "./MultiInspector";
 import { GalleryInspector } from "./GalleryInspector";
@@ -87,6 +88,7 @@ function ClipInspector({ clip, kind, asset, music, chosen, onChoose }: { clip: C
           {tab === "video" && c.type === "media" && (
             <>
               <ShapeSection clip={clip} content={c} asset={asset} />
+              {asset && <MaskSection clip={clip} asset={asset} />}
               <BackgroundSection clips={[clip]} />
               <MotionSection clip={clip} />
               {asset?.kind === "video" && <FollowSection clip={clip} asset={asset} />}

@@ -5,7 +5,7 @@
 use nuzky_engine::Project;
 use nuzky_engine::edit::MAIN_TRACK;
 use nuzky_engine::model::{
-    Background, Clip, ClipContent, Crop, ReelStatus, Thumbnail, ThumbnailFormat, Track, TrackKind, language_name,
+    Background, Clip, ClipContent, Crop, Mask, ReelStatus, Thumbnail, ThumbnailFormat, Track, TrackKind, language_name,
 };
 use nuzky_engine::recap::duration_text;
 use serde::Serialize;
@@ -192,6 +192,12 @@ fn scale(clip: &Clip) -> f32 {
 fn crop(clip: &Clip) -> Option<Crop> {
     match &clip.content {
         ClipContent::Media { transform, .. } | ClipContent::Text { transform, .. } => transform.crop,
+    }
+}
+
+fn mask(clip: &Clip) -> Option<Mask> {
+    match &clip.content {
+        ClipContent::Media { transform, .. } | ClipContent::Text { transform, .. } => transform.mask,
     }
 }
 
@@ -384,6 +390,13 @@ pub fn summarize(before: &Project, after: &Project) -> Vec<RunChange> {
             }
             if sh1 != sh2 || (crop(clip) != crop(o) && clip.keyframes == o.keyframes) {
                 push("Changed the crop or shape of");
+            }
+            if mask(clip) != mask(o) && clip.keyframes == o.keyframes {
+                push(match (mask(o).is_some(), mask(clip).is_some()) {
+                    (false, true) => "Added a mask to",
+                    (true, false) => "Removed the mask of",
+                    _ => "Changed the mask of",
+                });
             }
             if (fi1, fo1) != (fi2, fo2) {
                 push("Changed the sound fades of");

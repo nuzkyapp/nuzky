@@ -10,7 +10,7 @@ use wgpu::util::DeviceExt;
 
 use crate::color::{LogConversion, Lut3d};
 use crate::media::Transfer;
-use crate::model::Adjust;
+use crate::model::{self, Adjust};
 
 /// HDR to SDR conversion, shared by the compositor and plugin effects, whose own names never start with `nuzky_`.
 pub(crate) const HDR_WGSL: &str = r#"
@@ -116,6 +116,9 @@ struct Layer {
     fill: vec4<f32>, // premultiplied fill colour
     color: vec4<f32>, // log profile on (1) or off, the LUT's strength, the LUT on (1) or off
     log_rows: array<vec4<f32>, 3>, // the log profile's primaries to BT.2020, by rows
+    cutout: vec4<f32>, // mask: 0 none, 1 circle, 2 rectangle, 3 linear; inverted (1); feather in output pixels; turn in radians
+    cutout_at: vec4<f32>, // its centre in the whole layer, upright, 0..1; the layer's width and height in output pixels
+    cutout_half: vec4<f32>, // its half width and height in output pixels
 };
 @group(0) @binding(0) var<uniform> layer: Layer;
 @group(0) @binding(1) var tex: texture_2d<f32>;
@@ -146,6 +149,28 @@ fn vs(@builtin(vertex_index) i: u32) -> VsOut {
 fn rounded_box(p: vec2<f32>, half: vec2<f32>, radius: f32) -> f32 {
     let q = abs(p) - half + radius;
     return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - radius;
+}
+
+// How much of the layer its mask shows at `layer_uv`, the edge fading over the feather centred on it.
+fn cutout(layer_uv: vec2<f32>) -> f32 {
+    let offset = (layer_uv - layer.cutout_at.xy) * layer.cutout_at.zw;
+    // Into the shape's own axes, turned back by its clockwise turn.
+    let c = cos(layer.cutout.w);
+    let s = sin(layer.cutout.w);
+    let p = vec2<f32>(c * offset.x + s * offset.y, c * offset.y - s * offset.x);
+    let half = max(layer.cutout_half.xy, vec2<f32>(1e-3));
+    var d = p.y;
+    if layer.cutout.x < 1.5 {
+        // Distance from an ellipse, close to exact near its edge (Inigo Quilez's approximation).
+        let k0 = length(p / half);
+        let k1 = length(p / (half * half));
+        d = select(-min(half.x, half.y), k0 * (k0 - 1.0) / k1, k1 > 0.0);
+    } else if layer.cutout.x < 2.5 {
+        d = rounded_box(p, half, 0.0);
+    }
+    let w = max(layer.cutout.z, 1.0);
+    let shown = 1.0 - smoothstep(-w / 2.0, w / 2.0, d);
+    return select(shown, 1.0 - shown, layer.cutout.y > 0.5);
 }
 
 const BT709_LUMA = vec3<f32>(0.2126, 0.7152, 0.0722);
@@ -412,6 +437,9 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
             color += vec4<f32>(0.0, 0.0, 0.0, layer.shadow.x * (1.0 - smoothstep(-layer.shadow.y, layer.shadow.y, s))) * (1.0 - color.a);
         }
     }
+    if layer.cutout.x > 0.5 {
+        color *= cutout(in.layer_uv);
+    }
     return color * layer.opacity.x;
 }
 "#;
@@ -433,6 +461,9 @@ struct LayerUniform {
     fill: [f32; 4],
     color: [f32; 4],
     log_rows: [[f32; 4]; 3],
+    cutout: [f32; 4],
+    cutout_at: [f32; 4],
+    cutout_half: [f32; 4],
 }
 
 /// Straight-alpha RGBA image shared between frames without copying.
@@ -458,6 +489,8 @@ pub struct Layer {
     pub clip: Option<[f32; 4]>,
     pub transfer: Transfer,
     pub mask: Option<Mask>,
+    /// The clip's mask (`model::Mask`), over the whole layer before the crop.
+    pub shape_mask: Option<model::Mask>,
     pub matte: Option<Box<Matte>>,
     /// Plugin effects the image goes through first, in order; each must be prepared (`Gpu::prepare_effect`).
     pub effects: Vec<EffectPass>,
@@ -577,6 +610,25 @@ impl Mask {
         let shadow = if self.shadow > 0.0 { self.shadow_blur * SHADOW_OFFSET + self.shadow_blur } else { 0.0 };
         self.border + shadow + 1.0
     }
+}
+
+/// The shader's `cutout`, `cutout_at` and `cutout_half` of a mask over a layer `size` output pixels wide and high. Values
+/// out of bounds, as from a project that skipped validation, are brought into them.
+fn cutout(mask: &model::Mask, size: [f32; 2]) -> [[f32; 4]; 3] {
+    let bounded = |v: f32, lo: f32, hi: f32| if v.is_finite() { v.clamp(lo, hi) } else { 0.0 };
+    let kind = match mask.kind {
+        model::MaskKind::Circle => 1.0,
+        model::MaskKind::Rectangle => 2.0,
+        model::MaskKind::Linear => 3.0,
+    };
+    let (offset, side) = (model::MAX_MASK_OFFSET, model::MAX_MASK_SIZE);
+    let feather = bounded(mask.feather, 0.0, 1.0) * size[0].min(size[1]);
+    let turn = bounded(mask.rotation, -1e6, 1e6).to_radians();
+    [
+        [kind, mask.invert as u8 as f32, feather, turn],
+        [0.5 + bounded(mask.x, -offset, offset), 0.5 + bounded(mask.y, -offset, offset), size[0], size[1]],
+        [bounded(mask.width, 0.0, side) * size[0] / 2.0, bounded(mask.height, 0.0, side) * size[1] / 2.0, 0.0, 0.0],
+    ]
 }
 
 /// How far a shadow falls below the layer, as a share of its blur.
@@ -996,6 +1048,12 @@ impl Gpu {
         let clip_space = |p: [f32; 2]| [p[0] / w as f32 * 2.0 - 1.0, 1.0 - p[1] / h as f32 * 2.0];
         // Triangle strip order: top-left, top-right, bottom-left, bottom-right.
         let strip = [0usize, 1, 3, 2];
+        // The quad is a parallelogram: a point at (u, v) of it is the top-left corner plus u of the top edge and v of
+        // the left one.
+        let [tl, tr, _, bl] = layer.corners;
+        let across = [tr[0] - tl[0], tr[1] - tl[1]];
+        let down = [bl[0] - tl[0], bl[1] - tl[1]];
+        let size = [across[0].hypot(across[1]).max(1e-3), down[0].hypot(down[1]).max(1e-3)];
         let (mask, border, shadow) = match layer.mask {
             None => {
                 for (slot, cyclic) in strip.into_iter().enumerate() {
@@ -1009,13 +1067,7 @@ impl Gpu {
                 ([0.0; 4], [0.0; 4], [0.0; 4])
             }
             Some(mask) => {
-                // The quad is a parallelogram: a point at (u, v) of it is the top-left corner plus u of
-                // the top edge and v of the left one. The drawn quad is the visible part plus the reach
-                // of the border and shadow.
-                let [tl, tr, _, bl] = layer.corners;
-                let across = [tr[0] - tl[0], tr[1] - tl[1]];
-                let down = [bl[0] - tl[0], bl[1] - tl[1]];
-                let size = [across[0].hypot(across[1]).max(1e-3), down[0].hypot(down[1]).max(1e-3)];
+                // The drawn quad is the visible part plus the reach of the border and shadow.
                 let [left, top, right, bottom] = mask.rect;
                 let centre = [(left + right) / 2.0, (top + bottom) / 2.0];
                 let reach = [mask.reach() / size[0], mask.reach() / size[1]];
@@ -1052,6 +1104,7 @@ impl Gpu {
             Some(Fill::Color([r, g, b, a])) => ([2.0, 0.0, 0.0, 0.0], [r * a, g * a, b * a, *a]),
             Some(Fill::Picture { scale, .. }) => ([3.0, scale[0], scale[1], 0.0], [0.0; 4]),
         };
+        let [cutout, cutout_at, cutout_half] = layer.shape_mask.map_or([[0.0; 4]; 3], |m| cutout(&m, size));
         let a = layer.adjust;
         let uniform = LayerUniform {
             corners,
@@ -1073,6 +1126,9 @@ impl Gpu {
                 0.0,
             ],
             log_rows: layer.color.log.as_ref().map_or([[0.0; 4]; 3], |log| log.to_2020.map(|[a, b, c]| [a, b, c, 0.0])),
+            cutout,
+            cutout_at,
+            cutout_half,
         };
         let buffer = self.uniform_buffer("layer", bytemuck::bytes_of(&uniform));
         self.bind_group(&buffer, textures.map(|t| t.create_view(&Default::default())))
@@ -1443,6 +1499,9 @@ impl Gpu {
                         fill: [0.0; 4],
                         color: [0.0; 4],
                         log_rows: [[0.0; 4]; 3],
+                        cutout: [0.0; 4],
+                        cutout_at: [0.0; 4],
+                        cutout_half: [0.0; 4],
                     };
                     self.queue.write_buffer(&target.uniform, 0, bytemuck::bytes_of(&uniform));
                     bind_groups.push(target.bind_group.clone());
@@ -1561,6 +1620,7 @@ mod tests {
             clip: None,
             transfer: Transfer::Sdr,
             mask: None,
+            shape_mask: None,
             matte: None,
             effects: Vec::new(),
             color: Default::default(),
@@ -1596,6 +1656,7 @@ mod tests {
             clip: None,
             transfer: Transfer::Sdr,
             mask: None,
+            shape_mask: None,
             matte: None,
             effects: Vec::new(),
             color: Default::default(),
@@ -1637,6 +1698,7 @@ mod tests {
             clip: None,
             transfer: Transfer::Hlg,
             mask: None,
+            shape_mask: None,
             matte: Some(Box::new(matte)),
             effects: Vec::new(),
             color: Default::default(),
@@ -1671,6 +1733,7 @@ mod tests {
                 clip: None,
                 transfer: Transfer::Sdr,
                 mask: None,
+                shape_mask: None,
                 matte: None,
                 effects: Vec::new(),
                 color: Default::default(),
@@ -1714,6 +1777,7 @@ mod tests {
             clip: None,
             transfer: Transfer::Sdr,
             mask: None,
+            shape_mask: None,
             matte: None,
             effects: Vec::new(),
             color: Default::default(),

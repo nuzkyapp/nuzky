@@ -476,6 +476,7 @@ fn layers(project: &Project, t: i64) -> Vec<Layer<'_>> {
         let covers = opacity >= 0.99
             && transform.rotation.rem_euclid(360.0) < 0.01
             && Crop::visible(transform.crop) == [0.0, 0.0, 1.0, 1.0]
+            && transform.mask.is_none()
             && spans(asset.width as f32 * fit, cw, transform.x)
             && spans(asset.height as f32 * fit, ch, transform.y);
         layers.push(Layer { clip, asset, opacity, animating, covers });

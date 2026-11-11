@@ -7,9 +7,9 @@ use nuzky_engine::{
     model::{
         Asset, AssetKind, Background, Clip, ClipContent, EffectValue, LETTER_SPACING, LINE_SPACING, Lut,
         MAX_BORDER_WIDTH, MAX_CANVAS_SIDE, MAX_CLIP_EFFECTS, MAX_CORRECTION_CHARS, MAX_FONT_HEIGHT_RATIO, MAX_LEFT_OUT,
-        MAX_LEFT_OUT_CHARS, MAX_REEL_HOOK_CHARS, MAX_REEL_TITLE_CHARS, MAX_REEL_WHY_CHARS, MAX_SCRIPT_CHARS,
-        MAX_SHADOW, MAX_TEXT_WIDTH_RATIO, PROJECT_VERSION, ReelCandidate, ReelStatus, TextStyle, Thumbnail, TrackKind,
-        Transform, language_name, max_stroke_width, unit_of,
+        MAX_LEFT_OUT_CHARS, MAX_MASK_OFFSET, MAX_MASK_SIZE, MAX_REEL_HOOK_CHARS, MAX_REEL_TITLE_CHARS,
+        MAX_REEL_WHY_CHARS, MAX_SCRIPT_CHARS, MAX_SHADOW, MAX_TEXT_WIDTH_RATIO, PROJECT_VERSION, ReelCandidate,
+        ReelStatus, TextStyle, Thumbnail, TrackKind, Transform, language_name, max_stroke_width, unit_of,
     },
 };
 
@@ -199,6 +199,16 @@ fn transform(value: &Transform) -> Result<()> {
                 && c.left + c.right < 1.0
                 && c.top + c.bottom < 1.0,
             "INVALID_PROJECT: a crop must leave part of the layer visible"
+        );
+    }
+    if let Some(m) = value.mask {
+        ensure!(
+            [m.x, m.y].iter().all(|v| v.is_finite() && v.abs() <= MAX_MASK_OFFSET)
+                && [m.width, m.height].iter().all(|v| v.is_finite() && *v > 0.0 && *v <= MAX_MASK_SIZE)
+                && m.rotation.is_finite()
+                && (0.0..=1.0).contains(&m.feather),
+            "INVALID_PROJECT: a mask's centre goes from -{MAX_MASK_OFFSET} to {MAX_MASK_OFFSET} of the layer, its width \
+             and height above 0 up to {MAX_MASK_SIZE} times the layer's and its feather from 0 to 1"
         );
     }
     Ok(())

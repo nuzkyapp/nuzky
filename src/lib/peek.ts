@@ -38,6 +38,7 @@ const TRANSFORM: [keyof Transform, string, ((v: number) => string) | null][] = [
   ["x", "Position", null],
   ["y", "Position", null],
   ["crop", "Crop and shape", null],
+  ["mask", "Mask", null],
 ];
 /** Names for the other fields that change, as the inspector calls them. */
 const FIELDS: Record<string, string> = {

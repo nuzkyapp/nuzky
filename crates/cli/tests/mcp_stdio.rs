@@ -1287,6 +1287,71 @@ fn picture_in_picture_over_a_phrase_with_crop_and_shape_over_stdio() {
     assert_eq!((&content["shape"], &content["transform"]["crop"]["left"]), (&round, &json!(0.25)), "{content}");
 }
 
+/// An agent shows a picture only inside a rectangle that slides from its left half to its right half, and
+/// `nuzky frame` draws the picture there at the start and at the end.
+#[test]
+fn an_agent_masks_a_clip_and_moves_the_mask_with_keyframes_over_stdio() {
+    let mut c = Client::new(true);
+    let picture = c.dir.join("white.ppm");
+    std::fs::write(&picture, [b"P6\n64 36\n255\n".as_slice(), &[230; 64 * 36 * 3]].concat()).unwrap();
+    let run = c.call("begin_run", json!({"label":"mask"}));
+    let ids = c.call("import_media", json!({"run_id":run["run_id"],"paths":[picture]}))["asset_ids"].clone();
+    let edits = json!([{"type":"addClip","assetId":ids[0]},{"type":"setCanvas","width":64,"height":36}]);
+    c.call("apply_edits", json!({"run_id":run["run_id"],"request_id":"place","edits":edits}));
+    let clip = c.call("get_state", json!({}))["tracks"][0]["clips"][0].clone();
+    let at = |x: f64| {
+        let mask = json!({"kind":"rectangle","x":x,"y":0,"width":0.4,"height":0.9,"rotation":0,"feather":0});
+        json!({"x":0,"y":0,"scale":1,"rotation":0,"opacity":1,"mask":mask})
+    };
+    let edit = |request: &str, edits: Value| json!({"run_id":run["run_id"],"request_id":request,"edits":edits});
+    let end = clip["durationUs"].as_i64().unwrap();
+    let keys = json!([{"tUs":0,"transform":at(-0.25)},{"tUs":end,"transform":at(0.25)}]);
+    c.call("apply_edits", edit("move", json!([{"type":"setKeyframes","clipId":clip["id"],"keyframes":keys}])));
+    let mut flat = at(0.0);
+    flat["mask"]["width"] = json!(0);
+    let refused =
+        c.error("apply_edits", edit("flat", json!([{"type":"updateClip","clipId":clip["id"],"transform":flat}])));
+    assert!(refused.contains("a mask's centre"), "{refused}");
+    c.call("end_run", json!({"run_id":run["run_id"],"action":"keep"}));
+    c.finish();
+    let project = c.dir.join("project.nuzky");
+    let disk: Value = serde_json::from_slice(&std::fs::read(&project).unwrap()).unwrap();
+    let saved = &disk["tracks"][0]["clips"][0]["keyframes"][1]["transform"]["mask"];
+    assert_eq!(
+        (&saved["kind"], &saved["x"], saved.get("invert")),
+        (&json!("rectangle"), &json!(0.25), None),
+        "{saved}"
+    );
+
+    // Brightness of each column of the frame at `secs`, read through FFmpeg.
+    let columns = |secs: &str| {
+        let out = c.dir.join(format!("frame-{secs}.png"));
+        let cli = Command::new(env!("CARGO_BIN_EXE_nuzky"))
+            .arg("frame")
+            .arg(&project)
+            .arg(secs)
+            .arg(&out)
+            .env("HOME", &c.dir)
+            .env("NUZKY_DATA_DIR", c.dir.join("data"))
+            .env("XDG_CACHE_HOME", c.dir.join("cache"))
+            .output()
+            .unwrap();
+        assert!(cli.status.success(), "{}", String::from_utf8_lossy(&cli.stderr));
+        let rgba = Command::new("ffmpeg")
+            .args(["-v", "error", "-i"])
+            .arg(&out)
+            .args(["-f", "rawvideo", "-pix_fmt", "gray", "-"])
+            .output()
+            .unwrap()
+            .stdout;
+        (0..64).map(|x| rgba[18 * 64 + x]).collect::<Vec<u8>>()
+    };
+    let (start, last) = (columns("0"), columns(&format!("{}", (end - 1) as f64 / 1e6)));
+    // The rectangle is 0.4 of the width: x 3.2 to 28.8 at the start, 35.2 to 60.8 at the end.
+    assert!(start[16] > 200 && start[1] < 30 && start[48] < 30, "start {start:?}");
+    assert!(last[48] > 200 && last[33] < 30 && last[62] < 30 && last[16] < 30, "end {last:?}");
+}
+
 /// B-roll from a screen recording: "Teď otevřu Claudu Code." names the recording of the Claude Code window in its Czech
 /// ending, so find_broll suggests it over that sentence with why and the edit that places it; once placed it is not
 /// suggested again, a range that names nothing gets nothing, and a range needs the transcript key.

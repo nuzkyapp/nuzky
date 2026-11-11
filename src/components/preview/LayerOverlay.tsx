@@ -3,7 +3,7 @@ import { api } from "../../lib/api";
 import { followPointer } from "../../lib/drag";
 import { NO_CROP } from "../../lib/presets";
 import { findClip, isCaptionTrack, placeCaptions, setClipTransform, transformAtPlayhead, useAiLocked, useEditor } from "../../lib/store";
-import type { Crop, LayerBounds, Project, Transform } from "../../lib/types";
+import type { Crop, LayerBounds, Mask, Project, Transform } from "../../lib/types";
 import { withEdge } from "../inspector/ShapeSection";
 import { useStyleUi } from "../inspector/TextSection";
 
@@ -71,6 +71,43 @@ function inRounded(p: Pt, q: Pt[], radius: number) {
   const r = (radius * Math.min(w, h)) / 2;
   const [x, y] = [Math.max(0, Math.abs(u - 0.5) * w - w / 2 + r), Math.max(0, Math.abs(v - 0.5) * h - h / 2 + r)];
   return Math.hypot(x, y) <= r;
+}
+
+/** Where a point given in the mask's own axes, in canvas pixels from its centre, lies over a layer whose whole picture is `frame`. */
+function maskPoint(frame: Pt[], m: Mask, [sx, sy]: Pt): Pt {
+  const [w, h] = [Math.hypot(frame[1][0] - frame[0][0], frame[1][1] - frame[0][1]), Math.hypot(frame[3][0] - frame[0][0], frame[3][1] - frame[0][1])];
+  const r = (m.rotation * Math.PI) / 180;
+  const [u, v] = [0.5 + m.x + (sx * Math.cos(r) - sy * Math.sin(r)) / Math.max(w, 1e-6), 0.5 + m.y + (sx * Math.sin(r) + sy * Math.cos(r)) / Math.max(h, 1e-6)];
+  return [frame[0][0] + u * (frame[1][0] - frame[0][0]) + v * (frame[3][0] - frame[0][0]), frame[0][1] + u * (frame[1][1] - frame[0][1]) + v * (frame[3][1] - frame[0][1])];
+}
+
+/** The mask's half width and height in canvas pixels over `frame`. */
+function maskHalf(frame: Pt[], m: Mask): Pt {
+  return [(m.width * Math.hypot(frame[1][0] - frame[0][0], frame[1][1] - frame[0][1])) / 2, (m.height * Math.hypot(frame[3][0] - frame[0][0], frame[3][1] - frame[0][1])) / 2];
+}
+
+/** The mask's edge over `frame`: a closed outline, or for a linear mask a line reaching past the layer. */
+function maskOutline(frame: Pt[], m: Mask): Pt[] {
+  const [hw, hh] = maskHalf(frame, m);
+  if (m.kind === "linear") {
+    const reach = Math.hypot(frame[2][0] - frame[0][0], frame[2][1] - frame[0][1]) * 2;
+    return [maskPoint(frame, m, [-reach, 0]), maskPoint(frame, m, [reach, 0])];
+  }
+  if (m.kind === "rectangle") return [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map((p) => maskPoint(frame, m, p as Pt));
+  return Array.from({ length: 64 }, (_, i) => maskPoint(frame, m, [hw * Math.cos((i * Math.PI) / 32), hh * Math.sin((i * Math.PI) / 32)]));
+}
+
+/** Whether the mask shows the layer at `p`, so a click where it hides the picture reaches the layer below. */
+function inMask(p: Pt, frame: Pt[], m: Mask | null | undefined) {
+  if (!m) return true;
+  const [u, v] = alongQuad(frame, p);
+  const [w, h] = [Math.hypot(frame[1][0] - frame[0][0], frame[1][1] - frame[0][1]), Math.hypot(frame[3][0] - frame[0][0], frame[3][1] - frame[0][1])];
+  const [dx, dy] = [(u - 0.5 - m.x) * w, (v - 0.5 - m.y) * h];
+  const r = (m.rotation * Math.PI) / 180;
+  const [x, y] = [dx * Math.cos(r) + dy * Math.sin(r), dy * Math.cos(r) - dx * Math.sin(r)];
+  const [hw, hh] = maskHalf(frame, m);
+  const inside = m.kind === "linear" ? y <= 0 : m.kind === "rectangle" ? Math.abs(x) <= hw && Math.abs(y) <= hh : (x / Math.max(hw, 1e-6)) ** 2 + (y / Math.max(hh, 1e-6)) ** 2 <= 1;
+  return inside !== !!m.invert;
 }
 
 function rotateAbout(p: Pt, c: Pt, deg: number): Pt {
@@ -395,7 +432,9 @@ export function LayerBox({ width, height, bleed, source }: { width: number; heig
     at.onBounds(list);
     if (list.length === 0) return;
     const p = toCanvas(down.clientX, down.clientY);
-    const hit = [...list].reverse().find((b) => inQuad(p, b.corners as Pt[]) && inRounded(p, b.corners as Pt[], at.radius(b.clipId)));
+    const hit = [...list]
+      .reverse()
+      .find((b) => inQuad(p, b.corners as Pt[]) && inRounded(p, b.corners as Pt[], at.radius(b.clipId)) && inMask(p, b.frame as Pt[], at.transform(b.clipId)?.mask));
     if (!hit) {
       at.select(null);
       return;
@@ -418,6 +457,10 @@ export function LayerBox({ width, height, bleed, source }: { width: number; heig
   const corners = live?.corners ?? (selected?.corners as Pt[] | undefined);
   const screen = corners?.map(([x, y]) => [x * k, y * k] as Pt);
   const croppable = !!selected && source.croppable(selected.clipId);
+  // The mask's edge, dashed, while the box shows the layer where the engine put it.
+  const mask = selected && !live ? source.transform(selected.clipId)?.mask : null;
+  const maskEdge = mask && selected ? maskOutline(selected.frame as Pt[], mask).map(([x, y]) => `${x * k},${y * k}`).join(" ") : null;
+  const frameClip = selected ? (selected.frame as Pt[]).map(([x, y]) => `${x * k},${y * k}`).join(" ") : "";
   // Visible preview area in overlay coordinates; the preview clips everything outside it.
   const pad = HANDLE / 2 + 1;
   const visible = (p: Pt) => p[0] >= -bleed.x + pad && p[0] <= width + bleed.x - pad && p[1] >= -bleed.y + pad && p[1] <= height + bleed.y - pad;
@@ -452,6 +495,18 @@ export function LayerBox({ width, height, bleed, source }: { width: number; heig
           <svg className="pointer-events-none absolute inset-0 overflow-visible" width={width} height={height}>
             {live?.frame && (
               <polygon points={live.frame.map(([x, y]) => `${x * k},${y * k}`).join(" ")} fill="none" stroke="var(--color-fg)" strokeOpacity={0.6} strokeWidth={1} strokeDasharray="4 4" />
+            )}
+            {maskEdge && mask && (
+              <>
+                <clipPath id={`mask-frame-${selected.clipId}`}>
+                  <polygon points={frameClip} />
+                </clipPath>
+                {mask.kind === "linear" ? (
+                  <polyline data-mask-edge={mask.kind} points={maskEdge} clipPath={`url(#mask-frame-${selected.clipId})`} fill="none" stroke="var(--color-fg)" strokeOpacity={0.8} strokeWidth={1} strokeDasharray="5 4" />
+                ) : (
+                  <polygon data-mask-edge={mask.kind} points={maskEdge} fill="none" stroke="var(--color-fg)" strokeOpacity={0.8} strokeWidth={1} strokeDasharray="5 4" />
+                )}
+              </>
             )}
             <polygon points={screen.map((p) => p.join(",")).join(" ")} fill="none" stroke="var(--color-fg)" strokeWidth={1.5} />
             <line x1={top[0]} y1={top[1]} x2={up[0]} y2={up[1]} stroke="var(--color-fg)" strokeWidth={1.5} />

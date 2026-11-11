@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { ChevronLeft, ChevronRight, Diamond, Maximize, Minimize, RotateCcw } from "lucide-react";
-import { clipOffset, keyframeIndexAt, keyframeTolerance, transformAt, upsertKeyframe } from "../../lib/keyframes";
+import { clipOffset, cropAndMask, keyframeIndexAt, keyframeTolerance, transformAt, upsertKeyframe } from "../../lib/keyframes";
 import { LIMITS } from "../../lib/limits";
 import { DEFAULT_TRANSFORM } from "../../lib/presets";
 import { editClip, isCaptionTrack, readoutTime, setClipTransform, transformAtPlayhead, useEditor } from "../../lib/store";
@@ -96,7 +96,7 @@ export function TransformSection({ clip, asset, caption = false }: { clip: Clip;
       {
         type: "updateClip",
         clipId: c.id,
-        transform: { ...DEFAULT_TRANSFORM, y: isCaptionTrack(track) ? LIMITS.captionY : 0, crop: transformAtPlayhead(c, useEditor.getState().timeUs).crop },
+        transform: { ...DEFAULT_TRANSFORM, y: isCaptionTrack(track) ? LIMITS.captionY : 0, ...cropAndMask(transformAtPlayhead(c, useEditor.getState().timeUs)) },
       },
       { type: "setKeyframes", clipId: c.id, keyframes: [] },
     ]);
