@@ -1,8 +1,9 @@
 import json, subprocess, time
 
 from e2e.ai_panel import FAKE
+from e2e.caption_text import SECTION, reveal, views
 from e2e.corrections import generate_captions, tab
-from e2e.harness import CLI, FIXTURES, changed_share, export, flow, link_models, preview_crop, preview_rect, preview_redraw, wait, webdriver
+from e2e.harness import CLI, FIXTURES, changed_share, export, flow, link_models, press, preview_crop, preview_rect, preview_redraw, wait, webdriver
 
 TRACKS = 'return window.__nuzky.store.getState().snap.project.tracks'
 LANGUAGES = "return [...document.querySelectorAll('[role=radiogroup][aria-label=\"Captions to style\"] [role=radio]')]" \
@@ -93,15 +94,52 @@ def bilingual(r):
     r.check('Redo brings them back', wait(lambda: english(r) is not None, 5))
     en = english(r)
 
-    # Picking English in Languages styles English only.
+    # Picking English in Languages makes the tab about English; Edit style shows an English caption in the inspector,
+    # whose place the AI panel took to translate.
     r.s.run("document.querySelector('[role=radio][aria-label=\"English captions\"]').click()")
     picked = wait(lambda: r.s.run("return [...document.querySelectorAll('h3')].some((h) => h.textContent === 'Style · English')"), 5)
-    r.check('picking English styles the English captions', picked and r.s.run(
+    r.check('picking English makes the tab about the English captions', picked and r.s.run(
         "return !!document.querySelector('[data-translate-again]') && !document.querySelector('[data-generate-captions]')"))
-    r.s.run("[...document.querySelectorAll('button[aria-pressed]')].find((b) => b.title === 'Apply Yellow to all captions').click()")
+    inspector = f"return [!!document.querySelector('aside[aria-label=AI]'), !!document.querySelector('{SECTION}')]"
+    r.check("the AI panel that translated sits in the inspector's place", r.s.run(inspector) == [True, False], r.s.run(inspector))
+    r.seek(en['clips'][0]['startUs'])
+    r.s.run("document.querySelector('[data-edit-caption-style]').click()")
+    selection = lambda: r.s.run('return window.__nuzky.store.getState().selection')
+    r.check('Edit style puts the AI panel away and shows the English caption at the playhead in the inspector',
+            wait(lambda: r.s.run(inspector) == [False, True] and selection() == [en['clips'][0]['id']], 5), [r.s.run(inspector), selection()])
+    r.s.run(f"document.querySelector('{SECTION} button[title=\"Apply Yellow to all captions\"]').click()")
     yellow = wait(lambda: (t := english(r)) and t['clips'][0]['content']['style']['color'] != en_style['color'] and t, 5)
     r.check('a style applies to the English captions', yellow, english(r)['clips'][0]['content']['style'])
     r.check('and leaves the Czech look alone', speech(r)['clips'][0]['content']['style'] == cs_style)
+
+    # A caption's inspector styles either track: Language goes from a Czech caption to the English one on screen with it,
+    # whose inspector has no karaoke or key words and puts a style on at 70 % of its size.
+    k = yellow['clips'][0]['content']['style']['fontSize'] / 74  # Yellow is 74 px at 1080p; here at 70 % on this canvas.
+    first = speech(r)['clips'][0]
+    r.focus_clip(first['id'])
+    picker = f"[...document.querySelectorAll('{SECTION} [role=group][aria-label=Language] button')]"
+    segments = lambda: r.s.run(f"return {picker}.map((b) => [b.textContent.trim(), b.getAttribute('aria-pressed')])")
+    r.check("a Czech caption's inspector offers Language with Czech and English, Czech picked",
+            wait(lambda: segments() == [['Czech', 'true'], ['English', 'false']], 10), segments())
+    r.s.run(f"{picker}.find((b) => b.textContent.trim() === 'English')?.focus()")
+    press('Return')
+    under = next(c for c in english(r)['clips'] if c['startUs'] <= first['startUs'] < c['startUs'] + c['durationUs'])
+    r.check('Enter on English selects the English caption on screen when the Czech one starts', wait(lambda: selection() == [under['id']], 5), selection())
+    focused = lambda: r.s.run("return [document.activeElement?.textContent.trim(), document.activeElement?.getAttribute('aria-pressed')]")
+    r.check('and the keyboard stays on English, now picked', wait(lambda: focused() == ['English', 'true'], 5), focused())
+    sections = r.s.run(f"return [...document.querySelectorAll('{SECTION} section h3')].map((h) => h.textContent)")
+    karaoke = r.s.run(f"return !!document.querySelector('{SECTION} button[title=\"Apply Karaoke to all captions\"]')")
+    r.check("the English caption's inspector has no Karaoke or Key words and no style that lights words",
+            'Style' in sections and 'Karaoke' not in sections and 'Key words' not in sections and not karaoke, {'sections': sections, 'karaoke tile': karaoke})
+    views(r, 'inspector-english', reveal(f"document.querySelector('{SECTION} [role=group][aria-label=Language]').parentElement.parentElement.parentElement"))
+    r.s.run(f"document.querySelector('{SECTION} button[title=\"Apply Box to all captions\"]').click()")
+    boxed = wait(lambda: (t := english(r)) and all(c['content']['style']['background'] == '#000000b3' for c in t['clips']) and t, 5)
+    sizes = [c['content']['style']['fontSize'] for c in (boxed or english(r))['clips']]
+    r.check('Box from the inspector goes on every English caption at 70 % of its 62 px, without a highlight',
+            boxed and all(abs(s - 62 * k) < 0.01 for s in sizes) and not any(c['content']['style'].get('highlight') for c in boxed['clips']),
+            {'sizes': sizes, 'expected': 62 * k})
+    r.check('and leaves the Czech look alone too', speech(r)['clips'][0]['content']['style'] == cs_style)
+    r.s.run('window.__nuzky.store.getState().select([])')
 
     # Both show in the preview; hiding English takes only it away.
     middle = en['clips'][0]['startUs'] + en['clips'][0]['durationUs'] // 2

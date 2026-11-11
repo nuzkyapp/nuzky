@@ -135,8 +135,8 @@ def resolution_captions(r):
     # The safe area leaves 720 px of a 1080 px wide vertical canvas for a centred caption.
     r.check('they wrap inside the 4K safe area: 1440 px, twice 720', {s['maxWidth'] for s in styles} == {1440},
             {s['maxWidth'] for s in styles})
-    reel = wait(lambda: r.s.run("return document.querySelector('button[title=\"Apply Reel to all captions\"]')?.getAttribute('aria-pressed') === 'true'"), 5)
-    r.check('the Captions tab marks Reel as their style', reel)
+    reel = wait(lambda: r.s.run("return document.querySelector('[data-caption-look]')?.textContent") == 'Reel', 5)
+    r.check('the Captions tab names Reel as their style', reel)
     track = next(t for t in r.s.run(PROJECT)['tracks'] if t['kind'] == 'text')
     caption = max(track['clips'], key=lambda c: c['durationUs'])
     r.s.run('window.__nuzky.store.getState().select([])')

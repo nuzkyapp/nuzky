@@ -2,11 +2,14 @@ import { useState } from "react";
 import { create } from "zustand";
 import { AlignCenter, AlignLeft, AlignRight, Ban, RotateCcw } from "lucide-react";
 import { LIMITS } from "../../lib/limits";
-import { BOX_RADIUS, CAPTION_STYLES, KEYWORD_COLOR, KEYWORD_PICKS, TEXT_PRESETS, isLook, sameStyle, weightOf } from "../../lib/presets";
-import { applyCaptionLook, editClip, patched, placeCaptions, presetOver, restyleCaptions, useCanvasUnit, useEditor, type StylePatch } from "../../lib/store";
-import type { Animation, CaptionPreset, Clip, EditCmd, LetterCase, TextAlign, TextShadow, TextStyle, Transform } from "../../lib/types";
+import { BOX_RADIUS, KEYWORD_COLOR, KEYWORD_PICKS, TEXT_PRESETS, isLook, sameStyle, scaleStyle, weightOf } from "../../lib/presets";
+import { languageName } from "../../lib/speech";
+import { applyCaptionLook, editClip, isCaptionTrack, patched, placeCaptions, presetOver, restyleCaptions, useCanvasUnit, useEditor, type StylePatch } from "../../lib/store";
+import type { Animation, CaptionPreset, Clip, EditCmd, LetterCase, TextAlign, TextShadow, TextStyle, Track, Transform } from "../../lib/types";
 import { FontPicker } from "../FontPicker";
 import { Select } from "../panel/SpeechControls";
+import { useSpeechLanguage } from "../panel/CaptionLanguages";
+import { MyStyles, StyleTile, builtInStyles, forTrack, useMyStyles, type Tile } from "./CaptionStyles";
 import { ALL_WEIGHTS, DEFAULT_FONT, WEIGHT_NAMES, useFontWeights } from "../../lib/fonts";
 import { Button, Checkbox, Chip, ColorInput, Disclosure, LockReason, PresetTile, Section, Segmented, Slider, TextSwatch, lockedProps, parseNumber, useLockReason } from "../ui";
 import { captionKeys, keyAsText, markKeyWords } from "../../lib/keywords";
@@ -83,15 +86,18 @@ function ApplyTo() {
 const textStyles = (clips: Clip[]) => clips.flatMap((c) => (c.content.type === "text" ? [c.content.style] : []));
 
 /**
- * Style tiles use the presets and names of the Text tab, or of the Captions tab for a caption. A caption's
- * style goes to every caption unless Apply to says This caption; its text is always its own.
+ * Style tiles use the presets and names of the Text tab, or of the Captions tab for a caption, with the user's own
+ * styles under them. A caption's style goes to every caption of its track unless Apply to says This caption; its text
+ * is always its own.
  */
 export function TextSection({ clip, text, style, caption }: { clip: Clip; text: string; style: TextStyle; caption: boolean }) {
   const edit = useEditor((s) => s.edit);
   const all = useStyleUi((s) => s.allCaptions) && caption;
-  // The captions of this caption's track, which an agent may have made beside another captions track.
-  const track = useEditor((s) => (all ? s.snap?.project.tracks.find((t) => t.clips.some((c) => c.id === clip.id)) : undefined));
+  // The captions of this caption's track, which an agent may have made beside another captions track, or a translation.
+  const track = useEditor((s) => (caption ? s.snap?.project.tracks.find((t) => t.clips.some((c) => c.id === clip.id)) : undefined));
   const everyCaption = all && track ? track.clips : null;
+  // A translation has no spoken words, so nothing lights up or is a key word in it.
+  const spoken = caption && !track?.translation;
   // Built from the latest confirmed style, so two quick changes to different properties both stick.
   const setStyle: SetStyle = everyCaption
     ? (patch, key) => restyleCaptions(patch, `captions:style:${key}`, track?.id)
@@ -99,48 +105,40 @@ export function TextSection({ clip, text, style, caption }: { clip: Clip; text: 
         editClip(clip.id, (c) => (c.content.type === "text" ? { type: "updateClip", clipId: c.id, style: patched(c.content.style, patch) } : null), `${clip.id}:style:${key}`);
   const styles = everyCaption ? textStyles(everyCaption) : undefined;
   const unit = useCanvasUnit();
-  const presets = caption ? CAPTION_STYLES : TEXT_PRESETS;
-  const selected = (p: (typeof presets)[number]) => {
-    if (!caption) return sameStyle(p.style, style, unit);
-    return (everyCaption ?? [clip]).every((c) => c.content.type === "text" && isLook(p as CaptionPreset, c.content.style, c.animIn, c.animOut, unit));
-  };
-  const apply = (p: (typeof presets)[number]) => {
-    const look = p as CaptionPreset;
-    if (everyCaption) return void applyCaptionLook({ style: look.style, animIn: look.animIn ?? null, animOut: look.animOut ?? null }, p.name, track?.id);
-    const restyle: EditCmd = { type: "updateClip", clipId: clip.id, style: presetOver(p.style, style, unit) };
-    // A caption style brings its animations too.
-    const animate = (slot: "in" | "out", animation: Animation | null | undefined): EditCmd => ({ type: "setAnimation", clipId: clip.id, slot, animation: animation ?? null });
-    edit(caption ? [restyle, animate("in", look.animIn), animate("out", look.animOut)] : restyle);
-  };
   const unlit = unlitReason(clip, text);
   const timed = clip.content.type === "text" && !!clip.content.words?.length;
   return (
     <>
       <Section title="Text">
         <TextField clipId={clip.id} text={text} />
+        {caption && <CaptionTracks clip={clip} />}
         {caption && <ApplyTo />}
       </Section>
       {/* Font, size, colour and case first, so they are in view without scrolling past every style. */}
       <Section title="Style">
         <MainStyle style={style} styles={styles} setStyle={setStyle} unit={unit} />
-        <div className="grid grid-cols-3 gap-2">
-          {presets.map((p) => (
-            <PresetTile key={p.name} named label={p.name} selected={selected(p)} title={everyCaption ? `Apply ${p.name} to all captions` : `Apply ${p.name} style`} onClick={() => apply(p)}>
-              {/* As the Captions tab draws its styles: the name in the style, so the two lists read as one. */}
-              <span className="absolute inset-0 flex items-center justify-center px-1">
-                <TextSwatch style={{ ...p.style, fontFamily: p.style.fontFamily ?? style.fontFamily }} label={p.name} size={13} />
-              </span>
-            </PresetTile>
-          ))}
-        </div>
+        {caption ? (
+          <CaptionLooks clip={clip} style={style} everyCaption={everyCaption} trackId={track?.id} translation={!spoken} unit={unit} />
+        ) : (
+          <div className="grid grid-cols-3 gap-2">
+            {TEXT_PRESETS.map((p) => (
+              <PresetTile key={p.name} named label={p.name} selected={sameStyle(p.style, style, unit)} title={`Apply ${p.name} style`} onClick={() => edit({ type: "updateClip", clipId: clip.id, style: presetOver(p.style, style, unit) })}>
+                {/* As the Captions tab draws its styles: the name in the style, so the two lists read as one. */}
+                <span className="absolute inset-0 flex items-center justify-center px-1">
+                  <TextSwatch style={{ ...p.style, fontFamily: p.style.fontFamily ?? style.fontFamily }} label={p.name} size={13} />
+                </span>
+              </PresetTile>
+            ))}
+          </div>
+        )}
       </Section>
-      {caption && (
+      {spoken && (
         <Section title="Karaoke">
           <HighlightRows style={style} styles={styles} setStyle={setStyle} />
           {style.highlight && unlitReason(clip, text) && <p className="text-[12px] text-muted">{unlitReason(clip, text)}</p>}
         </Section>
       )}
-      {caption && (
+      {spoken && (
         <Section title="Key words">
           <KeywordRows style={style} styles={styles} setStyle={setStyle} clips={everyCaption ?? [clip]} />
           {/* Without word timing, as captions brought from CapCut, the line shows only once a pick is on. */}
@@ -150,6 +148,97 @@ export function TextSection({ clip, text, style, caption }: { clip: Clip; text: 
       <MoreStyleFold style={style} styles={styles} setStyle={setStyle} unit={unit} />
       {everyCaption && <CaptionPosition clips={everyCaption} trackId={track?.id} title="Position of all captions" />}
     </>
+  );
+}
+
+/**
+ * A caption's style tiles, the built-in ones and the user's own, as the Captions tab offers them for its track: on All
+ * captions a tile gives every caption of the track its look, animations included, else the selected caption alone.
+ */
+function CaptionLooks({
+  clip,
+  style,
+  everyCaption,
+  trackId,
+  translation,
+  unit,
+}: {
+  clip: Clip;
+  style: TextStyle;
+  everyCaption: Clip[] | null;
+  trackId?: string;
+  translation: boolean;
+  unit: number;
+}) {
+  const edit = useEditor((s) => s.edit);
+  const lock = useLockReason();
+  const mine = useMyStyles();
+  const apply = (look: CaptionPreset) => {
+    if (everyCaption) return void applyCaptionLook({ style: look.style, animIn: look.animIn ?? null, animOut: look.animOut ?? null }, look.name, trackId);
+    const animate = (slot: "in" | "out", animation: Animation | null | undefined): EditCmd => ({ type: "setAnimation", clipId: clip.id, slot, animation: animation ?? null });
+    edit([{ type: "updateClip", clipId: clip.id, style: presetOver(look.style, style, unit) }, animate("in", look.animIn), animate("out", look.animOut)]);
+  };
+  const tile: Tile = (original, own) => {
+    const look = forTrack(original, translation, !!own);
+    const current = (everyCaption ?? [clip]).every((c) => c.content.type === "text" && isLook(look, c.content.style, c.animIn, c.animOut, unit));
+    return (
+      <StyleTile
+        key={original.name}
+        preset={original}
+        font={style.fontFamily}
+        current={current}
+        disabled={!!lock}
+        title={lock ?? (everyCaption ? `Apply ${look.name} to all captions` : `Apply ${look.name} style`)}
+        onApply={() => apply(look)}
+        own={own}
+      />
+    );
+  };
+  const grid = "grid grid-cols-3 gap-2";
+  return (
+    <>
+      <div className={grid}>{builtInStyles(translation).map((p) => tile(p))}</div>
+      {/* Saved like the built-in ones, for 1080p, so a style looks the same on any canvas. */}
+      <MyStyles look={{ style: scaleStyle(style, 1 / unit), animIn: clip.animIn ?? null, animOut: clip.animOut ?? null }} mine={mine} tile={tile} grid={grid} />
+    </>
+  );
+}
+
+/**
+ * Which captions the inspector shows, while the project has more than one track of them, such as the speech's and its
+ * English translation. Picking another selects that track's caption on screen when this one starts, else the one
+ * starting nearest it. It only changes the selection, so it works while the AI edits.
+ */
+function CaptionTracks({ clip }: { clip: Clip }) {
+  const tracks = useEditor((s) => s.snap?.project.tracks);
+  const captions = (tracks ?? []).filter((t) => isCaptionTrack(t) && t.clips.length > 0);
+  if (captions.length < 2) return null;
+  return <CaptionTrackPicker clip={clip} tracks={captions} />;
+}
+
+function CaptionTrackPicker({ clip, tracks }: { clip: Clip; tracks: Track[] }) {
+  const speech = tracks.filter((t) => !t.translation);
+  const language = useSpeechLanguage(speech[0]) ?? "Captions";
+  const name = (t: Track) => (t.translation ? languageName(t.translation) : speech.indexOf(t) > 0 ? `${language} ${speech.indexOf(t) + 1}` : language);
+  const current = tracks.find((t) => t.clips.some((c) => c.id === clip.id))?.id ?? null;
+  const pick = (id: string) => {
+    const to = tracks.find((t) => t.id === id)?.clips;
+    if (!to?.length || id === current) return;
+    const at = clip.startUs;
+    const shown = to.find((c) => c.startUs <= at && at < c.startUs + c.durationUs);
+    const next = shown ?? to.reduce((a, b) => (Math.abs(b.startUs - at) < Math.abs(a.startUs - at) ? b : a));
+    useEditor.getState().select([next.id]);
+    // The inspector shows the other caption anew; the keyboard stays on the choice that showed it.
+    window.setTimeout(() => document.querySelector<HTMLElement>(`aside[aria-label=Inspector] [role=group][aria-label=Language] [data-seg="${CSS.escape(id)}"]`)?.focus(), 0);
+  };
+  return (
+    <FieldRow label="Language">
+      <div className="min-w-0 flex-1">
+        <LockReason.Provider value={null}>
+          <Segmented label="Language" value={current} onChange={pick} options={tracks.map((t) => ({ id: t.id, label: name(t), title: `Show the ${name(t)} captions` }))} />
+        </LockReason.Provider>
+      </div>
+    </FieldRow>
   );
 }
 

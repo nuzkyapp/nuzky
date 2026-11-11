@@ -114,7 +114,7 @@ export function TransformSection({ clip, asset, caption = false }: { clip: Clip;
         </>
       }
     >
-      {caption && <p className="-mt-1 text-[12px] text-muted">Moves this caption only. Position in the Captions tab moves every caption.</p>}
+      {caption && <p className="-mt-1 text-[12px] text-muted">Moves this caption only. Position of all captions, in the Text tab, moves every caption.</p>}
       {keyed && (
         <p className="tabular -mt-1 text-[12px] text-muted">
           {clip.keyframes.length} keyframe{clip.keyframes.length === 1 ? "" : "s"} · edits {atIndex >= 0 ? "update this keyframe" : "add a keyframe here"}

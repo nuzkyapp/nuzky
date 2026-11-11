@@ -90,8 +90,8 @@ def karaoke(r):
     r.check('every caption keeps the time of each of its words',
             all(' '.join(w['text'] for w in c['words']) == c['text'] for c in captions),
             [(c['text'], [w['text'] for w in c['words']]) for c in captions if ' '.join(w['text'] for w in c['words']) != c['text']])
-    r.check('the karaoke tile stays marked for the captions on the timeline',
-            r.s.run(tile + ".getAttribute('aria-pressed')") == 'true')
+    look = "return document.querySelector('[data-caption-look]')?.textContent ?? null"
+    r.check('the Captions tab names Karaoke as the style of the captions on the timeline', wait(lambda: r.s.run(look) == 'Karaoke', 5), r.s.run(look))
 
     # The first caption of two words each heard for at least four frames: the middle frame of each word.
     def frames(caption):
@@ -204,6 +204,12 @@ def bright(image):
     return sum(1 for r, g, b in image.getdata() if min(r, g, b) > 200)
 
 
+def edit_style(r):
+    """Edit style in the Captions tab, which shows a caption's inspector with the style tiles of every caption."""
+    r.s.run("document.querySelector('[data-edit-caption-style]')?.click()")
+    return wait(lambda: r.s.run("return !!document.querySelector('aside[aria-label=Inspector] [data-style-tile]')"), 5)
+
+
 def tile_js(name):
     return f"return [...document.querySelectorAll('button[aria-pressed]')].find((b) => b.textContent.trim() === {name!r})"
 
@@ -252,7 +258,8 @@ def caption_styles(r):
     r.check('Emphasis marks words of the louder sentence as key, and only those',
             keyed and all(start * 1e6 - 100_000 <= at <= end * 1e6 for at, _ in keyed), {'key': keyed, 'louder': r.louder})
 
-    # Key words by length instead, for every caption at once.
+    # Key words by length instead, for every caption at once, in the inspector Edit style shows.
+    r.check('Edit style shows a caption with the look of every caption in the inspector', edit_style(r))
     r.s.run("[...document.querySelectorAll('[role=group][aria-label=\"Key words\"] button')].find((b) => b.textContent.trim() === 'Longest').click()")
     r.check('Longest marks key words in every caption',
             wait(lambda: all(c['keywords'] == {'color': KEY_GREEN, 'pick': 'longest'} for c in r.s.run(STYLED)), 5))
@@ -347,6 +354,7 @@ def caption_styles(r):
             {'regenerated': regenerated[0], 'before': engine[0]})
 
     # Another look, then a restart: My styles is still there and brings the look back.
+    edit_style(r)
     r.s.run(tile_js('Reel') + '.click()')
     r.check('Reel replaces the style on every caption', wait(lambda: all(c['keywords'] is None and c['animIn'] is None for c in r.s.run(STYLED)), 5))
     leave_editor(r)
@@ -357,6 +365,7 @@ def caption_styles(r):
     r.check('the app starts again', wait(lambda: r.s.run('return !!window.__nuzky?.store.getState().snap', retries=3), 60))
     r.s.run("window.__nuzky.store.setState({view: 'editor'})")
     wait(lambda: r.s.run("const t = [...document.querySelectorAll('[role=tab]')].find((t) => t.textContent.trim() === 'Captions'); t?.click(); return !!t"), 10)
+    wait(lambda: edit_style(r), 10)
     if r.check('after a restart My styles still has Green longest', wait(lambda: r.s.run(tile_js('Green longest') + ' ? true : false'), 10, 0.5)):
         r.s.run(tile_js('Green longest') + '.click()')
         r.check('it brings the font, pop-in and key words back to every caption',

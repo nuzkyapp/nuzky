@@ -3,8 +3,9 @@ All caps from one caption's inspector capitalises every caption and survives pic
 reports with Undo, This caption keeps
 a colour to one caption, More style stays folded until opened and then aligns every caption and gives them a box with
 its opacity and fully round corners, Position moves every caption at once and undoes in one step, and a caption dragged
-in the preview takes every caption with it, or only itself on This caption. The Captions tab
-shows the same controls for every caption. Apply to stays usable while an AI run locks the style. What the user sees is
+in the preview takes every caption with it, or only itself on This caption. The Captions tab has no style controls
+of its own: it names the captions' look and Edit style shows a caption's Text tab. Apply to stays usable while an AI
+run locks the style. What the user sees is
 checked in the project, the saved file and the engine's frame."""
 import json, time
 
@@ -110,7 +111,7 @@ def drag_up(r, clip_id, by, shot):
 
 @flow('caption-text', 'A caption\'s text style goes to every caption unless Apply to says This caption: All caps, a style '
       'that keeps the caps, one caption\'s own colour, More style\'s alignment, box opacity and round corners, Position '
-      'and a drag in the preview for every caption, in the project and the engine\'s frame, with the same controls in the Captions tab', before=grey)
+      'and a drag in the preview for every caption, in the project and the engine\'s frame, reached from the Captions tab by Edit style', before=grey)
 def caption_text(r):
     r.import_media(r.grey)
     r.add_clip('grey.png')
@@ -182,6 +183,25 @@ def caption_text(r):
     r.check('Corners 100 % rounds every box fully', every(r, lambda c: abs(c['style'].get('boxRadius', 0.25) - 1) < 1e-6), [c['style'].get('boxRadius') for c in captions(r)])
     views(r, 'inspector-more-style', reveal(FOLD.format(SECTION, 'More style')))
 
+    # My styles in the inspector, as in the Captions tab: the selected caption's look saved under a name, then applied.
+    own = f"[...document.querySelectorAll('{SECTION} button[aria-pressed]')].find((b) => b.textContent.trim() === 'Boxed')"
+    name = f"document.querySelector('{SECTION} input[aria-label=\"Style name\"]')"
+    r.s.run(f"document.querySelector('{SECTION} button[aria-label=\"Save the current look as a style\"]')?.click()")
+    if r.check('the inspector saves the caption\'s look as a style, named in place', wait(lambda: r.s.run(f'return !!{name}'), 5)):
+        r.s.run(f"const f = {name}; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(f, 'Boxed');"
+                "f.dispatchEvent(new Event('input', {bubbles: true}));"
+                "f.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));")
+        r.check('its tile shows under the built-in styles', wait(lambda: r.s.run(f'return !!{own}'), 5))
+        views(r, 'inspector-my-styles', reveal(f"[...document.querySelectorAll('{SECTION} span')].find((s) => s.textContent === 'My styles')"))
+        r.s.run(f'{own}.click()')
+        r.check('the tile gives every caption the saved look: the selected caption\'s colour, its box and capitals',
+                every(r, lambda c: c['style']['color'] == '#ffe14d' and c['style']['background'] == '#00000066' and c['style'].get('letterCase') == 'upper'),
+                captions(r))
+        r.check('and is checked', wait(lambda: r.s.run(f"return {own}?.getAttribute('aria-pressed')") == 'true', 5))
+        r.s.run("[...document.querySelectorAll('[data-toast]')].find((t) => t.textContent.includes('Boxed applied to all 3 captions'))"
+                "?.querySelectorAll('button').forEach((b) => b.textContent.trim() === 'Undo' && b.click())")
+        r.check('Undo in its toast gives each caption its colour back', wait(lambda: colours() == ['#ffffff', '#ffe14d', '#ffffff'], 5), colours())
+
     # Position: every caption up at once, and one undo takes it back.
     if not r.check('Enter opens Position', open_fold(r, SECTION, 'Position of all captions')):
         return
@@ -225,30 +245,68 @@ def caption_text(r):
     corner = box_corner(engine_frame(r, 'engine-round-box'))
     r.check('the engine draws the caption on a box whose corner is round, leaving the frame grey there', corner is not None and corner > 0.8, corner)
 
-    # The Captions tab: the same controls, for every caption.
+    # The Captions tab names the captions' style and sends to the inspector for it, the one place for their look.
+    r.s.run(f"[...document.querySelectorAll('{SECTION} [role=tab]')].find((t) => t.textContent.trim() === 'Animation').click()")
+    inspector_tab = lambda: r.s.run(f"return [...document.querySelectorAll('{SECTION} [role=tab]')].find((t) => t.getAttribute('aria-selected') === 'true')?.textContent.trim()")
+    wait(lambda: inspector_tab() == 'Animation', 5)
+    r.s.run('window.__nuzky.store.getState().select([])')
+    third = captions(r)[2]['id']
+    r.seek(2_500_000)
     r.s.run("[...document.querySelectorAll('[role=tab]')].find((t) => t.textContent.trim() === 'Captions').click()")
-    if not r.check('the Captions tab shows Case with AB, as every caption is in capitals',
-                   wait(lambda: r.s.run(f"return !!{group(LIBRARY, 'Case')}") and pressed(r, LIBRARY, 'Case') == 'AB', 10)):
+    edit_style = f"document.querySelector('{LIBRARY} [data-edit-caption-style]')"
+    if not r.check('the Captions tab offers Edit style in the inspector', wait(lambda: r.s.run(f"return {edit_style}?.textContent.trim()") == 'Edit style in the inspector', 10)):
         r.shot('captions-tab-missing')
         return
-    wait(lambda: select_all(r, f"""document.querySelector('{LIBRARY} input[aria-label="Size value"]')"""), 5)
+    tab = r.s.run(f"""return {{look: document.querySelector('{LIBRARY} [data-caption-look]')?.textContent,
+        controls: [...document.querySelectorAll('{LIBRARY} [data-style-tile], {LIBRARY} input[aria-label="Size value"], {LIBRARY} [role=group][aria-label=Case]')].length}}""")
+    r.check('it names their look, their own here, and has no style controls of its own', tab == {'look': 'Custom', 'controls': 0}, tab)
+    views(r, 'captions-tab', reveal(edit_style))
+    r.s.run(f'{edit_style}.focus()')
+    press('Return')
+    r.check('Enter on it selects the caption at the playhead and shows its Text tab, though Animation was last open',
+            wait(lambda: r.s.run('return window.__nuzky.store.getState().selection') == [third] and inspector_tab() == 'Text', 5),
+            [r.s.run('return window.__nuzky.store.getState().selection'), inspector_tab()])
+    r.check('the keyboard lands on Font, first in its Style section', wait(lambda: r.s.run(
+        "return !!document.activeElement?.closest('aside[aria-label=Inspector] section') && document.activeElement.getAttribute('aria-label')?.startsWith('Font:')"), 5),
+        r.s.run("return document.activeElement?.getAttribute('aria-label')"))
+    style_top = lambda: r.s.run(f"""const h = [...document.querySelectorAll('{SECTION} section h3')].find((h) => h.textContent === 'Style');
+        const pane = h?.closest('.overflow-y-auto'); return pane ? Math.round(h.getBoundingClientRect().top - pane.getBoundingClientRect().top) : null""")
+    on_font = lambda: r.s.run("return document.activeElement?.getAttribute('aria-label')?.startsWith('Font:') ?? false")
+    r.check('with the Style section at the top of the inspector, Font and Size above the tiles', (top := style_top()) is not None and 0 <= top <= 24, top)
+    views(r, 'inspector-edit-style', 'document.activeElement?.blur()')
+    wait(lambda: select_all(r, f"""document.querySelector('{SECTION} input[aria-label="Size value"]')"""), 5)
     for key in '120':
         press(key)
     press('Return')
-    r.check('Size 120 in the Captions tab goes on every caption', every(r, lambda c: c['style']['fontSize'] == 120), [c['style']['fontSize'] for c in captions(r)])
+    r.check('Size 120 there goes on every caption', every(r, lambda c: c['style']['fontSize'] == 120), [c['style']['fontSize'] for c in captions(r)])
     # My styles keeps the look, and its tile shows the box as round and the label lined up as the captions are.
-    r.s.run(f"document.querySelector('{LIBRARY} button[aria-label=\"Save the current look as a style\"]').click()")
-    name = f"document.querySelector('{LIBRARY} input[aria-label=\"Style name\"]')"
+    r.s.run(f"document.querySelector('{SECTION} button[aria-label=\"Save the current look as a style\"]').click()")
+    name = f"document.querySelector('{SECTION} input[aria-label=\"Style name\"]')"
     if r.check('saving asks for a name in place', wait(lambda: r.s.run(f'return !!{name}'), 5)):
         r.s.run(f"const f = {name}; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(f, 'Round box');"
                 "f.dispatchEvent(new Event('input', {bubbles: true}));"
                 "f.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));")
-        swatch = lambda: r.s.run(f"""const t = [...document.querySelectorAll('{LIBRARY} button[aria-pressed]')].find((b) => b.textContent.trim() === 'Round box');
+        swatch = lambda: r.s.run(f"""const t = [...document.querySelectorAll('{SECTION} [data-style-tile]')].find((b) => b.textContent.trim() === 'Round box');
             const s = t && getComputedStyle(t.querySelector('span'));
             return s ? {{radius: s.borderTopLeftRadius, align: s.textAlign}} : null""")
         r.check('the saved style\'s tile draws a fully round box and lines its name up right',
                 wait(lambda: swatch() == {'radius': '13px', 'align': 'right'}, 5), swatch())
-    views(r, 'captions-tab', reveal(f"[...document.querySelectorAll('{LIBRARY} span')].find((s) => s.textContent === 'Font')"))
+    r.s.run(f"[...document.querySelectorAll('{SECTION} [data-style-tile]')].find((b) => b.textContent.trim() === 'Round box').click()")
+    r.check('its tile gives every caption that look', every(r, lambda c: c['style']['color'] == '#ffffff'), [c['style']['color'] for c in captions(r)])
+    r.s.run("[...document.querySelectorAll('[role=tab]')].find((t) => t.textContent.trim() === 'Captions').click()")
+    r.check('and the Captions tab names the saved style as their look',
+            wait(lambda: r.s.run(f"return document.querySelector('{LIBRARY} [data-caption-look]')?.textContent") == 'Round box', 5),
+            r.s.run(f"return document.querySelector('{LIBRARY} [data-caption-look]')?.textContent"))
+    # With that saved style checked under every built-in one, in the smallest window, Style and Font still show.
+    webdriver('POST', r.s.path + '/window/rect', {'width': 1024, 'height': 640})
+    wait(lambda: r.s.run('return window.innerWidth') == 1024, 5)
+    r.s.run('window.__nuzky.store.getState().select([])')
+    r.s.run(f'{edit_style}.click()')
+    r.check('at 1024 × 640 with Round box checked, Edit style shows Style from its heading with the keyboard on Font',
+            wait(lambda: (top := style_top()) is not None and 0 <= top <= 24 and on_font(), 5), [style_top(), on_font()])
+    r.shot('inspector-edit-style-own-1024')
+    webdriver('POST', r.s.path + '/window/rect', {'width': 1440, 'height': 900})
+    wait(lambda: r.s.run('return window.innerWidth') == 1440, 5)
 
     # An agent can add a second captions track; a caption there styles the captions of its own track only.
     tracks = lambda: r.s.run("""return window.__nuzky.store.getState().snap.project.tracks.filter((t) => t.kind === 'text' && t.name === 'Captions')
