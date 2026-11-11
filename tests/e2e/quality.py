@@ -50,7 +50,8 @@ def quality(r, resolution=None, fps=None, shot=None):
 
 
 def canvas_is(r, **want):
-    return wait(lambda: (c := r.s.run(CANVAS)) and all(c[k] == v for k, v in want.items()) and c, 10)
+    # A quality never chosen is left out of the project.
+    return wait(lambda: (c := r.s.run(CANVAS)) and all(c.get(k, False if k == 'qualityChosen' else None) == v for k, v in want.items()) and c, 10)
 
 
 def export_dialog(r):
@@ -96,7 +97,7 @@ def quality_chip(r):
     close_quality(r)
     r.check('the export dialog still opens at the remembered 720p', export_dialog(r) == ('720p', '30'), export_dialog(r))
     close_export(r)
-    r.check('nothing in the project changed', r.s.run(CANVAS)['qualityChosen'] is False and not r.s.run(
+    r.check('nothing in the project changed', not r.s.run(CANVAS).get('qualityChosen') and not r.s.run(
         'return window.__nuzky.store.getState().snap.canUndo'), r.s.run(CANVAS))
 
     r.import_media(FIXTURES / 'talk.mp4')

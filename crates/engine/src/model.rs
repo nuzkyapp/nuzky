@@ -264,8 +264,9 @@ pub struct Canvas {
     #[serde(default)]
     pub background_blur: f32,
     /// Someone chose this resolution and frame rate as the video's quality, so the export dialog starts from them
-    /// instead of the resolution and preset of the last export. Set by `SetCanvas` with a frame rate.
-    #[serde(default)]
+    /// instead of the resolution and preset of the last export. Set by `SetCanvas` with a frame rate. Left out while
+    /// false, so a project that never chose one saves as before.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub quality_chosen: bool,
 }
 
