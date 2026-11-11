@@ -131,7 +131,7 @@ fn look(app: &AppHandle) -> CmdResult<Look> {
 /// groups, so a new kind of job is safe before anyone thinks of it.
 fn job_blocks(group: StorageGroupId, kinds: &[String]) -> Option<String> {
     let unrelated: &[&str] = match group {
-        StorageGroupId::Sound => &["proxy", "matte", "cover-mask", "cover-pick", "faces", "reframe"],
+        StorageGroupId::Sound => &["proxy", "matte", "cover-mask", "cover-pick", "faces", "reframe", "follow"],
         _ => &["audio", "voice", "dereverb", "level"],
     };
     let never = ["speech-model", "vision-models", "screen-recording", "voiceover"];

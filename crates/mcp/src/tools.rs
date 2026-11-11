@@ -340,6 +340,7 @@ impl Backend {
             "analyze" => self.analyze(parse(arguments)?, state),
             "segment_subject" => self.segment_subject(parse(arguments)?, state),
             "reframe" => self.reframe(parse(arguments)?, state),
+            "follow_object" => self.follow_object(parse(arguments)?, state),
             "transcribe" => self.transcribe(parse(arguments)?, state),
             "get_transcript" => self.get_transcript(parse(arguments)?, state),
             "find_broll" => self.find_broll(parse(arguments)?, state),
@@ -1249,6 +1250,51 @@ impl Backend {
                     })?;
                 Ok(json!({"format":args.format, "width":width, "height":height,
                 "followed":result.followed, "centred":result.centred, "revision":applied.stamp.revision}))
+            },
+        )
+    }
+
+    /// Follows a boxed thing through a video clip as a job and places the clip to keep it in the frame, as one edit of
+    /// the run.
+    fn follow_object(&self, args: FollowObject, state: &SessionState) -> Result<Value> {
+        owns_run(state, &args.run_id)?;
+        let project = self.media_project(&state.project);
+        let host = Arc::downgrade(&self.host);
+        let revision = state.stamp.revision;
+        let run_id = args.run_id.clone();
+        self.host.start_job(
+            &self.client.id,
+            Some(&args.run_id),
+            "follow",
+            state.stamp.clone(),
+            move |cancel, progress| {
+                let followed = nuzky_vision::follow::follow(
+                    &project,
+                    &args.clip_id,
+                    args.at_us,
+                    args.region,
+                    &cancel,
+                    &mut |p| progress.set("following", Some(p)),
+                )?;
+                check_cancel(&cancel)?;
+                let host = host.upgrade().context("APP_CLOSED: project is closed")?;
+                let applied = host
+                    .session
+                    .apply_edits(
+                        &run_id,
+                        &new_id(),
+                        followed.commands,
+                        Expect { revision: Some(revision), ..Expect::default() },
+                    )
+                    .map_err(|error| {
+                        if error.to_string().starts_with("STALE_REVISION") {
+                            anyhow!("STALE_REVISION: The project changed while following. Call follow_object again.")
+                        } else {
+                            error
+                        }
+                    })?;
+                Ok(json!({"clip_id":args.clip_id, "keyframes":followed.keyframes, "found_us":followed.found_us,
+                "lost_us":followed.lost_us, "revision":applied.stamp.revision}))
             },
         )
     }

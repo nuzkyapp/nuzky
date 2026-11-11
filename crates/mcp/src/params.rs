@@ -47,6 +47,19 @@ pub struct Reframe {
     pub clip_ids: Option<Vec<String>>,
 }
 #[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FollowObject {
+    pub run_id: String,
+    /// A video clip of the timeline.
+    pub clip_id: String,
+    /// Timeline microseconds inside the clip at which `box` holds the thing.
+    pub at_us: i64,
+    /// [x, y, w, h]: the thing's left, top, width and height at at_us as fractions of the clip's upright picture, as
+    /// track_object gives them.
+    #[serde(rename = "box")]
+    pub region: [f32; 4],
+}
+#[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum EndAction {
     Keep,

@@ -158,6 +158,7 @@ pub const COMMANDS: &[&str] = &[
     "start_cover_pick",
     "start_export",
     "start_face_check",
+    "start_follow",
     "start_make_reels",
     "start_recap",
     "start_reframe",

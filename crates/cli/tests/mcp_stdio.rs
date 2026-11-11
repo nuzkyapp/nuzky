@@ -1047,7 +1047,7 @@ fn initialize_list_state_edit_end_undo_over_stdio() {
     let mut c = Client::new(true);
     let list = c.rpc("tools/list", json!({}));
     let tools = list["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 49);
+    assert_eq!(tools.len(), 50);
     let beats = tools.iter().find(|t| t["name"] == "cut_to_beats").unwrap();
     assert_eq!(
         (&beats["annotations"]["readOnlyHint"], &beats["annotations"]["destructiveHint"]),
@@ -3618,6 +3618,70 @@ fn reframe_follows_a_wide_head_and_undoes_with_the_run_over_stdio() {
     let done = wait_job(&mut c, &job, Duration::from_secs(10), |_| false);
     assert_eq!(done["status"], "cancelled", "{done}");
     assert_eq!(std::fs::read(c.dir.join("project.nuzky")).unwrap(), changed);
+    c.finish();
+}
+
+/// A 160 px test pattern crossing a textured wide picture, followed onto a vertical canvas inside a run: the clip fills
+/// the canvas and moves with keyframes, the whole change undoes with the run, and a picture that just fills its canvas
+/// or a box off the picture is refused without touching the project.
+#[test]
+fn follow_object_keeps_a_crossing_pattern_in_a_vertical_frame_and_undoes_with_the_run_over_stdio() {
+    let mut c = Client::new(true);
+    let wide = c.dir.join("crossing.mp4");
+    let out = Command::new("ffmpeg")
+        .args(["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i"])
+        .arg("color=c=gray:s=640x360:r=30:d=4,geq=lum='128+50*sin(X/9)*cos(Y/13)':cb=128:cr=128")
+        .args(["-f", "lavfi", "-i", "testsrc2=s=80x80:r=30:d=4", "-filter_complex", "[0][1]overlay=x='60+100*t':y=140"])
+        .args(["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p"])
+        .arg(&wide)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let import = c.call("begin_run", json!({"label":"import"}))["run_id"].clone();
+    let asset = c.call("import_media", json!({"run_id":import,"paths":[wide]}))["asset_ids"][0].clone();
+    c.call(
+        "apply_edits",
+        json!({"run_id":import,"request_id":"place","edits":[
+            {"type":"setCanvas","width":640,"height":360}, {"type":"addClip","assetId":asset}
+        ]}),
+    );
+    c.call("end_run", json!({"run_id":import,"action":"keep"}));
+    let clip = c.call("get_state", json!({}))["tracks"][0]["clips"][0]["id"].clone();
+    // At 1 s the pattern's corner is at (160, 140) of the 640×360 picture.
+    let at_one = json!([0.25, 140.0 / 360.0, 0.125, 80.0 / 360.0]);
+
+    let run = c.call("begin_run", json!({"label":"follow"}))["run_id"].clone();
+    let before = std::fs::read(c.dir.join("project.nuzky")).unwrap();
+    let job = c.call("follow_object", json!({"run_id":run,"clip_id":clip,"at_us":1_000_000,"box":at_one}));
+    let done = wait_job(&mut c, &job, Duration::from_secs(60), |_| false);
+    assert_eq!(done["status"], "failed", "a picture that just fills its canvas has no room: {done}");
+    assert!(done["error"].as_str().unwrap().contains("NO_ROOM"), "{done}");
+    let job =
+        c.call("follow_object", json!({"run_id":run,"clip_id":clip,"at_us":1_000_000,"box":[1.2, 0.2, 0.1, 0.1]}));
+    let done = wait_job(&mut c, &job, Duration::from_secs(60), |_| false);
+    assert!(done["error"].as_str().unwrap().contains("INVALID_ARGUMENTS"), "{done}");
+    assert_eq!(std::fs::read(c.dir.join("project.nuzky")).unwrap(), before);
+
+    c.call(
+        "apply_edits",
+        json!({"run_id":run,"request_id":"tall","edits":[{"type":"setCanvas","width":360,"height":640}]}),
+    );
+    let job = c.call("follow_object", json!({"run_id":run,"clip_id":clip,"at_us":1_000_000,"box":at_one}));
+    let done = wait_job(&mut c, &job, Duration::from_secs(60), |_| false);
+    assert_eq!(done["status"], "done", "{done}");
+    let state = c.call("get_state", json!({}));
+    let followed = &state["tracks"][0]["clips"][0];
+    assert_eq!(done["result"]["clip_id"], clip);
+    assert_eq!(done["result"]["lost_us"], 0, "{done}");
+    assert_eq!(done["result"]["revision"], state["revision"]);
+    assert!(followed["content"]["transform"]["scale"].as_f64().unwrap() > 3.0, "it fills the tall canvas: {followed}");
+    let keys = followed["keyframes"].as_array().unwrap();
+    assert!(keys.len() >= 2 && done["result"]["keyframes"] == keys.len(), "{done} {followed}");
+    let xs: Vec<f64> = keys.iter().map(|k| k["transform"]["x"].as_f64().unwrap()).collect();
+    assert!(xs.first() > xs.last(), "the picture moves left as the pattern moves right: {xs:?}");
+    c.call("end_run", json!({"run_id":run,"action":"keep"}));
+    c.call("undo_run", json!({"run_id":run}));
+    assert_eq!(std::fs::read(c.dir.join("project.nuzky")).unwrap(), before);
     c.finish();
 }
 

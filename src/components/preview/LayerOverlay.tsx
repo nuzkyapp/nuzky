@@ -49,7 +49,7 @@ function cropQuad(q: Pt[], c: Crop): Pt[] {
 }
 
 /** Where `p` lies along the top and left edges of a quad, 0 at the top-left corner and 1 at the far ends. */
-function alongQuad(q: Pt[], p: Pt): Pt {
+export function alongQuad(q: Pt[], p: Pt): Pt {
   const along = (end: Pt) => {
     const [ex, ey] = [end[0] - q[0][0], end[1] - q[0][1]];
     return ((p[0] - q[0][0]) * ex + (p[1] - q[0][1]) * ey) / Math.max(1e-6, ex * ex + ey * ey);

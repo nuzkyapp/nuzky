@@ -32,7 +32,7 @@ pub struct JobEvent {
     #[cfg_attr(
         test,
         ts(
-            type = r#""audio" | "proxy" | "matte" | "export" | "captions" | "transcript" | "style" | "vision-models" | "scene-model" | "cover" | "reframe" | "faces" | "reels" | "speech-model" | "agent" | "beats""#
+            type = r#""audio" | "proxy" | "matte" | "export" | "captions" | "transcript" | "style" | "vision-models" | "scene-model" | "cover" | "reframe" | "follow" | "faces" | "reels" | "speech-model" | "agent" | "beats""#
         )
     )]
     pub kind: &'static str,
@@ -112,8 +112,8 @@ pub(crate) fn register(app: &AppHandle, id: &str) -> Option<Arc<AtomicBool>> {
         match kind {
             "export" => running == "export",
             "captions" | "transcript" | "style" => matches!(running, "captions" | "transcript" | "style"),
-            "vision-models" | "scene-model" | "cover-pick" | "cover-mask" | "cover-export" | "reframe" | "faces"
-            | "reels" => running == kind,
+            "vision-models" | "scene-model" | "cover-pick" | "cover-mask" | "cover-export" | "reframe" | "follow"
+            | "faces" | "reels" => running == kind,
             // Each one decodes a whole video; the next file waits, so the preview keeps some of the machine.
             "proxy" => running == "proxy",
             "matte" => running == "matte",
@@ -1062,6 +1062,73 @@ pub fn start_reframe(
     if let Err(error) = spawned {
         unregister(&app, &id);
         return Err(format!("Starting reframe: {error}"));
+    }
+    Ok(id)
+}
+
+/// Follows what the user boxed in a video clip's picture at `at_us` (`region` in fractions of the upright picture)
+/// and places the clip to keep it in the frame, as one undo step.
+#[tauri::command]
+pub fn start_follow(
+    app: AppHandle,
+    clip_id: String,
+    at_us: i64,
+    region: [f32; 4],
+    expected_epoch: Option<String>,
+) -> Result<String, String> {
+    let state = app.state::<AppState>();
+    let (host, view) = {
+        let current = crate::lock_session(&state.session, expected_epoch.as_deref())?;
+        (Arc::downgrade(&current.host), current.host.session.state().map_err(crate::err)?)
+    };
+    let project = view.project;
+    let id = format!("follow:{}", new_id());
+    let cancel = register(&app, &id).ok_or("Following is already running")?;
+    let (worker, job) = (app.clone(), id.clone());
+    let spawned = std::thread::Builder::new().name("follow".into()).spawn(move || {
+        let mut rep = Reporter::new(&worker, &job, "follow", "Following".into());
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let followed = nuzky_vision::follow::follow(&project, &clip_id, at_us, region, &cancel, &mut |p| {
+                rep.progress(p, Some("Following"))
+            })?;
+            check_cancelled(&cancel)?;
+            let state = worker.state::<AppState>();
+            let current = state.session.lock().unwrap();
+            const SWITCHED: &str = "Another project was opened, so the clip was not moved.";
+            anyhow::ensure!(host.ptr_eq(&Arc::downgrade(&current.host)), SWITCHED);
+            let edited = current
+                .host
+                .session
+                .edit(
+                    followed.commands,
+                    None,
+                    nuzky_session::Expect { revision: Some(view.stamp.revision), speech_layout_key: None },
+                )
+                .map_err(|error| {
+                    if error.to_string().starts_with("STALE_REVISION") {
+                        anyhow::anyhow!("The project changed while following. Follow it again.")
+                    } else {
+                        error
+                    }
+                })?;
+            if let Ok(snap) = current.snapshot(Vec::new()) {
+                worker.emit("project-changed", snap).ok();
+            }
+            let step = (edited.stamp.revision != view.stamp.revision).then_some(&edited.stamp);
+            Ok(Some(
+                serde_json::json!({"clipId":clip_id, "keyframes":followed.keyframes,
+                "foundUs":followed.found_us, "lostUs":followed.lost_us,
+                "revision":step.map(|s| s.revision), "sessionEpoch":step.map(|s| &s.session_epoch)})
+                .to_string(),
+            ))
+        }))
+        .unwrap_or_else(|p| Err(crashed(&p)));
+        rep.finish(result, cancel.load(Ordering::Relaxed));
+        unregister(&worker, &job);
+    });
+    if let Err(error) = spawned {
+        unregister(&app, &id);
+        return Err(format!("Starting to follow: {error}"));
     }
     Ok(id)
 }

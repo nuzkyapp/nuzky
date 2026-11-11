@@ -1,6 +1,7 @@
 import { Captions, Languages, ScanFace, SlidersHorizontal } from "lucide-react";
 import { useState } from "react";
 import { checkFaces, useFaces } from "../../lib/faces";
+import { useFollow } from "../../lib/follow";
 import { useReframe } from "../../lib/reframe";
 import { isLook, scaleStyle } from "../../lib/presets";
 import { translateBlocked, translateCaptions, useAgent } from "../../lib/agent";
@@ -99,6 +100,7 @@ export function CaptionsTab() {
   );
   const checking = useFaces((s) => !!s.job);
   const reframing = useReframe((s) => !!s.job);
+  const following = useFollow((s) => !!s.job);
 
   // Captions go over the selected videos unless Whole video was picked since the selection last changed.
   const selected = useSelectedClips();
@@ -208,8 +210,8 @@ export function CaptionsTab() {
           variant="plain"
           className="text-[12px]"
           data-check-faces
-          disabled={!!faceBlocker || checking || reframing || busy}
-          disabledReason={faceBlocker ?? (checking ? "Looking for faces" : reframing ? "Wait for the reframe to finish" : BUSY)}
+          disabled={!!faceBlocker || checking || reframing || following || busy}
+          disabledReason={faceBlocker ?? (checking ? "Looking for faces" : reframing ? "Wait for the reframe to finish" : following ? "Wait for Follow to finish" : BUSY)}
           onClick={() => void checkFaces()}
         >
           <ScanFace size={14} /> Find text over faces

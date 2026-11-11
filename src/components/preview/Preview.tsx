@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { AudioLines, Maximize, Minimize, Pause, Play, SkipBack, SkipForward, Smartphone, SquareSplitHorizontal, Volume2, VolumeX, X } from "lucide-react";
 import { api } from "../../lib/api";
 import { useCover } from "../../lib/cover";
+import { stopPicking, useFollow } from "../../lib/follow";
 import { toggleCompare, toggleFullPreview, toggleMuted, usePreview } from "../../lib/preview";
 import { NO_ADJUST, sameAdjust } from "../../lib/presets";
 import { pictureAspect, useReels } from "../../lib/reels";
@@ -15,6 +16,7 @@ import { AiRunBar } from "../TopBar";
 import { CompareDivider } from "./CompareDivider";
 import { IconButton, LockReason, RangeInput, trapTab } from "../ui";
 import { KindIcon } from "../panel/assets";
+import { FollowPicker, FollowStatus } from "./FollowPicker";
 import { LayerOverlay } from "./LayerOverlay";
 import { PreviewDrop } from "./PreviewDrop";
 import { RatioMenu } from "./RatioMenu";
@@ -234,6 +236,7 @@ export function Preview() {
       ),
   );
   const { muted, full, compare } = usePreview();
+  const picking = useFollow((s) => !!s.picking);
   const { togglePlay, seek } = useEditor.getState();
   const sectionRef = useRef<HTMLElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -256,7 +259,9 @@ export function Preview() {
   // Another view or project takes the comparison away rather than bringing it back on return.
   useEffect(() => {
     if (cover || reels || source || home) usePreview.setState({ compare: null });
-  }, [cover, reels, source, home]);
+    // Choosing what to follow needs the timeline's picture.
+    if (cover || reels || source || home || compare !== null) stopPicking();
+  }, [cover, reels, source, home, compare]);
   const deviceBox = useRef({ w: 0, h: 0 });
   useEffect(() => {
     if (sourcePreview && deviceBox.current.w > 0) void api.sourcePreviewResize(deviceBox.current.w, deviceBox.current.h);
@@ -339,6 +344,7 @@ export function Preview() {
       <div ref={boxRef} className="relative mx-4 mt-3 min-h-0 flex-1 overflow-hidden">
         {cover && box.w > 0 && <CoverStage format={cover} box={box} />}
         {!cover && <ReframeStatus />}
+        {!cover && <FollowStatus />}
         {!cover && <FacesStatus />}
         {source && (
           <>
@@ -387,7 +393,8 @@ export function Preview() {
               )}
             </div>
             {/* Outside the clipped frame so handles of a layer larger than the canvas stay reachable. */}
-            {!empty && !engineError && canvas && fit.w > 0 && !reels && compare === null && <LayerOverlay width={fit.w} height={fit.h} bleed={{ x: (box.w - fit.w) / 2, y: (box.h - fit.h) / 2 }} />}
+            {!empty && !engineError && canvas && fit.w > 0 && !reels && compare === null && !cover && picking && <FollowPicker width={fit.w} height={fit.h} />}
+            {!empty && !engineError && canvas && fit.w > 0 && !reels && compare === null && !picking && <LayerOverlay width={fit.w} height={fit.h} bleed={{ x: (box.w - fit.w) / 2, y: (box.h - fit.h) / 2 }} />}
             {!empty && !engineError && canvas && !reels && !cover && <PreviewDrop canvas={canvas} />}
             {compare !== null && !empty && !engineError && !reels && !cover && !source && fit.w > 0 && <CompareDivider width={fit.w} />}
             <VoiceoverCountdown />
