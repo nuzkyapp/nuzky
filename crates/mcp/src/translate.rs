@@ -123,7 +123,8 @@ pub fn translated_segments(
             .collect();
         let next = sentences.get(i + 1).map_or(i64::MAX, |s| s.start_us);
         for mut segment in group_words(&timed, grouping, frame_us) {
-            segment.end_us = segment.end_us.min(next).max(segment.start_us + 1);
+            // Never past the sentence, so the translation of the last one never makes the video longer.
+            segment.end_us = segment.end_us.min(next).min(sentence.end_us).max(segment.start_us + 1);
             segment.words.clear();
             segments.push(segment);
         }
@@ -134,7 +135,11 @@ pub fn translated_segments(
 /// The look of new translated captions: the speech captions' own at 70 % of their size, without a highlight or
 /// key words, which need the spoken words, and their place: under the speech captions, by as much as the lowest of
 /// them and the tallest translation draw.
-pub fn translated_look(source: &Track, segments: &[CaptionSegment], canvas: &Canvas) -> (CaptionPreset, TransformPatch) {
+pub fn translated_look(
+    source: &Track,
+    segments: &[CaptionSegment],
+    canvas: &Canvas,
+) -> (CaptionPreset, TransformPatch) {
     let first = source.clips.iter().find(|c| matches!(c.content, ClipContent::Text { .. }));
     let mut style = match first.map(|c| &c.content) {
         Some(ClipContent::Text { style, .. }) => style.clone(),
@@ -154,7 +159,8 @@ pub fn translated_look(source: &Track, segments: &[CaptionSegment], canvas: &Can
         .filter(|c| c.keyframes.is_empty())
         .filter_map(|c| match &c.content {
             ClipContent::Text { text, style, transform, .. } => Some(
-                (0.5 + transform.y) * height + crate::fonts::text_height(text, style, wrap(style)) * transform.scale / 2.0,
+                (0.5 + transform.y) * height
+                    + crate::fonts::text_height(text, style, wrap(style)) * transform.scale / 2.0,
             ),
             ClipContent::Media { .. } => None,
         })
@@ -163,10 +169,8 @@ pub fn translated_look(source: &Track, segments: &[CaptionSegment], canvas: &Can
     style.stroke_width *= TRANSLATION_SIZE;
     style.highlight = None;
     style.keywords = None;
-    let tallest = segments
-        .iter()
-        .map(|s| crate::fonts::text_height(&s.text, &style, wrap(&style)) * scale)
-        .fold(0.0, f32::max);
+    let tallest =
+        segments.iter().map(|s| crate::fonts::text_height(&s.text, &style, wrap(&style)) * scale).fold(0.0, f32::max);
     let centre = speech_bottom + 0.2 * style.font_size * scale + tallest / 2.0;
     let preset = CaptionPreset {
         name: String::new(),
@@ -174,8 +178,12 @@ pub fn translated_look(source: &Track, segments: &[CaptionSegment], canvas: &Can
         anim_in: first.and_then(|c| c.anim_in),
         anim_out: first.and_then(|c| c.anim_out),
     };
-    let transform =
-        TransformPatch { x: Some(x), y: Some((centre / height - 0.5).min(0.42)), scale: Some(scale), ..TransformPatch::default() };
+    let transform = TransformPatch {
+        x: Some(x),
+        y: Some((centre / height - 0.5).min(0.42)),
+        scale: Some(scale),
+        ..TransformPatch::default()
+    };
     (preset, transform)
 }
 
@@ -307,7 +315,7 @@ mod tests {
     }
 
     /// A translation shares its sentence's time by the length of its words, never starts before the sentence nor
-    /// runs into the next one, and keeps no words to highlight.
+    /// runs past it, and keeps no words to highlight.
     #[test]
     fn translations_share_their_sentence_time() {
         let s = |start_us, end_us| Sentence { start_us, end_us, text: String::new() };
@@ -319,7 +327,7 @@ mod tests {
         assert_eq!(texts, ["Today I'll show you how", "to edit a video.", "Captions!"]);
         assert_eq!(segments[0].start_us, 1_000_000);
         assert!(segments[1].start_us > 2_000_000 && segments[1].end_us <= 3_000_000, "{:?}", segments[1].start_us);
-        assert_eq!(segments[2].start_us, 5_000_000);
+        assert_eq!((segments[2].start_us, segments[2].end_us), (5_000_000, 6_000_000));
         assert!(segments.iter().all(|s| s.words.is_empty()));
     }
 }

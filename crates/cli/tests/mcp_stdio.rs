@@ -2549,7 +2549,9 @@ fn captions_translate_into_a_track_of_their_own_over_stdio() {
     assert!(c.error("translate_captions", write(&json!("stale"), &translations)).contains("CAPTIONS_CHANGED"));
     assert!(c.error("translate_captions", write(&read["key"], &json!([translations[0]]))).contains("missing [1]"));
     assert!(c.error("translate_captions", json!({"language": "xx"})).contains("INVALID_LANGUAGE"));
+    let length = c.call("get_state", json!({}))["duration_us"].clone();
     let made = c.call("translate_captions", write(&read["key"], &translations));
+    assert_eq!(c.call("get_state", json!({}))["duration_us"], length, "the last translation ends with the video");
 
     let tracks =
         |c: &mut Client| c.call("get_state", json!({"range": {"startUs": 0, "endUs": i64::MAX}}))["tracks"].clone();
