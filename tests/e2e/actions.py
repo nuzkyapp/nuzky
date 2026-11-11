@@ -13,6 +13,10 @@ CHOSEN = "return document.querySelector('#launcher-list [role=option][aria-selec
 GROUPS = "return [...document.querySelectorAll('#launcher-list [role=group]')].filter((g) => g.querySelector('[role=option]')).map((g) => g.getAttribute('aria-label'))"
 FOCUSED = "const el = document.activeElement; return el ? {tag: el.tagName, data: Object.keys(el.dataset), text: el.textContent, role: el.getAttribute('role')} : null"
 TOASTS = 'return window.__nuzky.store.getState().toasts.map((t) => t.text)'
+FULL = "return !!document.querySelector('section[aria-label=Preview].fixed')"
+FULL_STUB = """const win = window.__nuzky.previewWindow;
+win.isFullscreen = () => Promise.resolve(false);
+win.setFullscreen = () => Promise.resolve();"""
 
 
 def open_launcher(r, **modifiers):
@@ -37,6 +41,13 @@ def clips(r):
       "and takes the launcher's key of another editor's set")
 def launcher_actions(r):
     resize(r, 1440, 900)
+    # An empty project has nothing to export, and the row says so.
+    open_launcher(r)
+    search(r, 'export')
+    rows = r.s.run(ROWS)
+    r.check('in an empty project Export says to add a video first', rows and rows[0]['disabled'] and 'Add a video or picture first.' in rows[0]['text'], rows)
+    press('Escape')
+    wait(lambda: not r.s.run(OPEN), 3)
     r.import_media(FIXTURES / 'talk.mp4')
     r.add_clip('talk.mp4')
     r.s.run('window.__nuzky.store.getState().select([])')
@@ -121,6 +132,23 @@ def launcher_actions(r):
     r.check("a button's own reason reads as a sentence: Rotate 90° says to select a clip first", rows and rows[0]['text'] == 'Rotate 90°Select a clip first.', rows)
     press('Escape')
     r.check('Esc closes the launcher', wait(lambda: not r.s.run(OPEN), 3))
+
+    # The full screen preview covers the controls outside it, so their actions wait. The window's own full screen is
+    # stubbed, as in the preview flow, so the run never takes over the screen.
+    r.s.run(FULL_STUB)
+    r.s.run('document.activeElement?.blur()')
+    r.key('f')
+    wait(lambda: r.s.run(FULL), 5)
+    open_launcher(r)
+    search(r, 'resolution')
+    rows = r.s.run(ROWS)
+    r.check('in the full screen preview Resolution and frame rate says to leave it first',
+            rows and rows[0]['disabled'] and 'Leave the full screen preview first.' in rows[0]['text'], rows)
+    press('Escape')
+    wait(lambda: not r.s.run(OPEN), 3)
+    r.s.run('document.activeElement?.blur()')
+    r.key('f')
+    r.check('F leaves the full screen preview', wait(lambda: not r.s.run(FULL), 5))
 
     # A button that opens a menu is pressed, with the keyboard left on it.
     open_launcher(r)

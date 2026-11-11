@@ -79,6 +79,7 @@ export type Command = {
   run: () => void;
 };
 
+const FULL = "Leave the full screen preview first.";
 const sentence = (text: string) => `${text[0].toUpperCase()}${text.slice(1)}.`;
 /** Changes the project, so the AI's lock holds it back. */
 const EDITS = new Set<ActionId>(["split", "deleteLeft", "deleteRight", "freeze", "delete", "duplicate", "cut", "paste", "pasteAttributes", "undo", "redo", "import"]);
@@ -90,7 +91,7 @@ function whyNot(action: ActionId): string | null {
   const { project } = s.snap;
   if (useCover.getState().open && RESTS_IN_COVER.has(action)) return "Close the cover editor first.";
   if (useReels.getState().open && !WORKS_IN_REELS.has(action)) return "Leave reels first.";
-  if (usePreview.getState().full && RESTS_IN_FULL.has(action)) return "Leave the full screen preview first.";
+  if (usePreview.getState().full && RESTS_IN_FULL.has(action)) return FULL;
   if (EDITS.has(action) && s.aiRun && s.lockShown) return AI_EDITING;
   const t = Math.round(s.timeUs);
   switch (action) {
@@ -114,6 +115,10 @@ function whyNot(action: ActionId): string | null {
       return s.clipboard ? null : nothingCopied();
     case "pasteAttributes":
       return pasteAttributesBlocker(project, s.selection, s.clipboard);
+    case "export": {
+      const running = s.exportJobId && s.jobs[s.exportJobId]?.status === "running";
+      return running || projectDuration(project) > 0 ? null : "Add a video or picture first.";
+    }
     case "undo":
       return s.snap.canUndo ? null : "Nothing to undo.";
     case "redo":
@@ -164,6 +169,7 @@ function focusWhenShown(selector: string, fallback?: string, frames = 30) {
 
 /** Why the library's tabs are out of reach: the cover editor, reels and the voiceover take its place. */
 function libraryWhy(): string | null {
+  if (usePreview.getState().full) return FULL;
   if (useCover.getState().open) return "Close the cover editor first.";
   if (useReels.getState().open) return "Leave reels first.";
   if (useVoiceover.getState().phase !== "closed") return "Close the voiceover first.";
@@ -201,6 +207,8 @@ function controlWhy(selector: string): string | null {
     if (useReels.getState().open) return "Leave reels first.";
     return useSource.getState().asset ? "Go back to the timeline first." : "Not available here.";
   }
+  // The full screen preview covers everything but its own controls.
+  if (usePreview.getState().full && !el.closest("section[aria-label=Preview]")) return FULL;
   if (!el.disabled && el.getAttribute("aria-disabled") !== "true") return null;
   if (locked()) return AI_EDITING;
   // "Rotate: select a clip first" names the button the row already names.
@@ -260,6 +268,8 @@ export const COMMANDS: Command[] = [
     why: () => {
       const s = useEditor.getState();
       if (useCover.getState().open) return "The cover editor is open.";
+      if (useReels.getState().open) return "Leave reels first.";
+      if (usePreview.getState().full) return FULL;
       return s.snap && projectDuration(s.snap.project) > 0 ? null : "Add a video or picture first.";
     },
     run: () => openCover(),
