@@ -187,6 +187,8 @@ mod tests {
             duck_db: None,
             mono: None,
             background: None,
+            log: None,
+            lut: None,
         })
         .unwrap();
         let got = placed(&p, &words);
@@ -314,6 +316,8 @@ mod tests {
             duck_db: None,
             mono: None,
             background: None,
+            log: None,
+            lut: None,
         })
         .unwrap();
         assert_eq!(speech_layout_key(&p), key);

@@ -299,6 +299,7 @@ fn layer(image: Image, corners: Quad, opacity: f32, rect: [f32; 4]) -> Layer {
         mask,
         matte: None,
         effects: Vec::new(),
+        color: Default::default(),
     }
 }
 

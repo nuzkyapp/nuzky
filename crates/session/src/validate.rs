@@ -5,8 +5,8 @@ use anyhow::{Context, Result, ensure};
 use nuzky_engine::{
     Project,
     model::{
-        Asset, AssetKind, Background, Clip, ClipContent, EffectValue, LETTER_SPACING, LINE_SPACING, MAX_BORDER_WIDTH,
-        MAX_CANVAS_SIDE, MAX_CLIP_EFFECTS, MAX_CORRECTION_CHARS, MAX_FONT_HEIGHT_RATIO, MAX_LEFT_OUT,
+        Asset, AssetKind, Background, Clip, ClipContent, EffectValue, LETTER_SPACING, LINE_SPACING, Lut,
+        MAX_BORDER_WIDTH, MAX_CANVAS_SIDE, MAX_CLIP_EFFECTS, MAX_CORRECTION_CHARS, MAX_FONT_HEIGHT_RATIO, MAX_LEFT_OUT,
         MAX_LEFT_OUT_CHARS, MAX_REEL_HOOK_CHARS, MAX_REEL_TITLE_CHARS, MAX_REEL_WHY_CHARS, MAX_SHADOW,
         MAX_TEXT_WIDTH_RATIO, PROJECT_VERSION, ReelCandidate, ReelStatus, TextStyle, Thumbnail, TrackKind, Transform,
         language_name, max_stroke_width, unit_of,
@@ -15,6 +15,8 @@ use nuzky_engine::{
 
 /// More words than any caption shows; bounds the per-frame search for the spoken word.
 const MAX_CAPTION_WORDS: usize = 1000;
+/// A LUT's name is its file's name, which file systems keep under 256 characters.
+const MAX_LUT_NAME: usize = 255;
 
 /// Structural validity; missing media is reported by media tools, not by editing.
 pub fn validate(project: &Project) -> Result<()> {
@@ -434,6 +436,8 @@ fn validate_clip(project: &Project, clip: &Clip, kind: TrackKind) -> Result<()> 
             duck_db,
             mono,
             background,
+            log,
+            lut,
         } => {
             let asset =
                 project.asset(asset_id).ok_or_else(|| anyhow::anyhow!("INVALID_PROJECT: missing asset {asset_id}"))?;
@@ -514,6 +518,22 @@ fn validate_clip(project: &Project, clip: &Clip, kind: TrackKind) -> Result<()> 
                 color(&shape.border_color, "border color")?;
             }
             background_of(project, clip, kind, asset, background)?;
+            let picture = kind == TrackKind::Video && asset.kind != AssetKind::Audio;
+            ensure!(
+                picture || (log.is_none() && lut.is_none()),
+                "INVALID_PROJECT: clip {} converts the colour of media without a picture",
+                clip.id
+            );
+            if let Lut::File { id, name, strength } = lut {
+                ensure!(
+                    nuzky_engine::color::is_lut_id(id)
+                        && name.chars().count() <= MAX_LUT_NAME
+                        && strength.is_finite()
+                        && (0.0..=1.0).contains(strength),
+                    "INVALID_PROJECT: the LUT of {} needs an id of 16 hex digits, a name of at most {MAX_LUT_NAME} characters and a strength from 0 to 1",
+                    clip.id
+                );
+            }
         }
         ClipContent::Text { style, transform: t, words, .. } => {
             text_style(style, (project.canvas.width, project.canvas.height))?;

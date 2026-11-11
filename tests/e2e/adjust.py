@@ -141,6 +141,8 @@ def adjust(r):
     wait(lambda: r.s.run(TAB, '[role=tablist][aria-label=Library]', 'Filters'), 5)
     punch = "document.querySelector('button[title=\"Apply Punch\"]')"
     wait(lambda: r.s.run(f'return !!{punch}'), 5)
+    # Below Log footage and LUTs: the filters' tiles are in view for the screenshots.
+    r.s.run("document.querySelector('aside[data-tour=library] section[aria-label=Filters]').scrollIntoView({block: 'start'})")
     for width, height, suffix in ((1024, 640, '-1024'), (1440, 900, '')):
         webdriver('POST', r.s.path + '/window/rect', {'width': width, 'height': height})
         wait(lambda: r.s.run('return window.innerWidth') == width, 5)

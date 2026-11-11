@@ -432,6 +432,8 @@ fn fade_out(clip_id: &str, fade_out_us: i64) -> EditCmd {
         duck_db: None,
         mono: None,
         background: None,
+        log: None,
+        lut: None,
     }
 }
 

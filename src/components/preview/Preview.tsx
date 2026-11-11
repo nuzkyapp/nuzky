@@ -226,7 +226,12 @@ export function Preview() {
   const reel = useReels((s) => s.current);
   const picture = useEditor((s) => (reels ? pictureAspect(s.snap?.project, reel) : 0));
   const home = useEditor((s) => s.view === "home");
-  const adjusted = useEditor((s) => !!s.snap?.project.tracks.some((t) => t.clips.some((c) => c.content.type === "media" && !sameAdjust(c.content.adjust, NO_ADJUST))));
+  const adjusted = useEditor(
+    (s) =>
+      !!s.snap?.project.tracks.some((t) =>
+        t.clips.some((c) => c.content.type === "media" && (!sameAdjust(c.content.adjust, NO_ADJUST) || (c.content.log ?? "none") !== "none" || c.content.lut?.type === "file")),
+      ),
+  );
   const { muted, full, compare } = usePreview();
   const { togglePlay, seek } = useEditor.getState();
   const sectionRef = useRef<HTMLElement>(null);
@@ -419,7 +424,7 @@ export function Preview() {
             <LockReason.Provider value={null}>
               <IconButton
                 round
-                label={compare !== null ? "Stop comparing" : adjusted ? "Compare before and after the adjustments" : "Nothing to compare: no clip has a filter or adjustments"}
+                label={compare !== null ? "Stop comparing" : adjusted ? "Compare before and after the colour" : "Nothing to compare: no clip has Log, a LUT, a filter or adjustments"}
                 active={compare !== null}
                 disabled={compare === null && !adjusted}
                 onClick={toggleCompare}

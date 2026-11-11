@@ -1210,6 +1210,8 @@ mod tests {
                     duck_db: 0.0,
                     mono: Default::default(),
                     background: Default::default(),
+                    log: Default::default(),
+                    lut: Default::default(),
                 },
             );
             if id == "b" {
@@ -1283,6 +1285,8 @@ mod tests {
                     duck_db: 0.0,
                     mono: Default::default(),
                     background: Default::default(),
+                    log: Default::default(),
+                    lut: Default::default(),
                 },
             );
             if id == "b" {

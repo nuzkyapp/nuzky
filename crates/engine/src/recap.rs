@@ -489,6 +489,7 @@ fn layer(image: Image, [x, y, w, h]: [f32; 4]) -> Layer {
         mask: None,
         matte: None,
         effects: Vec::new(),
+        color: Default::default(),
     }
 }
 
@@ -1040,6 +1041,8 @@ impl Sound {
                 duck_db: 0.0,
                 mono: Default::default(),
                 background: Background::None,
+                log: Default::default(),
+                lut: Default::default(),
             };
             Clip::new(format!("{}-{at}", asset.id), at.max(0), asset.duration_us, content)
         };

@@ -16,6 +16,7 @@ import type { Asset, JobEvent, ProjectSummary, Snapshot, ModelQuestion, Transpor
 import { AGENT_VISION_MODELS } from "./components/ModelQuestionDialog";
 import { showsVisionDownload } from "./components/setup/steps/VisionStep";
 import { useYoutube } from "./lib/youtube";
+import { importLutPaths, useLuts } from "./lib/color";
 import { MEDIA_EXTENSIONS, importPaths, mediaKind, pickAndImport, resolveDrop } from "./components/panel/assets";
 import { Toasts } from "./components/Toasts";
 import { Tour } from "./components/Tour";
@@ -535,7 +536,7 @@ useEditor.subscribe((s, prev) => {
 // Test hook for WebDriver runs; native file dialogs cannot be automated.
 if (import.meta.env.DEV)
   Object.assign(window, {
-    __nuzky: { importPaths, exportVideo, plugins: usePlugins, runPlugin, gallery: useGallery, store: useEditor, cover: useCover, reels: useReels, openReelsToFind, speech: useSpeech, names: useNames, api, agent: useAgent, dock: useDock, setup: useSetup, library: useLibrary, style: useStyle, addProjects, findDrafts, newProjectFromMedia, capcut: useCapCut, openDraft, openDraftFolder, openProject, refreshLibrary, trashProjects, updates: useUpdates, checkForUpdates, sounds: useSounds, stickers: useStickers, tour: useTour, youtube: useYoutube, previewWindow: appWindow, remote: useRemote, source: useSource, keys: useKeys, keysQuestion: useKeysQuestion, settings: useSettings, openSettings },
+    __nuzky: { importPaths, importLutPaths, luts: useLuts, exportVideo, plugins: usePlugins, runPlugin, gallery: useGallery, store: useEditor, cover: useCover, reels: useReels, openReelsToFind, speech: useSpeech, names: useNames, api, agent: useAgent, dock: useDock, setup: useSetup, library: useLibrary, style: useStyle, addProjects, findDrafts, newProjectFromMedia, capcut: useCapCut, openDraft, openDraftFolder, openProject, refreshLibrary, trashProjects, updates: useUpdates, checkForUpdates, sounds: useSounds, stickers: useStickers, tour: useTour, youtube: useYoutube, previewWindow: appWindow, remote: useRemote, source: useSource, keys: useKeys, keysQuestion: useKeysQuestion, settings: useSettings, openSettings },
   });
 
 async function startEditor() {

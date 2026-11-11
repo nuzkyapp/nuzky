@@ -258,6 +258,8 @@ fn update_speed(id: &str, speed: f32) -> EditCmd {
         duck_db: None,
         mono: None,
         background: None,
+        log: None,
+        lut: None,
     }
 }
 fn invariants(p: &Project) -> Result<(), String> {

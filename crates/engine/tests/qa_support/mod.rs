@@ -100,6 +100,8 @@ pub fn clip(id: &str, asset: &str, start: i64, duration: i64) -> Clip {
             duck_db: 0.0,
             mono: Default::default(),
             background: Default::default(),
+            log: Default::default(),
+            lut: Default::default(),
         },
     )
 }

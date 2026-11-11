@@ -374,6 +374,8 @@ pub(crate) fn update(clip_id: &str, transform: Transform) -> EditCmd {
         duck_db: None,
         mono: None,
         background: None,
+        log: None,
+        lut: None,
     }
 }
 

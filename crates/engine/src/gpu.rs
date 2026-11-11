@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context as _, Result};
 use wgpu::util::DeviceExt;
 
+use crate::color::{LogConversion, Lut3d};
 use crate::media::Transfer;
 use crate::model::Adjust;
 
@@ -113,11 +114,15 @@ struct Layer {
     shadow: vec4<f32>, // opacity, blur, offset down
     matte: vec4<f32>, // fill behind the person: 0 none, 1 footage, 2 colour, 3 picture; footage: its own transfer, or picture scale
     fill: vec4<f32>, // premultiplied fill colour
+    color: vec4<f32>, // log profile on (1) or off, the LUT's strength, the LUT on (1) or off
+    log_rows: array<vec4<f32>, 3>, // the log profile's primaries to BT.2020, by rows
 };
 @group(0) @binding(0) var<uniform> layer: Layer;
 @group(0) @binding(1) var tex: texture_2d<f32>;
 @group(0) @binding(2) var matte_tex: texture_2d<f32>; // the person in alpha, over the same uv as tex
 @group(0) @binding(3) var fill_tex: texture_2d<f32>;
+@group(0) @binding(4) var log_curve: texture_1d<f32>; // scene light of the log profile's 0..1 signal (`crate::color`)
+@group(0) @binding(5) var file_lut: texture_3d<f32>; // the LUT the user imported
 
 struct VsOut {
     @builtin(position) pos: vec4<f32>,
@@ -148,6 +153,43 @@ const BT709_LUMA = vec3<f32>(0.2126, 0.7152, 0.0722);
 // g * x / (1 + (g - 1) * x) keeps 0 and 1, has slope g at 0 and 1 / g at 1, and rises for every g > 0.
 fn bend(x: vec3<f32>, g: f32) -> vec3<f32> {
     return g * x / (1.0 + (g - 1.0) * x);
+}
+
+// `crate::color`'s display rendering of scene light, 0.18 being 18 % grey.
+const TONE_POWER = 1.763696;
+const TONE_KNEE = 0.300731;
+const TONE_GAIN = 1.002262;
+
+fn log_scene(s: f32) -> f32 {
+    let n = i32(textureDimensions(log_curve));
+    let p = clamp(s, 0.0, 1.0) * f32(n - 1);
+    let i = min(i32(floor(p)), n - 2);
+    return mix(textureLoad(log_curve, i, 0).r, textureLoad(log_curve, i + 1, 0).r, p - f32(i));
+}
+
+// A log profile's picture in normal colour, as `color::Conversion::apply`: scene light in BT.2020 tone mapped per
+// channel, then BT.709 without what lies below 0, brought under 1 towards its luma and encoded for the screen.
+fn log_to_display(rgb: vec3<f32>) -> vec3<f32> {
+    let light = vec3<f32>(log_scene(rgb.r), log_scene(rgb.g), log_scene(rgb.b));
+    let scene = vec3<f32>(dot(layer.log_rows[0].xyz, light), dot(layer.log_rows[1].xyz, light), dot(layer.log_rows[2].xyz, light));
+    let x = pow(max(scene, vec3<f32>(0.0)), vec3<f32>(TONE_POWER));
+    let display = fit(max(nuzky_bt2020_to_bt709 * (TONE_GAIN * x / (x + TONE_KNEE)), vec3<f32>(0.0)));
+    return pow(clamp(display, vec3<f32>(0.0), vec3<f32>(1.0)), vec3<f32>(1.0 / 2.4));
+}
+
+// Trilinear lookup of a LUT over 0..1, red along x, green along y and blue along z, as `Lut3d::sample` does.
+fn lut3d(t: texture_3d<f32>, rgb: vec3<f32>) -> vec3<f32> {
+    let n = vec3<i32>(textureDimensions(t));
+    let p = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0)) * vec3<f32>(n - 1);
+    let i = min(vec3<i32>(floor(p)), n - 2);
+    let f = p - vec3<f32>(i);
+    let row = array<vec3<f32>, 4>(
+        mix(textureLoad(t, i, 0).rgb, textureLoad(t, i + vec3<i32>(1, 0, 0), 0).rgb, f.x),
+        mix(textureLoad(t, i + vec3<i32>(0, 1, 0), 0).rgb, textureLoad(t, i + vec3<i32>(1, 1, 0), 0).rgb, f.x),
+        mix(textureLoad(t, i + vec3<i32>(0, 0, 1), 0).rgb, textureLoad(t, i + vec3<i32>(1, 0, 1), 0).rgb, f.x),
+        mix(textureLoad(t, i + vec3<i32>(0, 1, 1), 0).rgb, textureLoad(t, i + vec3<i32>(1, 1, 1), 0).rgb, f.x),
+    );
+    return mix(mix(row[0], row[1], f.y), mix(row[2], row[3], f.y), f.z);
 }
 
 // Brings colour into 0..1 by moving it towards its own luma, keeping hue and luma where clipping each
@@ -278,14 +320,24 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         }
     }
     var rgb = c.rgb;
-    let adjusting = in.pos.x >= layer.opacity.z
+    // Left of the compare line the clip shows as recorded, without its log profile, LUT and adjustments.
+    let graded = in.pos.x >= layer.opacity.z;
+    let adjusting = graded
         && (any(layer.adjust != vec4<f32>(0.0)) || any(layer.grading != vec4<f32>(0.0)) || layer.effects.x != 0.0 || layer.effects.w != 0.0);
     let hdr = layer.opacity.y > 0.0;
-    if adjusting || hdr {
-        // Tone mapping and adjustments work on straight colour.
+    let log = graded && layer.color.x > 0.0;
+    let file = graded && layer.color.z > 0.0;
+    if adjusting || hdr || log || file {
+        // Tone mapping, LUTs and adjustments work on straight colour.
         rgb = select(vec3<f32>(0.0), rgb / c.a, c.a > 0.0);
         if hdr {
             rgb = nuzky_hdr_to_sdr(rgb, layer.opacity.y);
+        }
+        if log {
+            rgb = log_to_display(rgb);
+        }
+        if file {
+            rgb = mix(rgb, lut3d(file_lut, rgb), layer.color.y);
         }
         if adjusting {
             // Every control scales or bends the picture instead of adding a constant to it, so black stays black
@@ -379,6 +431,8 @@ struct LayerUniform {
     shadow: [f32; 4],
     matte: [f32; 4],
     fill: [f32; 4],
+    color: [f32; 4],
+    log_rows: [[f32; 4]; 3],
 }
 
 /// Straight-alpha RGBA image shared between frames without copying.
@@ -407,6 +461,15 @@ pub struct Layer {
     pub matte: Option<Box<Matte>>,
     /// Plugin effects the image goes through first, in order; each must be prepared (`Gpu::prepare_effect`).
     pub effects: Vec<EffectPass>,
+    pub color: ClipColor,
+}
+
+/// What a layer's colour goes through before its adjustments: its log profile's conversion, then the user's LUT
+/// mixed over it at a strength from 0 to 1.
+#[derive(Clone, Default)]
+pub struct ClipColor {
+    pub log: Option<Arc<LogConversion>>,
+    pub lut: Option<(Arc<Lut3d>, f32)>,
 }
 
 /// One plugin effect drawn over a layer's image (`crate::plugin_effects`).
@@ -577,8 +640,14 @@ pub struct Gpu {
     target: Option<Target>,
     /// Textures from the previous frame, keyed by the image allocation they hold.
     textures: HashMap<usize, (Arc<Vec<u8>>, wgpu::Texture)>,
+    /// Log curve and LUT textures from the previous frame, keyed by what they hold.
+    curves: HashMap<usize, (Arc<LogConversion>, wgpu::Texture)>,
+    luts: HashMap<usize, (Arc<Lut3d>, wgpu::Texture)>,
     /// Bound where a layer has no matte or fill.
     blank: wgpu::Texture,
+    /// Bound where a layer has no log profile or LUT.
+    blank_curve: wgpu::Texture,
+    blank_lut: wgpu::Texture,
     pub adapter_name: String,
 }
 
@@ -631,16 +700,61 @@ fn whole_texture_pipeline(
 }
 
 fn texture_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    texture_entry_of(binding, wgpu::TextureViewDimension::D2)
+}
+
+fn texture_entry_of(binding: u32, view_dimension: wgpu::TextureViewDimension) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
         visibility: wgpu::ShaderStages::FRAGMENT,
         ty: wgpu::BindingType::Texture {
             sample_type: wgpu::TextureSampleType::Float { filterable: false },
-            view_dimension: wgpu::TextureViewDimension::D2,
+            view_dimension,
             multisampled: false,
         },
         count: None,
     }
+}
+
+/// A log curve as a 32-bit float 1D texture.
+fn curve_texture(device: &wgpu::Device, queue: &wgpu::Queue, curve: &[f32]) -> wgpu::Texture {
+    device.create_texture_with_data(
+        queue,
+        &wgpu::TextureDescriptor {
+            label: Some("log curve"),
+            size: wgpu::Extent3d { width: curve.len() as u32, height: 1, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D1,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        },
+        wgpu::util::TextureDataOrder::LayerMajor,
+        bytemuck::cast_slice(curve),
+    )
+}
+
+/// A LUT as an RGBA 32-bit float 3D texture, red along x.
+fn lut_texture(device: &wgpu::Device, queue: &wgpu::Queue, lut: &Lut3d) -> wgpu::Texture {
+    let n = lut.size as u32;
+    let size = wgpu::Extent3d { width: n, height: n, depth_or_array_layers: n };
+    let texels: Vec<f32> = lut.data.iter().flat_map(|&[r, g, b]| [r, g, b, 1.0]).collect();
+    device.create_texture_with_data(
+        queue,
+        &wgpu::TextureDescriptor {
+            label: Some("lut"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D3,
+            format: wgpu::TextureFormat::Rgba32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        },
+        wgpu::util::TextureDataOrder::LayerMajor,
+        bytemuck::cast_slice(&texels),
+    )
 }
 
 impl Gpu {
@@ -694,6 +808,8 @@ impl Gpu {
                 texture_entry(1),
                 texture_entry(2),
                 texture_entry(3),
+                texture_entry_of(4, wgpu::TextureViewDimension::D1),
+                texture_entry_of(5, wgpu::TextureViewDimension::D3),
             ],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -774,6 +890,8 @@ impl Gpu {
             wgpu::util::TextureDataOrder::LayerMajor,
             &[0, 0, 0, 0],
         );
+        let blank_curve = curve_texture(&device, &queue, &[0.0; 2]);
+        let blank_lut = lut_texture(&device, &queue, &Lut3d { size: 2, data: vec![[0.0; 3]; 8] });
         Ok(Self {
             device,
             queue,
@@ -791,7 +909,11 @@ impl Gpu {
             lost,
             target: None,
             textures: HashMap::new(),
+            curves: HashMap::new(),
+            luts: HashMap::new(),
             blank,
+            blank_curve,
+            blank_lut,
             adapter_name,
         })
     }
@@ -865,8 +987,8 @@ impl Gpu {
         Ok(tex)
     }
 
-    /// `textures` are the layer's image, its matte and its fill.
-    fn bind(&self, layer: &Layer, textures: [&wgpu::Texture; 3], w: u32, h: u32, premult: bool) -> wgpu::BindGroup {
+    /// `textures` are the layer's image, its matte and its fill, then its log profile's LUT and its own LUT.
+    fn bind(&self, layer: &Layer, textures: [&wgpu::Texture; 5], w: u32, h: u32, premult: bool) -> wgpu::BindGroup {
         let base = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
         let shift = (layer.uv_rotation / 90) as usize % 4;
         let mut corners = [[0.0; 4]; 4];
@@ -944,6 +1066,13 @@ impl Gpu {
             shadow,
             matte,
             fill,
+            color: [
+                layer.color.log.is_some() as u8 as f32,
+                layer.color.lut.as_ref().map_or(0.0, |(_, strength)| strength.clamp(0.0, 1.0)),
+                layer.color.lut.is_some() as u8 as f32,
+                0.0,
+            ],
+            log_rows: layer.color.log.as_ref().map_or([[0.0; 4]; 3], |log| log.to_2020.map(|[a, b, c]| [a, b, c, 0.0])),
         };
         let buffer = self.uniform_buffer("layer", bytemuck::bytes_of(&uniform));
         self.bind_group(&buffer, textures.map(|t| t.create_view(&Default::default())))
@@ -961,8 +1090,8 @@ impl Gpu {
         buffer
     }
 
-    fn bind_group(&self, buffer: &wgpu::Buffer, views: [wgpu::TextureView; 3]) -> wgpu::BindGroup {
-        let [image, matte, fill] = views.each_ref().map(wgpu::BindingResource::TextureView);
+    fn bind_group(&self, buffer: &wgpu::Buffer, views: [wgpu::TextureView; 5]) -> wgpu::BindGroup {
+        let [image, matte, fill, log, file] = views.each_ref().map(wgpu::BindingResource::TextureView);
         self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("layer"),
             layout: &self.layout,
@@ -971,8 +1100,22 @@ impl Gpu {
                 wgpu::BindGroupEntry { binding: 1, resource: image },
                 wgpu::BindGroupEntry { binding: 2, resource: matte },
                 wgpu::BindGroupEntry { binding: 3, resource: fill },
+                wgpu::BindGroupEntry { binding: 4, resource: log },
+                wgpu::BindGroupEntry { binding: 5, resource: file },
             ],
         })
+    }
+
+    fn curve_texture_for(&mut self, log: &Arc<LogConversion>) -> wgpu::Texture {
+        let key = Arc::as_ptr(log) as usize;
+        let (device, queue) = (&self.device, &self.queue);
+        self.curves.entry(key).or_insert_with(|| (log.clone(), curve_texture(device, queue, &log.curve))).1.clone()
+    }
+
+    fn lut_texture_for(&mut self, lut: &Arc<Lut3d>) -> wgpu::Texture {
+        let key = Arc::as_ptr(lut) as usize;
+        let (device, queue) = (&self.device, &self.queue);
+        self.luts.entry(key).or_insert_with(|| (lut.clone(), lut_texture(device, queue, lut))).1.clone()
     }
 
     /// The textures a layer draws from, keeping each one's image for the next frame. Its effects draw into the
@@ -983,7 +1126,7 @@ impl Gpu {
         used: &mut Vec<usize>,
         encoder: &mut wgpu::CommandEncoder,
         effect_slots: &mut usize,
-    ) -> Result<[wgpu::Texture; 3]> {
+    ) -> Result<[wgpu::Texture; 5]> {
         let mut images = [Some(&layer.image), None, None];
         if let Some(matte) = &layer.matte {
             images[1] = Some(&matte.alpha);
@@ -1003,7 +1146,22 @@ impl Gpu {
             textures[0] = self.draw_effects(encoder, layer, textures[0].clone(), *effect_slots)?;
             *effect_slots += 1;
         }
-        Ok(textures)
+        let log = match &layer.color.log {
+            Some(log) => {
+                used.push(Arc::as_ptr(log) as usize);
+                self.curve_texture_for(log)
+            }
+            None => self.blank_curve.clone(),
+        };
+        let lut = match &layer.color.lut {
+            Some((lut, _)) => {
+                used.push(Arc::as_ptr(lut) as usize);
+                self.lut_texture_for(lut)
+            }
+            None => self.blank_lut.clone(),
+        };
+        let [image, matte, fill] = textures;
+        Ok([image, matte, fill, log, lut])
     }
 
     /// Compiles an effect's shader once per device. A shader the GPU refuses fails here, inside error scopes, so
@@ -1252,7 +1410,9 @@ impl Gpu {
                             mapped_at_creation: false,
                         });
                         let blank = || self.blank.create_view(&Default::default());
-                        let bind_group = self.bind_group(&uniform, [view.clone(), blank(), blank()]);
+                        let curve = self.blank_curve.create_view(&Default::default());
+                        let lut = self.blank_lut.create_view(&Default::default());
+                        let bind_group = self.bind_group(&uniform, [view.clone(), blank(), blank(), curve, lut]);
                         let target = TransitionTarget { texture, view, uniform, bind_group };
                         if transition_index == self.transitions.len() {
                             self.transitions.push(target);
@@ -1281,6 +1441,8 @@ impl Gpu {
                         shadow: [0.0; 4],
                         matte: [0.0; 4],
                         fill: [0.0; 4],
+                        color: [0.0; 4],
+                        log_rows: [[0.0; 4]; 3],
                     };
                     self.queue.write_buffer(&target.uniform, 0, bytemuck::bytes_of(&uniform));
                     bind_groups.push(target.bind_group.clone());
@@ -1288,6 +1450,8 @@ impl Gpu {
             }
         }
         self.textures.retain(|k, _| used.contains(k));
+        self.curves.retain(|k, _| used.contains(k));
+        self.luts.retain(|k, _| used.contains(k));
 
         self.target(w, h);
         let target = self.target.as_ref().unwrap();
@@ -1399,6 +1563,7 @@ mod tests {
             mask: None,
             matte: None,
             effects: Vec::new(),
+            color: Default::default(),
         };
         let draws = [Draw::Transition([layer.clone(), layer])];
         let first = gpu.render(2, 2, [0.0; 4], &draws).unwrap();
@@ -1433,6 +1598,7 @@ mod tests {
             mask: None,
             matte: None,
             effects: Vec::new(),
+            color: Default::default(),
         };
         for adjust in [false, true] {
             layer.adjust.contrast = if adjust { 0.2 } else { 0.0 };
@@ -1473,6 +1639,7 @@ mod tests {
             mask: None,
             matte: Some(Box::new(matte)),
             effects: Vec::new(),
+            color: Default::default(),
         };
         let without = gpu.render(2, 2, [0.0, 0.0, 0.0, 1.0], &[Draw::Layer(layer.clone())]).unwrap();
         assert!(without[0] < 140, "the footage is tone mapped: {:?}", &without[..4]);
@@ -1506,6 +1673,7 @@ mod tests {
                 mask: None,
                 matte: None,
                 effects: Vec::new(),
+                color: Default::default(),
             };
             assert_eq!(gpu.render(1, 1, [0.0; 4], &[Draw::Layer(layer)]).unwrap(), [80, 100, 120, 255]);
         };
@@ -1548,6 +1716,7 @@ mod tests {
             mask: None,
             matte: None,
             effects: Vec::new(),
+            color: Default::default(),
         };
         assert_eq!(gpu.render(2, 2, [0.0; 4], &[Draw::Layer(layer.clone())]).unwrap(), pixels);
         let mut half = layer.clone();
