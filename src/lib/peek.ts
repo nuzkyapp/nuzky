@@ -1,4 +1,5 @@
 import { ADJUST_ROWS, FILTERS, sameAdjust } from "./presets";
+import { ownTransform } from "./keyframes";
 import { isCaptionTrack, projectDuration } from "./store";
 import { formatDuration, formatTime } from "./time";
 import type { Clip, ClipContent, Project, Transform } from "./types";
@@ -20,6 +21,7 @@ function placed(project: Project) {
 function clipName(project: Project, clip: Clip) {
   const c = clip.content;
   if (c.type === "text") return `“${c.text.length > 24 ? `${c.text.slice(0, 23)}…` : c.text}”`;
+  if (c.type === "adjustment") return "an adjustment layer";
   return project.assets.find((a) => a.id === c.assetId)?.name ?? "a clip";
 }
 
@@ -77,15 +79,16 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 function changeText(now: Clip, then: Clip) {
   const a = now.content as ClipContent & Record<string, unknown>;
   const b = then.content as ClipContent & Record<string, unknown>;
+  const [ta, tb] = [ownTransform(now), ownTransform(then)];
   const names = new Set<string>();
   let value: string | null = null;
   for (const [k, label, format] of TRANSFORM)
-    if (!same(a.transform[k], b.transform[k])) {
+    if (!same(ta[k], tb[k])) {
       names.add(label);
-      value = format ? `${label} ${format(a.transform[k] as number)} → ${format(b.transform[k] as number)}` : null;
+      value = format ? `${label} ${format(ta[k] as number)} → ${format(tb[k] as number)}` : null;
     }
-  if (a.type === "media" && b.type === "media") {
-    if (a.volume !== b.volume) value = `Volume ${percent(a.volume)} → ${percent(b.volume)}`;
+  if (a.type === "media" && b.type === "media" && a.volume !== b.volume) value = `Volume ${percent(a.volume)} → ${percent(b.volume)}`;
+  if ((a.type === "media" && b.type === "media") || (a.type === "adjustment" && b.type === "adjustment")) {
     const rows = ADJUST_ROWS.filter((r) => Math.round(a.adjust[r.key] * 100) !== Math.round(b.adjust[r.key] * 100));
     const filter = FILTERS.find((f) => f.id !== "none" && sameAdjust(b.adjust, f.adjust));
     if (rows.length === 1) {

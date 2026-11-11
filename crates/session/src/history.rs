@@ -250,6 +250,8 @@ pub(crate) fn label(cmds: &[EditCmd]) -> &'static str {
         EditCmd::AddText { .. } => "Add text",
         EditCmd::AddPictureInPicture { .. } => "Picture in picture",
         EditCmd::AddOverlay { .. } => "Overlay",
+        EditCmd::AddAdjustment { .. } => "Adjustment layer",
+        EditCmd::SplitScreen { .. } => "Split screen",
         EditCmd::MoveClip { .. } => "Move clip",
         EditCmd::MoveClips { .. } => "Move clips",
         EditCmd::TrimClip { .. } => "Trim clip",

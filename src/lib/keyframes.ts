@@ -3,6 +3,13 @@ import { NO_CROP } from "./presets";
 import type { Canvas, Clip, Ease, Keyframe, Mask, MotionKind, Transform } from "./types";
 import { US } from "./time";
 
+const UNMOVED: Transform = { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 };
+
+/** The clip's own transform, without keyframes; an adjustment layer covers the whole picture unmoved. */
+export function ownTransform(clip: Clip): Transform {
+  return clip.content.type === "adjustment" ? UNMOVED : clip.content.transform;
+}
+
 /** Keyframes closer than half a frame to the playhead count as "at the playhead". */
 export function keyframeTolerance(fps: number) {
   return US / fps / 2;
@@ -108,7 +115,7 @@ const close = (a: Transform, b: Transform) =>
  */
 export function motionOf(clip: Clip, canvas: Canvas): { kind: MotionKind; strength: number } | null {
   const ks = clip.keyframes;
-  const base = clip.content.transform;
+  const base = ownTransform(clip);
   if (ks.length !== 2 || ks.some((k) => k.ease !== "smooth")) return null;
   for (const kind of ["pushIn", "pullOut", "kenBurns"] as const) {
     const [still, zoomed] = kind === "pullOut" ? [ks[1], ks[0]] : [ks[0], ks[1]];

@@ -105,11 +105,19 @@ export function ImportPlaceholder({ name, compact, onStop }: { name: string; com
 }
 
 /** The calm full-width tile on top of Media and Audio that opens the file picker. */
-export function ImportTile({ label, hint, shortcut, onClick, className = "" }: { label: string; hint?: string; shortcut?: string; onClick: () => void; className?: string }) {
+export function ImportTile({
+  label,
+  hint,
+  shortcut,
+  onClick,
+  className = "",
+  ...rest
+}: { label: string; hint?: string; shortcut?: string; onClick: () => void; className?: string; title?: string; [data: `data-${string}`]: boolean | string }) {
   const lock = useLockReason();
   return (
     <button
       type="button"
+      {...rest}
       aria-keyshortcuts={shortcut}
       onClick={onClick}
       {...lockedProps(lock)}

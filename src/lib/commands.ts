@@ -5,6 +5,7 @@ import {
   Blend,
   Captions,
   ChevronLeft,
+  Columns2,
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
@@ -246,6 +247,21 @@ export const COMMANDS: Command[] = [
   tab("effects", "Add a sound effect", "audio", AudioLines, "sfx whoosh audio zvuk zvukový efekt", "#library-panel-audio input", () => useSounds.setState({ tab: "effects" })),
   tab("transitions", "Add a transition", "transitions", Blend, "dissolve fade přechod prolínačka", undefined),
   tab("filters", "Filters and LUTs", "filters", Palette, "color colour log lut grade filtr barvy barevné korekce", undefined),
+  tab("adjustment", "Add adjustment layer", "filters", SlidersHorizontal, "adjustment layer grade colour over all clips vrstva úprav barevná korekce přes všechny klipy", "[data-add-adjustment]"),
+  {
+    id: "splitScreen",
+    label: "Split screen",
+    group: "Inspector",
+    icon: Columns2,
+    terms: "side by side layout collage rozdělená obrazovka vedle sebe pod sebou koláž rozložení",
+    why: () => {
+      const s = useEditor.getState();
+      if (usePreview.getState().full) return FULL;
+      const n = s.selection.length;
+      return n >= 2 && n <= 4 && document.querySelector("[data-split-screen]") ? null : "Select 2 to 4 video or image clips first.";
+    },
+    run: () => focusWhenShown("[data-split-screen] button"),
+  },
   tab("plugins", "Plugins", "plugins", Puzzle, "plugin rozšíření doplňky", undefined),
   tab("media", "Media", "media", Film, "library files média knihovna soubory", undefined),
   button("detach", "Detach audio", "Timeline", Unlink, "separate sound oddělit zvuk odpojit", "[data-detach-audio]"),

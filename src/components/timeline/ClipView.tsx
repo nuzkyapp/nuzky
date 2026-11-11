@@ -1,5 +1,5 @@
 import { memo, useEffect } from "react";
-import { AudioLines, Film, Gauge, Image as ImageIcon, Rewind, Snowflake, Type } from "lucide-react";
+import { AudioLines, Film, Gauge, Image as ImageIcon, Rewind, SlidersHorizontal, Snowflake, Type } from "lucide-react";
 import { retime, type Timing } from "../../lib/retime";
 import { MAIN_TRACK, isCaptionTrack, useEditor } from "../../lib/store";
 import { US, formatDuration } from "../../lib/time";
@@ -159,10 +159,10 @@ export const ClipView = memo(function ClipView({
   const innerH = height - 8;
   const isCaption = c.type === "text" && isCaptionTrack(track);
   // Captions run the video's length, so they are a quiet tint of their colour with a full-colour top edge; selected, solid.
-  const bg = c.type === "text" ? (isCaption ? (selected ? "bg-clip-captions" : "bg-clip-captions/55 shadow-[inset_0_1px_0_var(--color-clip-captions)]") : "bg-clip-title") : sound ? "bg-clip-audio" : asset?.kind === "image" ? "bg-clip-image" : "bg-clip-video";
+  const bg = c.type === "adjustment" ? "bg-clip-adjustment" : c.type === "text" ? (isCaption ? (selected ? "bg-clip-captions" : "bg-clip-captions/55 shadow-[inset_0_1px_0_var(--color-clip-captions)]") : "bg-clip-title") : sound ? "bg-clip-audio" : asset?.kind === "image" ? "bg-clip-image" : "bg-clip-video";
   const speed = c.type === "media" ? c.speed : 1;
-  const Icon = c.type === "text" ? Type : sound ? AudioLines : asset?.kind === "image" ? ImageIcon : speed === 0 ? Snowflake : Film;
-  const label = c.type === "text" ? c.text : (asset?.name ?? "Missing media");
+  const Icon = c.type === "adjustment" ? SlidersHorizontal : c.type === "text" ? Type : sound ? AudioLines : asset?.kind === "image" ? ImageIcon : speed === 0 ? Snowflake : Film;
+  const label = c.type === "text" ? c.text : c.type === "adjustment" ? "Adjustment" : (asset?.name ?? "Missing media");
   // A caption shows the words that fit whole, else a small dot, never a cut word; every caption keeps the same fill and top
   // edge, so the row reads as one band whatever room a block has for its text.
   const captionText = isCaption ? (fitWords(label, width - 8) ?? "") : "";
@@ -232,8 +232,8 @@ export const ClipView = memo(function ClipView({
         </div>
       )}
 
-      {c.type === "text" ? (
-        // Text sits straight on its colour, centred; caption clips are short and the track header carries their icon, so the text gets the room.
+      {c.type !== "media" ? (
+        // Text and adjustment layers sit straight on their colour, centred; caption clips are short and the track header carries their icon, so the text gets the room.
         <div className={`pointer-events-none absolute inset-0 flex items-center gap-1.5 text-[11px] text-fg ${isCaption ? "px-1" : "px-2 font-medium"}`}>
           {!isCaption && <Icon size={11} className="shrink-0" />}
           {isCaption ? (

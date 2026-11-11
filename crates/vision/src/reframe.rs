@@ -132,7 +132,7 @@ pub fn reframe(
 fn targets<'a>(project: &'a Project, clip_ids: Option<&[String]>) -> Result<Vec<(&'a Clip, &'a Asset)>> {
     let pictured = |clip: &'a Clip| match &clip.content {
         ClipContent::Media { asset_id, .. } => project.asset(asset_id).filter(|a| a.kind != AssetKind::Audio),
-        ClipContent::Text { .. } => None,
+        ClipContent::Text { .. } | ClipContent::Adjustment { .. } => None,
     };
     let video = project.tracks.iter().filter(|t| t.kind == TrackKind::Video);
     let found: Vec<_> = match clip_ids {
@@ -165,6 +165,7 @@ fn base(clip: &Clip) -> Transform {
     match (&clip.content, clip.keyframes.first()) {
         (_, Some(key)) => key.transform,
         (ClipContent::Media { transform, .. } | ClipContent::Text { transform, .. }, None) => *transform,
+        (ClipContent::Adjustment { .. }, None) => Transform::default(),
     }
 }
 

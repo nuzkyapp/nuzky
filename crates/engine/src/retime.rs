@@ -150,7 +150,7 @@ pub fn source_time(clip: &Clip, t_us: i64) -> i64 {
     Retime::of(clip).map_or_else(
         || match clip.content {
             ClipContent::Media { source_in_us, .. } => source_in_us,
-            ClipContent::Text { .. } => 0,
+            ClipContent::Text { .. } | ClipContent::Adjustment { .. } => 0,
         },
         |map| map.frame_at(t_us - clip.start_us),
     )

@@ -1352,6 +1352,49 @@ fn an_agent_masks_a_clip_and_moves_the_mask_with_keyframes_over_stdio() {
     assert!(last[48] > 200 && last[33] < 30 && last[62] < 30 && last[16] < 30, "end {last:?}");
 }
 
+/// A split screen of two pictures and an adjustment layer over them, as an agent makes them in one batch: each picture
+/// covers its half, the layer goes above them with its clip id in the result, and the saved project holds both.
+#[test]
+fn split_screen_and_an_adjustment_layer_over_stdio() {
+    let mut c = Client::new(true);
+    let (left, right) = (c.dir.join("left.ppm"), c.dir.join("right.ppm"));
+    std::fs::write(&left, [b"P6\n4 2\n255\n".as_slice(), &[200; 24]].concat()).unwrap();
+    std::fs::write(&right, [b"P6\n2 4\n255\n".as_slice(), &[90; 24]].concat()).unwrap();
+    let run = c.call("begin_run", json!({"label":"split"}));
+    let ids = c.call("import_media", json!({"run_id":run["run_id"],"paths":[left, right]}))["asset_ids"].clone();
+    let place = json!([{"type":"addClip","assetId":ids[0]},
+        {"type":"addOverlay","assetId":ids[1],"startUs":0,"durationUs":3_000_000}]);
+    c.call("apply_edits", json!({"run_id":run["run_id"],"request_id":"place","edits":place}));
+    let state = c.call("get_state", json!({}));
+    let clips = [&state["tracks"][0]["clips"][0]["id"], &state["tracks"][1]["clips"][0]["id"]];
+    assert!(
+        c.error(
+            "apply_edits",
+            json!({"run_id":run["run_id"],"request_id":"three",
+            "edits":[{"type":"splitScreen","clipIds":clips,"layout":"threeColumns"}]})
+        )
+        .contains("give 3 clips")
+    );
+    let edits = json!([{"type":"splitScreen","clipIds":clips,"layout":"sideBySide"},
+        {"type":"addAdjustment","startUs":0,"adjust":{"saturation":-1}}]);
+    let done = c.call("apply_edits", json!({"run_id":run["run_id"],"request_id":"split","edits":edits}));
+    c.call("end_run", json!({"run_id":run["run_id"],"action":"keep"}));
+    let state = c.call("get_state", json!({}));
+    let x = |track: usize| state["tracks"][track]["clips"][0]["content"]["transform"]["x"].as_f64().unwrap();
+    assert_eq!((x(0), x(1)), (-0.25, 0.25), "{state}");
+    let layer = &state["tracks"][2]["clips"][0];
+    assert_eq!((&layer["content"]["type"], &layer["durationUs"]), (&json!("adjustment"), &json!(3_000_000)), "{state}");
+    assert_eq!(done["select"], json!([layer["id"]]), "the result names the new layer: {done}");
+    c.finish();
+    let disk: Value = serde_json::from_slice(&std::fs::read(c.dir.join("project.nuzky")).unwrap()).unwrap();
+    assert_eq!(
+        disk["tracks"][2]["clips"][0]["content"],
+        json!({"type":"adjustment","adjust":{"exposure":0.0,"tint":0.0,
+        "highlights":0.0,"shadows":0.0,"fade":0.0,"brightness":0.0,"contrast":0.0,"saturation":-1.0,"temperature":0.0,
+        "vignette":0.0}})
+    );
+}
+
 /// B-roll from a screen recording: "Teď otevřu Claudu Code." names the recording of the Claude Code window in its Czech
 /// ending, so find_broll suggests it over that sentence with why and the edit that places it; once placed it is not
 /// suggested again, a range that names nothing gets nothing, and a range needs the transcript key.

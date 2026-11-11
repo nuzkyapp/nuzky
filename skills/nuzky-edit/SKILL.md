@@ -135,6 +135,12 @@ When the user wants a picture from the web, such as the logo of a brand they tal
 
 To point at something or add a reaction, put an emoji or one of Nuzky's stickers over the video with `add_sticker(run_id, sticker, at_us)`, passing the emoji itself ("🔥", "👍🏽") rather than its name when you can; it lands centred for 3 s on a track of its own, and its `transform` moves it next to what it points at.
 
+## Split screen and one look over several clips
+
+For two to four videos side by side, such as a reaction next to the original or before and after, put each on a track of its own over the same time first (`addOverlay` with the same `startUs` and `durationUs`), then in the same `apply_edits` batch send `{"type":"splitScreen","clipIds":[…],"layout":…}`. `sideBySide` and `topAndBottom` take two clips, `threeColumns`, `threeRows` and `oneOverTwo` (the first clip over the top half, the other two below it) take three, `grid` takes four, filled in the order given; on a 9:16 video `topAndBottom` and `oneOverTwo` keep each picture widest. Each clip covers its cell, cropped evenly to its shape, and loses rotation, mask and keyframes; move what matters back into its cell with `transform.crop` and `x`/`y` afterwards. Inspect a frame after: faces must not be cut by the cell edges.
+
+For one colour grade, LUT or effect over several clips at once, such as a warm look over the whole intro, use an adjustment layer rather than changing every clip: `{"type":"addAdjustment","startUs":…,"durationUs":…,"adjust":{…}}` puts it on the highest video track, and while it lasts it changes the whole picture below it, every video, image and title there, but not the captions above it. Change it later with `updateClip` `adjust` and `lut` and `setEffects`, as for a clip; its length and place are those of any clip. The `select` of the result names its clip id.
+
 ## A brand's logo and its colours
 
 For a brand deal ("put in the logo of the company I talk about, and captions in its colours"):

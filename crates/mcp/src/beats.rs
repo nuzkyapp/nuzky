@@ -115,7 +115,7 @@ pub fn music_clip<'a>(project: &'a Project, id: Option<&str>) -> Result<(&'a Tra
     };
     let name = |c: &Clip| match &c.content {
         ClipContent::Media { asset_id, .. } => project.asset(asset_id).map_or(asset_id.clone(), |a| a.name.clone()),
-        ClipContent::Text { .. } => String::new(),
+        ClipContent::Text { .. } | ClipContent::Adjustment { .. } => String::new(),
     };
     let list = |found: Vec<(&Track, &Clip)>| {
         found
@@ -145,7 +145,7 @@ pub fn music_clip<'a>(project: &'a Project, id: Option<&str>) -> Result<(&'a Tra
     };
     let sound = match &clip.content {
         ClipContent::Media { asset_id, .. } => project.asset(asset_id).is_some_and(nuzky_engine::audio::has_audio),
-        ClipContent::Text { .. } => false,
+        ClipContent::Text { .. } | ClipContent::Adjustment { .. } => false,
     };
     ensure!(
         track.kind == TrackKind::Audio && sound,
@@ -498,7 +498,7 @@ fn sources(project: &Project, main: &Track, shots: Option<&[Shot]>) -> Result<Ve
                     Some(source_in_us + (c.duration_us as f64 * *speed as f64).round() as i64),
                     c.content.clone(),
                 )),
-                ClipContent::Text { .. } => None,
+                ClipContent::Text { .. } | ClipContent::Adjustment { .. } => None,
             })
             .collect::<Result<_>>()?,
     };
@@ -701,7 +701,7 @@ mod tests {
             .iter()
             .map(|c| match &c.content {
                 ClipContent::Media { asset_id, volume, .. } => (asset_id.as_str(), *volume),
-                ClipContent::Text { .. } => unreachable!(),
+                ClipContent::Text { .. } | ClipContent::Adjustment { .. } => unreachable!(),
             })
             .collect();
         // Taking turns, the first take fills more of the pieces and runs out three pieces before the end, where the
@@ -873,7 +873,7 @@ mod tests {
                         .iter()
                         .map(|c| match &c.content {
                             ClipContent::Media { asset_id, source_in_us, .. } => (asset_id.clone(), *source_in_us),
-                            ClipContent::Text { .. } => unreachable!(),
+                            ClipContent::Text { .. } | ClipContent::Adjustment { .. } => unreachable!(),
                         })
                         .collect(),
                 ),

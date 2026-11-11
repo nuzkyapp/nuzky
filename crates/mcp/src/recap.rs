@@ -24,7 +24,7 @@ pub fn raw_import(project: &Project, kept: &[Asset]) -> Result<Project> {
         project.tracks.iter().filter(move |t| (t.id == MAIN_TRACK) == main).flat_map(|t| &t.clips).filter_map(|c| {
             match &c.content {
                 ClipContent::Media { asset_id, .. } => project.asset(asset_id),
-                ClipContent::Text { .. } => None,
+                ClipContent::Text { .. } | ClipContent::Adjustment { .. } => None,
             }
         })
     };
@@ -382,7 +382,7 @@ mod tests {
         p.assets[0].part = Some(nuzky_engine::model::Part { start_us: 3_000_000, end_us: 6_000_000 });
         let source = |r: &Project| match &r.tracks[0].clips[0].content {
             ClipContent::Media { source_in_us, .. } => (*source_in_us, r.tracks[0].clips[0].duration_us),
-            ClipContent::Text { .. } => unreachable!(),
+            ClipContent::Text { .. } | ClipContent::Adjustment { .. } => unreachable!(),
         };
         let clip = p.tracks[0].clips[0].id.clone();
         p.apply(EditCmd::TrimClip {

@@ -1260,7 +1260,7 @@ pub fn project_evidence(project: &Project, path: &Path, transcripts: &Transcript
             ClipContent::Media { asset_id, source_in_us, .. } => {
                 offsets.get(asset_id.as_str()).map(|offset| (c, offset + source_in_us))
             }
-            ClipContent::Text { .. } => None,
+            ClipContent::Text { .. } | ClipContent::Adjustment { .. } => None,
         })
         .collect();
     clips.sort_by_key(|(c, _)| (c.start_us, c.id.clone()));
@@ -1378,7 +1378,7 @@ fn project_picture(project: &Project, clips: &[&nuzky_engine::model::Clip]) -> P
                         .iter()
                         .any(|h| matches!(&h.content, ClipContent::Media { asset_id: a, .. } if a == asset_id))
             }
-            ClipContent::Text { .. } => false,
+            ClipContent::Text { .. } | ClipContent::Adjustment { .. } => false,
         })
         .collect();
     let mut framing = Vec::new();

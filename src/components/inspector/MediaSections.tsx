@@ -13,15 +13,17 @@ import { Button, Checkbox, IconButton, PresetTile, ProgressBar, Section, Segment
 import { QUIET } from "./Header";
 
 type Media = Extract<Clip["content"], { type: "media" }>;
+/** A clip with colour of its own: a video, an image or an adjustment layer. */
+type Graded = Extract<Clip["content"], { type: "media" | "adjustment" }>;
 
 /** The log profile and LUT of the clip, chosen in Filters: Strength for the LUT and × to take either off. */
-export function ColorSection({ clip, content }: { clip: Clip; content: Media }) {
+export function ColorSection({ clip, content }: { clip: Clip; content: Graded }) {
   const edit = useEditor((s) => s.edit);
   const luts = useLuts((s) => s.list);
   useEffect(() => {
     if (luts === null) void loadLuts();
   }, [luts]);
-  const profile = profileOf(content.log ?? "none");
+  const profile = profileOf(content.type === "media" ? (content.log ?? "none") : "none");
   const lut = lutOf(content.lut);
   if (!profile && !lut) return null;
   const missing = lut && luts !== null && !luts.some((l) => l.id === lut.id);
@@ -63,7 +65,7 @@ export function ColorSection({ clip, content }: { clip: Clip; content: Media }) 
                 editClip(
                   clip.id,
                   (c) => {
-                    const had = c.content.type === "media" ? lutOf(c.content.lut) : null;
+                    const had = c.content.type !== "text" ? lutOf(c.content.lut) : null;
                     return had ? { type: "updateClip", clipId: c.id, lut: { ...had, strength: v / 100 } } : null;
                   },
                   `${clip.id}:lut:strength`,
@@ -77,12 +79,12 @@ export function ColorSection({ clip, content }: { clip: Clip; content: Media }) 
   );
 }
 
-export function AdjustSection({ clip, content }: { clip: Clip; content: Media }) {
+export function AdjustSection({ clip, content }: { clip: Clip; content: Graded }) {
   const edit = useEditor((s) => s.edit);
   const adjust = content.adjust;
   // Built from the latest confirmed values, so a second slider never overwrites the first.
   const set = (key: keyof Adjust, v: number) =>
-    editClip(clip.id, (c) => (c.content.type === "media" ? { type: "updateClip", clipId: c.id, adjust: { ...c.content.adjust, [key]: v / 100 } } : null), `${clip.id}:adjust:${key}`);
+    editClip(clip.id, (c) => (c.content.type !== "text" ? { type: "updateClip", clipId: c.id, adjust: { ...c.content.adjust, [key]: v / 100 } } : null), `${clip.id}:adjust:${key}`);
   return (
     <Section
       title="Adjust"

@@ -294,7 +294,7 @@ fn plans(cuts: &BeatCuts, host: &Host, clip_id: &str) -> Result<Option<BeatPlans
         .iter()
         .filter_map(|c| match &c.content {
             ClipContent::Media { asset_id, .. } => base.asset(asset_id).map(|a| (asset_id.as_str(), a.kind)),
-            ClipContent::Text { .. } => None,
+            ClipContent::Text { .. } | ClipContent::Adjustment { .. } => None,
         })
         .collect();
     let mut rhythms: Vec<RhythmPlan> = Vec::new();

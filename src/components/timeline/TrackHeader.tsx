@@ -1,5 +1,5 @@
 import { memo, type ReactNode } from "react";
-import { AudioLines, Captions, Eye, EyeOff, Film, Type, Volume2, VolumeX } from "lucide-react";
+import { AudioLines, Captions, Eye, EyeOff, Film, SlidersHorizontal, Type, Volume2, VolumeX } from "lucide-react";
 import { languageName } from "../../lib/speech";
 import { MAIN_TRACK, isCaptionTrack, pictureAssets, useEditor } from "../../lib/store";
 import { CoverTile } from "../cover/CoverTile";
@@ -30,7 +30,9 @@ function TrackToggle({ off, label, onIcon, offIcon, onClick, locked }: { off: bo
  */
 export const TrackHeader = memo(function TrackHeader({ track, width, locked }: { track: Track; width: number; locked: boolean }) {
   const { edit } = useEditor.getState();
-  const KindIcon = track.kind === "audio" ? AudioLines : track.kind === "text" ? (isCaptionTrack(track) ? Captions : Type) : Film;
+  // A video track holding only adjustment layers says so, in their colour.
+  const adjusting = track.kind === "video" && track.clips.length > 0 && track.clips.every((c) => c.content.type === "adjustment");
+  const KindIcon = track.kind === "audio" ? AudioLines : track.kind === "text" ? (isCaptionTrack(track) ? Captions : Type) : adjusting ? SlidersHorizontal : Film;
   // The colour of the track's clips: a video track holding only pictures takes the pictures' colour.
   const pictures = useEditor((s) => {
     const ids = s.snap && track.kind === "video" && track.clips.length > 0 ? pictureAssets(s.snap.project) : null;
@@ -38,7 +40,8 @@ export const TrackHeader = memo(function TrackHeader({ track, width, locked }: {
   });
   // Translated captions go by their language, so the two caption tracks read apart.
   const name = track.translation ? languageName(track.translation) : track.name || track.kind;
-  const tone = track.kind === "audio" ? "bg-clip-audio" : track.kind === "text" ? (isCaptionTrack(track) ? "bg-clip-captions" : "bg-clip-title") : pictures ? "bg-clip-image" : "bg-clip-video";
+  const tone =
+    track.kind === "audio" ? "bg-clip-audio" : track.kind === "text" ? (isCaptionTrack(track) ? "bg-clip-captions" : "bg-clip-title") : adjusting ? "bg-clip-adjustment" : pictures ? "bg-clip-image" : "bg-clip-video";
   return (
     // 22 px toggles and the 24 px tile leave the name about 50 px, enough for "Captions" and "Overlay".
     <div className="sticky left-0 z-[47] flex shrink-0 items-center gap-0.5 border-r border-white/[.07] bg-panel pl-2 pr-1" style={{ width }}>
@@ -70,7 +73,7 @@ export const TrackHeader = memo(function TrackHeader({ track, width, locked }: {
       ) : (
         <span className="w-[22px] shrink-0" aria-hidden />
       )}
-      {track.kind !== "text" ? (
+      {track.kind !== "text" && !adjusting ? (
         <TrackToggle
           off={track.muted}
           label={track.muted ? `Unmute ${track.name}` : `Mute ${track.name}`}

@@ -25,7 +25,7 @@ pub fn unsettled(project: &Project) -> Vec<(i64, i64)> {
                 ClipContent::Media { asset_id, .. } => {
                     project.asset(asset_id).is_some_and(|asset| asset.kind != AssetKind::Audio)
                 }
-                ClipContent::Text { .. } => true,
+                ClipContent::Text { .. } | ClipContent::Adjustment { .. } => true,
             };
             if !visible {
                 continue;

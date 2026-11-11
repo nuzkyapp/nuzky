@@ -1,11 +1,11 @@
 import { useShallow } from "zustand/react/shallow";
-import { Copy, Layers, RotateCcw, Trash2 } from "lucide-react";
-import { cropAndMask } from "../../lib/keyframes";
+import { Copy, Layers, Repeat2, RotateCcw, Trash2 } from "lucide-react";
+import { cropAndMask, ownTransform } from "../../lib/keyframes";
 import { LIMITS } from "../../lib/limits";
-import { ADJUST_ROWS, DEFAULT_TRANSFORM, NO_ADJUST, sameAdjust } from "../../lib/presets";
+import { ADJUST_ROWS, DEFAULT_TRANSFORM, NO_ADJUST, SPLIT_LAYOUTS, sameAdjust } from "../../lib/presets";
 import { deleteSelection, duplicateSelection, editClips, findClip, isCaptionTrack, patched, readoutTime, transformAtPlayhead, useCanvasUnit, useEditor, type StylePatch } from "../../lib/store";
 import type { Adjust, Clip, EditCmd, Project, Track, Transform } from "../../lib/types";
-import { Button, IconButton, Section, Slider } from "../ui";
+import { Button, IconButton, PresetTile, Section, Slider } from "../ui";
 import { InspectorHeader, QUIET } from "./Header";
 import { BackgroundSection } from "./BackgroundSection";
 import { DuckingRow, MonoRow, VoiceSection } from "./MediaSections";
@@ -20,11 +20,11 @@ function facts(project: Project, { clip, track }: Found) {
   const asset = c.type === "media" ? project.assets.find((a) => a.id === c.assetId) : undefined;
   const onAudioTrack = track.kind === "audio";
   return {
-    transform: !onAudioTrack,
+    transform: !onAudioTrack && c.type !== "adjustment",
     adjust: c.type === "media" && !onAudioTrack && asset?.kind !== "audio",
     sound: c.type === "media" && c.speed !== 0 && (onAudioTrack || !!asset?.hasAudio),
     text: c.type === "text",
-    kind: c.type === "text" ? (isCaptionTrack(track) ? "caption" : "text") : onAudioTrack ? "audio" : (asset?.kind ?? "video"),
+    kind: c.type === "text" ? (isCaptionTrack(track) ? "caption" : "text") : c.type === "adjustment" ? "adjustment" : onAudioTrack ? "audio" : (asset?.kind ?? "video"),
   };
 }
 
@@ -36,7 +36,7 @@ function shared(values: number[]) {
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** Nouns for the selection summary: "2 videos · 3 captions · 1 audio clip". */
-const KIND_NOUNS: Record<string, string> = { video: "video", image: "image", caption: "caption", text: "text clip", audio: "audio clip" };
+const KIND_NOUNS: Record<string, string> = { video: "video", image: "image", caption: "caption", text: "text clip", audio: "audio clip", adjustment: "adjustment layer" };
 
 const KEYS = ["x", "y", "scale", "rotation", "opacity"] as const;
 
@@ -58,7 +58,7 @@ function TransformRows({ found, coalesce }: { found: Found[]; coalesce: string }
     editClips(
       ids,
       (clip): EditCmd[] => {
-        const cmds: EditCmd[] = [{ type: "updateClip", clipId: clip.id, transform: { ...clip.content.transform, ...patch } }];
+        const cmds: EditCmd[] = [{ type: "updateClip", clipId: clip.id, transform: { ...ownTransform(clip), ...patch } }];
         if (clip.keyframes.length > 0) cmds.push({ type: "setKeyframes", clipId: clip.id, keyframes: clip.keyframes.map((k) => ({ ...k, transform: { ...k.transform, ...patch } })) });
         return cmds;
       },
@@ -93,6 +93,84 @@ function TransformRows({ found, coalesce }: { found: Found[]; coalesce: string }
       <Slider label="Position Y" mixed={y.mixed} value={y.value * 100} min={-100} max={100} step={0.5} unit="%" format={(v) => v.toFixed(1)} onChange={(v) => set({ y: v / 100 }, "y")} />
       <Slider label="Rotation" mixed={rotation.mixed} value={rotation.value} min={-180} max={180} step={1} unit="°" format={(v) => String(Math.round(v))} onChange={(v) => set({ rotation: v }, "rot")} />
       <Slider label="Opacity" mixed={opacity.mixed} value={opacity.value * 100} min={0} max={100} step={1} unit="%" format={(v) => String(Math.round(v))} onChange={(v) => set({ opacity: v / 100 }, "opacity")} />
+    </Section>
+  );
+}
+
+type Split = (typeof SPLIT_LAYOUTS)[number];
+const near = (a: number, b: number) => Math.abs(a - b) < 1e-3;
+
+/** The cell of `split` the clip's centre is in the middle of, or -1. */
+function cellOf(split: Split, clip: Clip) {
+  const t = ownTransform(clip);
+  return split.cells.findIndex(([l, top, r, b]) => near(t.x, (l + r) / 2 - 0.5) && near(t.y, (top + b) / 2 - 0.5));
+}
+
+/** A layout's cells drawn in the frame's shape, numbered in the order clips fill them. */
+function SplitDiagram({ split, aspect }: { split: Split; aspect: number }) {
+  // Inside the tile's 4:3 with room around it: a vertical frame fits its height, a wide one its width.
+  const [w, h] = aspect >= 4 / 3 ? [80, 80 / aspect] : [44 * aspect, 44];
+  return (
+    <svg aria-hidden className="absolute inset-0 m-auto" width={w} height={h} viewBox={`0 0 ${w} ${h}`}>
+      {split.cells.map(([l, t, r, b], i) => (
+        <g key={i}>
+          <rect x={l * w + 1} y={t * h + 1} width={(r - l) * w - 2} height={(b - t) * h - 2} rx={2} className="fill-white/[.14]" />
+          <text x={((l + r) / 2) * w} y={((t + b) / 2) * h} dominantBaseline="central" textAnchor="middle" className="fill-fg/80 text-[10px] font-semibold">
+            {i + 1}
+          </text>
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+/**
+ * 2 to 4 videos or images side by side: each layout puts them in its cells, the clip on the highest track in the first,
+ * as the timeline lists them top down; the header's button moves each to the next cell.
+ */
+function SplitScreenRows({ found }: { found: Found[] }) {
+  const project = useEditor((s) => s.snap!.project);
+  const edit = useEditor((s) => s.edit);
+  const track = (f: Found) => project.tracks.findIndex((t) => t.id === f.track.id);
+  const ordered = [...found].sort((a, b) => track(b) - track(a) || a.clip.startUs - b.clip.startUs).map((f) => f.clip);
+  const splits = SPLIT_LAYOUTS.filter((s) => s.cells.length === ordered.length);
+  // The layout every clip sits in a cell of, one clip a cell, and the clips in the order of its cells.
+  const placed = (split: Split) => {
+    const byCell: (Clip | null)[] = split.cells.map(() => null);
+    for (const clip of ordered) {
+      const cell = cellOf(split, clip);
+      if (cell < 0 || byCell[cell]) return null;
+      byCell[cell] = clip;
+    }
+    return byCell as Clip[];
+  };
+  const current = splits.find((s) => placed(s));
+  const apply = (split: Split, clips: Clip[]) => edit({ type: "splitScreen", clipIds: clips.map((c) => c.id), layout: split.layout });
+  const aspect = project.canvas.width / project.canvas.height;
+  return (
+    <Section
+      title="Split screen"
+      actions={
+        <IconButton
+          label={current ? "Move each clip to the next part" : "Move each clip to the next part: choose a layout first"}
+          className={QUIET}
+          disabled={!current}
+          onClick={() => {
+            const byCell = current && placed(current);
+            if (current && byCell) apply(current, [byCell[byCell.length - 1], ...byCell.slice(0, -1)]);
+          }}
+        >
+          <Repeat2 size={14} />
+        </IconButton>
+      }
+    >
+      <div className="grid grid-cols-3 gap-2" data-split-screen>
+        {splits.map((split) => (
+          <PresetTile key={split.layout} label={split.label} selected={split === current} onClick={() => apply(split, (split === current && placed(split)) || ordered)}>
+            <SplitDiagram split={split} aspect={aspect} />
+          </PresetTile>
+        ))}
+      </div>
     </Section>
   );
 }
@@ -176,6 +254,7 @@ export function MultiInspector({ ids }: { ids: string[] }) {
             <Trash2 size={14} /> Delete
           </Button>
         </div>
+        {found.length >= 2 && found.length <= 4 && all("adjust") && found.every((f) => f.track.kind === "video") && <SplitScreenRows found={found} />}
         {all("transform") && <TransformRows found={found} coalesce={coalesce} />}
         {all("text") && <StyleRows found={found} coalesce={coalesce} />}
         {all("adjust") && <BackgroundSection clips={found.map((f) => f.clip)} />}

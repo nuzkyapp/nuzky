@@ -1,5 +1,5 @@
 import captionStyles from "../../assets/presets/captions.json";
-import type { Adjust, Animation, AnimationKind, CaptionPreset, Crop, KeywordPick, Shape, TextShadow, TextStyle, Transform, TransitionKind } from "./types";
+import type { Adjust, Animation, AnimationKind, CaptionPreset, Crop, KeywordPick, Shape, SplitLayout, TextShadow, TextStyle, Transform, TransitionKind } from "./types";
 
 /** Canvas formats at 1080p; `canvasSize` gives them at another resolution. */
 export const FORMATS = [
@@ -36,6 +36,16 @@ export function scaleStyle(style: TextStyle, k: number): TextStyle {
 export const DEFAULT_TRANSFORM: Transform = { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 };
 export const NO_CROP: Crop = { left: 0, top: 0, right: 0, bottom: 0 };
 export const NO_SHAPE: Shape = { radius: 0, borderWidth: 0, borderColor: "#ffffff", shadow: 0 };
+/** A split screen's layouts as the engine's `SplitLayout::cells` lays them out: each cell's left, top, right and bottom edge in 0..1 of the frame. */
+export const SPLIT_LAYOUTS: { layout: SplitLayout; label: string; cells: [number, number, number, number][] }[] = [
+  { layout: "sideBySide", label: "Side by side", cells: [[0, 0, 0.5, 1], [0.5, 0, 1, 1]] },
+  { layout: "topAndBottom", label: "Stacked", cells: [[0, 0, 1, 0.5], [0, 0.5, 1, 1]] },
+  { layout: "threeColumns", label: "Columns", cells: [[0, 0, 1 / 3, 1], [1 / 3, 0, 2 / 3, 1], [2 / 3, 0, 1, 1]] },
+  { layout: "threeRows", label: "Rows", cells: [[0, 0, 1, 1 / 3], [0, 1 / 3, 1, 2 / 3], [0, 2 / 3, 1, 1]] },
+  { layout: "oneOverTwo", label: "One over two", cells: [[0, 0, 1, 0.5], [0, 0.5, 0.5, 1], [0.5, 0.5, 1, 1]] },
+  { layout: "grid", label: "Grid", cells: [[0, 0, 0.5, 0.5], [0.5, 0, 1, 0.5], [0, 0.5, 0.5, 1], [0.5, 0.5, 1, 1]] },
+];
+
 export const NO_ADJUST: Adjust = { exposure: 0, tint: 0, highlights: 0, shadows: 0, fade: 0, brightness: 0, contrast: 0, saturation: 0, temperature: 0, vignette: 0 };
 
 export const ADJUST_ROWS: { key: keyof Adjust; label: string; min: number }[] = [

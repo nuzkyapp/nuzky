@@ -63,7 +63,7 @@ fn caption_lines(out: &mut Vec<RunChange>, before: &[Clip], after: &[Clip], lang
     } else {
         let style = |c: &Clip| match &c.content {
             ClipContent::Text { style, .. } => Some(style.clone()),
-            ClipContent::Media { .. } => None,
+            ClipContent::Media { .. } | ClipContent::Adjustment { .. } => None,
         };
         let restyled: Vec<&Clip> =
             after.iter().filter(|c| before.iter().any(|b| b.id == c.id && style(b) != style(c))).collect();
@@ -79,7 +79,7 @@ fn source(clip: &Clip) -> Option<(&str, i64, i64)> {
         ClipContent::Media { asset_id, source_in_us, speed, .. } => {
             Some((asset_id, *source_in_us, source_in_us + (clip.duration_us as f64 * *speed as f64).round() as i64))
         }
-        ClipContent::Text { .. } => None,
+        ClipContent::Text { .. } | ClipContent::Adjustment { .. } => None,
     }
 }
 
@@ -186,18 +186,28 @@ fn origins<'a>(before: &'a Project, after: &'a Project) -> Vec<(&'a Clip, Option
 fn scale(clip: &Clip) -> f32 {
     match &clip.content {
         ClipContent::Media { transform, .. } | ClipContent::Text { transform, .. } => transform.scale,
+        ClipContent::Adjustment { .. } => 1.0,
+    }
+}
+
+fn position(clip: &Clip) -> (f32, f32) {
+    match &clip.content {
+        ClipContent::Media { transform, .. } | ClipContent::Text { transform, .. } => (transform.x, transform.y),
+        ClipContent::Adjustment { .. } => (0.0, 0.0),
     }
 }
 
 fn crop(clip: &Clip) -> Option<Crop> {
     match &clip.content {
         ClipContent::Media { transform, .. } | ClipContent::Text { transform, .. } => transform.crop,
+        ClipContent::Adjustment { .. } => None,
     }
 }
 
 fn mask(clip: &Clip) -> Option<Mask> {
     match &clip.content {
         ClipContent::Media { transform, .. } | ClipContent::Text { transform, .. } => transform.mask,
+        ClipContent::Adjustment { .. } => None,
     }
 }
 
@@ -268,6 +278,14 @@ pub fn summarize(before: &Project, after: &Project) -> Vec<RunChange> {
         let what = if *freeze { "Froze a frame of" } else { "Added" };
         out.push(line(format!("{what} {name}{place}"), clips));
     }
+    let layers: Vec<&Clip> = pairs
+        .iter()
+        .filter(|(c, o)| o.is_none() && matches!(c.content, ClipContent::Adjustment { .. }))
+        .map(|(c, _)| *c)
+        .collect();
+    if !layers.is_empty() {
+        out.push(line(format!("Added {}", count(layers.len(), "adjustment layer", "adjustment layers")), &layers));
+    }
 
     // Captions of the speech, their translations and titles.
     let clips_of = |p: &'_ Project, keep: &dyn Fn(&Track) -> bool| -> Vec<Clip> {
@@ -292,7 +310,7 @@ pub fn summarize(before: &Project, after: &Project) -> Vec<RunChange> {
     let (titles_before, titles_after) = (text_clips(before), text_clips(after));
     let text_of = |c: &Clip| match &c.content {
         ClipContent::Text { text, .. } => text.clone(),
-        ClipContent::Media { .. } => String::new(),
+        ClipContent::Media { .. } | ClipContent::Adjustment { .. } => String::new(),
     };
     for t in &titles_after {
         match titles_before.iter().find(|b| b.id == t.id) {
@@ -365,7 +383,11 @@ pub fn summarize(before: &Project, after: &Project) -> Vec<RunChange> {
             },
         ) = (&o.content, &clip.content)
         {
-            if (scale(clip) - scale(o)).abs() > 0.005 && clip.keyframes == o.keyframes {
+            // A new place and crop together, as a split screen gives, is one change rather than a zoom.
+            let framed = clip.keyframes == o.keyframes && crop(clip) != crop(o) && position(clip) != position(o);
+            if framed {
+                push("Moved and cropped");
+            } else if (scale(clip) - scale(o)).abs() > 0.005 && clip.keyframes == o.keyframes {
                 if scale(clip) > scale(o) {
                     zoomed.push((clip, scale(clip) / scale(o).max(0.01)));
                 } else {
@@ -388,7 +410,7 @@ pub fn summarize(before: &Project, after: &Project) -> Vec<RunChange> {
             if a1 != a2 || lg1 != lg2 || lt1 != lt2 {
                 push("Changed the colour of");
             }
-            if sh1 != sh2 || (crop(clip) != crop(o) && clip.keyframes == o.keyframes) {
+            if sh1 != sh2 || (crop(clip) != crop(o) && clip.keyframes == o.keyframes && !framed) {
                 push("Changed the crop or shape of");
             }
             if mask(clip) != mask(o) && clip.keyframes == o.keyframes {
@@ -444,6 +466,12 @@ pub fn summarize(before: &Project, after: &Project) -> Vec<RunChange> {
                     Background::Color { .. } | Background::Image { .. } => "Replaced the background of",
                 });
             }
+        }
+        if let (ClipContent::Adjustment { adjust: a1, lut: l1 }, ClipContent::Adjustment { adjust: a2, lut: l2 }) =
+            (&o.content, &clip.content)
+            && (a1 != a2 || l1 != l2)
+        {
+            push("Changed the colour of");
         }
         if clip.keyframes != o.keyframes {
             push(if clip.keyframes.is_empty() { "Removed the motion of" } else { "Added motion to" });
@@ -783,6 +811,21 @@ mod tests {
             json!({"type": "setReelCandidates", "candidates": [candidate("a", 0, "made"), candidate("c", 10, "proposed")]}),
         );
         assert_eq!(texts(&summarize(&before, &e.project)), ["Proposed 1 reel", "Removed 1 reel"]);
+    }
+
+    #[test]
+    fn a_split_screen_and_an_adjustment_layer_say_so_rather_than_zoom() {
+        let mut e = editor();
+        apply(&mut e, json!({"type": "addOverlay", "assetId": "t1", "startUs": 0, "durationUs": 5_000_000}));
+        let before = e.project.clone();
+        let ids = [e.project.tracks[0].clips[0].id.clone(), e.project.tracks[1].clips[0].id.clone()];
+        apply(&mut e, json!({"type": "splitScreen", "clipIds": ids, "layout": "topAndBottom"}));
+        apply(&mut e, json!({"type": "addAdjustment", "startUs": 0, "adjust": {"contrast": 0.3}}));
+        let layer = e.project.tracks[2].clips[0].id.clone();
+        assert_eq!(texts(&summarize(&before, &e.project)), ["Added 1 adjustment layer", "Moved and cropped 2 clips"]);
+        let before = e.project.clone();
+        apply(&mut e, json!({"type": "updateClip", "clipId": layer, "adjust": {"contrast": 0.5}}));
+        assert_eq!(texts(&summarize(&before, &e.project)), ["Changed the colour of 1 clip"]);
     }
 
     #[test]

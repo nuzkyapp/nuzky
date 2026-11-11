@@ -3,14 +3,16 @@ import { useShallow } from "zustand/react/shallow";
 import { AlertCircle, AlertTriangle, Ellipsis, Palette, Plus } from "lucide-react";
 import { COMMON_PROFILES, LOG_GROUPS, LOG_PROFILES, applyLut, loadLuts, lutOf, pickAndImportLut, removeLut, useColorPreviews, useLuts, type ColorLook, type LutInfo } from "../../lib/color";
 import { FILTERS, adjustCss, sameAdjust } from "../../lib/presets";
-import { findClip, useEditor } from "../../lib/store";
+import { addAdjustmentLayer, findClip, mainClips, useEditor } from "../../lib/store";
 import type { Adjust, LogProfile, Lut } from "../../lib/types";
 import { BeforeAfter, Button, LockReason, Menu, PresetTile, lockedProps, useLockReason } from "../ui";
+import { ImportTile } from "./assets";
 
 // Shown when the clip has no thumbnail yet: a sky, a horizon and grass reveal colour shifts.
 const SCENE = "linear-gradient(180deg, #7fb2e5 0%, #d9c7a3 52%, #4f7d3f 53%, #2c4a25 100%)";
 const GRID = "grid grid-cols-[repeat(auto-fill,minmax(75px,1fr))] gap-2";
-const NO_CLIP = "Select a video or image clip first";
+const NO_CLIP = "Select a video, image or adjustment clip first";
+const NO_LOG = "An adjustment layer has no camera footage; convert the clip itself";
 
 function Picture({ thumb }: { thumb: string | null | undefined }) {
   // A little above the middle, so a portrait phone clip shows the face.
@@ -33,17 +35,23 @@ function FilterPreview({ adjust, thumb }: { adjust: Adjust; thumb: string | null
   );
 }
 
-/** The single selected video or image clip, if any. */
+/** The single selected video, image or adjustment clip, if any; an adjustment layer's tiles show the main track's picture under its start. */
 function useFilterTarget() {
   return useEditor(
     useShallow((s) => {
-      const none = { clipId: null, assetId: null, adjust: null, log: "none" as LogProfile, lut: null as Lut | null, thumb: null };
+      const none = { clipId: null, assetId: null, adjust: null, log: "none" as LogProfile, lut: null as Lut | null, thumb: null, adjustment: false };
       if (!s.snap || s.selection.length !== 1) return none;
       const found = findClip(s.snap.project, s.selection[0]);
       const c = found?.clip.content;
+      if (found && c?.type === "adjustment") {
+        const at = found.clip.startUs;
+        const under = mainClips(s.snap.project).find((m) => m.startUs <= at && at < m.startUs + m.durationUs)?.content;
+        const picture = under?.type === "media" ? s.snap.project.assets.find((a) => a.id === under.assetId && a.kind !== "audio") : undefined;
+        return { clipId: found.clip.id, assetId: picture?.id ?? null, adjust: c.adjust, log: "none" as LogProfile, lut: c.lut ?? null, thumb: picture ? (s.thumbs[picture.id] ?? null) : null, adjustment: true };
+      }
       const asset = c?.type === "media" ? s.snap.project.assets.find((a) => a.id === c.assetId) : undefined;
       if (!found || c?.type !== "media" || !asset || asset.kind === "audio") return none;
-      return { clipId: found.clip.id, assetId: asset.id, adjust: c.adjust, log: c.log ?? "none", lut: c.lut ?? null, thumb: s.thumbs[asset.id] ?? null };
+      return { clipId: found.clip.id, assetId: asset.id, adjust: c.adjust, log: c.log ?? "none", lut: c.lut ?? null, thumb: s.thumbs[asset.id] ?? null, adjustment: false };
     }),
   );
 }
@@ -71,9 +79,10 @@ export function FiltersTab() {
   const thumb = graded ? (look ?? target.thumb) : target.thumb;
   return (
     <div className="scroll-shown flex flex-col gap-4 overflow-y-auto p-3.5">
+      <ImportTile label="Adjustment layer" onClick={() => void addAdjustmentLayer()} className="w-full" data-add-adjustment title="Add a layer from the playhead whose LUT, filter and adjustments change every clip below it" />
       {!clipId && (
         <p className="flex items-center gap-1.5 text-[12px] text-muted">
-          <Palette size={14} className="shrink-0" /> Select one video or image clip to convert log footage or add a LUT or filter.
+          <Palette size={14} className="shrink-0" /> Select one video, image or adjustment clip to add a LUT or filter.
         </p>
       )}
       <LogFootage target={target} />
@@ -104,9 +113,10 @@ type Target = ReturnType<typeof useFilterTarget>;
 
 /** Camera log profiles: each tile splits the clip's picture as recorded and converted, and one click converts it. */
 function LogFootage({ target }: { target: Target }) {
-  const { clipId, assetId, log, thumb } = target;
+  const { clipId, assetId, log, thumb, adjustment } = target;
   const edit = useEditor((s) => s.edit);
   const [all, setAll] = useState(false);
+  const why = !clipId ? NO_CLIP : adjustment ? NO_LOG : null;
   const shown = all ? LOG_PROFILES : LOG_PROFILES.filter((p) => COMMON_PROFILES.includes(p.id) || p.id === log);
   const previews = useColorPreviews(
     assetId,
@@ -120,9 +130,9 @@ function LogFootage({ target }: { target: Target }) {
         key={p.id}
         label={p.label}
         selected={selected}
-        disabled={!clipId}
-        title={!clipId ? NO_CLIP : selected ? `Show ${p.name} as recorded` : `Convert from ${p.name}${p.recordedOn ? `, ${p.recordedOn}` : ""}`}
-        onClick={() => clipId && edit({ type: "updateClip", clipId, log: selected ? "none" : p.id })}
+        disabled={!!why}
+        title={why ?? (selected ? `Show ${p.name} as recorded` : `Convert from ${p.name}${p.recordedOn ? `, ${p.recordedOn}` : ""}`)}
+        onClick={() => clipId && !why && edit({ type: "updateClip", clipId, log: selected ? "none" : p.id })}
       >
         <Look before={thumb} after={previews[i]} />
       </PresetTile>

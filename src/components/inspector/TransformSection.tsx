@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { ChevronLeft, ChevronRight, Diamond, Maximize, Minimize, RotateCcw } from "lucide-react";
-import { clipOffset, cropAndMask, curveIndex, keyframeIndexAt, keyframeTolerance, transformAt, upsertKeyframe } from "../../lib/keyframes";
+import { clipOffset, cropAndMask, curveIndex, keyframeIndexAt, keyframeTolerance, ownTransform, transformAt, upsertKeyframe } from "../../lib/keyframes";
 import { LIMITS } from "../../lib/limits";
 import { DEFAULT_TRANSFORM } from "../../lib/presets";
 import { editClip, isCaptionTrack, readoutTime, setClipTransform, transformAtPlayhead, useEditor } from "../../lib/store";
@@ -21,7 +21,7 @@ function KeyframeControls({ clip, at }: { clip: Clip; at: AtPlayhead }) {
     editClip(clip.id, (c): EditCmd | EditCmd[] => {
       const offset = clipOffset(c, useEditor.getState().timeUs);
       const i = keyframeIndexAt(c, offset, tol);
-      if (i < 0) return { type: "setKeyframes", clipId: c.id, keyframes: upsertKeyframe(c, offset, transformAt(c, c.content.transform, offset), tol) };
+      if (i < 0) return { type: "setKeyframes", clipId: c.id, keyframes: upsertKeyframe(c, offset, transformAt(c, ownTransform(c), offset), tol) };
       const rest = c.keyframes.filter((_, j) => j !== i);
       const remove: EditCmd = { type: "setKeyframes", clipId: c.id, keyframes: rest };
       // Removing the last keyframe keeps its values as the clip's fixed transform.
@@ -96,7 +96,7 @@ function atPlayhead(clip: Clip, timeUs: number, fps: number): AtPlayhead {
   const tol = keyframeTolerance(fps);
   const inside = timeUs >= clip.startUs && timeUs <= clip.startUs + clip.durationUs;
   return {
-    ...transformAt(clip, clip.content.transform, offset),
+    ...transformAt(clip, ownTransform(clip), offset),
     inside,
     atIndex: inside ? keyframeIndexAt(clip, offset, tol) : -1,
     curve: inside ? curveIndex(clip, offset, tol) : -1,

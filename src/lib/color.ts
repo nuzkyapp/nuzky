@@ -87,12 +87,13 @@ export async function loadLuts() {
   }
 }
 
-/** The one video or image clip selected, if any. */
+/** The one video, image or adjustment clip selected, if any. */
 export function pictureClip(): Clip | null {
   const s = useEditor.getState();
   if (!s.snap || s.selection.length !== 1) return null;
   const found = findClip(s.snap.project, s.selection[0]);
   const c = found?.clip.content;
+  if (found && c?.type === "adjustment") return found.clip;
   const asset = c?.type === "media" ? s.snap.project.assets.find((a) => a.id === c.assetId) : undefined;
   return found && c?.type === "media" && asset && asset.kind !== "audio" ? found.clip : null;
 }
@@ -101,7 +102,8 @@ export function pictureClip(): Clip | null {
 export function applyLut(clipId: string, lut: LutInfo) {
   const s = useEditor.getState();
   const found = s.snap && findClip(s.snap.project, clipId);
-  const had = found?.clip.content.type === "media" ? lutOf(found.clip.content.lut) : null;
+  const content = found?.clip.content;
+  const had = content && content.type !== "text" ? lutOf(content.lut) : null;
   return s.edit({ type: "updateClip", clipId, lut: { type: "file", id: lut.id, name: lut.name, strength: had?.strength ?? 1 } });
 }
 

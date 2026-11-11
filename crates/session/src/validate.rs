@@ -5,7 +5,7 @@ use anyhow::{Context, Result, ensure};
 use nuzky_engine::{
     Project,
     model::{
-        Asset, AssetKind, Background, Clip, ClipContent, EffectValue, LETTER_SPACING, LINE_SPACING, Lut,
+        Adjust, Asset, AssetKind, Background, Clip, ClipContent, EffectValue, LETTER_SPACING, LINE_SPACING, Lut,
         MAX_BORDER_WIDTH, MAX_CANVAS_SIDE, MAX_CLIP_EFFECTS, MAX_CORRECTION_CHARS, MAX_FONT_HEIGHT_RATIO, MAX_LEFT_OUT,
         MAX_LEFT_OUT_CHARS, MAX_MASK_OFFSET, MAX_MASK_SIZE, MAX_REEL_HOOK_CHARS, MAX_REEL_TITLE_CHARS,
         MAX_REEL_WHY_CHARS, MAX_SCRIPT_CHARS, MAX_SHADOW, MAX_TEXT_WIDTH_RATIO, PROJECT_VERSION, ReelCandidate,
@@ -69,6 +69,10 @@ pub fn validate(project: &Project) -> Result<()> {
             ensure!(clip.start_us >= end, "INVALID_PROJECT: overlapping clips on {}", track.id);
             if track.id == "main" {
                 ensure!(clip.start_us == end, "INVALID_PROJECT: main track is magnetic and must have no gaps");
+                ensure!(
+                    !matches!(clip.content, ClipContent::Adjustment { .. }),
+                    "INVALID_PROJECT: an adjustment layer goes on a track above the main track"
+                );
             }
             validate_clip(project, clip, track.kind)?;
             end = clip
@@ -515,23 +519,6 @@ fn validate_clip(project: &Project, clip: &Clip, kind: TrackKind) -> Result<()> 
                 "INVALID_PROJECT: clip {} changes media without sound",
                 clip.id
             );
-            ensure!(
-                [
-                    adjust.exposure,
-                    adjust.tint,
-                    adjust.highlights,
-                    adjust.shadows,
-                    adjust.fade,
-                    adjust.brightness,
-                    adjust.contrast,
-                    adjust.saturation,
-                    adjust.temperature,
-                    adjust.vignette
-                ]
-                .iter()
-                .all(|v| v.is_finite()),
-                "INVALID_PROJECT: non-finite adjustment"
-            );
             transform(t)?;
             if let Some(shape) = shape {
                 let border = MAX_BORDER_WIDTH * project.canvas.unit().max(1.0);
@@ -551,16 +538,13 @@ fn validate_clip(project: &Project, clip: &Clip, kind: TrackKind) -> Result<()> 
                 "INVALID_PROJECT: clip {} converts the colour of media without a picture",
                 clip.id
             );
-            if let Lut::File { id, name, strength } = lut {
-                ensure!(
-                    nuzky_engine::color::is_lut_id(id)
-                        && name.chars().count() <= MAX_LUT_NAME
-                        && strength.is_finite()
-                        && (0.0..=1.0).contains(strength),
-                    "INVALID_PROJECT: the LUT of {} needs an id of 16 hex digits, a name of at most {MAX_LUT_NAME} characters and a strength from 0 to 1",
-                    clip.id
-                );
-            }
+            lut_of(clip, lut)?;
+            adjustments(adjust)?;
+        }
+        ClipContent::Adjustment { adjust, lut } => {
+            ensure!(kind == TrackKind::Video, "INVALID_PROJECT: adjustment layer {} must be on a video track", clip.id);
+            lut_of(clip, lut)?;
+            adjustments(adjust)?;
         }
         ClipContent::Text { style, transform: t, words, .. } => {
             text_style(style, (project.canvas.width, project.canvas.height))?;
@@ -589,6 +573,42 @@ fn validate_clip(project: &Project, clip: &Clip, kind: TrackKind) -> Result<()> 
     }
     if let Some(transition) = clip.transition_in {
         ensure!(transition.duration_us >= 0, "INVALID_PROJECT: negative transition duration");
+    }
+    Ok(())
+}
+
+fn adjustments(adjust: &Adjust) -> Result<()> {
+    let a = adjust;
+    ensure!(
+        [
+            a.exposure,
+            a.tint,
+            a.highlights,
+            a.shadows,
+            a.fade,
+            a.brightness,
+            a.contrast,
+            a.saturation,
+            a.temperature,
+            a.vignette
+        ]
+        .iter()
+        .all(|v| v.is_finite()),
+        "INVALID_PROJECT: non-finite adjustment"
+    );
+    Ok(())
+}
+
+fn lut_of(clip: &Clip, lut: &Lut) -> Result<()> {
+    if let Lut::File { id, name, strength } = lut {
+        ensure!(
+            nuzky_engine::color::is_lut_id(id)
+                && name.chars().count() <= MAX_LUT_NAME
+                && strength.is_finite()
+                && (0.0..=1.0).contains(strength),
+            "INVALID_PROJECT: the LUT of {} needs an id of 16 hex digits, a name of at most {MAX_LUT_NAME} characters and a strength from 0 to 1",
+            clip.id
+        );
     }
     Ok(())
 }

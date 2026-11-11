@@ -258,7 +258,9 @@ fn place(samples: &[Sample], area: Rect, upright_first: bool, project: &Project)
 fn moved(clip: &Clip, [dx, dy]: [f32; 2]) -> Vec<EditCmd> {
     let shift = |t: &Transform| Transform { x: t.x + dx, y: t.y + dy, ..*t };
     if clip.keyframes.is_empty() {
-        let (ClipContent::Media { transform, .. } | ClipContent::Text { transform, .. }) = &clip.content;
+        let (ClipContent::Media { transform, .. } | ClipContent::Text { transform, .. }) = &clip.content else {
+            return Vec::new();
+        };
         return vec![update(&clip.id, shift(transform))];
     }
     let keyframes = clip.keyframes.iter().map(|k| Keyframe { transform: shift(&k.transform), ..*k }).collect();
