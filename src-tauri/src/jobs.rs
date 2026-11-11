@@ -427,6 +427,9 @@ pub struct ExportRequest {
     #[serde(default)]
     #[cfg_attr(test, ts(optional = nullable))]
     pub preset: Option<Delivery>,
+    /// Also save the captions beside the video as `.srt` files, one per language (`subtitles::files`).
+    #[serde(default)]
+    pub srt: bool,
 }
 
 impl ExportRequest {
@@ -457,6 +460,7 @@ pub fn start_export(
     request: ExportRequest,
     replace_existing: bool,
     replace_credits: bool,
+    replace_captions: bool,
     expected_epoch: Option<&str>,
 ) -> Result<String, String> {
     check_destination(&out, replace_existing)?;
@@ -477,7 +481,11 @@ pub fn start_export(
         let name = credits.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         return Err(format!("CREDITS_EXIST: {name} already exists"));
     }
-    let options = ExportOptions { replace_credits, ..request.options(replace_existing) };
+    let captions = if request.srt { caption_files(&project, &transcripts, &out)? } else { Vec::new() };
+    if !replace_captions {
+        check_captions(&captions)?;
+    }
+    let options = ExportOptions { replace_credits, captions, replace_captions, ..request.options(replace_existing) };
     check_options(&project, &options).map_err(|e| e.to_string())?;
     let id = format!("export:{}", new_id());
     let cancel = register(app, &id).ok_or("An export is already running")?;
@@ -521,6 +529,54 @@ pub fn start_export(
         })
         .map_err(|e| e.to_string())?;
     Ok(id)
+}
+
+/// The project's captions as `.srt` files beside `base`, named as `subtitles::files` names them.
+pub(crate) fn caption_files(
+    project: &Project,
+    transcripts: &TranscriptStore,
+    base: &Path,
+) -> Result<Vec<(PathBuf, String)>, String> {
+    // Unknown, as when a file was moved, only leaves the language out of the name.
+    let speech = crate::transcripts::heard_language(project, transcripts).unwrap_or_else(|e| {
+        log::warn!("The language of the speech is unknown: {e:#}");
+        None
+    });
+    Ok(nuzky_engine::subtitles::files(project, speech.as_deref(), base))
+}
+
+/// Captions files that are already there are replaced only once someone said so, as the credits are.
+fn check_captions(files: &[(PathBuf, String)]) -> Result<(), String> {
+    let name = |path: &PathBuf| path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let existing: Vec<String> =
+        files.iter().filter(|(path, _)| path.symlink_metadata().is_ok()).map(|(p, _)| name(p)).collect();
+    match existing.len() {
+        0 => Ok(()),
+        1 => Err(format!("CAPTIONS_EXIST: {} already exists", existing[0])),
+        _ => Err(format!("CAPTIONS_EXIST: {} already exist", existing.join(" and "))),
+    }
+}
+
+/// Saves only the captions, as `.srt` files beside `base` (`reel.srt`, or `reel.cs.srt` and `reel.en.srt`), and
+/// returns where. An existing file is replaced only with `replace_existing`.
+pub fn export_captions(
+    app: &AppHandle,
+    base: PathBuf,
+    replace_existing: bool,
+    expected_epoch: Option<&str>,
+) -> Result<Vec<String>, String> {
+    let state = app.state::<AppState>();
+    let host = crate::lock_session(&state.session, expected_epoch)?.host.clone();
+    let project = host.session.state().map_err(crate::err)?.project;
+    let files = caption_files(&project, &host.transcripts, &base)?;
+    if files.is_empty() {
+        return Err("There are no captions to save. Make them in the Captions tab first.".into());
+    }
+    if !replace_existing {
+        check_captions(&files)?;
+    }
+    nuzky_engine::subtitles::write(&files, replace_existing).map_err(|e| format!("{e:#}"))?;
+    Ok(files.into_iter().map(|(path, _)| path.to_string_lossy().into_owned()).collect())
 }
 
 #[cfg_attr(test, derive(ts_rs::TS))]

@@ -1121,10 +1121,40 @@ fn start_export(
     options: jobs::ExportRequest,
     replace_existing: Option<bool>,
     replace_credits: Option<bool>,
+    replace_captions: Option<bool>,
     expected_epoch: Option<String>,
 ) -> CmdResult<String> {
     let (replace, credits) = (replace_existing.unwrap_or(true), replace_credits.unwrap_or(false));
-    jobs::start_export(&app, PathBuf::from(path), options, replace, credits, expected_epoch.as_deref())
+    let captions = replace_captions.unwrap_or(false);
+    jobs::start_export(&app, PathBuf::from(path), options, replace, credits, captions, expected_epoch.as_deref())
+}
+
+/// Saves only the captions as `.srt` files beside `path` and returns them.
+#[tauri::command]
+async fn export_captions(
+    app: AppHandle,
+    path: String,
+    replace_existing: bool,
+    expected_epoch: Option<String>,
+) -> CmdResult<Vec<String>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        jobs::export_captions(&app, PathBuf::from(path), replace_existing, expected_epoch.as_deref())
+    })
+    .await
+    .map_err(err)?
+}
+
+/// The `.srt` files the project's captions would be saved as beside `path`, without writing them.
+#[tauri::command]
+async fn caption_files(app: AppHandle, path: String) -> CmdResult<Vec<String>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let host = app.state::<AppState>().session.lock().unwrap().host.clone();
+        let project = host.session.state().map_err(err)?.project;
+        let files = jobs::caption_files(&project, &host.transcripts, Path::new(&path))?;
+        Ok(files.into_iter().map(|(path, _)| path.to_string_lossy().into_owned()).collect())
+    })
+    .await
+    .map_err(err)?
 }
 
 /// Filmstrip for timeline clips: one horizontal sprite of evenly spaced frames.
@@ -1473,6 +1503,8 @@ pub fn run() {
             library::restore_collection,
             library::set_collection,
             start_export,
+            export_captions,
+            caption_files,
             recap::recap_info,
             recap::start_recap,
             filmstrip,

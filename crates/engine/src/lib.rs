@@ -24,6 +24,7 @@ pub mod recap;
 pub mod render;
 pub mod speech;
 mod stretch;
+pub mod subtitles;
 pub mod text;
 pub mod thumbnail;
 pub mod voice;

@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { save } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { videoDir, join } from "@tauri-apps/api/path";
 import { AlertCircle, AlertTriangle, AudioLines, CheckCircle2, ChevronDown, X } from "lucide-react";
 import { api, errorText, plainError } from "../lib/api";
 import { formatLabel } from "../lib/presets";
 import { closeExport, useCover } from "../lib/cover";
+import { askExportPath } from "../lib/exportFolder";
 import { cancelExport, copyError, failedText, ranText, runBeforeExport, skippedText, usePlugins, type PassReport } from "../lib/plugins";
 import { currentEpoch, projectDuration, stopAiRun, useEditor } from "../lib/store";
 import { CoverExport } from "./cover/CoverExport";
@@ -29,6 +28,7 @@ export const QUALITIES: { id: ExportRequest["quality"]; label: string; bitsPerPi
 ];
 const AUDIO_BPS = 192_000;
 const STORAGE_KEY = "nuzky.export";
+const NO_CAPTIONS = "No captions yet. Make them in the Captions tab first.";
 /** "off" when the recap ends without its nuzky.app card. */
 const RECAP_END_CARD_KEY = "nuzky.recap.endCard";
 /**
@@ -73,6 +73,8 @@ export function estimateBytes(w: number, h: number, fps: number, quality: Export
 }
 
 const fileName = (path: string) => path.split(/[\\/]/).pop() || path;
+/** The project's name as a file name. */
+const safeName = (name: string) => name.replace(/[\\/:*?"<>|]+/g, "-").trim() || "Nuzky export";
 
 export function formatBytes(b: number) {
   if (b >= 1e9) return `${(b / 1e9).toFixed(1)} GB`;
@@ -99,11 +101,13 @@ function ownResolution(canvas: Canvas) {
 /** The settings the last export used, or the project's own; `asked`'s preset where the video fits it. */
 export function loadOptions(canvas: Canvas, asked: Delivery | null): ExportRequest {
   const short = Math.min(canvas.width, canvas.height);
+  // The .srt files are the dialog's own choice, so the export from the phone stays the video alone.
   const fallback: ExportRequest = {
     resolution: RESOLUTIONS.some((r) => r.id === short) ? short : 1080,
     fps: FRAME_RATES.includes(canvas.fps) ? canvas.fps : 30,
     quality: "recommended",
     preset: null,
+    srt: false,
   };
   try {
     const saved = savedOptions();
@@ -125,10 +129,10 @@ export function loadOptions(canvas: Canvas, asked: Delivery | null): ExportReque
  * Export… after the save panel: the plugins the user turned on for export run first, then the video exports what they
  * left. Resolves whether the export started; Cancel export while the plugins run starts none.
  */
-export async function exportVideo(path: string, options: ExportRequest, epoch: string | undefined, replace: boolean, credits: boolean) {
+export async function exportVideo(path: string, options: ExportRequest, epoch: string | undefined, replace: boolean, credits: boolean, captions = false) {
   useEditor.setState({ exportJobId: null });
   if (!(await runBeforeExport())) return false;
-  useEditor.setState({ exportJobId: await api.startExport(path, options, epoch, replace, credits) });
+  useEditor.setState({ exportJobId: await api.startExport(path, options, epoch, replace, credits, captions) });
   return true;
 }
 
@@ -197,17 +201,24 @@ export function ExportDialog() {
   const [exists, setExists] = useState<string | null>(null);
   /** The credits file the video's CC BY sounds and footage bring is already there; Replace writes over it. */
   const [creditsExist, setCreditsExist] = useState<string | null>(null);
-  const last = useRef<{ path: string; replace: boolean; credits: boolean } | null>(null);
+  /** The .srt files are already there ("reel.cs.srt and reel.en.srt"); Replace writes over them. */
+  const [captionsExist, setCaptionsExist] = useState<{ names: string; many: boolean } | null>(null);
+  /** The .srt files the captions would be saved as beside the video; none without captions. */
+  const [captionNames, setCaptionNames] = useState<string[]>([]);
+  /** The .srt files Export .srt only saved. */
+  const [savedCaptions, setSavedCaptions] = useState<string[] | null>(null);
+  /** `srt`: Export .srt only, which saves the captions alone. `captions`: the .srt files going beside the video. */
+  const last = useRef<{ srt: boolean; path: string; replace: boolean; credits: boolean; captions: string[]; replaceCaptions: boolean } | null>(null);
   const startedAt = useRef(0);
   const dialog = useRef<HTMLDivElement>(null);
   const [presetMenu, setPresetMenu] = useState<{ x: number; y: number; width: number; keyboard: boolean } | null>(null);
   const presetButton = useRef<HTMLButtonElement>(null);
   const running = job?.status === "running";
 
-  // Options start from the project each time the dialog opens; preset, resolution and quality are remembered.
+  // Options start from the project each time the dialog opens; preset, resolution, quality and .srt are remembered.
   useEffect(() => {
     const { snap, exportPreset } = useEditor.getState();
-    if (open && snap) setOptions(loadOptions(snap.project.canvas, exportPreset));
+    if (open && snap) setOptions({ ...loadOptions(snap.project.canvas, exportPreset), srt: savedOptions()?.srt === true });
     if (open && exportPreset) useEditor.setState({ exportPreset: null });
     if (open) setWhat(useCover.getState().open ? "cover" : "video");
   }, [open]);
@@ -249,12 +260,34 @@ export function ExportDialog() {
     };
   }, [open, what]);
 
+  // The .srt files beside a video named after the project, asked again when the captions tracks change.
+  const captionTracks = useEditor((s) =>
+    s.snap?.project.tracks
+      .filter((t) => t.kind === "text" && t.name === "Captions")
+      .map((t) => `${t.id}:${t.translation ?? ""}:${t.clips.length}`)
+      .join(),
+  );
+  const projectName = project?.name;
+  useEffect(() => {
+    if (!open || projectName === undefined) return;
+    let live = true;
+    api.captionFiles(`${safeName(projectName)}.mp4`).then(
+      (files) => live && setCaptionNames(files.map(fileName)),
+      () => live && setCaptionNames([]),
+    );
+    return () => {
+      live = false;
+    };
+  }, [open, projectName, captionTracks]);
+
   const close = closeExport;
   useEffect(() => {
     if (open) return;
     setError(null);
     setExists(null);
     setCreditsExist(null);
+    setCaptionsExist(null);
+    setSavedCaptions(null);
   }, [open]);
 
   const ready = open && options !== null;
@@ -283,7 +316,8 @@ export function ExportDialog() {
   // A file that appeared at the destination while rendering is asked about like one that was there before.
   const appeared = !exists && jobFailed?.startsWith("OUTPUT_EXISTS") && last.current ? last.current.path : null;
   const replacing = exists ?? appeared;
-  const asking = creditsExist ?? (replacing && fileName(replacing));
+  const asking = creditsExist ?? captionsExist?.names ?? (replacing && fileName(replacing));
+  const askingMany = !creditsExist && !!captionsExist?.many;
   // The question replaces the buttons that were focused, so focus moves to its safe answer.
   useEffect(() => {
     if (asking) dialog.current?.querySelector<HTMLElement>("[data-autofocus]")?.focus();
@@ -301,7 +335,7 @@ export function ExportDialog() {
     // A project's own resolution (4K, or the quality chosen in the top bar) is not a choice to remember for the others;
     // one picked here is.
     const resolution = patch.resolution ?? (ownResolution(project.canvas) ? savedOptions()?.resolution : next.resolution);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ resolution, quality: next.quality, preset: next.preset ?? null }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ resolution, quality: next.quality, preset: next.preset ?? null, srt: next.srt }));
   };
   const blocked = blockedReason(options.preset, project.canvas);
   const presetItem = (p: (typeof PRESETS)[number]): MenuEntry => {
@@ -323,44 +357,73 @@ export function ExportDialog() {
     ...group(PRESETS.filter((p) => !fits(p.id, project.canvas)).map(presetItem)),
   ];
 
-  /**
-   * `epoch`: the project the export was asked for, taken before any wait. `replace`: overwriting the file was confirmed;
-   * `credits`: overwriting the credits file beside it was, which is asked on its own.
-   */
-  const run = async (path: string, replace: boolean, credits = false, epoch = currentEpoch()) => {
+  const failedWith = (e: unknown, path: string) => {
+    const text = errorText(e);
+    const captions = /^CAPTIONS_EXIST: (.+) already exist(s?)/.exec(text);
+    if (text.startsWith("DESTINATION_EXISTS")) setExists(path);
+    else if (text.startsWith("CREDITS_EXIST")) setCreditsExist(/^CREDITS_EXIST: (.+) already exists/.exec(text)?.[1] ?? "The credits file");
+    else if (captions) setCaptionsExist({ names: captions[1], many: captions[2] === "" });
+    else setError(text);
+  };
+  const reset = () => {
     setError(null);
     setExists(null);
     setCreditsExist(null);
-    last.current = { path, replace, credits };
+    setCaptionsExist(null);
+    setSavedCaptions(null);
+  };
+
+  /**
+   * `epoch`: the project the export was asked for, taken before any wait. `replace`: overwriting the file was confirmed;
+   * `credits` and `replaceCaptions`: overwriting the credits or .srt files beside it was, which is asked on its own.
+   */
+  const run = async (path: string, replace: boolean, credits = false, replaceCaptions = false, epoch = currentEpoch()) => {
+    reset();
+    const srt = what === "video" && options.srt && captionNames.length > 0;
+    last.current = { srt: false, path, replace, credits, captions: [], replaceCaptions };
     try {
       if (what === "recap") {
         startedAt.current = Date.now();
         useEditor.setState({ exportJobId: await api.startRecap(path, recapRun, endCard, epoch, replace) });
       } else {
-        if (await exportVideo(path, options, epoch, replace, credits)) startedAt.current = Date.now();
+        if (srt) last.current.captions = (await api.captionFiles(path)).map(fileName);
+        if (await exportVideo(path, { ...options, srt }, epoch, replace, credits, replaceCaptions)) startedAt.current = Date.now();
       }
     } catch (e) {
-      const text = errorText(e);
-      if (text.startsWith("DESTINATION_EXISTS")) setExists(path);
-      else if (text.startsWith("CREDITS_EXIST")) setCreditsExist(/^CREDITS_EXIST: (.+) already exists/.exec(text)?.[1] ?? "The credits file");
-      else setError(text);
+      failedWith(e, path);
+    }
+  };
+
+  /** Export .srt only: the captions alone, as one file or one per language. */
+  const saveCaptions = async (path: string, replace: boolean, epoch = currentEpoch()) => {
+    reset();
+    useEditor.setState({ exportJobId: null });
+    last.current = { srt: true, path, replace, credits: false, captions: [], replaceCaptions: replace };
+    try {
+      setSavedCaptions(await api.exportCaptions(path, replace, epoch));
+    } catch (e) {
+      failedWith(e, path);
     }
   };
 
   const pickAndRun = async () => {
     const epoch = currentEpoch();
-    const safe = project.name.replace(/[\\/:*?"<>|]+/g, "-").trim() || "Nuzky export";
-    let defaultPath = what === "recap" ? `${safe} recap.mp4` : `${safe}.mp4`;
-    try {
-      defaultPath = await join(await videoDir(), defaultPath);
-    } catch {
-      /* no Videos folder; the dialog falls back to its default location */
-    }
-    const picked = await save({ defaultPath, filters: [{ name: "MP4 video", extensions: ["mp4"] }] });
+    const name = what === "recap" ? `${safeName(project.name)} recap.mp4` : `${safeName(project.name)}.mp4`;
+    const picked = await askExportPath(name, [{ name: "MP4 video", extensions: ["mp4"] }]);
     if (!picked) return;
     const path = picked.endsWith(".mp4") ? picked : `${picked}.mp4`;
     // The save dialog asked before replacing the name it returned, not one with ".mp4" added.
-    await run(path, path === picked, false, epoch);
+    await run(path, path === picked, false, false, epoch);
+  };
+
+  const pickAndSaveCaptions = async () => {
+    const epoch = currentEpoch();
+    const picked = await askExportPath(`${safeName(project.name)}.srt`, [{ name: "SRT captions", extensions: ["srt"] }]);
+    if (!picked) return;
+    const path = /\.srt$/i.test(picked) ? picked : `${picked}.srt`;
+    // The save dialog asked only about the name it returned: one file per language is asked about here.
+    const files = await api.captionFiles(path).catch(() => []);
+    await saveCaptions(path, files.length === 1 && files[0] === picked, epoch);
   };
 
   const eta = (() => {
@@ -370,7 +433,8 @@ export function ExportDialog() {
     return left < 60 ? `${Math.ceil(left)} s left` : `${Math.ceil(left / 60)} min left`;
   })();
   const failed = asking || before ? null : (error ?? jobFailed);
-  const settingsLocked = running || !!before || job?.status === "done";
+  const settingsLocked = running || !!before || job?.status === "done" || !!savedCaptions;
+  const hasCaptions = captionNames.length > 0;
   const info = recap.info;
   const recapBlocked =
     what !== "recap"
@@ -572,6 +636,16 @@ export function ExportDialog() {
               />
               <span className="text-right text-[13px] text-muted">Quality</span>
               <Segmented label="Quality" value={options.quality} onChange={(quality) => setOption({ quality })} options={QUALITIES} />
+              <span className="text-right text-[13px] text-muted">Captions</span>
+              <Checkbox
+                label="Also save as .srt"
+                checked={options.srt && hasCaptions}
+                disabled={!hasCaptions}
+                title={hasCaptions ? undefined : NO_CAPTIONS}
+                onChange={(srt) => setOption({ srt })}
+              />
+              {/* One file is named like the video; only one per language needs saying. */}
+              {options.srt && captionNames.length > 1 && <p className="col-start-2 -mt-1 text-[12px] text-muted">{captionNames.join(" · ")}</p>}
             </div>
           </fieldset>
           )}
@@ -610,13 +684,32 @@ export function ExportDialog() {
           {job?.status === "done" && (
             <div className="flex items-start gap-2 rounded-xl bg-ok/10 p-3 text-[13px] text-fg" role="status">
               <CheckCircle2 size={16} className="mt-px shrink-0 text-ok" />
-              <span className="break-all">Saved to {job.output}</span>
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className="break-all">Saved to {job.output}</span>
+                {what === "video" && last.current?.captions.length === 1 && <span className="text-muted">Captions saved beside it as .srt</span>}
+                {what === "video" && (last.current?.captions.length ?? 0) > 1 && (
+                  <span className="break-words text-muted">Captions saved beside it: {last.current!.captions.join(" · ")}</span>
+                )}
+              </span>
+            </div>
+          )}
+          {savedCaptions && (
+            <div className="flex items-start gap-2 rounded-xl bg-ok/10 p-3 text-[13px] text-fg" role="status">
+              <CheckCircle2 size={16} className="mt-px shrink-0 text-ok" />
+              {savedCaptions.length === 1 ? (
+                <span className="break-all">Saved to {savedCaptions[0]}</span>
+              ) : (
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span className="break-all">Saved to {savedCaptions[0].replace(/[\\/][^\\/]*$/, "")}</span>
+                  <span className="break-words text-muted">{savedCaptions.map(fileName).join(" · ")}</span>
+                </span>
+              )}
             </div>
           )}
           {job?.status === "done" && job.message && <Notice kind="warn">{job.message}</Notice>}
           {asking && (
-            <Notice kind="warn" className="break-all">
-              {asking} already exists. Replace it?
+            <Notice kind="warn" className={captionsExist ? "break-words" : "break-all"}>
+              {asking} {askingMany ? "already exist. Replace them?" : "already exists. Replace it?"}
             </Notice>
           )}
           {failed && (
@@ -669,6 +762,15 @@ export function ExportDialog() {
                   Keep editing
                 </Button>
               </>
+            ) : savedCaptions ? (
+              <>
+                <Button pill onClick={() => revealItemInDir(savedCaptions[0])}>
+                  Show in folder
+                </Button>
+                <Button pill variant="primary" data-autofocus onClick={close}>
+                  Done
+                </Button>
+              </>
             ) : job?.status === "done" ? (
               <>
                 <Button pill onClick={() => job.output && revealItemInDir(job.output)}>
@@ -680,24 +782,46 @@ export function ExportDialog() {
               </>
             ) : asking ? (
               <>
-                <Button pill data-autofocus onClick={() => (setExists(null), setCreditsExist(null), pickAndRun())}>
+                <Button pill data-autofocus onClick={() => (reset(), last.current?.srt ? pickAndSaveCaptions() : pickAndRun())}>
                   Choose another name…
                 </Button>
                 <Button
                   pill
                   variant="danger"
-                  onClick={() => (creditsExist ? run(last.current!.path, last.current!.replace, true) : run(replacing!, true, last.current?.credits))}
+                  onClick={() => {
+                    const l = last.current!;
+                    if (creditsExist) void run(l.path, l.replace, true, l.replaceCaptions);
+                    else if (captionsExist) void (l.srt ? saveCaptions(l.path, true) : run(l.path, l.replace, l.credits, true));
+                    else void run(replacing!, true, l.credits, l.replaceCaptions);
+                  }}
                 >
                   Replace
                 </Button>
               </>
             ) : (
               <>
-                <Button pill onClick={close}>
-                  Close
-                </Button>
-                {failed && last.current ? (
-                  <Button pill variant="primary" data-autofocus disabled={!!exportBlocked} disabledReason={exportBlocked ?? undefined} onClick={() => run(last.current!.path, last.current!.replace, last.current!.credits)}>
+                {what === "video" ? (
+                  <Button pill disabled={!hasCaptions} disabledReason={hasCaptions ? undefined : NO_CAPTIONS} onClick={pickAndSaveCaptions}>
+                    Export .srt only…
+                  </Button>
+                ) : (
+                  <Button pill onClick={close}>
+                    Close
+                  </Button>
+                )}
+                {failed && last.current?.srt ? (
+                  <Button pill variant="primary" data-autofocus onClick={() => saveCaptions(last.current!.path, last.current!.replace)}>
+                    Retry
+                  </Button>
+                ) : failed && last.current ? (
+                  <Button
+                    pill
+                    variant="primary"
+                    data-autofocus
+                    disabled={!!exportBlocked}
+                    disabledReason={exportBlocked ?? undefined}
+                    onClick={() => run(last.current!.path, last.current!.replace, last.current!.credits, last.current!.replaceCaptions)}
+                  >
                     Retry
                   </Button>
                 ) : (

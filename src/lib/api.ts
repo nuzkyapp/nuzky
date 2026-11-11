@@ -163,8 +163,14 @@ export const api = {
   openSoundPage: (url: string) => invoke<void>("open_sound_page", { url }),
   /** Without `replaceExisting` an existing file is kept and the export fails with DESTINATION_EXISTS. */
   /** CC BY sounds and footage bring `<name>.credits.txt`; without `replaceCredits` an existing one fails with CREDITS_EXIST. */
-  startExport: (path: string, options: ExportRequest, epoch: Epoch, replaceExisting: boolean, replaceCredits = false) =>
-    invoke<string>("start_export", { path, options, expectedEpoch: epoch, replaceExisting, replaceCredits }),
+  /** With `options.srt` the captions go beside it as `.srt`; without `replaceCaptions` existing ones fail with CAPTIONS_EXIST. */
+  startExport: (path: string, options: ExportRequest, epoch: Epoch, replaceExisting: boolean, replaceCredits = false, replaceCaptions = false) =>
+    invoke<string>("start_export", { path, options, expectedEpoch: epoch, replaceExisting, replaceCredits, replaceCaptions }),
+  /** Saves only the captions as `.srt` beside `path` (`reel.srt`, or `reel.cs.srt` and `reel.en.srt`) and returns the files. */
+  exportCaptions: (path: string, replaceExisting: boolean, epoch: Epoch) =>
+    invoke<string[]>("export_captions", { path, replaceExisting, expectedEpoch: epoch }),
+  /** The `.srt` files the captions would be saved as beside `path`; none without captions. */
+  captionFiles: (path: string) => invoke<string[]>("caption_files", { path }),
   filmstrip: (assetId: string) => invoke<Filmstrip | null>("filmstrip", { assetId }),
   layerBounds: (tUs: number) => invoke<LayerBounds[]>("layer_bounds", { tUs: Math.round(tUs) }),
   /** What a recap of an AI run, or with null of everything cut since the import, would count and how long it is. */

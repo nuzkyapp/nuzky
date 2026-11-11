@@ -1,7 +1,7 @@
 //! MP4 export: the preview renderer at canvas resolution, H.264 + AAC. A delivery preset fixes
 //! the format a platform expects and levels the sound to its loudness.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context as _, Result, anyhow, bail};
@@ -118,6 +118,10 @@ pub struct ExportOptions {
     /// The credits file of CC BY sounds and footage may replace one beside the video. Asked apart from the video,
     /// since a creator may keep their own notes in a file of that name.
     pub replace_credits: bool,
+    /// Captions written beside the video once it is saved, as `subtitles::files` names them.
+    pub captions: Vec<(PathBuf, String)>,
+    /// The captions files may replace ones beside the video, asked apart from the video like the credits.
+    pub replace_captions: bool,
     /// x264 speed preset.
     pub preset: String,
     /// Short side of the output in pixels (720, 1080, 1440, 2160); `None` keeps the canvas size.
@@ -134,6 +138,8 @@ impl Default for ExportOptions {
             crf: Quality::Recommended.crf(),
             replace_existing: false,
             replace_credits: false,
+            captions: Vec::new(),
+            replace_captions: false,
             // Every platform encodes the upload again and keeps only the detail the file still has. At the
             // same CRF, medium keeps visibly more of it than veryfast, for about twice the export time.
             preset: "medium".into(),
@@ -195,6 +201,11 @@ pub fn export(
     if credits.is_some() && !options.replace_credits && credits_out.symlink_metadata().is_ok() {
         bail!("OUTPUT_EXISTS: {} already exists; choose a new export path", credits_out.display());
     }
+    if !options.replace_captions
+        && let Some((path, _)) = options.captions.iter().find(|(path, _)| path.symlink_metadata().is_ok())
+    {
+        bail!("OUTPUT_EXISTS: {} already exists; choose a new export path", path.display());
+    }
     prepare_sound(project, cache_dir, cancel)?;
     // A clip with a background needs its person outlines made first (`nuzky_vision::matte::prepare`).
     crate::matte::check(cache_dir, project)?;
@@ -202,10 +213,12 @@ pub fn export(
         encode(project, cache_dir, tmp, options, cancel, &mut progress, duration)
     })?;
     if let Some(text) = credits {
-        write_credits(&text, &credits_out, options.replace_credits).with_context(|| {
+        write_text(&text, &credits_out, options.replace_credits).with_context(|| {
             format!("The video is saved, but its credits could not be written to {}", credits_out.display())
         })?;
     }
+    crate::subtitles::write(&options.captions, options.replace_captions)
+        .context("The video is saved, but its captions could not be written")?;
     Ok(measured)
 }
 
@@ -280,7 +293,7 @@ pub fn heard_clips(project: &Project) -> impl Iterator<Item = &Clip> {
 }
 
 /// Through a temporary file beside it, like the video.
-pub(crate) fn write_credits(text: &str, out: &Path, replace_existing: bool) -> Result<()> {
+pub(crate) fn write_text(text: &str, out: &Path, replace_existing: bool) -> Result<()> {
     let tmp = out.with_file_name(format!(".nuzky-part-{}.txt", uuid::Uuid::new_v4()));
     std::fs::write(&tmp, text).with_context(|| format!("Cannot write {}", tmp.display()))?;
     let result = publish(&tmp, out, replace_existing, &AtomicBool::new(false));
