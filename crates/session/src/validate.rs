@@ -7,9 +7,9 @@ use nuzky_engine::{
     model::{
         Asset, AssetKind, Background, Clip, ClipContent, EffectValue, LETTER_SPACING, LINE_SPACING, Lut,
         MAX_BORDER_WIDTH, MAX_CANVAS_SIDE, MAX_CLIP_EFFECTS, MAX_CORRECTION_CHARS, MAX_FONT_HEIGHT_RATIO, MAX_LEFT_OUT,
-        MAX_LEFT_OUT_CHARS, MAX_REEL_HOOK_CHARS, MAX_REEL_TITLE_CHARS, MAX_REEL_WHY_CHARS, MAX_SHADOW,
-        MAX_TEXT_WIDTH_RATIO, PROJECT_VERSION, ReelCandidate, ReelStatus, TextStyle, Thumbnail, TrackKind, Transform,
-        language_name, max_stroke_width, unit_of,
+        MAX_LEFT_OUT_CHARS, MAX_REEL_HOOK_CHARS, MAX_REEL_TITLE_CHARS, MAX_REEL_WHY_CHARS, MAX_SCRIPT_CHARS,
+        MAX_SHADOW, MAX_TEXT_WIDTH_RATIO, PROJECT_VERSION, ReelCandidate, ReelStatus, TextStyle, Thumbnail, TrackKind,
+        Transform, language_name, max_stroke_width, unit_of,
     },
 };
 
@@ -77,6 +77,10 @@ pub fn validate(project: &Project) -> Result<()> {
                 .ok_or_else(|| anyhow::anyhow!("INVALID_PROJECT: clip time overflow"))?;
         }
     }
+    ensure!(
+        project.script.chars().count() <= MAX_SCRIPT_CHARS,
+        "INVALID_PROJECT: the voiceover script has more than {MAX_SCRIPT_CHARS} characters"
+    );
     word_corrections(project)?;
     thumbnails(project)?;
     imported(project)?;

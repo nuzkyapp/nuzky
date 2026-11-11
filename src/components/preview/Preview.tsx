@@ -20,6 +20,7 @@ import { PreviewDrop } from "./PreviewDrop";
 import { RatioMenu } from "./RatioMenu";
 import { FacesStatus } from "./FacesStatus";
 import { ReframeStatus } from "./ReframeStatus";
+import { VoiceoverCountdown } from "../panel/VoiceoverPanel";
 import { useKeyLabels } from "../../lib/keys";
 
 const HEADER = 24;
@@ -389,6 +390,7 @@ export function Preview() {
             {!empty && !engineError && canvas && fit.w > 0 && !reels && compare === null && <LayerOverlay width={fit.w} height={fit.h} bleed={{ x: (box.w - fit.w) / 2, y: (box.h - fit.h) / 2 }} />}
             {!empty && !engineError && canvas && !reels && !cover && <PreviewDrop canvas={canvas} />}
             {compare !== null && !empty && !engineError && !reels && !cover && !source && fit.w > 0 && <CompareDivider width={fit.w} />}
+            <VoiceoverCountdown />
           </div>
         </div>
       </div>

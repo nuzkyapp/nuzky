@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { api, errorText, plainError } from "./api";
 import { aiLocked, enqueue, undoAction, useEditor } from "./store";
 import type { BeatCutDone, BeatPlans, Project, Rhythm, SongBeats } from "./types";
+import { isRecordedVoiceover } from "./voiceover";
 
 export const RHYTHMS: { id: Rhythm; label: string; does: string }[] = [
   { id: "calm", label: "Calm", does: "A cut on every bar after the intro." },
@@ -40,7 +41,7 @@ export function musicClipOf(project: Project): { clipId: string; name: string } 
     for (const clip of track.clips) {
       const c = clip.content;
       const asset = c.type === "media" ? project.assets.find((a) => a.id === c.assetId) : undefined;
-      if (asset?.hasAudio) return { clipId: clip.id, name: asset.name };
+      if (asset?.hasAudio && !isRecordedVoiceover(asset)) return { clipId: clip.id, name: asset.name };
     }
   }
   return null;

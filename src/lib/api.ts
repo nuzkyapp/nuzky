@@ -3,7 +3,7 @@ import type { GalleryPlugin, GalleryState } from "./gallery";
 import type { StorageUsage, StyleSettings } from "./types";
 import type { EffectIssue, ListedPlugin, PluginRow, PluginValues } from "./plugins";
 import type { ColorLook, LutInfo } from "./color";
-import type { AgentAccess, ImportedKeys, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, BeatCutDone, BeatPlans, Boot, BrollChoice, BrollSuggestions, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Mono, Part, PreviewStarted, Project, ProjectPoster, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFinish, ReelFraming, Rhythm, Said, SampleRun, ScreenRecording, ScreenWindow, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied } from "./types";
+import type { AgentAccess, ImportedKeys, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, BeatCutDone, BeatPlans, Boot, BrollChoice, BrollSuggestions, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Mono, Part, PreviewStarted, Project, ProjectPoster, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFinish, ReelFraming, Rhythm, Said, SampleRun, ScreenRecording, ScreenWindow, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied, VoiceoverState } from "./types";
 
 /**
  * The session a change was made for. Mutating commands carry it, so a change still in flight when
@@ -260,6 +260,15 @@ export const api = {
   screenRecordStart: (window: ScreenWindow | null) => invoke<ScreenRecording>("screen_record_start", { window }),
   /** `keep` adds the recording to the project's media as one undo step; otherwise it is deleted. */
   screenRecordStop: (keep: boolean, epoch: Epoch) => invoke<Snapshot | null>("screen_record_stop", { keep, expectedEpoch: epoch }),
+  /** Opens the microphone for the meter, which `voiceover-level` reports; resolves with its name. */
+  voiceoverOpen: () => invoke<string>("voiceover_open"),
+  /** Closes the microphone; a take still recording is deleted. */
+  voiceoverClose: () => invoke<void>("voiceover_close"),
+  voiceoverState: () => invoke<VoiceoverState>("voiceover_state"),
+  /** Starts writing what the microphone hears, to go on the timeline at `startUs`. */
+  voiceoverRecordStart: (startUs: number) => invoke<void>("voiceover_record_start", { startUs: Math.round(startUs) }),
+  /** `keep` puts the take on the timeline where it started, as one undo step; otherwise it is deleted. */
+  voiceoverRecordStop: (keep: boolean, epoch: Epoch) => invoke<Snapshot | null>("voiceover_record_stop", { keep, expectedEpoch: epoch }),
   /** Finds the beat of the song under `clipId` as a `beats` job; null when it is known already. */
   findBeats: (clipId: string, epoch: Epoch) => invoke<string | null>("find_beats", { clipId, expectedEpoch: epoch }),
   /** What each rhythm would cut; null while the song's beat is not known. Nothing changes. */
@@ -353,6 +362,9 @@ const PLAIN: Record<string, string | ((detail: string) => string)> = {
   RUN_BUSY: "An AI edit is still open. Stop it first.",
   SCREEN_PERMISSION: (detail) => detail,
   SCREEN_UNSUPPORTED: (detail) => detail,
+  MIC_MISSING: (detail) => detail,
+  MIC_PERMISSION: (detail) => detail,
+  VOICEOVER_BUSY: (detail) => detail,
   RECORDING: "The screen is already being recorded.",
   STORAGE_BUSY: (detail) => detail,
   MODEL_IN_USE: (detail) => detail,

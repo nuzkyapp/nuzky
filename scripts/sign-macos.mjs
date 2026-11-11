@@ -64,7 +64,8 @@ try {
   for (const name of readdirSync(frameworks).filter((name) => name.endsWith('.dylib'))) {
     run('codesign', [...sign, '--options', 'runtime', path.join(frameworks, name)]);
   }
-  run('codesign', [...sign, '--options', 'runtime', app]);
+  // The hardened runtime lets the app use the microphone, for voiceovers, only with this entitlement.
+  run('codesign', [...sign, '--options', 'runtime', '--entitlements', 'src-tauri/Entitlements.plist', app]);
   run('codesign', ['--verify', '--deep', '--strict', app]);
   createDmg(app, dmg, target);
   run('codesign', [...sign, dmg]);

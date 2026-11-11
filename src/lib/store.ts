@@ -40,6 +40,8 @@ interface EditorState {
   clipboard: CopiedClip[] | null;
   playing: boolean;
   timeUs: number;
+  /** How often the playhead was moved by hand or by a command, so a voiceover take knows when it no longer matches the picture. */
+  seeks: number;
   /** Timeline zoom in pixels per second. */
   zoom: number;
   jobs: Record<string, JobEvent>;
@@ -410,6 +412,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   clipboard: null,
   playing: false,
   timeUs: 0,
+  seeks: 0,
   zoom: 60,
   jobs: {},
   toasts: [],
@@ -507,7 +510,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     const t = Math.max(0, Math.min(end, tUs));
     // Moving the playhead shows the timeline again.
     closeSource();
-    set({ timeUs: t });
+    set({ timeUs: t, seeks: get().seeks + 1 });
     api.seek(t);
   },
 

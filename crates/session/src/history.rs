@@ -275,6 +275,7 @@ pub(crate) fn label(cmds: &[EditCmd]) -> &'static str {
         EditCmd::ReplaceCaptions { .. } => "Replace captions",
         EditCmd::RippleDeleteRanges { .. } => "Cut",
         EditCmd::RenameProject { .. } => "Rename project",
+        EditCmd::SetScript { .. } => "Voiceover script",
         EditCmd::CorrectWords { .. } => "Correct words",
         EditCmd::MarkKeyWord { .. } => "Key word",
         EditCmd::ZoomRanges { .. } => "Zoom",

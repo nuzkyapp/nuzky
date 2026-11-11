@@ -2051,6 +2051,9 @@ pub(crate) fn state_value(state: &SessionState, args: State) -> Result<Value> {
     object.insert("thumbnails".into(), json!(project.thumbnails));
     object.insert("reel_candidates".into(), json!(project.reel_candidates));
     object.insert("imported".into(), json!(project.imported));
+    if !project.script.is_empty() {
+        object.insert("script".into(), json!(project.script));
+    }
     object.insert("duration_us".into(), json!(state.project.duration_us()));
     object.insert("caption_stats".into(), caption_stats(&state.project));
     object.insert("missing_fonts".into(), json!(crate::fonts::missing(crate::fonts::families(&state.project))));

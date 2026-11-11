@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::{
     Adjust, Animation, Asset, AssetKind, Background, CAPTIONS_TRACK, Canvas, CaptionWord, Clip, ClipContent, Ease,
-    Effect, Keyframe, Keywords, LetterCase, LogProfile, Lut, MAX_CANVAS_SIDE, MAX_CLIP_EFFECTS, MAX_FPS, Mono, Project,
-    ReelCandidate, Shape, TextAlign, TextShadow, TextStyle, Thumbnail, ThumbnailFormat, Track, TrackKind, Transform,
-    Transition, WordCorrection, word_ranges,
+    Effect, Keyframe, Keywords, LetterCase, LogProfile, Lut, MAX_CANVAS_SIDE, MAX_CLIP_EFFECTS, MAX_FPS,
+    MAX_SCRIPT_CHARS, Mono, Project, ReelCandidate, Shape, TextAlign, TextShadow, TextStyle, Thumbnail,
+    ThumbnailFormat, Track, TrackKind, Transform, Transition, WordCorrection, word_ranges,
 };
 
 pub const MAIN_TRACK: &str = "main";
@@ -354,6 +354,10 @@ pub enum EditCmd {
     },
     RenameProject {
         name: String,
+    },
+    /// Replaces the voiceover script, the text the creator reads while recording a voiceover; empty removes it.
+    SetScript {
+        text: String,
     },
     /// Sets how recognised words read, each found by its media file, its start in the file and
     /// its recognised text. Setting a word back to its recognised text removes the correction.
@@ -1035,9 +1039,10 @@ impl Project {
             | EditCmd::SetTransition { .. }
             | EditCmd::SetKeyframes { .. }
             | EditCmd::SetEffects { .. } => self.apply_clip(cmd)?,
-            EditCmd::UpdateTrack { .. } | EditCmd::SetCanvas { .. } | EditCmd::RenameProject { .. } => {
-                self.apply_tracks(cmd)?
-            }
+            EditCmd::UpdateTrack { .. }
+            | EditCmd::SetCanvas { .. }
+            | EditCmd::RenameProject { .. }
+            | EditCmd::SetScript { .. } => self.apply_tracks(cmd)?,
             EditCmd::AddCaptions { .. } | EditCmd::ReplaceCaptions { .. } | EditCmd::RippleDeleteRanges { .. } => {
                 self.apply_captions(cmd, &mut out)?
             }
@@ -1911,6 +1916,14 @@ impl Project {
                 if !name.is_empty() {
                     self.name = name.to_string();
                 }
+            }
+            EditCmd::SetScript { text } => {
+                let chars = text.chars().count();
+                ensure!(
+                    chars <= MAX_SCRIPT_CHARS,
+                    "The script has {chars} characters; keep it to {MAX_SCRIPT_CHARS} at most, about an hour of speech"
+                );
+                self.script = if text.trim().is_empty() { String::new() } else { text };
             }
             _ => unreachable!("command dispatched to the wrong edit group"),
         }
@@ -2965,6 +2978,25 @@ mod tests {
 
     fn main_layout(p: &Project) -> Vec<(i64, i64)> {
         p.tracks[0].clips.iter().map(|c| (c.start_us / 1000, c.duration_us / 1000)).collect()
+    }
+
+    #[test]
+    fn typing_a_script_is_one_undo_step_and_it_stays_within_its_limit() {
+        let mut editor = Editor::new(Project::new("talk"));
+        let script = |text: &str| EditCmd::SetScript { text: text.into() };
+        editor.apply(script("Three tips"), Some("script:1".into())).unwrap();
+        editor.apply(script("Three tips for better sound."), Some("script:1".into())).unwrap();
+        assert_eq!(editor.project.script, "Three tips for better sound.");
+        editor.undo();
+        assert_eq!(editor.project.script, "");
+        assert!(!editor.can_undo());
+        editor.redo();
+        let long = "a".repeat(MAX_SCRIPT_CHARS + 1);
+        let error = editor.apply(script(&long), None).unwrap_err().to_string();
+        assert!(error.contains("keep it to 60000 at most"), "{error}");
+        assert_eq!(editor.project.script, "Three tips for better sound.");
+        editor.apply(script(" \n "), None).unwrap();
+        assert_eq!(editor.project.script, "", "a script of only spaces is no script");
     }
 
     #[test]

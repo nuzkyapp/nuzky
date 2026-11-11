@@ -34,7 +34,14 @@ pub struct Project {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional = nullable))]
     pub imported: Option<Imported>,
+    /// What the creator reads while recording a voiceover, as they pasted or wrote it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[cfg_attr(feature = "ts", ts(optional = nullable))]
+    pub script: String,
 }
+
+/// The longest voiceover script, in characters: about an hour of speech.
+pub const MAX_SCRIPT_CHARS: usize = 60_000;
 
 /// A timeline cut in another editor, such as a CapCut draft, as it was opened into this project.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -1325,6 +1332,7 @@ impl Project {
             thumbnails: Vec::new(),
             reel_candidates: Vec::new(),
             imported: None,
+            script: String::new(),
         }
     }
 
@@ -1420,6 +1428,22 @@ mod tests {
         assert!(json.contains("\"type\":\"text\""));
         assert!(json.contains(r##""highlight":"#ffe14d""##) && json.contains(r#""words":[{"text":"Ahoj","startUs":0"#));
         assert_eq!(serde_json::from_str::<Project>(&json).unwrap(), p);
+    }
+
+    #[test]
+    fn a_project_saved_before_voiceover_scripts_opens_and_saves_unchanged() {
+        let old = r##"{"version":1,"name":"Old","canvas":{"width":1080,"height":1920,"fps":30,"background":"#000000"},"assets":[],"tracks":[{"id":"main","kind":"video","name":"Main","muted":false,"hidden":false,"clips":[]}]}"##;
+        let project: Project = serde_json::from_str(old).unwrap();
+        assert_eq!(project.script, "");
+        let saved = serde_json::to_value(&project).unwrap();
+        assert!(saved.get("script").is_none(), "an empty script adds nothing to the file");
+        assert_eq!(serde_json::to_value(serde_json::from_value::<Project>(saved.clone()).unwrap()).unwrap(), saved);
+
+        let mut with = project;
+        with.script = "Three tips for better sound.\nFirst, get closer.".into();
+        let json = serde_json::to_string(&with).unwrap();
+        assert!(json.contains(r#""script":"Three tips for better sound.\nFirst, get closer.""#));
+        assert_eq!(serde_json::from_str::<Project>(&json).unwrap(), with);
     }
 
     #[test]

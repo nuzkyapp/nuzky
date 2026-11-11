@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { Copy, Magnet, Maximize2, PanelLeftClose, PanelRightClose, RotateCwSquare, Scissors, Snowflake, Trash2, Unlink, ZoomIn, ZoomOut } from "lucide-react";
+import { Copy, Magnet, Maximize2, Mic, PanelLeftClose, PanelRightClose, RotateCwSquare, Scissors, Snowflake, Trash2, Unlink, ZoomIn, ZoomOut } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import {
   MAIN_TRACK,
@@ -39,6 +39,7 @@ import { HistoryButton, type Peek } from "./HistoryButton";
 import { TrackHeader } from "./TrackHeader";
 import { SNAP_PX, dragFade, dragResult, isFade, snap, useTimelineGestures, type Drag } from "./useTimelineGestures";
 import { useKeyLabels } from "../../lib/keys";
+import { closeVoiceover, openVoiceover, useMicLevel, useVoiceover } from "../../lib/voiceover";
 
 const HEADER_W = 152;
 const RULER_H = 28;
@@ -49,6 +50,39 @@ const LANES_AT = { left: HEADER_W, top: RULER_H };
 const REPLACE_END = 24;
 const OVERLAY_LANE_H = 20;
 const END_TIP = "The video ends here. Sound after this point is not exported.";
+
+/**
+ * The take being recorded, as a red clip that grows from where it started, on a lane of its own under the tracks;
+ * Stop puts it on an audio track there.
+ */
+function RecordingLane({ zoom }: { zoom: number }) {
+  const startUs = useVoiceover((s) => s.startUs);
+  const shown = useVoiceover((s) => s.phase === "recording" || s.phase === "stopping");
+  const recordedUs = useMicLevel((s) => s.level?.recordedUs ?? 0);
+  const lane = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (shown) lane.current?.scrollIntoView({ block: "nearest" });
+  }, [shown]);
+  if (!shown) return null;
+  return (
+    <div ref={lane} className="relative flex shrink-0" style={{ height: 58 + ROW_GAP }}>
+      <div className="sticky left-0 z-[47] flex shrink-0 items-center gap-1.5 border-r border-white/[.07] bg-panel px-3 text-[12px] text-muted" style={{ width: HEADER_W }}>
+        <Mic size={14} className="shrink-0" />
+        Recording
+      </div>
+      <div className="relative flex-1" style={{ marginBlock: ROW_GAP / 2 }}>
+        <div
+          data-recording-clip
+          className="absolute top-1 bottom-1 flex items-start gap-1.5 overflow-hidden rounded-[7px] bg-danger/20 px-2 pt-1.5 text-[11px] leading-[13px] font-medium whitespace-nowrap text-fg shadow-[inset_0_0_0_1.5px_rgb(255_69_58/.9)]"
+          style={{ left: (startUs / US) * zoom, width: Math.max(4, (recordedUs / US) * zoom) }}
+        >
+          <span aria-hidden className="mt-[2.5px] h-2 w-2 shrink-0 rounded-full bg-danger" />
+          Voiceover <span className="tabular text-muted">{formatDuration(recordedUs)}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function rowHeight(track: Track) {
   if (track.id === MAIN_TRACK) return 64;
@@ -317,6 +351,9 @@ export function Timeline({ height }: { height: number }) {
   const locked = useAiLocked();
   // In the cover editor the timeline chooses the cover's frame: clicks and drags move the playhead, which is the frame.
   const cover = useCover((s) => s.open);
+  const voiceoverOpen = useVoiceover((s) => s.phase !== "closed");
+  // Stop or Cancel in the voiceover ends a take; this button only closes it between takes.
+  const voiceoverBusy = useVoiceover((s) => s.phase === "countdown" || s.phase === "recording" || s.phase === "stopping");
   const coverFromImage = useEditor((s) => !!(cover && thumbnailOf(s.snap?.project, cover)?.image));
   const candidates = useCandidates();
   const { select, setZoom } = useEditor.getState();
@@ -730,6 +767,18 @@ export function Timeline({ height }: { height: number }) {
           </div>
         )}
         <div className="flex-1" />
+        {!cover && (
+          <IconButton
+            round
+            label={voiceoverOpen ? "Close voiceover" : locked ? lockedLabel("Record voiceover") : "Record voiceover"}
+            active={voiceoverOpen}
+            disabled={voiceoverOpen ? voiceoverBusy : locked}
+            onClick={() => void (voiceoverOpen ? closeVoiceover() : openVoiceover())}
+            data-voiceover-button
+          >
+            <Mic size={16} />
+          </IconButton>
+        )}
         <IconButton round label={withKey("Zoom out", "zoomOut")} onClick={() => setZoom(zoom / 1.3)}>
           <ZoomOut size={16} />
         </IconButton>
@@ -923,6 +972,7 @@ export function Timeline({ height }: { height: number }) {
               return isMain && laneRow ? [laneRow, row] : row;
             })}
             {drag?.moved && drag.target === null && dragKind === "audio" && <div className="ml-[152px] h-0.5 rounded-full bg-accent" />}
+            <RecordingLane zoom={zoom} />
             {/* The header column runs on below the last track, so nothing scrolled under it shows through. */}
             <div data-lane className="flex flex-1">
               <div className="sticky left-0 z-[47] shrink-0 border-r border-white/[.07] bg-panel" style={{ width: HEADER_W }} />

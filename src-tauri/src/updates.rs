@@ -452,6 +452,8 @@ fn work_of(kinds: &[String]) -> Option<&'static str> {
         Some("the model download")
     } else if any(&["style"]) {
         Some("learning your style")
+    } else if any(&["voiceover"]) {
+        Some("the voiceover recording")
     } else {
         let restarts = ["audio", "voice", "dereverb", "level", "proxy", "matte"];
         kinds.iter().any(|kind| !restarts.contains(&kind.as_str())).then_some("the analysis")

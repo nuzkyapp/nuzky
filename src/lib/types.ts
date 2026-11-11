@@ -828,6 +828,9 @@ export type EditCmd = {
   "type": "renameProject",
   name: string,
 } | {
+  "type": "setScript",
+  text: string,
+} | {
   "type": "correctWords",
   corrections: Array<WordCorrection>,
 } | {
@@ -1147,6 +1150,26 @@ export type MadeReel = {
   skipped: Array<string>,
 };
 
+/**
+ * The microphone as the meter shows it, 20 times a second.
+ */
+export type MicLevel = {
+  /**
+   * The loudest sample of the last 50 ms in dBFS, -60 at the least.
+   */
+  peakDb: number,
+  warning: MicWarning | null,
+  /**
+   * How long the take being recorded is, in microseconds; null while nothing records.
+   */
+  recordedUs: number | null,
+};
+
+/**
+ * What the creator should change before or while recording.
+ */
+export type MicWarning = "loud" | "quiet" | "silent";
+
 export type ModelKind = "speech" | "vision";
 
 /**
@@ -1228,6 +1251,10 @@ export type Project = {
    * The timeline of another editor the project was opened from.
    */
   imported?: Imported | null,
+  /**
+   * What the creator reads while recording a voiceover, as they pasted or wrote it.
+   */
+  script?: string,
 };
 
 /**
@@ -2397,6 +2424,21 @@ export type VisionModels = {
    * Why covers cannot run on this computer at all, so nothing should be downloaded.
    */
   unavailable: string | null,
+};
+
+export type VoiceoverState = {
+  /**
+   * The microphone listened to, or null while it is closed.
+   */
+  microphone: string | null,
+  /**
+   * Where on the timeline the take being recorded starts.
+   */
+  recordingFromUs: number | null,
+  /**
+   * A take the project refused, as while the AI edits, kept until it is added or deleted.
+   */
+  unsaved: boolean,
 };
 
 /**

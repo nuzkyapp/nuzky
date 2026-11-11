@@ -47,7 +47,8 @@
     "category": "Video",
     "shortDescription": "A local desktop video editor",
     "macOS": {
-      "minimumSystemVersion": "15.0"
+      "minimumSystemVersion": "15.0",
+      "entitlements": "./Entitlements.plist"
     },
     "windows": {
       "bundleVCRuntime": true,

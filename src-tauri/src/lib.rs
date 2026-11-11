@@ -41,6 +41,7 @@ mod transcripts;
 #[cfg(test)]
 mod typescript;
 mod updates;
+mod voiceover;
 mod youtube_videos;
 mod zooms;
 
@@ -94,6 +95,7 @@ pub struct AppState {
     beat_cuts: beats::BeatCuts,
     youtube: youtube_videos::YoutubeVideos,
     screen: screen::ScreenRecorder,
+    voiceover: voiceover::Voiceover,
     source_preview: Mutex<Option<(Engine, String)>>,
     plugin_preview: Mutex<Arc<AtomicBool>>,
     gallery: plugins::GalleryState,
@@ -1340,6 +1342,7 @@ pub fn run() {
                 beat_cuts: Default::default(),
                 youtube: Default::default(),
                 screen: Default::default(),
+                voiceover: Default::default(),
                 source_preview: Mutex::default(),
                 plugin_preview: Mutex::default(),
                 gallery: Default::default(),
@@ -1409,6 +1412,11 @@ pub fn run() {
             screen::screen_recording,
             screen::screen_record_start,
             screen::screen_record_stop,
+            voiceover::voiceover_open,
+            voiceover::voiceover_close,
+            voiceover::voiceover_state,
+            voiceover::voiceover_record_start,
+            voiceover::voiceover_record_stop,
             broll::suggest_broll,
             broll::add_broll,
             source_preview::source_preview_open,
@@ -1615,6 +1623,7 @@ pub fn run() {
                 // The panel's agent runs in its own process group, so it would outlive the app.
                 app.state::<agent_panel::AgentPanel>().stop();
                 app.state::<AppState>().screen.quit();
+                app.state::<AppState>().voiceover.quit();
                 app.state::<AppState>().quit();
                 diagnostics::quit();
                 #[cfg(target_os = "linux")]
@@ -1642,6 +1651,9 @@ impl AppState {
         kinds.extend(host.jobs.running().into_iter().map(String::from));
         if self.screen.recording() {
             kinds.push("screen-recording".into());
+        }
+        if self.voiceover.recording() {
+            kinds.push("voiceover".into());
         }
         kinds
     }
@@ -1672,6 +1684,8 @@ fn quit_question(kinds: &[String]) -> Option<&'static str> {
         Some("An export is still running. Quitting cancels it and removes the unfinished file.")
     } else if kinds.iter().any(|kind| kind == "screen-recording") {
         Some("A screen recording is not in the project yet. Quitting deletes it.")
+    } else if kinds.iter().any(|kind| kind == "voiceover") {
+        Some("A voiceover is not in the project yet. Quitting deletes it.")
     } else if kinds.iter().any(|kind| !matches!(kind.as_str(), "audio" | "proxy" | "matte")) {
         Some("Speech recognition or analysis is still running. Quitting cancels it.")
     } else {
