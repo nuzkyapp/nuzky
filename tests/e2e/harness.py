@@ -52,7 +52,8 @@ DRIVER_PORT = int(os.environ.get('NUZKY_REPRO_DRIVER_PORT', '4444'))
 
 def flow(name, description, before=None, home=False, first_launch=False, reuse_transcripts=False, needs=None):
     """`home`: the flow starts on the home screen; others start in the editor of the restored project.
-    `first_launch`: Get set up stays open when a fresh profile opens it by itself; other flows start without it.
+    `first_launch`: Get set up stays open when a fresh profile opens it by itself, and its first project asks which
+    editor's keys to use; other flows start without either.
     `reuse_transcripts`: the flow only reads what was said, so it starts with what an earlier run recognised in the same
     media with the same model (`transcript_pool`); a flow that checks recognition itself must not set it.
     `needs`: what of this machine the flow needs, as a function that returns what is missing in plain words, or None;
@@ -397,6 +398,8 @@ def run_flow(name):
         if not body.first_launch:
             wait(lambda: r.s.run('return window.__nuzky.tour.getState().firstLaunch !== null', retries=3), 15)
             r.s.run('const s = window.__nuzky.setup.getState(); if (s.open) s.closeSetup();')
+            # Nor is it asked which editor's keys to use; Nuzky's stay.
+            r.s.run('window.__nuzky.keysQuestion.setState({due: false})')
         if not body.home:
             r.s.run("window.__nuzky.store.setState({view: 'editor'})")
         time.sleep(1)

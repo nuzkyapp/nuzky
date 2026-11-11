@@ -4,6 +4,7 @@ import { BugReportDialog } from "./BugReportDialog";
 import { ExportDialog } from "./ExportDialog";
 import { Launcher } from "./home/Launcher";
 import { OpenedDraftDialog } from "./home/OpenedDraftDialog";
+import { KeysQuestionDialog } from "./KeysQuestionDialog";
 import { SwitchDialog } from "./home/SwitchConfirm";
 import { ModelQuestionDialog } from "./ModelQuestionDialog";
 import { SettingsDialog } from "./settings/SettingsDialog";
@@ -29,6 +30,7 @@ export default function Dialogs() {
       <OpenedDraftDialog />
       <BugReportDialog />
       <ShareDialog />
+      <KeysQuestionDialog />
       <SettingsDialog />
     </>
   );

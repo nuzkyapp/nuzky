@@ -240,7 +240,7 @@ export function KeysPane() {
   );
 }
 
-function Keycap({ chord, changed, or }: { chord: string; changed: boolean; or: boolean }) {
+export function Keycap({ chord, changed, or }: { chord: string; changed: boolean; or: boolean }) {
   return (
     <>
       {or && <span className="px-0.5 text-[11px] text-muted">or</span>}

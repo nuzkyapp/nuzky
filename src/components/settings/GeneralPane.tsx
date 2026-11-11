@@ -1,4 +1,6 @@
 import { Check, Loader2 } from "lucide-react";
+import { PRESETS, useKeys } from "../../lib/keys";
+import { askKeysQuestion } from "../../lib/keysQuestion";
 import { closeSettings } from "../../lib/settings";
 import { SETUP_STEPS, useSetup } from "../../lib/setup";
 import { trySample } from "../../lib/tour";
@@ -12,6 +14,7 @@ export function GeneralPane() {
   const { version, enabled, auto, latest, checking, install } = useUpdates();
   const done = useSetup((s) => SETUP_STEPS.filter((step) => s.states[step] === "done").length);
   const busy = checking ? "Checking for updates…" : install ? "The update is on its way." : undefined;
+  const preset = useKeys((s) => PRESETS[s.preset].name);
 
   return (
     <div className="flex flex-col gap-6">
@@ -78,6 +81,17 @@ export function GeneralPane() {
             }}
           >
             Start
+          </Button>
+        </Item>
+        <Item id="keys-question" title="Keys from another editor" detail={`Keys like ${preset}`}>
+          <Button
+            pill
+            onClick={() => {
+              closeSettings();
+              askKeysQuestion();
+            }}
+          >
+            Ask again
           </Button>
         </Item>
       </Group>

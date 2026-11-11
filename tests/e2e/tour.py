@@ -336,6 +336,11 @@ def flow_tour(r):
     sample = r.s.run('return window.__nuzky.store.getState().snap.path')
     r.s.run('window.__nuzky.newProjectFromMedia([arguments[0]])', str(FIXTURES / 'talk.mp4'))
     r.check('another project opens', wait(lambda: r.s.run('return window.__nuzky.store.getState().snap.path') != sample, 15))
+    # The tour's samples never asked; this profile's first other project asks which editor's keys to use (keys.py).
+    question = "return !!document.querySelector('dialog[data-keys-question]')?.open"
+    r.check("this profile's first project outside the tour asks which editor's keys to use", wait(lambda: r.s.run(question), 5))
+    press('Escape')
+    r.check('Esc keeps the keys', wait(lambda: not r.s.run(question), 5))
     r.s.run("window.__nuzky.openProject({path: arguments[0], name: 'Sample video'})", sample)
     r.check('the sample opens again by its path', wait(lambda: project(r)['name'] == 'Sample video' and project(r)['view'] == 'editor', 15), project(r))
     leave_editor(r)

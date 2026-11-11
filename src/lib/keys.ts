@@ -81,7 +81,7 @@ const COMMON = {
   cutNext: ["↓"],
   goStart: ["Home"],
   goEnd: ["End"],
-  // None of the three has a key for these; M is a marker there, which Nuzky does not have.
+  // None of the other editors has a key for these; M is a marker there, which Nuzky does not have.
   mute: ["M"],
   aiPanel: ["Ctrl+J"],
   delete: ["Delete", "Backspace"],
@@ -99,9 +99,10 @@ const COMMON = {
  */
 export const PRESETS = {
   nuzky: { name: "Nuzky", keys: NUZKY },
-  premiere: {
-    name: "Premiere Pro",
-    keys: { ...COMMON, fullScreen: ["Ctrl+`"], split: ["Ctrl+K"], deleteLeft: ["Q"], deleteRight: ["W"], freeze: [], duplicate: [], pasteAttributes: ["Ctrl+Alt+V"], zoomIn: ["=", "+"], zoomOut: ["-"], export: ["Ctrl+M"], projects: ["Ctrl+O"] },
+  // CapCut's A, B and T switch its timeline tools; Nuzky's timeline always selects and trims, so they stay free.
+  capcut: {
+    name: "CapCut",
+    keys: { ...COMMON, fullScreen: ["Ctrl+Shift+F"], split: ["Ctrl+B"], deleteLeft: ["Q"], deleteRight: ["W"], freeze: [], duplicate: ["Ctrl+D"], pasteAttributes: [], zoomIn: ["Ctrl+=", "Ctrl++"], zoomOut: ["Ctrl+-"], export: ["Ctrl+E"], projects: ["Ctrl+K"] },
   },
   finalCut: {
     name: "Final Cut Pro",
@@ -110,6 +111,10 @@ export const PRESETS = {
   resolve: {
     name: "DaVinci Resolve",
     keys: { ...COMMON, fullScreen: ["Ctrl+F"], split: ["Ctrl+\\", "Ctrl+B"], deleteLeft: ["Ctrl+Shift+["], deleteRight: ["Ctrl+Shift+]"], freeze: ["Shift+R"], duplicate: [], pasteAttributes: ["Alt+V"], zoomIn: ["Ctrl+=", "Ctrl++"], zoomOut: ["Ctrl+-"], export: ["Ctrl+E"], projects: ["Shift+1"] },
+  },
+  premiere: {
+    name: "Premiere Pro",
+    keys: { ...COMMON, fullScreen: ["Ctrl+`"], split: ["Ctrl+K"], deleteLeft: ["Q"], deleteRight: ["W"], freeze: [], duplicate: [], pasteAttributes: ["Ctrl+Alt+V"], zoomIn: ["=", "+"], zoomOut: ["-"], export: ["Ctrl+M"], projects: ["Ctrl+O"] },
   },
 } satisfies Record<string, { name: string; keys: Keymap }>;
 
