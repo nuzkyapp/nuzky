@@ -599,6 +599,72 @@ pub struct InspectImage {
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct ClipMetadata {
+    /// Files of get_state assets; every file the user brought when left out.
+    pub asset_ids: Option<Vec<String>>,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FrameSheet {
+    /// A video or image clip of the timeline; its file is shown, with each frame's timeline time.
+    pub clip_id: Option<String>,
+    /// Instead of clip_id: a file of get_state assets, also one not on the timeline.
+    pub asset_id: Option<String>,
+    /// Half-open range in the file's own microseconds; the part the clip shows, or the file's chosen part or all of it.
+    pub range_us: Option<[i64; 2]>,
+    /// Frames spread evenly over the range, 1 to 16, default 12.
+    pub count: Option<usize>,
+    /// Instead of count: 1 to 16 times of the file.
+    pub times_us: Option<Vec<i64>>,
+    /// Pixels of each frame's width, 96 to 1280, default 240.
+    pub width: Option<u32>,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct QuietPoint {
+    /// Timeline time to cut near, integer microseconds.
+    pub time_us: i64,
+    /// How far either side to listen, 20000 to 5000000, default 300000.
+    pub within_us: Option<i64>,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AudioSpectrum {
+    /// A clip with sound; the part of its file it plays is read.
+    pub clip_id: Option<String>,
+    /// Instead of clip_id: a file of get_state assets.
+    pub asset_id: Option<String>,
+    /// Half-open range in the file's own microseconds, at least 0.5 s.
+    pub range_us: Option<[i64; 2]>,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DescribeClip {
+    /// A video or image clip of the timeline.
+    pub clip_id: Option<String>,
+    /// Instead of clip_id: a file of get_state assets, also one not on the timeline.
+    pub asset_id: Option<String>,
+    /// Half-open range in the file's own microseconds; the part the clip shows by default.
+    pub range_us: Option<[i64; 2]>,
+    /// Most shots described, 1 to 16, default 6.
+    pub max_shots: Option<usize>,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TrackObject {
+    /// What to follow in a few English words, such as "dog", "red car" or "the man's face".
+    pub words: String,
+    /// A video or image clip of the timeline.
+    pub clip_id: Option<String>,
+    /// Instead of clip_id: a file of get_state assets.
+    pub asset_id: Option<String>,
+    /// Half-open range in the file's own microseconds; the part the clip shows by default.
+    pub range_us: Option<[i64; 2]>,
+    /// Microseconds between looks, 100000 to 10000000; by default 500000, or wider so a range takes at most 60.
+    pub every_us: Option<i64>,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct InspectThumbnail {
     pub format: ThumbnailFormat,
     /// Pixels, 96 to the thumbnail's own width; half of it by default.

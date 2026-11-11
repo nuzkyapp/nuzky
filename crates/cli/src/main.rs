@@ -33,6 +33,7 @@ const USAGE: &str = "Usage:
       frame, bench, render, mask and thumbnail first find the person behind whom clip backgrounds go,
       downloading the person model when it is missing
   nuzky vision-models                     download the face and subject models
+  nuzky vision-models scene               download the scene model of describe_clip and track_object
   nuzky thumbnail-frames <project.json> [--format 9:16|16:9]
       frames worth a cover, best first, as JSON; downloads missing face models first
   nuzky mask <project.json> <seconds> <out.png>
@@ -379,6 +380,7 @@ fn main() -> Result<()> {
             }
         }
         ["vision-models"] => install_models(nuzky_vision::models::ALL)?,
+        ["vision-models", "scene"] => install_models(nuzky_vision::models::SCENE)?,
         ["thumbnail-frames", project, rest @ ..] => {
             let format = match rest {
                 [] => None,

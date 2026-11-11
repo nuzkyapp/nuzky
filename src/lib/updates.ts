@@ -161,7 +161,7 @@ export function setAutoCheck(auto: boolean) {
 const WORK: [string, (j: JobEvent) => boolean][] = [
   ["the export", (j) => j.kind === "export" || j.id.startsWith("cover-export:") || (j.kind === "agent" && j.label === "Exporting")],
   ["speech recognition", (j) => j.kind === "captions" || j.kind === "transcript" || (j.kind === "agent" && j.label === "Transcribing")],
-  ["the model download", (j) => j.kind === "speech-model" || j.kind === "vision-models"],
+  ["the model download", (j) => j.kind === "speech-model" || j.kind === "vision-models" || j.kind === "scene-model"],
   ["learning your style", (j) => j.kind === "style"],
   ["the analysis", (j) => j.kind !== "audio" && j.kind !== "proxy" && j.kind !== "matte"],
 ];

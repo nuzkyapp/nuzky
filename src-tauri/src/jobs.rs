@@ -32,7 +32,7 @@ pub struct JobEvent {
     #[cfg_attr(
         test,
         ts(
-            type = r#""audio" | "proxy" | "matte" | "export" | "captions" | "transcript" | "style" | "vision-models" | "cover" | "reframe" | "faces" | "reels" | "speech-model" | "agent" | "beats""#
+            type = r#""audio" | "proxy" | "matte" | "export" | "captions" | "transcript" | "style" | "vision-models" | "scene-model" | "cover" | "reframe" | "faces" | "reels" | "speech-model" | "agent" | "beats""#
         )
     )]
     pub kind: &'static str,
@@ -112,9 +112,8 @@ pub(crate) fn register(app: &AppHandle, id: &str) -> Option<Arc<AtomicBool>> {
         match kind {
             "export" => running == "export",
             "captions" | "transcript" | "style" => matches!(running, "captions" | "transcript" | "style"),
-            "vision-models" | "cover-pick" | "cover-mask" | "cover-export" | "reframe" | "faces" | "reels" => {
-                running == kind
-            }
+            "vision-models" | "scene-model" | "cover-pick" | "cover-mask" | "cover-export" | "reframe" | "faces"
+            | "reels" => running == kind,
             // Each one decodes a whole video; the next file waits, so the preview keeps some of the machine.
             "proxy" => running == "proxy",
             "matte" => running == "matte",

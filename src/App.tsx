@@ -233,6 +233,8 @@ function onJob(job: JobEvent) {
       text: `Face and person models failed: ${plainError(job.message ?? "")}`,
       action: { label: "Get set up", run: () => (useSetup.getState().showStep("vision"), useSetup.getState().openSetup()) },
     });
+  // The AI went on without it; it asks again with the next message.
+  if (job.kind === "scene-model" && job.status === "failed") toast({ kind: "error", text: `Scene model failed: ${plainError(job.message ?? "")}` });
   // A cover shows the background once the person behind whom it goes is found.
   if (job.kind === "matte" && job.status === "done") useCover.setState((s) => ({ masks: s.masks + 1 }));
   // The dialog shows the result itself; with it closed, a toast reports it.
@@ -267,6 +269,7 @@ function useBackendEvents() {
     offs.push(listen<JobEvent>("job", (e) => onJob(e.payload)));
     offs.push(listen<ModelQuestion | null>("speech-model-question", (e) => useEditor.setState({ speechModelQuestion: e.payload })));
     offs.push(listen<ModelQuestion | null>("vision-model-question", (e) => useEditor.setState({ visionModelQuestion: e.payload })));
+    offs.push(listen<ModelQuestion | null>("scene-model-question", (e) => useEditor.setState({ sceneModelQuestion: e.payload })));
     // Whether Get set up still offers the face and person models.
     void loadVisionModels();
     const offStyle = listenStyle();

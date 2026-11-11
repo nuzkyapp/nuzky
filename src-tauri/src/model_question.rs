@@ -1,6 +1,7 @@
 //! When an agent's job needs models that are not installed, the app asks the user whether to download them and
 //! downloads them as the panels do: the speech model for a transcript, the face and person models for covers,
-//! reframing and clip backgrounds. Jobs that need the same kind meanwhile wait for the same answer.
+//! reframing and clip backgrounds, and the scene model for describing clips and following what words name. Jobs
+//! that need the same kind meanwhile wait for the same answer.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -23,9 +24,11 @@ use crate::jobs::{Reporter, download_failed, download_speech, ensure_mattes, mis
 pub enum ModelKind {
     Speech,
     Vision,
+    Scene,
 }
 
-/// What the user is asked, sent as `speech-model-question` or `vision-model-question`; null closes it.
+/// What the user is asked, sent as `speech-model-question`, `vision-model-question` or `scene-model-question`; null
+/// closes it.
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -39,7 +42,7 @@ pub struct ModelQuestion {
 /// One question to the user and the download that follows it.
 struct Round {
     question: ModelQuestion,
-    /// The face and person models it downloads.
+    /// The face and person models, or the scene model, it downloads.
     vision: Vec<Model>,
     /// Jobs waiting for the answer; when the last one stops before the user answered, the question closes.
     waiting: usize,
@@ -48,13 +51,14 @@ struct Round {
     outcome: Arc<OnceLock<Result<(), String>>>,
 }
 
-static ROUNDS: Mutex<[Option<Round>; 2]> = Mutex::new([None, None]);
+static ROUNDS: Mutex<[Option<Round>; 3]> = Mutex::new([None, None, None]);
 
 impl ModelKind {
     fn event(self) -> &'static str {
         match self {
             Self::Speech => "speech-model-question",
             Self::Vision => "vision-model-question",
+            Self::Scene => "scene-model-question",
         }
     }
 
@@ -62,6 +66,7 @@ impl ModelKind {
         match self {
             Self::Speech => "the speech model",
             Self::Vision => "the face and person models",
+            Self::Scene => "the scene model",
         }
     }
 
@@ -77,6 +82,11 @@ impl ModelKind {
                  segment_subject, reframe and clip backgrounds. Tell the user what you can do without them, such as \
                  choosing a cover frame yourself with inspect_frames, and that Get set up downloads them whenever \
                  they want."
+            }
+            Self::Scene => {
+                "Do not call describe_clip or track_object again in this conversation. Look at the clips yourself \
+                 with frame_sheet or inspect_frames instead, and tell the user the AI asks for the scene model \
+                 again with their next message."
             }
         }
     }
@@ -97,8 +107,10 @@ pub fn ask_speech(app: &AppHandle, cancel: &AtomicBool, progress: &Progress) -> 
     ask(app, ModelKind::Speech, Vec::new(), missing_speech_mb(model), &installed, cancel, progress)
 }
 
-/// Blocks an agent's job until the face and person models it needs are installed, asking the user first.
+/// Blocks an agent's job until the face and person models, or the scene model, it needs are installed, asking the
+/// user first.
 pub fn ask_vision(app: &AppHandle, needed: &[Model], cancel: &AtomicBool, progress: &Progress) -> anyhow::Result<()> {
+    let kind = if needed.iter().all(|m| models::SCENE.contains(m)) { ModelKind::Scene } else { ModelKind::Vision };
     // A question open for another tool's models may download fewer than this one needs; then it asks again.
     loop {
         let missing = models::missing(needed, &models_dir());
@@ -107,7 +119,7 @@ pub fn ask_vision(app: &AppHandle, needed: &[Model], cancel: &AtomicBool, progre
         }
         let size_mb = missing.iter().map(|m| m.size).sum::<u64>().div_ceil(1_000_000) as u32;
         let installed = || models::missing(needed, &models_dir()).is_empty();
-        ask(app, ModelKind::Vision, missing, size_mb, &installed, cancel, progress)?;
+        ask(app, kind, missing, size_mb, &installed, cancel, progress)?;
     }
 }
 
@@ -170,6 +182,7 @@ fn ask(
         let phase = match kind {
             ModelKind::Speech => "downloading_speech_model",
             ModelKind::Vision => "downloading_vision_models",
+            ModelKind::Scene => "downloading_scene_model",
         };
         progress.set(if downloading { phase } else { "waiting_for_user" }, None);
         std::thread::sleep(Duration::from_millis(100));
@@ -199,6 +212,7 @@ pub fn answer_model_question(app: AppHandle, id: String, download: bool) -> Resu
     let (job_id, busy) = match kind {
         ModelKind::Speech => (format!("speech-model:{id}"), "The speech model is already downloading"),
         ModelKind::Vision => (format!("vision-models:{id}"), "The face and person models are already downloading"),
+        ModelKind::Scene => (format!("scene-model:{id}"), "The scene model is already downloading"),
     };
     // Another download of the same models runs, e.g. the cover editor's: the question stays until it ends.
     let Some(cancel) = register(&app, &job_id) else {
@@ -240,6 +254,15 @@ pub fn answer_model_question(app: AppHandle, id: String, download: bool) -> Resu
                 {
                     ensure_mattes(&state, &open);
                 }
+                failed
+            }
+            ModelKind::Scene => {
+                let mut rep = Reporter::new(&worker_app, &worker_job, "scene-model", "Scene model".into());
+                let result =
+                    crate::cover::download_models(&vision, false, "Downloading the scene model", &cancel, &mut rep)
+                        .map_err(|error| download_failed(error, "the scene model"));
+                let failed = result.as_ref().err().map(|error| format!("{error:#}"));
+                rep.finish(result.map(|()| None), cancel.load(Ordering::Relaxed));
                 failed
             }
         };

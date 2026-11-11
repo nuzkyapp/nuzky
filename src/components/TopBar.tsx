@@ -97,7 +97,7 @@ export function JobIndicator() {
   if (running.length === 0) return null;
   const j =
     // Its Stop is here (and in Get set up for the download it started); an export and recognition have theirs in their dialog and tab.
-    running.find((x) => x.kind === "speech-model" || x.kind === "vision-models") ??
+    running.find((x) => x.kind === "speech-model" || x.kind === "vision-models" || x.kind === "scene-model") ??
     running.find((x) => x.kind === "export") ??
     running.find((x) => x.kind === "captions" || x.kind === "transcript") ??
     // Ahead of the audio prepared beside them, so their Stop is there.
@@ -142,8 +142,8 @@ export function JobIndicator() {
         </Button>
       </span>
     );
-  if (j.kind === "speech-model" || j.kind === "vision-models") {
-    const stop = j.kind === "speech-model" ? "Stop downloading the speech model" : "Stop downloading the face and person models";
+  if (j.kind === "speech-model" || j.kind === "vision-models" || j.kind === "scene-model") {
+    const stop = { "speech-model": "Stop downloading the speech model", "vision-models": "Stop downloading the face and person models", "scene-model": "Stop downloading the scene model" }[j.kind];
     return (
       <span className="bar flex h-8 items-center gap-1.5 rounded-full pl-3 pr-1 text-[12px] font-medium text-fg" role="status">
         {body}

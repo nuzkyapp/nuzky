@@ -344,7 +344,7 @@ pub fn download_models(
     for model in &missing {
         let integrity = nuzky_mcp::model_download::Integrity { size: model.size, sha256: model.sha256 };
         nuzky_mcp::model_download::download(
-            &nuzky_mcp::model_download::github(model.url),
+            &nuzky_mcp::model_download::huggingface(&nuzky_mcp::model_download::github(model.url)),
             &model.path(&dir),
             integrity,
             cancel,

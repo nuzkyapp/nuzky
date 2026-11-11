@@ -986,7 +986,7 @@ export type ImportedKeys = {
 
 export type JobEvent = {
   id: string,
-  kind: "audio" | "proxy" | "matte" | "export" | "captions" | "transcript" | "style" | "vision-models" | "cover" | "reframe" | "faces" | "reels" | "speech-model" | "agent" | "beats",
+  kind: "audio" | "proxy" | "matte" | "export" | "captions" | "transcript" | "style" | "vision-models" | "scene-model" | "cover" | "reframe" | "faces" | "reels" | "speech-model" | "agent" | "beats",
   label: string,
   status: "running" | "done" | "failed" | "cancelled",
   progress: number,
@@ -1170,10 +1170,11 @@ export type MicLevel = {
  */
 export type MicWarning = "loud" | "quiet" | "silent";
 
-export type ModelKind = "speech" | "vision";
+export type ModelKind = "speech" | "vision" | "scene";
 
 /**
- * What the user is asked, sent as `speech-model-question` or `vision-model-question`; null closes it.
+ * What the user is asked, sent as `speech-model-question`, `vision-model-question` or `scene-model-question`; null
+ * closes it.
  */
 export type ModelQuestion = {
   id: string,

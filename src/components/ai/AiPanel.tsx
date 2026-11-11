@@ -26,6 +26,7 @@ import {
   MessageSquareText,
   Plus,
   RefreshCw,
+  ScanEye,
   ScanFace,
   Scissors,
   Sparkles,
@@ -817,12 +818,32 @@ function Item({ item, index, collapsed, past, last }: { item: ChatItem; index: n
   }
 }
 
-/** An agent's job waits for the face and person models: Download here, and the agent goes on once they are in. */
-function VisionModelsQuestion() {
-  const question = useEditor((s) => s.visionModelQuestion);
-  const job = useEditor((s) => (s.visionModelJob ? s.jobs[s.visionModelJob] : undefined));
+/** What the card of each model an agent may wait for says, and what its download is called. */
+const MODELS = {
+  vision: {
+    icon: ScanFace,
+    text: "The AI needs them to find faces and the person in your video. They run on this computer, a one-time download.",
+    downloading: "Downloading face and person models",
+    stop: "The AI goes on without them",
+  },
+  scene: {
+    icon: ScanEye,
+    text: "The AI needs it to see what is in your clips and to follow what you name in them. It runs on this computer, a one-time download.",
+    downloading: "Downloading the scene model",
+    stop: "The AI goes on without it",
+  },
+} as const;
+
+/** An agent's job waits for the face and person models or the scene model: Download here, and the agent goes on once they are in. */
+function ModelsQuestion({ kind }: { kind: "vision" | "scene" }) {
+  const question = useEditor((s) => (kind === "vision" ? s.visionModelQuestion : s.sceneModelQuestion));
+  const job = useEditor((s) => {
+    const id = kind === "vision" ? s.visionModelJob : s.sceneModelJob;
+    return id ? s.jobs[id] : undefined;
+  });
   const running = job?.status === "running";
   const card = useRef<HTMLDivElement>(null);
+  const copy = MODELS[kind];
   // Download and Not now go away when pressed; the focus goes to Stop, or back to the field.
   useEffect(() => {
     if (document.activeElement !== document.body) return;
@@ -831,20 +852,20 @@ function VisionModelsQuestion() {
   }, [running, question]);
   if (question)
     return (
-      <div role="group" aria-labelledby="vision-question-title" className="grid grid-cols-[20px_1fr] gap-2 rounded-[10px] bg-raised p-3 text-[12px] leading-[18px] text-fg/85">
-        <ScanFace size={16} className="mt-px text-accent" />
+      <div role="group" aria-labelledby={`${kind}-question-title`} className="grid grid-cols-[20px_1fr] gap-2 rounded-[10px] bg-raised p-3 text-[12px] leading-[18px] text-fg/85">
+        <copy.icon size={16} className="mt-px text-accent" />
         <div className="flex min-w-0 flex-col gap-0.5">
-          <span id="vision-question-title" className="text-[13px] font-semibold text-fg">
-            {MODEL_QUESTION.vision.title}
+          <span id={`${kind}-question-title`} className="text-[13px] font-semibold text-fg">
+            {MODEL_QUESTION[kind].title}
           </span>
-          <span>The AI needs them to find faces and the person in your video. They run on this computer, a one-time download.</span>
+          <span>{copy.text}</span>
           {/* The agent waits for this answer, so the AI lock does not hold it. */}
           <LockReason.Provider value={null}>
             <div className="mt-2 flex flex-wrap gap-1.5">
-              <Button variant="primary" className="h-7 px-2.5 text-[12px]" onClick={() => answerModelQuestion("vision", true)}>
+              <Button variant="primary" className="h-7 px-2.5 text-[12px]" onClick={() => answerModelQuestion(kind, true)}>
                 Download {question.sizeMb} MB
               </Button>
-              <Button variant="ghost" className="h-7 px-2.5 text-[12px]" onClick={() => answerModelQuestion("vision", false)}>
+              <Button variant="ghost" className="h-7 px-2.5 text-[12px]" onClick={() => answerModelQuestion(kind, false)}>
                 Not now
               </Button>
             </div>
@@ -857,15 +878,15 @@ function VisionModelsQuestion() {
     <div ref={card} className="flex flex-col gap-1.5 rounded-[10px] bg-raised p-3 text-[12px]" role="status">
       <div className="flex items-center gap-2">
         <Loader2 size={13} className="shrink-0 animate-spin text-accent" />
-        <span className="min-w-0 flex-1 truncate text-fg">Downloading face and person models</span>
+        <span className="min-w-0 flex-1 truncate text-fg">{copy.downloading}</span>
         {job.progress > 0 && <span className="tabular text-muted">{Math.round(job.progress * 100)}%</span>}
         <LockReason.Provider value={null}>
-          <Button className="h-6 px-2 text-[12px]" title="The AI goes on without them" onClick={() => void api.cancelJob(job.id)}>
+          <Button className="h-6 px-2 text-[12px]" title={copy.stop} onClick={() => void api.cancelJob(job.id)}>
             Stop
           </Button>
         </LockReason.Provider>
       </div>
-      <ProgressBar value={job.progress} label="Downloading face and person models" />
+      <ProgressBar value={job.progress} label={copy.downloading} />
     </div>
   );
 }
@@ -890,7 +911,8 @@ function Separator({ children }: { children: ReactNode }) {
 function Conversation() {
   const items = useAgent((s) => s.items);
   const visionQuestion = useEditor((s) => s.visionModelQuestion);
-  // The editor's conversation asks for the face and person models; Your style's is about the style.
+  const sceneQuestion = useEditor((s) => s.sceneModelQuestion);
+  // The editor's conversation asks for the face and person models and the scene model; Your style's is about the style.
   const project = useContext(About) === "project";
   useEffect(() => {
     if (!project) return;
@@ -906,7 +928,7 @@ function Conversation() {
   useLayoutEffect(() => {
     const el = scroller.current;
     if (el && pinned.current) el.scrollTop = el.scrollHeight;
-  }, [items, visionQuestion]);
+  }, [items, visionQuestion, sceneQuestion]);
   const lastUser = items.map((i) => i.kind).lastIndexOf("user");
   // A reopened chat says when it was, and when today's part of it starts.
   const sentAt = (from: number) => {
@@ -943,7 +965,8 @@ function Conversation() {
           <Item item={item} index={i} last={i === items.length - 1} past={pastCount !== null && i < pastCount} collapsed={item.kind === "steps" && (i < lastUser || (!working && items.slice(i + 1).some((x) => x.kind === "agent")))} />
         </Fragment>
       ))}
-      {project && <VisionModelsQuestion />}
+      {project && <ModelsQuestion kind="vision" />}
+      {project && <ModelsQuestion kind="scene" />}
     </div>
   );
 }

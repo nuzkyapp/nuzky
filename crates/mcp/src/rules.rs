@@ -96,6 +96,17 @@ pub(crate) const TOOLS: &[Rules] = &[
     // Only draws the thumbnail; a missing mask of its frame is made as a job into the cache.
     rules("inspect_thumbnail", Always, false, true, true),
     rules("inspect_image", Always, false, true, false),
+    // Only reads the files' own tags.
+    rules("clip_metadata", Always, false, true, false),
+    // Only draws frames of one file.
+    rules("frame_sheet", Always, false, true, false),
+    // Only mixes the timeline's speech; preparing missing sound runs as a job.
+    rules("quiet_point", Always, false, true, true),
+    // Only reads one file's sound; preparing it runs as a job.
+    rules("audio_spectrum", Always, false, true, true),
+    // Only looks at one file's picture, as a job.
+    rules("describe_clip", Always, false, true, true),
+    rules("track_object", Always, false, true, true),
     rules("export_thumbnail", Never, false, false, true),
     // Only shows choices to the user; the project is not touched.
     rules("suggest_options", Always, false, true, false),
@@ -157,7 +168,13 @@ mod tests {
                 "list_history",
                 "get_style",
                 "search_sounds",
-                "list_plugins"
+                "list_plugins",
+                "clip_metadata",
+                "frame_sheet",
+                "quiet_point",
+                "audio_spectrum",
+                "describe_clip",
+                "track_object"
             ])
         );
         assert_eq!(
@@ -197,7 +214,13 @@ mod tests {
                 "undo_to",
                 "get_style",
                 "search_sounds",
-                "list_plugins"
+                "list_plugins",
+                "clip_metadata",
+                "frame_sheet",
+                "quiet_point",
+                "audio_spectrum",
+                "describe_clip",
+                "track_object"
             ])
         );
         assert_eq!(
@@ -214,7 +237,11 @@ mod tests {
                 "cut_to_beats",
                 "export_video",
                 "export_thumbnail",
-                "run_plugin"
+                "run_plugin",
+                "quiet_point",
+                "audio_spectrum",
+                "describe_clip",
+                "track_object"
             ])
         );
         let job = find("job").unwrap();

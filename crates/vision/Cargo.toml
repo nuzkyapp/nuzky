@@ -9,10 +9,9 @@ nuzky-engine.workspace = true
 anyhow.workspace = true
 dunce = "1.0.5"
 serde.workspace = true
+serde_json.workspace = true
 sha2 = "0.11.0"
 png = "0.18.1"
 # Loaded at run time, never linked: see src/runtime.rs.
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["load-dynamic"] }
 
-[dev-dependencies]
-serde_json.workspace = true

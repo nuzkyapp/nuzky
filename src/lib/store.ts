@@ -80,10 +80,14 @@ interface EditorState {
   speechModelQuestion: ModelQuestion | null;
   /** An agent needs the face and person models and Nuzky asks whether to download them. */
   visionModelQuestion: ModelQuestion | null;
+  /** An agent needs the scene model and Nuzky asks whether to download it. */
+  sceneModelQuestion: ModelQuestion | null;
   /** How many AI conversations are on screen; one asks for the face and person models instead of a dialog. */
   aiChats: number;
   /** The download of the face and person models the user agreed to for an agent. */
   visionModelJob: string | null;
+  /** The download of the scene model the user agreed to for an agent. */
+  sceneModelJob: string | null;
 
   /** `opened`: the snapshot of a project just opened, created or booted; others must belong to the open session. */
   setSnap: (snap: Snapshot, keepSelection?: boolean, opened?: boolean) => void;
@@ -437,8 +441,10 @@ export const useEditor = create<EditorState>((set, get) => ({
   launcherOpen: false,
   speechModelQuestion: null,
   visionModelQuestion: null,
+  sceneModelQuestion: null,
   aiChats: 0,
   visionModelJob: null,
+  sceneModelJob: null,
 
   setSnap: (snap, keepSelection = true, opened = false) => {
     const previous = get().snap;
