@@ -10,6 +10,7 @@ mod fillers;
 mod restarts;
 mod retakes;
 mod scenes;
+mod spectrum;
 mod speech;
 pub mod style;
 mod wav2vec2;
@@ -27,6 +28,7 @@ pub use fillers::{HESITATION_US, filler_words, hesitations};
 pub use restarts::align_transcript;
 pub use retakes::{Attempt, Filler, RetakeGroup, Retakes, Review, retakes, token as word_token};
 pub use scenes::{SceneCut, SceneParams, picture_difference, scene_cuts, scene_cuts_cancellable, scene_cuts_in};
+pub use spectrum::{Hum, Spectrum, Tone, spectrum};
 pub use speech::{
     AudioSource, Segment, Transcript, Word, keep_vulkan_fp32, transcribe_with_regions, transcribe_words,
     transcribe_words_cancellable, use_gpu,

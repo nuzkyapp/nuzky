@@ -112,7 +112,12 @@ pub fn file_sheet(path: &Path, times: &[i64], width: Option<u32>, cancelled: &dy
 
 /// Lays out frames of `width` × `height`, four in a row, each labelled with its time, as one PNG. `frame` gives the
 /// straight RGBA of the frame at a time.
-fn sheet(times: &[i64], width: u32, height: u32, mut frame: impl FnMut(i64) -> Result<Vec<u8>>) -> Result<Vec<u8>> {
+pub(crate) fn sheet(
+    times: &[i64],
+    width: u32,
+    height: u32,
+    mut frame: impl FnMut(i64) -> Result<Vec<u8>>,
+) -> Result<Vec<u8>> {
     let columns = (times.len() as u32).min(4);
     let rows = (times.len() as u32).div_ceil(columns);
     let (sheet_w, sheet_h) = (columns * width, rows * (height + LABEL_HEIGHT));

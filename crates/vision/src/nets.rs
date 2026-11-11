@@ -9,7 +9,7 @@ use ort::value::TensorRef;
 
 use crate::frame::{Frame, Rect};
 
-fn ort_error<E: std::fmt::Display>(error: E) -> anyhow::Error {
+pub(crate) fn ort_error<E: std::fmt::Display>(error: E) -> anyhow::Error {
     anyhow!("ONNX Runtime: {error}")
 }
 
@@ -43,6 +43,21 @@ pub(crate) struct Output {
 /// Runs a model on one float tensor and copies its float outputs, in the model's output order.
 /// A watcher stops the run within a few tens of milliseconds of `cancel`, even mid-inference.
 pub(crate) fn run(session: &mut Session, shape: &[usize], input: &[f32], cancel: &AtomicBool) -> Result<Vec<Output>> {
+    cancellable(cancel, |options| {
+        let tensor = TensorRef::from_array_view((shape.to_vec(), input)).map_err(ort_error)?;
+        let outputs = session.run_with_options(ort::inputs![tensor], options).map_err(ort_error)?;
+        outputs
+            .iter()
+            .map(|(_, value)| {
+                let (shape, data) = value.try_extract_tensor::<f32>().map_err(ort_error)?;
+                Ok(Output { shape: shape.to_vec(), data: data.to_vec() })
+            })
+            .collect::<Result<Vec<_>>>()
+    })
+}
+
+/// Runs `run` with options a watcher terminates within a few tens of milliseconds of `cancel`, even mid-inference.
+pub(crate) fn cancellable<T>(cancel: &AtomicBool, run: impl FnOnce(&RunOptions) -> Result<T>) -> Result<T> {
     check_cancel(cancel)?;
     let options = RunOptions::new().map_err(ort_error)?;
     let done = AtomicBool::new(false);
@@ -56,17 +71,7 @@ pub(crate) fn run(session: &mut Session, shape: &[usize], input: &[f32], cancel:
                 std::thread::park_timeout(Duration::from_millis(20));
             }
         });
-        let result = (|| {
-            let tensor = TensorRef::from_array_view((shape.to_vec(), input)).map_err(ort_error)?;
-            let outputs = session.run_with_options(ort::inputs![tensor], &options).map_err(ort_error)?;
-            outputs
-                .iter()
-                .map(|(_, value)| {
-                    let (shape, data) = value.try_extract_tensor::<f32>().map_err(ort_error)?;
-                    Ok(Output { shape: shape.to_vec(), data: data.to_vec() })
-                })
-                .collect::<Result<Vec<_>>>()
-        })();
+        let result = run(&options);
         done.store(true, Ordering::Release);
         watcher.thread().unpark();
         result

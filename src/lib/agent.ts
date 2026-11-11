@@ -254,6 +254,12 @@ const TITLES: Record<string, string> = {
   web_search: SEARCHING,
   import_web_image: "Getting a picture from the web",
   inspect_image: "Looking at a picture",
+  clip_metadata: "Reading when and where clips were shot",
+  frame_sheet: "Looking through a clip",
+  quiet_point: "Finding a quiet spot to cut",
+  audio_spectrum: "Listening for hum and whine",
+  describe_clip: "Describing a clip",
+  track_object: "Following an object",
 };
 
 const ANALYSES: Record<string, string> = {
@@ -274,6 +280,8 @@ const JOBS: Record<string, string> = {
   reframe: "Following the face",
   matte: "Finding the person",
   segment: "Finding the person",
+  describe: "Describing a clip",
+  track: "Following an object",
 };
 
 /** What a job the agent left running is doing, with its percentage once known, or why it failed. */
@@ -307,6 +315,7 @@ function stepDetail(raw: string, input?: unknown): string | null {
   const name = toolName(raw);
   if (name === "web_search") return typeof args.query === "string" ? args.query : host(args.url);
   if (name === "import_web_image") return host(args.url);
+  if (name === "track_object" && typeof args.words === "string") return args.words;
   if (name === "inspect_frames" && Array.isArray(args.times_us)) return args.times_us.slice(0, 4).map((t) => formatTime(Number(t), false)).join(" · ") + (args.times_us.length > 4 ? " …" : "");
   if (name === "export_video" && typeof args.path === "string") return args.path.split(/[\\/]/).pop() ?? null;
   if (name === "apply_edits" && Array.isArray(args.edits)) return args.edits.length === 1 ? "1 change" : `${args.edits.length} changes`;

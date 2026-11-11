@@ -1047,7 +1047,7 @@ fn initialize_list_state_edit_end_undo_over_stdio() {
     let mut c = Client::new(true);
     let list = c.rpc("tools/list", json!({}));
     let tools = list["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 43);
+    assert_eq!(tools.len(), 49);
     let beats = tools.iter().find(|t| t["name"] == "cut_to_beats").unwrap();
     assert_eq!(
         (&beats["annotations"]["readOnlyHint"], &beats["annotations"]["destructiveHint"]),
@@ -5612,5 +5612,207 @@ fn a_plugin_effect_is_saved_checked_and_put_on_a_clip_over_stdio() {
         json!([{"plugin": "vhs", "effect": "vhs", "clip_ids": [clip],
             "message": "VHS is not installed on this computer, so the clip is drawn without it."}])
     );
+    c.finish();
+}
+
+/// A phone video lying on its side, with the iPhone's QuickTime tags of when and where, and sound: a voice (a tone
+/// with harmonics) for 1 s, 0.4 s of only the room, the voice again, all over 50 Hz mains hum with harmonics and a
+/// 15 kHz whine.
+fn phone_take(c: &Client) -> PathBuf {
+    let flat = ffmpeg_media(
+        c,
+        "flat.mov",
+        &[
+            "testsrc2=s=320x180:r=30:d=3",
+            "aevalsrc='if(between(t,1,1.4),0,0.3*sin(2*PI*220*t)+0.15*sin(2*PI*440*t)+0.1*sin(2*PI*660*t))\
+             +0.02*sin(2*PI*50*t)+0.012*sin(2*PI*100*t)+0.008*sin(2*PI*150*t)+0.004*sin(2*PI*15000*t)':s=48000:d=3",
+        ],
+        &["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le"],
+    );
+    let path = c.dir.join("IMG_0042.MOV");
+    let status = Command::new("ffmpeg")
+        .args(["-hide_banner", "-loglevel", "error", "-y", "-display_rotation", "90", "-i"])
+        .arg(&flat)
+        .args(["-c", "copy", "-movflags", "use_metadata_tags"])
+        .args(["-metadata", "com.apple.quicktime.creationdate=2024-05-12T14:03:22+0200"])
+        .args(["-metadata", "com.apple.quicktime.location.ISO6709=+50.0755+014.4378+250.000/"])
+        .args(["-metadata", "com.apple.quicktime.make=Apple", "-metadata", "com.apple.quicktime.model=iPhone 15 Pro"])
+        .arg(&path)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    path
+}
+
+/// The frame of `path` at `t_us` as FFmpeg shows it, upright, at `width`×`height`.
+fn ffmpeg_frame(path: &std::path::Path, t_us: i64, width: u32, height: u32) -> Vec<u8> {
+    let out = Command::new("ffmpeg")
+        .args(["-v", "error", "-ss", &format!("{:.6}", t_us as f64 / 1e6), "-i"])
+        .arg(path)
+        .args([
+            "-frames:v",
+            "1",
+            "-vf",
+            &format!("scale={width}:{height}:flags=area"),
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgba",
+            "-",
+        ])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    out.stdout
+}
+
+#[test]
+fn agents_read_when_where_frames_quiet_and_hum_of_a_clip_over_stdio() {
+    // Its own data folder, so no scene model is installed whatever this computer has.
+    let mut c = Client::start(true, None, Some(None));
+    let take = phone_take(&c);
+    let tone = ffmpeg_media(&c, "song.wav", &["sine=frequency=440:sample_rate=48000:duration=2"], &[]);
+    let silent =
+        ffmpeg_media(&c, "silent.mp4", &["testsrc2=s=160x90:r=30:d=1"], &["-c:v", "libx264", "-preset", "ultrafast"]);
+    let run = c.call("begin_run", json!({"label":"inputs"}))["run_id"].clone();
+    let ids = c.call("import_media", json!({"run_id":run,"paths":[take, tone, silent]}))["asset_ids"].clone();
+    c.call("apply_edits", json!({"run_id":run,"request_id":"place","edits":[{"type":"addClip","assetId":ids[0]}]}));
+    c.call("end_run", json!({"run_id":run,"action":"keep"}));
+    let state = c.call("get_state", json!({}));
+    let clip = state["tracks"][0]["clips"][0]["id"].clone();
+
+    // When, where and on what, as the file says; the file without tags says nothing.
+    let meta = c.call("clip_metadata", json!({}));
+    let rows = meta["assets"].as_array().unwrap();
+    assert_eq!(rows.len(), 3, "{meta}");
+    assert_eq!(rows[0]["recorded_at"], "2024-05-12T14:03:22+02:00", "{meta}");
+    assert_eq!(rows[0]["time_basis"], "local");
+    assert_eq!(rows[0]["location"], json!({"latitude": 50.0755, "longitude": 14.4378, "altitude_m": 250.0}));
+    assert_eq!(rows[0]["device"], "Apple iPhone 15 Pro");
+    assert!(rows[1]["recorded_at"].is_null() && rows[1]["location"].is_null(), "{meta}");
+
+    // The file's own frames, upright as FFmpeg shows them, labelled with file and timeline times.
+    let result = c.rpc("tools/call", json!({"name":"frame_sheet","arguments":{"clip_id":clip,"count":4,"width":180}}));
+    assert_ne!(result["result"]["isError"], true, "{result}");
+    let content = &result["result"]["content"];
+    let info: Value = serde_json::from_str(content[0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(info["times_us"], json!([375_000, 1_125_000, 1_875_000, 2_625_000]), "{info}");
+    assert_eq!(info["timeline_us"], json!([375_000, 1_125_000, 1_875_000, 2_625_000]), "{info}");
+    use base64::Engine as _;
+    let bytes = base64::prelude::BASE64_STANDARD.decode(content[1]["data"].as_str().unwrap()).unwrap();
+    let (sheet, rgba) = decode_png(&bytes);
+    // Turned a quarter: 180 wide shows a 180×320 picture, four in a row, each over its 24 px label.
+    assert_eq!((sheet.width, sheet.height), (720, 344));
+    let reference = ffmpeg_frame(&take, 1_125_000, 180, 320);
+    let tile: Vec<u8> = (0..320).flat_map(|y| rgba[(y * 720 + 180) * 4..(y * 720 + 360) * 4].to_vec()).collect();
+    let mae = tile.iter().zip(&reference).map(|(a, b)| f64::from(a.abs_diff(*b))).sum::<f64>() / tile.len() as f64;
+    assert!(mae < 6.0, "the second frame differs from FFmpeg's by {mae:.1} levels");
+    let sideways = ffmpeg_frame(&take, 2_625_000, 180, 320);
+    let other = tile.iter().zip(&sideways).map(|(a, b)| f64::from(a.abs_diff(*b))).sum::<f64>() / tile.len() as f64;
+    assert!(other > 2.0 * mae, "frames at other times look the same: {other:.1} against {mae:.1}");
+    assert!(c.error("frame_sheet", json!({"asset_id":ids[1]})).contains("NO_PICTURE"));
+    assert!(c.error("frame_sheet", json!({"asset_id":ids[0],"range_us":[0, 9_000_000]})).contains("INVALID_RANGE"));
+
+    // The quiet place near a cut is in the room's 0.4 s, on a frame, and the voice's middle has none.
+    let waiting = c.error("quiet_point", json!({"time_us": 1_150_000}));
+    let job = waiting.split("as job ").nth(1).and_then(|rest| rest.split(';').next()).unwrap().to_owned();
+    assert_eq!(wait_job(&mut c, &json!({"job_id": job}), Duration::from_secs(60), |_| false)["status"], "done");
+    let quiet = c.call("quiet_point", json!({"time_us": 1_150_000}));
+    let at = quiet["quiet_us"].as_i64().unwrap();
+    assert!((1_000_000..1_400_000).contains(&at) && quiet["pause"] == true, "{quiet}");
+    assert_eq!(at * 30 % 1_000_000 / 30, 0, "not on a frame: {quiet}");
+    let voice = c.call("quiet_point", json!({"time_us": 2_200_000, "within_us": 100_000}));
+    assert_eq!(voice["pause"], false, "{voice}");
+
+    // Mains hum at 50 Hz with its harmonics and the whine, in the file's own sound.
+    let spectrum = c.call("audio_spectrum", json!({"clip_id": clip}));
+    assert_eq!(spectrum["hum"]["mains_hz"], 50, "{spectrum}");
+    let harmonics: Vec<f64> =
+        spectrum["hum"]["harmonics"].as_array().unwrap().iter().map(|h| h["hz"].as_f64().unwrap()).collect();
+    assert!(harmonics.len() >= 3 && (harmonics[0] - 50.0).abs() < 1.0, "{spectrum}");
+    assert!((spectrum["whine"][0]["hz"].as_f64().unwrap() - 15_000.0).abs() < 2.0, "{spectrum}");
+    let clean = c.error("audio_spectrum", json!({"asset_id": ids[2]}));
+    assert!(clean.contains("NO_SOUND"), "{clean}");
+
+    // Without the scene model, describing and following say how to get it.
+    for (tool, args) in
+        [("describe_clip", json!({"clip_id": clip})), ("track_object", json!({"clip_id": clip, "words": "dog"}))]
+    {
+        let missing = c.error(tool, args);
+        assert!(
+            missing.contains("MODEL_MISSING") && missing.contains("nuzky vision-models scene"),
+            "{tool}: {missing}"
+        );
+    }
+    assert!(c.error("track_object", json!({"clip_id": clip, "words": "  "})).contains("INVALID_ARGUMENTS"));
+    // An 11 minute file is looked at 60 times, 11 s apart, by default; only an every_us the agent gives has a limit.
+    let long =
+        ffmpeg_media(&c, "long.mp4", &["testsrc2=s=64x36:r=1:d=660"], &["-c:v", "libx264", "-preset", "ultrafast"]);
+    let run = c.call("begin_run", json!({"label":"long"}))["run_id"].clone();
+    let long = c.call("import_media", json!({"run_id":run,"paths":[long]}))["asset_ids"][0].clone();
+    c.call("end_run", json!({"run_id":run,"action":"keep"}));
+    let default = c.error("track_object", json!({"asset_id": long, "words": "dog"}));
+    assert!(default.contains("MODEL_MISSING"), "{default}");
+    let wide = c.error("track_object", json!({"asset_id": long, "words": "dog", "every_us": 11_000_000}));
+    assert!(wide.contains("INVALID_ARGUMENTS"), "{wide}");
+    assert!(c.error("describe_clip", json!({"asset_id": ids[1]})).contains("NO_PICTURE"));
+
+    // Each only reads: a read-only agent gets the same.
+    let mut c = c.restart(false);
+    assert_eq!(c.call("clip_metadata", json!({"asset_ids": [ids[0]]}))["assets"][0]["device"], "Apple iPhone 15 Pro");
+    assert_eq!(c.call("audio_spectrum", json!({"asset_id": ids[0]}))["hum"]["mains_hz"], 50);
+    c.finish();
+}
+
+#[test]
+#[ignore = "Requires the scene model from scripts/fixtures.sh; run with scripts/isolated.sh"]
+fn agents_describe_the_sample_and_follow_its_dog_over_stdio() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let sample = dunce::canonicalize(root.join("assets/sample/spotlight-effect.mp4")).unwrap();
+    let mut c = Client::new(true);
+    let run = c.call("begin_run", json!({"label":"sample"}))["run_id"].clone();
+    let id = c.call("import_media", json!({"run_id":run,"paths":[sample]}))["asset_ids"][0].clone();
+    c.call("apply_edits", json!({"run_id":run,"request_id":"place","edits":[{"type":"addClip","assetId":id}]}));
+    let clip = c.call("get_state", json!({}))["tracks"][0]["clips"][0]["id"].clone();
+    // 8 s of it from 10 s into the file, at the start of the timeline.
+    c.call(
+        "apply_edits",
+        json!({"run_id":run,"request_id":"trim","edits":[
+            {"type":"trimClip","clipId":clip,"startUs":0,"durationUs":8_000_000,"sourceInUs":10_000_000}]}),
+    );
+    c.call("end_run", json!({"run_id":run,"action":"keep"}));
+    let done = |c: &mut Client, answer: Value| -> Value {
+        if answer.get("job_id").is_some() && answer.get("status").is_some() {
+            let finished = wait_job(c, &answer, Duration::from_secs(180), |_| false);
+            assert_eq!(finished["status"], "done", "{finished}");
+            finished["result"].clone()
+        } else {
+            answer
+        }
+    };
+    let answer = c.call("describe_clip", json!({"clip_id": clip, "max_shots": 2}));
+    let described = done(&mut c, answer);
+    let shots = described["shots"].as_array().unwrap();
+    assert!(!shots.is_empty() && shots.len() <= 2, "{described}");
+    let text = shots[0]["description"].as_str().unwrap().to_lowercase();
+    assert!(text.contains("dog") && text.contains("woman"), "{described}");
+    assert_eq!(shots[0]["start_us"], 10_000_000, "{described}");
+    assert_eq!(shots[0]["timeline_us"], 0, "{described}");
+
+    let answer = c.call("track_object", json!({"clip_id": clip, "words": "dog", "every_us": 2_000_000}));
+    let tracked = done(&mut c, answer);
+    let track = tracked["track"].as_array().unwrap();
+    assert_eq!(track.len(), 4, "{tracked}");
+    assert_eq!(tracked["found"], 1.0, "{tracked}");
+    for (i, look) in track.iter().enumerate() {
+        assert_eq!(look["t_us"], 11_000_000 + 2_000_000 * i as i64, "{tracked}");
+        assert_eq!(look["timeline_us"], 1_000_000 + 2_000_000 * i as i64, "{tracked}");
+        let b: Vec<f64> = look["box"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+        let (x, y) = (b[0] + b[2] / 2.0, b[1] + b[3] / 2.0);
+        assert!((0.35..0.65).contains(&x) && (0.6..0.95).contains(&y), "{look}");
+    }
+    let answer = c.call("track_object", json!({"clip_id": clip, "words": "elephant", "every_us": 4_000_000}));
+    let absent = done(&mut c, answer);
+    assert_eq!(absent["found"], 0.0, "{absent}");
     c.finish();
 }

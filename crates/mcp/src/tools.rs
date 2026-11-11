@@ -25,7 +25,7 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
-use crate::{activity, media, params::*, plugins, reels, transcript, translate, vision_models, waveform};
+use crate::{activity, inputs, media, params::*, plugins, reels, transcript, translate, vision_models, waveform};
 
 const PREVIEW_CHARS: usize = 400;
 /// apply_edits leaves out clips longer than this: restyling 117 captions once answered 64 thousand characters,
@@ -76,6 +76,8 @@ pub struct Backend {
     /// Why this agent cannot have the speech model: the user said not now, stopped the download or it failed.
     model_refused: Arc<Mutex<Option<String>>>,
     vision_refused: vision_models::Refused,
+    /// The scene model is asked for apart from the face and person models, so declining one keeps the other.
+    scene_refused: vision_models::Refused,
 }
 
 /// The asset the sound became and the edits that add it.
@@ -112,6 +114,7 @@ impl Backend {
             sticker_requests: Mutex::default(),
             model_refused: Arc::default(),
             vision_refused: Arc::default(),
+            scene_refused: Arc::default(),
         })
     }
 
@@ -184,6 +187,9 @@ impl Backend {
         }
         if name == "get_waveform" {
             return self.waveform(parse(arguments)?, &state);
+        }
+        if name == "frame_sheet" {
+            return self.frame_sheet(parse(arguments)?, &state);
         }
         let mut value = self.dispatch(name, arguments, &state)?;
         if name == "begin_run"
@@ -326,6 +332,11 @@ impl Backend {
             "import_web_image" => self.import_web_image(parse(arguments)?, state),
             "add_sticker" => self.add_sticker(parse(arguments)?, state),
             "activity" => self.activity(parse(arguments)?, state),
+            "clip_metadata" => self.clip_metadata(parse(arguments)?, state),
+            "quiet_point" => self.quiet_point(parse(arguments)?, state),
+            "audio_spectrum" => self.audio_spectrum(parse(arguments)?, state),
+            "describe_clip" => self.describe_clip(parse(arguments)?, state),
+            "track_object" => self.track_object(parse(arguments)?, state),
             "analyze" => self.analyze(parse(arguments)?, state),
             "segment_subject" => self.segment_subject(parse(arguments)?, state),
             "reframe" => self.reframe(parse(arguments)?, state),
@@ -474,6 +485,210 @@ impl Backend {
             ContentBlock::text(info.to_string()),
             ContentBlock::image(BASE64_STANDARD.encode(png), "image/png"),
         ]))
+    }
+
+    fn clip_metadata(&self, args: ClipMetadata, state: &SessionState) -> Result<Value> {
+        let project = self.media_project(&state.project);
+        let assets: Vec<&nuzky_engine::model::Asset> = match &args.asset_ids {
+            Some(ids) => ids
+                .iter()
+                .map(|id| project.asset(id).with_context(|| format!("UNKNOWN_ASSET: {id}")))
+                .collect::<Result<_>>()?,
+            None => project.assets.iter().filter(|a| a.credit.is_none()).collect(),
+        };
+        Ok(inputs::metadata(&assets))
+    }
+
+    fn frame_sheet(&self, args: FrameSheet, state: &SessionState) -> Result<CallToolResult> {
+        let project = self.media_project(&state.project);
+        let part = inputs::part(&project, args.clip_id.as_deref(), args.asset_id.as_deref(), args.range_us)?;
+        ensure!(
+            part.asset.kind != nuzky_engine::model::AssetKind::Audio,
+            "NO_PICTURE: {} is a sound file; it has no picture",
+            part.asset.name
+        );
+        let width = args.width.unwrap_or(240);
+        ensure!((96..=1280).contains(&width), "INVALID_ARGUMENTS: width must be 96..=1280");
+        let times = match (args.times_us, args.count) {
+            (Some(_), Some(_)) => anyhow::bail!("INVALID_ARGUMENTS: give times_us or count, not both"),
+            (Some(times), None) => {
+                ensure!(
+                    (1..=media::MAX_FRAMES).contains(&times.len()),
+                    "INVALID_ARGUMENTS: times_us holds 1 to 16 times"
+                );
+                let end = if part.is_image() { 1 } else { part.asset.duration_us };
+                ensure!(
+                    times.iter().all(|t| (0..end).contains(t)),
+                    "INVALID_RANGE: times_us must be inside the file, 0..{end} microseconds"
+                );
+                times
+            }
+            (None, count) => {
+                let count = count.unwrap_or(12);
+                ensure!((1..=media::MAX_FRAMES).contains(&count), "INVALID_ARGUMENTS: count must be 1..=16");
+                inputs::spread(part.range, if part.is_image() { 1 } else { count })
+            }
+        };
+        let bytes = inputs::frame_sheet(&part, &times, width)?;
+        let mut info = part.describe();
+        info["times_us"] = json!(times);
+        info["timeline_us"] = json!(times.iter().map(|t| part.timeline(*t)).collect::<Vec<_>>());
+        info["labels"] = json!("file seconds.microseconds");
+        Ok(CallToolResult::success(vec![
+            ContentBlock::text(info.to_string()),
+            ContentBlock::image(BASE64_STANDARD.encode(bytes), "image/png"),
+        ]))
+    }
+
+    fn quiet_point(&self, args: QuietPoint, state: &SessionState) -> Result<Value> {
+        let within = args.within_us.unwrap_or(300_000);
+        ensure!((20_000..=5_000_000).contains(&within), "INVALID_ARGUMENTS: within_us must be 20000..=5000000");
+        let project = self.media_project(&state.project);
+        activity::timeline_range(&project, None)?;
+        media::check_media(&project)?;
+        self.prepare_sound(&project, state, "quiet_point")?;
+        inputs::quiet_point(&project, &self.host.cache_dir, args.time_us, within)
+    }
+
+    fn audio_spectrum(&self, args: AudioSpectrum, state: &SessionState) -> Result<Value> {
+        let project = self.media_project(&state.project);
+        let part = inputs::part(&project, args.clip_id.as_deref(), args.asset_id.as_deref(), args.range_us)?;
+        ensure!(nuzky_engine::audio::has_audio(&part.asset), "NO_SOUND: {} has no sound", part.asset.name);
+        ensure!(part.range.1 - part.range.0 >= 500_000, "INVALID_RANGE: listen to at least 0.5 s");
+        self.prepare_assets(vec![part.asset.clone()], state, "audio_spectrum")?;
+        let found = inputs::spectrum(&self.host.cache_dir, &part)?
+            .context("INVALID_RANGE: the file has less than 0.5 s of sound there")?;
+        let mut result = part.describe();
+        for (key, value) in serde_json::to_value(found)?.as_object().into_iter().flatten() {
+            result[key] = value.clone();
+        }
+        Ok(result)
+    }
+
+    fn describe_clip(&self, args: DescribeClip, state: &SessionState) -> Result<Value> {
+        let project = self.media_project(&state.project);
+        let part = self.picture_part(&project, args.clip_id.as_deref(), args.asset_id.as_deref(), args.range_us)?;
+        let max = args.max_shots.unwrap_or(6);
+        ensure!((1..=16).contains(&max), "INVALID_ARGUMENTS: max_shots must be 1..=16");
+        vision_models::check(nuzky_vision::models::SCENE, &self.scene_refused)?;
+        let refused = self.scene_refused.clone();
+        let job = self.host.start_job(
+            &self.client.id,
+            state.open_run.as_ref().map(|run| run.run_id.as_str()),
+            "describe",
+            state.stamp.clone(),
+            move |cancel, progress| {
+                vision_models::ensure(nuzky_vision::models::SCENE, &refused, &cancel, &progress)?;
+                progress.set("looking", None);
+                let times = inputs::shots(&part, max, &|| cancel.load(Ordering::Relaxed))?;
+                let texts = nuzky_vision::scene::describe(
+                    &part.asset,
+                    &times,
+                    &nuzky_analysis::models_dir(),
+                    &cancel,
+                    &mut |done| progress.set("describing", Some(done)),
+                )?;
+                let shots: Vec<Value> = times
+                    .iter()
+                    .zip(&texts)
+                    .enumerate()
+                    .map(|(i, (&t, text))| {
+                        let end = times.get(i + 1).copied().unwrap_or(part.range.1);
+                        json!({"start_us": t, "end_us": end, "timeline_us": part.timeline(t), "description": text})
+                    })
+                    .collect();
+                let mut result = part.describe();
+                result["shots"] = json!(shots);
+                Ok(result)
+            },
+        )?;
+        self.answer_job(&job)
+    }
+
+    fn track_object(&self, args: TrackObject, state: &SessionState) -> Result<Value> {
+        let words = args.words.split_whitespace().collect::<Vec<_>>().join(" ");
+        ensure!(!words.is_empty(), "INVALID_ARGUMENTS: words names what to follow");
+        ensure!(
+            words.chars().count() <= nuzky_vision::florence::MAX_WORDS,
+            "INVALID_ARGUMENTS: name what to follow in at most {} characters",
+            nuzky_vision::florence::MAX_WORDS
+        );
+        let project = self.media_project(&state.project);
+        let part = self.picture_part(&project, args.clip_id.as_deref(), args.asset_id.as_deref(), args.range_us)?;
+        let (start, end) = part.range;
+        let every = match args.every_us {
+            Some(every) => {
+                ensure!(
+                    (100_000..=10_000_000).contains(&every),
+                    "INVALID_ARGUMENTS: every_us must be 100000..=10000000"
+                );
+                every
+            }
+            None => 500_000.max((end - start + 59) / 60),
+        };
+        let times: Vec<i64> = if part.is_image() || end - start <= 1 {
+            vec![start]
+        } else {
+            (0..).map(|i| start + (every / 2).min((end - start) / 2) + i * every).take_while(|t| *t < end).collect()
+        };
+        ensure!(
+            times.len() <= 120,
+            "INVALID_ARGUMENTS: that is {} looks, at most 120; give a larger every_us or a shorter range_us",
+            times.len()
+        );
+        vision_models::check(nuzky_vision::models::SCENE, &self.scene_refused)?;
+        let refused = self.scene_refused.clone();
+        let job = self.host.start_job(
+            &self.client.id,
+            state.open_run.as_ref().map(|run| run.run_id.as_str()),
+            "track",
+            state.stamp.clone(),
+            move |cancel, progress| {
+                vision_models::ensure(nuzky_vision::models::SCENE, &refused, &cancel, &progress)?;
+                let seen = nuzky_vision::scene::track(
+                    &part.asset,
+                    &times,
+                    &words,
+                    &nuzky_analysis::models_dir(),
+                    &cancel,
+                    &mut |done| progress.set("looking", Some(done)),
+                )?;
+                let found = seen.iter().filter(|s| s.matches).count() as f64 / seen.len().max(1) as f64;
+                let track: Vec<Value> = seen
+                    .iter()
+                    .map(|s| {
+                        let mut row = serde_json::to_value(s).unwrap_or_default();
+                        row["timeline_us"] = part.timeline(s.t_us);
+                        row
+                    })
+                    .collect();
+                let mut result = part.describe();
+                result["words"] = json!(words);
+                result["every_us"] = json!(every);
+                result["size"] = json!([part.asset.width, part.asset.height]);
+                result["found"] = json!((found * 100.0).round() / 100.0);
+                result["track"] = json!(track);
+                Ok(result)
+            },
+        )?;
+        self.answer_job(&job)
+    }
+
+    /// A video or image clip or file whose picture the scene model can look at.
+    fn picture_part(
+        &self,
+        project: &Project,
+        clip_id: Option<&str>,
+        asset_id: Option<&str>,
+        range: Option<[i64; 2]>,
+    ) -> Result<inputs::Part> {
+        let part = inputs::part(project, clip_id, asset_id, range)?;
+        ensure!(
+            part.asset.kind != nuzky_engine::model::AssetKind::Audio,
+            "NO_PICTURE: {} is a sound file; it has no picture",
+            part.asset.name
+        );
+        Ok(part)
     }
 
     /// Renders and mixes the range as a job, so a long range reports progress and can be cancelled,
@@ -2606,6 +2821,7 @@ mod transcript_tests {
             sticker_requests: Mutex::default(),
             model_refused: Arc::default(),
             vision_refused: Arc::default(),
+            scene_refused: Arc::default(),
         };
         (dir, backend, project)
     }

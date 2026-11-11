@@ -27,6 +27,7 @@ export default function Dialogs() {
       <SwitchDialog />
       <ModelQuestionDialog kind="speech" />
       <ModelQuestionDialog kind="vision" />
+      <ModelQuestionDialog kind="scene" />
       <OpenedDraftDialog />
       <BugReportDialog />
       <ShareDialog />

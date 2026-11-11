@@ -9,7 +9,9 @@ from e2e.setup import BOX, relaunch
 from e2e.speech_model import Models
 
 # Every model with the path the loopback server answers it on: the address's host, then its path.
-URLS = dict(re.findall(r'file: "([^"]+)",\s*label: "[^"]+",\s*url: "https://([^"]+)"', (ROOT / 'crates/vision/src/models.rs').read_text()))
+# The scene model is asked for apart from these (agent_inputs).
+URLS = {name: url for name, url in re.findall(r'file: "([^"]+)",\s*label: "[^"]+",\s*url: "https://([^"]+)"',
+        (ROOT / 'crates/vision/src/models.rs').read_text()) if not name.startswith('florence-')}
 FRAMES = ('yunet-2026may.onnx', 'face-landmarks-v2.onnx', 'face-blendshapes-v2.onnx', 'selfie-segmenter.onnx')
 CARD = 'aside[aria-label=AI] [aria-labelledby=vision-question-title]'
 DIALOG = 'dialog[aria-labelledby="vision-model-title"]'

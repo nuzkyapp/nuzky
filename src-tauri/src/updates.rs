@@ -448,7 +448,7 @@ fn work_of(kinds: &[String]) -> Option<&'static str> {
         Some("the export")
     } else if any(&["captions", "transcript", "transcription"]) {
         Some("speech recognition")
-    } else if any(&["speech-model", "vision-models"]) {
+    } else if any(&["speech-model", "vision-models", "scene-model"]) {
         Some("the model download")
     } else if any(&["style"]) {
         Some("learning your style")

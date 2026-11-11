@@ -710,6 +710,39 @@ elif CODEX and 'image' in message:
         {'type': 'addPictureInPicture', 'assetId': asset, 'startUs': 0, 'durationUs': 3_000_000}]})
     call('end_run', {'run_id': run, 'action': 'keep'})
     say('Hotovo, obrázek je v prvních 3 s.')
+elif 'what is in the clips' in message:
+    # Every input an agent has about a clip beyond the timeline, as agent_inputs checks them.
+    def done(answer):
+        if 'job_id' in answer and 'status' in answer:
+            while (answer := call('job', {'job_id': answer['job_id'], 'action': 'wait', 'timeout_s': 5}))['status'] == 'running':
+                pass
+            if answer['status'] != 'done':
+                raise RuntimeError(answer.get('error'))
+            return answer['result']
+        return answer
+
+    def sound(tool, arguments):
+        try:
+            return call(tool, arguments)
+        except RuntimeError as waiting:
+            if not str(waiting).startswith('AUDIO_NOT_READY'):
+                raise
+            done({'job_id': str(waiting).split('as job ')[1].split(';')[0], 'status': 'running'})
+            return call(tool, arguments)
+
+    clip = call('get_state', {})['tracks'][0]['clips'][0]['id']
+    meta = call('clip_metadata', {})['assets'][0]
+    call('frame_sheet', {'clip_id': clip, 'count': 4})
+    quiet = sound('quiet_point', {'time_us': 2_000_000})
+    spectrum = sound('audio_spectrum', {'clip_id': clip})
+    described = done(call('describe_clip', {'clip_id': clip, 'max_shots': 1}))
+    tracked = done(call('track_object', {'clip_id': clip, 'words': 'dog', 'every_us': 2_000_000}))
+    with open(LOG / 'inputs.json', 'w') as f:
+        json.dump({'meta': meta, 'quiet': quiet, 'spectrum': spectrum, 'described': described, 'tracked': tracked}, f)
+    place = meta['location']
+    say(f"Natočeno {meta['recorded_at'][:10]} na {meta['device']}, {place['latitude']:.2f} N {place['longitude']:.2f} E. "
+        f"{described['shots'][0]['description']} Pes je v záběru v {tracked['found'] * 100:.0f} % pohledů, "
+        f"brum {'je' if spectrum['hum'] else 'není'} slyšet.")
 elif 'cut' in message:
     state = call('get_state', {})
     call('activity', {})

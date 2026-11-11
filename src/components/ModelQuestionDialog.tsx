@@ -16,26 +16,35 @@ export const MODEL_QUESTION: Record<ModelKind, { title: string; text: (mb: numbe
     text: (mb) =>
       `The AI needs them to find faces and cut out the person, for covers, reframing and backgrounds. They run on this computer, a one-time download of ${mb} MB. Once they are downloaded, the AI goes on by itself; with Not now, it goes on without them.`,
   },
+  scene: {
+    title: "Download the scene model?",
+    text: (mb) =>
+      `The AI needs it to see what is in your clips and to follow what you name in them. It runs on this computer, a one-time download of ${mb} MB. Once it is downloaded, the AI goes on by itself; with Not now, it goes on without it.`,
+  },
 };
 
 /** The label of the download of the face and person models an agent asked for (src-tauri/src/model_question.rs). */
 export const AGENT_VISION_MODELS = "Face and person models";
 
-const question = (kind: ModelKind) => (kind === "speech" ? "speechModelQuestion" : "visionModelQuestion");
+const QUESTION = { speech: "speechModelQuestion", vision: "visionModelQuestion", scene: "sceneModelQuestion" } as const;
+const question = (kind: ModelKind) => QUESTION[kind];
+/** The job of the download the user agreed to, as src-tauri/src/model_question.rs names it. */
+const DOWNLOAD = { vision: ["visionModelJob", "vision-models"], scene: ["sceneModelJob", "scene-model"] } as const;
 
 /** Answers what an agent's job waits for. */
 export function answerModelQuestion(kind: ModelKind, download: boolean) {
   const asked = useEditor.getState()[question(kind)];
   if (!asked) return;
-  useEditor.setState({ [question(kind)]: null, ...(kind === "vision" && download ? { visionModelJob: `vision-models:${asked.id}` } : {}) });
+  const job = kind !== "speech" && download ? { [DOWNLOAD[kind][0]]: `${DOWNLOAD[kind][1]}:${asked.id}` } : {};
+  useEditor.setState({ [question(kind)]: null, ...job });
   api.answerModelQuestion(asked.id, download).catch((e) => useEditor.getState().toast({ kind: "error", text: plainError(errorText(e)) }));
 }
 
-/** Asks whether to download a model an agent needs; the agent waits for the answer. The editor's AI panel asks for the face and person models itself while it is on screen. */
+/** Asks whether to download a model an agent needs; the agent waits for the answer. The editor's AI panel asks for the face and person models and the scene model itself while it is on screen. */
 export function ModelQuestionDialog({ kind }: { kind: ModelKind }) {
   // The editor stays behind the home screen with its panel, and the full screen preview hides the panel.
   const full = usePreview((s) => s.full);
-  const asked = useEditor((s) => (kind === "vision" && s.aiChats > 0 && s.view === "editor" && !full ? null : s[question(kind)]));
+  const asked = useEditor((s) => (kind !== "speech" && s.aiChats > 0 && s.view === "editor" && !full ? null : s[question(kind)]));
   // What it asked stays while it closes, so it fades out whole.
   const [shown, setShown] = useState(asked);
   if (asked && asked !== shown) setShown(asked);
