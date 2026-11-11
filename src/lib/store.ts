@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { api, errorText, plainError } from "./api";
 import { closeSource, sourceOpen, toggleSourcePlay } from "./source";
-import { clipOffset, keyframeTolerance, transformAt, upsertKeyframe } from "./keyframes";
+import { clipOffset, keyframeTolerance, ownTransform, transformAt, upsertKeyframe } from "./keyframes";
 import { canvasUnit, scaleStyle } from "./presets";
 import { US } from "./time";
 import type { Asset, Background, Clip, CopiedClip, Delivery, EditCmd, Filmstrip, JobEvent, Project, ProjectVersion, Snapshot, ModelQuestion, TextStyle, TimeRange, Track, Transform, Transition, ZoomsApplied } from "./types";
@@ -730,7 +730,7 @@ export function transitionTarget(project: Project, selection: string[], cut: str
 
 /** Transform the renderer uses at the playhead, keyframes included. */
 export function transformAtPlayhead(clip: Clip, timeUs: number): Transform {
-  return transformAt(clip, clip.content.transform, clipOffset(clip, timeUs));
+  return transformAt(clip, ownTransform(clip), clipOffset(clip, timeUs));
 }
 
 /** Queues an edit built from the clip's latest confirmed state; skipped when the clip is gone. */
@@ -764,7 +764,7 @@ type TransformPatch = Partial<Transform> | ((current: Transform) => Partial<Tran
 /** The edit that changes the transform at `timeUs`: the clip's own, or once it has keyframes, the keyframe there. */
 export function transformEdit(clip: Clip, project: Project, timeUs: number, patch: TransformPatch): EditCmd {
   const offset = clipOffset(clip, timeUs);
-  const current = transformAt(clip, clip.content.transform, offset);
+  const current = transformAt(clip, ownTransform(clip), offset);
   const transform = { ...current, ...(typeof patch === "function" ? patch(current) : patch) };
   if (clip.keyframes.length === 0) return { type: "updateClip", clipId: clip.id, transform };
   return { type: "setKeyframes", clipId: clip.id, keyframes: upsertKeyframe(clip, offset, transform, keyframeTolerance(project.canvas.fps)) };
@@ -1061,10 +1061,16 @@ export async function detachAudio(clipIds: string[]) {
   if (snap) toast({ kind: "info", text, action: undoAction(snap) });
 }
 
+/** Adds an adjustment layer from the playhead for 3 s and selects it, so the inspector shows its Adjust tab. */
+export function addAdjustmentLayer() {
+  const { edit, timeUs } = useEditor.getState();
+  return edit({ type: "addAdjustment", startUs: Math.round(timeUs), durationUs: null, adjust: null });
+}
+
 /** Turns the selected pictures and texts a quarter turn clockwise, keyframes by the same angle, as one undo step. */
 export function rotateSelection() {
   return editClips(useEditor.getState().selection, (clip, track): EditCmd[] | null => {
-    if (track.kind === "audio") return null;
+    if (track.kind === "audio" || clip.content.type === "adjustment") return null;
     const { transform } = clip.content;
     // Past 180° the clip's own angle goes the short way round; keyframes move by the same amount so their sweep stays.
     const turn = transform.rotation + 90 > 180 ? -270 : 90;

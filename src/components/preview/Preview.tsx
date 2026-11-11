@@ -232,7 +232,7 @@ export function Preview() {
   const adjusted = useEditor(
     (s) =>
       !!s.snap?.project.tracks.some((t) =>
-        t.clips.some((c) => c.content.type === "media" && (!sameAdjust(c.content.adjust, NO_ADJUST) || (c.content.log ?? "none") !== "none" || c.content.lut?.type === "file")),
+        t.clips.some((c) => c.content.type !== "text" && (!sameAdjust(c.content.adjust, NO_ADJUST) || (c.content.type === "media" && (c.content.log ?? "none") !== "none") || c.content.lut?.type === "file")),
       ),
   );
   const { muted, full, compare } = usePreview();

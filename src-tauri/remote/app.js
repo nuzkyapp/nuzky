@@ -14,6 +14,7 @@ const ICONS = {
   film: SVG('<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18M3 7.5h4M3 12h18M3 16.5h4M17 3v18M17 7.5h4M17 16.5h4"/>'),
   image: SVG('<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/>'),
   type: SVG('<path d="M4 7V4h16v3M9 20h6M12 4v16"/>'),
+  sliders: SVG('<path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4"/>'),
   cc: SVG('<rect width="18" height="14" x="3" y="5" rx="2"/><path d="M7 15h4M15 15h2M7 11h2M13 11h4"/>'),
   music: SVG('<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>'),
   chats: SVG('<path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z"/><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1"/>'),
@@ -361,7 +362,7 @@ function drawClip(d, c, t, top) {
   if (caption || !label) d.replaceChildren(label);
   else {
     const chip = el("div", "chip");
-    chip.append(icon({ video: "film", image: "image", audio: "music", title: "type" }[kind]), label);
+    chip.append(icon({ video: "film", image: "image", audio: "music", title: "type", adjustment: "sliders" }[kind]), label);
     d.replaceChildren(chip);
   }
   d.chip = d.querySelector(".chip");

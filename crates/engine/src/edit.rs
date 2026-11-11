@@ -5,8 +5,8 @@ use anyhow::{Result, anyhow, bail, ensure};
 use serde::{Deserialize, Serialize};
 
 use crate::model::{
-    Adjust, Animation, Asset, AssetKind, Background, CAPTIONS_TRACK, Canvas, CaptionWord, Clip, ClipContent, Ease,
-    Effect, Keyframe, Keywords, LetterCase, LogProfile, Lut, MAX_CANVAS_SIDE, MAX_CLIP_EFFECTS, MAX_FPS,
+    Adjust, Animation, Asset, AssetKind, Background, CAPTIONS_TRACK, Canvas, CaptionWord, Clip, ClipContent, Crop,
+    Ease, Effect, Keyframe, Keywords, LetterCase, LogProfile, Lut, MAX_CANVAS_SIDE, MAX_CLIP_EFFECTS, MAX_FPS,
     MAX_SCRIPT_CHARS, Mono, Project, ReelCandidate, Shape, SpeedPoint, TextAlign, TextShadow, TextStyle, Thumbnail,
     ThumbnailFormat, Track, TrackKind, Transform, Transition, WordCorrection, word_ranges,
 };
@@ -15,6 +15,7 @@ pub const MAIN_TRACK: &str = "main";
 const IMAGE_DURATION_US: i64 = 3_000_000;
 pub const FREEZE_DURATION_US: i64 = 3_000_000;
 const TEXT_DURATION_US: i64 = 3_000_000;
+const ADJUSTMENT_DURATION_US: i64 = 3_000_000;
 const UNDO_LIMIT: usize = 200;
 pub const MIN_SPEED: f32 = 0.1;
 pub const MAX_SPEED: f32 = 10.0;
@@ -93,6 +94,70 @@ pub struct CaptionSegment {
     pub words: Vec<CaptionWord>,
 }
 
+/// How a split screen divides the picture.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SplitLayout {
+    /// Two halves, left and right.
+    SideBySide,
+    /// Two halves, top and bottom.
+    TopAndBottom,
+    /// Three columns.
+    ThreeColumns,
+    /// Three rows.
+    ThreeRows,
+    /// The first clip over the top half, the other two side by side below it.
+    OneOverTwo,
+    /// Four quarters: top left, top right, bottom left, bottom right.
+    Grid,
+}
+
+impl SplitLayout {
+    /// Each cell's left, top, right and bottom edge, as shares of the canvas.
+    pub fn cells(self) -> &'static [[f32; 4]] {
+        const THIRD: f32 = 1.0 / 3.0;
+        const TWO_THIRDS: f32 = 2.0 / 3.0;
+        match self {
+            SplitLayout::SideBySide => &[[0.0, 0.0, 0.5, 1.0], [0.5, 0.0, 1.0, 1.0]],
+            SplitLayout::TopAndBottom => &[[0.0, 0.0, 1.0, 0.5], [0.0, 0.5, 1.0, 1.0]],
+            SplitLayout::ThreeColumns => {
+                &[[0.0, 0.0, THIRD, 1.0], [THIRD, 0.0, TWO_THIRDS, 1.0], [TWO_THIRDS, 0.0, 1.0, 1.0]]
+            }
+            SplitLayout::ThreeRows => {
+                &[[0.0, 0.0, 1.0, THIRD], [0.0, THIRD, 1.0, TWO_THIRDS], [0.0, TWO_THIRDS, 1.0, 1.0]]
+            }
+            SplitLayout::OneOverTwo => &[[0.0, 0.0, 1.0, 0.5], [0.0, 0.5, 0.5, 1.0], [0.5, 0.5, 1.0, 1.0]],
+            SplitLayout::Grid => {
+                &[[0.0, 0.0, 0.5, 0.5], [0.5, 0.0, 1.0, 0.5], [0.0, 0.5, 0.5, 1.0], [0.5, 0.5, 1.0, 1.0]]
+            }
+        }
+    }
+}
+
+/// How a picture of `asset`'s shape fills the cell `[left, top, right, bottom]` of the canvas: scaled until it covers
+/// the cell, its centre on the cell's, and the rest cut off evenly on both sides.
+pub fn cell_transform(canvas: &Canvas, asset: &Asset, [left, top, right, bottom]: [f32; 4], opacity: f32) -> Transform {
+    let (cw, ch) = (canvas.width as f32, canvas.height as f32);
+    let fit = (cw / asset.width as f32).min(ch / asset.height as f32);
+    let (w, h) = (asset.width as f32 * fit, asset.height as f32 * fit);
+    let (cell_w, cell_h) = ((right - left) * cw, (bottom - top) * ch);
+    let scale = (cell_w / w).max(cell_h / h);
+    // Less than a hundredth of a pixel on a 4K picture is no crop.
+    let cut = |shown: f32, kept: f32| Some((1.0 - kept / shown) / 2.0).filter(|c| *c > 1e-6).unwrap_or(0.0);
+    let (x, y) = (cut(w * scale, cell_w), cut(h * scale, cell_h));
+    Transform {
+        x: (left + right) / 2.0 - 0.5,
+        y: (top + bottom) / 2.0 - 0.5,
+        scale,
+        rotation: 0.0,
+        opacity,
+        crop: (x > 0.0 || y > 0.0).then_some(Crop { left: x, top: y, right: x, bottom: y }),
+        mask: None,
+    }
+}
+
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -137,6 +202,23 @@ pub enum EditCmd {
         start_us: i64,
         text: String,
         style: TextStyle,
+    },
+    /// Adds an adjustment layer from `start_us` for `duration_us` (3 s by default) on the highest video track, or on
+    /// a new one above it: while it lasts, its LUT, its `adjust` and its effects (`setEffects`) change the whole picture
+    /// below it, every video, image and text there, but not text tracks above it such as captions. Change it later with
+    /// updateClip `adjust` and `lut`, and trim or move it like any clip; it never goes on the main track.
+    #[cfg_attr(feature = "ts", ts(optional_fields = nullable))]
+    AddAdjustment {
+        start_us: i64,
+        duration_us: Option<i64>,
+        adjust: Option<Adjust>,
+    },
+    /// Lays 2 to 4 video or image clips out side by side as a split screen: each fills its cell of `layout`, in the
+    /// order given, scaled to cover it and cropped evenly to its shape, without rotation, mask or keyframes. Their clips
+    /// usually play at the same time on tracks of their own; nothing about their time changes.
+    SplitScreen {
+        clip_ids: Vec<String>,
+        layout: SplitLayout,
     },
     /// `track_id: None` moves the clip to a new track of the right kind. With `new_track` it always goes on a new
     /// track right above or below `track_id` as the timeline shows it, or its own track without one; on screen a
@@ -230,8 +312,8 @@ pub enum EditCmd {
         /// Video and image clips: the log profile the camera recorded in, such as `appleLog` for an iPhone's Apple
         /// Log, turned into normal colour before the LUT and the adjustments; `none` shows the picture as recorded.
         log: Option<LogProfile>,
-        /// Video and image clips: `{"type": "file", id, name, strength}` puts a LUT from the user's LUT library over
-        /// the clip at a strength from 0 to 1; `{"type": "none"}` removes it.
+        /// Video, image and adjustment clips: `{"type": "file", id, name, strength}` puts a LUT from the user's LUT
+        /// library over the clip at a strength from 0 to 1; `{"type": "none"}` removes it.
         lut: Option<Lut>,
     },
     SetAnimation {
@@ -248,7 +330,8 @@ pub enum EditCmd {
         clip_id: String,
         keyframes: Vec<Keyframe>,
     },
-    /// Plugin effects drawn over a video or image clip, in order, at most four; an empty list removes them.
+    /// Plugin effects drawn over a video or image clip, or over everything below an adjustment layer, in order, at most
+    /// four; an empty list removes them.
     /// `list_plugins` names each plugin's effects and their params.
     SetEffects {
         clip_id: String,
@@ -995,7 +1078,7 @@ impl Project {
             ClipContent::Media { asset_id, .. } => {
                 self.asset(asset_id).filter(|a| a.kind != AssetKind::Image).map(|a| a.duration_us)
             }
-            ClipContent::Text { .. } => None,
+            ClipContent::Text { .. } | ClipContent::Adjustment { .. } => None,
         }
     }
 
@@ -1047,6 +1130,7 @@ impl Project {
             | EditCmd::AddOverlay { .. }
             | EditCmd::AddSticker { .. }
             | EditCmd::AddText { .. }
+            | EditCmd::AddAdjustment { .. }
             | EditCmd::DetachAudio { .. }
             | EditCmd::ReplaceClip { .. } => self.apply_media(cmd, &mut out, &mut moved)?,
             EditCmd::MoveClip { .. }
@@ -1069,6 +1153,7 @@ impl Project {
                 self.apply_captions(cmd, &mut out)?
             }
             EditCmd::PasteClips { clips, at_us } => self.paste_clips(clips, at_us, &mut out)?,
+            EditCmd::SplitScreen { clip_ids, layout } => self.split_screen(&clip_ids, layout)?,
             EditCmd::ReplaceMainClips { clips } => self.replace_main_clips(clips)?,
             EditCmd::PasteAttributes { source, clip_ids } => self.paste_attributes(source, clip_ids, &mut out)?,
             EditCmd::RestyleTrack { track_id, style, transform } => {
@@ -1256,6 +1341,23 @@ impl Project {
                 out.select.push(clip.id.clone());
                 self.tracks[t].clips.push(clip);
             }
+            EditCmd::AddAdjustment { start_us, duration_us, adjust } => {
+                let start = start_us.max(0);
+                let duration = duration_us.unwrap_or(ADJUSTMENT_DURATION_US).max(min);
+                // Above every video track, so it changes all of their pictures; text tracks stay above it.
+                let top = self.tracks.iter().rposition(|t| t.kind == TrackKind::Video).unwrap_or(0);
+                let track = if top > 0 && !self.tracks[top].hidden && self.is_free(top, start, start + duration, None) {
+                    top
+                } else {
+                    let at = self.insert_track(top + 1, TrackKind::Video, false);
+                    self.tracks[at].name = "Adjustment".into();
+                    at
+                };
+                let content = ClipContent::Adjustment { adjust: adjust.unwrap_or_default(), lut: Lut::None };
+                let clip = Clip::new(new_id(), start, duration, content);
+                out.select.push(clip.id.clone());
+                self.tracks[track].clips.push(clip);
+            }
             EditCmd::DetachAudio { clip_id } => {
                 let (ti, ci) = self.find_clip(&clip_id).ok_or_else(|| anyhow!("Unknown clip"))?;
                 let clip = self.tracks[ti].clips[ci].clone();
@@ -1399,6 +1501,10 @@ impl Project {
                     None => track_id.and_then(|id| self.track_index(&id)).filter(|&i| self.tracks[i].kind == kind),
                 };
                 let target = match target {
+                    // The main track holds pictures only; an adjustment layer dropped on it goes right above it.
+                    Some(0) if matches!(clip.content, ClipContent::Adjustment { .. }) => {
+                        self.insert_track(1, kind, keep)
+                    }
                     Some(0) => {
                         *moved = Some((clip.id.clone(), start));
                         0
@@ -1457,7 +1563,7 @@ impl Project {
                 let freeze = self.tracks[ti].clips[ci].is_freeze();
                 let (speed, old_src) = match &self.tracks[ti].clips[ci].content {
                     ClipContent::Media { speed, source_in_us, .. } => (*speed as f64, *source_in_us),
-                    ClipContent::Text { .. } => (1.0, 0),
+                    ClipContent::Text { .. } | ClipContent::Adjustment { .. } => (1.0, 0),
                 };
                 let main = self.tracks[ti].id == MAIN_TRACK;
                 let clip = &mut self.tracks[ti].clips[ci];
@@ -1729,11 +1835,16 @@ impl Project {
                         self.tracks[ti].kind == TrackKind::Video
                             && self.asset(asset_id).is_some_and(|a| a.kind != AssetKind::Audio)
                     }
-                    ClipContent::Text { .. } => false,
+                    ClipContent::Text { .. } | ClipContent::Adjustment { .. } => false,
                 };
+                let adjustment = matches!(self.tracks[ti].clips[ci].content, ClipContent::Adjustment { .. });
                 ensure!(
-                    picture || (log.is_none_or(|l| l.is_none()) && lut.as_ref().is_none_or(Lut::is_none)),
-                    "Only video and image clips have colour to convert or grade"
+                    picture || log.is_none_or(|l| l.is_none()),
+                    "Only video and image clips have colour to convert from a log profile"
+                );
+                ensure!(
+                    picture || adjustment || lut.as_ref().is_none_or(Lut::is_none),
+                    "Only video, image and adjustment clips have colour to grade"
                 );
                 if let Some(Lut::File { id, strength, .. }) = &lut {
                     ensure!(crate::color::is_lut_id(id), "That LUT isn't one of Nuzky's: its id is 16 hex digits");
@@ -1753,7 +1864,7 @@ impl Project {
                         ClipContent::Media { asset_id, .. } => {
                             self.asset(asset_id).is_some_and(|a| a.kind != AssetKind::Image)
                         }
-                        ClipContent::Text { .. } => false,
+                        ClipContent::Text { .. } | ClipContent::Adjustment { .. } => false,
                     };
                     ensure!(timed, "Only video and sound clips play backwards or on a speed ramp");
                 }
@@ -1775,7 +1886,7 @@ impl Project {
                         ClipContent::Media { asset_id, .. } => {
                             !clip.is_freeze() && self.asset(asset_id).is_some_and(crate::audio::has_audio)
                         }
-                        ClipContent::Text { .. } => false,
+                        ClipContent::Text { .. } | ClipContent::Adjustment { .. } => false,
                     };
                     ensure!(sound, "This clip has no sound to change");
                 }
@@ -1813,12 +1924,7 @@ impl Project {
                             *lg = x;
                         }
                         if let Some(x) = lut {
-                            *lt = match x {
-                                Lut::File { id, name, strength } => {
-                                    Lut::File { id, name, strength: strength.clamp(0.0, 1.0) }
-                                }
-                                Lut::None => Lut::None,
-                            };
+                            *lt = bounded_lut(x);
                         }
                         if let Some(x) = shape {
                             *sh = Some(x).filter(|x| *x != Shape::default());
@@ -1914,6 +2020,14 @@ impl Project {
                             *st = x;
                         }
                     }
+                    ClipContent::Adjustment { adjust: adj, lut: lt } => {
+                        if let Some(x) = adjust {
+                            *adj = x;
+                        }
+                        if let Some(x) = lut {
+                            *lt = bounded_lut(x);
+                        }
+                    }
                 }
                 let clip = &self.tracks[ti].clips[ci];
                 if changes_length && ti != 0 && !self.is_free(ti, clip.start_us, clip.end_us(), Some(&clip_id)) {
@@ -1952,9 +2066,14 @@ impl Project {
             EditCmd::SetEffects { clip_id, effects } => {
                 let (ti, ci) = self.find_clip(&clip_id).ok_or_else(|| anyhow!("Unknown clip"))?;
                 let picture = self.tracks[ti].kind == TrackKind::Video
-                    && matches!(&self.tracks[ti].clips[ci].content, ClipContent::Media { asset_id, .. }
-                        if self.asset(asset_id).is_some_and(|a| a.kind != AssetKind::Audio));
-                ensure!(picture || effects.is_empty(), "Effects go on video and image clips");
+                    && match &self.tracks[ti].clips[ci].content {
+                        ClipContent::Media { asset_id, .. } => {
+                            self.asset(asset_id).is_some_and(|a| a.kind != AssetKind::Audio)
+                        }
+                        ClipContent::Adjustment { .. } => true,
+                        ClipContent::Text { .. } => false,
+                    };
+                ensure!(picture || effects.is_empty(), "Effects go on video, image and adjustment clips");
                 ensure!(effects.len() <= MAX_CLIP_EFFECTS, "A clip has at most {MAX_CLIP_EFFECTS} effects");
                 self.tracks[ti].clips[ci].effects = effects;
             }
@@ -2006,7 +2125,7 @@ impl Project {
                         match &mut clip.content {
                             ClipContent::Text { style, .. } => style.scale_pixels(k),
                             ClipContent::Media { shape: Some(shape), .. } => shape.border_width *= k,
-                            ClipContent::Media { .. } => {}
+                            ClipContent::Media { .. } | ClipContent::Adjustment { .. } => {}
                         }
                     }
                 }
@@ -2187,7 +2306,7 @@ impl Project {
                 let (c0, c1) = (clip.start_us, clip.end_us());
                 let (fade_in, fade_out) = match &clip.content {
                     ClipContent::Media { fade_in_us, fade_out_us, .. } => (*fade_in_us, *fade_out_us),
-                    ClipContent::Text { .. } => (0, 0),
+                    ClipContent::Text { .. } | ClipContent::Adjustment { .. } => (0, 0),
                 };
                 let length = |a: Option<Animation>| a.map_or(0, |a| a.duration_us);
                 let transition = |c: Option<&Clip>| c.and_then(|c| c.transition_in).map_or(0, |t| t.duration_us);
@@ -2236,7 +2355,7 @@ impl Project {
         );
         let picture = |p: &Project, c: &Clip| match &c.content {
             ClipContent::Media { asset_id, .. } => p.asset(asset_id).is_some_and(|a| a.kind != AssetKind::Audio),
-            ClipContent::Text { .. } => false,
+            ClipContent::Text { .. } | ClipContent::Adjustment { .. } => false,
         };
         let targets: Vec<(usize, usize)> = match &clip_id {
             Some(id) => {
@@ -2283,6 +2402,7 @@ impl Project {
             }
             let base = match &clip.content {
                 ClipContent::Media { transform, .. } | ClipContent::Text { transform, .. } => *transform,
+                ClipContent::Adjustment { .. } => continue,
             };
             // Scaled about (fx, fy), so the picture there stays where it is.
             let (x, y) = (base.x + (zoom - 1.0) * (base.x - fx), base.y + (zoom - 1.0) * (base.y - fy));
@@ -2293,6 +2413,38 @@ impl Project {
             let start_us = clip.start_us;
             let at = |t: i64, transform| Keyframe { t_us: t - start_us, transform, ease: Ease::Smooth };
             clip.keyframes = vec![at(start, from), at(end, to)];
+        }
+        Ok(())
+    }
+
+    fn split_screen(&mut self, clip_ids: &[String], layout: SplitLayout) -> Result<()> {
+        let cells = layout.cells();
+        ensure!(
+            clip_ids.len() == cells.len(),
+            "This split screen has {} parts; give {} clips, one for each",
+            cells.len(),
+            cells.len()
+        );
+        for (i, id) in clip_ids.iter().enumerate() {
+            ensure!(!clip_ids[..i].contains(id), "Give each clip once");
+        }
+        for (id, cell) in clip_ids.iter().zip(cells) {
+            let (ti, ci) = self.find_clip(id).ok_or_else(|| anyhow!("Unknown clip"))?;
+            let clip = &self.tracks[ti].clips[ci];
+            let asset = match &clip.content {
+                ClipContent::Media { asset_id, .. } if self.tracks[ti].kind == TrackKind::Video => self.asset(asset_id),
+                _ => None,
+            };
+            let asset = asset
+                .filter(|a| a.kind != AssetKind::Audio && a.width > 0 && a.height > 0)
+                .ok_or_else(|| anyhow!("Only video and image clips go in a split screen"))?;
+            let opacity = crate::effects::framing_at(clip, clip.start_us).opacity;
+            let placed = cell_transform(&self.canvas, asset, *cell, opacity);
+            let clip = &mut self.tracks[ti].clips[ci];
+            if let ClipContent::Media { transform, .. } = &mut clip.content {
+                *transform = placed;
+            }
+            clip.keyframes.clear();
         }
         Ok(())
     }
@@ -2310,6 +2462,7 @@ impl Project {
                     );
                     copied.track_kind != TrackKind::Text
                 }
+                ClipContent::Adjustment { .. } => copied.track_kind == TrackKind::Video,
             };
             ensure!(kind_fits, "A copied clip names a track of another kind");
         }
@@ -2393,7 +2546,7 @@ impl Project {
         for clip in &clips {
             let picture = match &clip.content {
                 ClipContent::Media { asset_id, .. } => self.asset(asset_id).map(|a| a.kind != AssetKind::Audio),
-                ClipContent::Text { .. } => Some(false),
+                ClipContent::Text { .. } | ClipContent::Adjustment { .. } => Some(false),
             };
             ensure!(picture.is_some(), "The media is no longer in the project");
             ensure!(picture == Some(true), "The main track takes video and pictures only");
@@ -2424,7 +2577,7 @@ impl Project {
             let (kind, caption) = (track.kind, track.is_captions());
             let sound = match &track.clips[ci].content {
                 ClipContent::Media { asset_id, .. } => self.asset(asset_id).is_some_and(crate::audio::has_audio),
-                ClipContent::Text { .. } => false,
+                ClipContent::Text { .. } | ClipContent::Adjustment { .. } => false,
             };
             let clip = &mut self.tracks[ti].clips[ci];
             let span = clip.duration_us;
@@ -2494,6 +2647,12 @@ impl Project {
                     if sound {
                         (*cv, *dr, *n, *l, *mo) = (*clean_voice, *dereverb, *normalize, *leveler, *mono);
                     }
+                    pasted += 1;
+                    continue;
+                }
+                (ClipContent::Adjustment { adjust, lut }, ClipContent::Adjustment { adjust: a, lut: lt }) => {
+                    (*a, *lt) = (*adjust, lut.clone());
+                    clip.effects = from.effects.clone();
                     pasted += 1;
                     continue;
                 }
@@ -2661,7 +2820,7 @@ fn keep_marks(old: &[Clip], new: &mut [Clip]) {
                 .filter(|w| (0..clip.duration_us).contains(&((w.start_us + w.end_us) / 2)))
                 .filter_map(|w| Some((clip.start_us + (w.start_us + w.end_us) / 2, plain(&w.text), w.marked?)))
                 .collect(),
-            ClipContent::Media { .. } => Vec::new(),
+            ClipContent::Media { .. } | ClipContent::Adjustment { .. } => Vec::new(),
         })
         .collect();
     if marks.is_empty() {
@@ -2682,6 +2841,13 @@ fn keep_marks(old: &[Clip], new: &mut [Clip]) {
 /// has as many words (split at single spaces), each word takes its new text and keeps its times. A
 /// corrected word may hold a space ("na pivo"), so each takes as many as it had. Any other edit leaves
 /// the words as they were, so they no longer match and nothing is highlighted.
+fn bounded_lut(lut: Lut) -> Lut {
+    match lut {
+        Lut::File { id, name, strength } => Lut::File { id, name, strength: strength.clamp(0.0, 1.0) },
+        Lut::None => Lut::None,
+    }
+}
+
 fn retext_words(words: &mut [CaptionWord], old: &str, new: &str) {
     let joined = words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" ");
     if words.is_empty() || joined != old || new.split(' ').count() != old.split(' ').count() {
@@ -2969,6 +3135,51 @@ mod tests {
                 assert_eq!((source_in_us, clip.duration_us), (from, length), "{id}");
             }
         }
+    }
+
+    #[test]
+    fn a_split_screen_takes_one_picture_per_cell_and_an_adjustment_layer_stays_off_the_main_track() {
+        let mut p = project();
+        let add = |p: &mut Project, cmd| p.apply(cmd).unwrap().select[0].clone();
+        let a = add(&mut p, EditCmd::AddClip { asset_id: "a".into(), start_us: None, track_id: None });
+        let b = add(&mut p, EditCmd::AddOverlay { asset_id: "b".into(), start_us: 0, duration_us: None });
+        let music = add(&mut p, EditCmd::AddClip { asset_id: "m".into(), start_us: Some(0), track_id: None });
+        let split = |ids: &[&String], layout| EditCmd::SplitScreen {
+            clip_ids: ids.iter().map(|&id| id.clone()).collect(),
+            layout,
+        };
+        let refused = |p: &mut Project, cmd| p.apply(cmd).unwrap_err().to_string();
+        assert!(refused(&mut p, split(&[&a], SplitLayout::SideBySide)).contains("give 2 clips"));
+        assert!(refused(&mut p, split(&[&a, &a], SplitLayout::SideBySide)).contains("once"));
+        assert!(refused(&mut p, split(&[&a, &music], SplitLayout::SideBySide)).contains("Only video and image"));
+
+        let key =
+            |t_us| Keyframe { t_us, transform: Transform { scale: 2.0, ..Transform::default() }, ease: Ease::Linear };
+        p.apply(EditCmd::SetKeyframes { clip_id: b.clone(), keyframes: vec![key(0), key(1_000_000)] }).unwrap();
+        p.apply(split(&[&b, &a], SplitLayout::SideBySide)).unwrap();
+        let framing = |p: &Project, id: &str| {
+            let (ti, ci) = p.find_clip(id).unwrap();
+            let clip = &p.tracks[ti].clips[ci];
+            let ClipContent::Media { transform, .. } = clip.content else { unreachable!() };
+            (transform, clip.keyframes.len())
+        };
+        // A 9:16 picture on a 9:16 canvas fills half of it at its own size, a quarter cut off each side.
+        let half = Some(Crop { left: 0.25, top: 0.0, right: 0.25, bottom: 0.0 });
+        let left = Transform { x: -0.25, crop: half, ..Transform::default() };
+        assert_eq!(framing(&p, &b), (left, 0));
+        assert_eq!(framing(&p, &a), (Transform { x: 0.25, ..left }, 0));
+
+        let layer = add(&mut p, EditCmd::AddAdjustment { start_us: 0, duration_us: None, adjust: None });
+        let main = p.tracks[0].clips.clone();
+        p.apply(EditCmd::MoveClip {
+            clip_id: layer.clone(),
+            track_id: Some(MAIN_TRACK.into()),
+            start_us: 0,
+            new_track: None,
+        })
+        .unwrap();
+        assert_eq!(p.tracks[0].clips, main);
+        assert_eq!(p.find_clip(&layer).map(|(ti, _)| (p.tracks[ti].kind, ti)), Some((TrackKind::Video, 1)));
     }
 
     fn project() -> Project {
@@ -3590,7 +3801,7 @@ mod tests {
             .clone();
         let shape = |p: &Project| match &p.tracks[0].clips[0].content {
             ClipContent::Media { shape, .. } => shape.clone(),
-            ClipContent::Text { .. } => unreachable!(),
+            ClipContent::Text { .. } | ClipContent::Adjustment { .. } => unreachable!(),
         };
         let set = |clip_id: &str, shape: Shape| {
             serde_json::from_value::<EditCmd>(
@@ -3853,7 +4064,7 @@ mod tests {
             .iter()
             .map(|c| match &c.content {
                 ClipContent::Text { text, words, .. } => (text.clone(), c.start_us + words[0].start_us),
-                ClipContent::Media { .. } => unreachable!(),
+                ClipContent::Media { .. } | ClipContent::Adjustment { .. } => unreachable!(),
             })
             .collect();
         assert_eq!(spoken, vec![("one".to_string(), 2_100_000), ("two".to_string(), 4_200_000)]);
@@ -3871,7 +4082,7 @@ mod tests {
             .iter()
             .map(|c| match c.content {
                 ClipContent::Media { source_in_us, .. } => (c.start_us, source_in_us),
-                ClipContent::Text { .. } => unreachable!(),
+                ClipContent::Text { .. } | ClipContent::Adjustment { .. } => unreachable!(),
             })
             .collect();
         assert_eq!(pieces, vec![(1_000_000, 0), (4_000_000, 2_000_000)]);
@@ -4231,7 +4442,7 @@ mod tests {
                 .iter()
                 .map(|c| match &c.content {
                     ClipContent::Media { fade_in_us, fade_out_us, .. } => (*fade_in_us / 1000, *fade_out_us / 1000),
-                    ClipContent::Text { .. } => panic!(),
+                    ClipContent::Text { .. } | ClipContent::Adjustment { .. } => panic!(),
                 })
                 .collect::<Vec<_>>()
         };
@@ -5178,7 +5389,7 @@ mod tests {
             .iter()
             .map(|c| match &c.content {
                 ClipContent::Media { source_in_us, .. } => *source_in_us,
-                ClipContent::Text { .. } => panic!(),
+                ClipContent::Text { .. } | ClipContent::Adjustment { .. } => panic!(),
             })
             .collect();
         assert_eq!(sources, [0, 1_000_000, 2_500_000, 0, 1_000_000]);
@@ -5196,7 +5407,7 @@ mod tests {
         p.apply(changes(&first, serde_json::json!({"fadeInUs": 1_000_000}))).unwrap();
         let fade = |p: &Project| match p.tracks[0].clips[0].content {
             ClipContent::Media { fade_in_us, .. } => fade_in_us,
-            ClipContent::Text { .. } => panic!(),
+            ClipContent::Text { .. } | ClipContent::Adjustment { .. } => panic!(),
         };
         // 0.1 s after a clip starts, and 0.2 s before it ends: both edges go to the cuts.
         let mut q = p.clone();
@@ -5560,7 +5771,7 @@ mod tests {
             .unwrap();
         let framing = |p: &Project| match &p.tracks[1].clips[0].content {
             ClipContent::Media { transform, .. } => *transform,
-            ClipContent::Text { .. } => unreachable!(),
+            ClipContent::Text { .. } | ClipContent::Adjustment { .. } => unreachable!(),
         };
         let own = framing(&p);
 

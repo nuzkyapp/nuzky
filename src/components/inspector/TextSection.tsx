@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ownTransform } from "../../lib/keyframes";
 import { create } from "zustand";
 import { AlignCenter, AlignLeft, AlignRight, Ban, RotateCcw } from "lucide-react";
 import { LIMITS } from "../../lib/limits";
@@ -521,7 +522,7 @@ export function CaptionPosition({ clips, trackId, title = "Position", flush }: {
   const free = clips.filter((c) => c.keyframes.length === 0);
   const keyed = clips.length - free.length;
   const field = (k: (typeof PLACE)[number]) => {
-    const values = free.map((c) => c.content.transform[k]);
+    const values = free.map((c) => ownTransform(c)[k]);
     return { value: values[0] ?? 0, mixed: values.some((v) => Math.abs(v - values[0]) > 1e-4) };
   };
   const set = (patch: Partial<Omit<Transform, "crop" | "mask">>, key: string) => placeCaptions(patch, `captions:place:${key}`, trackId);

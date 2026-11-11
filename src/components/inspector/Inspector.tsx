@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
-import { AudioLines, Blend, Captions, Film, Image as ImageIcon, Type } from "lucide-react";
+import { AudioLines, Blend, Captions, Film, Image as ImageIcon, SlidersHorizontal, Type } from "lucide-react";
 import { TRANSITIONS } from "../../lib/presets";
 import { useCover } from "../../lib/cover";
 import { useGallery } from "../../lib/gallery";
@@ -30,10 +30,11 @@ import { TextSection } from "./TextSection";
 import { TransformSection } from "./TransformSection";
 
 type TabId = "video" | "adjust" | "speed" | "animation" | "audio" | "text" | "transform";
-type Kind = "video" | "image" | "audio" | "text" | "caption";
+type Kind = "video" | "image" | "audio" | "text" | "caption" | "adjustment";
 
 function tabsFor(kind: Kind, hasSound: boolean, freeze: boolean): { id: TabId; label: string }[] {
   if (kind === "audio") return [{ id: "audio", label: "Audio" }];
+  if (kind === "adjustment") return [{ id: "adjust", label: "Adjust" }];
   if (kind === "text" || kind === "caption")
     return [
       { id: "text", label: "Text" },
@@ -50,7 +51,7 @@ function tabsFor(kind: Kind, hasSound: boolean, freeze: boolean): { id: TabId; l
   return tabs;
 }
 
-const KIND_ICON = { video: Film, image: ImageIcon, audio: AudioLines, text: Type, caption: Captions };
+const KIND_ICON = { video: Film, image: ImageIcon, audio: AudioLines, text: Type, caption: Captions, adjustment: SlidersHorizontal };
 
 type Chosen = Partial<Record<Kind, TabId>>;
 // Outside the inspector, which the AI panel replaces while it is open in its place.
@@ -65,7 +66,7 @@ function ClipInspector({ clip, kind, asset, music, chosen, onChoose }: { clip: C
   const freeze = isFreeze(clip);
   const tabs = tabsFor(kind, hasSound, freeze);
   const tab = tabs.find((t) => t.id === chosen[kind])?.id ?? tabs[0].id;
-  const title = kind === "caption" ? "Caption" : kind === "text" ? "Text" : (asset?.name ?? "Missing media");
+  const title = kind === "caption" ? "Caption" : kind === "text" ? "Text" : kind === "adjustment" ? "Adjustment layer" : (asset?.name ?? "Missing media");
   // A YouTube video's hidden footage stays hidden: until the clip reaches into it, times count within the part.
   const part = asset?.part;
   const within = !!part && c.type === "media" && c.sourceInUs >= part.startUs && c.sourceInUs + clip.durationUs * c.speed <= part.endUs + 1000;
@@ -95,7 +96,7 @@ function ClipInspector({ clip, kind, asset, music, chosen, onChoose }: { clip: C
             </>
           )}
           {tab === "text" && c.type === "text" && <TextSection clip={clip} text={c.text} style={c.style} caption={kind === "caption"} />}
-          {tab === "adjust" && c.type === "media" && (
+          {tab === "adjust" && c.type !== "text" && (
             <>
               <ColorSection clip={clip} content={c} />
               <AdjustSection clip={clip} content={c} />
@@ -168,7 +169,8 @@ export function Inspector({ width }: { width: number }) {
     const { clip, track } = found;
     const c = clip.content;
     const asset = c.type === "media" ? project.assets.find((a) => a.id === c.assetId) : undefined;
-    const kind: Kind = c.type === "text" ? (isCaptionTrack(track) ? "caption" : "text") : track.kind === "audio" ? "audio" : (asset?.kind ?? "video");
+    const kind: Kind =
+      c.type === "text" ? (isCaptionTrack(track) ? "caption" : "text") : c.type === "adjustment" ? "adjustment" : track.kind === "audio" ? "audio" : (asset?.kind ?? "video");
     const music = kind === "audio" && track.keepInPlace && !!asset?.hasAudio && !isRecordedVoiceover(asset);
     body = <ClipInspector key={clip.id} clip={clip} kind={kind} asset={asset} music={music} chosen={chosen} onChoose={useChosen.setState} />;
   }

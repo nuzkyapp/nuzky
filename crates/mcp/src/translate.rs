@@ -162,7 +162,7 @@ pub fn translated_look(
                 (0.5 + transform.y) * height
                     + crate::fonts::text_height(text, style, wrap(style)) * transform.scale / 2.0,
             ),
-            ClipContent::Media { .. } => None,
+            ClipContent::Media { .. } | ClipContent::Adjustment { .. } => None,
         })
         .fold((0.5 + place.y.unwrap_or(CAPTION_Y)) * height, f32::max);
     style.font_size *= TRANSLATION_SIZE;

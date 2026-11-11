@@ -652,6 +652,9 @@ pub enum Draw {
     Layer(Layer),
     /// Both layers contribute premultiplied colour to a transparent intermediate.
     Transition([Layer; 2]),
+    /// An adjustment layer: everything drawn before it, background included, becomes the picture of this layer, whose
+    /// own image is not read, and it draws that picture adjusted over it at its opacity.
+    Adjustment(Layer),
 }
 
 struct Target {
@@ -675,6 +678,8 @@ pub struct Gpu {
     pipeline: wgpu::RenderPipeline,
     additive: wgpu::RenderPipeline,
     transitions: Vec<TransitionTarget>,
+    /// The picture below each adjustment layer of a frame.
+    adjusted: Vec<wgpu::Texture>,
     layout: wgpu::BindGroupLayout,
     effect_layout: wgpu::BindGroupLayout,
     effect_pipelines: HashMap<u64, wgpu::RenderPipeline>,
@@ -950,6 +955,7 @@ impl Gpu {
             pipeline,
             additive,
             transitions: Vec::new(),
+            adjusted: Vec::new(),
             layout,
             effect_layout,
             effect_pipelines: HashMap::new(),
@@ -1179,11 +1185,12 @@ impl Gpu {
     fn layer_textures(
         &mut self,
         layer: &Layer,
+        picture: Option<&wgpu::Texture>,
         used: &mut Vec<usize>,
         encoder: &mut wgpu::CommandEncoder,
         effect_slots: &mut usize,
     ) -> Result<[wgpu::Texture; 5]> {
-        let mut images = [Some(&layer.image), None, None];
+        let mut images = [picture.is_none().then_some(&layer.image), None, None];
         if let Some(matte) = &layer.matte {
             images[1] = Some(&matte.alpha);
             images[2] = match &matte.fill {
@@ -1191,7 +1198,7 @@ impl Gpu {
                 Fill::Color(_) => None,
             };
         }
-        let mut textures = [self.blank.clone(), self.blank.clone(), self.blank.clone()];
+        let mut textures = [picture.unwrap_or(&self.blank).clone(), self.blank.clone(), self.blank.clone()];
         for (texture, image) in textures.iter_mut().zip(images) {
             if let Some(image) = image {
                 *texture = self.texture_for(image)?;
@@ -1368,6 +1375,28 @@ impl Gpu {
         pass.draw(0..4, 0..1);
     }
 
+    /// The texture the picture below the frame's adjustment layer number `index` is drawn into.
+    fn adjusted_target(&mut self, index: usize, w: u32, h: u32) -> wgpu::Texture {
+        if self.adjusted.get(index).is_none_or(|t| (t.width(), t.height()) != (w, h)) {
+            let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("adjusted"),
+                size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            if index == self.adjusted.len() {
+                self.adjusted.push(texture);
+            } else {
+                self.adjusted[index] = texture;
+            }
+        }
+        self.adjusted[index].clone()
+    }
+
     /// Ends the device as a crashed driver would, for tests of what happens then.
     #[doc(hidden)]
     pub fn lose_device(&self) {
@@ -1430,19 +1459,35 @@ impl Gpu {
         let mut bind_groups = Vec::new();
         let mut encoder = self.device.create_command_encoder(&Default::default());
         let mut transition_index = 0;
+        let mut adjusted_index = 0;
         let mut effect_slots = 0;
         let hung = self.hung_frames > 0;
         self.hung_frames = self.hung_frames.saturating_sub(1);
         for draw in layers {
             match draw {
                 Draw::Layer(layer) => {
-                    let textures = self.layer_textures(layer, &mut used, &mut encoder, &mut effect_slots)?;
+                    let textures = self.layer_textures(layer, None, &mut used, &mut encoder, &mut effect_slots)?;
                     bind_groups.push(self.bind(layer, textures.each_ref(), w, h, false));
+                }
+                Draw::Adjustment(layer) => {
+                    let below = self.adjusted_target(adjusted_index, w, h);
+                    adjusted_index += 1;
+                    let view = below.create_view(&Default::default());
+                    self.draw_pass(&mut encoder, &view, background, &bind_groups, false);
+                    bind_groups.clear();
+                    if layer.opacity < 1.0 {
+                        let plain = Layer { effects: Vec::new(), ..crate::render::solid(&layer.image, w, h) };
+                        let textures = self.layer_textures(&plain, Some(&below), &mut used, &mut encoder, &mut 0)?;
+                        bind_groups.push(self.bind(&plain, textures.each_ref(), w, h, true));
+                    }
+                    let textures =
+                        self.layer_textures(layer, Some(&below), &mut used, &mut encoder, &mut effect_slots)?;
+                    bind_groups.push(self.bind(layer, textures.each_ref(), w, h, true));
                 }
                 Draw::Transition(pair) => {
                     let mut groups = Vec::new();
                     for layer in pair {
-                        let textures = self.layer_textures(layer, &mut used, &mut encoder, &mut effect_slots)?;
+                        let textures = self.layer_textures(layer, None, &mut used, &mut encoder, &mut effect_slots)?;
                         groups.push(self.bind(layer, textures.each_ref(), w, h, false));
                     }
                     if self.transitions.get(transition_index).map(|t| (t.texture.width(), t.texture.height()))

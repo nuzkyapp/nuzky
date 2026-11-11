@@ -78,7 +78,7 @@ pub fn project(read: Read, editor: &str, from: &Path, modified_ms: i64, fonts: &
             let keep_in_place = kind == TrackKind::Audio
                 && clips.iter().all(|c| match &c.content {
                     ClipContent::Media { asset_id, .. } => assets.kind(asset_id) == Some(AssetKind::Audio),
-                    ClipContent::Text { .. } => false,
+                    ClipContent::Text { .. } | ClipContent::Adjustment { .. } => false,
                 });
             let name = if kind == TrackKind::Audio { "Audio" } else { "Overlay" };
             lanes(&mut tracks, clips, kind, name, track, keep_in_place, &mut left);

@@ -56,7 +56,7 @@ pub fn follow(
         .with_context(|| format!("CLIP_NOT_FOUND: {clip_id}"))?;
     let asset = match &clip.content {
         ClipContent::Media { asset_id, .. } => project.asset(asset_id).filter(|a| a.kind == AssetKind::Video),
-        ClipContent::Text { .. } => None,
+        ClipContent::Text { .. } | ClipContent::Adjustment { .. } => None,
     }
     .with_context(|| format!("INVALID_ARGUMENTS: {clip_id} is not a video clip; only a video's picture moves"))?;
     ensure!(clip.contains(at_us), "INVALID_RANGE: at_us must be inside the clip, {}..{}", clip.start_us, clip.end_us());

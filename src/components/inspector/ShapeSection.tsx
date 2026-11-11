@@ -1,4 +1,5 @@
 import { useShallow } from "zustand/react/shallow";
+import { ownTransform } from "../../lib/keyframes";
 import { RotateCcw } from "lucide-react";
 import { NO_CROP, NO_SHAPE } from "../../lib/presets";
 import { editClip, readoutTime, setClipTransform, transformAtPlayhead, transformEdit, useCanvasUnit, useEditor } from "../../lib/store";
@@ -84,7 +85,7 @@ export function ShapeSection({ clip, content, asset }: { clip: Clip; content: Me
   const reset = () =>
     editClip(clip.id, (c): EditCmd[] => {
       const whole = <T extends { crop?: Crop | null }>(t: T) => ({ ...t, crop: null });
-      const cmds: EditCmd[] = [{ type: "updateClip", clipId: c.id, transform: whole(c.content.transform), shape: NO_SHAPE }];
+      const cmds: EditCmd[] = [{ type: "updateClip", clipId: c.id, transform: whole(ownTransform(c)), shape: NO_SHAPE }];
       if (c.keyframes.length > 0) cmds.push({ type: "setKeyframes", clipId: c.id, keyframes: c.keyframes.map((k) => ({ ...k, transform: whole(k.transform) })) });
       return cmds;
     });

@@ -674,7 +674,7 @@ mod tests {
             .iter()
             .map(|c| match &c.content {
                 ClipContent::Media { asset_id, .. } => asset_id.as_str(),
-                ClipContent::Text { .. } => "",
+                ClipContent::Text { .. } | ClipContent::Adjustment { .. } => "",
             })
             .collect();
         assert!(assets.iter().all(|a| *a == "talk"), "{assets:?}");

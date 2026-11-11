@@ -254,6 +254,7 @@ fn prompt(text: &str, context: &PromptContext, project: &nuzky_engine::Project) 
                     let name = project.asset(asset_id).map_or(asset_id.as_str(), |a| a.name.as_str());
                     format!("{} ({name:?}, {kind})", clip.id)
                 }
+                ClipContent::Adjustment { .. } => format!("{} (adjustment layer)", clip.id),
             })
             .collect();
         lines.push(format!("[Nuzky] Selected clips: {}{range}.", names.join(", ")));

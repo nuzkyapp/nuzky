@@ -806,6 +806,15 @@ pub enum ClipContent {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         words: Vec<CaptionWord>,
     },
+    /// An adjustment layer: while it lasts, the clip's effects, its LUT and its adjustments apply, in that order as on a
+    /// video clip, to the whole picture drawn below it. Only on a video track above the main track; it has no picture or sound.
+    #[serde(rename_all = "camelCase")]
+    Adjustment {
+        #[serde(default)]
+        adjust: Adjust,
+        #[serde(default, skip_serializing_if = "Lut::is_none")]
+        lut: Lut,
+    },
 }
 
 /// Which sound a clip plays in both ears.

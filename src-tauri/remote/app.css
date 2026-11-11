@@ -19,6 +19,7 @@
   --clip-audio: #17603c;
   --clip-title: #865316;
   --clip-captions: #4b3a80;
+  --clip-adjustment: #7a3566;
   --hair: rgb(255 255 255 / 0.07);
   --off: rgb(242 242 245 / 0.35);
   color-scheme: dark;
@@ -414,6 +415,9 @@ svg.fill {
 .clip.title {
   background: var(--clip-title);
 }
+.clip.adjustment {
+  background: var(--clip-adjustment);
+}
 .chip {
   position: absolute;
   left: 3px;
@@ -434,7 +438,8 @@ svg.fill {
   width: 11px;
   height: 11px;
 }
-.clip.title .chip {
+.clip.title .chip,
+.clip.adjustment .chip {
   background: none;
   top: 0;
   bottom: 0;

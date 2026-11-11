@@ -40,6 +40,7 @@ pub fn transition_at(track: &Track, t_us: i64) -> Option<(&Clip, &Clip, Transiti
 pub fn framing_at(clip: &Clip, t_us: i64) -> Transform {
     let base = match clip.content {
         ClipContent::Media { transform, .. } | ClipContent::Text { transform, .. } => transform,
+        ClipContent::Adjustment { .. } => Transform::default(),
     };
     keyframed(clip, t_us - clip.start_us).unwrap_or(base)
 }

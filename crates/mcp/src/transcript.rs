@@ -1235,7 +1235,7 @@ pub fn heard_assets_in(project: &Project, ranges: &[TimeRange]) -> HashSet<Strin
         })
         .filter_map(|(_, clip)| match &clip.content {
             ClipContent::Media { asset_id, .. } => Some(asset_id.clone()),
-            ClipContent::Text { .. } => None,
+            ClipContent::Text { .. } | ClipContent::Adjustment { .. } => None,
         })
         .collect()
 }
@@ -1343,7 +1343,7 @@ pub(crate) fn placement(track: &Track) -> Option<TransformPatch> {
         .filter(|c| c.keyframes.is_empty())
         .filter_map(|c| match &c.content {
             ClipContent::Text { transform, .. } => Some(transform),
-            ClipContent::Media { .. } => None,
+            ClipContent::Media { .. } | ClipContent::Adjustment { .. } => None,
         })
         .collect();
     let [x, y, scale, rotation] = most_common(transforms.iter().map(|t| [t.x, t.y, t.scale, t.rotation]))?;
@@ -2032,7 +2032,7 @@ pub(crate) mod tests {
             .flat_map(|t| &t.clips)
             .map(|c| match &c.content {
                 ClipContent::Text { text, .. } => text.clone(),
-                ClipContent::Media { .. } => unreachable!(),
+                ClipContent::Media { .. } | ClipContent::Adjustment { .. } => unreachable!(),
             })
             .collect()
     }
@@ -2127,7 +2127,7 @@ pub(crate) mod tests {
         assert_eq!((after.start_us, after.duration_us), (before[1].start_us, before[1].duration_us));
         let look = |c: &nuzky_engine::model::Clip| match &c.content {
             ClipContent::Text { style, transform, .. } => (style.clone(), *transform),
-            ClipContent::Media { .. } => unreachable!(),
+            ClipContent::Media { .. } | ClipContent::Adjustment { .. } => unreachable!(),
         };
         assert_eq!(look(after), look(&before[1]));
         // A caption that no longer shows the word is left alone.

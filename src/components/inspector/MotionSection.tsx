@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Ban, MoveRight, ZoomIn, ZoomOut, type LucideIcon } from "lucide-react";
 import { api, errorText } from "../../lib/api";
-import { clipOffset, motionOf, transformAt } from "../../lib/keyframes";
+import { clipOffset, motionOf, ownTransform, transformAt } from "../../lib/keyframes";
 import { useSpeech } from "../../lib/speech";
 import { editClip, undoAction, useEditor } from "../../lib/store";
 import { US } from "../../lib/time";
@@ -59,7 +59,7 @@ async function applyMotion(clip: Clip, kind: MotionKind | null, strength: number
   const done = await editClip(clip.id, (c, _track, project) => {
     own = c.keyframes.length > 0 && !motionOf(c, project.canvas) ? c.keyframes.length : 0;
     const cmds: EditCmd[] = [];
-    if (own > 0) cmds.push({ type: "updateClip", clipId: c.id, transform: transformAt(c, c.content.transform, clipOffset(c, timeUs)) });
+    if (own > 0) cmds.push({ type: "updateClip", clipId: c.id, transform: transformAt(c, ownTransform(c), clipOffset(c, timeUs)) });
     if (c.keyframes.length > 0) cmds.push({ type: "setKeyframes", clipId: c.id, keyframes: [] });
     if (kind) cmds.push({ type: "applyMotion", clipId: c.id, range, kind, strength });
     return cmds.length > 0 ? cmds : null;

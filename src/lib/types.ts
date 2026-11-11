@@ -478,6 +478,10 @@ export type ClipContent = {
    * after a manual edit of the text nothing is highlighted.
    */
   words?: Array<CaptionWord>,
+} | {
+  "type": "adjustment",
+  adjust: Adjust,
+  lut?: Lut,
 };
 
 export type Collection = {
@@ -663,6 +667,15 @@ export type EditCmd = {
   text: string,
   style: TextStyle,
 } | {
+  "type": "addAdjustment",
+  startUs: number,
+  durationUs?: number | null,
+  adjust?: Adjust | null,
+} | {
+  "type": "splitScreen",
+  clipIds: Array<string>,
+  layout: SplitLayout,
+} | {
   "type": "moveClip",
   clipId: string,
   trackId?: string | null,
@@ -767,8 +780,8 @@ export type EditCmd = {
    */
   log?: LogProfile | null,
   /**
-   * Video and image clips: `{"type": "file", id, name, strength}` puts a LUT from the user's LUT library over
-   * the clip at a strength from 0 to 1; `{"type": "none"}` removes it.
+   * Video, image and adjustment clips: `{"type": "file", id, name, strength}` puts a LUT from the user's LUT
+   * library over the clip at a strength from 0 to 1; `{"type": "none"}` removes it.
    */
   lut?: Lut | null,
 } | {
@@ -1786,6 +1799,11 @@ export type SpeedPoint = {
    */
   speed: number,
 };
+
+/**
+ * How a split screen divides the picture.
+ */
+export type SplitLayout = "sideBySide" | "topAndBottom" | "threeColumns" | "threeRows" | "oneOverTwo" | "grid";
 
 export type StickerCatalog = {
   groups: Array<StickerGroup>,

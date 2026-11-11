@@ -3,7 +3,7 @@ import type { LucideIcon } from "lucide-react";
 /** The quiet 24 px icon buttons of a section header: keyframes and reset. */
 export const QUIET = "size-6 rounded-md";
 
-const TONES = { video: "bg-clip-video", image: "bg-clip-image", audio: "bg-clip-audio", text: "bg-clip-title", caption: "bg-clip-captions" };
+const TONES = { video: "bg-clip-video", image: "bg-clip-image", audio: "bg-clip-audio", text: "bg-clip-title", caption: "bg-clip-captions", adjustment: "bg-clip-adjustment" };
 
 /** What the inspector shows: kind icon on a tile, in the colour of its clips on the timeline, and the name over a tabular detail line. */
 export function InspectorHeader({ icon: Icon, title, detail, tone }: { icon: LucideIcon; title: string; detail: string; tone?: keyof typeof TONES }) {

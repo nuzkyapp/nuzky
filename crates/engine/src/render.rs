@@ -197,6 +197,7 @@ fn placement(
             let text = text_renderer.render_spoken(&text[..end], &style, scale, wrap * scale, spoken, &keys);
             ((text.image.width as f32 / text.scale, text.image.height as f32 / text.scale), Some(text.image))
         }
+        ClipContent::Adjustment { .. } => return None,
     };
     Some(Placement { transform, size, text })
 }
@@ -244,7 +245,7 @@ pub(crate) fn sub_quad(q: &Quad, rect: [f32; 4]) -> Quad {
 fn layer_mask(project: &Project, clip: &Clip, transform: &Transform, k: f32) -> Option<Mask> {
     let shape = match &clip.content {
         ClipContent::Media { shape, .. } => shape.clone().unwrap_or_default(),
-        ClipContent::Text { .. } => Default::default(),
+        ClipContent::Text { .. } | ClipContent::Adjustment { .. } => Default::default(),
     };
     let rect = Crop::visible(transform.crop);
     if rect == WHOLE && !(shape.radius > 0.0 || shape.border_width > 0.0 || shape.shadow > 0.0) {
@@ -297,6 +298,7 @@ fn placement_quad(project: &Project, place: &Placement, k: f32) -> Quad {
 fn decode_resolution(project: &Project, clip: &Clip, asset: &Asset, k: f32, max_side: u32) -> (u32, u32) {
     let base = match clip.content {
         ClipContent::Media { transform, .. } | ClipContent::Text { transform, .. } => transform.scale,
+        ClipContent::Adjustment { .. } => 1.0,
     };
     let mut scale = clip.keyframes.iter().map(|key| key.transform.scale).reduce(f32::max).unwrap_or(base);
     scale *= max_animation_scale(clip);
@@ -468,7 +470,7 @@ impl Renderer {
         }
         for draw in draws.iter_mut() {
             match draw {
-                Draw::Layer(layer) => layer.effects.clear(),
+                Draw::Layer(layer) | Draw::Adjustment(layer) => layer.effects.clear(),
                 Draw::Transition(pair) => pair.iter_mut().for_each(|layer| layer.effects.clear()),
             }
         }
@@ -591,6 +593,10 @@ impl Renderer {
                 draws.push(Draw::Transition(
                     pair.map(|layer| layer.unwrap_or_else(|| solid(&self.solids[0], out_w, out_h))),
                 ));
+            } else if matches!(first.clip.content, ClipContent::Adjustment { .. }) {
+                if let Some(layer) = self.adjustment_for(project, first.clip, t_us, k, out_w, out_h) {
+                    draws.push(Draw::Adjustment(layer));
+                }
             } else if let Some(layer) = self.layer_for(project, first, t_us, k, wait, playing)? {
                 if track.id == crate::edit::MAIN_TRACK && canvas.background_blur > 0.0 {
                     draws.push(Draw::Layer(self.background(
@@ -611,7 +617,7 @@ impl Renderer {
         let behind_used: Vec<usize> = draws
             .iter()
             .flat_map(|draw| match draw {
-                Draw::Layer(layer) => std::slice::from_ref(layer),
+                Draw::Layer(layer) | Draw::Adjustment(layer) => std::slice::from_ref(layer),
                 Draw::Transition(pair) => &pair[..],
             })
             .filter(|layer| layer.matte.as_ref().is_some_and(|m| matches!(m.fill, Fill::Footage(_))))
@@ -633,7 +639,7 @@ impl Renderer {
             .flat_map(|t| &t.clips)
             .filter_map(|c| match &c.content {
                 ClipContent::Media { asset_id, .. } => Some((c.id.as_str(), project.asset(asset_id)?.path.as_str())),
-                ClipContent::Text { .. } => None,
+                ClipContent::Text { .. } | ClipContent::Adjustment { .. } => None,
             })
             .collect();
         self.workers.retain(|(clip_id, path), w| {
@@ -747,6 +753,25 @@ impl Renderer {
         worker
     }
 
+    /// What the adjustment layer `clip` does to the picture drawn below it at `t_us`, as a layer covering the output
+    /// that the GPU draws from that picture; `None` while it changes nothing.
+    fn adjustment_for(&mut self, project: &Project, clip: &Clip, t_us: i64, k: f32, w: u32, h: u32) -> Option<Layer> {
+        let ClipContent::Adjustment { adjust, lut } = &clip.content else { return None };
+        let opacity = transform_at(clip, t_us).0.opacity.clamp(0.0, 1.0);
+        if opacity <= 0.0 {
+            return None;
+        }
+        let canvas = (project.canvas.width as f32, project.canvas.height as f32);
+        let effects = self.effect_passes(clip, canvas, 1.0, k, t_us);
+        let color = ClipColor { log: None, lut: self.lut(lut) };
+        if *adjust == Adjust::default() && color.lut.is_none() && effects.is_empty() {
+            return None;
+        }
+        let mut layer = solid(&self.solids[0], w, h);
+        (layer.opacity, layer.adjust, layer.effects, layer.color) = (opacity, *adjust, effects, color);
+        Some(layer)
+    }
+
     fn layer_for(
         &mut self,
         project: &Project,
@@ -804,6 +829,7 @@ impl Renderer {
                 let Some(text) = place.text else { return Ok(None) };
                 (text, (0, false), Adjust::default(), Transfer::Sdr)
             }
+            ClipContent::Adjustment { .. } => return Ok(None),
         };
         Ok(Some(Layer {
             image,

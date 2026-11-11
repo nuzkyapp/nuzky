@@ -1,4 +1,5 @@
 import { useShallow } from "zustand/react/shallow";
+import { ownTransform } from "../../lib/keyframes";
 import { editClip, readoutTime, setClipTransform, transformAtPlayhead, useEditor } from "../../lib/store";
 import type { Asset, Clip, EditCmd, Mask, MaskKind, Transform } from "../../lib/types";
 import { Checkbox, Section, Segmented, Slider } from "../ui";
@@ -20,7 +21,7 @@ export function newMask(kind: MaskKind, asset: Asset): Mask {
  */
 function everywhere(clip: Clip, change: (mask: Mask | null | undefined) => Mask | null): EditCmd[] {
   const set = <T extends Transform>(t: T): T => ({ ...t, mask: change(t.mask) });
-  const cmds: EditCmd[] = [{ type: "updateClip", clipId: clip.id, transform: set(clip.content.transform) }];
+  const cmds: EditCmd[] = [{ type: "updateClip", clipId: clip.id, transform: set(ownTransform(clip)) }];
   if (clip.keyframes.length > 0) cmds.push({ type: "setKeyframes", clipId: clip.id, keyframes: clip.keyframes.map((k) => ({ ...k, transform: set(k.transform) })) });
   return cmds;
 }

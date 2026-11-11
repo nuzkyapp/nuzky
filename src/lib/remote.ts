@@ -286,10 +286,10 @@ function pageTracks() {
       }
       return {
         id: c.id,
-        kind: c.content.type === "text" ? "text" : t.kind === "audio" ? "audio" : (media?.kind ?? "video"),
+        kind: c.content.type === "text" ? "text" : c.content.type === "adjustment" ? "adjustment" : t.kind === "audio" ? "audio" : (media?.kind ?? "video"),
         assetId: asset && asset.kind !== "audio" ? asset.id : null,
         thumb: asset && asset.kind !== "audio" ? `/thumb/${encodeURIComponent(asset.id)}?v=${fileVersion(asset)}` : null,
-        label: c.content.type === "text" ? c.content.text : (media?.name ?? ""),
+        label: c.content.type === "text" ? c.content.text : c.content.type === "adjustment" ? "Adjustment" : (media?.name ?? ""),
         startUs: c.startUs,
         durationUs: c.durationUs,
         can: Object.fromEntries(["split", "duplicate", "detachAudio", "delete"].map((k) => [k, !why[k]])),
