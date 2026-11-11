@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::audio::has_audio;
 use crate::model::{Asset, AssetKind, Clip, ClipContent, Project, Track};
+use crate::retime::Retime;
 
 /// A recognised word, timed in its media file.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -60,15 +61,16 @@ fn heard_clips(project: &Project) -> impl Iterator<Item = &Clip> {
 
 /// Words of every heard clip in timeline order, from transcripts keyed by asset id. A word
 /// belongs to the clip whose source range holds its midpoint, so a word cut in two stays with
-/// the side that has most of it; its times are clamped to that clip.
+/// the side that has most of it; its times are clamped to that clip. A clip played backwards says no
+/// words, and one on a speed ramp places them where the ramp plays them.
 pub fn map_words(project: &Project, transcripts: &HashMap<String, Vec<Word>>) -> Vec<TimelineWord> {
     let mut out = Vec::new();
     for clip in heard_clips(project) {
         let ClipContent::Media { asset_id, source_in_us, speed, .. } = &clip.content else { continue };
         let Some(words) = transcripts.get(asset_id) else { continue };
-        let speed = *speed as f64;
-        let source_end = *source_in_us as f64 + clip.duration_us as f64 * speed;
-        let to_timeline = |t: i64| clip.start_us + ((t - source_in_us) as f64 / speed).round() as i64;
+        let Some(map) = Retime::of(clip).filter(|map| !map.reverse()) else { continue };
+        let source_end = *source_in_us as f64 + clip.duration_us as f64 * *speed as f64;
+        let to_timeline = |t: i64| clip.start_us + map.offset_of(t as f64).round() as i64;
         for word in words {
             let mid = (word.start_us + word.end_us) as f64 / 2.0;
             if mid < *source_in_us as f64 || mid >= source_end {
@@ -96,8 +98,9 @@ pub fn map_words(project: &Project, transcripts: &HashMap<String, Vec<Word>>) ->
 pub fn speech_layout_key(project: &Project) -> String {
     let mut hasher = DefaultHasher::new();
     for clip in heard_clips(project) {
-        if let ClipContent::Media { asset_id, source_in_us, speed, .. } = &clip.content {
-            (asset_id, clip.start_us, clip.end_us(), source_in_us, speed.to_bits()).hash(&mut hasher);
+        if let ClipContent::Media { asset_id, source_in_us, speed, reverse, ramp, .. } = &clip.content {
+            (asset_id, clip.start_us, clip.end_us(), source_in_us, speed.to_bits(), reverse).hash(&mut hasher);
+            ramp.iter().for_each(|p| (p.at.to_bits(), p.speed.to_bits()).hash(&mut hasher));
         }
     }
     format!("{:016x}", hasher.finish())
@@ -176,6 +179,8 @@ mod tests {
             style: None,
             speed: Some(2.0),
             keep_pitch: None,
+            reverse: None,
+            ramp: None,
             adjust: None,
             fade_in_us: None,
             fade_out_us: None,
@@ -305,6 +310,8 @@ mod tests {
             style: None,
             speed: None,
             keep_pitch: None,
+            reverse: None,
+            ramp: None,
             adjust: None,
             fade_in_us: None,
             fade_out_us: None,

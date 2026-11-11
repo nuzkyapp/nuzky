@@ -111,17 +111,18 @@ fn build(before: Project, after: Project, derived: &Derived) -> Recap {
     let change = summary::cut(&before, &after);
     let mut ranges = Vec::new();
     for clip in before.tracks.iter().filter(|t| t.id == MAIN_TRACK).flat_map(|t| &t.clips).filter(|c| !c.is_freeze()) {
-        let ClipContent::Media { asset_id, source_in_us, speed, .. } = &clip.content else { continue };
+        let ClipContent::Media { asset_id, .. } = &clip.content else { continue };
+        let Some(retime) = nuzky_engine::retime::Retime::of(clip) else { continue };
         let gone = change.gone_assets.contains(asset_id);
         let whole = [(0, before.asset(asset_id).map_or(0, |a| a.duration_us))];
         let passages =
             if gone { whole.as_slice() } else { change.passages.get(asset_id).map_or(&[][..], Vec::as_slice) };
         for &(a, b) in passages {
-            let map = |t| {
-                (clip.start_us + ((t - source_in_us) as f64 / f64::from(*speed)).round() as i64)
-                    .clamp(clip.start_us, clip.end_us())
+            let map = |t: i64| {
+                (clip.start_us + retime.offset_of(t as f64).round() as i64).clamp(clip.start_us, clip.end_us())
             };
-            let (a, b) = (map(a), map(b));
+            // Played backwards, a passage's end comes first.
+            let (a, b) = (map(a).min(map(b)), map(a).max(map(b)));
             if a < b {
                 ranges.push((a, b));
             }

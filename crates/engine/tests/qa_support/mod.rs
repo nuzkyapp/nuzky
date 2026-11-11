@@ -102,6 +102,8 @@ pub fn clip(id: &str, asset: &str, start: i64, duration: i64) -> Clip {
             background: Default::default(),
             log: Default::default(),
             lut: Default::default(),
+            reverse: false,
+            ramp: Vec::new(),
         },
     )
 }

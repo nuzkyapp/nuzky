@@ -14,6 +14,7 @@ use crate::level::{self, Levels};
 use crate::loudness::db_to_gain;
 use crate::media::extract_pcm_with_peaks;
 use crate::model::{Asset, AssetKind, CHANNELS, Clip, ClipContent, Mono, Project, SAMPLE_RATE, Track, TrackKind};
+use crate::retime::Retime;
 use crate::speech::is_heard;
 use crate::stretch::Stretch;
 
@@ -446,6 +447,7 @@ impl Mixer {
                 if !has_audio(asset) {
                     continue;
                 }
+                let Some(map) = Retime::of(clip) else { continue };
                 let Some((path, pcm)) = self.source(asset, cleans_voice(clip)) else { continue };
                 let wet = (*dereverb > 0.0).then(|| self.dereverbed(asset, &path)).flatten();
                 let levels = (*normalize || *leveler > 0.0)
@@ -457,8 +459,16 @@ impl Mixer {
                 let src0 = *source_in_us as f64 * SAMPLE_RATE as f64 / 1_000_000.0;
                 let origin = clip.start_us as f64 * SAMPLE_RATE as f64 / 1_000_000.0;
                 // PCM cannot hold an edge sample like video holds a frame.
-                let available_start = (origin - src0 / *speed as f64).ceil() as i64;
-                let available_end = (origin + (pcm.frames() as f64 - src0) / *speed as f64).ceil() as i64;
+                let (available_start, available_end) = if map.is_retimed() {
+                    let at = |sample: f64| origin + map.offset_of(samples_to_us_f64(sample)) * SAMPLE_RATE as f64 / 1e6;
+                    let (a, b) = (at(0.0), at(pcm.frames() as f64));
+                    (a.min(b).ceil() as i64, a.max(b).ceil() as i64)
+                } else {
+                    (
+                        (origin - src0 / *speed as f64).ceil() as i64,
+                        (origin + (pcm.frames() as f64 - src0) / *speed as f64).ceil() as i64,
+                    )
+                };
                 let begin = begin.max(available_start);
                 let finish = finish.min(available_end);
                 // A split leaves pieces that play on seamlessly; ramping there would dip the sound.
@@ -503,7 +513,7 @@ impl Mixer {
                     (place, &*stretch, kept)
                 });
                 for i in from..to {
-                    let src = src0 + (i as f64 - origin) * *speed as f64;
+                    let src = file_sample(&map, src0, origin, *speed as f64, i as f64);
                     let mut gain = volume
                         * gain_at(i, begin, finish, edges, incoming, outgoing)
                         * fade_gain(i, c0, c1, us_to_samples(*fade_in_us), us_to_samples(*fade_out_us));
@@ -556,6 +566,20 @@ fn transition_into(track: &Track, clip: &Clip) -> Option<(i64, i64)> {
     if track.id == crate::edit::MAIN_TRACK { transition_window(clip) } else { None }
 }
 
+/// The file sample a clip plays at timeline sample `i`, where the picture is (`crate::retime`): `src0` and
+/// `origin` are its source start and its start on the timeline, in samples.
+fn file_sample(map: &Retime, src0: f64, origin: f64, speed: f64, i: f64) -> f64 {
+    if map.is_retimed() {
+        map.source_at(samples_to_us_f64(i - origin)) * SAMPLE_RATE as f64 / 1e6
+    } else {
+        src0 + (i - origin) * speed
+    }
+}
+
+fn samples_to_us_f64(samples: f64) -> f64 {
+    samples * 1e6 / SAMPLE_RATE as f64
+}
+
 fn sample_at(samples: &[f32], position: f64, channel: usize) -> f32 {
     if !position.is_finite() || position < 0.0 || position >= (samples.len() / CHANNELS) as f64 {
         return 0.0;
@@ -586,8 +610,10 @@ fn cleans_voice(clip: &Clip) -> bool {
     matches!(clip.content, ClipContent::Media { clean_voice: true, .. })
 }
 
+/// Only a steady speed forwards keeps the pitch; on a ramp or backwards the pitch follows the speed, as a tape's does.
 fn keeps_pitch(clip: &Clip) -> bool {
     matches!(clip.content, ClipContent::Media { keep_pitch: true, speed, .. } if speed != 1.0)
+        && !crate::retime::is_retimed(clip)
 }
 
 /// Whether `next` starts where `clip` ends and plays on from the same source at the same
@@ -624,16 +650,25 @@ fn continues(clip: &Clip, next: &Clip) -> bool {
         return false;
     };
     let source_end = source_a + (clip.duration_us as f64 * *speed_a as f64).round() as i64;
+    let plays_on = match (Retime::of(clip), Retime::of(next)) {
+        // Pieces of a clip played backwards or on a ramp meet where the one before stops, at the same speed.
+        (Some(x), Some(y)) if x.is_retimed() || y.is_retimed() => {
+            let end = clip.duration_us as f64;
+            x.reverse() == y.reverse()
+                && (x.source_at(end) - y.source_at(0.0)).abs() <= samples_to_us(1) as f64
+                && (x.speed_at(end) - y.speed_at(0.0)).abs() <= 1e-3 * x.speed_at(end)
+        }
+        _ => speed_a == speed_b && (source_b - source_end).abs() <= samples_to_us(1),
+    };
     a == b
         && clip.end_us() == next.start_us
-        && speed_a == speed_b
+        && plays_on
         && volume_a == volume_b
         && duck_a == duck_b
         && mono_a == mono_b
         && (dereverb_a, normalize_a, leveler_a) == (dereverb_b, normalize_b, leveler_b)
         && cleans_voice(clip) == cleans_voice(next)
         && keeps_pitch(clip) == keeps_pitch(next)
-        && (source_b - source_end).abs() <= samples_to_us(1)
 }
 
 impl Mixer {
@@ -649,7 +684,13 @@ impl Mixer {
         else {
             return None;
         };
-        if before.end_us() != after.start_us || continues(before, after) {
+        // A clip played backwards or on a ramp has the file past its edge on another side than its speed says, so
+        // it does not reach across a cut and keeps its edge ramps.
+        if before.end_us() != after.start_us
+            || continues(before, after)
+            || crate::retime::is_retimed(before)
+            || crate::retime::is_retimed(after)
+        {
             return None;
         }
         let (asset_before, asset_after) = (project.asset(id_before)?, project.asset(id_after)?);
@@ -745,16 +786,18 @@ impl Mixer {
                 let samples = pcm.samples();
                 let file =
                     self.speech.entry(path).or_insert_with(|| vec![0; pcm.frames().div_ceil(SPEECH_BLOCK as usize)]);
+                let Some(map) = Retime::of(clip) else { continue };
                 let src0 = *source_in_us as f64 * SAMPLE_RATE as f64 / 1_000_000.0;
                 let origin = clip.start_us as f64 * SAMPLE_RATE as f64 / 1_000_000.0;
-                let src = |t: i64| src0 + (t as f64 - origin) * *speed as f64;
+                let src = |t: i64| file_sample(&map, src0, origin, *speed as f64, t as f64);
                 for block in blocks {
                     // The part of the timeline block the clip sounds in, and every block of the file it plays.
                     let (a, b) = ((block * SPEECH_BLOCK).max(c0), ((block + 1) * SPEECH_BLOCK).min(c1));
-                    if a >= b || src(b - 1) < 0.0 {
+                    let (low, high) = (src(a).min(src(b - 1)), src(a).max(src(b - 1)));
+                    if a >= b || high < 0.0 {
                         continue;
                     }
-                    let (from, to) = (src(a).max(0.0) as i64 / SPEECH_BLOCK, src(b - 1) as i64 / SPEECH_BLOCK);
+                    let (from, to) = (low.max(0.0) as i64 / SPEECH_BLOCK, high as i64 / SPEECH_BLOCK);
                     for i in from as usize..=to as usize {
                         let Some(level) = file.get_mut(i) else { break };
                         if *level == 0 {
@@ -1212,6 +1255,8 @@ mod tests {
                     background: Default::default(),
                     log: Default::default(),
                     lut: Default::default(),
+                    reverse: false,
+                    ramp: Vec::new(),
                 },
             );
             if id == "b" {
@@ -1287,6 +1332,8 @@ mod tests {
                     background: Default::default(),
                     log: Default::default(),
                     lut: Default::default(),
+                    reverse: false,
+                    ramp: Vec::new(),
                 },
             );
             if id == "b" {

@@ -160,6 +160,10 @@ pub fn plan(project: &Project, beats: &Beats, options: &Options) -> Result<Plan>
     let ClipContent::Media { source_in_us: music_in, speed: music_speed, .. } = music.content else {
         unreachable!("music_clip returns media")
     };
+    ensure!(
+        !nuzky_engine::retime::is_retimed(music),
+        "NO_STEADY_BEAT: the music plays backwards or on a speed ramp, so its beat is not steady; cut to it at one speed forwards"
+    );
     let main = project.tracks.iter().find(|t| t.id == MAIN_TRACK).context("INVALID_PROJECT: no main track")?;
     let fps = project.canvas.fps.max(1);
     let frame = |t: i64| ((2 * t.max(0) as i128 * fps as i128 + 1_000_000) / 2_000_000) as i64;
@@ -421,6 +425,8 @@ fn fade_out(clip_id: &str, fade_out_us: i64) -> EditCmd {
         style: None,
         speed: None,
         keep_pitch: None,
+        reverse: None,
+        ramp: None,
         adjust: None,
         fade_in_us: None,
         fade_out_us: Some(fade_out_us),
@@ -445,8 +451,11 @@ fn sources(project: &Project, main: &Track, shots: Option<&[Shot]>) -> Result<Ve
             _ => None,
         })
     };
-    let source = |asset_id: &str, from: i64, to: Option<i64>, content: ClipContent| {
-        let ClipContent::Media { speed, .. } = content else { unreachable!("footage is media") };
+    let source = |asset_id: &str, from: i64, to: Option<i64>, mut content: ClipContent| {
+        // The pieces are new clips that play their shot forwards at its average speed.
+        let ClipContent::Media { speed, reverse, ramp, .. } = &mut content else { unreachable!("footage is media") };
+        let speed = *speed;
+        (*reverse, *ramp) = (false, Vec::new());
         let asset = project.asset(asset_id).with_context(|| format!("UNKNOWN_ASSET: {asset_id}"))?;
         let to = (asset.kind != AssetKind::Image).then(|| to.unwrap_or(asset.duration_us).min(asset.duration_us));
         Ok(Source { from, to, speed: speed as f64, content })

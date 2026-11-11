@@ -162,15 +162,20 @@ fn cut(
 fn picture_cuts(project: &Project, windows: &[TimeRange], cancelled: &dyn Fn() -> bool) -> Result<Vec<i64>> {
     let mut cuts = Vec::new();
     for clip in project.tracks.iter().filter(|t| t.id == MAIN_TRACK).flat_map(|t| &t.clips).filter(|c| !c.is_freeze()) {
-        let ClipContent::Media { asset_id, source_in_us, speed, .. } = &clip.content else { continue };
+        let ClipContent::Media { asset_id, .. } = &clip.content else { continue };
         let Some(asset) = project.assets.iter().find(|a| &a.id == asset_id && a.kind == AssetKind::Video) else {
             continue;
         };
+        let Some(retime) = nuzky_engine::retime::Retime::of(clip) else { continue };
         let inside: Vec<_> = windows
             .iter()
             .map(|w| (w.start_us.max(clip.start_us), w.end_us.min(clip.end_us())))
             .filter(|(start, end)| start < end)
-            .map(|(start, end)| Range { start_us: source_time(clip, start), end_us: source_time(clip, end) })
+            .map(|(start, end)| {
+                // Played backwards, the window's end is the earlier time of the file.
+                let (a, b) = (source_time(clip, start), source_time(clip, end));
+                Range { start_us: a.min(b), end_us: a.max(b) }
+            })
             .collect();
         if inside.is_empty() {
             continue;
@@ -178,9 +183,7 @@ fn picture_cuts(project: &Project, windows: &[TimeRange], cancelled: &dyn Fn() -
         let params = SceneParams { threshold: CUT_THRESHOLD, ..SceneParams::default() };
         match scene_cuts_in(asset, &inside, params, cancelled) {
             Ok(found) => {
-                cuts.extend(found.iter().map(|cut| {
-                    clip.start_us + ((cut.time_us - source_in_us) as f64 / f64::from(*speed)).round() as i64
-                }))
+                cuts.extend(found.iter().map(|cut| clip.start_us + retime.offset_of(cut.time_us as f64).round() as i64))
             }
             Err(error) if cancelled() => return Err(error),
             Err(error) => log::warn!("Reel edges stay at the words, the picture is not readable: {error:#}"),

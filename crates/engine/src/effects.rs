@@ -15,14 +15,7 @@ pub fn max_animation_scale(clip: &Clip) -> f32 {
         .product()
 }
 
-pub fn source_time(clip: &Clip, t_us: i64) -> i64 {
-    match clip.content {
-        ClipContent::Media { source_in_us, speed, .. } => {
-            source_in_us + ((t_us - clip.start_us).max(0) as f64 * speed as f64).round() as i64
-        }
-        _ => 0,
-    }
-}
+pub use crate::retime::source_time;
 
 pub fn transition_window(clip: &Clip) -> Option<(i64, i64)> {
     let d = clip.transition_in?.duration_us;
@@ -160,6 +153,8 @@ mod tests {
                 source_in_us: 500_000,
                 speed: 2.0,
                 keep_pitch: false,
+                reverse: false,
+                ramp: Vec::new(),
                 volume: 1.0,
                 transform: Transform::default(),
                 adjust: Default::default(),

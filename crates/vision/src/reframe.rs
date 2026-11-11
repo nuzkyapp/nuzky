@@ -372,6 +372,8 @@ pub(crate) fn update(clip_id: &str, transform: Transform) -> EditCmd {
         style: None,
         speed: None,
         keep_pitch: None,
+        reverse: None,
+        ramp: None,
         adjust: None,
         fade_in_us: None,
         fade_out_us: None,

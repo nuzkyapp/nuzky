@@ -43,7 +43,7 @@ fn check_seek(path: &Path, extra_times: &[i64]) {
         } else {
             failures.push(format!("decoder t={t}: no candidate"));
         }
-        let rgba = worker.get(t, (a.width, a.height), false, true).expect("worker frame");
+        let rgba = worker.get(t, (a.width, a.height), false, true, false).expect("worker frame");
         let error = mae(&rgba.data, &truth[expected * frame_len..(expected + 1) * frame_len]);
         if !worker.exact || rgba.t_us != timestamps[expected] || error > 1.0 {
             failures.push(format!(
@@ -728,7 +728,7 @@ fn cold_seek_immediately_before_keyframe_uses_previous_frame() {
         decoder.seek(t).unwrap();
         let first = decoder.next_frame().unwrap().unwrap().0;
         let mut worker = VideoWorker::spawn(path.clone());
-        let frame = worker.get(t, (96, 64), false, true).unwrap();
+        let frame = worker.get(t, (96, 64), false, true, false).unwrap();
         let error = mae(&frame.data, &truth[expected * 96 * 64 * 4..(expected + 1) * 96 * 64 * 4]);
         eprintln!(
             "QA keyframe boundary want={t} first_after_seek={first} worker={} expected={} exact={} MAE={error}",

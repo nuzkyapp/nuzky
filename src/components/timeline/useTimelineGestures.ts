@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent, type RefObject } from "react";
 import { followPointer } from "../../lib/drag";
+import { isRetimed, retime } from "../../lib/retime";
 import { FADE_STEP_US, MAIN_TRACK, allClips, clipEdges, maxFadeUs, projectDuration, useEditor } from "../../lib/store";
 import { US, lastFrame, nearestFrame } from "../../lib/time";
 import type { Clip, Project, Track } from "../../lib/types";
@@ -31,6 +32,8 @@ export interface Drag {
   snapUs: number | null;
   candidates: number[];
   maxDurUs: number | null;
+  /** How far left of its start the left edge may go, for a clip played backwards or on a ramp. */
+  minLeftUs: number | null;
   sourceInUs: number | null;
   speed: number;
   /** A fade drag: the sound fade at that end when it started, and the longest it may get. */
@@ -50,7 +53,7 @@ export function dragResult(d: Drag, minUs: number): { startUs: number; durationU
   if (d.mode === "move") return { startUs: Math.max(0, clip.startUs + d.dxUs), durationUs: clip.durationUs };
   if (d.mode === "trimL") {
     // The left edge stops where the source starts, at this clip's speed.
-    const lower = d.sourceInUs !== null ? Math.ceil(-d.sourceInUs / d.speed) : -clip.startUs;
+    const lower = d.minLeftUs ?? (d.sourceInUs !== null ? Math.ceil(-d.sourceInUs / d.speed) : -clip.startUs);
     const delta = Math.min(Math.max(d.dxUs, lower, -clip.startUs), clip.durationUs - minUs);
     const sourceInUs = d.sourceInUs !== null ? Math.max(0, d.sourceInUs + Math.round(delta * d.speed)) : undefined;
     return { startUs: clip.startUs + delta, durationUs: clip.durationUs - delta, sourceInUs };
@@ -237,9 +240,15 @@ export function useTimelineGestures({
       const mode: Mode = fade === "in" ? "fadeIn" : fade === "out" ? "fadeOut" : x <= EDGE ? "trimL" : x >= rect.width - EDGE ? "trimR" : "move";
       const asset = clipAsset(project, clip);
       const media = clip.content.type === "media" ? clip.content : null;
-      const sourceInUs = media && asset?.kind !== "image" && media.speed !== 0 ? media.sourceInUs : null;
+      const timed = media && asset && asset.kind !== "image" && media.speed !== 0 ? media : null;
+      // Played backwards or on a ramp, the edges stop where the clip's way through its file reaches the file's ends;
+      // the engine works out the source start, from the edge's time.
+      const map = timed && isRetimed(timed) ? retime(timed, clip.durationUs) : null;
+      const ends = map && asset ? [map.offsetOf(0), map.offsetOf(asset.durationUs)] : null;
+      const sourceInUs = timed && !ends ? timed.sourceInUs : null;
       // The right edge stops where the source ends, at this clip's speed (floored like the engine).
-      const maxDurUs = sourceInUs !== null && asset && media ? Math.floor((asset.durationUs - sourceInUs) / media.speed) : null;
+      const maxDurUs = ends ? Math.floor(Math.max(...ends)) : sourceInUs !== null && asset && media ? Math.floor((asset.durationUs - sourceInUs) / media.speed) : null;
+      const minLeftUs = ends ? Math.ceil(Math.min(...ends)) : null;
       const selection = useEditor.getState().selection;
       const group =
         mode === "move" && track.id !== MAIN_TRACK && selection.length > 1 && selection.includes(clip.id)
@@ -249,7 +258,7 @@ export function useTimelineGestures({
       for (const c of allClips(project)) if (c.id !== clip.id && !group?.includes(c)) candidates.push(c.startUs, c.startUs + c.durationUs);
       // While the AI edits, pressing a clip only selects it.
       const locked = !!useEditor.getState().aiRun;
-      let d: Drag = { clip, trackId: track.id, mode, startX: e.clientX, startY: e.clientY, moved: false, toggle: e.shiftKey || (MAC ? e.metaKey : e.ctrlKey), dxUs: 0, target: undefined, snapUs: null, candidates, maxDurUs, sourceInUs, speed: media?.speed ?? 1, fadeUs: (mode === "fadeIn" ? media?.fadeInUs : media?.fadeOutUs) ?? 0, maxFadeUs: maxFadeUs(clip.durationUs), group };
+      let d: Drag = { clip, trackId: track.id, mode, startX: e.clientX, startY: e.clientY, moved: false, toggle: e.shiftKey || (MAC ? e.metaKey : e.ctrlKey), dxUs: 0, target: undefined, snapUs: null, candidates, maxDurUs, minLeftUs, sourceInUs, speed: media?.speed ?? 1, fadeUs: (mode === "fadeIn" ? media?.fadeInUs : media?.fadeOutUs) ?? 0, maxFadeUs: maxFadeUs(clip.durationUs), group };
       setDrag(d);
 
       // Pointer moves are handled once per display frame: a fast mouse sends several per frame, and each

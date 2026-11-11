@@ -2690,6 +2690,52 @@ fn an_agent_freezes_a_frame_and_no_word_lands_on_it_over_stdio() {
     assert_eq!(disk.tracks[0].clips.iter().filter(|clip| clip.is_freeze()).count(), 1);
 }
 
+/// An agent ramps a take into slow motion and plays it backwards through apply_edits: the clip keeps its part of the
+/// file, its words move to where the ramp plays them, played backwards it has none, and discarding the run takes it
+/// all back at once.
+#[test]
+fn an_agent_ramps_and_reverses_a_clip_and_its_words_follow_over_stdio() {
+    let mut c = Client::start(true, None, Some(None));
+    let run = c.call("begin_run", json!({"label":"place the take"}));
+    place_transcribed_take(&mut c, &["jedna", "dva", "tři", "čtyři"], &run["run_id"]);
+    c.call("end_run", json!({"run_id":run["run_id"],"action":"keep"}));
+    let take = c.call("get_state", json!({}))["tracks"][0]["clips"][0]["id"].clone();
+    let starts = |c: &mut Client| -> Vec<i64> {
+        let words = c.call("get_transcript", json!({}))["words"].clone();
+        words.as_array().unwrap().iter().map(|w| w["start_us"].as_i64().unwrap()).collect()
+    };
+    assert_eq!(starts(&mut c), [200_000, 1_000_000, 1_800_000, 2_600_000]);
+
+    let run = c.call("begin_run", json!({"label":"slow motion"}))["run_id"].clone();
+    // From 2x down to 0.5x, an average of 1.25x: the 4 s take plays in 3.2 s, and its second word, 1 s into the
+    // file, is heard once 3.2·(2x − 0.75x²) = 1, at x = 1/6, 533 ms in.
+    let ramp = json!([{"at":0.0,"speed":2.0},{"at":1.0,"speed":0.5}]);
+    let edits = json!([{"type":"updateClip","clipId":take,"ramp":ramp}]);
+    let done = c.call("apply_edits", json!({"run_id":run,"request_id":"ramp","edits":edits}));
+    let clip = &done["clips"][0];
+    assert_eq!((&clip["durationUs"], &clip["content"]["speed"]), (&json!(3_200_000), &json!(1.25)), "{done}");
+    assert_eq!(clip["content"]["ramp"], ramp);
+    let ramped = starts(&mut c);
+    assert!((ramped[1] - 533_333).abs() <= 1 && ramped.windows(2).all(|w| w[0] < w[1]), "{ramped:?}");
+
+    let both = json!([{"type":"updateClip","clipId":take,"speed":2.0,"ramp":ramp}]);
+    let refused = c.error("apply_edits", json!({"run_id":run,"request_id":"both","edits":both}));
+    assert!(refused.contains("not both at once"), "{refused}");
+    let backwards = json!([{"type":"updateClip","clipId":take,"reverse":true}]);
+    let done = c.call("apply_edits", json!({"run_id":run,"request_id":"back","edits":backwards}));
+    assert_eq!(
+        (&done["clips"][0]["content"]["reverse"], &done["clips"][0]["durationUs"]),
+        (&json!(true), &json!(3_200_000))
+    );
+    assert_eq!(starts(&mut c), Vec::<i64>::new(), "a take played backwards says no words");
+
+    c.call("end_run", json!({"run_id":run,"action":"discard"}));
+    let content = c.call("get_state", json!({}))["tracks"][0]["clips"][0]["content"].clone();
+    assert!(content.get("reverse").is_none() && content.get("ramp").is_none() && content["speed"] == 1.0, "{content}");
+    assert_eq!(starts(&mut c), [200_000, 1_000_000, 1_800_000, 2_600_000]);
+    c.finish();
+}
+
 /// An agent off by one word once overwrote "něco" instead of "natchne" with a current
 /// transcript_key. `expected` names the word the agent means, so a shifted index changes nothing.
 #[test]

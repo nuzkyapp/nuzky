@@ -20,6 +20,7 @@ struct Changes {
     volume: bool,
     mono: bool,
     speed: bool,
+    reversed: bool,
 }
 
 impl Changes {
@@ -30,6 +31,7 @@ impl Changes {
             (self.volume, "volume changed"),
             (self.mono, "made mono"),
             (self.speed, "speed changed"),
+            (self.reversed, "reversed"),
         ]
         .into_iter()
         .filter_map(|(on, what)| on.then_some(what))
@@ -45,6 +47,7 @@ impl Changes {
             (self.volume, "volume changed"),
             (self.mono, "made mono"),
             (self.speed, "speed changed"),
+            (self.reversed, "reversed"),
         ]
         .into_iter()
         .filter_map(|(on, what)| on.then_some(what))
@@ -122,7 +125,8 @@ pub fn credits(project: &Project) -> Option<String> {
         let source_end = *source_in_us as f64 + clip.duration_us as f64 * f64::from(*speed);
         entry.trimmed |=
             *source_in_us > TRIM_TOLERANCE_US || source_end < (asset.duration_us - TRIM_TOLERANCE_US) as f64;
-        entry.speed |= *speed != 1.0;
+        entry.speed |= *speed != 1.0 || matches!(&clip.content, ClipContent::Media { ramp, .. } if !ramp.is_empty());
+        entry.reversed |= matches!(&clip.content, ClipContent::Media { reverse: true, .. });
         // Detached sound plays from another clip, so a silent picture says nothing about the sound.
         if heard {
             entry.faded |= *fade_in_us > 0 || *fade_out_us > 0;

@@ -391,14 +391,25 @@ export type ClipContent = {
   transform: Transform,
   /**
    * Playback speed; the clip covers `duration_us * speed` of source. Sound follows it. 0 is a freeze
-   * frame (`Clip::is_freeze`), always at volume 0.
+   * frame (`Clip::is_freeze`), always at volume 0. With a `ramp` it is the ramp's average speed.
    */
   speed: number,
   /**
    * Sound at another speed keeps its pitch; off, it gets higher when faster and lower
-   * when slower. Projects from before it have it off, so they sound as they did.
+   * when slower. Projects from before it have it off, so they sound as they did. Only a steady speed
+   * forwards keeps it: on a ramp or played backwards the pitch follows the speed.
    */
   keepPitch?: boolean,
+  /**
+   * Plays the clip's part of its file from its end to its start, sound included (`crate::retime`).
+   */
+  reverse?: boolean,
+  /**
+   * A speed ramp: the speed moves evenly from point to point along the clip and holds before the first
+   * and after the last. Its average is `speed`, so the clip still covers `duration_us * speed` of source.
+   * Empty plays at `speed` throughout (`crate::retime`).
+   */
+  ramp?: Array<SpeedPoint>,
   adjust: Adjust,
   /**
    * Audio fades at the clip edges.
@@ -692,9 +703,22 @@ export type EditCmd = {
   speed?: number | null,
   /**
    * Sound at another speed keeps its pitch. Moving a clip off 1x turns it on unless the
-   * same command sets it.
+   * same command sets it. Only a steady speed forwards keeps it.
    */
   keepPitch?: boolean | null,
+  /**
+   * Video and sound clips: play the clip's part of its file from its end to its start, sound included.
+   * The clip keeps its length and its part of the file.
+   */
+  reverse?: boolean | null,
+  /**
+   * Video and sound clips: a speed ramp, 2 to 18 points `{at, speed}` from `at` 0 (the clip's start) to 1 (its
+   * end), speeds 0.1 to 10; the speed moves evenly from point to point. The clip keeps its part of the file,
+   * so it gets longer or shorter as `speed` does, and `speed` becomes the ramp's average. An empty list
+   * plays the clip at that average throughout. Not together with `speed`; `speed` alone on a ramped clip
+   * scales the whole ramp.
+   */
+  ramp?: Array<SpeedPoint> | null,
   adjust?: Adjust | null,
   fadeInUs?: number | null,
   fadeOutUs?: number | null,
@@ -1707,6 +1731,20 @@ export type SpeechSetupModel = {
    * What is left of the model's own file.
    */
   missingMb: number,
+};
+
+/**
+ * One point of a speed ramp.
+ */
+export type SpeedPoint = {
+  /**
+   * Where along the clip, as a share of its length from 0 (its start) to 1 (its end).
+   */
+  at: number,
+  /**
+   * The speed there, 0.1 to 10.
+   */
+  speed: number,
 };
 
 export type StickerCatalog = {

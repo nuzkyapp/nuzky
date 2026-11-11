@@ -12,6 +12,7 @@ use nuzky_engine::{
     edit::{CaptionPreset, EditCmd, TimeRange, TransformPatch, merge_ranges, stays_in_place},
     effects::source_time,
     model::{Asset, Clip, ClipContent, MAX_CORRECTION_CHARS, Track, WordCorrection},
+    retime::Retime,
     speech::{TimelineWord, Word, is_heard, map_words},
 };
 use nuzky_session::{
@@ -442,13 +443,15 @@ fn editing_bounds(project: &Project, derived: &Derived) -> (Vec<TimelineWord>, V
                     if asset_id != asset {
                         continue;
                     }
+                    // A clip played backwards says no words (`speech::map_words`).
+                    let Some(retime) = Retime::of(clip).filter(|r| !r.reverse()) else { continue };
                     let speed = f64::from(*speed);
                     let source_start = (word.start_us as f64).max(*source_in_us as f64);
                     let source_end = (word.end_us as f64).min(*source_in_us as f64 + clip.duration_us as f64 * speed);
                     if source_end <= source_start {
                         continue;
                     }
-                    let map = |t: f64| clip.start_us + ((t - *source_in_us as f64) / speed).round() as i64;
+                    let map = |t: f64| clip.start_us + retime.offset_of(t).round() as i64;
                     fragments.push(WordFragment {
                         timeline: TimeRange {
                             start_us: map(source_start).max(clip.start_us),
@@ -655,19 +658,7 @@ pub fn hesitations(project: &Project, derived: &Derived, cache_dir: &Path) -> Ve
     let clips: HashMap<&str, &Clip> =
         project.tracks.iter().flat_map(|t| &t.clips).map(|c| (c.id.as_str(), c)).collect();
     // A clip split where nothing was cut away plays on as one: its pieces follow in the file too.
-    let continues = |a: &Clip, b: &Clip| match (&a.content, &b.content) {
-        (
-            ClipContent::Media { asset_id, speed, .. },
-            ClipContent::Media { asset_id: next, speed: next_speed, source_in_us, .. },
-        ) => {
-            a.id == b.id
-                || asset_id == next
-                    && speed == next_speed
-                    && b.start_us == a.end_us()
-                    && source_time(a, a.end_us()) == *source_in_us
-        }
-        _ => false,
-    };
+    let continues = |a: &Clip, b: &Clip| a.id == b.id || nuzky_engine::retime::plays_on(a, b, 1.0);
     // Gaps between words of one stretch of a file, by file.
     let mut gaps: HashMap<&str, Vec<(usize, &Clip)>> = HashMap::new();
     for (i, pair) in words.windows(2).enumerate() {
@@ -690,11 +681,11 @@ pub fn hesitations(project: &Project, derived: &Derived, cache_dir: &Path) -> Ve
             })
             .collect();
         for (&(i, clip), range) in gaps.iter().zip(nuzky_analysis::hesitations(&peaks, &ranges)) {
-            let (Some(range), ClipContent::Media { source_in_us, speed, .. }) = (range, &clip.content) else {
+            let (Some(range), Some(retime)) = (range, Retime::of(clip)) else {
                 continue;
             };
             let place = |t: i64| {
-                (clip.start_us + ((t - source_in_us) as f64 / f64::from(*speed)).round() as i64)
+                (clip.start_us + retime.offset_of(t as f64).round() as i64)
                     .clamp(words[i].end_us, words[i + 1].start_us)
             };
             let (start_us, end_us) = (place(range.start_us), place(range.end_us));
@@ -948,6 +939,8 @@ pub fn plan_correction(
         style: None,
         speed: None,
         keep_pitch: None,
+        reverse: None,
+        ramp: None,
         adjust: None,
         fade_in_us: None,
         fade_out_us: None,

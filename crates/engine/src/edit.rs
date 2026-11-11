@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::model::{
     Adjust, Animation, Asset, AssetKind, Background, CAPTIONS_TRACK, Canvas, CaptionWord, Clip, ClipContent, Ease,
     Effect, Keyframe, Keywords, LetterCase, LogProfile, Lut, MAX_CANVAS_SIDE, MAX_CLIP_EFFECTS, MAX_FPS,
-    MAX_SCRIPT_CHARS, Mono, Project, ReelCandidate, Shape, TextAlign, TextShadow, TextStyle, Thumbnail,
+    MAX_SCRIPT_CHARS, Mono, Project, ReelCandidate, Shape, SpeedPoint, TextAlign, TextShadow, TextStyle, Thumbnail,
     ThumbnailFormat, Track, TrackKind, Transform, Transition, WordCorrection, word_ranges,
 };
 
@@ -190,8 +190,17 @@ pub enum EditCmd {
         /// Changing speed keeps the source range, so the clip gets shorter or longer.
         speed: Option<f32>,
         /// Sound at another speed keeps its pitch. Moving a clip off 1x turns it on unless the
-        /// same command sets it.
+        /// same command sets it. Only a steady speed forwards keeps it.
         keep_pitch: Option<bool>,
+        /// Video and sound clips: play the clip's part of its file from its end to its start, sound included.
+        /// The clip keeps its length and its part of the file.
+        reverse: Option<bool>,
+        /// Video and sound clips: a speed ramp, 2 to 18 points `{at, speed}` from `at` 0 (the clip's start) to 1 (its
+        /// end), speeds 0.1 to 10; the speed moves evenly from point to point. The clip keeps its part of the file,
+        /// so it gets longer or shorter as `speed` does, and `speed` becomes the ramp's average. An empty list
+        /// plays the clip at that average throughout. Not together with `speed`; `speed` alone on a ramped clip
+        /// scales the whole ramp.
+        ramp: Option<Vec<SpeedPoint>>,
         adjust: Option<Adjust>,
         fade_in_us: Option<i64>,
         fade_out_us: Option<i64>,
@@ -694,6 +703,8 @@ pub fn media(asset: &Asset, transform: Transform, shape: Option<Shape>) -> ClipC
         background: Default::default(),
         log: Default::default(),
         lut: Default::default(),
+        reverse: false,
+        ramp: Vec::new(),
     }
 }
 
@@ -845,9 +856,20 @@ impl Project {
         second.id = new_id();
         second.start_us = at_us;
         second.duration_us = clip.end_us() - at_us;
-        if let ClipContent::Media { source_in_us, speed, fade_in_us, .. } = &mut second.content {
-            *source_in_us += (offset as f64 * *speed as f64).round() as i64;
+        let parts = crate::retime::Retime::of(clip)
+            .filter(|map| map.is_retimed())
+            .map(|map| (map.part(0, offset), map.part(offset, clip.duration_us)));
+        if let ClipContent::Media { source_in_us, speed, ramp, fade_in_us, .. } = &mut second.content {
+            match &parts {
+                Some((_, (src, sp, rp))) => (*source_in_us, *speed, *ramp) = (*src, *sp, rp.clone()),
+                None => *source_in_us += (offset as f64 * *speed as f64).round() as i64,
+            }
             *fade_in_us = 0;
+        }
+        if let (Some(((src, sp, rp), _)), ClipContent::Media { source_in_us, speed, ramp, .. }) =
+            (parts, &mut clip.content)
+        {
+            (*source_in_us, *speed, *ramp) = (src, sp, rp);
         }
         // The first half keeps the entry animation and fade, the second the exit ones.
         if let ClipContent::Media { fade_out_us, .. } = &mut clip.content {
@@ -1305,11 +1327,18 @@ impl Project {
                     normalize,
                     leveler,
                     mono,
+                    reverse,
+                    ramp,
                     ..
                 } = &mut self.tracks[ti].clips[ci].content
                 {
                     *a = asset.id;
                     *source_in_us = source_in;
+                    // A picture has no time to play backwards or on a ramp.
+                    if asset.kind == AssetKind::Image {
+                        *reverse = false;
+                        ramp.clear();
+                    }
                     if !sound {
                         *mono = Mono::Off;
                         *clean_voice = false;
@@ -1443,8 +1472,36 @@ impl Project {
                 });
                 let moves_left = start_us != old_start || head_trim;
                 // An image or a freeze frame has no source time to move, so its left edge moves without one.
-                let left_edge = moves_left && (source_in_us.is_some() || limit.is_none());
-                if let ClipContent::Media { source_in_us: src, .. } = &mut clip.content
+                let mut left_edge = moves_left && (source_in_us.is_some() || limit.is_none());
+                if let Some(map) = crate::retime::Retime::of(clip).filter(|map| map.is_retimed()) {
+                    // The edges move on the timeline and the clip keeps playing as it did between them. A clip played
+                    // forwards on a ramp also takes a later source start as a head trim; backwards, its head is the
+                    // end of its part of the file, so only `start_us` moves it.
+                    let from = match source_in_us {
+                        Some(s) if start_us == old_start && s != old_src && !map.reverse() => {
+                            map.offset_of(s as f64).round() as i64
+                        }
+                        _ if main => start_us - old_start,
+                        _ => start_us.max(0) - old_start,
+                    };
+                    let mut to = from + duration_us.max(min);
+                    let mut from = from;
+                    if let Some(limit) = limit {
+                        let (a, b) = (map.offset_of(0.0), map.offset_of(limit as f64));
+                        from = from.max(a.min(b).ceil() as i64);
+                        to = to.min(a.max(b).floor() as i64);
+                    }
+                    if to - from < min {
+                        if from != 0 { from = to - min } else { to = from + min }
+                    }
+                    let (src, sp, rp) = map.part(from, to);
+                    if let ClipContent::Media { source_in_us, speed, ramp, .. } = &mut clip.content {
+                        (*source_in_us, *speed, *ramp) = (src.max(0), sp, rp);
+                    }
+                    left_edge = from != 0;
+                    start = if main { old_start + from } else { (old_start + from).max(0) };
+                    duration = to - from;
+                } else if let ClipContent::Media { source_in_us: src, .. } = &mut clip.content
                     && speed > 0.0
                 {
                     let mut new_src = source_in_us.unwrap_or(*src).max(0);
@@ -1548,11 +1605,15 @@ impl Project {
                     leveler,
                     duck_db,
                     mono,
+                    reverse,
+                    ramp,
                     ..
                 } = &mut still.content
                 {
                     *mono = Mono::Off;
                     *source_in_us = crate::effects::source_time(&clip, at_us).min(last);
+                    *reverse = false;
+                    ramp.clear();
                     (*speed, *volume, *keep_pitch, *clean_voice, *normalize) = (0.0, 0.0, false, false, false);
                     (*fade_in_us, *fade_out_us, *dereverb, *leveler, *duck_db) = (0, 0, 0.0, 0.0, 0.0);
                 }
@@ -1627,6 +1688,8 @@ impl Project {
                 style,
                 speed,
                 keep_pitch,
+                reverse,
+                ramp,
                 adjust,
                 fade_in_us,
                 fade_out_us,
@@ -1642,10 +1705,13 @@ impl Project {
                 lut,
             } => {
                 let (ti, ci) = self.find_clip(&clip_id).ok_or_else(|| anyhow!("Unknown clip"))?;
-                let changes_length = speed.is_some();
+                let changes_length = speed.is_some() || ramp.is_some();
+                ensure!(speed.is_none() || ramp.is_none(), "Set a speed or a speed ramp, not both at once");
                 ensure!(
                     !self.tracks[ti].clips[ci].is_freeze()
                         || (speed.is_none()
+                            && ramp.as_ref().is_none_or(Vec::is_empty)
+                            && reverse.is_none_or(|r| !r)
                             && keep_pitch.is_none()
                             && volume.is_none_or(|v| v == 0.0)
                             && fade_in_us.is_none_or(|f| f == 0)
@@ -1682,6 +1748,22 @@ impl Project {
                         );
                     }
                 }
+                if reverse == Some(true) || ramp.as_ref().is_some_and(|r| !r.is_empty()) {
+                    let timed = match &self.tracks[ti].clips[ci].content {
+                        ClipContent::Media { asset_id, .. } => {
+                            self.asset(asset_id).is_some_and(|a| a.kind != AssetKind::Image)
+                        }
+                        ClipContent::Text { .. } => false,
+                    };
+                    ensure!(timed, "Only video and sound clips play backwards or on a speed ramp");
+                }
+                // An empty ramp keeps the average speed.
+                let ramp = ramp
+                    .map(|points| match points.is_empty() {
+                        true => Ok((Vec::new(), None)),
+                        false => crate::retime::checked_ramp(points).map(|(ramp, mean)| (ramp, Some(mean))),
+                    })
+                    .transpose()?;
                 if clean_voice == Some(true)
                     || dereverb.is_some_and(|x| x > 0.0)
                     || normalize == Some(true)
@@ -1707,6 +1789,8 @@ impl Project {
                         volume: v,
                         speed: sp,
                         keep_pitch: kp,
+                        reverse: rv,
+                        ramp: rp,
                         adjust: adj,
                         fade_in_us: fi,
                         fade_out_us: fo,
@@ -1775,11 +1859,30 @@ impl Project {
                         if let Some(x) = keep_pitch {
                             *kp = x;
                         }
-                        if let Some(x) = speed {
-                            let x = x.clamp(MIN_SPEED, MAX_SPEED);
-                            if *sp == 1.0 && keep_pitch.is_none() {
-                                *kp = true;
+                        if let Some(x) = reverse {
+                            *rv = x;
+                        }
+                        let new_speed = match (speed, ramp) {
+                            (Some(x), _) => {
+                                let x = x.clamp(MIN_SPEED, MAX_SPEED);
+                                if *sp == 1.0 && keep_pitch.is_none() {
+                                    *kp = true;
+                                }
+                                if rp.is_empty() {
+                                    Some(x)
+                                } else {
+                                    let (scaled, mean) = crate::retime::scaled_ramp(rp, x / *sp);
+                                    *rp = scaled;
+                                    Some(mean)
+                                }
                             }
+                            (None, Some((points, mean))) => {
+                                *rp = points;
+                                Some(mean.unwrap_or(*sp))
+                            }
+                            (None, None) => None,
+                        };
+                        if let Some(x) = new_speed {
                             let ratio = *sp as f64 / x as f64;
                             *sp = x;
                             // Rounded down, the clip never covers more source than it did before the change.
@@ -3823,6 +3926,8 @@ mod tests {
             style: None,
             speed: None,
             keep_pitch: None,
+            reverse: None,
+            ramp: None,
             adjust: None,
             fade_in_us: None,
             fade_out_us: None,
@@ -3857,6 +3962,8 @@ mod tests {
             style,
             speed: Some(2.0),
             keep_pitch: None,
+            reverse: None,
+            ramp: None,
             adjust,
             fade_in_us,
             fade_out_us,
@@ -3876,6 +3983,112 @@ mod tests {
         p.apply(EditCmd::SplitClip { clip_id: id, at_us: 1_000_000 }).unwrap();
         let ClipContent::Media { source_in_us, .. } = &p.tracks[0].clips[1].content else { panic!() };
         assert_eq!(*source_in_us, 2_000_000);
+    }
+
+    /// Trimming a clip played backwards or on a ramp cuts what plays at the moved edge and leaves the rest playing
+    /// as it did; the file's edges stop it as they stop any clip.
+    #[test]
+    fn reversed_and_ramped_clips_keep_playing_what_they_did_when_trimmed_or_split() {
+        use crate::retime::Retime;
+        let cmd = |v: serde_json::Value| serde_json::from_value::<EditCmd>(v).unwrap();
+        let mut p = project();
+        let id = p.apply(EditCmd::AddClip { asset_id: "a".into(), start_us: None, track_id: None }).unwrap().select[0]
+            .clone();
+        let part = |p: &Project| {
+            let c = &p.tracks[0].clips[0];
+            let ClipContent::Media { source_in_us, speed, .. } = &c.content else { unreachable!() };
+            (c.duration_us, *source_in_us, *speed)
+        };
+        let update = |v: serde_json::Value| {
+            let mut v = v;
+            v["type"] = "updateClip".into();
+            v["clipId"] = id.as_str().into();
+            cmd(v)
+        };
+        let trim = |start: i64, duration: i64, source: i64| {
+            cmd(
+                serde_json::json!({"type": "trimClip", "clipId": id, "startUs": start, "durationUs": duration, "sourceInUs": source}),
+            )
+        };
+
+        // Backwards, the head of the clip is the end of its part of the file and its tail the start, whatever source
+        // start the timeline sends as it would for a clip played forwards.
+        p.apply(update(serde_json::json!({"reverse": true}))).unwrap();
+        assert_eq!(part(&p), (5_000_000, 0, 1.0));
+        p.apply(trim(1_000_000, 4_000_000, 1_000_000)).unwrap();
+        assert_eq!(part(&p), (4_000_000, 0, 1.0));
+        p.apply(trim(0, 3_000_000, 1_000_000)).unwrap();
+        assert_eq!(part(&p), (3_000_000, 1_000_000, 1.0));
+        // Pulled out past the file's end at its head, it stops there.
+        p.apply(trim(-2_000_000, 5_000_000, 0)).unwrap();
+        assert_eq!(part(&p), (4_000_000, 1_000_000, 1.0));
+
+        // A ramp from 2x to 0.5x keeps the 4 s of the file and plays them in 3.2 s; its speed is the average.
+        p.apply(update(serde_json::json!({"ramp": [{"at": 0.0, "speed": 2.0}, {"at": 1.0, "speed": 0.5}]}))).unwrap();
+        assert_eq!(part(&p), (3_200_000, 1_000_000, 1.25));
+        let whole = p.tracks[0].clips[0].clone();
+        let before = Retime::of(&whole).unwrap();
+        // Trimmed at its tail, what is left plays as it did; so does each half of a split.
+        p.apply(trim(0, 2_000_000, 1_000_000)).unwrap();
+        let trimmed = p.tracks[0].clips[0].clone();
+        let after = Retime::of(&trimmed).unwrap();
+        for t in [0.0, 700_000.0, 1_999_000.0] {
+            assert!((before.source_at(t) - after.source_at(t)).abs() < 2.0, "{t}");
+        }
+        p.apply(cmd(serde_json::json!({"type": "splitClip", "clipId": id, "atUs": 800_000}))).unwrap();
+        let (a, b) = (&p.tracks[0].clips[0], &p.tracks[0].clips[1]);
+        let (ma, mb) = (Retime::of(a).unwrap(), Retime::of(b).unwrap());
+        for t in [0.0, 400_000.0, 799_000.0, 800_000.0, 1_500_000.0] {
+            let got = if t < 800_000.0 { ma.source_at(t) } else { mb.source_at(t - 800_000.0) };
+            assert!((got - before.source_at(t)).abs() < 2.0, "{t}");
+        }
+        assert!(matches!(&b.content, ClipContent::Media { reverse: true, ramp, .. } if ramp.len() == 2));
+
+        // Speed scales a ramp; an empty ramp keeps the average speed and the length.
+        let second = b.id.clone();
+        let (duration, speed) = (b.duration_us, b.content.clone());
+        let ClipContent::Media { speed: old, .. } = speed else { unreachable!() };
+        let set = |v: serde_json::Value| {
+            let mut v = v;
+            v["type"] = "updateClip".into();
+            v["clipId"] = second.as_str().into();
+            cmd(v)
+        };
+        p.apply(set(serde_json::json!({"speed": old * 2.0}))).unwrap();
+        let ClipContent::Media { ramp, speed, .. } = &p.tracks[0].clips[1].content else { unreachable!() };
+        assert!((speed - old * 2.0).abs() < 1e-3 && ramp.len() == 2, "{speed} {ramp:?}");
+        assert!((p.tracks[0].clips[1].duration_us - duration / 2).abs() <= 2);
+        let halved = p.tracks[0].clips[1].duration_us;
+        p.apply(set(serde_json::json!({"ramp": []}))).unwrap();
+        assert!(matches!(&p.tracks[0].clips[1].content, ClipContent::Media { ramp, .. } if ramp.is_empty()));
+        assert_eq!(p.tracks[0].clips[1].duration_us, halved);
+
+        // What has no source time to play differently refuses, as do half-made ramps and speed with a ramp.
+        let ramp = serde_json::json!([{"at": 0.0, "speed": 1.0}, {"at": 1.0, "speed": 2.0}]);
+        assert!(p.apply(set(serde_json::json!({"speed": 2.0, "ramp": ramp}))).is_err());
+        assert!(
+            p.apply(set(serde_json::json!({"ramp": [{"at": 0.2, "speed": 1.0}, {"at": 1.0, "speed": 2.0}]}))).is_err()
+        );
+        let freeze = p
+            .apply(cmd(serde_json::json!({"type": "freezeFrame", "clipId": second, "atUs": p.tracks[0].clips[1].start_us + 100_000})))
+            .unwrap()
+            .select[0]
+            .clone();
+        let ClipContent::Media { reverse, ramp: frozen, .. } =
+            &p.tracks[0].clips.iter().find(|c| c.id == freeze).unwrap().content
+        else {
+            unreachable!()
+        };
+        assert!(!reverse && frozen.is_empty(), "a freeze frame keeps the reverse or ramp of its clip");
+        let on_freeze = cmd(serde_json::json!({"type": "updateClip", "clipId": freeze, "reverse": true}));
+        assert!(p.apply(on_freeze).is_err());
+
+        // A picture put in a clip played backwards on a ramp has no time to play so; the clip takes it as a still.
+        p.apply(EditCmd::AddAssets { assets: vec![asset("photo", AssetKind::Image, 1)] }).unwrap();
+        let first = p.tracks[0].clips[0].id.clone();
+        p.apply(cmd(serde_json::json!({"type": "replaceClip", "clipId": first, "assetId": "photo"}))).unwrap();
+        let ClipContent::Media { reverse, ramp, .. } = &p.tracks[0].clips[0].content else { unreachable!() };
+        assert!(!reverse && ramp.is_empty());
     }
 
     #[test]
@@ -3905,6 +4118,8 @@ mod tests {
             style,
             speed: Some(0.5),
             keep_pitch: None,
+            reverse: None,
+            ramp: None,
             adjust,
             fade_in_us,
             fade_out_us,
@@ -3941,6 +4156,8 @@ mod tests {
             style,
             speed: Some(10.0),
             keep_pitch: None,
+            reverse: None,
+            ramp: None,
             adjust,
             fade_in_us,
             fade_out_us,
@@ -4120,6 +4337,8 @@ mod tests {
                     clip_id,
                     speed: Some(10.0),
                     keep_pitch: None,
+                    reverse: None,
+                    ramp: None,
                     transform: None,
                     volume: None,
                     text: None,
@@ -4198,6 +4417,8 @@ mod tests {
                 style: None,
                 speed: None,
                 keep_pitch: None,
+                reverse: None,
+                ramp: None,
                 adjust: None,
                 fade_in_us: None,
                 fade_out_us: None,

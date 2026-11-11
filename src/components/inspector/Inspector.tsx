@@ -72,7 +72,9 @@ function ClipInspector({ clip, kind, asset, music, chosen, onChoose }: { clip: C
   const detail =
     formatDuration(clip.durationUs) +
     (asset && asset.kind !== "image" && c.type === "media"
-      ? ` · ${freeze ? "freeze frame at" : "from"} ${formatDuration(c.sourceInUs - origin)} of ${formatDuration(length)}`
+      ? c.reverse
+        ? ` · backwards from ${c.sourceInUs + clip.durationUs * c.speed - origin >= length - 1000 ? "the end" : formatDuration(c.sourceInUs + clip.durationUs * c.speed - origin)} of ${formatDuration(length)}`
+        : ` · ${freeze ? "freeze frame at" : "from"} ${formatDuration(c.sourceInUs - origin)} of ${formatDuration(length)}`
       : "");
 
   return (
