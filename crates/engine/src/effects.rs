@@ -261,6 +261,7 @@ mod tests {
             hidden: false,
             keep_in_place: false,
             clips: vec![clip(), b],
+            translation: None,
         };
         assert!(transition_at(&track, 499_999).is_none());
         for (t, p) in [(500_000, 0.0), (1_000_000, 0.5), (1_499_999, 0.999999)] {

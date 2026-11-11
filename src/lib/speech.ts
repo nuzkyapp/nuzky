@@ -29,6 +29,9 @@ export const SPEECH_LANGUAGES: [string, string][] = [
   ["uk", "Ukrainian"],
 ];
 
+/** "English" for "en"; the code itself for a language Nuzky does not name. */
+export const languageName = (code: string) => SPEECH_LANGUAGES.find(([c]) => c === code)?.[1] ?? code;
+
 const LANGUAGE_KEY = "nuzky.speechLanguage";
 
 /** The language picked last, else the computer's language when it is offered, else detection. */

@@ -57,6 +57,7 @@ fn keyword_caption(group: usize) -> (Editor, String) {
                 anim_in: None,
                 anim_out: None,
                 transform: None,
+                translation: None,
             },
             None,
         )
@@ -433,6 +434,7 @@ fn equal_start_captions_do_not_overlap() {
             anim_in: None,
             anim_out: None,
             transform: None,
+            translation: None,
         },
         None,
     );

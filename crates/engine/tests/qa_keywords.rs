@@ -29,6 +29,7 @@ fn keyword_mark_without_a_pick_draws_only_that_word_in_default_yellow() {
             anim_in: None,
             anim_out: None,
             transform: None,
+            translation: None,
         })
         .unwrap()
         .select[0]

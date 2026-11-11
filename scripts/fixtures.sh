@@ -70,6 +70,17 @@ names() {
 }
 media names-1.mp4 names 150
 media names-2.mp4 names 145
+# Czech speech for captions in two languages (tests/e2e/bilingual.py): Whisper makes the Czech captions, the AI panel's
+# stand-in agent translates them.
+czech_talk() {
+  local dir
+  dir=$(mktemp -d)
+  espeak-ng -v cs -s 140 -w "$dir/speech.wav" "Dneska vám ukážu, jak stříhat video. Nejdřív naimportujeme klipy. Pak přidáme titulky."
+  ff -f lavfi -i testsrc2=s=1080x1920:r=30 -i "$dir/speech.wav" -shortest \
+    -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -b:a 128k -f mp4 "$1"
+  rm -rf "$dir"
+}
+media czech-talk.mp4 czech_talk
 media talk.mp4 ff -f lavfi -i testsrc2=s=1080x1920:r=30 -i "$out/speech.wav" -shortest \
   -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -b:a 128k
 media wide.mp4 ff -f lavfi -i testsrc2=s=1920x1080:r=25:d=5 -f lavfi -i sine=frequency=440:duration=5 \

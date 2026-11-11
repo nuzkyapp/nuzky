@@ -9,6 +9,8 @@ stream-json user messages from stdin while it works; Codex and OpenCode read one
              adds two captions and answers
   "retakes"  transcribes, retries a declined model three times, or cuts the first two words in one run
   "options"  offers two takes with suggest_options
+  "translate the captions into English"  (Translate in the Captions tab) reads the sentences with translate_captions,
+             waits a second and writes them in English in one run, sentence by sentence from a fixed list
   "search the web"  searches the web twice with the agent's own search, in its own format, and answers
   "logo of the company"  (Claude, a brand deal) follows the guide's "A brand's logo and its colours" for Acme, whose site
              is at $NUZKY_WEB_TEST_URL/acme: searches, imports the page and then its first picture, reads the colours
@@ -553,6 +555,18 @@ elif thumbnail:
                 time.sleep(0.5)
     call('end_run', {'run_id': run, 'action': 'keep'})
     say(f'Hotovo: cover i náhledovka pro YouTube mají hook „{hook}“ za hlavou.')
+elif message.startswith('translate the captions into english'):
+    read = call('translate_captions', {'language': 'en'})
+    said = ["Today I'll show you how to edit a video.", 'First we import the clips.', 'Then we add the captions.']
+    translations = [{'i': s['i'], 'text': said[s['i']] if s['i'] < len(said) else f"Sentence {s['i'] + 1} in English."}
+                    for s in read['sentences']]
+    say(f"Překládám {len(translations)} vět do angličtiny.")
+    # Long enough for the flow to see the translation running.
+    time.sleep(1.5)
+    run = call('begin_run', {'label': 'English captions'})['run_id']
+    made = call('translate_captions', {'language': 'en', 'run_id': run, 'key': read['key'], 'translations': translations})
+    call('end_run', {'run_id': run, 'action': 'keep'})
+    say(f"Hotovo: {made['caption_count']} anglických titulků pod českými.")
 elif 'search the web' in message:
     for query in SEARCHES:
         search(query)

@@ -322,6 +322,7 @@ fn captions_where_reels_put_them_cover_a_close_selfie_and_the_suggested_place_do
             anim_in: reel.anim_in,
             anim_out: reel.anim_out,
             transform: None,
+            translation: None,
         })
         .unwrap();
     let check = |project: &Project| covered_faces(project, &models(), &AtomicBool::new(false), &mut |_| {}).unwrap();

@@ -995,7 +995,7 @@ fn initialize_list_state_edit_end_undo_over_stdio() {
     let mut c = Client::new(true);
     let list = c.rpc("tools/list", json!({}));
     let tools = list["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 42);
+    assert_eq!(tools.len(), 43);
     let beats = tools.iter().find(|t| t["name"] == "cut_to_beats").unwrap();
     assert_eq!(
         (&beats["annotations"]["readOnlyHint"], &beats["annotations"]["destructiveHint"]),
@@ -2525,6 +2525,83 @@ fn correct_words_fixes_the_transcript_and_captions_over_stdio() {
         disk["wordCorrections"],
         json!([{"assetId":"take","sourceStartUs":1_000_000,"original":"vejte","text":"dejte"}])
     );
+}
+
+/// Czech captions translated into English by the agent become a captions track of their own: timed over the
+/// sentences they translate, in a smaller look under the Czech, and out of reach of everything made from the
+/// transcript, so making the Czech captions again or correcting a word that English also has leaves them as they
+/// are. Translating again replaces them in their own look.
+#[test]
+fn captions_translate_into_a_track_of_their_own_over_stdio() {
+    let mut c = Client::start(true, None, Some(None));
+    let run = c.call("begin_run", json!({"label":"English captions"}))["run_id"].clone();
+    place_transcribed_take(&mut c, &["Dneska", "vám", "to", "ukážu.", "Titulky."], &run);
+    c.call("build_captions", json!({"run_id": run}));
+    let czech = caption_texts(&mut c);
+
+    let read = c.call("translate_captions", json!({"language": "en"}));
+    let sentences: Vec<&str> =
+        read["sentences"].as_array().unwrap().iter().map(|s| s["text"].as_str().unwrap()).collect();
+    assert_eq!(sentences, ["Dneska vám to ukážu.", "Titulky."]);
+    assert_eq!(read["translation_track_id"], Value::Null);
+    let translations = json!([{"i": 0, "text": "Today I want to show you."}, {"i": 1, "text": "Captions."}]);
+    let write = |key: &Value, translations: &Value| json!({"language": "en", "run_id": run, "key": key, "translations": translations});
+    assert!(c.error("translate_captions", write(&json!("stale"), &translations)).contains("CAPTIONS_CHANGED"));
+    assert!(c.error("translate_captions", write(&read["key"], &json!([translations[0]]))).contains("missing [1]"));
+    assert!(c.error("translate_captions", json!({"language": "xx"})).contains("INVALID_LANGUAGE"));
+    let length = c.call("get_state", json!({}))["duration_us"].clone();
+    let made = c.call("translate_captions", write(&read["key"], &translations));
+    assert_eq!(c.call("get_state", json!({}))["duration_us"], length, "the last translation ends with the video");
+
+    let tracks =
+        |c: &mut Client| c.call("get_state", json!({"range": {"startUs": 0, "endUs": i64::MAX}}))["tracks"].clone();
+    let english =
+        |tracks: &Value| tracks.as_array().unwrap().iter().find(|t| t["translation"] == "en").unwrap().clone();
+    let state = tracks(&mut c);
+    let en = english(&state);
+    assert_eq!((&en["id"], &en["name"]), (&made["track_id"], &json!("Captions")));
+    let texts = |track: &Value| -> Vec<String> {
+        track["clips"].as_array().unwrap().iter().map(|c| c["content"]["text"].as_str().unwrap().to_owned()).collect()
+    };
+    assert_eq!(texts(&en), ["Today I want to", "show you.", "Captions."]);
+    let first = &read["sentences"][0];
+    let clips = en["clips"].as_array().unwrap();
+    assert_eq!(clips[0]["startUs"], first["start_us"]);
+    assert!(clips.iter().all(|clip| clip["content"]["words"].as_array().is_none_or(Vec::is_empty)));
+    let cs = state.as_array().unwrap().iter().find(|t| t["name"] == "Captions" && t["translation"].is_null()).unwrap();
+    let (cs_style, en_style) = (&cs["clips"][0]["content"]["style"], &clips[0]["content"]["style"]);
+    let size = |style: &Value| style["fontSize"].as_f64().unwrap();
+    assert!((size(en_style) - size(cs_style) * 0.7).abs() < 0.01, "{en_style} {cs_style}");
+    let y = |clip: &Value| clip["content"]["transform"]["y"].as_f64().unwrap();
+    assert!(y(&clips[0]) > y(&cs["clips"][0]), "English sits under the Czech");
+
+    // Czech made again and a corrected Czech "to" leave the English "to" alone.
+    c.call("build_captions", json!({"run_id": run}));
+    assert_eq!(caption_texts(&mut c), czech);
+    let transcript = c.call("get_transcript", json!({}));
+    assert_eq!(transcript["words"][2]["text"], "to");
+    let fixed = c.call(
+        "correct_words",
+        json!({"run_id": run, "transcript_key": transcript["transcript_key"],
+            "corrections": [{"i": 2, "text": "tohle", "expected": "to"}]}),
+    );
+    assert_eq!(fixed["captions_changed"].as_array().unwrap().len(), 1);
+    assert!(caption_texts(&mut c).iter().any(|t| t.contains("tohle")));
+    assert_eq!(texts(&english(&tracks(&mut c))), texts(&en));
+
+    // Translating again replaces the English in the look the user gave it.
+    let restyle = json!([{"type": "restyleTrack", "trackId": en["id"], "style": {"color": "#ffd400"}}]);
+    c.call("apply_edits", json!({"run_id": run, "request_id": "yellow", "edits": restyle}));
+    let read = c.call("translate_captions", json!({"language": "en"}));
+    assert_eq!(read["translation_track_id"], en["id"]);
+    let again = json!([{"i": 0, "text": "Today I'll show you this."}, {"i": 1, "text": "The captions."}]);
+    c.call("translate_captions", write(&read["key"], &again));
+    let after = english(&tracks(&mut c));
+    assert_eq!(after["id"], en["id"]);
+    assert_eq!(texts(&after), ["Today I'll show you this.", "The captions."]);
+    assert_eq!(after["clips"][0]["content"]["style"]["color"], "#ffd400");
+    c.call("end_run", json!({"run_id": run, "action": "keep"}));
+    c.finish();
 }
 
 /// A freeze frame an agent puts between two words holds the picture silently: no word or caption lands on it, the

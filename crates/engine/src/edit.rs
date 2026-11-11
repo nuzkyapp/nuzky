@@ -307,7 +307,8 @@ pub enum EditCmd {
         fps: Option<u32>,
     },
     /// Adds a new captions track; existing tracks are left alone. Every caption gets the animations, and the
-    /// transform fields given over its place a little below the middle.
+    /// transform fields given over its place a little below the middle. With `translation`, the track holds the
+    /// speech captions translated into that language (`Track::translation`).
     #[cfg_attr(feature = "ts", ts(optional_fields = nullable))]
     AddCaptions {
         segments: Vec<CaptionSegment>,
@@ -318,6 +319,8 @@ pub enum EditCmd {
         anim_out: Option<Animation>,
         #[serde(default)]
         transform: Option<TransformPatch>,
+        #[serde(default)]
+        translation: Option<String>,
     },
     /// Replaces the clips of an existing captions track. With `ranges`, only the captions starting in them go, and
     /// every new caption must start in them and leave the kept captions clear.
@@ -770,6 +773,7 @@ impl Project {
                 hidden: false,
                 keep_in_place,
                 clips: Vec::new(),
+                translation: None,
             },
         );
         at
@@ -1883,7 +1887,7 @@ impl Project {
     fn apply_captions(&mut self, cmd: EditCmd, out: &mut EditOutcome) -> Result<()> {
         let min = min_duration(self);
         match cmd {
-            EditCmd::AddCaptions { segments, style, anim_in, anim_out, transform } => {
+            EditCmd::AddCaptions { segments, style, anim_in, anim_out, transform, translation } => {
                 let clips = caption_clips(segments, &style, [anim_in, anim_out], transform, &self.canvas, min)?;
                 out.select = clips.iter().map(|c| c.id.clone()).take(1).collect();
                 self.tracks.push(Track {
@@ -1894,6 +1898,7 @@ impl Project {
                     hidden: false,
                     keep_in_place: false,
                     clips,
+                    translation,
                 });
             }
             EditCmd::ReplaceCaptions { track_id, segments, style, anim_in, anim_out, transform, ranges } => {
@@ -3205,7 +3210,15 @@ mod tests {
         let seg =
             |start_us, end_us, text: &str| CaptionSegment { start_us, end_us, text: text.into(), words: Vec::new() };
         let segments = vec![seg(1_000_000, 2_000_000, "over a"), seg(6_000_000, 7_000_000, "over b")];
-        p.apply(EditCmd::AddCaptions { segments, style, anim_in: None, anim_out: None, transform: None }).unwrap();
+        p.apply(EditCmd::AddCaptions {
+            segments,
+            style,
+            anim_in: None,
+            anim_out: None,
+            transform: None,
+            translation: None,
+        })
+        .unwrap();
         let first = p.tracks[0].clips[0].id.clone();
         let cut = copied(&p, &first);
         p.apply(EditCmd::DeleteClips { clip_ids: vec![first] }).unwrap();
@@ -3636,6 +3649,7 @@ mod tests {
             anim_in: None,
             anim_out: None,
             transform: None,
+            translation: None,
         })
         .unwrap();
         let title =
@@ -4193,6 +4207,7 @@ mod tests {
             anim_in: None,
             anim_out: None,
             transform: None,
+            translation: None,
         })
         .unwrap();
         let track = p.tracks.iter().find(|t| t.name == "Captions").unwrap().id.clone();
@@ -4216,6 +4231,7 @@ mod tests {
             anim_in: None,
             anim_out: None,
             transform: None,
+            translation: None,
         })
         .unwrap();
         assert_eq!(p.tracks.iter().filter(|t| t.name == "Captions").count(), 2);
@@ -4399,8 +4415,15 @@ mod tests {
             box_radius: BOX_RADIUS,
         };
         let seg = CaptionSegment { start_us: 1_000_000, end_us: 3_000_000, text: "jsem se".into(), words: Vec::new() };
-        p.apply(EditCmd::AddCaptions { segments: vec![seg], style, anim_in: None, anim_out: None, transform: None })
-            .unwrap();
+        p.apply(EditCmd::AddCaptions {
+            segments: vec![seg],
+            style,
+            anim_in: None,
+            anim_out: None,
+            transform: None,
+            translation: None,
+        })
+        .unwrap();
         let clip_id = p.tracks.iter().find(|t| t.is_captions()).unwrap().clips[0].id.clone();
         // A keyframe at 2.5 s on the timeline, inside the part that stays.
         let keyframes = vec![Keyframe { t_us: 1_500_000, transform: Transform::default(), ease: Ease::Linear }];
@@ -4456,6 +4479,7 @@ mod tests {
                 anim_in: None,
                 anim_out: None,
                 transform: None,
+                translation: None,
             })
             .unwrap();
             let mut overlay = p.tracks[0].clone();
@@ -4528,6 +4552,7 @@ mod tests {
                 anim_in: None,
                 anim_out: None,
                 transform: None,
+                translation: None,
             })
             .unwrap();
         (p, out.select[0].clone())
@@ -4694,6 +4719,7 @@ mod tests {
                 anim_in: None,
                 anim_out: None,
                 transform: None,
+                translation: None,
             })
             .unwrap_err();
         assert!(error.to_string().contains("Caption words must be the caption text"), "{error}");
@@ -4704,8 +4730,15 @@ mod tests {
             segment(1_000_000, "bez", vec![word("bez", 1_000_000)]),
             segment(1_010_000, "slov", Vec::new()),
         ];
-        p.apply(EditCmd::AddCaptions { segments: merged, style, anim_in: None, anim_out: None, transform: None })
-            .unwrap();
+        p.apply(EditCmd::AddCaptions {
+            segments: merged,
+            style,
+            anim_in: None,
+            anim_out: None,
+            transform: None,
+            translation: None,
+        })
+        .unwrap();
         let captions = &p.tracks.iter().find(|t| t.is_captions()).unwrap().clips;
         let ClipContent::Text { text, words, .. } = &captions[0].content else { panic!() };
         assert_eq!(

@@ -1332,7 +1332,7 @@ fn project_picture(project: &Project, clips: &[&nuzky_engine::model::Clip]) -> P
     let mut captions: Vec<Caption> = Vec::new();
     let mut heights: Vec<f32> = Vec::new();
     let mut looks: Vec<CaptionLook> = Vec::new();
-    for clip in project.tracks.iter().filter(|t| t.is_captions() && !t.hidden).flat_map(|t| &t.clips) {
+    for clip in project.tracks.iter().filter(|t| t.is_speech_captions() && !t.hidden).flat_map(|t| &t.clips) {
         let ClipContent::Text { text, style, transform, .. } = &clip.content else { continue };
         captions.push(Caption {
             start_us: clip.start_us,
@@ -2216,6 +2216,7 @@ mod tests {
             hidden: false,
             keep_in_place: false,
             clips: Vec::new(),
+            translation: None,
         };
         // The creator's look on three captions half again as large, two of them by keyframes, on a canvas half a
         // Reel's size; Reel on one.

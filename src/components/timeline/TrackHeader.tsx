@@ -1,5 +1,6 @@
 import { memo, type ReactNode } from "react";
 import { AudioLines, Captions, Eye, EyeOff, Film, Type, Volume2, VolumeX } from "lucide-react";
+import { languageName } from "../../lib/speech";
 import { MAIN_TRACK, isCaptionTrack, pictureAssets, useEditor } from "../../lib/store";
 import { CoverTile } from "../cover/CoverTile";
 import type { Track } from "../../lib/types";
@@ -35,6 +36,8 @@ export const TrackHeader = memo(function TrackHeader({ track, width, locked }: {
     const ids = s.snap && track.kind === "video" && track.clips.length > 0 ? pictureAssets(s.snap.project) : null;
     return !!ids && track.clips.every((c) => c.content.type === "media" && ids.has(c.content.assetId));
   });
+  // Translated captions go by their language, so the two caption tracks read apart.
+  const name = track.translation ? languageName(track.translation) : track.name || track.kind;
   const tone = track.kind === "audio" ? "bg-clip-audio" : track.kind === "text" ? (isCaptionTrack(track) ? "bg-clip-captions" : "bg-clip-title") : pictures ? "bg-clip-image" : "bg-clip-video";
   return (
     // 22 px toggles and the 24 px tile leave the name about 50 px, enough for "Captions" and "Overlay".
@@ -51,14 +54,14 @@ export const TrackHeader = memo(function TrackHeader({ track, width, locked }: {
           <span aria-hidden className={`mr-1.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] text-fg shadow-[inset_0_1px_0_rgb(255_255_255/.18)] ${tone}`}>
             <KindIcon size={13} />
           </span>
-          <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-fg">{track.name || track.kind}</span>
+          <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-fg">{name}</span>
         </>
       )}
       {/* Fixed columns: eye, then speaker; a spacer keeps the column when a toggle does not apply. */}
       {track.kind !== "audio" ? (
         <TrackToggle
           off={track.hidden}
-          label={track.hidden ? `Show ${track.name}` : `Hide ${track.name}`}
+          label={track.hidden ? `Show ${name}` : `Hide ${name}`}
           onIcon={<Eye size={14} />}
           offIcon={<EyeOff size={14} />}
           onClick={() => edit({ type: "updateTrack", trackId: track.id, hidden: !track.hidden })}

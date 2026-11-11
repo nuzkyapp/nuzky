@@ -13,6 +13,12 @@ use nuzky_engine::{
 /// The renderer's own font lookup, loaded once on the first font asked about.
 static RENDERER: LazyLock<Mutex<TextRenderer>> = LazyLock::new(|| Mutex::new(TextRenderer::new()));
 
+/// How tall `text` draws in `style`, wrapped at `max_width`, in canvas pixels at scale 1.
+pub fn text_height(text: &str, style: &TextStyle, max_width: f32) -> f32 {
+    let drawn = RENDERER.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).render(text, style, 1.0, max_width);
+    drawn.image.height as f32 / drawn.scale
+}
+
 fn text_style(clip: &Clip) -> Option<&TextStyle> {
     match &clip.content {
         ClipContent::Text { style, .. } => Some(style),

@@ -82,6 +82,8 @@ pub(crate) const TOOLS: &[Rules] = &[
         false,
     ),
     rules("build_captions", Never, true, false, false),
+    // Reading the sentences changes nothing; writing replaces the captions of that language made before.
+    rules("translate_captions", When(|args| args["translations"].is_null()), true, false, false),
     rules("apply_zooms", Never, true, false, false),
     // A dry run only reads the song and plans; preparing its sound runs as a job.
     rules("cut_to_beats", When(|args| args["dry_run"] == true), true, false, true),
@@ -167,6 +169,7 @@ mod tests {
                 "undo_run",
                 "undo_to",
                 "build_captions",
+                "translate_captions",
                 "apply_zooms",
                 "cut_to_beats",
                 "propose_reels",

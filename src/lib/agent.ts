@@ -6,6 +6,7 @@ import { check as checkChatGpt, planReady, useChatGpt } from "./chatgpt";
 import { forgetChatGptModels, loadModels as loadAgentModels, resolved, useModels } from "./models";
 import { downloadModels, loadModels, useCover } from "./cover";
 import { useDock } from "./dock";
+import { languageName } from "./speech";
 import { formatTime } from "./time";
 import { useEditor } from "./store";
 import type { AgentStatus, Snapshot } from "./types";
@@ -166,6 +167,8 @@ interface AgentState {
   demo: boolean;
   /** The conversation shown is the scripted one: it is never saved, and a real message starts a new chat. */
   demoItems: boolean;
+  /** The language the agent was asked to translate the captions into, until its turn ends. */
+  translating: string | null;
 }
 
 const AGENT_KEY = "nuzky.aiAgent";
@@ -205,6 +208,7 @@ export const useAgent = create<AgentState>(() => ({
   next: null,
   demo: false,
   demoItems: false,
+  translating: null,
 }));
 
 const agentApi = {
@@ -240,6 +244,7 @@ const TITLES: Record<string, string> = {
   apply_motion: "Adding motion",
   cut_to_beats: "Cutting to the beat",
   build_captions: "Adding captions",
+  translate_captions: "Translating the captions",
   inspect_frames: "Checking frames",
   activity: "Scanning picture and sound",
   import_media: "Importing media",
@@ -545,6 +550,26 @@ export function makeCoverWithAi() {
   else start();
 }
 
+/** Why the captions cannot be translated with the AI now, or null. */
+export function translateBlocked(): string | null {
+  const { agents, agentsError } = useAgent.getState();
+  if (!agents && !planReady(useChatGpt.getState().status)) return agentsError ? `Nuzky couldn't look for your AI. ${agentsError}` : "Looking for your AI…";
+  if (!anyAgent()) return "Connect an AI in the AI panel to translate captions";
+  return sendBlocked(false);
+}
+
+/**
+ * Asks the agent picked in the AI panel to translate the captions of the speech into `language`, opening the panel:
+ * it reads them with translate_captions, translates them itself and writes them in one run, which Undo takes back.
+ */
+export function translateCaptions(language: string) {
+  if (translateBlocked()) return;
+  useDock.setState({ open: true });
+  void send(`Translate the captions into ${languageName(language)}.`, "project", []);
+  // After send, which starts the turn; it ends when the turn does.
+  if (useAgent.getState().status === "working") useAgent.setState({ translating: language });
+}
+
 /** `attachments`: what goes with it; by default the draft's, when it sends the draft. */
 export async function send(text = useAgent.getState().draft.trim(), about: AiAbout = useAgent.getState().about, attachments?: Attachment[]) {
   const s = useAgent.getState();
@@ -690,7 +715,7 @@ function fail(code: AgentErrorCode, message: string) {
     retry = asked?.kind === "user" ? asked.text : undefined;
     retryAttachments = asked?.kind === "user" ? asked.attachments : undefined;
   }
-  useAgent.setState({ items: [...items, { kind: "error", code, message, retry, retryAttachments }], draft, attachments, status: "idle", next: null });
+  useAgent.setState({ items: [...items, { kind: "error", code, message, retry, retryAttachments }], draft, attachments, status: "idle", next: null, translating: null });
   // The sign-in ended or lost the plan meanwhile: the panel stops saying it uses the plan.
   if (s.agent === "chatgpt" && (code === "NOT_SIGNED_IN" || code === "PLAN_UNAVAILABLE")) void checkChatGpt(false);
 }
@@ -744,7 +769,7 @@ function onEvent(e: AgentEvent) {
     const ordered = [...marked.slice(0, turnStart), ...turn.filter((it) => it.kind !== "run"), ...runs];
     const draft = s.next && !next ? (s.draft ? `${s.next.text}\n${s.draft}` : s.next.text) : s.draft;
     const attachments = s.next && !next ? [...s.next.context.attachments, ...s.attachments] : s.attachments;
-    useAgent.setState({ items: stopped && !runs.length ? [...ordered, { kind: "stopped" }] : ordered, status: "idle", next: null, draft, attachments });
+    useAgent.setState({ items: stopped && !runs.length ? [...ordered, { kind: "stopped" }] : ordered, status: "idle", next: null, draft, attachments, translating: null });
     if (next) void start(next.text, next.context);
     else void watchJobs();
   }
@@ -781,7 +806,7 @@ useEditor.subscribe((s, prev) => {
   // What the agent did before another project opened is kept, even when it was cut short mid-answer.
   const old = useAgent.getState();
   if (old.chat) void saveChat(old.chat, old.items);
-  useAgent.setState({ chat: null, pastCount: null, chats: null, items: [], jobs: [], status: "idle", next: null, demoItems: false });
+  useAgent.setState({ chat: null, pastCount: null, chats: null, items: [], jobs: [], status: "idle", next: null, demoItems: false, translating: null });
   void loadChats().then(() => {
     const { chats, chat, items, status } = useAgent.getState();
     if (chats?.length && chat === null && !items.length && status === "idle") void openChat(chats[0].id);

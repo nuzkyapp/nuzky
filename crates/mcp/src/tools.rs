@@ -25,7 +25,7 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
-use crate::{activity, media, params::*, plugins, reels, transcript, vision_models, waveform};
+use crate::{activity, media, params::*, plugins, reels, transcript, translate, vision_models, waveform};
 
 const PREVIEW_CHARS: usize = 400;
 /// apply_edits leaves out clips longer than this: restyling 117 captions once answered 64 thousand characters,
@@ -350,6 +350,7 @@ impl Backend {
                 }
             }
             "build_captions" => self.captions(parse(arguments)?, state),
+            "translate_captions" => self.translate_captions(parse(arguments)?, state),
             "apply_zooms" => self.apply_zooms(parse(arguments)?, state),
             "cut_to_beats" => self.cut_to_beats(parse(arguments)?, state),
             "apply_motion" => self.apply_motion(parse(arguments)?, state),
@@ -1452,6 +1453,70 @@ impl Backend {
         )))
     }
 
+    /// The speech captions as sentences to translate, or, with translations, their captions in that language.
+    fn translate_captions(&self, args: TranslateCaptions, state: &SessionState) -> Result<Value> {
+        let project = &state.project;
+        let source = translate::source_track(project, args.track_id.as_deref())?;
+        let sentences = translate::sentences(source);
+        let key = translate::key(&sentences);
+        let existing = translate::translation_track(project, &args.language).map(|t| t.id.clone());
+        let Some(translations) = args.translations else {
+            ensure!(
+                nuzky_engine::model::language_name(&args.language).is_some(),
+                "INVALID_LANGUAGE: captions translate into cs, sk, en, de, pl, es, fr, it or uk"
+            );
+            let sentences: Vec<Value> = sentences
+                .iter()
+                .enumerate()
+                .map(|(i, s)| json!({"i": i, "start_us": s.start_us, "end_us": s.end_us, "text": s.text}))
+                .collect();
+            return Ok(json!({
+                "language": args.language, "key": key, "source_track_id": source.id,
+                "translation_track_id": existing, "sentences": sentences,
+            }));
+        };
+        let run_id = args.run_id.as_deref().context("INVALID_ARGUMENTS: translations need run_id")?;
+        owns_run(state, run_id)?;
+        ensure!(
+            args.key.as_deref() == Some(key.as_str()),
+            "CAPTIONS_CHANGED: the speech captions changed since they were read; call translate_captions without translations again"
+        );
+        let mut texts = vec![None; sentences.len()];
+        for t in translations {
+            let slot =
+                texts.get_mut(t.i).with_context(|| format!("INVALID_ARGUMENTS: there is no sentence {}", t.i))?;
+            ensure!(slot.replace(t.text).is_none(), "INVALID_ARGUMENTS: sentence {} is translated twice", t.i);
+        }
+        let missing: Vec<usize> = texts.iter().enumerate().filter(|(_, t)| t.is_none()).map(|(i, _)| i).collect();
+        ensure!(missing.is_empty(), "INVALID_ARGUMENTS: translate every sentence; missing {missing:?}");
+        let texts: Vec<String> = texts.into_iter().flatten().collect();
+        let defaults = translate::TRANSLATION_GROUPING;
+        let grouping = nuzky_analysis::CaptionGrouping {
+            max_words: args.max_words.unwrap_or(defaults.max_words),
+            max_chars: args.max_chars.unwrap_or(defaults.max_chars),
+            ..defaults
+        };
+        ensure!(grouping.max_words > 0 && grouping.max_chars > 0, "INVALID_GROUPING: caption limits must be positive");
+        let frame_us = project.frame_duration_us().ceil() as i64;
+        let segments = translate::translated_segments(&sentences, &texts, grouping, frame_us);
+        let canvas = (project.canvas.width, project.canvas.height);
+        let look = translate::asked_look(args.style, args.style_preset.as_deref(), canvas)?;
+        let edit = translate::translation_edit(project, &args.language, segments, look, args.transform, source)?;
+        let warnings = crate::fonts::warnings(crate::fonts::edit_families(&edit));
+        let result = self.host.session.apply_edits(
+            run_id,
+            &new_id(),
+            vec![edit],
+            Expect { revision: Some(state.stamp.revision), speech_layout_key: None },
+        )?;
+        let after = self.host.session.state()?.project;
+        let track_id = translate::translation_track(&after, &args.language).map(|t| t.id.clone());
+        Ok(with_warnings(
+            json!({"revision": result.stamp.revision, "session_epoch": result.stamp.session_epoch, "track_id": track_id, "caption_count": result.outcome.created.len(), "created": result.outcome.created, "removed": result.outcome.removed}),
+            warnings,
+        ))
+    }
+
     /// Punch-ins on word ranges as one edit of the run. Splitting clips moves the speech layout and
     /// so the transcript key; a retry with the same request_id applies the zoom planned the first
     /// time instead of planning it again.
@@ -2203,12 +2268,12 @@ pub(crate) fn tool_error(backend: &Backend, message: String) -> CallToolResult {
 
 fn caption_stats(project: &Project) -> Value {
     let captions =
-        project.tracks.iter().filter(|track| track.is_captions()).flat_map(|track| &track.clips).filter_map(|clip| {
-            match &clip.content {
+        project.tracks.iter().filter(|track| track.is_speech_captions()).flat_map(|track| &track.clips).filter_map(
+            |clip| match &clip.content {
                 nuzky_engine::model::ClipContent::Text { text, .. } => Some(text),
                 _ => None,
-            }
-        });
+            },
+        );
     let (count, max_chars, max_words) = captions.fold((0, 0, 0), |(count, chars, words), text| {
         (count + 1, chars.max(text.chars().count()), words.max(text.split_whitespace().count()))
     });
@@ -2479,6 +2544,7 @@ mod tests {
                 anim_in: None,
                 anim_out: None,
                 transform: None,
+                translation: None,
             })
             .unwrap();
         assert_eq!(caption_stats(&project), json!({"count":1,"max_chars":16,"max_words":2}));

@@ -143,6 +143,7 @@ pub const COMMANDS: &[&str] = &[
     "source_preview_play",
     "source_preview_resize",
     "source_preview_seek",
+    "speech_language",
     "speech_models",
     "speech_setup",
     "start_captions",

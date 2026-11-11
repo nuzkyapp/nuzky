@@ -221,6 +221,8 @@ export const api = {
   /** Recognises the heard media without a transcript, or all of it with `refresh`. */
   startTranscript: (model: string, language: string, refresh: boolean, epoch: Epoch) => invoke<string>("start_transcript", { model, language, refresh, expectedEpoch: epoch }),
   transcriptView: (pauseUs: number) => invoke<TranscriptView>("transcript_view", { pauseUs: Math.round(pauseUs) }),
+  /** The language most of the timeline's speech was recognised in, such as "cs"; null before any is recognised. */
+  speechLanguage: () => invoke<string | null>("speech_language"),
   /** Inclusive word index ranges and the hesitations after these words, as one undo step. */
   cutWords: (key: string, ranges: [number, number][], hesitations: number[], epoch: Epoch) =>
     invoke<TranscriptCut>("cut_words", { key, delete: ranges, hesitations, expectedEpoch: epoch }),

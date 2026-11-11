@@ -4,7 +4,9 @@
 
 use nuzky_engine::Project;
 use nuzky_engine::edit::MAIN_TRACK;
-use nuzky_engine::model::{Background, Clip, ClipContent, Crop, ReelStatus, Thumbnail, ThumbnailFormat, TrackKind};
+use nuzky_engine::model::{
+    Background, Clip, ClipContent, Crop, ReelStatus, Thumbnail, ThumbnailFormat, Track, TrackKind, language_name,
+};
 use nuzky_engine::recap::duration_text;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -39,6 +41,36 @@ fn quote(text: &str) -> String {
     let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
     let short: String = flat.chars().take(40).collect();
     if short.len() < flat.len() { format!("“{short}…”") } else { format!("“{short}”") }
+}
+
+/// Lines for captions added, removed, made again or restyled: the speech's, or with `language` their translation.
+fn caption_lines(out: &mut Vec<RunChange>, before: &[Clip], after: &[Clip], language: Option<&str>) {
+    let (one, many) = match language {
+        Some(name) => (format!("{name} caption"), format!("{name} captions")),
+        None => ("caption".to_owned(), "captions".to_owned()),
+    };
+    let new: Vec<&Clip> = after.iter().filter(|c| !before.iter().any(|b| b.id == c.id)).collect();
+    if before.is_empty() && !after.is_empty() {
+        out.push(line(format!("Added {}", count(after.len(), &one, &many)), &after.iter().collect::<Vec<_>>()));
+    } else if !before.is_empty() && after.is_empty() {
+        out.push(RunChange { text: format!("Removed the {many}"), clip_ids: Vec::new(), at_us: None });
+    } else if !new.is_empty() && new.len() == after.len() {
+        let again = match language {
+            Some(name) => format!("Translated the captions into {name} again"),
+            None => "Made the captions again".to_owned(),
+        };
+        out.push(line(format!("{again}: {} instead of {}", after.len(), before.len()), &new));
+    } else {
+        let style = |c: &Clip| match &c.content {
+            ClipContent::Text { style, .. } => Some(style.clone()),
+            ClipContent::Media { .. } => None,
+        };
+        let restyled: Vec<&Clip> =
+            after.iter().filter(|c| before.iter().any(|b| b.id == c.id && style(b) != style(c))).collect();
+        if !restyled.is_empty() {
+            out.push(line(format!("Restyled {}", count(restyled.len(), &one, &many)), &restyled));
+        }
+    }
 }
 
 /// Source time a media clip plays: [in, in + duration × speed).
@@ -231,40 +263,27 @@ pub fn summarize(before: &Project, after: &Project) -> Vec<RunChange> {
         out.push(line(format!("{what} {name}{place}"), clips));
     }
 
-    // Captions and titles.
-    let text_clips = |p: &'_ Project, captions: bool| -> Vec<Clip> {
-        p.tracks
-            .iter()
-            .filter(|t| t.kind == TrackKind::Text && t.is_captions() == captions)
-            .flat_map(|t| t.clips.clone())
-            .collect()
+    // Captions of the speech, their translations and titles.
+    let clips_of = |p: &'_ Project, keep: &dyn Fn(&Track) -> bool| -> Vec<Clip> {
+        p.tracks.iter().filter(|t| keep(t)).flat_map(|t| t.clips.clone()).collect()
     };
-    let (caps_before, caps_after) = (text_clips(before, true), text_clips(after, true));
-    let new_caps: Vec<&Clip> = caps_after.iter().filter(|c| !caps_before.iter().any(|b| b.id == c.id)).collect();
-    if caps_before.is_empty() && !caps_after.is_empty() {
-        out.push(line(
-            format!("Added {}", count(caps_after.len(), "caption", "captions")),
-            &caps_after.iter().collect::<Vec<_>>(),
-        ));
-    } else if !caps_before.is_empty() && caps_after.is_empty() {
-        out.push(RunChange { text: "Removed the captions".into(), clip_ids: Vec::new(), at_us: None });
-    } else if !new_caps.is_empty() && new_caps.len() == caps_after.len() {
-        out.push(line(
-            format!("Made the captions again: {} instead of {}", caps_after.len(), caps_before.len()),
-            &new_caps,
-        ));
-    } else {
-        let style = |c: &Clip| match &c.content {
-            ClipContent::Text { style, .. } => Some(style.clone()),
-            ClipContent::Media { .. } => None,
-        };
-        let restyled: Vec<&Clip> =
-            caps_after.iter().filter(|c| caps_before.iter().any(|b| b.id == c.id && style(b) != style(c))).collect();
-        if !restyled.is_empty() {
-            out.push(line(format!("Restyled {}", count(restyled.len(), "caption", "captions")), &restyled));
-        }
+    caption_lines(
+        &mut out,
+        &clips_of(before, &Track::is_speech_captions),
+        &clips_of(after, &Track::is_speech_captions),
+        None,
+    );
+    let mut languages: Vec<&str> =
+        before.tracks.iter().chain(&after.tracks).filter_map(|t| t.translation.as_deref()).collect();
+    languages.sort();
+    languages.dedup();
+    for language in languages {
+        let translated = |t: &Track| t.is_captions() && t.translation.as_deref() == Some(language);
+        let name = language_name(language).unwrap_or(language);
+        caption_lines(&mut out, &clips_of(before, &translated), &clips_of(after, &translated), Some(name));
     }
-    let (titles_before, titles_after) = (text_clips(before, false), text_clips(after, false));
+    let text_clips = |p: &'_ Project| clips_of(p, &|t: &Track| t.kind == TrackKind::Text && !t.is_captions());
+    let (titles_before, titles_after) = (text_clips(before), text_clips(after));
     let text_of = |c: &Clip| match &c.content {
         ClipContent::Text { text, .. } => text.clone(),
         ClipContent::Media { .. } => String::new(),
