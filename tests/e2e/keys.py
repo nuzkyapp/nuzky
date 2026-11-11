@@ -3,7 +3,7 @@ after Use it here, tooltips name the new key, a set of another editor (DaVinci R
 Premiere Pro file takes its keys over that set; a file of no editor changes nothing and says so."""
 import time
 
-from e2e.harness import FIXTURES, flow, press, wait
+from e2e.harness import FIXTURES, flow, leave_editor, press, wait
 from e2e.home import resize
 
 OPEN = "return !!document.querySelector('[role=dialog][data-settings]')"
@@ -189,3 +189,119 @@ def keys(r):
     r.check("the home screen's Settings row opens it", wait(lambda: r.s.run(DIALOG), 5))
     time.sleep(0.5)
     r.shot('home')
+
+
+QUESTION = "return !!document.querySelector('dialog[data-keys-question]')?.open"
+CHOICES = "return [...document.querySelectorAll('dialog[data-keys-question] [data-keys-choice]')].map((b) => b.textContent)"
+CURRENT = "return document.querySelector('dialog[data-keys-question] [aria-current=true]')?.dataset.keysChoice ?? null"
+FOCUSED = "return document.activeElement?.dataset.keysChoice ?? null"
+SETUP_OPEN = "return !!document.querySelector('[aria-labelledby=setup-title]')"
+VIEW = 'return window.__nuzky.store.getState().view'
+TOASTS = 'return window.__nuzky.store.getState().toasts.map((t) => t.text + (t.action ? ` [${t.action.label}]` : ""))'
+# The open project through the projects' own way in, as a click on its card.
+OPEN_PROJECT = "const s = window.__nuzky.store.getState().snap; window.__nuzky.openProject({path: s.path, name: s.project.name})"
+
+
+def asked_after_opening(r):
+    """Goes home and opens the project again, and says whether that asked about keys."""
+    leave_editor(r)
+    r.s.run(OPEN_PROJECT)
+    wait(lambda: r.s.run(VIEW) == 'editor', 5)
+    return wait(lambda: r.s.run(QUESTION), 2)
+
+
+@flow('keys-question', "A fresh profile's first project asks once which editor's keys to use: CapCut puts its keys in place, "
+      'so Ctrl+B splits and S does not; neither another project nor a restart asks again, Settings › General asks again and '
+      "Esc there changes nothing, and a fresh profile's Not now keeps Nuzky's keys", home=True, first_launch=True)
+def keys_question(r):
+    from e2e.corrections import Hands
+    from e2e.home import click
+    from e2e.setup import relaunch
+    from e2e.tour import click_at
+    resize(r, 1440, 900)
+    hands = Hands(r)
+    r.check('a fresh profile opens Get set up by itself', wait(lambda: r.s.run(SETUP_OPEN), 15))
+    press('Escape')
+    r.check('Esc closes it, and the home screen asks nothing about keys', wait(lambda: not r.s.run(SETUP_OPEN), 5) and not r.s.run(QUESTION))
+
+    click(r, '9:16', 'main')
+    r.check('a format opens the first project', wait(lambda: r.s.run(VIEW) == 'editor', 5))
+    r.check('the first project asks which editor\'s keys to use', wait(lambda: r.s.run(QUESTION), 5))
+    choices = r.s.run(CHOICES)
+    r.check('it offers Nuzky, CapCut, Final Cut Pro, DaVinci Resolve and Premiere Pro with their Split key',
+            choices == ['NuzkySsplits', 'CapCutCtrlBsplits', 'Final Cut ProCtrlBsplits', 'DaVinci ResolveCtrl\\splits', 'Premiere ProCtrlKsplits'], choices)
+    r.check("Nuzky's own keys are the ones in place", r.s.run(CURRENT) == 'nuzky', r.s.run(CURRENT))
+    r.check('the keyboard is on the question, not on a choice', r.s.run(FOCUSED) is None)
+    press('Down')
+    r.check('↓ goes to the set in place', r.s.run(FOCUSED) == 'nuzky', r.s.run(FOCUSED))
+    press('Down')
+    r.check('and on to CapCut', r.s.run(FOCUSED) == 'capcut', r.s.run(FOCUSED))
+    time.sleep(0.4)
+    r.shot('question')
+    if resize(r, 1024, 640):
+        time.sleep(0.4)
+        r.shot('question-1024')
+        resize(r, 1440, 900)
+
+    r.check('a real click on CapCut reaches it', click_at(hands, "dialog[data-keys-question] [data-keys-choice='capcut']"))
+    r.check('CapCut closes the question and takes its set', wait(lambda: not r.s.run(QUESTION), 5) and r.s.run(KEYS) == {'preset': 'capcut', 'changed': {}}, r.s.run(KEYS))
+    r.check('a message says so with its Split key', 'Keys like CapCut. Ctrl+B splits.' in r.s.run(TOASTS), r.s.run(TOASTS))
+    r.check('the choice stays for the next launch', r.s.run(SAVED) == {'preset': 'capcut', 'changed': {}}, r.s.run(SAVED))
+    time.sleep(0.4)
+    r.shot('capcut-chosen')
+
+    r.import_media(FIXTURES / 'talk.mp4')
+    r.add_clip('talk.mp4')
+    r.check("S, Nuzky's Split, does nothing with CapCut's keys", not split_with(r, 's'))
+    r.check('Ctrl+B splits', split_with(r, 'b', ctrlKey=True))
+    r.check('Ctrl+B is what the Split button\'s tooltip names', r.s.run(SPLIT_TIP) == 'Split at playhead (Ctrl+B)', r.s.run(SPLIT_TIP))
+    whole = r.track()[0]['durationUs']
+    r.seek(1_500_000)
+    time.sleep(0.3)
+    r.key('q')
+    left = wait(lambda: (t := r.track()) and abs(t[0]['durationUs'] - (whole - 1_500_000)) < 50_000 and t, 3)
+    r.check('Q deletes the part left of the playhead', left, r.track())
+    if left:
+        r.key('z', ctrlKey=True)
+        wait(lambda: r.track()[0]['durationUs'] == whole, 5)
+
+    r.check('opening the project again does not ask again', not asked_after_opening(r))
+    relaunch(r)
+    r.check('nor after a restart', not asked_after_opening(r) and r.s.run(KEYS)['preset'] == 'capcut', r.s.run(KEYS))
+
+    r.key(',', ctrlKey=True)
+    wait(lambda: r.s.run(OPEN), 5)
+    r.s.run("document.querySelector('#settings-tab-general').click()")
+    row = "[data-setting='keys-question']"
+    r.check('Settings › General names the keys in place', wait(lambda: 'Keys like CapCut' in (r.s.run(f"return document.querySelector(\"{row}\")?.textContent") or ''), 5))
+    time.sleep(0.4)
+    r.shot('settings-general')
+    r.check('a real click on Ask again reaches it', click_at(hands, f'{row} button'))
+    r.check('Ask again closes Settings and asks at once', wait(lambda: r.s.run(QUESTION) and not r.s.run(OPEN), 5))
+    r.check('with the check on CapCut now', r.s.run(CURRENT) == 'capcut', r.s.run(CURRENT))
+    toasts = len(r.s.run(TOASTS))
+    press('Escape')
+    r.check('Esc closes it and changes nothing', wait(lambda: not r.s.run(QUESTION), 5) and r.s.run(KEYS) == {'preset': 'capcut', 'changed': {}}
+            and len(r.s.run(TOASTS)) == toasts, (r.s.run(KEYS), r.s.run(TOASTS)))
+    r.check('and it does not ask by itself again', not asked_after_opening(r))
+    r.key(',', ctrlKey=True)
+    wait(lambda: r.s.run(OPEN), 5)
+    r.s.run("document.querySelector('#settings-tab-general').click()")
+    wait(lambda: r.s.run(f"return !!document.querySelector(\"{row}\")"), 5)
+    click_at(hands, f'{row} button')
+    r.check('Ask again asks once more', wait(lambda: r.s.run(QUESTION), 5))
+    click_at(hands, 'section[aria-label=Timeline]')
+    r.check('a click beside it closes it and changes nothing', wait(lambda: not r.s.run(QUESTION), 5) and r.s.run(KEYS) == {'preset': 'capcut', 'changed': {}}, r.s.run(KEYS))
+
+    # A fresh profile again, whose first project is the one on disk: Not now keeps Nuzky's keys.
+    r.s.run('localStorage.clear()')
+    time.sleep(1)
+    relaunch(r)
+    r.s.run(OPEN_PROJECT)
+    r.check("a fresh profile's first project asks", wait(lambda: r.s.run(QUESTION), 5))
+    r.check('Not now is a button', click_at(hands, 'dialog[data-keys-question] .justify-end button'))
+    r.check("Not now closes it and keeps Nuzky's keys", wait(lambda: not r.s.run(QUESTION), 5) and r.s.run(KEYS) == {'preset': 'nuzky', 'changed': {}}, r.s.run(KEYS))
+    r.check('S splits', split_with(r, 's'))
+    r.check('Ctrl+B does not', not split_with(r, 'b', ctrlKey=True))
+    r.check('after Not now, opening the project again does not ask', not asked_after_opening(r))
+    r.check('no error toast', not r.errors(), r.errors())
