@@ -3,11 +3,17 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 
 const MUTED_KEY = "nuzky.previewMuted";
 
-/** How this computer plays the preview; neither is part of the project or the export. */
+/** How this computer plays the preview; none of it is part of the project or the export. */
 export const usePreview = create(() => ({
   muted: localStorage.getItem(MUTED_KEY) === "1",
   full: false,
+  /** The share of the frame's width, from the left, shown before the clips' adjustments; `null` when not comparing. */
+  compare: null as number | null,
 }));
+
+export function toggleCompare() {
+  usePreview.setState({ compare: usePreview.getState().compare === null ? 0.5 : null });
+}
 
 export function toggleMuted() {
   const muted = !usePreview.getState().muted;

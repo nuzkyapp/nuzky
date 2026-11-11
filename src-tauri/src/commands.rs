@@ -119,6 +119,7 @@ pub const COMMANDS: &[&str] = &[
     "set_collection",
     "set_editor_shown",
     "set_preview_box",
+    "set_preview_compare",
     "set_preview_muted",
     "set_sound_settings",
     "set_style_settings",

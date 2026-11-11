@@ -103,7 +103,7 @@ const SHADER: &str = r#"
 struct Layer {
     corners: array<vec4<f32>, 4>, // xy = clip-space position, zw = uv
     local: array<vec4<f32>, 4>, // xy = output pixels from the centre of the visible part
-    opacity: vec4<f32>, // opacity, transfer (0 SDR, 1 PQ, 2 HLG)
+    opacity: vec4<f32>, // opacity, transfer (0 SDR, 1 PQ, 2 HLG), compare: output x left of which no adjustments apply
     adjust: vec4<f32>,
     effects: vec4<f32>,
     grading: vec4<f32>, // exposure, tint, highlights, shadows
@@ -278,7 +278,8 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         }
     }
     var rgb = c.rgb;
-    let adjusting = any(layer.adjust != vec4<f32>(0.0)) || any(layer.grading != vec4<f32>(0.0)) || layer.effects.x != 0.0 || layer.effects.w != 0.0;
+    let adjusting = in.pos.x >= layer.opacity.z
+        && (any(layer.adjust != vec4<f32>(0.0)) || any(layer.grading != vec4<f32>(0.0)) || layer.effects.x != 0.0 || layer.effects.w != 0.0);
     let hdr = layer.opacity.y > 0.0;
     if adjusting || hdr {
         // Tone mapping and adjustments work on straight colour.
@@ -568,6 +569,8 @@ pub struct Gpu {
     /// Frames whose wait acts as if the GPU never answered, for tests of a hung driver.
     #[doc(hidden)]
     pub hung_frames: u32,
+    /// Output x left of which layers draw without their adjustments, for the preview's before and after; 0 for none.
+    pub compare: f32,
     /// Errors wgpu reported outside an error scope during the frame, which by default would panic.
     errors: Arc<Mutex<Vec<String>>>,
     lost: Arc<Mutex<Option<String>>>,
@@ -783,6 +786,7 @@ impl Gpu {
             shrink,
             effect_targets: Vec::new(),
             hung_frames: 0,
+            compare: 0.0,
             errors,
             lost,
             target: None,
@@ -930,7 +934,7 @@ impl Gpu {
         let uniform = LayerUniform {
             corners,
             local,
-            opacity: [layer.opacity.clamp(0.0, 1.0), picture_transfer, 0.0, 0.0],
+            opacity: [layer.opacity.clamp(0.0, 1.0), picture_transfer, self.compare, 0.0],
             adjust: [a.brightness, a.contrast, a.saturation, a.temperature],
             effects: [a.vignette, layer.blur, premult as u8 as f32, a.fade],
             grading: [a.exposure, a.tint, a.highlights, a.shadows],

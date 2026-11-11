@@ -849,6 +849,11 @@ fn set_preview_box(state: State<'_, AppState>, width: u32, height: u32) {
 }
 
 #[tauri::command]
+fn set_preview_compare(state: State<'_, AppState>, split: Option<f32>) {
+    state.engine.send(Msg::Compare(split));
+}
+
+#[tauri::command]
 fn set_preview_muted(state: State<'_, AppState>, muted: bool) {
     state.engine.muted.store(muted, Ordering::Relaxed);
     if let Some((engine, _)) = state.source_preview.lock().unwrap().as_ref() {
@@ -1434,6 +1439,7 @@ pub fn run() {
             pause,
             seek,
             set_preview_box,
+            set_preview_compare,
             set_preview_muted,
             list_projects,
             list_fonts,

@@ -3,16 +3,20 @@ import { Palette } from "lucide-react";
 import { FILTERS, adjustCss, sameAdjust } from "../../lib/presets";
 import { findClip, useEditor } from "../../lib/store";
 import type { Adjust } from "../../lib/types";
-import { PresetTile } from "../ui";
+import { BeforeAfter, PresetTile } from "../ui";
 
 // Shown when the clip has no thumbnail yet: a sky, a horizon and grass reveal colour shifts.
 const SCENE = "linear-gradient(180deg, #7fb2e5 0%, #d9c7a3 52%, #4f7d3f 53%, #2c4a25 100%)";
+
+function Picture({ thumb }: { thumb: string | null }) {
+  return <span className="absolute inset-0" style={thumb ? { backgroundImage: `url(${thumb})`, backgroundSize: "cover", backgroundPosition: "center" } : { background: SCENE }} />;
+}
 
 function FilterPreview({ adjust, thumb }: { adjust: Adjust; thumb: string | null }) {
   const css = adjustCss(adjust);
   return (
     <span className="absolute inset-0" style={{ filter: css.filter }}>
-      <span className="absolute inset-0" style={thumb ? { backgroundImage: `url(${thumb})`, backgroundSize: "cover", backgroundPosition: "center" } : { background: SCENE }} />
+      <Picture thumb={thumb} />
       {css.tint && <span className="absolute inset-0 mix-blend-multiply" style={{ background: css.tint }} />}
       {css.vignette > 0 && <span className="absolute inset-0" style={{ background: `radial-gradient(ellipse at center, transparent 45%, rgba(0,0,0,${css.vignette}) 100%)` }} />}
     </span>
@@ -53,7 +57,7 @@ export function FiltersTab() {
             title={clipId ? `Apply ${f.label}` : "Select a video or image clip first"}
             onClick={() => clipId && edit({ type: "updateClip", clipId, adjust: f.adjust })}
           >
-            <FilterPreview adjust={f.adjust} thumb={thumb} />
+            {f.id === "none" ? <Picture thumb={thumb} /> : <BeforeAfter before={<Picture thumb={thumb} />} after={<FilterPreview adjust={f.adjust} thumb={thumb} />} />}
           </PresetTile>
         ))}
       </div>
