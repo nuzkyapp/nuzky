@@ -152,7 +152,7 @@ def cover_follows_the_shader(r, clip):
     wait(lambda: not r.s.run("return !!document.querySelector('[data-testid=cover-stage]')"), 5)
 
 
-@flow('plugin_effects', 'Without an effect plugin the Effects section says where effects come from; an effect added '
+@flow('plugin_effects', 'Without an effect plugin the Effects section lists Nuzky\'s own effects and Make an effect with AI; an effect added '
       'from the + menu changes the preview with its bands across the rotated photo as shown, and a second one stacks '
       'under a line; a shader an agent saves shows in the open cover and its tile as the cover export draws it; the '
       'Plugins tab lists each plugin\'s effects; a broken shader leaves the clip drawn without it, says so plainly once '
@@ -167,13 +167,15 @@ def plugin_effects(r):
     clip = r.track()[0]
     r.seek(clip['durationUs'] // 2)
     r.check('the inspector opens the Adjust tab', adjust(r, clip['id']))
-    empty = lambda: r.s.run(f"const s = {SECTION}; return s && {{text: s.innerText, add: !!{ADD}, "
-                            "make: [...s.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Make an effect')}")
-    r.check('without an effect plugin the Effects section says where effects come from, offers Make an effect and has no +',
-            wait(lambda: (e := empty()) and 'Effects come from plugins.' in e['text'] and e['make'] and not e['add'], 10), empty())
-    look(r, 'empty')
-    r.s.run(CLICK, 'aside[aria-label=Inspector]', 'Make an effect')
-    r.check('Make an effect opens the AI panel with the request started',
+    r.check('without a plugin the Effects section still has its +', wait(lambda: r.s.run(f'return !!{ADD} && !{ADD}.getAttribute("aria-disabled")'), 10))
+    r.s.run(f'{ADD}.click()')
+    items = lambda: r.s.run("return [...document.querySelectorAll('[role=menuitem]')].map((b) => b.textContent.trim())")
+    r.check("its menu lists Nuzky's own effects, then Make an effect with AI…",
+            wait(lambda: (i := items()) and i[:2] == ['Blur', 'Zoom blur'] and 'Glitch' in i and i[-1] == 'Make an effect with AI…', 5), items())
+    time.sleep(0.3)
+    r.shot('own-effects-menu')
+    r.s.run(f'{MENU_ITEM}.click()', 'Make an effect with AI')
+    r.check('Make an effect with AI… opens the AI panel with the request started',
             wait(lambda: r.s.run(DRAFT) == 'Make a Nuzky plugin with an effect that ' and r.s.run('return window.__nuzky.dock.getState().open'), 5),
             r.s.run(DRAFT))
     r.s.run("window.__nuzky.dock.setState({open: false}); window.__nuzky.agent.setState({draft: ''})")

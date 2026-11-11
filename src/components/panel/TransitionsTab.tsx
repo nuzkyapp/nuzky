@@ -1,6 +1,6 @@
 import { useState, type CSSProperties } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { ArrowLeft, ArrowUp, Ban, Blend, ChevronsLeft, Droplet, Moon, Sun, Trash2, ZoomIn, type LucideIcon } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Ban, Blend, ChevronsDown, ChevronsLeft, ChevronsRight, ChevronsUp, Droplet, Moon, RotateCw, Sun, Trash2, ZoomIn, ZoomOut, type LucideIcon } from "lucide-react";
 import { LIMITS } from "../../lib/limits";
 import { DEFAULT_TRANSITION_US, TRANSITIONS } from "../../lib/presets";
 import { deleteSelection, editClip, mainClips, transitionTarget, useEditor, type Cut } from "../../lib/store";
@@ -14,9 +14,16 @@ export const TRANSITION_ICONS: Record<TransitionKind, LucideIcon> = {
   fadeBlack: Moon,
   fadeWhite: Sun,
   slideLeft: ArrowLeft,
+  slideRight: ArrowRight,
   slideUp: ArrowUp,
+  slideDown: ArrowDown,
   zoomIn: ZoomIn,
+  zoomOut: ZoomOut,
   wipeLeft: ChevronsLeft,
+  wipeRight: ChevronsRight,
+  wipeUp: ChevronsUp,
+  wipeDown: ChevronsDown,
+  spin: RotateCw,
   blur: Droplet,
 };
 
@@ -26,9 +33,16 @@ const MOTION: Record<TransitionKind, { a?: string; b: string; flash?: string }> 
   fadeBlack: { b: "t-swap-b", flash: "#000" },
   fadeWhite: { b: "t-swap-b", flash: "#fff" },
   slideLeft: { a: "t-slide-left-a", b: "t-slide-left-b" },
+  slideRight: { a: "t-slide-right-a", b: "t-slide-right-b" },
   slideUp: { a: "t-slide-up-a", b: "t-slide-up-b" },
+  slideDown: { a: "t-slide-down-a", b: "t-slide-down-b" },
   zoomIn: { a: "t-zoom-a", b: "t-zoom-b" },
+  zoomOut: { b: "t-zoom-out-b" },
   wipeLeft: { b: "t-wipe-b" },
+  wipeRight: { b: "t-wipe-right-b" },
+  wipeUp: { b: "t-wipe-up-b" },
+  wipeDown: { b: "t-wipe-down-b" },
+  spin: { a: "t-spin-a", b: "t-spin-b" },
   blur: { a: "t-blur-a", b: "t-blur-b" },
 };
 

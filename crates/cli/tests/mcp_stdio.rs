@@ -5790,6 +5790,61 @@ fn a_plugin_effect_is_saved_checked_and_put_on_a_clip_over_stdio() {
     c.finish();
 }
 
+/// An agent picks Nuzky's own effects without any plugin, the newer transitions and a keyframe curve, all of them in
+/// the schema it reads; a plugin may not take the id of Nuzky's own effects.
+#[test]
+fn agents_use_nuzkys_own_effects_more_transitions_and_keyframe_curves_over_stdio() {
+    let mut c = Client::start(true, None, Some(None));
+    let tools = c.rpc("tools/list", json!({}));
+    let schema =
+        tools["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "apply_edits").unwrap().to_string();
+    for name in ["\"easeIn\"", "\"easeOut\"", "\"spin\"", "\"wipeDown\"", "\"zoomOut\""] {
+        assert!(schema.contains(name), "apply_edits names {name}");
+    }
+    let image = c.dir.join("still.ppm");
+    std::fs::write(&image, b"P6\n2 2\n255\nabcdefghijkl").unwrap();
+    let run = c.call("begin_run", json!({"label": "looks"}))["run_id"].clone();
+    let asset = c.call("import_media", json!({"run_id": run, "paths": [image]}))["asset_ids"][0].clone();
+    let edits = json!([{"type": "addClip", "assetId": asset}, {"type": "addClip", "assetId": asset}]);
+    c.call("apply_edits", json!({"run_id": run, "request_id": "place", "edits": edits}));
+    let clips = c.call("get_state", json!({}))["tracks"][0]["clips"].clone();
+    let (first, second) = (clips[0]["id"].clone(), clips[1]["id"].clone());
+    let glitch =
+        json!({"plugin": "nuzky", "effect": "glitch", "name": "Glitch", "version": "1", "params": {"amount": 0.8}});
+    let still = json!({"x": 0, "y": 0, "scale": 1, "rotation": 0, "opacity": 1});
+    let keyframes = json!([
+        {"tUs": 0, "transform": still, "ease": "easeOut"},
+        {"tUs": 1_000_000, "transform": {"x": 0.2, "y": 0, "scale": 1.3, "rotation": 0, "opacity": 1}, "ease": "linear"}
+    ]);
+    c.call(
+        "apply_edits",
+        json!({"run_id": run, "request_id": "looks", "edits": [
+            {"type": "setEffects", "clipId": first, "effects": [glitch]},
+            {"type": "setTransition", "clipId": second, "transition": {"kind": "spin", "durationUs": 400_000}},
+            {"type": "setKeyframes", "clipId": first, "keyframes": keyframes}]}),
+    );
+    let bounce = json!([{"tUs": 0, "transform": still, "ease": "bounce"}]);
+    let error = c.error(
+        "apply_edits",
+        json!({"run_id": run, "request_id": "bounce", "edits": [{"type": "setKeyframes", "clipId": first, "keyframes": bounce}]}),
+    );
+    assert!(error.contains("bounce"), "{error}");
+    c.call("end_run", json!({"run_id": run, "action": "keep"}));
+    let state = c.call("get_state", json!({}));
+    let clips = &state["tracks"][0]["clips"];
+    assert_eq!(clips[0]["effects"], json!([glitch]));
+    assert_eq!(clips[0]["keyframes"][0]["ease"], "easeOut");
+    assert_eq!(clips[1]["transitionIn"], json!({"kind": "spin", "durationUs": 400_000}));
+    assert!(state.get("effect_issues").is_none(), "Nuzky's own effects need no plugin: {state}");
+
+    let manifest = json!({"nuzkyPlugin": 2, "id": "nuzky", "name": "Mine", "description": "Takes Nuzky's id",
+        "version": "1.0.0", "effects": [{"id": "glitch", "name": "Glitch"}]});
+    let effect = "fn effect(p: Pixel) -> vec4<f32> {\n    return p.color;\n}\n";
+    let error = plugin_error(c.error("save_plugin", json!({"manifest": manifest, "effects": {"glitch": effect}})));
+    assert!(error.starts_with("PLUGIN_BROKEN: plugin.json: id nuzky is Nuzky's own effects"), "{error}");
+    c.finish();
+}
+
 /// A phone video lying on its side, with the iPhone's QuickTime tags of when and where, and sound: a voice (a tone
 /// with harmonics) for 1 s, 0.4 s of only the room, the voice again, all over 50 Hz mains hum with harmonics and a
 /// 15 kHz whine.

@@ -145,9 +145,16 @@ export const TRANSITIONS: { kind: TransitionKind; label: string }[] = [
   { kind: "fadeBlack", label: "Fade to black" },
   { kind: "fadeWhite", label: "Flash white" },
   { kind: "slideLeft", label: "Slide left" },
+  { kind: "slideRight", label: "Slide right" },
   { kind: "slideUp", label: "Slide up" },
-  { kind: "zoomIn", label: "Zoom in" },
+  { kind: "slideDown", label: "Slide down" },
   { kind: "wipeLeft", label: "Wipe left" },
+  { kind: "wipeRight", label: "Wipe right" },
+  { kind: "wipeUp", label: "Wipe up" },
+  { kind: "wipeDown", label: "Wipe down" },
+  { kind: "zoomIn", label: "Zoom in" },
+  { kind: "zoomOut", label: "Zoom out" },
+  { kind: "spin", label: "Spin" },
   { kind: "blur", label: "Blur" },
 ];
 

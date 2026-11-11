@@ -184,6 +184,7 @@ fn placement(
             let end = text.char_indices().nth(count).map(|(i, _)| i).unwrap_or(text.len());
             let zoom = match visible.transition {
                 Some(TransitionRole { kind: TransitionKind::ZoomIn, progress, incoming: false }) => 1.0 + progress,
+                Some(TransitionRole { kind: TransitionKind::ZoomOut, progress, incoming: true }) => 2.0 - progress,
                 _ => 1.0,
             };
             // A power of two keeps the raster through a scale animation. A small preview gets a small raster too:
@@ -301,7 +302,9 @@ fn decode_resolution(project: &Project, clip: &Clip, asset: &Asset, k: f32, max_
     scale *= max_animation_scale(clip);
     if project.tracks.iter().filter(|t| t.id == crate::edit::MAIN_TRACK).any(|t| {
         t.clips.windows(2).any(|pair| {
-            pair[0].id == clip.id && pair[1].transition_in.is_some_and(|t| t.kind == TransitionKind::ZoomIn)
+            let zoomed = |kind| pair[1].transition_in.is_some_and(|t| t.kind == kind);
+            (pair[0].id == clip.id && zoomed(TransitionKind::ZoomIn))
+                || (pair[1].id == clip.id && zoomed(TransitionKind::ZoomOut))
         })
     }) {
         scale *= 2.0;
@@ -409,7 +412,7 @@ impl Renderer {
         let mut passes = Vec::new();
         for effect in clip.effects.iter().take(MAX_CLIP_EFFECTS) {
             let name = plugin_effects::display_name(effect);
-            let found = self.plugins.as_deref().map(|dir| plugin_effects::lookup(dir, &effect.plugin, &effect.effect));
+            let found = plugin_effects::find(self.plugins.as_deref(), &effect.plugin, &effect.effect);
             let Some(Lookup::Ready(loaded)) = found else {
                 self.skip(name);
                 continue;
@@ -964,38 +967,57 @@ fn transition_geometry(
 ) -> (Quad, f32, Option<[f32; 4]>) {
     use TransitionKind::*;
     let weight = if incoming { p } else { 1.0 - p };
-    let mut t = Transform::default();
+    let (w, h) = (w as f32, h as f32);
+    let (mut x, mut y, mut scale, mut turn, mut alpha) = (0.0, 0.0, 1.0, 0.0, 1.0);
     match kind {
-        Dissolve | Blur => t.opacity = weight,
-        FadeBlack | FadeWhite => t.opacity = (weight * 2.0 - 1.0).max(0.0),
-        SlideLeft => t.x = if incoming { 1.0 - p } else { -p },
-        SlideUp => t.y = if incoming { 1.0 - p } else { -p },
+        Dissolve | Blur => alpha = weight,
+        FadeBlack | FadeWhite => alpha = (weight * 2.0 - 1.0).max(0.0),
+        SlideLeft => x = if incoming { 1.0 - p } else { -p },
+        SlideRight => x = if incoming { p - 1.0 } else { p },
+        SlideUp => y = if incoming { 1.0 - p } else { -p },
+        SlideDown => y = if incoming { p - 1.0 } else { p },
         ZoomIn => {
-            t.opacity = weight;
+            alpha = weight;
             if !incoming {
-                t.scale = 1.0 + p;
+                scale = 1.0 + p;
             }
         }
-        WipeLeft => {}
+        ZoomOut => {
+            alpha = weight;
+            if incoming {
+                scale = 2.0 - p;
+            }
+        }
+        Spin => {
+            // Both turn half a circle together, the incoming one finishing upright, and cross over in the middle.
+            alpha = ((weight - 0.5) * 4.0 + 0.5).clamp(0.0, 1.0);
+            turn = std::f32::consts::PI * if incoming { p - 1.0 } else { p };
+            scale = 1.0 - 0.3 * (std::f32::consts::PI * p).sin();
+        }
+        WipeLeft | WipeRight | WipeUp | WipeDown => {}
     }
     let cx = (corners[0][0] + corners[2][0]) / 2.0;
     let cy = (corners[0][1] + corners[2][1]) / 2.0;
+    let (sin, cos) = turn.sin_cos();
     for point in &mut corners {
-        point[0] = (point[0] - cx) * t.scale + cx + t.x * w as f32;
-        point[1] = (point[1] - cy) * t.scale + cy + t.y * h as f32;
+        let (dx, dy) = ((point[0] - cx) * scale, (point[1] - cy) * scale);
+        point[0] = dx * cos - dy * sin + cx + x * w;
+        point[1] = dx * sin + dy * cos + cy + y * h;
     }
+    // The part of the frame each clip shows: the incoming one takes the side it enters from.
+    let split = |edge: f32, along_x: bool, incoming_first: bool| {
+        let (lo, hi) =
+            if along_x { ([0.0, 0.0, edge, h], [edge, 0.0, w, h]) } else { ([0.0, 0.0, w, edge], [0.0, edge, w, h]) };
+        Some(if incoming == incoming_first { lo } else { hi })
+    };
     let clip = match kind {
-        TransitionKind::WipeLeft | TransitionKind::SlideLeft => {
-            let edge = w as f32 * (1.0 - p);
-            Some(if incoming { [edge, 0.0, w as f32, h as f32] } else { [0.0, 0.0, edge, h as f32] })
-        }
-        TransitionKind::SlideUp => {
-            let edge = h as f32 * (1.0 - p);
-            Some(if incoming { [0.0, edge, w as f32, h as f32] } else { [0.0, 0.0, w as f32, edge] })
-        }
+        WipeLeft | SlideLeft => split(w * (1.0 - p), true, false),
+        WipeRight | SlideRight => split(w * p, true, true),
+        WipeUp | SlideUp => split(h * (1.0 - p), false, false),
+        WipeDown | SlideDown => split(h * p, false, true),
         _ => None,
     };
-    (corners, opacity * t.opacity, clip)
+    (corners, opacity * alpha, clip)
 }
 
 fn apply_transition(layer: &mut Layer, kind: TransitionKind, p: f32, incoming: bool, w: u32, h: u32) {
@@ -1145,6 +1167,47 @@ mod tests {
     use super::*;
     use crate::edit::{CaptionSegment, EditCmd};
     use crate::model::{BOX_RADIUS, TextAlign, TextStyle, Track};
+
+    /// Every transition starts on the outgoing clip alone, as it was, and ends on the incoming one alone, as it is; the
+    /// incoming clip comes from the side its name says.
+    #[test]
+    fn every_transition_starts_on_the_outgoing_clip_and_ends_on_the_incoming_one() {
+        use TransitionKind::*;
+        let (w, h) = (100, 200);
+        let frame: Quad = [[0.0, 0.0], [100.0, 0.0], [100.0, 200.0], [0.0, 200.0]];
+        let near =
+            |a: &Quad, b: &Quad| a.iter().zip(b).all(|(p, q)| (p[0] - q[0]).abs() < 1e-3 && (p[1] - q[1]).abs() < 1e-3);
+        let shows = |(corners, opacity, clip): (Quad, f32, Option<[f32; 4]>)| {
+            let rect = clip.unwrap_or([0.0, 0.0, w as f32, h as f32]);
+            opacity > 0.0 && rect[2] > rect[0] && rect[3] > rect[1] && intersects_rect(&corners, rect)
+        };
+        let kinds = [
+            Dissolve, FadeBlack, FadeWhite, SlideLeft, SlideUp, ZoomIn, WipeLeft, Blur, SlideRight, SlideDown,
+            WipeRight, WipeUp, WipeDown, ZoomOut, Spin,
+        ];
+        for kind in kinds {
+            for (p, shown) in [(0.0, false), (1.0, true)] {
+                let whole = transition_geometry(frame, 1.0, kind, p, shown, w, h);
+                assert!(near(&whole.0, &frame) && whole.1 == 1.0, "{kind:?} at {p}: {whole:?}");
+                let gone = transition_geometry(frame, 1.0, kind, p, !shown, w, h);
+                assert!(!shows(gone), "{kind:?} at {p} still shows the other clip: {gone:?}");
+            }
+            assert!(
+                shows(transition_geometry(frame, 1.0, kind, 0.6, true, w, h)),
+                "{kind:?} shows the incoming clip past midway"
+            );
+        }
+        // A quarter of the way, where the incoming clip shows.
+        let at = |kind, incoming| transition_geometry(frame, 1.0, kind, 0.25, incoming, w, h);
+        assert_eq!(at(SlideRight, true).2, Some([0.0, 0.0, 25.0, 200.0]));
+        assert_eq!(at(SlideRight, true).0[0][0], -75.0, "from the left");
+        assert_eq!(at(SlideDown, true).0[0][1], -150.0, "from the top");
+        assert_eq!(at(WipeRight, true).2, Some([0.0, 0.0, 25.0, 200.0]));
+        assert_eq!(at(WipeUp, true).2, Some([0.0, 150.0, 100.0, 200.0]));
+        assert_eq!(at(WipeDown, true).2, Some([0.0, 0.0, 100.0, 50.0]));
+        assert_eq!(at(ZoomOut, true).0[0], [-37.5, -75.0], "the incoming clip starts larger");
+        assert!(at(Spin, false).0[0][0] > 0.0, "the outgoing clip turns");
+    }
 
     #[test]
     fn background_averages_pixels_and_preserves_alpha() {
