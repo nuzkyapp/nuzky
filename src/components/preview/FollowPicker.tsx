@@ -61,7 +61,7 @@ export function FollowPicker({ width, height }: { width: number; height: number 
         const mine = all.find((b) => b.clipId === clipId);
         if (!mine) {
           setArea(null);
-          useFollow.setState((s) => (s.picking ? { picking: { ...s.picking, frame: null } } : s));
+          useFollow.setState((s) => (s.picking ? { picking: { ...s.picking, frame: null, hidden: true } } : s));
           return;
         }
         const xs = mine.corners.map((c) => c[0]);
@@ -75,7 +75,7 @@ export function FollowPicker({ width, height }: { width: number; height: number 
           // A third of the shown picture's shorter side, in its middle, until the user draws one.
           const side = Math.min(shown[2], shown[3]) / 3;
           const start: Box = [shown[0] + (shown[2] - side) / 2, shown[1] + (shown[3] - side) / 2, side, side];
-          return { picking: { ...s.picking, frame: mine.frame as Pt[], box: inside(s.picking.box ?? start, shown, 1) } };
+          return { picking: { ...s.picking, frame: mine.frame as Pt[], hidden: false, box: inside(s.picking.box ?? start, shown, 1) } };
         });
       })
       .catch(() => alive && setArea(null));
@@ -203,11 +203,12 @@ export function FollowStatus() {
     if (clipId) document.querySelector<HTMLElement>("[data-follow-go]")?.focus();
   }, [clipId]);
   if (picking) {
-    const why = !over ? "Move the playhead back over the clip" : !ready ? "The clip isn't shown at the playhead" : undefined;
+    // Until the engine says where the picture is, Follow waits without a reason.
+    const why = !over ? "Move the playhead back over the clip" : picking.hidden ? "The clip isn't shown at the playhead" : undefined;
     return (
       <div className={CHIP} role="status">
-        <span className="truncate">Drag a box around what to follow</span>
-        <ChipButton data-follow-go disabled={!!why} disabledReason={why} title="Enter · arrow keys move the box, + and − resize it" onClick={followPicked}>
+        <span className="truncate">Put the box around what to follow</span>
+        <ChipButton data-follow-go disabled={!!why || !ready} disabledReason={why} title="Enter · arrow keys move the box, + and − resize it" onClick={followPicked}>
           Follow
         </ChipButton>
         <ChipButton

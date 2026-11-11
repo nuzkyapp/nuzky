@@ -14,7 +14,13 @@ export function FollowSection({ clip, asset }: { clip: Clip; asset: Asset }) {
   const picking = useFollow((s) => s.picking?.clipId === clip.id);
   const following = useFollow((s) => !!s.job);
   const reframing = useReframe((s) => !!s.job);
-  const why = following ? "Following…" : reframing ? "Wait for the reframe to finish" : !room ? "The picture just fills the frame, so it can't move. Zoom in on the clip first." : undefined;
+  const why = following
+    ? "Already following. Stop it in the preview."
+    : reframing
+      ? "Wait for the reframe to finish"
+      : !room
+        ? "The picture just fills the frame, so it can't move. Change the Ratio or zoom in on the clip first."
+        : undefined;
   return (
     <Section title="Follow">
       <Button
@@ -23,11 +29,15 @@ export function FollowSection({ clip, asset }: { clip: Clip; asset: Asset }) {
         className="w-full justify-center gap-1.5"
         disabled={!!why}
         disabledReason={why}
-        title={picking ? "Stop choosing what to follow" : "Draw a box around a person or a thing in the preview, and the picture keeps it in the frame through the clip"}
+        title={
+          picking
+            ? "Stop choosing what to follow"
+            : `Box a person or a thing in the preview, and the picture keeps it in the frame through the clip${clip.keyframes.length > 0 ? ", replacing the clip's keyframes" : ""}`
+        }
         onClick={() => (picking ? stopPicking() : startPicking(clip.id))}
       >
         <Crosshair size={14} />
-        {picking ? "Choosing in the preview…" : "Choose what to follow"}
+        {picking ? "Cancel choosing" : "Choose what to follow"}
       </Button>
     </Section>
   );

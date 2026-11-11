@@ -13,7 +13,7 @@ interface FollowState {
    * The video clip whose picture is being boxed in the preview; once the picture shows, the box in canvas pixels and
    * the corners of the whole picture on the canvas at the playhead.
    */
-  picking: { clipId: string; box: Box | null; frame: [number, number][] | null } | null;
+  picking: { clipId: string; box: Box | null; frame: [number, number][] | null; hidden?: boolean } | null;
   job: string | null;
   /** What the last follow did, offered for Undo while it is the newest step. */
   done: { snap: Snapshot; text: string } | null;
@@ -35,16 +35,27 @@ export function roomToFollow(asset: Asset, canvas: Canvas, t: Transform): boolea
   return w * scale * shown[0] - canvas.width > 1 || h * scale * shown[1] - canvas.height > 1;
 }
 
-/** Shows the box in the preview over the clip's picture, moving the playhead onto the clip when it is elsewhere. */
+/**
+ * Shows the box in the preview over the clip's picture, moving the playhead onto the clip when it is elsewhere. While
+ * the video plays it waits until the pause is confirmed, as playing ends choosing.
+ */
 export function startPicking(clipId: string) {
   if (aiLocked() || useFollow.getState().job) return;
-  const { snap, timeUs, seek, playing, togglePlay } = useEditor.getState();
-  const clip = snap && findClip(snap.project, clipId)?.clip;
-  if (!clip) return;
-  if (playing) togglePlay();
-  if (timeUs < clip.startUs || timeUs >= clip.startUs + clip.durationUs) seek(clip.startUs);
-  useFollow.setState({ picking: { clipId, box: null, frame: null }, done: null });
-  useReframe.setState({ done: null });
+  const open = () => {
+    const { snap, timeUs, seek } = useEditor.getState();
+    const clip = snap && findClip(snap.project, clipId)?.clip;
+    if (!clip) return;
+    if (timeUs < clip.startUs || timeUs >= clip.startUs + clip.durationUs) seek(clip.startUs);
+    useFollow.setState({ picking: { clipId, box: null, frame: null }, done: null });
+    useReframe.setState({ done: null });
+  };
+  if (!useEditor.getState().playing) return open();
+  const paused = useEditor.subscribe((s) => {
+    if (s.playing) return;
+    paused();
+    open();
+  });
+  useEditor.getState().togglePlay();
 }
 
 export function stopPicking() {
@@ -83,7 +94,7 @@ export function onFollowJob(job: JobEvent) {
       toast({ kind: "info", text: "Nothing to change: the picture already keeps it in the frame." });
       return;
     }
-    const text = out.lostUs >= 500_000 ? `Followed it · lost for ${(out.lostUs / 1e6).toFixed(1)} s, where the picture holds still` : "Followed it through the clip";
+    const text = out.lostUs >= 500_000 ? `Followed it · lost it for ${(out.lostUs / 1e6).toFixed(1)} s, held still there` : "Followed it through the clip";
     // The project-changed event of the edit came before the job's end; a later edit already moved past it.
     if (snap && snap.revision === out.revision && snap.sessionEpoch === out.sessionEpoch) useFollow.setState({ done: { snap, text } });
   }

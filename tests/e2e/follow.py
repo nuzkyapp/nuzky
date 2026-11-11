@@ -60,7 +60,7 @@ def follow(r):
     r.seek(2_000_000)
     full = wait(lambda: r.s.run(f'return document.querySelector("{BUTTON}")?.getAttribute("aria-disabled")') == 'true'
                 and r.s.run(f'return document.querySelector("{BUTTON}").title'), 10)
-    r.check('on a frame the picture just fills, Follow says why it cannot move it', full and 'Zoom in' in full, full)
+    r.check('on a frame the picture just fills, Follow says why it cannot move it', full and 'zoom in' in full, full)
 
     r.s.call("window.__nuzky.store.getState().edit({type: 'setCanvas', width: 1080, height: 1920})")
     wait(lambda: r.s.run(PROJECT)['canvas']['height'] == 1920, 10)
@@ -74,15 +74,25 @@ def follow(r):
     r.s.run(f'document.querySelector("{BUTTON}").click()')
     shown = wait(lambda: r.s.run('return !!document.querySelector("[data-testid=follow-picker] [data-follow-box]")'), 10)
     r.check('Choose what to follow shows a box over the picture and the chip says what to do', shown
-            and 'Drag a box around what to follow' in chip(r), chip(r))
+            and 'Put the box around what to follow' in chip(r), chip(r))
     r.check('the keyboard is on Follow', wait(lambda: r.s.run('return document.activeElement?.textContent.trim()') == 'Follow', 5))
     press('Escape')
     gone = wait(lambda: not r.s.run('return !!document.querySelector("[data-testid=follow-picker]")'), 5)
     r.check('Esc leaves choosing, the clip stays selected and nothing changes', gone and r.s.run(REVISION) == revision
             and r.s.run('return window.__nuzky.store.getState().selection') == [clip['id']], r.s.run(REVISION))
 
+    # Choosing while the video plays pauses it first and stays open.
+    r.s.run('window.__nuzky.store.getState().togglePlay()')
+    wait(lambda: r.s.run('return window.__nuzky.store.getState().playing'), 5)
     r.s.run(f'document.querySelector("{BUTTON}").click()')
-    wait(lambda: r.s.run('return !!document.querySelector("[data-testid=follow-picker] [data-follow-box]")'), 10)
+    shown = wait(lambda: r.s.run('return !!document.querySelector("[data-testid=follow-picker] [data-follow-box]")'), 10)
+    time.sleep(1)
+    r.check('choosing while the video plays pauses it and the box stays', shown
+            and r.s.run('return !!document.querySelector("[data-testid=follow-picker] [data-follow-box]")')
+            and not r.s.run('return window.__nuzky.store.getState().playing')
+            and r.s.run(f'return document.querySelector("{BUTTON}").textContent.trim()') == 'Cancel choosing')
+    r.seek(2_000_000)
+    time.sleep(1)
     drag_head(r, clip['id'])
     time.sleep(0.5)
     r.shot('follow-picking')

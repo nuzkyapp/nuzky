@@ -83,7 +83,7 @@ export function RatioMenu() {
           {FORMATS.map((f) => {
             const on = sameRatio(f, canvas);
             const size = canvasSize(f, short);
-            const why = !pictures ? "Add a video to the timeline first" : reframing ? "Already following the face" : following ? "Wait for the clip to finish following" : null;
+            const why = !pictures ? "Add a video to the timeline first" : reframing ? "Already following the face" : following ? "Already following a clip. Stop it in the preview." : null;
             const which = selected > 0 ? `the ${selected} selected clip${selected === 1 ? "" : "s"}` : "every full-frame clip";
             return (
               <div key={f.label} className="group flex items-center gap-1 rounded-md pr-1 hover:bg-white/[.08] has-[:focus-visible]:bg-white/[.08]">
