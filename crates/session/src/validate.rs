@@ -653,7 +653,9 @@ mod tests {
         for (width, height, border, valid) in
             [(2160, 3840, 200.0, true), (2160, 3840, 201.0, false), (1080, 1920, 101.0, false)]
         {
-            project.apply(EditCmd::SetCanvas { width, height, background: None, background_blur: None, fps: None }).unwrap();
+            project
+                .apply(EditCmd::SetCanvas { width, height, background: None, background_blur: None, fps: None })
+                .unwrap();
             let ClipContent::Media { shape, .. } = &mut project.tracks[0].clips[0].content else { panic!() };
             *shape = Some(nuzky_engine::model::Shape { border_width: border, ..Default::default() });
             assert_eq!(validate(&project).is_ok(), valid, "{width}x{height}, border {border}");
@@ -811,8 +813,13 @@ mod tests {
             }
         }
         let mut editor = nuzky_engine::edit::Editor::new(project.clone());
-        let set =
-            EditCmd::SetCanvas { width: 1080, height: 1920, background: Some("#€".into()), background_blur: None, fps: None };
+        let set = EditCmd::SetCanvas {
+            width: 1080,
+            height: 1920,
+            background: Some("#€".into()),
+            background_blur: None,
+            fps: None,
+        };
         let error = editor.apply_batch_checked(vec![set], None, validate).unwrap_err();
         assert!(format!("{error:#}").contains("INVALID_COLOR"), "{error:#}");
         assert_eq!(editor.project, project);

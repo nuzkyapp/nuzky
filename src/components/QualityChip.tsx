@@ -78,6 +78,7 @@ export function QualityChip() {
         <ChevronDown size={13} className="text-muted" />
       </Button>
       {open && (
+        // Opaque like a dialog: its controls lie over the inspector's text.
         <div
           data-exit
           role="dialog"
@@ -85,7 +86,7 @@ export function QualityChip() {
           // Keys stay here: Space or an arrow would otherwise play or move the playhead.
           onKeyDown={(e) => e.stopPropagation()}
           onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && e.relatedTarget && setOpen(null)}
-          className="overlay menu-in absolute right-0 top-10 z-50 flex w-[18rem] origin-top-right flex-col gap-2 rounded-xl p-3"
+          className="overlay overlay-solid menu-in absolute right-0 top-10 z-50 flex w-[18rem] origin-top-right flex-col gap-2 rounded-xl p-3"
         >
           <AiLock>
             <div className="flex items-baseline justify-between text-[12px] text-muted">
