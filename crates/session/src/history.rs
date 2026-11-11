@@ -268,6 +268,7 @@ pub(crate) fn label(cmds: &[EditCmd]) -> &'static str {
         EditCmd::DetachAudio { .. } => "Detach audio",
         EditCmd::UpdateTrack { .. } => "Change track",
         EditCmd::RestyleTrack { .. } => "Restyle text",
+        EditCmd::SetCanvas { fps: Some(_), .. } => "Change quality",
         EditCmd::SetCanvas { .. } => "Change format",
         EditCmd::AddCaptions { .. } => "Add captions",
         EditCmd::ReplaceCaptions { .. } => "Replace captions",

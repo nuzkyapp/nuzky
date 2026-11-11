@@ -14,6 +14,7 @@ import { Button, IconButton, Menu, ProgressBar } from "./ui";
 import { ShareButton } from "./ShareDialog";
 import { UpdateButton } from "./Updates";
 import { FeedbackButton } from "./Feedback";
+import { QualityChip } from "./QualityChip";
 import { useWindowButtons } from "../lib/window";
 import { useKeyLabels } from "../lib/keys";
 import { openSettings } from "../lib/settings";
@@ -387,6 +388,8 @@ export function TopBar() {
           <Settings size={16} />
         </IconButton>
       </div>
+      {/* The quality the video exports at sits just before Export; the cover and the reels export their own. */}
+      {!cover && !reels && <QualityChip />}
       {!reels && (
         <Button
           data-tour="export"

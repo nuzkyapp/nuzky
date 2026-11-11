@@ -1045,7 +1045,7 @@ fn project_from_media(name: &str, assets: Vec<nuzky_engine::model::Asset>) -> an
     let mut project = Project::new(name);
     if let Some(first) = assets.iter().find(|a| a.kind != nuzky_engine::model::AssetKind::Audio && a.width > 0) {
         let (width, height) = canvas_for(first.width, first.height);
-        project.apply(EditCmd::SetCanvas { width, height, background: None, background_blur: None })?;
+        project.apply(EditCmd::SetCanvas { width, height, background: None, background_blur: None, fps: None })?;
     }
     let added: Vec<String> = assets.iter().map(|a| a.id.clone()).collect();
     project.apply(EditCmd::AddAssets { assets })?;

@@ -441,7 +441,7 @@ mod tests {
     fn imported_text_fallback_scales_to_canvas_pixels() {
         let mut project = Project::new("4K import");
         project
-            .apply(EditCmd::SetCanvas { width: 2160, height: 3840, background: None, background_blur: None })
+            .apply(EditCmd::SetCanvas { width: 2160, height: 3840, background: None, background_blur: None, fps: None })
             .unwrap();
         let clip = TextClip {
             text: "Title".into(),

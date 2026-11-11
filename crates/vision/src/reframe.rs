@@ -89,7 +89,7 @@ pub fn reframe(
         },
     )?;
     let mut out = Reframe {
-        commands: vec![EditCmd::SetCanvas { width, height, background: None, background_blur: None }],
+        commands: vec![EditCmd::SetCanvas { width, height, background: None, background_blur: None, fps: None }],
         followed: Vec::new(),
         centred: Vec::new(),
     };
@@ -476,7 +476,7 @@ mod tests {
         let mut project = Project::new("reframe");
         let asset = nuzky_engine::media::probe(&file, "wide".into()).unwrap();
         for cmd in [
-            EditCmd::SetCanvas { width: 1920, height: 1080, background: None, background_blur: None },
+            EditCmd::SetCanvas { width: 1920, height: 1080, background: None, background_blur: None, fps: None },
             EditCmd::AddAssets { assets: vec![asset] },
             EditCmd::AddClip { asset_id: "wide".into(), start_us: None, track_id: None },
         ] {

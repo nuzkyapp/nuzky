@@ -9,13 +9,8 @@ export const FORMATS = [
   { label: "4:5", hint: "Instagram feed", width: 1080, height: 1350 },
 ];
 
-/** Canvas resolutions by the shorter side. Presets are made for the first one. */
-export const CANVAS_RESOLUTIONS = [
-  { id: 1080, label: "1080p" },
-  { id: 2160, label: "4K" },
-];
-
-const REFERENCE_SIDE = CANVAS_RESOLUTIONS[0].id;
+/** The shorter side of the canvas presets are made for. */
+const REFERENCE_SIDE = 1080;
 
 /** Canvas pixels per pixel of a preset, as the engine's `Canvas::unit`: 1 on 1080p, 2 on 4K. */
 export const canvasUnit = (canvas: { width: number; height: number }) => Math.min(canvas.width, canvas.height) / REFERENCE_SIDE;

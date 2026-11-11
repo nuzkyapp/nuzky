@@ -263,6 +263,11 @@ pub struct Canvas {
     /// main-track frame shows behind it (CapCut "Canvas: Blur"); 1 is the strongest blur.
     #[serde(default)]
     pub background_blur: f32,
+    /// Someone chose this resolution and frame rate as the video's quality, so the export dialog starts from them
+    /// instead of the resolution and preset of the last export. Set by `SetCanvas` with a frame rate. Left out while
+    /// false, so a project that never chose one saves as before.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub quality_chosen: bool,
 }
 
 /// Taller than this is a vertical video, shown in Reels and TikTok under their interface.
@@ -291,6 +296,8 @@ impl SafeArea {
 /// The shorter side of the canvas that text, outline and border sizes in presets are made for.
 pub const REFERENCE_SIDE: u32 = 1080;
 pub const MAX_CANVAS_SIDE: u32 = 7680;
+/// The highest canvas frame rate a project may have.
+pub const MAX_FPS: u32 = 240;
 
 impl Canvas {
     /// Canvas pixels per pixel of a preset: 1 on 1080p, 2 on 4K.
@@ -1183,7 +1190,14 @@ impl Project {
         Self {
             version: PROJECT_VERSION,
             name: name.into(),
-            canvas: Canvas { width: 1080, height: 1920, fps: 30, background: "#000000".into(), background_blur: 0.0 },
+            canvas: Canvas {
+                width: 1080,
+                height: 1920,
+                fps: 30,
+                background: "#000000".into(),
+                background_blur: 0.0,
+                quality_chosen: false,
+            },
             assets: Vec::new(),
             tracks: vec![Track {
                 id: "main".into(),

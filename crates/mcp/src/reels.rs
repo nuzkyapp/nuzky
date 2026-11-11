@@ -545,7 +545,13 @@ pub fn forget(made: &[MadeReel], source: &Project) -> bool {
 /// own zoom; a wider picture then loses its sides evenly.
 fn frame(reel: &mut Project, framing: Framing) -> Result<()> {
     let blur = if framing == Framing::Blur { BLUR } else { 0.0 };
-    reel.apply(EditCmd::SetCanvas { width: WIDTH, height: HEIGHT, background: None, background_blur: Some(blur) })?;
+    reel.apply(EditCmd::SetCanvas {
+        width: WIDTH,
+        height: HEIGHT,
+        background: None,
+        background_blur: Some(blur),
+        fps: None,
+    })?;
     if framing != Framing::Crop {
         return Ok(());
     }

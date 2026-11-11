@@ -268,6 +268,12 @@ export type Canvas = {
    * main-track frame shows behind it (CapCut "Canvas: Blur"); 1 is the strongest blur.
    */
   backgroundBlur: number,
+  /**
+   * Someone chose this resolution and frame rate as the video's quality, so the export dialog starts from them
+   * instead of the resolution and preset of the last export. Set by `SetCanvas` with a frame rate. Left out while
+   * false, so a project that never chose one saves as before.
+   */
+  qualityChosen?: boolean,
 };
 
 /**
@@ -776,6 +782,7 @@ export type EditCmd = {
   height: number,
   background?: string | null,
   backgroundBlur?: number | null,
+  fps?: number | null,
 } | {
   "type": "addCaptions",
   segments: Array<CaptionSegment>,
