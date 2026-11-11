@@ -30,7 +30,6 @@ export function CompareDivider({ width }: { width: number }) {
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
-    (e.currentTarget as HTMLElement).focus({ preventScroll: true });
     // The line moves with the pointer from where it was grabbed, without jumping under it.
     const offset = at(e.clientX) - split;
     followPointer({ move: (m) => set(at(m.clientX) - offset) });
@@ -49,8 +48,7 @@ export function CompareDivider({ width }: { width: number }) {
     <div ref={ref} className="pointer-events-none absolute inset-0" data-testid="compare">
       {split > 0.2 && <span className={`${CHIP} left-2`}>Before</span>}
       {split < 0.8 && <span className={`${CHIP} right-2`}>After</span>}
-      <div className="absolute inset-y-0 w-0.5 bg-fg shadow-[0_0_0_1px_rgb(0_0_0/.25)]" style={{ left: x - 1 }} />
-      {/* Only the knob takes the pointer, so the selected layer's handles under the line stay in reach. */}
+      <div className="absolute inset-y-0 w-0.5 bg-fg shadow-[0_0_0_1px_rgb(0_0_0/.4)]" style={{ left: x - 1 }} />
       <div
         role="slider"
         tabIndex={0}

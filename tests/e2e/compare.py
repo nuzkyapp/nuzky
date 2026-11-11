@@ -22,11 +22,13 @@ const x = arguments[0] === 'pointerdown' ? b.left + b.width / 2 : f.left + f.wid
 const event = new PointerEvent(arguments[0], {{bubbles: true, button: 0, pointerId: 1, clientX: x, clientY: b.top + b.height / 2}});
 (arguments[0] === 'pointerdown' ? h : window).dispatchEvent(event);"""
 
-# Whether what lies under the middle of the selected layer's rotate handle is that handle, not the line over it.
-ROTATE_FREE = """const h = document.querySelector('[data-testid=layer-overlay] [data-handle=rotate]');
-if (!h) return 'no rotate handle';
-const b = h.getBoundingClientRect();
-return !!document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)?.closest('[data-handle=rotate]')"""
+BUTTON = "[...document.querySelectorAll('section[aria-label=Preview] button')].find((b) => b.querySelector('.lucide-square-split-horizontal'))"
+REASON = f"const b = {BUTTON}; return b && b.getAttribute('aria-disabled') === 'true' ? b.title : null"
+BOX = "return !!document.querySelector('[data-testid=layer-overlay]')"
+# How far Play's centre is from the transport capsule's, in px.
+OFF_CENTRE = """const play = [...document.querySelectorAll('section[aria-label=Preview] button')].find((b) => /^(Play|Pause)/.test(b.getAttribute('aria-label') || ''));
+const p = play.getBoundingClientRect(), o = play.closest('.bar').getBoundingClientRect();
+return Math.round((p.left + p.width / 2) - (o.left + o.width / 2))"""
 # Whether the Compare button lies inside the transport capsule.
 FITS = """const b = [...document.querySelectorAll('section[aria-label=Preview] button')].find((b) => b.querySelector('.lucide-square-split-horizontal'));
 const bar = b?.closest('.bar');
@@ -71,6 +73,8 @@ def compare(r):
     middle = clip['startUs'] + clip['durationUs'] // 2
     r.seek(middle)
     r.focus_clip(clip['id'])
+    reason = wait(lambda: r.s.run(REASON), 5)
+    r.check('without a filter or adjustments Compare is disabled and says why', reason and 'Nothing to compare' in reason, reason)
     wait(lambda: r.s.run(TAB, 'Filters'), 5)
     wait(lambda: r.s.run("const b = document.querySelector('button[title=\"Apply Mono\"]'); if (b) b.click(); return !!b"), 5)
     r.check('Mono takes the colour out of the clip', wait(lambda: r.s.run(ADJUST, clip['id'])['saturation'] == -1, 5))
@@ -81,7 +85,7 @@ def compare(r):
     revision = r.s.run(REVISION)
     r.check('Compare turns on', wait(lambda: r.s.run(TOGGLE, True) is not None, 5) and wait(lambda: r.s.run(TOGGLE, False), 5))
     r.check('and draws the line across the middle', abs((wait(lambda: r.s.run(LINE), 5) or 0) - 0.5) < 0.01, r.s.run(LINE))
-    r.check('the selected layer\'s rotate handle under the line stays in reach', r.s.run(ROTATE_FREE) is True, r.s.run(ROTATE_FREE))
+    r.check('the selected layer\'s box and its handles hide while comparing', wait(lambda: not r.s.run(BOX), 5), r.s.run(BOX))
     split = preview(r, 'compare', rect, lambda c: saturation(c, 0.05, 0.4) >= 40)
     r.check('left of the line the picture is as it was before the filter', saturation(split, 0.05, 0.4) >= 40, saturation(split, 0.05, 0.4))
     r.check('and right of it as the filter makes it', saturation(split, 0.6, 0.95) <= 3, saturation(split, 0.6, 0.95))
@@ -97,6 +101,7 @@ def compare(r):
                 [saturation(moved, share - 0.08, share - 0.04), saturation(moved, share + 0.04, share + 0.08)])
     r.s.run(POINTER, 'pointerup', 0.75)
     r.check('a dropped line stays where it was let go', abs(r.s.run(LINE) - 0.75) < 0.01, r.s.run(LINE))
+    r.s.run(f'{HANDLE}.focus()')
     r.key('ArrowLeft')
     r.check('← moves the focused line by 5 %', wait(lambda: abs(r.s.run(LINE) - 0.70) < 0.01, 2), r.s.run(LINE))
     r.check('moving the line changes nothing in the project', r.s.run(REVISION) == revision, [revision, r.s.run(REVISION)])
@@ -114,10 +119,15 @@ def compare(r):
         time.sleep(1)
         r.shot(f'compare-window{suffix}')
         r.check(f'at {width} x {height} Compare fits in the transport', r.s.run(FITS), r.s.run(FITS))
+        # The smallest window has no room for both sides of the transport to match; main leaves Play 10 px left there.
+        if width == 1440:
+            off = r.s.run(OFF_CENTRE)
+            r.check(f'and Play stays in the middle of it ({off} px off)', abs(off) <= 1, off)
     rect = preview_rect(r)
 
     r.s.run(TOGGLE, True)
     r.check('Compare turns off and takes the line away', wait(lambda: r.s.run(TOGGLE, False) is False and r.s.run(LINE) is None, 5))
+    r.check('and the selected layer\'s box comes back', wait(lambda: r.s.run(BOX), 5))
     whole = preview(r, 'compare-off', rect, lambda c: saturation(c, 0.05, 0.95) <= 3)
     r.check('and the whole picture shows the filter again', saturation(whole, 0.05, 0.95) <= 3, saturation(whole, 0.05, 0.95))
     r.key('z', ctrlKey=True)

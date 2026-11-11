@@ -3,6 +3,7 @@ import { AudioLines, Maximize, Minimize, Pause, Play, SkipBack, SkipForward, Sma
 import { api } from "../../lib/api";
 import { useCover } from "../../lib/cover";
 import { toggleCompare, toggleFullPreview, toggleMuted, usePreview } from "../../lib/preview";
+import { NO_ADJUST, sameAdjust } from "../../lib/presets";
 import { pictureAspect, useReels } from "../../lib/reels";
 import { closeSource, seekSource, sourceDuration, toggleSourcePlay, useSource } from "../../lib/source";
 import { projectDuration, useEditor } from "../../lib/store";
@@ -114,7 +115,7 @@ export function useFrameStream(url: string, canvas: React.RefObject<HTMLCanvasEl
 function Timecode({ duration }: { duration: number }) {
   const now = formatTime(useEditor((s) => s.timeUs));
   return (
-    <span className="tabular truncate text-[13px]">
+    <span className="tabular truncate pl-3 text-[13px]">
       <span className="text-[15px] font-semibold text-fg @max-[560px]:text-[13px]">
         {now.slice(0, -3)}
         <span className="font-medium text-muted">{now.slice(-3)}</span>
@@ -134,8 +135,8 @@ function SourceTransport({ children }: { children: React.ReactNode }) {
   const now = formatTime(timeUs);
   const idle = duration === 0;
   return (
-    <div className="bar grid h-11 w-full max-w-[620px] grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-full pl-[18px] pr-1.5">
-      <span className="tabular truncate text-[13px]">
+    <div className="bar grid h-11 w-full max-w-[620px] grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-full px-1.5">
+      <span className="tabular truncate pl-3 text-[13px]">
         {!picture && (
           <>
             <span className="text-[15px] font-semibold text-fg @max-[560px]:text-[13px]">
@@ -225,6 +226,7 @@ export function Preview() {
   const reel = useReels((s) => s.current);
   const picture = useEditor((s) => (reels ? pictureAspect(s.snap?.project, reel) : 0));
   const home = useEditor((s) => s.view === "home");
+  const adjusted = useEditor((s) => !!s.snap?.project.tracks.some((t) => t.clips.some((c) => c.content.type === "media" && !sameAdjust(c.content.adjust, NO_ADJUST))));
   const { muted, full, compare } = usePreview();
   const { togglePlay, seek } = useEditor.getState();
   const sectionRef = useRef<HTMLElement>(null);
@@ -245,6 +247,10 @@ export function Preview() {
   useEffect(() => {
     if (cover || reels || assetGone) closeSource();
   }, [cover, reels, assetGone]);
+  // Another view or project takes the comparison away rather than bringing it back on return.
+  useEffect(() => {
+    if (cover || reels || source || home) usePreview.setState({ compare: null });
+  }, [cover, reels, source, home]);
   const deviceBox = useRef({ w: 0, h: 0 });
   useEffect(() => {
     if (sourcePreview && deviceBox.current.w > 0) void api.sourcePreviewResize(deviceBox.current.w, deviceBox.current.h);
@@ -375,7 +381,7 @@ export function Preview() {
               )}
             </div>
             {/* Outside the clipped frame so handles of a layer larger than the canvas stay reachable. */}
-            {!empty && !engineError && canvas && fit.w > 0 && !reels && <LayerOverlay width={fit.w} height={fit.h} bleed={{ x: (box.w - fit.w) / 2, y: (box.h - fit.h) / 2 }} />}
+            {!empty && !engineError && canvas && fit.w > 0 && !reels && compare === null && <LayerOverlay width={fit.w} height={fit.h} bleed={{ x: (box.w - fit.w) / 2, y: (box.h - fit.h) / 2 }} />}
             {!empty && !engineError && canvas && !reels && !cover && <PreviewDrop canvas={canvas} />}
             {compare !== null && !empty && !engineError && !reels && !cover && !source && fit.w > 0 && <CompareDivider width={fit.w} />}
           </div>
@@ -387,7 +393,7 @@ export function Preview() {
             {muteButton}
             {fullButton}
           </SourceTransport>
-        ) : <div className="bar grid h-11 w-full max-w-[620px] grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-full pl-[18px] pr-1.5">
+        ) : <div className="bar grid h-11 w-full max-w-[700px] grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-full px-1.5">
           <Timecode duration={duration} />
           <div className="flex items-center gap-2.5">
             <IconButton round label={withKey("Go to start", "goStart")} onClick={() => seek(0)} disabled={empty} className="@max-[440px]:hidden">
@@ -413,9 +419,9 @@ export function Preview() {
             <LockReason.Provider value={null}>
               <IconButton
                 round
-                label={compare === null ? "Compare before and after the adjustments" : "Stop comparing"}
+                label={compare !== null ? "Stop comparing" : adjusted ? "Compare before and after the adjustments" : "Nothing to compare: no clip has a filter or adjustments"}
                 active={compare !== null}
-                disabled={empty}
+                disabled={compare === null && !adjusted}
                 onClick={toggleCompare}
               >
                 <SquareSplitHorizontal size={16} />

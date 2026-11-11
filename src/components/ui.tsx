@@ -1072,7 +1072,7 @@ export function BeforeAfter({ before, after }: { before: ReactNode; after: React
       {before}
       <span className="absolute inset-0 [clip-path:polygon(100%_0,100%_100%,0_100%)]">{after}</span>
       <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true">
-        <line x1="1" y1="0" x2="0" y2="1" stroke="white" strokeOpacity="0.7" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+        <line x1="1" y1="0" x2="0" y2="1" stroke="white" strokeOpacity="0.45" strokeWidth="1" vectorEffect="non-scaling-stroke" />
       </svg>
     </>
   );
