@@ -33,16 +33,19 @@ export function QualityChip() {
   useEffect(() => {
     if (!open) return;
     if (open.keyboard) box.current?.querySelector<HTMLElement>("[role=dialog] [aria-pressed=true]")?.focus();
-    const outside = (e: PointerEvent) => !box.current?.contains(e.target as Node) && setOpen(null);
+    const outside = (e: Event) => !box.current?.contains(e.target as Node) && setOpen(null);
     const key = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       e.stopPropagation();
       closeToTrigger();
     };
     window.addEventListener("pointerdown", outside);
+    // Tab past it closes it too, also when a click opened it and WebKit left the focus elsewhere.
+    window.addEventListener("focusin", outside);
     window.addEventListener("keydown", key, true);
     return () => {
       window.removeEventListener("pointerdown", outside);
+      window.removeEventListener("focusin", outside);
       window.removeEventListener("keydown", key, true);
     };
   }, [open]);
@@ -52,6 +55,12 @@ export function QualityChip() {
   const size = outputSize(canvas, options.resolution);
   const name = resolutionName(options.resolution);
   const bitrate = QUALITIES.find((q) => q.id === options.quality)!.label;
+  const fileSize = (resolution: number, fps: number) => {
+    const { w, h } = outputSize(canvas, resolution);
+    return formatBytes(estimateBytes(w, h, fps, options.quality, duration));
+  };
+  // Each option's tooltip says what it would make, so trying one is not needed to compare them.
+  const would = (resolution: number, fps: number) => (duration > 0 ? `, about ${fileSize(resolution, fps)}` : "");
   const choose = (resolution: number, fps: number) => {
     if (resolution === options.resolution && fps === options.fps) return;
     // The size comes from the latest confirmed canvas, so a Ratio change made a moment ago is kept.
@@ -67,7 +76,7 @@ export function QualityChip() {
         aria-haspopup="dialog"
         aria-expanded={!!open}
         aria-label={`Quality: ${name}, ${options.fps} fps`}
-        title={`Quality: ${size.w}×${size.h}, ${options.fps} fps`}
+        title={`Exports at ${size.w}×${size.h}, ${options.fps} fps`}
         disabled={locked}
         disabledReason={AI_EDITING}
         // A click has a pointer position; Enter and Space have none.
@@ -85,7 +94,6 @@ export function QualityChip() {
           aria-label="Quality"
           // Keys stay here: Space or an arrow would otherwise play or move the playhead.
           onKeyDown={(e) => e.stopPropagation()}
-          onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && e.relatedTarget && setOpen(null)}
           className="overlay overlay-solid menu-in absolute right-0 top-10 z-50 flex w-[18rem] origin-top-right flex-col gap-2 rounded-xl p-3"
         >
           <AiLock>
@@ -99,7 +107,10 @@ export function QualityChip() {
               label="Resolution"
               value={options.resolution}
               onChange={(resolution) => choose(resolution, options.fps)}
-              options={RESOLUTIONS.map((r) => ({ id: r.id, label: resolutionName(r.id), title: r.label }))}
+              options={RESOLUTIONS.map((r) => {
+                const { w, h } = outputSize(canvas, r.id);
+                return { id: r.id, label: resolutionName(r.id), title: `${r.label}: ${w}×${h}${would(r.id, options.fps)}` };
+              })}
             />
             <span className="mt-1 text-[12px] text-muted">Frame rate</span>
             <Segmented
@@ -107,23 +118,23 @@ export function QualityChip() {
               compact
               value={options.fps}
               onChange={(fps) => choose(options.resolution, fps)}
-              options={FRAME_RATES.map((f) => ({ id: f, label: `${f}` }))}
+              options={FRAME_RATES.map((f) => ({ id: f, label: `${f}`, title: `${f} fps${would(options.resolution, f)}` }))}
             />
           </AiLock>
           <div
-            className="tabular mt-1 flex items-baseline justify-between gap-3 border-t border-white/[.08] pt-2.5 text-[12px] text-muted"
+            className="tabular mt-1 flex items-baseline justify-between gap-3 border-t border-white/[.08] pt-3 text-[12px] text-muted"
             aria-live="polite"
             title={duration > 0 ? `Estimate at ${bitrate} quality; scenes with a lot of motion come out larger` : undefined}
           >
             {duration > 0 ? (
               <>
-                <span>File for {formatLength(duration)}</span>
+                <span>{formatLength(duration)} of video</span>
                 <span data-estimate>
-                  about <span className="text-[13px] font-semibold text-fg">{formatBytes(estimateBytes(size.w, size.h, options.fps, options.quality, duration))}</span>
+                  about <span className="text-[13px] font-semibold text-fg">{fileSize(options.resolution, options.fps)}</span>
                 </span>
               </>
             ) : (
-              <span>Add a clip to the timeline to see the file size</span>
+              <span>Add a clip to see the file size</span>
             )}
           </div>
         </div>
