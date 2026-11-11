@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { Loader2 } from "lucide-react";
 import { api } from "../../lib/api";
 import { current, moveAll, show, useFaces } from "../../lib/faces";
+import { useFollow } from "../../lib/follow";
 import { useReframe } from "../../lib/reframe";
 import { AI_EDITING, undoAction, useAiLocked, useEditor } from "../../lib/store";
 import { formatTime } from "../../lib/time";
@@ -11,7 +12,7 @@ const KIND = { caption: "Caption", text: "Text", sticker: "Sticker" };
 
 /**
  * The face check in the cover's status chip, bottom middle of the preview area: its progress with Stop, then each
- * caption, text or sticker over a face with Next, Move all and Done, then what Move all did with Undo. Above Reframe's
+ * caption, text or sticker over a face with Next, Move all and Done, then what Move all did with Undo. Above Reframe's or Follow's
  * chip while that one shows. Stop, Next and Done change nothing, so an agent's run leaves them usable.
  */
 export function FacesStatus() {
@@ -21,10 +22,11 @@ export function FacesStatus() {
   const job = useEditor((s) => (id ? s.jobs[id] : undefined));
   const snap = useEditor((s) => s.snap);
   const locked = useAiLocked();
-  // As ReframeStatus decides whether its chip shows.
+  // As ReframeStatus and FollowStatus decide whether their chip shows.
   const reframeJob = useReframe((s) => s.job);
   const reframeDone = useReframe((s) => s.done);
-  const reframing = !!reframeJob || (!!reframeDone && !!undoAction(reframeDone.snap).valid?.());
+  const followChip = useFollow((s) => !!s.picking || !!s.job || (!!s.done && !!undoAction(s.done.snap).valid?.()));
+  const reframing = !!reframeJob || (!!reframeDone && !!undoAction(reframeDone.snap).valid?.()) || followChip;
   const ref = useRef<HTMLDivElement>(null);
   // Keyboard focus goes back to the button that started the check, not to the page, when the chip's button goes.
   const leave = () => {

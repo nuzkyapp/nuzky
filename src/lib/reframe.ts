@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { api, errorText, plainError } from "./api";
+import { useFollow } from "./follow";
 import { aiLocked, currentEpoch, useEditor, whenIdle } from "./store";
 import type { JobEvent, Project, Snapshot } from "./types";
 
@@ -25,13 +26,14 @@ export function picturedClips(project: Project, ids: string[]): string[] {
  * selected, to follow the face. The job applies it as one undo step; the preview then offers Undo.
  */
 export async function reframe(width: number, height: number) {
-  if (aiLocked() || useReframe.getState().job) return;
+  if (aiLocked() || useReframe.getState().job || useFollow.getState().job) return;
   // Edits made just before are part of what is reframed, not a change that would make it fail.
   await whenIdle();
   const { snap, selection, toast } = useEditor.getState();
   if (!snap) return;
   const ids = picturedClips(snap.project, selection);
   useReframe.setState({ done: null });
+  useFollow.setState({ done: null, picking: null });
   try {
     const id = await api.startReframe(width, height, ids.length > 0 ? ids : null, currentEpoch());
     useReframe.setState({ job: id });

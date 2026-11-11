@@ -43,12 +43,17 @@ pub fn transition_at(track: &Track, t_us: i64) -> Option<(&Clip, &Clip, Transiti
     })
 }
 
-pub fn transform_at(clip: &Clip, t_us: i64) -> (Transform, f32) {
-    let u = t_us - clip.start_us;
+/// The clip's own transform at a timeline time: its keyframes followed, without its animations.
+pub fn framing_at(clip: &Clip, t_us: i64) -> Transform {
     let base = match clip.content {
         ClipContent::Media { transform, .. } | ClipContent::Text { transform, .. } => transform,
     };
-    let mut transform = keyframed(clip, u).unwrap_or(base);
+    keyframed(clip, t_us - clip.start_us).unwrap_or(base)
+}
+
+pub fn transform_at(clip: &Clip, t_us: i64) -> (Transform, f32) {
+    let u = t_us - clip.start_us;
+    let mut transform = framing_at(clip, t_us);
     let mut reveal = 1.0;
     for (animation, exiting) in [(clip.anim_in, false), (clip.anim_out, true)] {
         let Some(animation) = animation.filter(|a| a.duration_us > 0) else { continue };

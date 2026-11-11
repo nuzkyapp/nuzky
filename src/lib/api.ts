@@ -204,6 +204,9 @@ export const api = {
   startFaceCheck: (epoch: Epoch) => invoke<string>("start_face_check", { expectedEpoch: epoch }),
   startReframe: (width: number, height: number, clipIds: string[] | null, epoch: Epoch) =>
     invoke<string>("start_reframe", { width, height, clipIds, expectedEpoch: epoch }),
+  /** Follows `region` (left, top, width, height in fractions of the clip's upright picture at `atUs`) as a `follow` job. */
+  startFollow: (clipId: string, atUs: number, region: [number, number, number, number], epoch: Epoch) =>
+    invoke<string>("start_follow", { clipId, atUs, region, expectedEpoch: epoch }),
   /** Masks the person in the frame at `timeUs`, downloading the mask model on first use. */
   startCoverMask: (timeUs: number, image: string | null, epoch: Epoch) =>
     invoke<string>("start_cover_mask", { timeUs: Math.round(timeUs), image, expectedEpoch: epoch }),
@@ -403,6 +406,7 @@ const PLAIN: Record<string, string | ((detail: string) => string)> = {
   DOWNLOAD_FAILED: (detail) => `The ${detail.split(":")[0]} could not be downloaded. Check the internet connection and free disk space, then try again.`,
   MODEL_INVALID: "The model did not download completely. Try again to download it anew.",
   NO_SPACE: (detail) => `There isn't enough free space for the download. Free up ${detail} more on this computer, then try again.`,
+  NO_ROOM: (detail) => sentence(detail),
   MEDIA_MISSING: (detail) => `${detail.split(/[\\/]/).pop()} is missing. Put the file back where it was, then try again.`,
   VISION_UNAVAILABLE:
     "Faces and people can't be found on this computer. Covers still let you choose the frame and add text, and a clip's background stays None.",

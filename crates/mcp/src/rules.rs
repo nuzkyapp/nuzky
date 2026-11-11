@@ -66,6 +66,8 @@ pub(crate) const TOOLS: &[Rules] = &[
     rules("segment_subject", Always, false, true, true),
     // Replaces the keyframes of the clips it moves.
     rules("reframe", Never, true, false, true),
+    // Replaces the keyframes of the clip it moves.
+    rules("follow_object", Never, true, false, true),
     rules("transcribe", Never, false, false, true),
     rules("get_transcript", Always, false, true, false),
     // Only reads the stored words and the names of the project's silent videos.
@@ -191,6 +193,7 @@ mod tests {
                 "cut_to_beats",
                 "propose_reels",
                 "reframe",
+                "follow_object",
                 "resolve_recovery",
                 "run_plugin"
             ])
@@ -234,6 +237,7 @@ mod tests {
                 "inspect_thumbnail",
                 "transcribe",
                 "reframe",
+                "follow_object",
                 "cut_to_beats",
                 "export_video",
                 "export_thumbnail",

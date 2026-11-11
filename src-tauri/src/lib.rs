@@ -1512,6 +1512,7 @@ pub fn run() {
             cancel_job,
             jobs::start_captions,
             jobs::start_reframe,
+            jobs::start_follow,
             jobs::start_face_check,
             jobs::speech_models,
             jobs::remove_speech_model,

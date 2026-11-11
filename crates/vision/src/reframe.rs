@@ -18,7 +18,7 @@ use crate::nets::Yunet;
 use crate::thumbnails::in_parallel;
 
 /// One look every half second; a longer timeline is looked at more sparsely instead of for longer.
-const LOOK_EVERY_US: i64 = 500_000;
+pub(crate) const LOOK_EVERY_US: i64 = 500_000;
 const MAX_LOOKS: usize = 1_200;
 /// Long side of a look; YuNet finds faces down to about 10 px there.
 const LOOK_SIDE: u32 = 512;
@@ -63,7 +63,7 @@ pub fn reframe(
     (canvas.width, canvas.height) = (width & !1, height & !1);
     let total: i64 = clips.iter().map(|(clip, _)| clip.duration_us).sum();
     let every = LOOK_EVERY_US.max(total / MAX_LOOKS as i64);
-    let solos: Vec<_> = clips.iter().map(|(clip, asset)| solo(project, clip, asset)).collect();
+    let solos: Vec<_> = clips.iter().map(|(clip, asset)| solo(project, clip, asset, LOOK_SIDE)).collect();
     let looks: Vec<(usize, i64)> = clips
         .iter()
         .enumerate()
@@ -168,9 +168,10 @@ fn base(clip: &Clip) -> Transform {
     }
 }
 
-/// The clip alone on a canvas of its picture's shape, as recorded: no framing, animation or background.
-fn solo(project: &Project, clip: &Clip, asset: &Asset) -> (Project, (u32, u32)) {
-    let k = LOOK_SIDE as f32 / asset.width.max(asset.height).max(1) as f32;
+/// The clip alone on a canvas of its picture's shape with the long side `side` pixels, as recorded: no framing,
+/// animation or background.
+pub(crate) fn solo(project: &Project, clip: &Clip, asset: &Asset, side: u32) -> (Project, (u32, u32)) {
+    let k = side as f32 / asset.width.max(asset.height).max(1) as f32;
     let even = |v: u32| ((v as f32 * k).round() as u32).max(16) & !1;
     let size = (even(asset.width), even(asset.height));
     let mut solo = Project::new("reframe");
@@ -197,21 +198,21 @@ fn times(clip: &Clip, asset: &Asset, every: i64) -> Vec<i64> {
 }
 
 /// Where a clip's picture can sit on a canvas.
-struct Placement {
+pub(crate) struct Placement {
     canvas: [f32; 2],
     /// The picture's size on the canvas at `scale`, in pixels.
     size: [f32; 2],
     /// Left, top, right and bottom edge of the part the crop leaves, in fractions of the picture.
     visible: [f32; 4],
-    scale: f32,
+    pub(crate) scale: f32,
     /// Where the face goes, in fractions of the canvas.
-    aim: [f32; 2],
+    pub(crate) aim: [f32; 2],
 }
 
 impl Placement {
     /// On `canvas`, scaled so the visible part of the picture fills it, times the zoom it had beyond filling
     /// `before`.
-    fn new(before: &Canvas, canvas: &Canvas, asset: &Asset, base: &Transform) -> Placement {
+    pub(crate) fn new(before: &Canvas, canvas: &Canvas, asset: &Asset, base: &Transform) -> Placement {
         let visible = Crop::visible(base.crop);
         let zoom = (base.scale / filling(before, asset, visible)).max(1.0);
         let scale = filling(canvas, asset, visible) * zoom;
@@ -226,11 +227,19 @@ impl Placement {
 
     /// The transform position that puts the point `at` of the picture on the point `on` of the canvas, both in
     /// fractions, or as near as it can while the picture covers the canvas.
-    fn position(&self, at: [f32; 2], on: [f32; 2]) -> [f32; 2] {
+    pub(crate) fn position(&self, at: [f32; 2], on: [f32; 2]) -> [f32; 2] {
         [0, 1].map(|i| {
             let (low, high) = covering(self.canvas[i], self.size[i], self.visible[i], self.visible[i + 2]);
             // When the picture just fills the canvas, rounding can put `low` a hair above `high`.
             (on[i] - 0.5 - (at[i] - 0.5) * self.size[i] / self.canvas[i]).max(low).min(high)
+        })
+    }
+
+    /// Whether the picture can move across or down by more than a pixel and still cover the canvas.
+    pub(crate) fn has_room(&self) -> bool {
+        [0, 1].into_iter().any(|i| {
+            let (low, high) = covering(self.canvas[i], self.size[i], self.visible[i], self.visible[i + 2]);
+            (high - low) * self.canvas[i] > 1.0
         })
     }
 
@@ -305,7 +314,7 @@ fn follow(looks: &[Vec<Face>]) -> Vec<Option<[f32; 2]>> {
 
 /// The followed face in every look: where it was not found, where it was last (or first) seen, and each value the
 /// median of five looks around it, so one wrong detection never moves the picture. None without any face.
-fn smooth(track: &[Option<[f32; 2]>]) -> Option<Vec<[f32; 2]>> {
+pub(crate) fn smooth(track: &[Option<[f32; 2]>]) -> Option<Vec<[f32; 2]>> {
     let mut seen = *track.iter().flatten().next()?;
     let held: Vec<[f32; 2]> = track
         .iter()
@@ -331,7 +340,7 @@ fn smooth(track: &[Option<[f32; 2]>]) -> Option<Vec<[f32; 2]>> {
 /// Keyframes, in clip time, that hold the picture while the face stays within the dead zone around where it was
 /// put and move it on one smooth curve once it leaves: over `PAN_US` up to the look that found it gone, and on to
 /// the last look of those that find it still going. None when it never moves.
-fn keys(times: &[i64], positions: &[[f32; 2]]) -> Vec<(i64, [f32; 2])> {
+pub(crate) fn keys(times: &[i64], positions: &[[f32; 2]]) -> Vec<(i64, [f32; 2])> {
     let mut held = positions[0];
     let mut keys: Vec<(i64, [f32; 2])> = Vec::new();
     let mut previous = None;

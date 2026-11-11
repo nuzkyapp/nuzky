@@ -2,6 +2,7 @@ import { useEffect, useRef, type KeyboardEvent } from "react";
 import { Check, ChevronDown, RectangleHorizontal } from "lucide-react";
 import { chose } from "../../lib/exit";
 import { FORMATS, canvasSize, formatLabel, sameRatio } from "../../lib/presets";
+import { useFollow } from "../../lib/follow";
 import { picturedClips, reframe, useReframe } from "../../lib/reframe";
 import { AI_EDITING, useAiLocked, useEditor } from "../../lib/store";
 import { Button } from "../ui";
@@ -16,6 +17,7 @@ export function RatioMenu() {
   const pictures = useEditor((s) => s.snap!.project.tracks.some((t) => t.kind === "video" && t.clips.some((c) => c.content.type === "media")));
   const selected = useEditor((s) => picturedClips(s.snap!.project, s.selection).length);
   const reframing = useReframe((s) => !!s.job);
+  const following = useFollow((s) => !!s.job);
   const edit = useEditor((s) => s.edit);
   const open = useEditor((s) => s.ratioOpen);
   const locked = useAiLocked();
@@ -81,7 +83,7 @@ export function RatioMenu() {
           {FORMATS.map((f) => {
             const on = sameRatio(f, canvas);
             const size = canvasSize(f, short);
-            const why = !pictures ? "Add a video to the timeline first" : reframing ? "Already following the face" : null;
+            const why = !pictures ? "Add a video to the timeline first" : reframing ? "Already following the face" : following ? "Wait for the clip to finish following" : null;
             const which = selected > 0 ? `the ${selected} selected clip${selected === 1 ? "" : "s"}` : "every full-frame clip";
             return (
               <div key={f.label} className="group flex items-center gap-1 rounded-md pr-1 hover:bg-white/[.08] has-[:focus-visible]:bg-white/[.08]">

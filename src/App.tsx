@@ -7,6 +7,7 @@ import { api, errorText, plainError } from "./lib/api";
 import { setLimits } from "./lib/limits";
 import { onFacesJob } from "./lib/faces";
 import { onReframeJob } from "./lib/reframe";
+import { onFollowJob } from "./lib/follow";
 import { canRetrySpeech, retrySpeech, useSpeech } from "./lib/speech";
 import { useNames } from "./lib/names";
 import { reportBug } from "./lib/diagnostics";
@@ -194,6 +195,7 @@ function onJob(job: JobEvent) {
   useEditor.setState({ jobs: { ...useEditor.getState().jobs, [job.id]: job } });
   if (job.kind === "cover" || job.kind === "vision-models") onCoverJob(job);
   if (job.kind === "reframe") onReframeJob(job);
+  if (job.kind === "follow") onFollowJob(job);
   if (job.kind === "faces") onFacesJob(job);
   if (job.kind === "reels") onReelsJob(job);
   if (job.kind === "beats" && job.status === "done") onBeatsFound(job.id.slice("beats:".length));
