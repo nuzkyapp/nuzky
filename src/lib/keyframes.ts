@@ -9,8 +9,27 @@ export function keyframeTolerance(fps: number) {
 }
 
 /** Share of the way to the next keyframe at `p` of the time between them, as the engine's `Ease::at`. */
-function eased(ease: Ease, p: number) {
-  return ease === "smooth" ? p * p * (3 - 2 * p) : p;
+export function eased(ease: Ease, p: number) {
+  switch (ease) {
+    case "smooth":
+      return p * p * (3 - 2 * p);
+    case "easeIn":
+      return p * p * p;
+    case "easeOut":
+      return 1 - (1 - p) ** 3;
+    default:
+      return p;
+  }
+}
+
+/**
+ * The keyframe whose curve leads from the playhead's place onwards: the one at the playhead, else the one before it,
+ * when another keyframe follows; -1 when the playhead is past the last one or before the first.
+ */
+export function curveIndex(clip: Clip, offsetUs: number, tol: number) {
+  const at = keyframeIndexAt(clip, offsetUs, tol);
+  const i = at >= 0 ? at : clip.keyframes.findLastIndex((k) => k.tUs < offsetUs);
+  return i >= 0 && i < clip.keyframes.length - 1 ? i : -1;
 }
 
 const MASK_VALUES = ["x", "y", "width", "height", "rotation", "feather"] as const;

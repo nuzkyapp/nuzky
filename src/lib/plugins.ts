@@ -5,6 +5,7 @@ import { send, sendBlocked, useAgent } from "./agent";
 import { api, errorText, plainError } from "./api";
 import { useDock } from "./dock";
 import { PLUGIN_RUN, aiLocked, enqueue, stopAiRun, undoAction, useEditor, type Toast } from "./store";
+import builtInDefs from "../../assets/effects/effects.json";
 import type { Project, Snapshot } from "./types";
 
 /** A choice's option, or a row the plugin found in the project; plain text, shown as it is. */
@@ -377,7 +378,22 @@ useEditor.subscribe((s, prev) => {
 export const brokenEffects = (p: Plugin) => p.effects.filter((e) => e.error);
 
 /** The installed effects, from every plugin that loads. */
-export const installedEffects = (list: Plugin[] | null) => (list ?? []).flatMap((p) => p.effects);
+/** As `plugin_effects::BUILT_IN` in the engine: the plugin id of the effects built into Nuzky. */
+export const BUILT_IN_PLUGIN = "nuzky";
+
+/** The effects built into Nuzky (`assets/effects`), which every computer draws. */
+export const BUILT_IN_EFFECTS: PluginEffect[] = (builtInDefs as { id: string; name: string; params: EffectParam[] }[]).map((e) => ({
+  plugin: BUILT_IN_PLUGIN,
+  pluginName: "Nuzky",
+  version: "1",
+  id: e.id,
+  name: e.name,
+  params: e.params,
+  error: null,
+}));
+
+/** Nuzky's own effects, then those of the user's plugins. */
+export const installedEffects = (list: Plugin[] | null) => [...BUILT_IN_EFFECTS, ...(list ?? []).flatMap((p) => p.effects)];
 
 // A preview of a plugin no longer shown would only keep a stuck script running.
 usePlugins.subscribe((s, prev) => {

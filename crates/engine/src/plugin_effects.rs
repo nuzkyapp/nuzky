@@ -697,6 +697,52 @@ static LIBRARY: LazyLock<Mutex<Library>> = LazyLock::new(Mutex::default);
 /// Effects that timed out, lost the GPU or failed to draw in this process, by key, with why.
 static BROKEN: LazyLock<Mutex<HashMap<u64, String>>> = LazyLock::new(Mutex::default);
 
+/// The plugin id of the effects built into Nuzky, which no plugin of the user's may take.
+pub const BUILT_IN: &str = "nuzky";
+/// The built-in effects' definitions, shared with the app (`src/lib/plugins.ts`).
+pub const BUILT_IN_MANIFEST: &str = include_str!("../../../assets/effects/effects.json");
+const BUILT_IN_SOURCES: [(&str, &str); 7] = [
+    ("blur", include_str!("../../../assets/effects/blur.wgsl")),
+    ("zoom-blur", include_str!("../../../assets/effects/zoom-blur.wgsl")),
+    ("shake", include_str!("../../../assets/effects/shake.wgsl")),
+    ("glitch", include_str!("../../../assets/effects/glitch.wgsl")),
+    ("rgb-split", include_str!("../../../assets/effects/rgb-split.wgsl")),
+    ("pixelate", include_str!("../../../assets/effects/pixelate.wgsl")),
+    ("grain", include_str!("../../../assets/effects/grain.wgsl")),
+];
+
+static BUILT_INS: LazyLock<Vec<Arc<Loaded>>> = LazyLock::new(|| {
+    let defs: Vec<EffectDef> = serde_json::from_str(BUILT_IN_MANIFEST).expect("the built-in effects parse");
+    defs.into_iter()
+        .map(|def| {
+            let (_, source) =
+                BUILT_IN_SOURCES.iter().find(|(id, _)| *id == def.id).expect("a built-in effect's shader");
+            let shader: Arc<str> = shader(source).into();
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            (BUILT_IN, def.id.as_str(), &*shader).hash(&mut hasher);
+            Arc::new(Loaded { def, key: hasher.finish(), shader })
+        })
+        .collect()
+});
+
+/// The effects built into Nuzky, in the order the app lists them.
+pub fn built_in() -> impl Iterator<Item = &'static EffectDef> {
+    BUILT_INS.iter().map(|loaded| &loaded.def)
+}
+
+/// The effect a clip names: one built into Nuzky, or one of the plugins under `dir`; `None` when it names a plugin
+/// and there is no plugins folder.
+pub fn find(dir: Option<&Path>, plugin: &str, effect: &str) -> Option<Lookup> {
+    if plugin != BUILT_IN {
+        return dir.map(|dir| lookup(dir, plugin, effect));
+    }
+    let Some(loaded) = BUILT_INS.iter().find(|loaded| loaded.def.id == effect) else { return Some(Lookup::Missing) };
+    Some(match BROKEN.lock().unwrap().get(&loaded.key) {
+        Some(why) => Lookup::Broken(why.clone()),
+        None => Lookup::Ready(loaded.clone()),
+    })
+}
+
 /// The folder of the user's plugins in Nuzky's data.
 pub fn plugins_dir() -> Option<PathBuf> {
     crate::data_dir().map(|dir| dir.join("plugins"))
@@ -831,7 +877,7 @@ pub fn issues_in(project: &Project, dir: Option<&Path>) -> Vec<EffectIssue> {
     let mut out: Vec<EffectIssue> = Vec::new();
     for clip in project.tracks.iter().flat_map(|t| &t.clips) {
         for effect in clip.effects.iter().take(crate::model::MAX_CLIP_EFFECTS) {
-            let broken = match dir.map(|dir| lookup(dir, &effect.plugin, &effect.effect)) {
+            let broken = match find(dir, &effect.plugin, &effect.effect) {
                 Some(Lookup::Ready(_)) => continue,
                 None | Some(Lookup::Missing) => None,
                 Some(Lookup::Broken(why)) => Some(why),
@@ -867,7 +913,7 @@ pub fn stamp(project: &Project) -> String {
     for effect in
         project.tracks.iter().flat_map(|t| &t.clips).flat_map(|c| c.effects.iter().take(crate::model::MAX_CLIP_EFFECTS))
     {
-        let state = match dir.as_deref().map(|dir| lookup(dir, &effect.plugin, &effect.effect)) {
+        let state = match find(dir.as_deref(), &effect.plugin, &effect.effect) {
             Some(Lookup::Ready(loaded)) => {
                 format!("{:016x}{}", loaded.key, serde_json::to_string(&loaded.def).unwrap_or_default())
             }
@@ -932,6 +978,24 @@ mod tests {
 
     fn error(source: &str) -> String {
         check(source).expect_err("the effect should be refused")
+    }
+
+    #[test]
+    fn the_built_in_effects_pass_the_checks_of_plugin_effects() {
+        let defs: Vec<EffectDef> = serde_json::from_str(BUILT_IN_MANIFEST).unwrap();
+        check_defs(&defs).unwrap();
+        assert_eq!(defs.len(), BUILT_IN_SOURCES.len());
+        for (id, source) in BUILT_IN_SOURCES {
+            assert!(defs.iter().any(|def| def.id == id), "{id} is in effects.json");
+            check(source).unwrap_or_else(|why| panic!("{id}.wgsl: {why}"));
+            assert!(matches!(find(None, BUILT_IN, id), Some(Lookup::Ready(_))), "{id} draws without a plugins folder");
+        }
+        assert_eq!(
+            built_in().map(|def| def.id.as_str()).collect::<Vec<_>>(),
+            defs.iter().map(|d| d.id.as_str()).collect::<Vec<_>>()
+        );
+        assert!(matches!(find(None, BUILT_IN, "from-a-newer-nuzky"), Some(Lookup::Missing)));
+        assert!(find(None, "vhs", "vhs").is_none());
     }
 
     #[test]

@@ -38,7 +38,7 @@ A plugin is a small JavaScript file that reads the project and returns edits, or
 ```
 
 - `nuzkyPlugin` is the plugin API, 3; plugins made for 1 and 2 still run, but one that ships files or effects, or needs silences, loudness or beats, needs 2, and one with `fullAccess` needs 3. `list_plugins` gives the `api` this Nuzky runs, and an older Nuzky refuses a plugin for a newer API with PLUGIN_API_NEWER.
-- `id`: 1 to 40 lowercase letters, digits and dashes; also the folder's name. Saving with the same id replaces the plugin and keeps the old files as plugin.prev.json, plugin.prev.js and effects/<id>.prev.wgsl.
+- `id`: 1 to 40 lowercase letters, digits and dashes, not `nuzky`, which names Nuzky's own effects; also the folder's name. Saving with the same id replaces the plugin and keeps the old files as plugin.prev.json, plugin.prev.js and effects/<id>.prev.wgsl.
 - `name` (at most 40 characters), `description` (300), `version` (20) and `action`, the verb on its button (24, "Run" when left out), or `actions` for several buttons (A richer panel below). Write them in the user's language, plainly, saying what will happen.
 - `needs`: what the plugin reads beyond the project, any of `"words"` (the transcript), `"silences"`, `"loudness"` and `"beats"` (found in the sound; these three need `nuzkyPlugin` 2). Ask only for what `run` uses: finding them in a long video takes a while the first time.
 - `inputs`, at most 20, each with `id` (letters, digits and `_`), `label` (at most 40 characters), `type` and `default`:

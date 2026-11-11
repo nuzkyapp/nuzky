@@ -613,6 +613,10 @@ pub enum Ease {
     Linear,
     /// Starts and ends gently, like a camera move (smoothstep).
     Smooth,
+    /// Starts slowly and speeds up (cubic).
+    EaseIn,
+    /// Starts fast and slows down to the next keyframe (cubic).
+    EaseOut,
 }
 
 impl Ease {
@@ -621,6 +625,8 @@ impl Ease {
         match self {
             Ease::Linear => p,
             Ease::Smooth => p * p * (3.0 - 2.0 * p),
+            Ease::EaseIn => p * p * p,
+            Ease::EaseOut => 1.0 - (1.0 - p).powi(3),
         }
     }
 }
@@ -638,6 +644,13 @@ pub enum TransitionKind {
     ZoomIn,
     WipeLeft,
     Blur,
+    SlideRight,
+    SlideDown,
+    WipeRight,
+    WipeUp,
+    WipeDown,
+    ZoomOut,
+    Spin,
 }
 
 /// Plays across [cut - d/2, cut + d/2]. The outgoing clip continues past its out point
@@ -1470,6 +1483,22 @@ pub fn parse_color(s: &str) -> [f32; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The curves and transitions a project saved before Ease in, Ease out and the newer transitions reads and saves
+    /// as it was.
+    #[test]
+    fn older_keyframe_curves_and_transitions_save_as_they_were() {
+        let transform = serde_json::to_value(Transform::default()).unwrap();
+        for ease in ["linear", "smooth"] {
+            let key = serde_json::json!({"tUs": 500_000, "transform": transform, "ease": ease});
+            assert_eq!(serde_json::to_value(serde_json::from_value::<Keyframe>(key.clone()).unwrap()).unwrap(), key);
+        }
+        for kind in ["dissolve", "fadeBlack", "fadeWhite", "slideLeft", "slideUp", "zoomIn", "wipeLeft", "blur"] {
+            let transition = serde_json::json!({"kind": kind, "durationUs": 500_000});
+            let read: Transition = serde_json::from_value(transition.clone()).unwrap();
+            assert_eq!(serde_json::to_value(read).unwrap(), transition);
+        }
+    }
 
     #[test]
     fn project_round_trips_through_json() {

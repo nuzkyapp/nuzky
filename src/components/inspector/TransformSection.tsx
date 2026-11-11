@@ -1,11 +1,11 @@
 import type { ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { ChevronLeft, ChevronRight, Diamond, Maximize, Minimize, RotateCcw } from "lucide-react";
-import { clipOffset, cropAndMask, keyframeIndexAt, keyframeTolerance, transformAt, upsertKeyframe } from "../../lib/keyframes";
+import { clipOffset, cropAndMask, curveIndex, keyframeIndexAt, keyframeTolerance, transformAt, upsertKeyframe } from "../../lib/keyframes";
 import { LIMITS } from "../../lib/limits";
 import { DEFAULT_TRANSFORM } from "../../lib/presets";
 import { editClip, isCaptionTrack, readoutTime, setClipTransform, transformAtPlayhead, useEditor } from "../../lib/store";
-import type { Asset, Clip, EditCmd, Transform } from "../../lib/types";
+import type { Asset, Clip, Ease, EditCmd, Transform } from "../../lib/types";
 import { IconButton, Section, Segmented, Slider } from "../ui";
 import { QUIET } from "./Header";
 
@@ -49,10 +49,44 @@ function KeyframeControls({ clip, at }: { clip: Clip; at: AtPlayhead }) {
   );
 }
 
+const CURVES: { id: Ease; label: string; title: string }[] = [
+  { id: "linear", label: "Linear", title: "At an even pace" },
+  { id: "easeIn", label: "Ease in", title: "Starts slowly and speeds up" },
+  { id: "easeOut", label: "Ease out", title: "Starts fast and slows down into the next keyframe" },
+  { id: "smooth", label: "Smooth", title: "Starts and ends gently" },
+];
+
+/** How the values move from the keyframe at or before the playhead on to the next one. */
+function CurveControl({ clip, index }: { clip: Clip; index: number }) {
+  const fps = useEditor((s) => s.snap!.project.canvas.fps);
+  // Built from the latest confirmed keyframes and the playhead at the click, as the diamond is.
+  const set = (ease: Ease) =>
+    editClip(clip.id, (c) => {
+      const i = curveIndex(c, clipOffset(c, useEditor.getState().timeUs), keyframeTolerance(fps));
+      return i < 0 ? null : { type: "setKeyframes", clipId: c.id, keyframes: c.keyframes.map((k, j) => (j === i ? { ...k, ease } : k)) };
+    });
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-[12px] text-muted">Curve to next keyframe</span>
+      <Segmented
+        label="Curve to next keyframe"
+        compact
+        value={index >= 0 ? clip.keyframes[index].ease : null}
+        onChange={set}
+        disabled={index < 0}
+        disabledReason="Move the playhead to a keyframe or between two"
+        options={CURVES}
+      />
+    </div>
+  );
+}
+
 /** What the playhead decides in the Transform section, as plain values. */
 interface AtPlayhead extends Transform {
   inside: boolean;
   atIndex: number;
+  /** The keyframe whose curve the playhead is on (`curveIndex`), or -1. */
+  curve: number;
   prevUs: number | null;
   nextUs: number | null;
 }
@@ -65,6 +99,7 @@ function atPlayhead(clip: Clip, timeUs: number, fps: number): AtPlayhead {
     ...transformAt(clip, clip.content.transform, offset),
     inside,
     atIndex: inside ? keyframeIndexAt(clip, offset, tol) : -1,
+    curve: inside ? curveIndex(clip, offset, tol) : -1,
     prevUs: [...clip.keyframes].reverse().find((k) => k.tUs < offset - tol)?.tUs ?? null,
     nextUs: clip.keyframes.find((k) => k.tUs > offset + tol)?.tUs ?? null,
   };
@@ -120,6 +155,7 @@ export function TransformSection({ clip, asset, caption = false }: { clip: Clip;
           {clip.keyframes.length} keyframe{clip.keyframes.length === 1 ? "" : "s"} · edits {atIndex >= 0 ? "update this keyframe" : "add a keyframe here"}
         </p>
       )}
+      {clip.keyframes.length > 1 && <CurveControl clip={clip} index={at.curve} />}
       {asset && asset.kind !== "audio" && (
         <Segmented
           label="Fit or fill"

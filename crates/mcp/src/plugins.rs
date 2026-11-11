@@ -422,6 +422,11 @@ pub(crate) fn manifest(value: &Value) -> Result<Manifest> {
         );
     }
     ensure!(is_id(&manifest.id), "PLUGIN_BROKEN: plugin.json: id is 1 to 40 lowercase letters, digits and dashes");
+    ensure!(
+        manifest.id != plugin_effects::BUILT_IN,
+        "PLUGIN_BROKEN: plugin.json: id {} is Nuzky's own effects; choose another",
+        plugin_effects::BUILT_IN
+    );
     let texts = [
         ("name", &manifest.name, 40),
         ("description", &manifest.description, 300),

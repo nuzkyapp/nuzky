@@ -628,7 +628,7 @@ export type DeletedCollection = {
  */
 export type Delivery = "reels" | "shorts" | "youtube_1080p" | "youtube_4k" | "instagram_feed" | "square";
 
-export type Ease = "linear" | "smooth";
+export type Ease = "linear" | "smooth" | "easeIn" | "easeOut";
 
 export type EditCmd = {
   "type": "addAssets",
@@ -2486,7 +2486,7 @@ export type Transition = {
   durationUs: number,
 };
 
-export type TransitionKind = "dissolve" | "fadeBlack" | "fadeWhite" | "slideLeft" | "slideUp" | "zoomIn" | "wipeLeft" | "blur";
+export type TransitionKind = "dissolve" | "fadeBlack" | "fadeWhite" | "slideLeft" | "slideUp" | "zoomIn" | "wipeLeft" | "blur" | "slideRight" | "slideDown" | "wipeRight" | "wipeUp" | "wipeDown" | "zoomOut" | "spin";
 
 export type Transport = {
   playing: boolean,

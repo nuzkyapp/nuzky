@@ -248,6 +248,14 @@ mod tests {
         c.keyframes[0].ease = Ease::Smooth;
         assert!((transform_at(&c, 1_500_000).0.scale - 0.65625).abs() < 1e-6);
         assert!((transform_at(&c, 2_000_000).0.scale - 1.0).abs() < 1e-6);
+        // Ease in covers 1.6 % of the way in the first quarter of the time and speeds up; ease out covers 57.8 % and
+        // slows down into the next keyframe. Both reach it on time.
+        for (ease, quarter, half) in [(Ease::EaseIn, 0.515625, 0.625), (Ease::EaseOut, 1.078125, 1.375)] {
+            c.keyframes[0].ease = ease;
+            assert!((transform_at(&c, 1_500_000).0.scale - quarter).abs() < 1e-6, "{ease:?}");
+            assert!((transform_at(&c, 2_000_000).0.scale - half).abs() < 1e-6, "{ease:?}");
+            assert_eq!(transform_at(&c, 3_000_000).0, b, "{ease:?}");
+        }
     }
 
     #[test]
