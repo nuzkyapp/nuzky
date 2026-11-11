@@ -19,9 +19,11 @@ fn no_plugins() {
     ONCE.call_once(|| unsafe { std::env::set_var("NUZKY_DATA_DIR", dir("looks-data")) });
 }
 
+/// One second of an FFmpeg test pattern, 96 × 64 unless `pattern` names its size.
 fn source(d: &Path, name: &str, pattern: &str) -> std::path::PathBuf {
     let path = d.join(format!("{name}.mp4"));
-    let input = format!("{pattern}=size=96x64:rate={FPS}:duration=1");
+    let size = if pattern.contains("size=") { "" } else { "=size=96x64" };
+    let input = format!("{pattern}{size}:rate={FPS}:duration=1");
     ff(&["-f", "lavfi", "-i", &input, "-c:v", "libx264", "-crf", "8", "-pix_fmt", "yuv420p"], &path);
     path
 }
@@ -55,6 +57,25 @@ fn exported_and_previewed(p: &Project, d: &Path, times: &[i64]) -> Vec<(Vec<u8>,
 
             assert!(preview.skipped_effects().is_empty(), "{:?}", preview.skipped_effects());
             (decoded[index * size..(index + 1) * size].to_vec(), shown)
+        })
+        .collect()
+}
+
+/// RGBA `w` × `h` shrunk to half by averaging each 2 × 2 block.
+fn half(rgba: &[u8], w: u32, h: u32) -> Vec<u8> {
+    let (w, h) = (w as usize, h as usize);
+    let at = |x: usize, y: usize, c: usize| rgba[(y * w + x) * 4 + c] as u32;
+    (0..h / 2)
+        .flat_map(|y| (0..w / 2).map(move |x| (x, y)))
+        .flat_map(|(x, y)| {
+            (0..4).map(move |c| {
+                ((at(2 * x, 2 * y, c)
+                    + at(2 * x + 1, 2 * y, c)
+                    + at(2 * x, 2 * y + 1, c)
+                    + at(2 * x + 1, 2 * y + 1, c)
+                    + 2)
+                    / 4) as u8
+            })
         })
         .collect()
 }
@@ -133,6 +154,22 @@ fn new_transitions_and_keyframe_curves_export_as_previewed() {
         for b in &kinds[i + 1..] {
             assert!(mae(a, b) > 2.0, "two transitions draw alike midway: MAE {}", mae(a, b));
         }
+    }
+    // A preview half the size shows what the export does, only smaller, on wide flat bars where shrinking adds little.
+    let mut bars = Project::new("bars");
+    let a = probe(&source(&d, "bars", "smptebars=size=384x256"), "bars".into()).unwrap();
+    (bars.canvas.width, bars.canvas.height, bars.canvas.fps) = (384, 256, FPS);
+    bars.tracks[0].clips = vec![clip("a", &a.id, 0, 1_000_000), clip("b", &a.id, 1_000_000, 1_000_000)];
+    bars.assets.push(a);
+    let mut full = Renderer::new().unwrap();
+    let mut small = Renderer::new().unwrap();
+    for kind in [TransitionKind::Spin, TransitionKind::ZoomOut, TransitionKind::SlideDown, TransitionKind::WipeUp] {
+        bars.tracks[0].clips[1].transition_in = Some(Transition { kind, duration_us: 400_000 });
+        let whole = full.render(&bars, spin_at, 384, 256, Wait::Exact, false).unwrap();
+        let shrunk = small.render(&bars, spin_at, 192, 128, Wait::Exact, false).unwrap();
+        let error = mae(&shrunk, &half(&whole, 384, 256));
+        eprintln!("QA looks: {kind:?} at half size MAE {error:.2}");
+        assert!(error < 2.0, "{kind:?} draws otherwise in a smaller preview: MAE {error}");
     }
     let eased = frame(&p, curve_at);
     let mut even = p.clone();

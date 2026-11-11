@@ -1023,10 +1023,8 @@ fn transition_geometry(
 fn apply_transition(layer: &mut Layer, kind: TransitionKind, p: f32, incoming: bool, w: u32, h: u32) {
     (layer.corners, layer.opacity, layer.clip) =
         transition_geometry(layer.corners, layer.opacity, kind, p, incoming, w, h);
-    match kind {
-        TransitionKind::Blur => layer.blur = if incoming { 1.0 - p } else { p } * 12.0,
-        TransitionKind::Spin => layer.blur = (std::f32::consts::PI * p).sin() * 6.0,
-        _ => {}
+    if kind == TransitionKind::Blur {
+        layer.blur = if incoming { 1.0 - p } else { p } * 12.0;
     }
 }
 
