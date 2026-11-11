@@ -33,13 +33,20 @@ export function captionKeys(clip: Clip): { words: CaptionWord[]; refs: CaptionWo
 
 export const keyColor = (style: TextStyle) => style.keywords?.color ?? KEYWORD_COLOR;
 
-/** For each span of the timeline, the caption words said in it, each where its middle is. */
+/**
+ * For each span of the timeline, the caption words said in it, each where its middle is. Only the caption a word is
+ * heard in counts, as a split leaves every word in both halves; the engine keeps marks the same way.
+ */
 export function captionWordsIn(tracks: Track[], spans: { startUs: number; endUs: number }[]): CaptionWordRef[][] {
   const all = tracks
     .flatMap((t) => (t.kind === "text" ? t.clips : []))
     .flatMap((clip) => {
       const keys = captionKeys(clip);
-      return keys ? keys.words.map((w, i) => ({ ref: keys.refs[i], atUs: clip.startUs + (w.startUs + w.endUs) / 2 })) : [];
+      if (!keys) return [];
+      return keys.words.flatMap((w, i) => {
+        const middle = (w.startUs + w.endUs) / 2;
+        return middle >= 0 && middle < clip.durationUs ? [{ ref: keys.refs[i], atUs: clip.startUs + middle }] : [];
+      });
     })
     .sort((a, b) => a.atUs - b.atUs);
   return spans.map(({ startUs, endUs }) => {

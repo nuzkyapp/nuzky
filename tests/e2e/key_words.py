@@ -14,8 +14,10 @@ JOBS = "return Object.entries(window.__nuzky.store.getState().jobs).map(([id, j]
 
 
 def said(captions):
-    """Every caption word with the timeline moment its middle is said and its mark: {(moment, text): marked}."""
-    return {(c['startUs'] + (w['startUs'] + w['endUs']) // 2, w['text']): w.get('marked') for c in captions for w in c['words']}
+    """Every caption word with the timeline moment its middle is said and its mark: {(moment, text): marked}. Only the
+    caption a word is heard in counts: a split leaves every word in both halves."""
+    return {(c['startUs'] + (w['startUs'] + w['endUs']) // 2, w['text']): w.get('marked') for c in captions for w in c['words']
+            if 0 <= (w['startUs'] + w['endUs']) // 2 < c['durationUs']}
 
 
 def mark_at(captions, moment, text, tolerance=40_000):
@@ -103,27 +105,41 @@ def key_words(r):
     r.check('a split between the two words keeps the mark on its piece',
             wait(lambda: len(r.s.run(WORDS)) == len(captions) + 1, 5) and mark_at(r.s.run(WORDS), moment, word['text']) is True)
 
-    # The transcript: select a word of another caption and press K.
+    # The transcript. By its time: a take may say the same word twice. Words are the options without a label of their own.
+    r.s.run("[...document.querySelectorAll('[role=tab]')].find((t) => t.textContent.trim() === 'Transcript')?.click()")
+    view = json.loads(r.s.call('window.__nuzky.api.transcriptView(500000).then(JSON.stringify)')['value'])
+
+    def transcript_word(start_us):
+        k = min(range(len(view['words'])), key=lambda i: abs(view['words'][i]['startUs'] - start_us))
+        span = f"document.querySelectorAll('[role=listbox][aria-label=Transcript] [role=option]:not([aria-label])')[{k}]"
+        select = (f"const s = {span}; s.scrollIntoView({{block: 'center'}});"
+                  "s.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true, button: 0, buttons: 1}));"
+                  "s.dispatchEvent(new PointerEvent('pointerup', {bubbles: true, button: 0}));")
+        return view['words'][k]['text'], span, select
+    button = "[...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Key word')"
+
+    # The split caption: K acts on the half the word is heard in, so the first K takes the mark back.
+    _, _, select_split = transcript_word(caption['startUs'] + word['startUs'])
+    r.s.run(select_split)
+    r.check(f'after the split, Key word shows "{word["text"]}" as key', wait(lambda: r.s.run(f"return {button}?.getAttribute('aria-pressed')") == 'true', 5))
+    press('k')
+    r.check('K on it takes the mark back in the half it is heard in', wait(lambda: mark_at(r.s.run(WORDS), moment, word['text']) is None, 5))
+    press('k')
+    r.check('and K again marks it there once more', wait(lambda: mark_at(r.s.run(WORDS), moment, word['text']) is True, 5))
+
+    # A word of another caption.
     other = next((c for c in captions if c['startUs'] > caption['startUs'] + caption['durationUs'] and c['words']
                   and sum(ch.isalnum() for ch in c['words'][0]['text']) >= 3), None)
     if not r.check('another caption follows', other):
         return
     picked = other['words'][0]
     picked_at = other['startUs'] + (picked['startUs'] + picked['endUs']) // 2
-    r.s.run("[...document.querySelectorAll('[role=tab]')].find((t) => t.textContent.trim() === 'Transcript')?.click()")
-    # By its time: a take may say the same word twice. Words are the options without a label of their own.
-    view = json.loads(r.s.call('window.__nuzky.api.transcriptView(500000).then(JSON.stringify)')['value'])
-    k = min(range(len(view['words'])), key=lambda i: abs(view['words'][i]['startUs'] - (other['startUs'] + picked['startUs'])))
-    span = f"document.querySelectorAll('[role=listbox][aria-label=Transcript] [role=option]:not([aria-label])')[{k}]"
+    shown, span, select_word = transcript_word(other['startUs'] + picked['startUs'])
     if not r.check(f'the transcript shows "{picked["text"]}"', wait(lambda: r.s.run(f'return ({span})?.textContent.trim()') == picked['text'].strip(), 10),
-                   [view['words'][k]['text'], picked['text']]):
+                   [shown, picked['text']]):
         r.shot('transcript-missing')
         return
-    select_word = (f"const s = {span}; s.scrollIntoView({{block: 'center'}});"
-                   "s.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true, button: 0, buttons: 1}));"
-                   "s.dispatchEvent(new PointerEvent('pointerup', {bubbles: true, button: 0}));")
     r.s.run(select_word)
-    button = "[...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Key word')"
     r.check('the bar under the selection offers Key word, not pressed', wait(lambda: r.s.run(f"return {button}?.getAttribute('aria-pressed')") == 'false', 5))
     press('k')
     r.check(f'K marks "{picked["text"]}" key in its caption', wait(lambda: mark_at(r.s.run(WORDS), picked_at, picked['text']) is True, 5))
