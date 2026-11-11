@@ -805,7 +805,7 @@ pub fn key_words(text: &str, words: &[CaptionWord], pick: Option<KeywordPick>) -
         None => Vec::new(),
         Some(KeywordPick::Emphasis) => said().filter(|(_, w)| w.key).map(|(i, _)| i).collect(),
         Some(KeywordPick::First) => said().next().map(|(i, _)| i).into_iter().collect(),
-        Some(KeywordPick::Last) => said().last().map(|(i, _)| i).into_iter().collect(),
+        Some(KeywordPick::Last) => said().next_back().map(|(i, _)| i).into_iter().collect(),
         // The first of the longest, so a tie always marks the same word.
         Some(KeywordPick::Longest) => {
             said().rev().max_by_key(|(_, w)| letters(w)).map(|(i, _)| i).into_iter().collect()

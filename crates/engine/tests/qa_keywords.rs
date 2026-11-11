@@ -38,11 +38,11 @@ fn keyword_mark_without_a_pick_draws_only_that_word_in_default_yellow() {
     project.apply(EditCmd::MarkKeyWord { clip_id: id, word: 1, marked: Some(true) }).unwrap();
     let marked = renderer.render(&project, 500_000, 640, 360, Wait::Exact, false).unwrap();
     let yellow: Vec<_> =
-        marked.chunks_exact(4).enumerate().filter(|(_, p)| p[..3] == [255, 212, 0]).map(|(i, _)| i).collect();
+        marked.as_chunks::<4>().0.iter().enumerate().filter(|(_, p)| p[..3] == [255, 212, 0]).map(|(i, _)| i).collect();
     assert!(yellow.len() > 50, "no #ffd400 fill: {} pixels", yellow.len());
     let (left, right) = (yellow.iter().map(|i| i % 640).min().unwrap(), yellow.iter().map(|i| i % 640).max().unwrap());
     let mut white = [0; 3];
-    for (i, (before, after)) in plain.chunks_exact(4).zip(marked.chunks_exact(4)).enumerate() {
+    for (i, (before, after)) in plain.as_chunks::<4>().0.iter().zip(marked.as_chunks::<4>().0).enumerate() {
         if before[..3] != [255, 255, 255] {
             continue;
         }
