@@ -442,14 +442,45 @@ pub struct Track {
     #[serde(default)]
     pub keep_in_place: bool,
     pub clips: Vec<Clip>,
+    /// A captions track holding the speech captions translated into this language, an ISO 639-1 code such as
+    /// "en". Its captions have no spoken words, so nothing made from the transcript writes into it. `None` on the
+    /// captions of the speech and on every other track.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional = nullable))]
+    pub translation: Option<String>,
 }
 
 /// Generated captions live on text tracks with this name; other text tracks hold titles.
 pub const CAPTIONS_TRACK: &str = "Captions";
 
+/// The languages captions can be translated into, the ones speech is recognised in (`SPEECH_LANGUAGES` in
+/// `src/lib/speech.ts`).
+pub const CAPTION_LANGUAGES: [(&str, &str); 9] = [
+    ("cs", "Czech"),
+    ("sk", "Slovak"),
+    ("en", "English"),
+    ("de", "German"),
+    ("pl", "Polish"),
+    ("es", "Spanish"),
+    ("fr", "French"),
+    ("it", "Italian"),
+    ("uk", "Ukrainian"),
+];
+
+/// "English" for "en", or `None` for a language captions are not translated into.
+pub fn language_name(code: &str) -> Option<&'static str> {
+    CAPTION_LANGUAGES.iter().find(|(c, _)| *c == code).map(|(_, name)| *name)
+}
+
 impl Track {
+    /// Captions of the speech or a translation of them.
     pub fn is_captions(&self) -> bool {
         self.kind == TrackKind::Text && self.name == CAPTIONS_TRACK
+    }
+
+    /// Captions made from the transcript, which recognition, word corrections and making captions again write.
+    pub fn is_speech_captions(&self) -> bool {
+        self.is_captions() && self.translation.is_none()
     }
 }
 
@@ -1207,6 +1238,7 @@ impl Project {
                 hidden: false,
                 keep_in_place: false,
                 clips: Vec::new(),
+                translation: None,
             }],
             word_corrections: Vec::new(),
             thumbnails: Vec::new(),

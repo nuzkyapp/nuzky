@@ -9,7 +9,7 @@ use nuzky_engine::{
         MAX_CANVAS_SIDE, MAX_CLIP_EFFECTS, MAX_CORRECTION_CHARS, MAX_FONT_HEIGHT_RATIO, MAX_LEFT_OUT,
         MAX_LEFT_OUT_CHARS, MAX_REEL_HOOK_CHARS, MAX_REEL_TITLE_CHARS, MAX_REEL_WHY_CHARS, MAX_SHADOW,
         MAX_TEXT_WIDTH_RATIO, PROJECT_VERSION, ReelCandidate, ReelStatus, TextStyle, Thumbnail, TrackKind, Transform,
-        max_stroke_width, unit_of,
+        language_name, max_stroke_width, unit_of,
     },
 };
 
@@ -51,6 +51,13 @@ pub fn validate(project: &Project) -> Result<()> {
         if let Some(credit) = &asset.credit {
             sound_credit(credit).with_context(|| format!("INVALID_PROJECT: credit of asset {}", asset.id))?;
         }
+    }
+    let mut translations = HashSet::new();
+    for track in project.tracks.iter().filter(|t| t.translation.is_some()) {
+        let language = track.translation.as_deref().unwrap_or_default();
+        ensure!(track.is_captions(), "INVALID_PROJECT: only a captions track can be a translation");
+        ensure!(language_name(language).is_some(), "INVALID_PROJECT: captions cannot be translated into {language:?}");
+        ensure!(translations.insert(language), "INVALID_PROJECT: two captions tracks translate into {language}");
     }
     for track in &project.tracks {
         let mut clips: Vec<_> = track.clips.iter().collect();

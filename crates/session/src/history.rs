@@ -270,6 +270,7 @@ pub(crate) fn label(cmds: &[EditCmd]) -> &'static str {
         EditCmd::RestyleTrack { .. } => "Restyle text",
         EditCmd::SetCanvas { fps: Some(_), .. } => "Change quality",
         EditCmd::SetCanvas { .. } => "Change format",
+        EditCmd::AddCaptions { translation: Some(_), .. } => "Translate captions",
         EditCmd::AddCaptions { .. } => "Add captions",
         EditCmd::ReplaceCaptions { .. } => "Replace captions",
         EditCmd::RippleDeleteRanges { .. } => "Cut",

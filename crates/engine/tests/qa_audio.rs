@@ -367,6 +367,7 @@ fn music_ducks_under_speech_and_comes_back_in_the_pause() {
         hidden: false,
         keep_in_place: true,
         clips: vec![clip("qa-song", &song.id, 0, 8_000_000)],
+        translation: None,
     });
     p.assets.push(song.clone());
     let cache = d.join("cache");

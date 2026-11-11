@@ -536,6 +536,38 @@ pub struct Captions {
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct TranslateCaptions {
+    /// The language to translate into, an ISO 639-1 code: en, cs, sk, de, pl, es, fr, it or uk.
+    pub language: String,
+    /// The captions track of the speech to translate; leave it out when the project has one.
+    pub track_id: Option<String>,
+    /// Leave out to read the sentences. With it, the translation of every sentence read, in order.
+    pub translations: Option<Vec<Translation>>,
+    /// The key the sentences came with; required with translations.
+    pub key: Option<String>,
+    /// Required with translations.
+    pub run_id: Option<String>,
+    /// A full caption style for the translation; leave it out to keep the translation's own look.
+    pub style: Option<TextStyle>,
+    /// A built-in style package or a saved style from My styles by name, as for build_captions.
+    pub style_preset: Option<String>,
+    /// Most words of one translated caption, 5 when left out.
+    pub max_words: Option<usize>,
+    /// Most characters of one translated caption, 30 when left out.
+    pub max_chars: Option<usize>,
+    /// Where the translated captions go, only the fields to change, as for build_captions.
+    pub transform: Option<TransformPatch>,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Translation {
+    /// The sentence's i.
+    pub i: usize,
+    /// What it says in the language, "" to show nothing for it.
+    pub text: String,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct Export {
     pub path: String,
     /// "reels": 1080x1920, 30 fps, 9:16; "shorts": 1080x1920, project fps, 9:16;

@@ -653,6 +653,7 @@ fn png_alpha_composites_over_video() {
         hidden: false,
         keep_in_place: false,
         clips: vec![clip("over", &asset.id, 0, 200_000)],
+        translation: None,
     });
     p.assets.push(asset);
     let frame = Renderer::new().unwrap().render(&p, 0, 64, 64, Wait::Exact, false).unwrap();
@@ -1136,7 +1137,15 @@ fn caption_preview_error(name: &str, style: TextStyle, scale: f32) -> f64 {
     let mut p = project(&grey, 1_000_000);
     let segment = CaptionSegment { start_us: 0, end_us: 1_000_000, text: "Poslední dva".into(), words: Vec::new() };
     let transform = Some(TransformPatch { scale: Some(scale), ..TransformPatch::default() });
-    p.apply(EditCmd::AddCaptions { segments: vec![segment], style, anim_in: None, anim_out: None, transform }).unwrap();
+    p.apply(EditCmd::AddCaptions {
+        segments: vec![segment],
+        style,
+        anim_in: None,
+        anim_out: None,
+        transform,
+        translation: None,
+    })
+    .unwrap();
     let mut renderer = Renderer::new().unwrap();
     let export = d.join("export.rgba");
     // As export draws its frames.

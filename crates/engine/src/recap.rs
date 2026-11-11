@@ -1051,6 +1051,7 @@ impl Sound {
             hidden: false,
             keep_in_place: true,
             clips,
+            translation: None,
         };
         if let Some(swish) = &recap.swish {
             let mut clips: Vec<Clip> = Vec::new();

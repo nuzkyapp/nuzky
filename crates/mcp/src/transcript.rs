@@ -984,7 +984,7 @@ pub fn caption_corrections(
     changes: &[(usize, &str)],
 ) -> (Vec<(String, String)>, Vec<String>) {
     let middle = |w: &TimelineWord| w.start_us + (w.end_us - w.start_us) / 2;
-    let captions = || project.tracks.iter().filter(|t| t.is_captions()).flat_map(|t| &t.clips);
+    let captions = || project.tracks.iter().filter(|t| t.is_speech_captions()).flat_map(|t| &t.clips);
     // Per clip: its text and the replacements by byte range, both from the text before any change.
     let mut planned: Vec<Replacements> = Vec::new();
     let mut kept: Vec<String> = Vec::new();
@@ -1299,8 +1299,11 @@ pub fn caption_edit_in(
             segments.extend(grouped.into_iter().filter(|s| s.end_us > s.start_us));
         }
     }
-    let tracks: Vec<_> = project.tracks.iter().filter(|t| t.is_captions()).collect();
-    ensure!(tracks.len() <= 1, "AMBIGUOUS_CAPTIONS: multiple caption tracks; use explicit replaceCaptions");
+    let tracks: Vec<_> = project.tracks.iter().filter(|t| t.is_speech_captions()).collect();
+    ensure!(
+        tracks.len() <= 1,
+        "AMBIGUOUS_CAPTIONS: multiple caption tracks of the speech; use explicit replaceCaptions"
+    );
     if scope.is_some() {
         let kept: Vec<&Clip> =
             tracks.iter().flat_map(|t| &t.clips).filter(|c| range_of(c.start_us) == Some(None)).collect();
@@ -1330,7 +1333,7 @@ pub fn caption_edit_in(
             transform: placement(track),
             ranges: scope.map(<[TimeRange]>::to_vec),
         },
-        None => EditCmd::AddCaptions { segments, style, anim_in, anim_out, transform: None },
+        None => EditCmd::AddCaptions { segments, style, anim_in, anim_out, transform: None, translation: None },
     };
     Ok((edit, count))
 }
@@ -1338,7 +1341,7 @@ pub fn caption_edit_in(
 /// Where the captions of `track` sit, so captions made again land there: the place most of its captions without
 /// keyframes share, so one caption moved alone does not move them all. Hidden captions have no say in the
 /// opacity, so one hidden on its own, even where it ties or is the only one without keyframes, hides none.
-fn placement(track: &Track) -> Option<TransformPatch> {
+pub(crate) fn placement(track: &Track) -> Option<TransformPatch> {
     let transforms: Vec<_> = track
         .clips
         .iter()
@@ -1471,6 +1474,7 @@ pub(crate) mod tests {
             hidden: false,
             keep_in_place: false,
             clips: vec![overlay],
+            translation: None,
         });
         sources.insert("broll".into(), vec![]);
         let derived = Derived::new(&project, sources, vec![]);
@@ -1590,6 +1594,7 @@ pub(crate) mod tests {
                 anim_in: None,
                 anim_out: None,
                 transform: None,
+                translation: None,
             })
             .unwrap();
         let caption = project.tracks.iter().find(|t| t.is_captions()).unwrap().clips[0].id.clone();
@@ -2054,6 +2059,7 @@ pub(crate) mod tests {
                 anim_in: None,
                 anim_out: None,
                 transform: None,
+                translation: None,
             })
             .unwrap();
     }

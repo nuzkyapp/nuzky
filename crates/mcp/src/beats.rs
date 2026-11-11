@@ -809,6 +809,7 @@ mod tests {
             anim_in: None,
             anim_out: None,
             transform: None,
+            translation: None,
         })
         .unwrap();
         let before = p.clone();

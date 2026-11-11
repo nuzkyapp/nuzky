@@ -429,6 +429,7 @@ fn lanes(
             hidden: from.hidden,
             keep_in_place,
             clips,
+            translation: None,
         });
     }
 }

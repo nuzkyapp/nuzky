@@ -75,6 +75,7 @@ fn recap(dir: &Path, music: bool) -> Recap {
             hidden: false,
             keep_in_place: true,
             clips: vec![song],
+            translation: None,
         });
     }
     let mut editor = Editor::new(before.clone());

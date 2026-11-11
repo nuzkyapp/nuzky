@@ -790,6 +790,7 @@ export type EditCmd = {
   animIn?: Animation | null,
   animOut?: Animation | null,
   transform?: TransformPatch | null,
+  translation?: string | null,
 } | {
   "type": "replaceCaptions",
   trackId: string,
@@ -2201,6 +2202,12 @@ export type Track = {
    */
   keepInPlace: boolean,
   clips: Array<Clip>,
+  /**
+   * A captions track holding the speech captions translated into this language, an ISO 639-1 code such as
+   * "en". Its captions have no spoken words, so nothing made from the transcript writes into it. `None` on the
+   * captions of the speech and on every other track.
+   */
+  translation?: string | null,
 };
 
 export type TrackKind = "video" | "audio" | "text";

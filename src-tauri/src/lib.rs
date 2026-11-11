@@ -1487,6 +1487,7 @@ pub fn run() {
             cover::start_cover_mask,
             cover::start_cover_export,
             transcripts::transcript_view,
+            transcripts::speech_language,
             transcripts::cut_words,
             transcripts::remove_pauses,
             transcripts::remove_retakes,

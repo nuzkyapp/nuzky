@@ -688,6 +688,11 @@ export function isCaptionTrack(track: Track) {
   return track.kind === "text" && track.name === "Captions";
 }
 
+/** Captions made from the transcript, not a translation of them (`Track.translation`). */
+export function isSpeechCaptionTrack(track: Track) {
+  return isCaptionTrack(track) && !track.translation;
+}
+
 export function mainClips(project: Project): Clip[] {
   return project.tracks.find((t) => t.id === MAIN_TRACK)?.clips ?? [];
 }
@@ -1111,8 +1116,8 @@ export function presetOver(preset: TextStyle, style: TextStyle, unit: number): T
   return { ...scaleStyle(preset, unit), fontFamily: preset.fontFamily ?? style.fontFamily, letterCase: preset.letterCase ?? style.letterCase, maxWidth: style.maxWidth };
 }
 
-/** The captions track `trackId`, or the first one. */
-const captionTrack = (project: Project, trackId?: string) => (trackId ? project.tracks.find((t) => t.id === trackId) : project.tracks.find(isCaptionTrack));
+/** The captions track `trackId`, or the captions of the speech. */
+const captionTrack = (project: Project, trackId?: string) => (trackId ? project.tracks.find((t) => t.id === trackId) : project.tracks.find(isSpeechCaptionTrack));
 
 /**
  * Gives every caption the look named `name`, made for 1080p, its style as `presetOver` puts it and its animations, as one undo

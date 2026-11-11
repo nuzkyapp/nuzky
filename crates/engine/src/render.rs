@@ -1323,6 +1323,7 @@ mod tests {
                 anim_in: None,
                 anim_out: None,
                 transform: None,
+                translation: None,
             })
             .unwrap();
         let ClipContent::Text { style, .. } = &project.tracks[1].clips[0].content else { panic!() };
@@ -1418,6 +1419,7 @@ mod tests {
             hidden: false,
             keep_in_place: false,
             clips: vec![clip],
+            translation: None,
         });
         let bounds = layer_bounds(&project, 500_000, &mut text);
         let quad = bounds[0].1;
@@ -1488,6 +1490,7 @@ mod tests {
                 anim_in: None,
                 anim_out: None,
                 transform: None,
+                translation: None,
             })
             .unwrap();
         project

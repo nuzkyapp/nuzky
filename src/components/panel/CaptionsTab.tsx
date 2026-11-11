@@ -1,12 +1,14 @@
-import { Captions, Check, Ellipsis, Plus, ScanFace } from "lucide-react";
+import { Captions, Check, Ellipsis, Languages, Plus, ScanFace } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { api, errorText, plainError } from "../../lib/api";
 import { checkFaces, useFaces } from "../../lib/faces";
 import { useReframe } from "../../lib/reframe";
 import { CAPTION_STYLES, isLook, scaleStyle } from "../../lib/presets";
-import { type CaptionLook, speaks, speechBlocker, startSpeech, useSpeech } from "../../lib/speech";
-import { MAIN_TRACK, applyCaptionLook, isCaptionTrack, patched, presetOver, restyleCaptions, useCanvasUnit, useEditor } from "../../lib/store";
-import type { CaptionPreset, Clip } from "../../lib/types";
+import { translateBlocked, translateCaptions, useAgent } from "../../lib/agent";
+import { type CaptionLook, languageName, speaks, speechBlocker, startSpeech, useSpeech } from "../../lib/speech";
+import { MAIN_TRACK, applyCaptionLook, isCaptionTrack, isSpeechCaptionTrack, patched, presetOver, restyleCaptions, useCanvasUnit, useEditor } from "../../lib/store";
+import type { CaptionPreset, Clip, Track } from "../../lib/types";
+import { CaptionLanguages, TRANSLATION_SIZE, useSpeechLanguage } from "./CaptionLanguages";
 import { CaptionPosition, HighlightRows, KeywordRows, MainStyle, MoreStyleFold, type SetStyle } from "../inspector/TextSection";
 import { Button, IconButton, LockReason, Menu, Segmented, TextSwatch, lockedProps, useLockReason } from "../ui";
 import { JobError, SpeechFields, SpeechJobCard, useSpeechJobs } from "./SpeechControls";
@@ -53,15 +55,15 @@ const useCaptionsOver = (ids: string[]) =>
     const tracks = s.snap?.project.tracks ?? [];
     const ranges = tracks.flatMap((t) => t.clips).filter((c) => ids.includes(c.id));
     const over = (c: Clip) => ranges.some((r) => r.startUs <= c.startUs && c.startUs < r.startUs + r.durationUs);
-    return tracks.filter(isCaptionTrack).flatMap((t) => t.clips).filter(over).length;
+    return tracks.filter(isSpeechCaptionTrack).flatMap((t) => t.clips).filter(over).length;
   });
 
 /**
- * The captions on the timeline and the look the controls show: the selected caption's, else the first one's.
+ * The captions of `track` and the look the controls show: the selected caption's, else the first one's.
  * Null without captions.
  */
-function useCaptions(): { clips: Clip[]; look: CaptionLook } | null {
-  const clips = useEditor((s) => s.snap?.project.tracks.find(isCaptionTrack)?.clips);
+function useCaptions(track: Track | undefined): { clips: Clip[]; look: CaptionLook } | null {
+  const clips = track?.clips;
   const selected = useEditor((s) => clips?.find((c) => s.selection.includes(c.id)));
   const clip = selected ?? clips?.[0];
   if (!clips || clip?.content.type !== "text") return null;
@@ -98,7 +100,15 @@ export function CaptionsTab() {
   const lock = useLockReason();
   const captionWords = useSpeech((s) => s.captionWords);
   const pending = useSpeech((s) => s.captionLook);
-  const captions = useCaptions();
+  const tracks = useEditor((s) => s.snap?.project.tracks);
+  const speech = tracks?.find(isSpeechCaptionTrack);
+  const translations = tracks?.filter((t) => isCaptionTrack(t) && !!t.translation) ?? [];
+  // The captions the controls style: the speech's unless a translation was picked.
+  const [picked, setPicked] = useState<string | null>(null);
+  const translation = translations.find((t) => t.id === picked);
+  const editing = translation ?? speech;
+  const spoken = useSpeechLanguage(speech);
+  const captions = useCaptions(editing);
   const onTimeline = captions?.look ?? null;
   const { running, last } = useSpeechJobs("captions");
   const blocker = useEditor((s) => (s.snap ? speechBlocker(s.snap.project) : null));
@@ -127,22 +137,28 @@ export function CaptionsTab() {
 
   // Regenerating keeps the look of the captions already there, edits included.
   const start = () => startSpeech(look, false, ids.length > 0 ? ids : null);
+  // A translation has no spoken words to highlight or colour, and stays smaller than the speech under it; a style of
+  // the user's own keeps its size, saved as it was.
+  const shown = (preset: CaptionPreset, own: boolean): CaptionPreset =>
+    translation ? { ...preset, style: { ...(own ? preset.style : scaleStyle(preset.style, TRANSLATION_SIZE)), highlight: null, keywords: null } } : preset;
+  const builtIn = translation ? CAPTION_STYLES.filter((s) => !s.style.highlight && !s.style.keywords) : CAPTION_STYLES;
   const apply = (preset: CaptionPreset) => {
     const next: CaptionLook = { style: preset.style, animIn: preset.animIn ?? null, animOut: preset.animOut ?? null };
     // Captions keep their font and case when the style brings none, each caption its own.
-    if (hasCaptions) void applyCaptionLook(next, preset.name);
+    if (hasCaptions) void applyCaptionLook(next, preset.name, editing?.id);
     else useSpeech.setState({ captionLook: { ...next, style: presetOver(preset.style, pending.style, 1) } });
   };
   // Every caption at once, or the look waiting for Generate, read when the change goes out so quick changes both stick.
   const setStyle: SetStyle = captions
-    ? (patch, key) => restyleCaptions(patch, `captions:style:${key}`)
+    ? (patch, key) => restyleCaptions(patch, `captions:style:${key}`, editing?.id)
     : (patch) => {
         const waiting = useSpeech.getState().captionLook;
         useSpeech.setState({ captionLook: { ...waiting, style: scaleStyle(patched(scaleStyle(waiting.style, unit), patch), 1 / unit) } });
       };
   const styles = captions?.clips.flatMap((c) => (c.content.type === "text" ? [c.content.style] : []));
 
-  const tile: Tile = (preset, own) => {
+  const tile: Tile = (original, own) => {
+    const preset = shown(original, !!own);
     // Checked when every caption has the look.
     const current = captions
       ? captions.clips.every((c) => c.content.type === "text" && isLook(preset, c.content.style, c.animIn, c.animOut, unit))
@@ -179,7 +195,7 @@ export function CaptionsTab() {
             current ? "border-accent shadow-[0_0_0_1px_var(--color-accent)]" : disabled ? "border-white/[.08]" : "border-white/[.08] hover:border-white/30"
           }`}
         >
-          <TextSwatch style={{ ...preset.style, fontFamily: preset.style.fontFamily ?? font }} label={preset.name} size={13} />
+          <TextSwatch style={{ ...original.style, fontFamily: original.style.fontFamily ?? font }} label={preset.name} size={13} />
           {current && (
             <span aria-hidden className="absolute top-1 right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-accent-strong text-white shadow-[0_1px_2px_rgb(0_0_0/.5)]">
               <Check size={10} strokeWidth={3} />
@@ -208,37 +224,47 @@ export function CaptionsTab() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="scroll-shown flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto p-3.5 pb-6">
-        <SpeechFields disabled={busy} />
+        {speech && <CaptionLanguages speech={speech} language={spoken} translations={translations} editing={editing?.id ?? speech.id} onEdit={(id) => setPicked(id === speech.id ? null : id)} />}
+        {!translation && (
+          <>
+            <SpeechFields disabled={busy} />
+            <div className="flex flex-col gap-1.5">
+              <span className="truncate text-[12px] text-muted" title={hasCaptions ? "Applies when you regenerate" : undefined}>
+                Words per caption
+              </span>
+              <Segmented label="Words per caption" value={captionWords} onChange={(n) => useSpeech.setState({ captionWords: n })} options={WORDS} disabled={busy} disabledReason={BUSY} />
+            </div>
+          </>
+        )}
         <div className="flex flex-col gap-1.5">
-          <span className="truncate text-[12px] text-muted" title={hasCaptions ? "Applies when you regenerate" : undefined}>
-            Words per caption
-          </span>
-          <Segmented label="Words per caption" value={captionWords} onChange={(n) => useSpeech.setState({ captionWords: n })} options={WORDS} disabled={busy} disabledReason={BUSY} />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <h3 className="text-[13px] font-semibold text-fg">Style</h3>
-          <div className={GRID}>{CAPTION_STYLES.map((s) => tile(s))}</div>
+          <h3 className="text-[13px] font-semibold text-fg">{translations.length > 0 && editing ? `Style · ${editing.translation ? languageName(editing.translation) : (spoken ?? "Captions")}` : "Style"}</h3>
+          <div className={GRID}>{builtIn.map((s) => tile(s))}</div>
         </div>
         {/* Saved like the built-in ones, for 1080p, so a style looks the same on any canvas. */}
         <MyStyles look={{ ...look, style: scaleStyle(look.style, 1 / unit) }} mine={mine} tile={tile} />
         <LockReason.Provider value={lock ?? (busy ? BUSY : null)}>
           <div className="flex flex-col gap-3">
             <MainStyle style={look.style} styles={styles} setStyle={setStyle} unit={unit} />
-            <HighlightRows style={look.style} styles={styles} setStyle={setStyle} />
+            {/* Highlights and key words follow spoken words, which a translation has none of. */}
+            {!translation && <HighlightRows style={look.style} styles={styles} setStyle={setStyle} />}
           </div>
-          <div className="flex flex-col gap-1.5">
-            <span className="text-[12px] text-muted">Key words</span>
-            <KeywordRows style={look.style} styles={styles} setStyle={setStyle} clips={captions?.clips} />
-          </div>
+          {!translation && (
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[12px] text-muted">Key words</span>
+              <KeywordRows style={look.style} styles={styles} setStyle={setStyle} clips={captions?.clips} />
+            </div>
+          )}
           <div className="flex flex-col">
             <MoreStyleFold style={look.style} styles={styles} setStyle={setStyle} unit={unit} flush />
-            {captions && <CaptionPosition clips={captions.clips} flush />}
+            {captions && <CaptionPosition clips={captions.clips} trackId={editing?.id} flush />}
           </div>
         </LockReason.Provider>
       </div>
       {/* Below the choices, in view however many styles there are. */}
       <div className="flex shrink-0 flex-col gap-2 border-t border-white/[.1] bg-panel p-3.5">
-        {running ? (
+        {translation ? (
+          <TranslateAgain language={translation.translation ?? ""} />
+        ) : running ? (
           <SpeechJobCard job={running} />
         ) : (
           <>
@@ -279,6 +305,32 @@ export function CaptionsTab() {
         </Button>
       </div>
     </div>
+  );
+}
+
+/** Translates the speech captions again into the language of the translation picked, replacing it. */
+function TranslateAgain({ language }: { language: string }) {
+  useAgent((s) => s.status);
+  useAgent((s) => s.agent);
+  const blocked = translateBlocked();
+  const name = languageName(language);
+  return (
+    <>
+      <span className="flex">
+        <Button
+          className="flex-1"
+          data-translate-again
+          title={`Replaces your edits of the ${name} captions. Undo brings them back.`}
+          disabled={!!blocked}
+          disabledReason={blocked ?? undefined}
+          onClick={() => translateCaptions(language)}
+        >
+          <Languages size={15} /> Translate again with AI
+        </Button>
+      </span>
+      {/* On a short window the styles need the room; the button's tooltip still says it. */}
+      <span className="text-[12px] text-muted [@media(max-height:720px)]:hidden">{`Replaces your edits of the ${name} captions. Undo brings them back.`}</span>
+    </>
   );
 }
 

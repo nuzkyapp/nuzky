@@ -213,6 +213,29 @@ pub async fn transcript_view(app: AppHandle, pause_us: i64) -> CmdResult<Transcr
     .map_err(crate::err)?
 }
 
+/// The language most heard files of the timeline were recognised in, to name the captions of the speech; `None`
+/// before anything is recognised.
+#[tauri::command]
+pub async fn speech_language(app: AppHandle) -> CmdResult<Option<String>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let host = app.state::<AppState>().session.lock().unwrap().host.clone();
+        let project = host.session.state().map_err(explain)?.project;
+        let derived = transcript::derive(&project, &host.transcripts).map_err(explain)?;
+        let mut counts: Vec<(String, usize)> = Vec::new();
+        for language in derived.languages.into_values().filter(|l| l != "auto") {
+            match counts.iter_mut().find(|(l, _)| *l == language) {
+                Some((_, n)) => *n += 1,
+                None => counts.push((language, 1)),
+            }
+        }
+        // The same language wins a tie every time.
+        counts.sort();
+        Ok(counts.into_iter().rev().max_by_key(|(_, n)| *n).map(|(l, _)| l))
+    })
+    .await
+    .map_err(crate::err)?
+}
+
 #[tauri::command]
 pub async fn cut_words(
     app: AppHandle,
@@ -588,7 +611,14 @@ pub(crate) mod tests {
         let style = nuzky_engine::edit::caption_presets()[0].style.clone();
         host.session
             .edit(
-                vec![EditCmd::AddCaptions { segments, style, anim_in: None, anim_out: None, transform: None }],
+                vec![EditCmd::AddCaptions {
+                    segments,
+                    style,
+                    anim_in: None,
+                    anim_out: None,
+                    transform: None,
+                    translation: None,
+                }],
                 None,
                 Expect::default(),
             )
