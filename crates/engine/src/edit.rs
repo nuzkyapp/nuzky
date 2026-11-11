@@ -8,7 +8,7 @@ use crate::model::{
     Adjust, Animation, Asset, AssetKind, Background, CAPTIONS_TRACK, Canvas, CaptionWord, Clip, ClipContent, Ease,
     Effect, Keyframe, Keywords, LetterCase, MAX_CANVAS_SIDE, MAX_CLIP_EFFECTS, Mono, Project, ReelCandidate, Shape,
     TextAlign, TextShadow, TextStyle, Thumbnail, ThumbnailFormat, Track, TrackKind, Transform, Transition,
-    WordCorrection,
+    WordCorrection, word_ranges,
 };
 
 pub const MAIN_TRACK: &str = "main";
@@ -347,6 +347,16 @@ pub enum EditCmd {
     /// its recognised text. Setting a word back to its recognised text removes the correction.
     CorrectWords {
         corrections: Vec<WordCorrection>,
+    },
+    /// Marks the word at index `word` of a caption's `words` by hand: `true` makes it a key word in the
+    /// key word colour, also without a pick or without `keywords` (#ffd400 then), `false` keeps it plain
+    /// whatever the caption's pick says, and `null` lets the pick decide again. The mark stays through restyling, splits, trims,
+    /// cuts and generating the captions again over the same speech.
+    #[cfg_attr(feature = "ts", ts(optional_fields = nullable))]
+    MarkKeyWord {
+        clip_id: String,
+        word: usize,
+        marked: Option<bool>,
     },
     /// Punch-ins on the main track: the picture of each range is scaled by its `scale`, which
     /// multiplies the clip's own scale and keeps its position and rotation. Clips are split at the
@@ -1023,6 +1033,18 @@ impl Project {
                 self.restyle_track(&track_id, style, transform, &mut out)?
             }
             EditCmd::CorrectWords { corrections } => self.correct_words(corrections)?,
+            EditCmd::MarkKeyWord { clip_id, word, marked } => {
+                let (ti, ci) = self.find_clip(&clip_id).ok_or_else(|| anyhow!("Unknown clip"))?;
+                let ClipContent::Text { text, words, .. } = &mut self.tracks[ti].clips[ci].content else {
+                    bail!("Only a caption's words can be key words")
+                };
+                ensure!(word < words.len(), "The caption has {} words, so it has no word {word}", words.len());
+                ensure!(
+                    word_ranges(text, words).is_some(),
+                    "Words were added to or removed from this caption by hand, so it shows no key words; build the captions again first"
+                );
+                words[word].marked = marked;
+            }
             EditCmd::ZoomRanges { ranges } => self.zoom_ranges(ranges, &mut out)?,
             EditCmd::ApplyMotion { clip_id, range, kind, strength } => {
                 self.apply_motion(clip_id, range, kind, strength, &mut out)?
@@ -1864,6 +1886,7 @@ impl Project {
             EditCmd::ReplaceCaptions { track_id, segments, style, anim_in, anim_out, transform, ranges } => {
                 let ti = self.caption_track(&track_id)?;
                 let mut clips = caption_clips(segments, &style, [anim_in, anim_out], transform, &self.canvas, min)?;
+                keep_marks(&self.tracks[ti].clips, &mut clips);
                 out.select = clips.iter().map(|c| c.id.clone()).take(1).collect();
                 if let Some(ranges) = ranges {
                     let ranges = merge_ranges(ranges);
@@ -2451,6 +2474,37 @@ fn caption_clips(
             Clip { anim_in, anim_out, ..Clip::new(new_id(), s.start_us, (s.end_us - s.start_us).max(min), content) }
         })
         .collect())
+}
+
+/// New captions take the marks words were given by hand in `old` where the same word, ignoring case and
+/// punctuation, is said at the same moment; a word the new captions mark themselves keeps its own. Only the
+/// caption a word is heard in counts, as a split leaves every word in both halves.
+fn keep_marks(old: &[Clip], new: &mut [Clip]) {
+    let plain =
+        |text: &str| text.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect::<String>();
+    let marks: Vec<(i64, String, bool)> = old
+        .iter()
+        .flat_map(|clip| match &clip.content {
+            ClipContent::Text { words, .. } => words
+                .iter()
+                .filter(|w| (0..clip.duration_us).contains(&((w.start_us + w.end_us) / 2)))
+                .filter_map(|w| Some((clip.start_us + (w.start_us + w.end_us) / 2, plain(&w.text), w.marked?)))
+                .collect(),
+            ClipContent::Media { .. } => Vec::new(),
+        })
+        .collect();
+    if marks.is_empty() {
+        return;
+    }
+    for clip in new {
+        let start = clip.start_us;
+        let ClipContent::Text { words, .. } = &mut clip.content else { continue };
+        for word in words.iter_mut().filter(|w| w.marked.is_none()) {
+            let span = start + word.start_us..start + word.end_us;
+            let text = plain(&word.text);
+            word.marked = marks.iter().find(|(middle, said, _)| span.contains(middle) && *said == text).map(|m| m.2);
+        }
+    }
 }
 
 /// A caption corrected word for word keeps its timing: when its old text was its words and the new text
@@ -3502,8 +3556,13 @@ mod tests {
         p.apply(EditCmd::SplitClip { clip_id: first.clone(), at_us: 3_000_000 }).unwrap();
         let style: TextStyle =
             serde_json::from_value(serde_json::json!({"fontSize": 60.0, "color": "#ffffff"})).unwrap();
-        let word =
-            |text: &str, start_us| CaptionWord { text: text.into(), start_us, end_us: start_us + 400_000, key: false };
+        let word = |text: &str, start_us| CaptionWord {
+            text: text.into(),
+            start_us,
+            end_us: start_us + 400_000,
+            key: false,
+            marked: None,
+        };
         p.apply(EditCmd::AddCaptions {
             segments: vec![CaptionSegment {
                 start_us: 2_000_000,
@@ -4383,6 +4442,7 @@ mod tests {
             start_us: start_ms * 1000,
             end_us: end_ms * 1000,
             key: false,
+            marked: None,
         };
         let style: TextStyle = serde_json::from_value(serde_json::json!({
             "fontSize": 95.0, "color": "#ffffff", "strokeWidth": 7.5, "highlight": "#ffe14d"
@@ -4535,6 +4595,7 @@ mod tests {
             start_us,
             end_us: start_us + 200_000,
             key: false,
+            marked: None,
         };
         let mut words = vec![timed("na pivo", 0), CaptionWord { key: true, ..timed("teď", 300_000) }];
         retext_words(&mut words, "na pivo teď", "na pivo hned");
@@ -4551,6 +4612,7 @@ mod tests {
             start_us,
             end_us: start_us + 200_000,
             key: false,
+            marked: None,
         };
         let segment = |start_us: i64, text: &str, words: Vec<CaptionWord>| CaptionSegment {
             start_us,

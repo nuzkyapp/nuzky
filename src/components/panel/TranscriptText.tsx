@@ -1,5 +1,6 @@
-import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 import { Trash2, ZoomIn } from "lucide-react";
+import { keyAsText, keyLine, markKeyWords, onKey, type CaptionWordRef } from "../../lib/keywords";
 import { followPointer } from "../../lib/drag";
 import { MAX_WORD_CHARS, paragraphs, tokenAt, tokenCounts, useWordPick, type Token } from "../../lib/speech";
 import { aiLocked, useEditor } from "../../lib/store";
@@ -15,6 +16,7 @@ export interface ZoomMark {
 }
 
 const NO_MARKS: ZoomMark[] = [];
+const NO_CAPTIONS: CaptionWordRef[][] = [];
 
 /** The quiet accent line under a suggested zoom, spaces included, so its sentence reads as one. */
 const MARK = "underline decoration-accent/60 decoration-2 underline-offset-4";
@@ -25,6 +27,13 @@ interface Selection {
 }
 
 const optionId = (i: number) => `transcript-token-${i}`;
+
+/** Key word pressed: tinted in the key word colour with a line inside it, as a chosen chip, its label in that colour when it reads. */
+const pressedKey = (color: string): CSSProperties => ({
+  ...(keyAsText(color) ? { color } : {}),
+  background: `color-mix(in srgb, ${color} 18%, transparent)`,
+  boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${color} 50%, transparent)`,
+});
 
 /** The word being corrected, in place: Enter or leaving the field saves, Esc cancels. */
 function WordField({ word, onDone }: { word: string; onDone: (text: string | null) => void }) {
@@ -75,7 +84,17 @@ function WordField({ word, onDone }: { word: string; onDone: (text: string | nul
   );
 }
 
-/** One paragraph; re-renders only when the current word, the selection, the word being corrected or the zooms inside it change. */
+/**
+ * A key word reads in its colour, or with a 2 px line in it under its text when the colour cannot carry text there. The
+ * word under the playhead in the selection sits on that colour, so K shows at once where it was pressed.
+ */
+function keyLook(key: string, selected: boolean, playing: boolean): CSSProperties | undefined {
+  if (selected && playing) return { background: key, color: onKey(key) };
+  if (playing) return undefined;
+  return keyAsText(key) ? { color: key } : { textDecorationLine: "underline", textDecorationColor: keyLine(key), textDecorationThickness: 2, textUnderlineOffset: 4 };
+}
+
+/** One paragraph; re-renders only when the current word, the selection, the word being corrected, the zooms or the key words change. */
 const Paragraph = memo(function Paragraph({
   tokens,
   from,
@@ -87,6 +106,7 @@ const Paragraph = memo(function Paragraph({
   onEdited,
   zoomOf,
   marks,
+  keyed,
 }: {
   tokens: Token[];
   from: number;
@@ -98,13 +118,18 @@ const Paragraph = memo(function Paragraph({
   onEdited: (text: string | null) => void;
   zoomOf: number[];
   marks: ZoomMark[];
+  /** The key word colour of each token from `from` that a caption shows as a key word, else empty, joined by spaces:
+   * a string, so an edit that changes no key word does not draw the paragraph again. */
+  keyed: string;
 }) {
+  const keys = keyed.split(" ");
   const items = [];
   for (let i = from; i < to; i++) {
     const t = tokens[i];
     const selected = i >= lo && i <= hi;
     const playing = i === active;
     const mark = zoomOf[i] >= 0 ? marks[zoomOf[i]] : null;
+    const key = keys[i - from];
     // The token before belongs to the same suggested zoom.
     const joined = !!mark && i > from && zoomOf[i - 1] === zoomOf[i];
     const spaceSelected = i > lo && i <= hi;
@@ -131,7 +156,8 @@ const Paragraph = memo(function Paragraph({
             role="option"
             aria-selected={selected}
             title={t.original ? `Recognised as “${t.original}”` : undefined}
-            aria-description={mark ? `Suggested zoom ${zoomLabel(mark.scale)}` : undefined}
+            aria-description={[mark && `Suggested zoom ${zoomLabel(mark.scale)}`, key && "Key word"].filter(Boolean).join(", ") || undefined}
+            style={key ? keyLook(key, selected, playing) : undefined}
             className={`cursor-pointer ${selected ? `${i === lo ? "rounded-l-sm" : ""} ${i === hi ? "rounded-r-sm" : ""}` : "rounded-sm hover:bg-raised"} ${mark ? MARK : t.original ? "underline decoration-muted decoration-dotted underline-offset-3" : ""} ${look}`}
           >
             {t.text}
@@ -180,6 +206,7 @@ const sameShape = (a: Token[], b: Token[]) => a.length === b.length && a.every((
  * The transcript as text. Click a word to jump there, drag or Shift-click to select a range,
  * Delete cuts it from the timeline unless `blocker` says why it cannot. ←/→ move word by word
  * (Shift extends), Esc clears. Double-click a word, or F2 with one word selected, to correct it.
+ * K makes the selected words key words in the captions that show them, or plain again.
  */
 export function TranscriptText({
   tokens,
@@ -187,6 +214,7 @@ export function TranscriptText({
   onDelete,
   onCorrect,
   marks,
+  captions,
 }: {
   tokens: Token[];
   blocker: string | null;
@@ -194,6 +222,8 @@ export function TranscriptText({
   /** `i` is the word's index in the view. */
   onCorrect: (i: number, text: string, shown: string) => Promise<boolean>;
   marks?: ZoomMark[] | null;
+  /** The caption words said in each token. */
+  captions?: CaptionWordRef[][];
 }) {
   const [sel, setSel] = useState<Selection | null>(null);
   const [editing, setEditing] = useState<number | null>(null);
@@ -211,6 +241,8 @@ export function TranscriptText({
   const zooms = marks ?? NO_MARKS;
   // The suggested zoom each token lies in, or -1.
   const zoomOf = useMemo(() => tokens.map((t) => zooms.findIndex((z) => t.startUs >= z.startUs && t.endUs <= z.endUs)), [tokens, zooms]);
+  const shownIn = captions ?? NO_CAPTIONS;
+  const keyed = useMemo(() => tokens.map((_, i) => shownIn[i]?.find((r) => r.key)?.color ?? ""), [tokens, shownIn]);
   // Fewer tokens can arrive before the effect below clears the selection.
   const live = sel && sel.anchor < tokens.length && sel.focus < tokens.length ? sel : null;
   const lo = live ? Math.min(live.anchor, live.focus) : -1;
@@ -322,6 +354,12 @@ export function TranscriptText({
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (onDeleteKey(e)) return;
+    if ((e.key === "k" || e.key === "K") && !e.ctrlKey && !e.metaKey && !e.altKey && live) {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleKey();
+      return;
+    }
     const key = e.key;
     if (tokens.length === 0) return;
     if (key === "ArrowRight" || key === "ArrowLeft" || key === "Home" || key === "End") {
@@ -353,6 +391,15 @@ export function TranscriptText({
   };
 
   const picked = lo >= 0 ? tokens.slice(lo, hi + 1) : [];
+  const under = lo >= 0 ? shownIn.slice(lo, hi + 1).flat() : [];
+  // Without captions the bar keeps to Delete; K still says what to do.
+  const captioned = shownIn.some((refs) => refs.length > 0);
+  const allKey = under.length > 0 && under.every((r) => r.key);
+  /** Makes every caption word under the selection key, or plain when all of them are. */
+  function toggleKey() {
+    if (under.length === 0) useEditor.getState().toast({ kind: "info", text: "No caption shows these words. Generate captions first." });
+    else markKeyWords(under, !allKey);
+  }
   const lengthUs = lo >= 0 ? tokens[hi].endUs - tokens[lo].startUs : 0;
   const summary = tokenCounts(picked);
 
@@ -387,14 +434,28 @@ export function TranscriptText({
             onEdited={onEdited}
             zoomOf={zoomOf}
             marks={zooms}
+            keyed={keyed.slice(from, to).join(" ")}
           />
         ))}
       </div>
       {lo >= 0 && (
         <div ref={bar} className="flex shrink-0 items-center gap-2 border-t border-white/[.07] px-3.5 py-2" onKeyDown={onDeleteKey}>
-          <span className="tabular flex-1 text-[12px] text-muted">
+          <span className="tabular min-w-0 flex-1 truncate text-[12px] text-muted" title={`${summary} · ${formatDuration(lengthUs)}`}>
             {summary} · {formatDuration(lengthUs)}
           </span>
+          {captioned && (
+            <Button
+              className="h-7 px-2.5"
+              aria-pressed={allKey}
+              disabled={under.length === 0}
+              disabledReason="No caption shows these words"
+              title={allKey ? "Show plain in the captions (K)" : "Show as key words in the captions (K)"}
+              style={allKey ? pressedKey(under[0].color) : undefined}
+              onClick={toggleKey}
+            >
+              Key word
+            </Button>
+          )}
           <Button variant="danger" className="h-7" disabled={!!blocker} disabledReason={blocker ?? undefined} title="Cut from the timeline (Delete)" onClick={remove}>
             <Trash2 size={14} /> Delete
           </Button>

@@ -1,6 +1,6 @@
 mod qa_support;
 use nuzky_engine::{
-    edit::{CaptionSegment, EditCmd, Editor},
+    edit::{CaptionSegment, EditCmd, Editor, TimeRange},
     model::*,
 };
 use qa_support::*;
@@ -26,6 +26,217 @@ fn editor() -> Editor {
     p.assets = vec![asset("a", 5_000_000), asset("b", 3_000_000)];
     Editor::new(p)
 }
+
+fn keyword_caption(group: usize) -> (Editor, String) {
+    let mut e = editor();
+    let words: Vec<_> = ["Dnes", "je", "Zdarma,", "vše"]
+        .into_iter()
+        .enumerate()
+        .map(|(i, text)| CaptionWord {
+            text: text.into(),
+            start_us: 1_000_000 + i as i64 * 500_000,
+            end_us: 1_400_000 + i as i64 * 500_000,
+            key: i == 2,
+            marked: None,
+        })
+        .collect();
+    let segments = words
+        .chunks(group)
+        .map(|words| CaptionSegment {
+            start_us: words[0].start_us,
+            end_us: words.last().unwrap().end_us + 100_000,
+            text: words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" "),
+            words: words.to_vec(),
+        })
+        .collect();
+    let out = e
+        .apply(
+            EditCmd::AddCaptions {
+                segments,
+                style: serde_json::from_value(serde_json::json!({"fontSize":64.0,"color":"#ffffff"})).unwrap(),
+                anim_in: None,
+                anim_out: None,
+                transform: None,
+            },
+            None,
+        )
+        .unwrap();
+    (e, out.select[0].clone())
+}
+
+#[test]
+fn keyword_marks_override_the_pick_and_undo_as_one_step() {
+    let (mut e, id) = keyword_caption(4);
+    let before = e.project.clone();
+    e.apply(EditCmd::MarkKeyWord { clip_id: id.clone(), word: 2, marked: Some(true) }, None).unwrap();
+    let picked = |p: &Project, pick| {
+        let ClipContent::Text { text, words, .. } = &p.tracks[1].clips[0].content else { panic!() };
+        key_words(text, words, pick).into_iter().map(|r| text[r].to_owned()).collect::<Vec<_>>()
+    };
+    assert_eq!(picked(&e.project, None), ["Zdarma,"]);
+    assert!(e.undo());
+    assert_eq!(e.project, before, "one undo removes only the mark");
+    assert!(e.redo());
+    for (marked, expected) in [(Some(false), vec![]), (None, vec!["Zdarma,"])] {
+        e.apply(EditCmd::MarkKeyWord { clip_id: id.clone(), word: 2, marked }, None).unwrap();
+        assert_eq!(picked(&e.project, Some(KeywordPick::Emphasis)), expected);
+        assert!(picked(&e.project, None).is_empty());
+    }
+}
+
+#[test]
+fn keyword_marks_refuse_invalid_targets_without_changing_the_project() {
+    let (mut e, id) = keyword_caption(4);
+    let media =
+        e.apply(EditCmd::AddClip { asset_id: "a".into(), start_us: None, track_id: None }, None).unwrap().select[0]
+            .clone();
+    for (clip_id, word) in [("missing".to_owned(), 0), (media, 0), (id.clone(), 4)] {
+        let before = e.project.clone();
+        assert!(e.apply(EditCmd::MarkKeyWord { clip_id, word, marked: Some(true) }, None).is_err());
+        assert_eq!(e.project, before);
+    }
+    e.apply(
+        serde_json::from_value(serde_json::json!({"type":"updateClip","clipId":id,"text":"Dnes je vše"})).unwrap(),
+        None,
+    )
+    .unwrap();
+    let before = e.project.clone();
+    assert!(e.apply(EditCmd::MarkKeyWord { clip_id: id, word: 0, marked: Some(true) }, None).is_err());
+    assert_eq!(e.project, before);
+}
+
+#[test]
+fn keyword_marks_follow_the_word_through_restyle_split_trim_ripple_and_duplicate() {
+    let (mut e, id) = keyword_caption(4);
+    e.apply(EditCmd::MarkKeyWord { clip_id: id.clone(), word: 2, marked: Some(true) }, None).unwrap();
+    let marked_at = |p: &Project| {
+        p.tracks[1]
+            .clips
+            .iter()
+            .flat_map(|c| {
+                let ClipContent::Text { text, words, .. } = &c.content else { panic!() };
+                let keys = key_words(text, words, None);
+                assert_eq!(keys.len(), words.iter().filter(|w| w.marked == Some(true)).count());
+                words
+                    .iter()
+                    .filter(|w| w.marked == Some(true) && c.contains(c.start_us + (w.start_us + w.end_us) / 2))
+                    .map(|w| (w.text.clone(), c.start_us + (w.start_us + w.end_us) / 2))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+    };
+    let track = e.project.tracks[1].id.clone();
+    let cmds = [
+        serde_json::from_value(serde_json::json!({"type":"restyleTrack","trackId":track,"style":{"fontSize":80.0}}))
+            .unwrap(),
+        EditCmd::SplitClip { clip_id: id.clone(), at_us: 1_950_000 },
+        EditCmd::TrimClip { clip_id: id.clone(), start_us: 1_450_000, duration_us: 1_550_000, source_in_us: None },
+        EditCmd::RippleDeleteRanges {
+            ranges: vec![TimeRange { start_us: 1_450_000, end_us: 1_950_000 }],
+            keep_track_ids: None,
+        },
+        EditCmd::DuplicateClip { clip_id: id },
+    ];
+    for (i, cmd) in cmds.into_iter().enumerate() {
+        let mut p = e.project.clone();
+        p.apply(cmd).unwrap();
+        let expected = match i {
+            3 => vec![("Zdarma,".into(), 1_700_000)],
+            4 => vec![("Zdarma,".into(), 2_200_000), ("Zdarma,".into(), 4_200_000)],
+            _ => vec![("Zdarma,".into(), 2_200_000)],
+        };
+        assert_eq!(marked_at(&p), expected, "edit {i}");
+    }
+}
+
+#[test]
+fn keyword_marks_survive_regrouping_only_for_the_same_speech_and_respect_new_marks() {
+    let (mut e, _) = keyword_caption(2);
+    let id = e.project.tracks[1].clips[1].id.clone();
+    e.apply(EditCmd::MarkKeyWord { clip_id: id, word: 0, marked: Some(true) }, None).unwrap();
+    let track_id = e.project.tracks[1].id.clone();
+    let ClipContent::Text { style, .. } = &e.project.tracks[1].clips[0].content else { panic!() };
+    for (text, marked, at, expected) in [
+        ("zdarma", None, 2_000_000, Some(true)),
+        ("placené", None, 2_000_000, None),
+        ("zdarma", Some(false), 2_000_000, Some(false)),
+        ("zdarma", None, 2_400_000, None),
+    ] {
+        let word = |text: &str, start_us, marked| CaptionWord {
+            text: text.into(),
+            start_us,
+            end_us: start_us + 400_000,
+            key: false,
+            marked,
+        };
+        let segments = vec![
+            CaptionSegment {
+                start_us: 1_000_000,
+                end_us: 2_900_000,
+                text: format!("Dnes je {text}"),
+                words: vec![word("Dnes", 1_000_000, None), word("je", 1_500_000, None), word(text, at, marked)],
+            },
+            CaptionSegment {
+                start_us: 2_900_000,
+                end_us: 3_500_000,
+                text: "vše".into(),
+                words: vec![word("vše", 3_000_000, None)],
+            },
+        ];
+        let mut p = e.project.clone();
+        p.apply(EditCmd::ReplaceCaptions {
+            track_id: track_id.clone(),
+            segments,
+            style: style.clone(),
+            anim_in: None,
+            anim_out: None,
+            transform: None,
+            ranges: None,
+        })
+        .unwrap();
+        let ClipContent::Text { words, .. } = &p.tracks[1].clips[0].content else { panic!() };
+        assert_eq!(
+            words.iter().map(|w| w.marked).collect::<Vec<_>>(),
+            [None, None, expected],
+            "{text} at {at}, explicit {marked:?}"
+        );
+        let ClipContent::Text { words, .. } = &p.tracks[1].clips[1].content else { panic!() };
+        assert_eq!(words[0].marked, None);
+    }
+}
+
+#[test]
+fn regenerating_takes_the_mark_of_the_half_a_split_word_is_heard_in() {
+    let (mut e, id) = keyword_caption(4);
+    e.apply(EditCmd::MarkKeyWord { clip_id: id.clone(), word: 2, marked: Some(true) }, None).unwrap();
+    // Both halves keep every word; "Zdarma," is heard in the right one, which makes it plain.
+    e.apply(EditCmd::SplitClip { clip_id: id, at_us: 1_950_000 }, None).unwrap();
+    let right = e.project.tracks[1].clips[1].id.clone();
+    e.apply(EditCmd::MarkKeyWord { clip_id: right, word: 2, marked: Some(false) }, None).unwrap();
+    let ClipContent::Text { words, style, .. } = e.project.tracks[1].clips[0].content.clone() else { panic!() };
+    let words: Vec<_> = words
+        .into_iter()
+        .map(|w| CaptionWord { start_us: w.start_us + 1_000_000, end_us: w.end_us + 1_000_000, marked: None, ..w })
+        .collect();
+    let segment = CaptionSegment { start_us: 1_000_000, end_us: 3_000_000, text: "Dnes je Zdarma, vše".into(), words };
+    let track_id = e.project.tracks[1].id.clone();
+    e.apply(
+        EditCmd::ReplaceCaptions {
+            track_id,
+            segments: vec![segment],
+            style,
+            anim_in: None,
+            anim_out: None,
+            transform: None,
+            ranges: None,
+        },
+        None,
+    )
+    .unwrap();
+    let ClipContent::Text { words, .. } = &e.project.tracks[1].clips[0].content else { panic!() };
+    assert_eq!(words.iter().map(|w| w.marked).collect::<Vec<_>>(), [None, None, Some(false), None]);
+}
+
 fn update_speed(id: &str, speed: f32) -> EditCmd {
     EditCmd::UpdateClip {
         clip_id: id.into(),

@@ -8,7 +8,8 @@ import type { Animation, CaptionPreset, Clip, EditCmd, LetterCase, TextAlign, Te
 import { FontPicker } from "../FontPicker";
 import { Select } from "../panel/SpeechControls";
 import { ALL_WEIGHTS, DEFAULT_FONT, WEIGHT_NAMES, useFontWeights } from "../../lib/fonts";
-import { Button, Checkbox, ColorInput, Disclosure, LockReason, PresetTile, Section, Segmented, Slider, TextSwatch, parseNumber, useLockReason } from "../ui";
+import { Button, Checkbox, Chip, ColorInput, Disclosure, LockReason, PresetTile, Section, Segmented, Slider, TextSwatch, lockedProps, parseNumber, useLockReason } from "../ui";
+import { captionKeys, keyAsText, markKeyWords } from "../../lib/keywords";
 
 /** Which text folds are open and whether a caption's inspector styles every caption, for this session, wherever they show. */
 export const useStyleUi = create<{ more: boolean; position: boolean; allCaptions: boolean }>(() => ({ more: false, position: false, allCaptions: true }));
@@ -111,6 +112,8 @@ export function TextSection({ clip, text, style, caption }: { clip: Clip; text: 
     const animate = (slot: "in" | "out", animation: Animation | null | undefined): EditCmd => ({ type: "setAnimation", clipId: clip.id, slot, animation: animation ?? null });
     edit(caption ? [restyle, animate("in", look.animIn), animate("out", look.animOut)] : restyle);
   };
+  const unlit = unlitReason(clip, text);
+  const timed = clip.content.type === "text" && !!clip.content.words?.length;
   return (
     <>
       <Section title="Text">
@@ -139,8 +142,9 @@ export function TextSection({ clip, text, style, caption }: { clip: Clip; text: 
       )}
       {caption && (
         <Section title="Key words">
-          <KeywordRows style={style} styles={styles} setStyle={setStyle} />
-          {style.keywords && unlitReason(clip, text) && <p className="text-[12px] text-muted">{unlitReason(clip, text)}</p>}
+          <KeywordRows style={style} styles={styles} setStyle={setStyle} clips={everyCaption ?? [clip]} />
+          {/* Without word timing, as captions brought from CapCut, the line shows only once a pick is on. */}
+          {unlit ? (timed || !!style.keywords?.pick) && <p className="text-[12px] text-muted">{unlit}</p> : <WordMarks clip={clip} />}
         </Section>
       )}
       <MoreStyleFold style={style} styles={styles} setStyle={setStyle} unit={unit} />
@@ -264,22 +268,63 @@ export function HighlightRows({ style, styles, setStyle }: StyleProps) {
   );
 }
 
-/** Which words of a caption are key, and their colour. */
-export function KeywordRows({ style, styles, setStyle }: StyleProps) {
+/**
+ * Which words of a caption are key, and their colour. Manual keeps a colour other than the default, so words marked by
+ * hand in `clips` keep it; the colour shows while a pick is on or such a word is there.
+ */
+export function KeywordRows({ style, styles, setStyle, clips }: StyleProps & { clips?: Clip[] }) {
   const { differ, all } = across(style, styles);
   const pick = differ((s) => s.keywords?.pick ?? "off") ? null : (style.keywords?.pick ?? "off");
+  const marked = !!clips?.some((c) => c.content.type === "text" && c.content.words?.some((w) => w.marked));
+  const manual = (s: TextStyle) => (!s.keywords || s.keywords.color.toLowerCase() === KEYWORD_COLOR ? null : { ...s.keywords, pick: null });
   return (
     <>
       <Segmented
         label="Key words"
         value={pick}
-        onChange={(id) => setStyle((s) => ({ keywords: id === "off" ? null : { color: s.keywords?.color ?? KEYWORD_COLOR, pick: id } }), "keywords")}
+        onChange={(id) => setStyle((s) => ({ keywords: id === "off" ? manual(s) : { color: s.keywords?.color ?? KEYWORD_COLOR, pick: id } }), "keywords")}
         options={KEYWORD_PICKS}
+        compact
       />
-      {all((s) => !!s.keywords) && (
-        <ColorInput label="Key word color" mixed={differ((s) => s.keywords?.color)} value={style.keywords?.color ?? KEYWORD_COLOR} onChange={(color) => setStyle((s) => (s.keywords ? { keywords: { ...s.keywords, color } } : {}), "keywordColor")} />
+      {(all((s) => !!s.keywords?.pick) || marked) && (
+        <ColorInput
+          label="Key word color"
+          mixed={differ((s) => s.keywords?.color ?? KEYWORD_COLOR)}
+          value={style.keywords?.color ?? KEYWORD_COLOR}
+          onChange={(color) => setStyle((s) => ({ keywords: { color, pick: s.keywords ? s.keywords.pick : null } }), "keywordColor")}
+        />
       )}
     </>
+  );
+}
+
+/** The caption's words: clicking one makes it a key word or plain again, whatever the pick above says. */
+function WordMarks({ clip }: { clip: Clip }) {
+  const lock = useLockReason();
+  const keys = captionKeys(clip);
+  if (!keys) return null;
+  return (
+    <FieldRow label="Mark words">
+      <div role="group" aria-label="Key words of this caption" className="flex min-w-0 flex-1 flex-wrap gap-1.5">
+        {keys.words.map((w, i) => {
+          const ref = keys.refs[i];
+          return (
+            <Chip
+              key={i}
+              pressed={ref.key}
+              tint={keys.color}
+              title={ref.key ? `Make “${w.text}” plain` : `Make “${w.text}” a key word`}
+              onClick={() => markKeyWords([ref], !ref.key)}
+              style={ref.key && keyAsText(keys.color) ? { color: keys.color } : undefined}
+              className="max-w-full truncate"
+              {...lockedProps(lock)}
+            >
+              {w.text}
+            </Chip>
+          );
+        })}
+      </div>
+    </FieldRow>
   );
 }
 

@@ -974,6 +974,25 @@ export function Segmented<T extends string | number>({
 }
 
 /**
+ * A 26 px capsule that toggles, as the kinds of sound effects: white 6 % with `muted` text, chosen `tint` at 18 % with a
+ * 50 % inner line, `accent` unless given.
+ */
+export function Chip({ pressed, tint, className = "", style, ...rest }: ComponentProps<"button"> & { pressed: boolean; tint?: string }) {
+  const tinted = pressed && tint ? { background: `color-mix(in srgb, ${tint} 18%, transparent)`, boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${tint} 50%, transparent)` } : undefined;
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      style={{ ...tinted, ...style }}
+      className={`h-[26px] rounded-full px-2.5 text-[12px] font-medium transition-colors duration-[120ms] ease-out aria-disabled:cursor-not-allowed aria-disabled:opacity-40 ${
+        pressed ? `text-fg hover:brightness-125 ${tint ? "" : "bg-accent/[.18] shadow-[inset_0_0_0_1px_rgb(41_151_255/.5)]"}` : "bg-white/[.06] text-muted hover:text-fg"
+      } ${className}`}
+      {...rest}
+    />
+  );
+}
+
+/**
  * A picture of media or a project that fades in over 180 ms when it arrives after its place was drawn, instead of popping
  * in; one the webview already has shows at once with its place. A keyframe animation, as a transition would not start
  * for a picture that loads before it was first styled.

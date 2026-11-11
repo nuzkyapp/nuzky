@@ -758,10 +758,19 @@ pub struct CaptionWord {
     /// `style.keywords` with `KeywordPick::Emphasis` colours it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub key: bool,
+    /// Chosen by hand: `true` colours the word as a key word and `false` leaves it plain, whatever
+    /// `style.keywords` picks, and also without a pick or without `keywords`; `None` follows the pick.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional = nullable))]
+    pub marked: Option<bool>,
 }
 
+/// Fill of key words marked by hand in a caption whose style has no `keywords`; `KEYWORD_COLOR` in
+/// `src/lib/presets.ts` is the same.
+pub const KEYWORD_COLOR: &str = "#ffd400";
+
 /// Byte ranges in `text` of the words, or `None` when `text` is not the words joined by single spaces.
-fn word_ranges(text: &str, words: &[CaptionWord]) -> Option<Vec<std::ops::Range<usize>>> {
+pub(crate) fn word_ranges(text: &str, words: &[CaptionWord]) -> Option<Vec<std::ops::Range<usize>>> {
     let mut at = 0;
     let mut ranges = Vec::with_capacity(words.len());
     for (i, word) in words.iter().enumerate() {
@@ -785,21 +794,30 @@ pub fn spoken_word(text: &str, words: &[CaptionWord], t_us: i64) -> Option<std::
     words.iter().zip(ranges).rev().find(|(w, _)| w.start_us <= t_us && t_us < w.end_us).map(|(_, range)| range)
 }
 
-/// Byte ranges in `text` of the words `pick` marks as key; none when `text` is not the words joined by
-/// single spaces, so a caption edited by hand colours nothing.
-pub fn key_words(text: &str, words: &[CaptionWord], pick: KeywordPick) -> Vec<std::ops::Range<usize>> {
+/// Byte ranges in `text` of the key words: those `pick` marks (none without a pick) and those marked by
+/// hand, less those unmarked by hand. None when `text` is not the words joined by single spaces, so a
+/// caption edited by hand colours nothing.
+pub fn key_words(text: &str, words: &[CaptionWord], pick: Option<KeywordPick>) -> Vec<std::ops::Range<usize>> {
     let Some(ranges) = word_ranges(text, words) else { return Vec::new() };
     let letters = |w: &CaptionWord| w.text.chars().filter(|c| c.is_alphanumeric()).count();
-    let said: Vec<_> = words.iter().zip(ranges).filter(|(w, _)| letters(w) > 0).collect();
-    match pick {
-        KeywordPick::Emphasis => said.into_iter().filter(|(w, _)| w.key).map(|(_, range)| range).collect(),
-        KeywordPick::First => said.into_iter().next().map(|(_, range)| range).into_iter().collect(),
-        KeywordPick::Last => said.into_iter().last().map(|(_, range)| range).into_iter().collect(),
+    let said = || words.iter().enumerate().filter(|(_, w)| letters(w) > 0);
+    let picked: Vec<usize> = match pick {
+        None => Vec::new(),
+        Some(KeywordPick::Emphasis) => said().filter(|(_, w)| w.key).map(|(i, _)| i).collect(),
+        Some(KeywordPick::First) => said().next().map(|(i, _)| i).into_iter().collect(),
+        Some(KeywordPick::Last) => said().next_back().map(|(i, _)| i).into_iter().collect(),
         // The first of the longest, so a tie always marks the same word.
-        KeywordPick::Longest => {
-            said.into_iter().rev().max_by_key(|(w, _)| letters(w)).map(|(_, range)| range).into_iter().collect()
+        Some(KeywordPick::Longest) => {
+            said().rev().max_by_key(|(_, w)| letters(w)).map(|(i, _)| i).into_iter().collect()
         }
-    }
+    };
+    words
+        .iter()
+        .zip(ranges)
+        .enumerate()
+        .filter(|(i, (w, _))| w.marked.unwrap_or(picked.contains(i)))
+        .map(|(_, (_, range))| range)
+        .collect()
 }
 
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -1063,8 +1081,14 @@ impl LetterCase {
 pub struct Keywords {
     /// `#rrggbb` fill of the key words.
     pub color: String,
-    #[serde(default)]
-    pub pick: KeywordPick,
+    /// Which words are key besides those marked by hand; `null` only those (Manual). Left out, Emphasis, as
+    /// projects saved before there was a choice have it.
+    #[serde(default = "emphasis")]
+    pub pick: Option<KeywordPick>,
+}
+
+fn emphasis() -> Option<KeywordPick> {
+    Some(KeywordPick::Emphasis)
 }
 
 /// Which words of a caption are key.
@@ -1260,8 +1284,8 @@ mod tests {
                 },
                 transform: Transform::default(),
                 words: vec![
-                    CaptionWord { text: "Ahoj".into(), start_us: 0, end_us: 400_000, key: false },
-                    CaptionWord { text: "světe".into(), start_us: 450_000, end_us: 900_000, key: true },
+                    CaptionWord { text: "Ahoj".into(), start_us: 0, end_us: 400_000, key: false, marked: None },
+                    CaptionWord { text: "světe".into(), start_us: 450_000, end_us: 900_000, key: true, marked: None },
                 ],
             },
         });
@@ -1305,7 +1329,13 @@ mod tests {
 
     #[test]
     fn spoken_word_follows_the_words_and_ignores_edited_text() {
-        let word = |text: &str, start_us, end_us| CaptionWord { text: text.into(), start_us, end_us, key: false };
+        let word = |text: &str, start_us, end_us| CaptionWord {
+            text: text.into(),
+            start_us,
+            end_us,
+            key: false,
+            marked: None,
+        };
         let words = [word("Příliš", 0, 300), word("žluťoučký", 400, 800), word("kůň", 800, 800)];
         let text = "Příliš žluťoučký kůň";
         let at = |t| spoken_word(text, &words, t).map(|r| &text[r]);
@@ -1328,19 +1358,25 @@ mod tests {
 
     #[test]
     fn key_words_follow_their_pick_and_ignore_edited_text() {
-        let word = |text: &str, key| CaptionWord { text: text.into(), start_us: 0, end_us: 1, key };
+        let word = |text: &str, key| CaptionWord { text: text.into(), start_us: 0, end_us: 1, key, marked: None };
         let words = [word("–", false), word("Stojí", false), word("450", true), word("korun!", false)];
         let text = "– Stojí 450 korun!";
-        let picked = |pick| key_words(text, &words, pick).into_iter().map(|r| &text[r]).collect::<Vec<_>>();
+        let picked = |pick| key_words(text, &words, Some(pick)).into_iter().map(|r| &text[r]).collect::<Vec<_>>();
         assert_eq!(picked(KeywordPick::Emphasis), ["450"]);
         // A dash is no word; the first longest wins a tie.
         assert_eq!(picked(KeywordPick::First), ["Stojí"]);
         assert_eq!(picked(KeywordPick::Last), ["korun!"]);
         assert_eq!(picked(KeywordPick::Longest), ["Stojí"]);
-        assert!(key_words("– Stojí 450 korun.", &words, KeywordPick::First).is_empty());
+        assert!(key_words("– Stojí 450 korun.", &words, Some(KeywordPick::First)).is_empty());
         // A style without keywords reads and writes as before.
         let style: TextStyle = serde_json::from_str(r##"{"fontSize":95.0,"color":"#ffffff"}"##).unwrap();
         assert!(style.keywords.is_none() && !serde_json::to_string(&style).unwrap().contains("keywords"));
+        // Key words saved before Manual existed keep Emphasis; Manual stays Manual through a save.
+        let old: Keywords = serde_json::from_str(r##"{"color":"#ffd400"}"##).unwrap();
+        assert_eq!(old.pick, Some(KeywordPick::Emphasis));
+        let manual: Keywords = serde_json::from_str(r##"{"color":"#ffd400","pick":null}"##).unwrap();
+        assert_eq!(manual.pick, None);
+        assert_eq!(serde_json::from_str::<Keywords>(&serde_json::to_string(&manual).unwrap()).unwrap(), manual);
     }
 
     #[test]

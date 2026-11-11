@@ -1574,6 +1574,7 @@ pub(crate) mod tests {
             start_us,
             end_us: start_us + 400_000,
             key: false,
+            marked: None,
         };
         let segment = nuzky_engine::edit::CaptionSegment {
             start_us: 400_000,

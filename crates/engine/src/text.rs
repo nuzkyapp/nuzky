@@ -13,8 +13,8 @@ use cosmic_text::{
 
 use crate::gpu::Image;
 use crate::model::{
-    LETTER_SPACING, LINE_SPACING, LetterCase, MAX_CANVAS_SIDE, TextAlign, TextStyle, max_stroke_width, parse_color,
-    unit_of,
+    KEYWORD_COLOR, LETTER_SPACING, LINE_SPACING, LetterCase, MAX_CANVAS_SIDE, TextAlign, TextStyle, max_stroke_width,
+    parse_color, unit_of,
 };
 
 // Physical raster limits also bound legacy files, zoomed text, many lines and cache retention.
@@ -257,10 +257,11 @@ impl TextRenderer {
         self.render_spoken(text, style, scale, max_width, None, &[])
     }
 
-    /// Like `render`, with the words at byte ranges `keys` of `text` filled in `style.keywords` and the
-    /// word at `spoken` in `style.highlight`, over a key word too. Every variant uses the same layout, so
-    /// the size and wrapping never change between words. The layout is kept, so a new spoken word only
-    /// repaints colours; shaping, glyph rasterising and the outline happen once per text, never per frame.
+    /// Like `render`, with the words at byte ranges `keys` of `text` filled in `style.keywords`' colour
+    /// (`KEYWORD_COLOR` without it) and the word at `spoken` in `style.highlight`, over a key word too.
+    /// Every variant uses the same layout, so the size and wrapping never change between words. The
+    /// layout is kept, so a new spoken word only repaints colours; shaping, glyph rasterising and the
+    /// outline happen once per text, never per frame.
     pub fn render_spoken(
         &mut self,
         text: &str,
@@ -270,9 +271,8 @@ impl TextRenderer {
         spoken: Option<Range<usize>>,
         keys: &[Range<usize>],
     ) -> TextImage {
-        let karaoke = style.highlight.is_some() || style.keywords.is_some();
+        let karaoke = style.highlight.is_some() || style.keywords.is_some() || !keys.is_empty();
         let spoken = spoken.filter(|range| style.highlight.is_some() && range.start < range.end);
-        let keys = if style.keywords.is_some() { keys } else { &[] };
         let mut h = std::collections::hash_map::DefaultHasher::new();
         text.hash(&mut h);
         format!("{style:?}").hash(&mut h);
@@ -488,7 +488,7 @@ impl TextRenderer {
         let stroke_c = parse_color(&style.stroke_color);
         let bg_c = style.background.as_deref().map(parse_color);
         let highlight_c = style.highlight.as_deref().map(parse_color).unwrap_or(fill_c);
-        let key_c = style.keywords.as_ref().map(|k| parse_color(&k.color)).unwrap_or(fill_c);
+        let key_c = parse_color(style.keywords.as_ref().map_or(KEYWORD_COLOR, |k| &k.color));
         // The share of a fill pixel a mask's glyphs cover.
         let share =
             |mask: Option<&[u8]>, i: usize| mask.map_or(0.0, |m| (m[i] as f32 / fill[i].max(1) as f32).min(1.0));

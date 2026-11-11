@@ -1110,10 +1110,11 @@ fn captions(edits: &[Edit], say: &dyn Fn(&[Example]) -> String) -> Option<Rule> 
         let highlight = look.highlight.as_ref().map_or(String::new(), |h| format!(", the word being said in {h}"));
         let keywords = look.keywords.as_ref().map_or(String::new(), |k| {
             let which = match k.pick {
-                KeywordPick::Emphasis => "numbers and words said louder",
-                KeywordPick::First => "first word",
-                KeywordPick::Last => "last word",
-                KeywordPick::Longest => "longest word",
+                Some(KeywordPick::Emphasis) => "numbers and words said louder",
+                Some(KeywordPick::First) => "first word",
+                Some(KeywordPick::Last) => "last word",
+                Some(KeywordPick::Longest) => "longest word",
+                None => "words marked by hand",
             };
             format!(", the {which} in {}", k.color)
         });
