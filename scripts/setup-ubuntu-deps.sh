@@ -10,7 +10,9 @@ packages=(libwebkit2gtk-4.1-dev libasound2-dev clang cmake pkg-config
 if [[ ${GITHUB_ACTIONS:-} == true ]]; then
   # GitHub's Azure mirror sometimes serves a package every 10 s, and the install then took the job's whole hour.
   # The runner's ubuntu.sources reads its mirrors from apt-mirrors.txt, so each attempt pins one of them.
-  for mirror in http://azure.archive.ubuntu.com/ubuntu/ https://archive.ubuntu.com/ubuntu/ https://security.ubuntu.com/ubuntu/; do
+  # kernel.org's full mirror is outside ubuntu.com, for when the runners reach none of Canonical's hosts.
+  for mirror in http://azure.archive.ubuntu.com/ubuntu/ https://archive.ubuntu.com/ubuntu/ https://security.ubuntu.com/ubuntu/ \
+    https://mirrors.edge.kernel.org/ubuntu/; do
     printf '%s\n' "$mirror" | sudo tee /etc/apt/apt-mirrors.txt
     if sudo timeout --kill-after=10s 60s apt-get update && \
       sudo timeout --kill-after=10s 180s apt-get install -y --download-only "${packages[@]}"; then
@@ -20,7 +22,7 @@ if [[ ${GITHUB_ACTIONS:-} == true ]]; then
     fi
     echo "::warning::Package download failed or timed out on $mirror"
   done
-  echo '::error::Could not download Ubuntu dependencies from any of the three mirrors.'
+  echo '::error::Could not download Ubuntu dependencies from any of the four mirrors.'
   exit 1
 fi
 
