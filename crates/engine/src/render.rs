@@ -8,13 +8,14 @@ use std::time::Duration;
 
 use anyhow::{Result, bail};
 
+use crate::color::{self, Lut3d};
 use crate::effects::{max_animation_scale, source_time, transform_at, transition_at, transition_window};
-use crate::gpu::{Draw, EffectPass, Fill, Gpu, GpuFault, Image, Layer, Mask, Matte};
+use crate::gpu::{ClipColor, Draw, EffectPass, Fill, Gpu, GpuFault, Image, Layer, Mask, Matte};
 use crate::matte::{Mattes, SIDE};
 use crate::media::{RgbaFrame, Transfer, VideoDecoder, decode_size, file_key, orient};
 use crate::model::{
-    Adjust, Asset, AssetKind, Background, Clip, ClipContent, Crop, MAX_BORDER_WIDTH, MAX_CLIP_EFFECTS, Project, Track,
-    TrackKind, Transform, TransitionKind, key_words, parse_color, spoken_word,
+    Adjust, Asset, AssetKind, Background, Clip, ClipContent, Crop, Lut, MAX_BORDER_WIDTH, MAX_CLIP_EFFECTS, Project,
+    Track, TrackKind, Transform, TransitionKind, key_words, parse_color, spoken_word,
 };
 use crate::plugin_effects::{self, Lookup};
 use crate::text::{TextRenderer, TextStats};
@@ -73,6 +74,10 @@ pub struct Renderer {
     pub late_layers: u64,
     /// The user's plugins, whose effects clips may name; `None` draws every clip without its effects.
     plugins: Option<PathBuf>,
+    /// The LUT library clips' LUTs come from (`color::luts_dir`), and each LUT read from it with its file's size and
+    /// time then; `None` for a file missing or broken.
+    luts: Option<PathBuf>,
+    lut_files: HashMap<String, (Option<LutStamp>, Option<Arc<Lut3d>>)>,
     gpu_timeout: Duration,
     /// The device still holds a frame that was stopped. A new one takes seconds to make, which a cancelled export
     /// should not wait for, so the next frame makes it.
@@ -85,6 +90,8 @@ pub struct Renderer {
     /// The share of the frame's width, from the left, drawn without the clips' adjustments; `None` for none.
     compare: Option<f32>,
 }
+
+type LutStamp = (u64, Option<std::time::SystemTime>);
 
 /// How long a frame without effects may take on the GPU before the device counts as stuck.
 const FRAME_LIMIT: Duration = Duration::from_secs(60);
@@ -325,6 +332,8 @@ impl Renderer {
             pictures: HashMap::new(),
             late_layers: 0,
             plugins: plugin_effects::plugins_dir(),
+            luts: color::luts_dir(),
+            lut_files: HashMap::new(),
             gpu_timeout: Duration::from_secs(10),
             stale_gpu: false,
             frame_effects: Vec::new(),
@@ -343,6 +352,12 @@ impl Renderer {
     /// Where the plugins whose effects clips name are; Nuzky's own data folder unless set.
     pub fn use_plugins(&mut self, dir: Option<PathBuf>) {
         self.plugins = dir;
+    }
+
+    /// Where the LUTs clips name are; Nuzky's own LUT library unless set.
+    pub fn use_luts(&mut self, dir: Option<PathBuf>) {
+        self.luts = dir;
+        self.lut_files.clear();
     }
 
     /// How long a frame with plugin effects may take on the GPU before they count as broken: 10 s unless set.
@@ -667,6 +682,7 @@ impl Renderer {
             mask,
             matte: None,
             effects: Vec::new(),
+            color: layer.color.clone(),
         }
     }
 
@@ -734,8 +750,9 @@ impl Renderer {
         let corners = placement_quad(project, &place, k);
         let mut matte = None;
         let mut effects = Vec::new();
+        let mut color = ClipColor::default();
         let (image, (rotation, mirror), adjust, transfer) = match &clip.content {
-            ClipContent::Media { asset_id, adjust, background, .. } => {
+            ClipContent::Media { asset_id, adjust, background, log, lut, .. } => {
                 let Some(asset) = project.asset(asset_id) else { return Ok(None) };
                 // A stable conversion size avoids flushing the decoder queue on every animation frame.
                 let size = decode_resolution(project, clip, asset, k, self.gpu.max_texture_dimension());
@@ -766,7 +783,10 @@ impl Renderer {
                 }
                 let image = Image { width: frame.width, height: frame.height, data: frame.data };
                 effects = self.effect_passes(clip, place.size, place.transform.scale, k, t_us);
-                (image, (asset.rotation, asset.mirror), *adjust, frame.transfer)
+                color = ClipColor { log: color::log_conversion(*log), lut: self.lut(lut) };
+                // A log profile says how the picture encodes light, whatever its file's metadata claims.
+                let transfer = if log.is_none() { frame.transfer } else { Transfer::Sdr };
+                (image, (asset.rotation, asset.mirror), *adjust, transfer)
             }
             ClipContent::Text { .. } => {
                 let Some(text) = place.text else { return Ok(None) };
@@ -786,7 +806,31 @@ impl Renderer {
             mask: layer_mask(project, clip, &place.transform, k),
             matte,
             effects,
+            color,
         }))
+    }
+
+    /// The clip's LUT from the LUT library, read again only when its file changes; `None` draws the clip without
+    /// it while the file is missing or broken, as `color::missing_luts` reports.
+    fn lut(&mut self, lut: &Lut) -> Option<(Arc<Lut3d>, f32)> {
+        let Lut::File { id, strength, .. } = lut else { return None };
+        let file = self.luts.as_deref().and_then(|dir| color::lut_file(dir, id))?;
+        let stamp = std::fs::metadata(&file).ok().map(|m| (m.len(), m.modified().ok()));
+        let loaded = match self.lut_files.get(id).filter(|(was, _)| *was == stamp) {
+            Some((_, loaded)) => loaded.clone(),
+            None => {
+                let loaded = stamp.and_then(|_| match color::read_cube(&file) {
+                    Ok(lut) => Some(Arc::new(lut)),
+                    Err(why) => {
+                        log::warn!("Drawing without the LUT {id}: {why}");
+                        None
+                    }
+                });
+                self.lut_files.insert(id.clone(), (stamp, loaded.clone()));
+                loaded
+            }
+        };
+        loaded.map(|lut| (lut, strength.clamp(0.0, 1.0)))
     }
 
     /// The person of `frame` and what shows behind them, for a layer of upright `size`; `None` draws the frame as
@@ -966,6 +1010,7 @@ pub(crate) fn solid(image: &Image, w: u32, h: u32) -> Layer {
         mask: None,
         matte: None,
         effects: Vec::new(),
+        color: Default::default(),
     }
 }
 
@@ -1278,6 +1323,8 @@ mod tests {
                     duck_db: 0.0,
                     mono: Default::default(),
                     background: Default::default(),
+                    log: Default::default(),
+                    lut: Default::default(),
                 },
             ));
         }

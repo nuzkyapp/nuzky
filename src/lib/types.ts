@@ -446,6 +446,16 @@ export type ClipContent = {
    * Blur or replace what is behind the person (video and image clips).
    */
   background?: Background,
+  /**
+   * The log profile the camera recorded the clip in (video and image clips), turned into normal colour
+   * before the LUT and the adjustments.
+   */
+  log?: LogProfile,
+  /**
+   * A LUT from Nuzky's LUT library over the clip's colour (video and image clips), after `log` and before
+   * the adjustments.
+   */
+  lut?: Lut,
 } | {
   "type": "text",
   text: string,
@@ -727,6 +737,16 @@ export type EditCmd = {
    * once per file in the background.
    */
   background?: Background | null,
+  /**
+   * Video and image clips: the log profile the camera recorded in, such as `appleLog` for an iPhone's Apple
+   * Log, turned into normal colour before the LUT and the adjustments; `none` shows the picture as recorded.
+   */
+  log?: LogProfile | null,
+  /**
+   * Video and image clips: `{"type": "file", id, name, strength}` puts a LUT from the user's LUT library over
+   * the clip at a strength from 0 to 1; `{"type": "none"}` removes it.
+   */
+  lut?: Lut | null,
 } | {
   "type": "setAnimation",
   clipId: string,
@@ -1094,6 +1114,24 @@ export type Limits = {
   maxDuckDb: number,
   minMotionStrength: number,
   maxMotionStrength: number,
+};
+
+/**
+ * The log profile a camera recorded in. Its picture looks grey and flat until it is turned into normal colour
+ * (`crate::color`), which is what the camera makers' Log to Rec.709 conversions do.
+ */
+export type LogProfile = "none" | "appleLog" | "appleLog2" | "xiaomiLog" | "sLog3Cine" | "sLog3" | "sLog2" | "canonLog3" | "canonLog2" | "vLog" | "fLog" | "fLog2" | "nLog" | "lLog" | "dLog" | "blackmagicFilm5" | "logC3" | "logC4";
+
+/**
+ * A 3D LUT over a video or image clip.
+ */
+export type Lut = {
+  "type": "none"
+} | {
+  "type": "file",
+  id: string,
+  name: string,
+  strength: number,
 };
 
 /**

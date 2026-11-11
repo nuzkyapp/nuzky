@@ -501,9 +501,17 @@ pub fn start_export(
             let cancelled = cancel.load(Ordering::Relaxed);
             let done = result.is_ok() && !cancelled;
             let without = result.as_ref().map_or(&[][..], |measured| &measured.drawn_without[..]);
+            let mut notes = Vec::new();
             if !without.is_empty() {
                 let issues = nuzky_engine::plugin_effects::issues(&project);
-                rep.note(Some(nuzky_engine::plugin_effects::exported_without(without, &issues)));
+                notes.push(nuzky_engine::plugin_effects::exported_without(without, &issues));
+            }
+            let luts = nuzky_engine::color::missing_luts(&project, nuzky_engine::color::luts_dir().as_deref());
+            if result.is_ok() && !luts.is_empty() {
+                notes.push(nuzky_engine::color::exported_without_luts(&luts));
+            }
+            if !notes.is_empty() {
+                rep.note(Some(notes.join(" ")));
             }
             rep.finish(result.map(|_| Some(out.to_string_lossy().into_owned())), cancelled);
             unregister(&app, &job_id);

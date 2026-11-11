@@ -3,6 +3,7 @@
 
 pub mod audio;
 pub mod check;
+pub mod color;
 pub mod credits;
 pub mod dereverb;
 pub mod edit;

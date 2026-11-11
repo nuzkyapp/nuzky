@@ -954,6 +954,58 @@ fn clip_sound_settings_apply_and_reject_silent_media_over_stdio() {
     c.finish();
 }
 
+/// An agent told the footage is Apple Log converts it with updateClip log, moves the strength of a LUT the clip has,
+/// and cannot give a clip a LUT id that is a path, or convert the colour of a sound.
+#[test]
+fn an_agent_converts_log_footage_and_sets_a_lut_strength_over_stdio() {
+    let mut c = Client::start(true, None, Some(None));
+    place_still(&mut c);
+    let image = c.call("get_state", json!({}))["tracks"][0]["clips"][0]["id"].clone();
+    let run = c.call("begin_run", json!({"label": "Log"}))["run_id"].clone();
+    let lut = json!({"type": "file", "id": "00112233aabbccdd", "name": "Teal Orange", "strength": 1.5});
+    c.call(
+        "apply_edits",
+        json!({"run_id": run, "request_id": "log", "edits": [
+            {"type": "updateClip", "clipId": image, "log": "appleLog", "lut": lut}
+        ]}),
+    );
+    let content = &c.call("get_state", json!({}))["tracks"][0]["clips"][0]["content"];
+    assert_eq!(content["log"], "appleLog", "{content}");
+    assert_eq!(content["lut"]["strength"], 1.0, "{content}");
+    let before = c.call("get_state", json!({}));
+    let path = json!({"type": "file", "id": "../../etc/passwd", "name": "x", "strength": 1.0});
+    let error = c.error(
+        "apply_edits",
+        json!({"run_id": run, "request_id": "path", "edits": [
+            {"type": "updateClip", "clipId": image, "lut": path}
+        ]}),
+    );
+    assert!(error.contains("16 hex digits"), "{error}");
+    let sound = c.call("add_sound", json!({"run_id": run, "id": "nuzky:whoosh", "at_us": 0}))["clip_id"].clone();
+    let error = c.error(
+        "apply_edits",
+        json!({"run_id": run, "request_id": "sound", "edits": [
+            {"type": "updateClip", "clipId": sound, "log": "sLog3"}
+        ]}),
+    );
+    assert!(error.contains("Only video and image clips"), "{error}");
+    assert_eq!(c.call("get_state", json!({}))["tracks"][0], before["tracks"][0]);
+    c.call("end_run", json!({"run_id": run, "action": "keep"}));
+    let disk: Project = serde_json::from_slice(&std::fs::read(c.dir.join("project.nuzky")).unwrap()).unwrap();
+    assert!(matches!(
+        &disk.tracks[0].clips[0].content,
+        nuzky_engine::model::ClipContent::Media {
+            log: nuzky_engine::model::LogProfile::AppleLog,
+            lut: nuzky_engine::model::Lut::File { .. },
+            ..
+        }
+    ));
+    c.call("undo_run", json!({"run_id": run}));
+    let content = &c.call("get_state", json!({}))["tracks"][0]["clips"][0]["content"];
+    assert!(content.get("log").is_none() && content.get("lut").is_none(), "one undo takes the run back: {content}");
+    c.finish();
+}
+
 /// A video recorded with a microphone on the left only: once its sound is prepared, get_state says so, and the
 /// agent plays that side in both ears with updateClip mono, which the saved project keeps.
 #[test]

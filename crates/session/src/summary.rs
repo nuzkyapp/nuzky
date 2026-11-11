@@ -330,6 +330,8 @@ pub fn summarize(before: &Project, after: &Project) -> Vec<RunChange> {
                 duck_db: d1,
                 mono: m1,
                 background: b1,
+                log: lg1,
+                lut: lt1,
                 ..
             },
             ClipContent::Media {
@@ -347,6 +349,8 @@ pub fn summarize(before: &Project, after: &Project) -> Vec<RunChange> {
                 duck_db: d2,
                 mono: m2,
                 background: b2,
+                log: lg2,
+                lut: lt2,
                 ..
             },
         ) = (&o.content, &clip.content)
@@ -366,7 +370,7 @@ pub fn summarize(before: &Project, after: &Project) -> Vec<RunChange> {
             } else if k1 != k2 {
                 push(if *k2 { "Turned on Keep pitch for" } else { "Turned off Keep pitch for" });
             }
-            if a1 != a2 {
+            if a1 != a2 || lg1 != lg2 || lt1 != lt2 {
                 push("Changed the colour of");
             }
             if sh1 != sh2 || (crop(clip) != crop(o) && clip.keyframes == o.keyframes) {

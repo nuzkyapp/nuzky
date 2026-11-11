@@ -1,5 +1,6 @@
-import { AlertTriangle, RotateCcw, Unlink } from "lucide-react";
+import { AlertTriangle, RotateCcw, Unlink, X } from "lucide-react";
 import { LIMITS } from "../../lib/limits";
+import { loadLuts, lutOf, profileOf, useLuts } from "../../lib/color";
 import { ADJUST_ROWS, NO_ADJUST, SPEED_PRESETS, sameAdjust } from "../../lib/presets";
 import { useEffect, useState } from "react";
 import { api, plainError } from "../../lib/api";
@@ -10,6 +11,69 @@ import { Button, Checkbox, IconButton, ProgressBar, Section, Segmented, Slider }
 import { QUIET } from "./Header";
 
 type Media = Extract<Clip["content"], { type: "media" }>;
+
+/** The log profile and LUT of the clip, chosen in Filters: Strength for the LUT and × to take either off. */
+export function ColorSection({ clip, content }: { clip: Clip; content: Media }) {
+  const edit = useEditor((s) => s.edit);
+  const luts = useLuts((s) => s.list);
+  useEffect(() => {
+    if (luts === null) void loadLuts();
+  }, [luts]);
+  const profile = profileOf(content.log ?? "none");
+  const lut = lutOf(content.lut);
+  if (!profile && !lut) return null;
+  const missing = lut && luts !== null && !luts.some((l) => l.id === lut.id);
+  const row = (name: string, remove: string, onRemove: () => void) => (
+    <div className="flex min-h-6 items-center justify-between gap-2">
+      <span className="truncate text-[12px] font-medium text-fg/80">{name}</span>
+      <IconButton label={remove} className={QUIET} onClick={onRemove}>
+        <X size={14} />
+      </IconButton>
+    </div>
+  );
+  return (
+    <Section title="Colour">
+      {profile && (
+        <div className="flex flex-col gap-0.5" data-log={profile.id}>
+          {row(profile.name, `Show the clip as recorded, without ${profile.name}`, () => edit({ type: "updateClip", clipId: clip.id, log: "none" }))}
+          {profile.recordedOn && <span className="text-[12px] text-muted">{profile.recordedOn}</span>}
+        </div>
+      )}
+      {lut && (
+        <div className={`flex flex-col gap-2 ${profile ? "border-t border-white/[.07] pt-3" : ""}`} data-lut={lut.name}>
+          {row(lut.name, `Remove ${lut.name}`, () => edit({ type: "updateClip", clipId: clip.id, lut: { type: "none" } }))}
+          {missing ? (
+            <p role="status" className="flex items-start gap-1.5 text-[12px] text-muted">
+              <AlertTriangle size={14} className="mt-px shrink-0 text-warn" />
+              <span>{`This LUT isn't on this computer, so the clip plays and exports without it. Import ${lut.name}.cube in Filters to use it.`}</span>
+            </p>
+          ) : (
+            <Slider
+              label="Strength"
+              name={`${lut.name} strength`}
+              value={lut.strength * 100}
+              min={0}
+              max={100}
+              step={1}
+              unit="%"
+              format={(v) => String(Math.round(v))}
+              onChange={(v) =>
+                editClip(
+                  clip.id,
+                  (c) => {
+                    const had = c.content.type === "media" ? lutOf(c.content.lut) : null;
+                    return had ? { type: "updateClip", clipId: c.id, lut: { ...had, strength: v / 100 } } : null;
+                  },
+                  `${clip.id}:lut:strength`,
+                )
+              }
+            />
+          )}
+        </div>
+      )}
+    </Section>
+  );
+}
 
 export function AdjustSection({ clip, content }: { clip: Clip; content: Media }) {
   const edit = useEditor((s) => s.edit);

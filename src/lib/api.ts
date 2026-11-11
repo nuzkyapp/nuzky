@@ -2,6 +2,7 @@ import { invoke, type Channel } from "@tauri-apps/api/core";
 import type { GalleryPlugin, GalleryState } from "./gallery";
 import type { StorageUsage, StyleSettings } from "./types";
 import type { EffectIssue, ListedPlugin, PluginRow, PluginValues } from "./plugins";
+import type { ColorLook, LutInfo } from "./color";
 import type { AgentAccess, ImportedKeys, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, BeatCutDone, BeatPlans, Boot, BrollChoice, BrollSuggestions, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Mono, Part, PreviewStarted, Project, ProjectPoster, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFinish, ReelFraming, Rhythm, Said, SampleRun, ScreenRecording, ScreenWindow, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied } from "./types";
 
 /**
@@ -34,6 +35,12 @@ export const api = {
   importMedia: (paths: string[], epoch: Epoch) =>
     invoke<{ snapshot: Snapshot; added: string[]; failed: { path: string; error: string }[] }>("import_media", { paths, expectedEpoch: epoch }),
   thumbnail: (assetId: string) => invoke<string | null>("thumbnail", { assetId }),
+  /** The asset's thumbnail picture in each look, as PNG data URLs; `null` for a look whose LUT is not in the library. */
+  colorPreviews: (assetId: string, looks: ColorLook[]) => invoke<(string | null)[] | null>("color_previews", { assetId, looks }),
+  listLuts: () => invoke<LutInfo[]>("list_luts"),
+  /** Copies a .cube file into Nuzky's LUT library; a file Nuzky can't read is refused with why. */
+  importLut: (path: string) => invoke<LutInfo>("import_lut", { path }),
+  removeLut: (id: string) => invoke<void>("remove_lut", { id }),
   /** Waveform peaks `from..to`; while the sound is still being prepared, only the part decoded so far and `complete: false`. */
   waveform: (assetId: string, from: number, to: number) => invoke<{ peaks: number[]; complete: boolean } | null>("waveform", { assetId, from, to }),
   /** The gain Match loudness gives the clip in dB, or null until its file's loudness is measured. */

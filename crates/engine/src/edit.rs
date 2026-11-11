@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::{
     Adjust, Animation, Asset, AssetKind, Background, CAPTIONS_TRACK, Canvas, CaptionWord, Clip, ClipContent, Ease,
-    Effect, Keyframe, Keywords, LetterCase, MAX_CANVAS_SIDE, MAX_CLIP_EFFECTS, MAX_FPS, Mono, Project, ReelCandidate,
-    Shape, TextAlign, TextShadow, TextStyle, Thumbnail, ThumbnailFormat, Track, TrackKind, Transform, Transition,
-    WordCorrection, word_ranges,
+    Effect, Keyframe, Keywords, LetterCase, LogProfile, Lut, MAX_CANVAS_SIDE, MAX_CLIP_EFFECTS, MAX_FPS, Mono, Project,
+    ReelCandidate, Shape, TextAlign, TextShadow, TextStyle, Thumbnail, ThumbnailFormat, Track, TrackKind, Transform,
+    Transition, WordCorrection, word_ranges,
 };
 
 pub const MAIN_TRACK: &str = "main";
@@ -218,6 +218,12 @@ pub enum EditCmd {
         /// project there; `{"type": "none"}` shows the picture as recorded. The person's outline is made
         /// once per file in the background.
         background: Option<Box<Background>>,
+        /// Video and image clips: the log profile the camera recorded in, such as `appleLog` for an iPhone's Apple
+        /// Log, turned into normal colour before the LUT and the adjustments; `none` shows the picture as recorded.
+        log: Option<LogProfile>,
+        /// Video and image clips: `{"type": "file", id, name, strength}` puts a LUT from the user's LUT library over
+        /// the clip at a strength from 0 to 1; `{"type": "none"}` removes it.
+        lut: Option<Lut>,
     },
     SetAnimation {
         clip_id: String,
@@ -259,7 +265,7 @@ pub enum EditCmd {
         clips: Vec<Clip>,
     },
     /// Gives clips of the source's kind its look. Text: style, font, transform, keyframes and animations, never
-    /// the text; a caption keeps its wrap width. Video and images: Adjust, effects, background, crop and shape, motion
+    /// the text; a caption keeps its wrap width. Video and images: log profile, LUT, Adjust, effects, background, crop and shape, motion
     /// (keyframes, moving each clip from its own framing) and animations. Sound: volume, fades, Voice and
     /// ducking. Keyframes stretch to each clip's length, and what the source lacks the clips lose. Clips of
     /// another kind are left alone and listed in the outcome's `skipped`.
@@ -682,6 +688,8 @@ pub fn media(asset: &Asset, transform: Transform, shape: Option<Shape>) -> ClipC
         duck_db: 0.0,
         mono: Mono::Off,
         background: Default::default(),
+        log: Default::default(),
+        lut: Default::default(),
     }
 }
 
@@ -1235,11 +1243,13 @@ impl Project {
                     bail!("This clip has no sound to detach");
                 }
                 let mut sound = Clip::new(new_id(), clip.start_us, clip.duration_us, clip.content.clone());
-                if let ClipContent::Media { transform, adjust, shape, background, .. } = &mut sound.content {
+                if let ClipContent::Media { transform, adjust, shape, background, log, lut, .. } = &mut sound.content {
                     *transform = Transform::default();
                     *adjust = Adjust::default();
                     *shape = None;
                     *background = Background::None;
+                    *log = LogProfile::None;
+                    *lut = Lut::None;
                 }
                 if let ClipContent::Media { volume, .. } = &mut self.tracks[ti].clips[ci].content {
                     *volume = 0.0;
@@ -1623,6 +1633,8 @@ impl Project {
                 duck_db,
                 mono,
                 background,
+                log,
+                lut,
             } => {
                 let (ti, ci) = self.find_clip(&clip_id).ok_or_else(|| anyhow!("Unknown clip"))?;
                 let changes_length = speed.is_some();
@@ -1641,14 +1653,22 @@ impl Project {
                     shape.is_none() || matches!(self.tracks[ti].clips[ci].content, ClipContent::Media { .. }),
                     "Only video and image clips have a shape"
                 );
+                let picture = match &self.tracks[ti].clips[ci].content {
+                    ClipContent::Media { asset_id, .. } => {
+                        self.tracks[ti].kind == TrackKind::Video
+                            && self.asset(asset_id).is_some_and(|a| a.kind != AssetKind::Audio)
+                    }
+                    ClipContent::Text { .. } => false,
+                };
+                ensure!(
+                    picture || (log.is_none_or(|l| l.is_none()) && lut.as_ref().is_none_or(Lut::is_none)),
+                    "Only video and image clips have colour to convert or grade"
+                );
+                if let Some(Lut::File { id, strength, .. }) = &lut {
+                    ensure!(crate::color::is_lut_id(id), "That LUT isn't one of Nuzky's: its id is 16 hex digits");
+                    ensure!(strength.is_finite(), "A LUT's strength is a number from 0 to 1");
+                }
                 if let Some(background) = background.as_ref().filter(|b| !b.is_none()) {
-                    let picture = match &self.tracks[ti].clips[ci].content {
-                        ClipContent::Media { asset_id, .. } => {
-                            self.tracks[ti].kind == TrackKind::Video
-                                && self.asset(asset_id).is_some_and(|a| a.kind != AssetKind::Audio)
-                        }
-                        ClipContent::Text { .. } => false,
-                    };
                     ensure!(picture, "Only video and image clips have a background");
                     if let Background::Image { asset_id } = &**background {
                         ensure!(
@@ -1693,10 +1713,23 @@ impl Project {
                         duck_db: duck,
                         mono: mo,
                         background: bg,
+                        log: lg,
+                        lut: lt,
                         ..
                     } => {
                         if let Some(x) = transform {
                             *tr = x;
+                        }
+                        if let Some(x) = log {
+                            *lg = x;
+                        }
+                        if let Some(x) = lut {
+                            *lt = match x {
+                                Lut::File { id, name, strength } => {
+                                    Lut::File { id, name, strength: strength.clamp(0.0, 1.0) }
+                                }
+                                Lut::None => Lut::None,
+                            };
                         }
                         if let Some(x) = shape {
                             *sh = Some(x).filter(|x| *x != Shape::default());
@@ -2292,10 +2325,11 @@ impl Project {
                     clip.keyframes = from.keyframes.iter().map(|k| Keyframe { t_us: stretch(k.t_us), ..*k }).collect();
                 }
                 (
-                    ClipContent::Media { adjust, background, shape, transform, .. },
-                    ClipContent::Media { adjust: a, background: b, shape: sh, transform: t, .. },
+                    ClipContent::Media { adjust, background, shape, transform, log, lut, .. },
+                    ClipContent::Media { adjust: a, background: b, shape: sh, transform: t, log: lg, lut: lt, .. },
                 ) if kind == TrackKind::Video => {
                     *a = *adjust;
+                    (*lg, *lt) = (*log, lut.clone());
                     *b = background.clone();
                     *sh = shape.clone();
                     t.crop = transform.crop;
@@ -3768,6 +3802,8 @@ mod tests {
             duck_db: None,
             mono: None,
             background: None,
+            log: None,
+            lut: None,
         }
     }
 
@@ -3800,6 +3836,8 @@ mod tests {
             duck_db: None,
             mono: None,
             background: None,
+            log: None,
+            lut: None,
         })
         .unwrap();
         assert_eq!(main_layout(&p), vec![(0, 2500)]);
@@ -3846,6 +3884,8 @@ mod tests {
             duck_db: None,
             mono: None,
             background: None,
+            log: None,
+            lut: None,
         };
         assert!(e.apply(slower, None).is_err());
         assert_eq!(e.project, before);
@@ -3880,6 +3920,8 @@ mod tests {
             duck_db: None,
             mono: None,
             background: None,
+            log: None,
+            lut: None,
         })
         .unwrap();
         p.apply(EditCmd::TrimClip { clip_id: id, start_us: 0, duration_us: 33_334, source_in_us: Some(4_966_666) })
@@ -4061,6 +4103,8 @@ mod tests {
                     duck_db: None,
                     mono: None,
                     background: None,
+                    log: None,
+                    lut: None,
                 },
                 "split_left" => EditCmd::SplitClip { clip_id, at_us: 5_500_000 },
                 "split_right" => EditCmd::SplitClip { clip_id, at_us: 9_500_000 },
@@ -4133,6 +4177,8 @@ mod tests {
                 duck_db: None,
                 mono: None,
                 background: None,
+                log: None,
+                lut: None,
             };
             e.apply(cmd, Some("vol".into())).unwrap();
         }

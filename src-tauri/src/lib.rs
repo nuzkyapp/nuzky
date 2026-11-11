@@ -18,6 +18,7 @@ mod file_dialogs;
 mod glossary;
 mod jobs;
 mod library;
+mod luts;
 mod model_question;
 mod plugins;
 mod preview_server;
@@ -1517,6 +1518,10 @@ pub fn run() {
             reels::reel_bounds,
             reels::start_make_reels,
             plugins::list_plugins,
+            luts::list_luts,
+            luts::import_lut,
+            luts::remove_lut,
+            luts::color_previews,
             plugins::effect_issues,
             plugins::preview_plugin,
             plugins::cancel_plugin_preview,

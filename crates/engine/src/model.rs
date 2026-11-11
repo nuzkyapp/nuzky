@@ -744,6 +744,14 @@ pub enum ClipContent {
         /// Blur or replace what is behind the person (video and image clips).
         #[serde(default, skip_serializing_if = "Background::is_none")]
         background: Background,
+        /// The log profile the camera recorded the clip in (video and image clips), turned into normal colour
+        /// before the LUT and the adjustments.
+        #[serde(default, skip_serializing_if = "LogProfile::is_none")]
+        log: LogProfile,
+        /// A LUT from Nuzky's LUT library over the clip's colour (video and image clips), after `log` and before
+        /// the adjustments.
+        #[serde(default, skip_serializing_if = "Lut::is_none")]
+        lut: Lut,
     },
     #[serde(rename_all = "camelCase")]
     Text {
@@ -956,6 +964,79 @@ pub enum Background {
 impl Background {
     pub fn is_none(&self) -> bool {
         *self == Background::None
+    }
+}
+
+/// The log profile a camera recorded in. Its picture looks grey and flat until it is turned into normal colour
+/// (`crate::color`), which is what the camera makers' Log to Rec.709 conversions do.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+pub enum LogProfile {
+    /// The picture as recorded.
+    #[default]
+    None,
+    /// Apple Log in BT.2020, iPhone 15 Pro and later.
+    AppleLog,
+    /// Apple Log 2: Apple Log in Apple Wide Gamut, iPhone 17 Pro.
+    AppleLog2,
+    /// Xiaomi Log in BT.2020, Xiaomi 14 Ultra and later.
+    XiaomiLog,
+    /// Sony S-Log3 in S-Gamut3.Cine.
+    SLog3Cine,
+    /// Sony S-Log3 in S-Gamut3.
+    SLog3,
+    /// Sony S-Log2 in S-Gamut.
+    SLog2,
+    /// Canon Log 3 in Cinema Gamut.
+    CanonLog3,
+    /// Canon Log 2 in Cinema Gamut.
+    CanonLog2,
+    /// Panasonic V-Log in V-Gamut.
+    VLog,
+    /// Fujifilm F-Log in F-Gamut.
+    FLog,
+    /// Fujifilm F-Log2 in F-Gamut.
+    FLog2,
+    /// Nikon N-Log in N-Gamut.
+    NLog,
+    /// Leica L-Log in BT.2020.
+    LLog,
+    /// DJI D-Log in D-Gamut.
+    DLog,
+    /// Blackmagic Film Generation 5 in Blackmagic Wide Gamut.
+    BlackmagicFilm5,
+    /// ARRI LogC3 at EI 800 in ARRI Wide Gamut 3.
+    LogC3,
+    /// ARRI LogC4 in ARRI Wide Gamut 4.
+    LogC4,
+}
+
+impl LogProfile {
+    pub fn is_none(&self) -> bool {
+        *self == LogProfile::None
+    }
+}
+
+/// A 3D LUT over a video or image clip.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum Lut {
+    /// No LUT.
+    #[default]
+    None,
+    /// A `.cube` file the user imported into Nuzky's LUT library (`crate::color::luts_dir`). `id` is the first 16
+    /// hex digits of the file's SHA-256 and `name` the name it was imported under. `strength`, 0 to 1, mixes the
+    /// LUT's colour over the colour it starts from.
+    File { id: String, name: String, strength: f32 },
+}
+
+impl Lut {
+    pub fn is_none(&self) -> bool {
+        *self == Lut::None
     }
 }
 
@@ -1360,9 +1441,12 @@ mod tests {
         let content: ClipContent = serde_json::from_str(old).unwrap();
         assert_eq!(serde_json::to_string(&content).unwrap(), old);
         let saved = serde_json::to_value(&content).unwrap();
-        assert!(["dereverb", "normalize", "leveler"].iter().all(|key| saved.get(key).is_none()));
-        let ClipContent::Media { mut transform, dereverb, normalize, leveler, .. } = content else { panic!() };
+        assert!(["dereverb", "normalize", "leveler", "log", "lut"].iter().all(|key| saved.get(key).is_none()));
+        let ClipContent::Media { mut transform, dereverb, normalize, leveler, log, lut, .. } = content else {
+            panic!()
+        };
         assert_eq!((dereverb, normalize, leveler), (0.0, false, 0.0));
+        assert!(log.is_none() && lut.is_none());
         transform.crop = Some(Crop { left: 0.25, ..Crop::default() });
         let shape = Some(Shape { radius: 1.0, border_width: 8.0, border_color: "#ff0000".into(), shadow: 0.5 });
         let json = serde_json::json!({"transform": transform, "shape": shape});

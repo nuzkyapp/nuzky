@@ -16,7 +16,7 @@ import { BackgroundSection } from "./BackgroundSection";
 import { BeatsSection } from "./BeatsSection";
 import { EffectsSection } from "./EffectsSection";
 import { InspectorHeader } from "./Header";
-import { AdjustSection, AudioSection, SpeedSection, VoiceSection } from "./MediaSections";
+import { AdjustSection, AudioSection, ColorSection, SpeedSection, VoiceSection } from "./MediaSections";
 import { MotionSection } from "./MotionSection";
 import { MultiInspector } from "./MultiInspector";
 import { GalleryInspector } from "./GalleryInspector";
@@ -87,6 +87,7 @@ function ClipInspector({ clip, kind, asset, music, chosen, onChoose }: { clip: C
           {tab === "text" && c.type === "text" && <TextSection clip={clip} text={c.text} style={c.style} caption={kind === "caption"} />}
           {tab === "adjust" && c.type === "media" && (
             <>
+              <ColorSection clip={clip} content={c} />
               <AdjustSection clip={clip} content={c} />
               <EffectsSection clip={clip} />
             </>

@@ -959,6 +959,8 @@ pub fn plan_correction(
         duck_db: None,
         mono: None,
         background: None,
+        log: None,
+        lut: None,
     }));
     Ok(Correction { edits, words, captions: changed, captions_kept })
 }
