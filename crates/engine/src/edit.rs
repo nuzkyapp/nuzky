@@ -3391,12 +3391,8 @@ mod tests {
         p.tracks[ti].clips[ci].duration_us = 20_000;
         p.apply(canvas(24)).unwrap();
         let fade = Animation { kind: crate::model::AnimationKind::Fade, duration_us: 500_000 };
-        p.apply(EditCmd::SetAnimation {
-            clip_id: short.clone(),
-            slot: AnimationSlot::In,
-            animation: Some(fade.clone()),
-        })
-        .unwrap();
+        p.apply(EditCmd::SetAnimation { clip_id: short.clone(), slot: AnimationSlot::In, animation: Some(fade) })
+            .unwrap();
         p.apply(EditCmd::SetAnimation { clip_id: long.clone(), slot: AnimationSlot::Out, animation: Some(fade) })
             .unwrap();
         p.apply(EditCmd::PasteAttributes { source: copied(&p, &long), clip_ids: vec![short.clone()] }).unwrap();
