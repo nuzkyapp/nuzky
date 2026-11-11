@@ -21,6 +21,18 @@ def centre(crop, index):
     return [round(sum(p[c] for p in pixels) / len(pixels)) for c in range(3)]
 
 
+def half(crop, upper):
+    """The pixels of a tile's top left or bottom right half, clear of the diagonal between them and the check badge."""
+    w, h = crop.size
+    pixels = crop.load()
+    inside = (lambda s: s < 0.75) if upper else (lambda s: s > 1.25)
+    return [pixels[x, y] for y in range(h) for x in range(w) if inside(x / w + y / h)]
+
+
+def chroma(pixels):
+    return sum(max(p) - min(p) for p in pixels) / len(pixels)
+
+
 def patches(crop):
     return {name: centre(crop, i) for i, name in enumerate(PATCHES)}
 
@@ -134,6 +146,16 @@ def adjust(r):
         wait(lambda: r.s.run('return window.innerWidth') == width, 5)
         time.sleep(1)
         r.shot(f'filters{suffix}')
+    tile = lambda label: r.s.run(f"""const b = document.querySelector('button[title="Apply {label}"] > span').getBoundingClientRect();
+        return {{left: b.left + 3, top: b.top + 3, width: b.width - 6, height: b.height - 6, viewport: window.innerWidth}};""")
+    # Inside the tile's border, which is the accent colour on the selected None tile.
+    original, mono = (preview_crop(r.work / 'filters.png', tile(label)) for label in ('None', 'Mono'))
+    look = lambda pixels: [round(sum(p[c] for p in pixels) / len(pixels)) for c in range(3)] + [round(chroma(pixels))]
+    plain, kept = look(half(original, True)), look(half(mono, True))
+    r.check('a filter tile keeps the original picture in its top left half', max(abs(a - b) for a, b in zip(plain, kept)) <= 4,
+            f'colour and saturation {plain} became {kept}')
+    coloured, grey = chroma(half(original, False)), chroma(half(mono, False))
+    r.check('and shows the filter in its bottom right half', coloured >= 15 and grey <= 3, f'saturation {coloured:.1f} became {grey:.1f}')
     r.s.run(f'{punch}.click()')
     punched = lambda: all(abs(v - PUNCH.get(k, 0)) < 1e-6 for k, v in r.s.run(ADJUST, photo_clip['id']).items())
     r.check('picking Punch puts its values on the clip', wait(punched, 5), r.s.run(ADJUST, photo_clip['id']))

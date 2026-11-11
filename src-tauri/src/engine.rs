@@ -28,6 +28,8 @@ pub enum Msg {
     Resize(u32, u32),
     /// Draws the frame again, as something it reads from the cache was made.
     Redraw,
+    /// The share of the width, from the left, drawn without the clips' adjustments; `None` ends the comparison.
+    Compare(Option<f32>),
 }
 
 #[cfg_attr(test, derive(ts_rs::TS))]
@@ -86,6 +88,7 @@ trait Frames {
     fn skipped_effects(&self) -> &[String] {
         &[]
     }
+    fn compare(&mut self, _split: Option<f32>) {}
 }
 
 impl Frames for Renderer {
@@ -95,6 +98,10 @@ impl Frames for Renderer {
 
     fn skipped_effects(&self) -> &[String] {
         Renderer::skipped_effects(self)
+    }
+
+    fn compare(&mut self, split: Option<f32>) {
+        self.set_compare(split);
     }
 }
 
@@ -176,6 +183,7 @@ struct State {
     box_size: (u32, u32),
     audio: Option<AudioOut>,
     dirty: bool,
+    compare: Option<f32>,
 }
 
 fn panic_message(panic: &(dyn std::any::Any + Send)) -> &str {
@@ -217,6 +225,7 @@ fn run<F: Frames>(
         box_size: (540, 960),
         audio: None,
         dirty: true,
+        compare: None,
     };
 
     let emit = |st: &State| {
@@ -294,6 +303,10 @@ fn run<F: Frames>(
                         st.dirty = true;
                     }
                     Msg::Redraw => st.dirty = true,
+                    Msg::Compare(split) => {
+                        st.compare = split;
+                        st.dirty = true;
+                    }
                 }
             }
 
@@ -318,6 +331,7 @@ fn run<F: Frames>(
                 let (w, h) = preview_size(&st.project, st.box_size.0, st.box_size.1);
                 let wait = if playing { Wait::Ready } else { Wait::Exact };
                 let started = Instant::now();
+                renderer.compare(st.compare);
                 match renderer.frame(&st.project, last_frame_at_end(&st.project, st.t_us), w, h, wait, playing) {
                     Ok(rgba) => {
                         server.publish(w, h, if playing { FLAG_PLAYING } else { 0 }, st.t_us, &rgba);

@@ -82,6 +82,8 @@ pub struct Renderer {
     /// Names of the effects the last frame was drawn without, and of all since the renderer started.
     skipped: Vec<String>,
     skipped_ever: Vec<String>,
+    /// The share of the frame's width, from the left, drawn without the clips' adjustments; `None` for none.
+    compare: Option<f32>,
 }
 
 /// How long a frame without effects may take on the GPU before the device counts as stuck.
@@ -328,7 +330,14 @@ impl Renderer {
             frame_effects: Vec::new(),
             skipped: Vec::new(),
             skipped_ever: Vec::new(),
+            compare: None,
         })
+    }
+
+    /// Draws the share of the frame's width `split` from the left without the clips' adjustments, so the preview
+    /// shows the picture before and after them side by side. Only the preview sets it; an export never does.
+    pub fn set_compare(&mut self, split: Option<f32>) {
+        self.compare = split.filter(|s| s.is_finite()).map(|s| s.clamp(0.0, 1.0));
     }
 
     /// Where the plugins whose effects clips name are; Nuzky's own data folder unless set.
@@ -421,6 +430,7 @@ impl Renderer {
     ) -> Result<Vec<u8>> {
         let effects = !self.frame_effects.is_empty();
         let limit = if effects { self.gpu_timeout } else { FRAME_LIMIT };
+        self.gpu.compare = self.compare.map_or(0.0, |split| split * w as f32);
         let error = match self.gpu.render_within(w, h, background, draws, Some(limit), stop) {
             Err(error) if error.downcast_ref::<GpuFault>().is_some() => error,
             done => return done,
@@ -456,6 +466,7 @@ impl Renderer {
     fn renew_gpu(&mut self) -> Result<()> {
         let mut fresh = Gpu::new()?;
         fresh.hung_frames = self.gpu.hung_frames;
+        fresh.compare = self.gpu.compare;
         let old = std::mem::replace(&mut self.gpu, fresh);
         // A device stuck on a shader may block while it is dropped; the frame does not wait for it.
         std::thread::Builder::new().name("gpu-end".into()).spawn(move || drop(old)).ok();

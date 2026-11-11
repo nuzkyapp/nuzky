@@ -44,6 +44,7 @@ export const api = {
   pause: () => invoke<void>("pause"),
   seek: (tUs: number) => invoke<void>("seek", { tUs: Math.round(tUs) }),
   setPreviewBox: (width: number, height: number) => invoke<void>("set_preview_box", { width, height }),
+  setPreviewCompare: (split: number | null) => invoke<void>("set_preview_compare", { split }),
   setPreviewMuted: (muted: boolean) => invoke<void>("set_preview_muted", { muted }),
   listProjects: () => invoke<ProjectSummary[]>("list_projects"),
   agentConnections: () => invoke<AgentConnection[]>("agent_connections"),

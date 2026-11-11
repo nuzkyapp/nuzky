@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { AudioLines, Maximize, Minimize, Pause, Play, SkipBack, SkipForward, Smartphone, Volume2, VolumeX, X } from "lucide-react";
+import { AudioLines, Maximize, Minimize, Pause, Play, SkipBack, SkipForward, Smartphone, SquareSplitHorizontal, Volume2, VolumeX, X } from "lucide-react";
 import { api } from "../../lib/api";
 import { useCover } from "../../lib/cover";
-import { toggleFullPreview, toggleMuted, usePreview } from "../../lib/preview";
+import { toggleCompare, toggleFullPreview, toggleMuted, usePreview } from "../../lib/preview";
 import { pictureAspect, useReels } from "../../lib/reels";
 import { closeSource, seekSource, sourceDuration, toggleSourcePlay, useSource } from "../../lib/source";
 import { projectDuration, useEditor } from "../../lib/store";
@@ -11,6 +11,7 @@ import type { SafeArea } from "../../lib/types";
 import { CoverBar, CoverStage } from "../cover/CoverStage";
 import { CropGuide, ReelBar } from "../reels/ReelBar";
 import { AiRunBar } from "../TopBar";
+import { CompareDivider } from "./CompareDivider";
 import { IconButton, LockReason, RangeInput, trapTab } from "../ui";
 import { KindIcon } from "../panel/assets";
 import { LayerOverlay } from "./LayerOverlay";
@@ -224,7 +225,7 @@ export function Preview() {
   const reel = useReels((s) => s.current);
   const picture = useEditor((s) => (reels ? pictureAspect(s.snap?.project, reel) : 0));
   const home = useEditor((s) => s.view === "home");
-  const { muted, full } = usePreview();
+  const { muted, full, compare } = usePreview();
   const { togglePlay, seek } = useEditor.getState();
   const sectionRef = useRef<HTMLElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -376,6 +377,7 @@ export function Preview() {
             {/* Outside the clipped frame so handles of a layer larger than the canvas stay reachable. */}
             {!empty && !engineError && canvas && fit.w > 0 && !reels && <LayerOverlay width={fit.w} height={fit.h} bleed={{ x: (box.w - fit.w) / 2, y: (box.h - fit.h) / 2 }} />}
             {!empty && !engineError && canvas && !reels && !cover && <PreviewDrop canvas={canvas} />}
+            {compare !== null && !empty && !engineError && !reels && !cover && !source && fit.w > 0 && <CompareDivider width={fit.w} />}
           </div>
         </div>
       </div>
@@ -407,6 +409,18 @@ export function Preview() {
           </div>
           <div className="flex items-center justify-end gap-1">
             {muteButton}
+            {/* Comparing changes nothing in the project, so it stays open to the user while an agent edits. */}
+            <LockReason.Provider value={null}>
+              <IconButton
+                round
+                label={compare === null ? "Compare before and after the adjustments" : "Stop comparing"}
+                active={compare !== null}
+                disabled={empty}
+                onClick={toggleCompare}
+              >
+                <SquareSplitHorizontal size={16} />
+              </IconButton>
+            </LockReason.Provider>
             <IconButton
               round
               label={area ? (showSafe ? "Hide the Reels and TikTok safe zone" : "Show the Reels and TikTok safe zone") : "The safe zone applies to vertical videos"}
