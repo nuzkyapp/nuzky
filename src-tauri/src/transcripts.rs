@@ -8,7 +8,7 @@ use nuzky_engine::{
     model::MAX_CORRECTION_CHARS,
 };
 use nuzky_mcp::transcript::{self, Derived, Hesitation, Pause};
-use nuzky_session::{Expect, host::Host};
+use nuzky_session::{Expect, host::Host, transcripts::TranscriptStore};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
@@ -220,20 +220,25 @@ pub async fn speech_language(app: AppHandle) -> CmdResult<Option<String>> {
     tauri::async_runtime::spawn_blocking(move || {
         let host = app.state::<AppState>().session.lock().unwrap().host.clone();
         let project = host.session.state().map_err(explain)?.project;
-        let derived = transcript::derive(&project, &host.transcripts).map_err(explain)?;
-        let mut counts: Vec<(String, usize)> = Vec::new();
-        for language in derived.languages.into_values().filter(|l| l != "auto") {
-            match counts.iter_mut().find(|(l, _)| *l == language) {
-                Some((_, n)) => *n += 1,
-                None => counts.push((language, 1)),
-            }
-        }
-        // The same language wins a tie every time.
-        counts.sort();
-        Ok(counts.into_iter().rev().max_by_key(|(_, n)| *n).map(|(l, _)| l))
+        heard_language(&project, &host.transcripts).map_err(explain)
     })
     .await
     .map_err(crate::err)?
+}
+
+/// The language most heard files of `project` were recognised in, which names the captions of the speech.
+pub(crate) fn heard_language(project: &Project, transcripts: &TranscriptStore) -> Result<Option<String>> {
+    let derived = transcript::derive(project, transcripts)?;
+    let mut counts: Vec<(String, usize)> = Vec::new();
+    for language in derived.languages.into_values().filter(|l| l != "auto") {
+        match counts.iter_mut().find(|(l, _)| *l == language) {
+            Some((_, n)) => *n += 1,
+            None => counts.push((language, 1)),
+        }
+    }
+    // The same language wins a tie every time.
+    counts.sort();
+    Ok(counts.into_iter().rev().max_by_key(|(_, n)| *n).map(|(l, _)| l))
 }
 
 #[tauri::command]

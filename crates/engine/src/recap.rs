@@ -16,7 +16,7 @@ use crate::audio::{Mixer, ensure_pcm, us_to_samples};
 use crate::edit::MAIN_TRACK;
 use crate::export::{
     LIMITER_CEILING_DB, Mp4Writer, Quality, check_cancel, check_source_path, frame_count, frame_time_us, prepare_sound,
-    write_beside, write_credits,
+    write_beside, write_text,
 };
 use crate::gpu::{Draw, Image, Layer, Mask};
 use crate::loudness::{Limiter, db_to_gain};
@@ -307,7 +307,7 @@ pub fn render(
         encode(recap, cache_dir, tmp, options.end_card, cancel, &mut progress)
     })?;
     match credits {
-        Some(text) => write_credits(&text, &credits_out, false).with_context(|| {
+        Some(text) => write_text(&text, &credits_out, false).with_context(|| {
             format!("The recap is saved, but its credits could not be written to {}", credits_out.display())
         }),
         None => Ok(()),

@@ -912,6 +912,10 @@ export type ExportRequest = {
    * Shorts accept fps up to 60, the others require 30.
    */
   preset?: Delivery | null,
+  /**
+   * Also save the captions beside the video as `.srt` files, one per language (`subtitles::files`).
+   */
+  srt: boolean,
 };
 
 /**

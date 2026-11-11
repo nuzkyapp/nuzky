@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { save } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { join, pictureDir } from "@tauri-apps/api/path";
 import { AlertCircle, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { api, errorText, plainError } from "../../lib/api";
 import { COVER_FORMATS, coverFormat, openCover, thumbnailOf, useCover } from "../../lib/cover";
+import { askExportPath } from "../../lib/exportFolder";
 import { currentEpoch, useEditor } from "../../lib/store";
 import { formatTime } from "../../lib/time";
 import type { ThumbnailFormat } from "../../lib/types";
@@ -77,13 +76,8 @@ export function CoverExport({ close, onFacts }: { close: () => void; onFacts: (f
   const pickAndRun = async () => {
     const epoch = currentEpoch();
     const safe = (project?.name ?? "").replace(/[\\/:*?"<>|]+/g, "-").trim() || "Nuzky";
-    let defaultPath = `${safe} ${format === "cover_9x16" ? "cover" : "YouTube thumbnail"}.${kind}`;
-    try {
-      defaultPath = await join(await pictureDir(), defaultPath);
-    } catch {
-      /* no Pictures folder; the dialog falls back to its default location */
-    }
-    const picked = await save({ defaultPath, filters: [kind === "png" ? { name: "PNG image", extensions: ["png"] } : { name: "JPEG image", extensions: ["jpg", "jpeg"] }] });
+    const name = `${safe} ${format === "cover_9x16" ? "cover" : "YouTube thumbnail"}.${kind}`;
+    const picked = await askExportPath(name, [kind === "png" ? { name: "PNG image", extensions: ["png"] } : { name: "JPEG image", extensions: ["jpg", "jpeg"] }]);
     if (!picked) return;
     const path = /\.(png|jpe?g)$/i.test(picked) ? picked : `${picked}.${kind}`;
     // The save dialog asked before replacing the name it returned, not one with the extension added.

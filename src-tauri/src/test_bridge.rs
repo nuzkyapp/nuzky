@@ -272,11 +272,20 @@ fn handle(app: &tauri::AppHandle, method: &str, path: &str, body: &Value) -> Res
             unsafe { buttons.objectAtIndex(0).performClick(None) };
             Ok(Value::Null)
         }),
-        // A file dialog: null, or whether the window server shows it.
+        // A file dialog: null, or whether the window server shows it, with the folder and name a save dialog offers.
         ("GET", "nuzky/sheet") => on_main(&window, |_, ns_window| {
-            Ok(ns_window
-                .attachedSheet()
-                .map_or(Value::Null, |sheet| json!({"onScreen": crate::file_dialogs::on_screen(sheet.windowNumber())})))
+            Ok(ns_window.attachedSheet().map_or(Value::Null, |sheet| {
+                let mut found = json!({"onScreen": crate::file_dialogs::on_screen(sheet.windowNumber())});
+                if let Ok(panel) = sheet.downcast::<NSSavePanel>() {
+                    let url: *mut AnyObject = unsafe { msg_send![&*panel, directoryURL] };
+                    let folder: Option<Retained<NSString>> =
+                        if url.is_null() { None } else { unsafe { msg_send![url, path] } };
+                    let name: Retained<NSString> = unsafe { msg_send![&*panel, nameFieldStringValue] };
+                    found["folder"] = json!(folder.map(|f| f.to_string()));
+                    found["name"] = json!(name.to_string());
+                }
+                found
+            }))
         }),
         // As macOS 27 once left file dialogs: AppKit has the sheet on the window, which darkens, but the window
         // server does not show it. AppKit's own orderOut would end the sheet.
