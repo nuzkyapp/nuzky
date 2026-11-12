@@ -1219,13 +1219,59 @@ export function swatchCss(style: TextStyle, size: number): CSSProperties {
 }
 
 /** A style preview in the font the engine draws it with. */
-export function TextSwatch({ style, label, size = 15, lines = 1 }: { style: TextStyle; label: string; /** Font size in px. */ size?: number; /** A long label wraps onto two. */ lines?: 1 | 2 }) {
+export function TextSwatch({
+  style,
+  label,
+  size = 15,
+  lines = 1,
+  fit = false,
+}: {
+  style: TextStyle;
+  label: string;
+  /** Font size in px. */
+  size?: number;
+  /** A long label wraps onto two. */
+  lines?: 1 | 2;
+  /** Shrinks the label until it fits the width of the nearest `@container`, so a wide style is not cut to "W I …". */
+  fit?: boolean;
+}) {
+  const ref = useRef<HTMLSpanElement>(null);
+  // Font size per px of the label's width, measured as drawn; the size that fits follows from the container's width in CSS.
+  const [perPx, setPerPx] = useState<number | null>(null);
+  const looks = fit ? `${size}|${label}|${JSON.stringify(style)}` : "";
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!looks || !el) return;
+    const measure = () => {
+      // WebKit measures a cut label only up to its ellipsis, so an uncut copy gives the label's whole width.
+      const copy = el.cloneNode(true) as HTMLSpanElement;
+      Object.assign(copy.style, { position: "absolute", visibility: "hidden", maxWidth: "none", overflow: "visible", textOverflow: "clip" });
+      el.after(copy);
+      const width = copy.offsetWidth - 8;
+      const px = parseFloat(getComputedStyle(copy).fontSize);
+      copy.remove();
+      if (width <= 0) return;
+      const next = Math.round((px / width) * 1e4) / 1e4;
+      setPerPx((prev) => (prev === next ? prev : next));
+    };
+    measure();
+    document.fonts.addEventListener("loadingdone", measure);
+    return () => document.fonts.removeEventListener("loadingdone", measure);
+  }, [looks]);
   // Karaoke styles show the moment a word is spoken: the last word, or the end of a one-word label, lit.
   // Key words take the first word, or the start of a one-word label.
   const split = label.lastIndexOf(" ") + 1 || Math.ceil(label.length / 2);
   const key = style.keywords ? label.indexOf(" ") + 1 || Math.floor(label.length / 2) : 0;
   return (
-    <span className={`inline-block max-w-full rounded px-1 ${lines === 2 ? "line-clamp-2 text-center leading-[15px]" : "truncate leading-6"}`} style={swatchCss(style, size)}>
+    <span
+      ref={ref}
+      className={`inline-block max-w-full rounded px-1 ${lines === 2 ? "line-clamp-2 text-center leading-[15px]" : "truncate leading-6"}`}
+      style={{
+        ...swatchCss(style, size),
+        // The swatch's own 8 px of padding and a few pixels for rounding stay out of the room the label gets.
+        fontSize: fit && perPx ? `min(${size}px, calc((100cqi - 12px) * ${perPx}))` : size,
+      }}
+    >
       {key > 0 && <span style={{ color: style.keywords?.color }}>{label.slice(0, Math.min(key, style.highlight ? split : label.length))}</span>}
       {style.highlight ? (
         <>

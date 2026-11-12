@@ -74,9 +74,9 @@ function TextStyles() {
                 className="group flex min-w-0 flex-col gap-1.5 text-left aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
               >
                 {/* The text each style adds, drawn large in it and playing its entry animation on hover, with the name under the tile. */}
-                <span className="flex h-20 w-full items-center justify-center overflow-hidden rounded-[10px] border border-white/[.08] bg-white/[.06] px-2 transition-colors duration-[120ms] ease-out group-hover:border-white/30 group-aria-disabled:group-hover:border-white/[.08]">
+                <span className="@container flex h-20 w-full items-center justify-center overflow-hidden rounded-[10px] border border-white/[.08] bg-white/[.06] px-2 transition-colors duration-[120ms] ease-out group-hover:border-white/30 group-aria-disabled:group-hover:border-white/[.08]">
                   <AnimatedSwatch animation={p.animIn?.kind}>
-                    <TextSwatch style={p.style} label={p.text} size={19} />
+                    <TextSwatch style={p.style} label={p.text} size={19} fit />
                   </AnimatedSwatch>
                 </span>
                 <span className="truncate text-[11px] text-muted">{p.name}</span>
