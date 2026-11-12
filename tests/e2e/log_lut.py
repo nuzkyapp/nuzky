@@ -101,6 +101,9 @@ def log_lut(r):
             time.sleep(0.4)
 
     flat = stats(preview('log-flat'))
+    order = r.s.run("return [...document.querySelectorAll('aside[data-tour=library] section[aria-label]')].map((s) => s.getAttribute('aria-label'))")
+    r.check('Filters lists Filters, then LUTs, then Log footage, which turns footage not recorded in log harsh', order == ['Filters', 'LUTs', 'Log footage'], order)
+    r.s.run(f"{SECTION.replace('arguments[0]', repr('Log footage'))}.scrollIntoView({{block: 'start'}})")
     shown = wait(lambda: r.s.run(TILES, 'Log footage'), 5)
     r.check('Log footage offers the phones and common cameras, with Show all for the rest',
             shown == ['Apple Log', 'Apple Log 2', 'Xiaomi Log', 'S-Log3 Cine', 'Canon Log 3', 'V-Log'], shown)
