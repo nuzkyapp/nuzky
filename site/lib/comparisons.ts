@@ -119,11 +119,11 @@ export const comparisons: Comparison[] = [
     metaTitle: "Free Edits alternative for Windows, Mac and Linux | Nuzky",
     description:
       "Looking for Instagram's Edits on Windows or Linux? Nuzky is a free, open source video editor for Reels, TikTok and Shorts on Mac, Windows and Linux, with captions written on your computer and no account.",
-    heading: ["The free", "Edits alternative."],
+    heading: ["The open source", "Edits alternative."],
     intro:
-      "Instagram's Edits came to the Mac in November 2026. Nuzky is a free, open source video editor for Reels, TikTok, Shorts and YouTube that also runs on Windows and Linux, needs no account and opens your CapCut drafts.",
+      "Edits runs on phones and Macs with Apple silicon, with no Windows version yet. Nuzky is a free, open source video editor for Reels, TikTok, Shorts and YouTube on Windows, Linux and Mac. It needs no account and opens your CapCut drafts.",
     summary:
-      "Nuzky is a free, open source video editor for Reels, TikTok, Shorts and YouTube on Mac, Windows and Linux. It needs no account, writes captions on your computer, opens your CapCut drafts and lets ChatGPT, Claude Code or Codex cut the project open in the app. It does not post straight to Instagram or have a phone app.",
+      "Nuzky is a free, open source video editor for Reels, TikTok, Shorts and YouTube on Mac, Windows and Linux. It needs no account, writes captions on your computer, opens your CapCut drafts and lets ChatGPT, Claude Code, Codex or any MCP client edit the project you have open. It does not post straight to Instagram or have a phone app.",
     covers: "Platforms, account, captions, AI editing and publishing compared, with when each one fits better",
     // Checked against the launch coverage of Edits for Mac on 5 November 2026. Instagram's own pages sit behind a
     // cookie wall, so the sources are the reports that quote them.
@@ -135,11 +135,11 @@ export const comparisons: Comparison[] = [
         nuzky: "Mac with Apple silicon and macOS 15 or newer, Windows 10 or 11, and Linux",
         rival: "Phones, and Macs with Apple silicon. No Windows version yet.",
       },
-      { label: "Auto captions", nuzky: "Free with no limit, written by AI on your computer", rival: "Free with no limit, in several languages" },
+      { label: "Auto captions", nuzky: "Free with no limit, written on your computer in your language", rival: "Free with no limit, in several languages" },
       { label: "Export", nuzky: "Up to 4K, never a watermark", rival: "Up to 4K without a watermark" },
       {
         label: "AI editing",
-        nuzky: "ChatGPT, Claude Code or Codex cuts the project open in the app while you watch. Stop it any time, and one undo takes the whole run back.",
+        nuzky: "ChatGPT, Claude Code, Codex or any MCP client edits the project you have open while you watch. Stop it any time, and one undo takes the whole run back.",
         rival: "Connect an AI agent over MCP, such as Meta's Muse",
       },
       { label: "Publishing", nuzky: "Exports a video file you post anywhere", rival: "Posts straight to Instagram with tags and location, or exports a file" },
@@ -150,22 +150,26 @@ export const comparisons: Comparison[] = [
       "You want captions written on your computer",
       "You have drafts in CapCut to finish",
     ],
-    pickRival: ["You post to Instagram straight from the editor", "You also edit on your phone", "You use the audio and text styles you saved in Edits"],
+    pickRival: ["You post to Instagram straight from the editor", "You edit in Edits on your phone and want your saved audio and text styles on the Mac"],
     stayWith: "Stay with Edits if",
     moving: {
       heading: ["Moving to Nuzky?", "Bring what you already have."],
       mdHeading: "Moving to Nuzky",
       items: [
         { title: "Your CapCut drafts", text: "On a Mac or a Windows PC, Nuzky lists them on its home screen and opens them. The draft in CapCut stays as it was." },
-        { title: "Your way of editing", text: "Give Nuzky raw recordings and the videos you cut from them. It writes down how you edit, and your AI follows it." },
-        { title: "No account", text: "Download it and start editing. You sign in only if you want ChatGPT to make the cut." },
+        { title: "Your way of editing", text: "Give Nuzky raw recordings and the videos you cut from them. It writes down how you edit, and the AI editor follows it." },
+        { title: "No account", text: "Download it and start editing. AI editing runs on the ChatGPT or Claude plan you already have." },
       ],
     },
     faqHeading: "Questions from Edits users",
     faq: [
       {
         q: "Is there Edits for Windows or Linux?",
-        a: "Not yet. When Edits came to the computer in November 2026, it ran only on Macs with Apple silicon. Nuzky runs on Windows 10 and 11, on Linux and on Macs with Apple silicon.",
+        a: "No. When Edits came to the Mac in November 2026, it ran only on Macs with Apple silicon, and there was no Windows version yet. Nuzky runs on Windows 10 and 11, on Linux and on Macs with Apple silicon.",
+      },
+      {
+        q: "Can I open my Edits projects in Nuzky?",
+        a: "No. Export the video from Edits, or bring your original recordings and edit them in Nuzky.",
       },
       {
         q: "Will Nuzky run on my Mac?",

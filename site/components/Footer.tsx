@@ -15,11 +15,11 @@ export function Footer() {
   return (
     <footer className="mx-auto w-full max-w-[1240px] px-5">
       <div className="flex flex-col gap-5 border-t border-white/[0.07] pb-12 pt-8 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-2.5 text-[13px] text-muted">
+        <div className="flex shrink-0 items-center gap-2.5 text-[13px] text-muted">
           <Image src="/media/icon.png" alt="" width={24} height={24} />
           Nuzky · Open source under GPL-3.0
         </div>
-        <nav aria-label="Project" className="flex flex-wrap gap-x-7 gap-y-2">
+        <nav aria-label="Project" className="flex flex-wrap gap-x-4.5 gap-y-2">
           {links.map(([label, href]) => (
             <a key={label} href={href} className="text-[13px] text-muted transition-colors hover:text-fg">
               {label}
