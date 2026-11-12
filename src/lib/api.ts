@@ -171,6 +171,8 @@ export const api = {
     invoke<string[]>("export_captions", { path, replaceExisting, expectedEpoch: epoch }),
   /** The `.srt` files the captions would be saved as beside `path`; none without captions. */
   captionFiles: (path: string) => invoke<string[]>("caption_files", { path }),
+  /** Why the project cannot export in HDR, as a sentence; null when it can. */
+  exportHdrUnavailable: () => invoke<string | null>("export_hdr_unavailable"),
   filmstrip: (assetId: string) => invoke<Filmstrip | null>("filmstrip", { assetId }),
   layerBounds: (tUs: number) => invoke<LayerBounds[]>("layer_bounds", { tUs: Math.round(tUs) }),
   /** What a recap of an AI run, or with null of everything cut since the import, would count and how long it is. */
@@ -394,6 +396,7 @@ const PLAIN: Record<string, string | ((detail: string) => string)> = {
   OUTPUT_EXISTS: "A file with that name appeared while exporting. Export again to replace it or choose another name.",
   DESTINATION_EXISTS: "A file with that name already exists.",
   NOT_WRITABLE: "Nuzky isn't allowed to save in that folder. Export to another folder.",
+  HDR_UNAVAILABLE: (detail) => detail,
   UNKNOWN_VERSION: "That version is no longer kept. Open the list of versions again.",
   RUN_UNAVAILABLE: "The project as it was before or after this AI run is no longer kept, so its recap can't be made.",
   HISTORY_CORRUPT: "That version could not be read, so the project is unchanged.",

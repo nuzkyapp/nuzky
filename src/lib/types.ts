@@ -628,7 +628,7 @@ export type DeletedCollection = {
 
 /**
  * A platform's delivery format, shared by the export dialog, MCP and the CLI. Every preset writes
- * H.264 High and AAC 48 kHz stereo with the sound levelled to its loudness.
+ * H.264 High, or 10-bit HEVC for HDR, and AAC 48 kHz stereo with the sound levelled to its loudness.
  */
 export type Delivery = "reels" | "shorts" | "youtube_1080p" | "youtube_4k" | "instagram_feed" | "square";
 
@@ -953,6 +953,10 @@ export type ExportRequest = {
    * Also save the captions beside the video as `.srt` files, one per language (`subtitles::files`).
    */
   srt: boolean,
+  /**
+   * HDR: 10-bit HEVC in HLG, keeping the light of HDR footage (`ExportOptions::hdr`).
+   */
+  hdr: boolean,
 };
 
 /**

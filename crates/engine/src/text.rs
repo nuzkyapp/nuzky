@@ -541,7 +541,7 @@ impl TextRenderer {
                 }
             }
         }
-        TextImage { image: Image { width: w as u32, height: h as u32, data: Arc::new(out) }, scale }
+        TextImage { image: Image::new(w as u32, h as u32, Arc::new(out)), scale }
     }
 }
 

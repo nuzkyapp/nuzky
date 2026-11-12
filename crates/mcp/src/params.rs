@@ -597,6 +597,11 @@ pub struct Export {
     pub fps: Option<u32>,
     /// Defaults to recommended.
     pub quality: Option<Quality>,
+    /// true writes HDR: 10-bit HEVC in HLG BT.2020, as iPhones record HDR, keeping the brightness and colour of the
+    /// HDR footage (clip_metadata hdr: true); SDR clips, text and captions sit at HDR reference white. Only for a
+    /// video with HDR footage, which HDR_UNAVAILABLE says otherwise. Default false: H.264 in SDR, as the preview shows.
+    #[serde(default)]
+    pub hdr: bool,
     /// Timeline ranges [start_us, end_us) left out of this file only, cut as rippleDeleteRanges cuts them, such
     /// as the other hooks when exporting one variant per hook. The project does not change.
     #[serde(default)]

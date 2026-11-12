@@ -392,8 +392,14 @@ fn encode(
     let vcodec = ff::encoder::find_by_name("libx264")
         .or_else(|| ff::encoder::find(ff::codec::Id::H264))
         .ok_or_else(|| anyhow!("No H.264 encoder available in this FFmpeg build"))?;
-    let mut mp4 =
-        Mp4Writer::create(out, vcodec, WIDTH, HEIGHT, FPS, Quality::Recommended.crf(), &[("preset", "veryfast")])?;
+    let mut mp4 = Mp4Writer::create(
+        out,
+        vcodec,
+        (WIDTH, HEIGHT, FPS),
+        Quality::Recommended.crf(),
+        &[("preset", "veryfast")],
+        false,
+    )?;
     let mut painter = Painter::new(recap, cache_dir, sections)?;
     let mut sound = Sound::new(recap, cache_dir, sections);
     for i in 0..frames {
@@ -497,7 +503,7 @@ fn layer(image: Image, [x, y, w, h]: [f32; 4]) -> Layer {
 /// A box of `color`, its corners rounded by `radius` pixels.
 fn rect(x: f32, y: f32, w: f32, h: f32, color: &str, radius: f32) -> Draw {
     let pixel = parse_color(color).map(|c| (c * 255.0).round() as u8).to_vec();
-    let mut rect = layer(Image { width: 1, height: 1, data: Arc::new(pixel) }, [x, y, w, h]);
+    let mut rect = layer(Image::new(1, 1, Arc::new(pixel)), [x, y, w, h]);
     if radius > 0.0 {
         rect.mask = Some(Mask {
             rect: WHOLE,
@@ -577,7 +583,7 @@ fn scrim(top: f32, bottom: f32, opacity: f32) -> Draw {
             [0, 0, 0, (alpha * 255.0).round() as u8]
         })
         .collect();
-    let image = Image { width: 1, height: STEPS as u32, data: Arc::new(data) };
+    let image = Image::new(1, STEPS as u32, Arc::new(data));
     Draw::Layer(layer(image, [0.0, top, WIDTH as f32, bottom - top]))
 }
 
@@ -691,7 +697,7 @@ impl<'a> Painter<'a> {
             Some((was_after, at, image)) if *was_after == after && *at == time => image.clone(),
             _ => {
                 let rgba = self.renderer.render(project, time, w, h, Wait::Exact, after)?;
-                let image = Image { width: w, height: h, data: Arc::new(rgba) };
+                let image = Image::new(w, h, Arc::new(rgba));
                 self.last = Some((after, time, image.clone()));
                 image
             }

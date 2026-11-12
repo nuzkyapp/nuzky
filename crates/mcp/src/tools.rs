@@ -2001,9 +2001,13 @@ impl Backend {
             crf: args.quality.unwrap_or(Quality::Recommended).crf(),
             replace_existing: false,
             delivery: args.preset,
+            hdr: args.hdr,
             ..ExportOptions::default()
         };
-        check_options(&project, &options).map_err(|e| anyhow!("INVALID_ARGUMENTS: {e}"))?;
+        check_options(&project, &options).map_err(|e| match e.to_string() {
+            e if e.starts_with("HDR_UNAVAILABLE") => anyhow!(e),
+            e => anyhow!("INVALID_ARGUMENTS: {e}"),
+        })?;
         media::check_media(&project)?;
         let cache = self.host.cache_dir.clone();
         let queue = self.export_queue.clone();
@@ -2050,7 +2054,7 @@ impl Backend {
                 });
                 let check = check_export(&project, &measured, &cancel, &progress);
                 let mut done =
-                    json!({"path": out, "duration_us": project.duration_us(), "preset": options.delivery, "check": check});
+                    json!({"path": out, "duration_us": project.duration_us(), "preset": options.delivery, "hdr": options.hdr, "check": check});
                 if !measured.drawn_without.is_empty() {
                     let issues = nuzky_engine::plugin_effects::issues(&project);
                     done["warning"] = json!(nuzky_engine::plugin_effects::exported_without(&measured.drawn_without, &issues));

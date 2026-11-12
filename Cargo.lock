@@ -3836,6 +3836,7 @@ dependencies = [
  "dunce",
  "ffmpeg-next",
  "ffmpeg-sys-next",
+ "half",
  "log",
  "memmap2",
  "naga",

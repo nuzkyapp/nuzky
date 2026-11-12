@@ -53,6 +53,7 @@ pub const COMMANDS: &[&str] = &[
     "duplicate_project",
     "effect_issues",
     "export_captions",
+    "export_hdr_unavailable",
     "filmstrip",
     "find_beats",
     "font_weights",

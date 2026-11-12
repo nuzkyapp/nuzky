@@ -79,6 +79,12 @@ fn grid_size(w: u32, h: u32) -> (usize, usize) {
 
 /// The average colour of each cell of `w` × `h` straight RGBA, read at a few points of every cell, as RGBA.
 fn grid(pixels: &[u8], w: u32, h: u32) -> Vec<u8> {
+    grid_of(pixels, w, h, false)
+}
+
+/// `grid` of 8-bit RGBA, or of 16-bit little-endian RGBA when `deep`, read by the high byte of each channel.
+fn grid_of(pixels: &[u8], w: u32, h: u32, deep: bool) -> Vec<u8> {
+    let (texel, channel, high) = if deep { (8, 2, 1) } else { (4, 1, 0) };
     let (gw, gh) = grid_size(w, h);
     let (w, h) = (w as usize, h as usize);
     let at = |cell: usize, sample: usize, size: usize, cells: usize| {
@@ -91,9 +97,9 @@ fn grid(pixels: &[u8], w: u32, h: u32) -> Vec<u8> {
             for sy in 0..CELL_SAMPLES {
                 let row = at(cy, sy, h, gh) * w;
                 for sx in 0..CELL_SAMPLES {
-                    let pixel = &pixels[(row + at(cx, sx, w, gw)) * 4..][..3];
-                    for (sum, value) in sum.iter_mut().zip(pixel) {
-                        *sum += u32::from(*value);
+                    let pixel = &pixels[(row + at(cx, sx, w, gw)) * texel..];
+                    for (c, sum) in sum.iter_mut().enumerate() {
+                        *sum += u32::from(pixel[c * channel + high]);
                     }
                 }
             }
@@ -162,9 +168,9 @@ impl Watch {
         }
     }
 
-    /// Frame `index`, straight RGBA `w` × `h`.
-    pub(crate) fn frame(&mut self, index: u64, pixels: &[u8], w: u32, h: u32) {
-        let cells = grid(pixels, w, h);
+    /// Frame `index`, straight RGBA `w` × `h`, of 16-bit little-endian channels when `deep`.
+    pub(crate) fn frame(&mut self, index: u64, pixels: &[u8], w: u32, h: u32, deep: bool) {
+        let cells = grid_of(pixels, w, h, deep);
         let black = dark_share(&cells) >= BLACK_SHARE;
         match (black, self.black_from) {
             (true, None) => self.black_from = Some(index),
@@ -876,8 +882,8 @@ mod tests {
             }
         }
         let mut watch = Watch::new(30, 1_000_000);
-        watch.frame(0, &frame, w, h);
-        watch.frame(1, &solid(w, h, [40; 3]), w, h);
+        watch.frame(0, &frame, w, h, false);
+        watch.frame(1, &solid(w, h, [40; 3]), w, h, false);
         assert_eq!(watch.finish().black, [0..1]);
     }
 
@@ -887,7 +893,7 @@ mod tests {
         let measure = |fps: u32, frames: &[u8]| {
             let mut watch = Watch::new(fps, frame_time_us(frames.len() as u64, fps));
             for (i, value) in frames.iter().enumerate() {
-                watch.frame(i as u64, &solid(w, h, [*value, 100, 100]), w, h);
+                watch.frame(i as u64, &solid(w, h, [*value, 100, 100]), w, h, false);
             }
             watch.finish().frozen
         };

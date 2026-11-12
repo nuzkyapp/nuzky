@@ -1157,6 +1157,18 @@ async fn caption_files(app: AppHandle, path: String) -> CmdResult<Vec<String>> {
     .map_err(err)?
 }
 
+/// Why the open project cannot export in HDR, for the export dialog; `None` when it can.
+#[tauri::command]
+async fn export_hdr_unavailable(app: AppHandle) -> CmdResult<Option<String>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let host = app.state::<AppState>().session.lock().unwrap().host.clone();
+        let project = host.session.state().map_err(err)?.project;
+        Ok(nuzky_engine::export::hdr_unavailable(&project).map(str::to_owned))
+    })
+    .await
+    .map_err(err)?
+}
+
 /// Filmstrip for timeline clips: one horizontal sprite of evenly spaced frames.
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[derive(Serialize, Clone)]
@@ -1505,6 +1517,7 @@ pub fn run() {
             start_export,
             export_captions,
             caption_files,
+            export_hdr_unavailable,
             recap::recap_info,
             recap::start_recap,
             filmstrip,

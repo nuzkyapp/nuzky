@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { AlertCircle, AlertTriangle, AudioLines, CheckCircle2, ChevronDown, X } from "lucide-react";
+import { AlertCircle, AlertTriangle, AudioLines, CheckCircle2, ChevronDown, Sun, X } from "lucide-react";
 import { api, errorText, plainError } from "../lib/api";
 import { formatLabel } from "../lib/presets";
 import { closeExport, useCover } from "../lib/cover";
@@ -27,6 +27,8 @@ export const QUALITIES: { id: ExportRequest["quality"]; label: string; bitsPerPi
   { id: "small", label: "Smaller file", bitsPerPixel: 0.035 },
 ];
 const AUDIO_BPS = 192_000;
+/** HDR's HEVC against H.264 at the same quality: half the video bits on a 20 s camera clip at 1080p. */
+const HDR_BITS = 0.5;
 const STORAGE_KEY = "nuzky.export";
 const NO_CAPTIONS = "No captions yet. Make them in the Captions tab first.";
 /** "off" when the recap ends without its nuzky.app card. */
@@ -66,9 +68,9 @@ export function outputSize(canvas: Canvas, shortSide: number) {
   return canvas.width <= canvas.height ? { w: shortSide, h: long } : { w: long, h: shortSide };
 }
 
-/** Typical H.264 bitrates at these CRFs; real size depends on how much the picture moves. */
-export function estimateBytes(w: number, h: number, fps: number, quality: ExportRequest["quality"], durationUs: number) {
-  const bpp = QUALITIES.find((q) => q.id === quality)!.bitsPerPixel;
+/** Typical H.264 bitrates at these CRFs, and HEVC's for HDR; real size depends on how much the picture moves. */
+export function estimateBytes(w: number, h: number, fps: number, quality: ExportRequest["quality"], durationUs: number, hdr = false) {
+  const bpp = QUALITIES.find((q) => q.id === quality)!.bitsPerPixel * (hdr ? HDR_BITS : 1);
   return ((w * h * fps * bpp + AUDIO_BPS) * (durationUs / US)) / 8;
 }
 
@@ -108,6 +110,7 @@ export function loadOptions(canvas: Canvas, asked: Delivery | null): ExportReque
     quality: "recommended",
     preset: null,
     srt: false,
+    hdr: false,
   };
   try {
     const saved = savedOptions();
@@ -213,12 +216,17 @@ export function ExportDialog() {
   const dialog = useRef<HTMLDivElement>(null);
   const [presetMenu, setPresetMenu] = useState<{ x: number; y: number; width: number; keyboard: boolean } | null>(null);
   const presetButton = useRef<HTMLButtonElement>(null);
+  /** Why this video cannot export in HDR; null when it can, undefined while its clips are being looked at. */
+  const [hdrUnavailable, setHdrUnavailable] = useState<string | null | undefined>(undefined);
   const running = job?.status === "running";
 
-  // Options start from the project each time the dialog opens; preset, resolution, quality and .srt are remembered.
+  // Options start from the project each time the dialog opens; preset, resolution, quality, .srt and HDR are remembered.
   useEffect(() => {
     const { snap, exportPreset } = useEditor.getState();
-    if (open && snap) setOptions({ ...loadOptions(snap.project.canvas, exportPreset), srt: savedOptions()?.srt === true });
+    if (open && snap) {
+      const saved = savedOptions();
+      setOptions({ ...loadOptions(snap.project.canvas, exportPreset), srt: saved?.srt === true, hdr: saved?.hdr === true });
+    }
     if (open && exportPreset) useEditor.setState({ exportPreset: null });
     if (open) setWhat(useCover.getState().open ? "cover" : "video");
   }, [open]);
@@ -280,6 +288,25 @@ export function ExportDialog() {
     };
   }, [open, projectName, captionTracks]);
 
+  // Whether the clips the video shows were filmed in HDR, asked again when what it shows changes.
+  const shownMedia = useEditor((s) =>
+    s.snap?.project.tracks
+      .filter((t) => !t.hidden)
+      .flatMap((t) => t.clips.map((c) => (c.content.type === "media" ? `${c.content.assetId}:${c.content.log ?? ""}` : "")))
+      .join(),
+  );
+  useEffect(() => {
+    if (!open || shownMedia === undefined) return;
+    let live = true;
+    api.exportHdrUnavailable().then(
+      (why) => live && setHdrUnavailable(why),
+      (e) => live && setHdrUnavailable(plainError(errorText(e))),
+    );
+    return () => {
+      live = false;
+    };
+  }, [open, shownMedia]);
+
   const close = closeExport;
   useEffect(() => {
     if (open) return;
@@ -335,8 +362,10 @@ export function ExportDialog() {
     // A project's own resolution (4K, or the quality chosen in the top bar) is not a choice to remember for the others;
     // one picked here is.
     const resolution = patch.resolution ?? (ownResolution(project.canvas) ? savedOptions()?.resolution : next.resolution);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ resolution, quality: next.quality, preset: next.preset ?? null, srt: next.srt }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ resolution, quality: next.quality, preset: next.preset ?? null, srt: next.srt, hdr: next.hdr }));
   };
+  // A remembered HDR applies only to a video that can export in HDR.
+  const hdr = options.hdr && hdrUnavailable === null;
   const blocked = blockedReason(options.preset, project.canvas);
   const presetItem = (p: (typeof PRESETS)[number]): MenuEntry => {
     const reason = blockedReason(p.id, project.canvas);
@@ -387,7 +416,7 @@ export function ExportDialog() {
         useEditor.setState({ exportJobId: await api.startRecap(path, recapRun, endCard, epoch, replace) });
       } else {
         if (srt) last.current.captions = (await api.captionFiles(path)).map(fileName);
-        if (await exportVideo(path, { ...options, srt }, epoch, replace, credits, replaceCaptions)) startedAt.current = Date.now();
+        if (await exportVideo(path, { ...options, srt, hdr }, epoch, replace, credits, replaceCaptions)) startedAt.current = Date.now();
       }
     } catch (e) {
       failedWith(e, path);
@@ -476,7 +505,7 @@ export function ExportDialog() {
             </h2>
             <p className="tabular text-[12px] text-muted">
               {what === "video"
-                ? `MP4 · H.264 + AAC · ${formatLabel(project.canvas.width, project.canvas.height)} · ${size.w}×${size.h} · ${formatTime(duration)}`
+                ? `MP4 · ${hdr ? "HEVC HDR" : "H.264"} + AAC · ${formatLabel(project.canvas.width, project.canvas.height)} · ${size.w}×${size.h} · ${formatTime(duration)}`
                 : what === "recap"
                   ? "MP4 · H.264 + AAC · 9:16"
                   : coverFacts}
@@ -636,6 +665,30 @@ export function ExportDialog() {
               />
               <span className="text-right text-[13px] text-muted">Quality</span>
               <Segmented label="Quality" value={options.quality} onChange={(quality) => setOption({ quality })} options={QUALITIES} />
+              <span className="text-right text-[13px] text-muted">Dynamic range</span>
+              <Segmented
+                label="Dynamic range"
+                value={hdr ? "hdr" : "sdr"}
+                onChange={(range) => setOption({ hdr: range === "hdr" })}
+                disabled={hdrUnavailable !== null}
+                disabledReason={hdrUnavailable ?? "Looking at the clips…"}
+                options={[
+                  { id: "sdr", label: "SDR" },
+                  { id: "hdr", label: "HDR" },
+                ]}
+              />
+              {hdr && (
+                <p className="col-start-2 -mt-1 flex items-center gap-1.5 text-[12px] text-muted">
+                  <Sun size={14} className="shrink-0" />
+                  HLG, as iPhones record. Flatter on non-HDR screens.
+                </p>
+              )}
+              {/* HDR was picked last time: say why this video goes out in SDR instead. */}
+              {options.hdr && hdrUnavailable && (
+                <p className="col-start-2 -mt-1 text-[12px] text-muted" role="status">
+                  {hdrUnavailable} It exports in SDR.
+                </p>
+              )}
               <span className="text-right text-[13px] text-muted">Captions</span>
               <Checkbox
                 label="Also save as .srt"
@@ -735,7 +788,7 @@ export function ExportDialog() {
             </span>
           ) : (
             <span className={`tabular min-w-0 text-[13px] text-muted ${before ? "invisible" : settingsLocked ? "opacity-50" : ""}`} title="Estimate; scenes with a lot of motion come out larger">
-              about <span className="font-semibold text-fg">{formatBytes(estimateBytes(size.w, size.h, options.fps, options.quality, duration))}</span>
+              about <span className="font-semibold text-fg">{formatBytes(estimateBytes(size.w, size.h, options.fps, options.quality, duration, hdr))}</span>
             </span>
           )}
           <div className="flex shrink-0 gap-2.5">

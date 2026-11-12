@@ -34,6 +34,8 @@ struct State {
     /// The decoder's next frame does not follow the last queued one: it decoded a piece before the queue, or frames
     /// after the shown one were dropped while playing backwards. Frames after the queue then need a seek.
     detached: bool,
+    /// HDR frames come in 16-bit floats, twice the bytes of 8-bit ones.
+    deep: bool,
     /// Bumped when the queue is invalidated, so in-flight work is discarded.
     epoch: u64,
     error: Option<String>,
@@ -68,7 +70,8 @@ impl State {
 
     /// Converted frames in one piece of backward decoding.
     fn backward_frames(&self) -> usize {
-        (BACKWARD_BYTES / (self.size.0 as usize * self.size.1 as usize * 4).max(1))
+        let texel = if self.deep { 8 } else { 4 };
+        (BACKWARD_BYTES / (self.size.0 as usize * self.size.1 as usize * texel).max(1))
             .clamp(*BACKWARD_FRAMES.start(), *BACKWARD_FRAMES.end())
     }
 
@@ -114,26 +117,32 @@ pub struct VideoWorker {
 
 impl VideoWorker {
     pub fn spawn(path: PathBuf) -> Self {
-        Self::start(path, None, false)
+        Self::start(path, None, false, false)
+    }
+
+    /// For an HDR export, whose HDR frames it gives in 16-bit floats (`VideoDecoder::deep`).
+    pub fn spawn_deep(path: PathBuf) -> Self {
+        Self::start(path, None, false, true)
     }
 
     /// For the preview, which jumps around the file (`VideoDecoder::open_for_seeking`).
     pub fn spawn_for_seeking(path: PathBuf) -> Self {
-        Self::start(path, None, true)
+        Self::start(path, None, true, false)
     }
 
     /// Decodes a preview proxy (`crate::proxy`), which gives the frames of its original at the same times.
     pub fn spawn_proxy(proxy: PathBuf) -> Self {
-        Self::start(proxy.clone(), Some(proxy), false)
+        Self::start(proxy.clone(), Some(proxy), false, false)
     }
 
-    fn start(path: PathBuf, proxy: Option<PathBuf>, seeking: bool) -> Self {
-        let shared = Arc::new(Shared { state: Mutex::new(State::default()), cv: Condvar::new() });
+    fn start(path: PathBuf, proxy: Option<PathBuf>, seeking: bool, deep: bool) -> Self {
+        let state = State { deep, ..State::default() };
+        let shared = Arc::new(Shared { state: Mutex::new(state), cv: Condvar::new() });
         let s = shared.clone();
         let is_proxy = proxy.is_some();
         let thread = std::thread::Builder::new()
             .name("video-decode".into())
-            .spawn(move || run(s, path, is_proxy, seeking))
+            .spawn(move || run(s, path, is_proxy, seeking, deep))
             .expect("spawn decoder thread");
         Self { shared, thread: Some(thread), last_used: Instant::now(), exact: false, proxy }
     }
@@ -220,14 +229,17 @@ impl Drop for VideoWorker {
     }
 }
 
-fn run(shared: Arc<Shared>, path: PathBuf, proxy: bool, seeking: bool) {
+fn run(shared: Arc<Shared>, path: PathBuf, proxy: bool, seeking: bool, deep: bool) {
     let opened = match (proxy, seeking) {
         (true, _) => VideoDecoder::open_proxy(&path),
         (false, true) => VideoDecoder::open_for_seeking(&path),
         (false, false) => VideoDecoder::open(&path),
     };
     let mut decoder = match opened {
-        Ok(d) => d,
+        Ok(mut d) => {
+            d.deep = deep;
+            d
+        }
         Err(e) => {
             let mut st = shared.state.lock().unwrap();
             st.error = Some(format!("{e:#}"));

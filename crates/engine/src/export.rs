@@ -1,5 +1,5 @@
-//! MP4 export: the preview renderer at canvas resolution, H.264 + AAC. A delivery preset fixes
-//! the format a platform expects and levels the sound to its loudness.
+//! MP4 export: the preview renderer at canvas resolution, H.264 + AAC, or for HDR 10-bit HEVC in HLG + AAC. A delivery
+//! preset fixes the format a platform expects and levels the sound to its loudness.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -13,7 +13,7 @@ use crate::audio::{Chain, Mixer, chains, has_audio};
 use crate::check::{Measured, Watch};
 use crate::loudness::{Limiter, Meter, db_to_gain};
 use crate::media::{Scaler, init};
-use crate::model::{CHANNELS, Clip, ClipContent, Project, SAMPLE_RATE, TrackKind};
+use crate::model::{AssetKind, CHANNELS, Clip, ClipContent, Project, SAMPLE_RATE, TrackKind};
 use crate::render::{Pending, Renderer, Wait};
 
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -37,7 +37,7 @@ impl Quality {
 }
 
 /// A platform's delivery format, shared by the export dialog, MCP and the CLI. Every preset writes
-/// H.264 High and AAC 48 kHz stereo with the sound levelled to its loudness.
+/// H.264 High, or 10-bit HEVC for HDR, and AAC 48 kHz stereo with the sound levelled to its loudness.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -130,6 +130,9 @@ pub struct ExportOptions {
     pub fps: Option<u32>,
     /// Delivery preset; `resolution` and `fps` must then be `None` or the preset's own values.
     pub delivery: Option<Delivery>,
+    /// HDR: 10-bit HEVC in HLG BT.2020, as iPhones record HDR, keeping the light and colour of HDR footage. The video
+    /// needs HDR footage (`hdr_footage`) and FFmpeg the libx265 encoder.
+    pub hdr: bool,
 }
 
 impl Default for ExportOptions {
@@ -146,6 +149,7 @@ impl Default for ExportOptions {
             resolution: None,
             fps: None,
             delivery: None,
+            hdr: false,
         }
     }
 }
@@ -310,8 +314,11 @@ pub(crate) fn check_cancel(cancel: &AtomicBool) -> Result<()> {
     Ok(())
 }
 
-/// Refuses a delivery preset the project cannot meet, before any work starts.
+/// Refuses a delivery preset the project cannot meet, or HDR without HDR footage or its encoder, before any work starts.
 pub fn check_options(project: &Project, options: &ExportOptions) -> Result<()> {
+    if options.hdr {
+        check_hdr(project)?;
+    }
     let Some(delivery) = options.delivery else { return Ok(()) };
     let (w, h) = (project.canvas.width, project.canvas.height);
     let (aw, ah) = delivery.aspect();
@@ -338,6 +345,48 @@ pub fn check_options(project: &Project, options: &ExportOptions) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// The names of the HDR files the video shows: on a video track that is not hidden, without a log profile, which says how
+/// its picture encodes light whatever its file claims. A file that cannot be read counts as not HDR.
+pub fn hdr_footage(project: &Project) -> Vec<String> {
+    init();
+    let mut names = Vec::new();
+    let shown = project.tracks.iter().filter(|t| !t.hidden && t.kind == TrackKind::Video).flat_map(|t| &t.clips);
+    for clip in shown.filter(|clip| clip.start_us < project.duration_us()) {
+        let ClipContent::Media { asset_id, log, .. } = &clip.content else { continue };
+        let Some(asset) = project.asset(asset_id).filter(|a| a.kind != AssetKind::Audio && log.is_none()) else {
+            continue;
+        };
+        if !names.contains(&asset.name) && crate::media::is_hdr(Path::new(&asset.path)).unwrap_or(false) {
+            names.push(asset.name.clone());
+        }
+    }
+    names
+}
+
+/// The HEVC encoder an HDR export writes with. Phones and platforms play 10-bit HEVC in HLG as HDR.
+fn hdr_encoder() -> Result<ff::Codec> {
+    init();
+    ff::encoder::find_by_name("libx265").ok_or_else(|| anyhow!("HDR_UNAVAILABLE: this FFmpeg has no libx265 encoder"))
+}
+
+/// Why this video cannot export in HDR, as a sentence for the user; `None` when it can.
+pub fn hdr_unavailable(project: &Project) -> Option<&'static str> {
+    if hdr_encoder().is_err() {
+        Some("This copy of FFmpeg has no libx265 encoder, which HDR export needs.")
+    } else if hdr_footage(project).is_empty() {
+        Some("No clip in this video was filmed in HDR.")
+    } else {
+        None
+    }
+}
+
+fn check_hdr(project: &Project) -> Result<()> {
+    match hdr_unavailable(project) {
+        Some(why) => bail!("HDR_UNAVAILABLE: {why} Export in SDR."),
+        None => Ok(()),
+    }
 }
 
 fn export_fps(project: &Project, options: &ExportOptions) -> u32 {
@@ -452,13 +501,14 @@ fn encode(
     if fps == 0 || fps > 240 {
         bail!("Export frame rate must be between 1 and 240");
     }
-    let mut renderer = Renderer::new()?;
+    let mut renderer = Renderer::with_range(options.hdr)?;
     renderer.use_mattes(cache_dir.to_path_buf(), Pending::Fail);
     let (w, h) = output_size(project, options, renderer.max_texture_dimension())?;
     let total_frames = frame_count(duration, fps);
     let total_samples = crate::audio::us_to_samples(duration);
 
     let vcodec = match delivery {
+        _ if options.hdr => hdr_encoder()?,
         // Another H.264 encoder would not promise the profile and settings the platforms expect.
         Some(delivery) => ff::encoder::find_by_name("libx264").ok_or_else(|| {
             anyhow!("{} needs the libx264 encoder, which this FFmpeg build does not have", delivery.label())
@@ -483,9 +533,16 @@ fn encode(
         }
         None => Sound::Mix(Box::new(Mixer::new(cache_dir.to_path_buf()))),
     };
-    let profile = if delivery.is_some() { ("profile", "high") } else { ("", "") };
-    let x264 = [("preset", options.preset.as_str()), profile];
-    let mut mp4 = Mp4Writer::create(out, vcodec, w, h, fps, options.crf, &x264)?;
+    let mut mp4 = if options.hdr {
+        // x265 keeps the detail of x264 at a CRF about this much higher, in a smaller file.
+        let crf = options.crf.saturating_add(HEVC_CRF_OFFSET);
+        let x265 = [("preset", options.preset.as_str()), ("x265-params", "log-level=error")];
+        Mp4Writer::create(out, vcodec, (w, h, fps), crf, &x265, true)?
+    } else {
+        let profile = if delivery.is_some() { ("profile", "high") } else { ("", "") };
+        let x264 = [("preset", options.preset.as_str()), profile];
+        Mp4Writer::create(out, vcodec, (w, h, fps), options.crf, &x264, false)?
+    };
     let mut watch = Watch::new(fps, duration);
     let render = |i| {
         let pixels = renderer.render_until(project, frame_time_us(i, fps), w, h, Wait::Exact, true, cancel)?;
@@ -498,7 +555,7 @@ fn encode(
         Ok(pixels)
     };
     let write = |i, pixels: Vec<u8>| {
-        watch.frame(i, &pixels, w, h);
+        watch.frame(i, &pixels, w, h, options.hdr);
         mp4.frame(i, &pixels)?;
         let audio_until = crate::audio::us_to_samples(frame_time_us(i + 1, fps)).min(total_samples);
         mp4.sound_until(audio_until, |pos, mix| {
@@ -544,7 +601,10 @@ fn overlap<T: Send>(
     })
 }
 
-/// An MP4 of H.264 video and AAC sound at 48 kHz stereo, written a frame at a time.
+/// The x265 CRF an HDR export uses above the x264 one of its quality.
+const HEVC_CRF_OFFSET: u8 = 2;
+
+/// An MP4 of H.264 video, or 10-bit HEVC in HLG for HDR, and AAC sound at 48 kHz stereo, written a frame at a time.
 pub(crate) struct Mp4Writer {
     octx: ff::format::context::Output,
     venc: ff::encoder::Video,
@@ -557,6 +617,8 @@ pub(crate) struct Mp4Writer {
     to_yuv: Scaler,
     rgba: frame::Video,
     yuv: frame::Video,
+    /// Frames come as 16-bit RGBA in HLG BT.2020 and go out as 10-bit HEVC.
+    hdr: bool,
     aframe_size: usize,
     /// The next audio sample to write.
     audio_pos: i64,
@@ -564,43 +626,54 @@ pub(crate) struct Mp4Writer {
 }
 
 impl Mp4Writer {
-    /// `x264` are encoder options; an empty name is skipped.
+    /// `options` are encoder options; an empty name is skipped. `hdr` takes 16-bit RGBA frames in HLG BT.2020 and
+    /// writes them as 10-bit HEVC, which `vcodec` must be.
     pub(crate) fn create(
         out: &Path,
         vcodec: ff::Codec,
-        w: u32,
-        h: u32,
-        fps: u32,
+        (w, h, fps): (u32, u32, u32),
         crf: u8,
-        x264: &[(&str, &str)],
+        options: &[(&str, &str)],
+        hdr: bool,
     ) -> Result<Self> {
         let mut octx = ff::format::output(out).with_context(|| format!("Cannot create {}", out.display()))?;
         let global_header = octx.format().flags().contains(ff::format::Flags::GLOBAL_HEADER);
         let mut venc = ff::codec::context::Context::new_with_codec(vcodec).encoder().video()?;
+        let (yuv, space, primaries, trc) = if hdr {
+            use ff::ffi::{AVColorPrimaries::AVCOL_PRI_BT2020, AVColorTransferCharacteristic::AVCOL_TRC_ARIB_STD_B67};
+            (Pixel::YUV420P10LE, color::Space::BT2020NCL, AVCOL_PRI_BT2020, AVCOL_TRC_ARIB_STD_B67)
+        } else {
+            use ff::ffi::{AVColorPrimaries::AVCOL_PRI_BT709, AVColorTransferCharacteristic::AVCOL_TRC_BT709};
+            (Pixel::YUV420P, color::Space::BT709, AVCOL_PRI_BT709, AVCOL_TRC_BT709)
+        };
         venc.set_width(w);
         venc.set_height(h);
-        venc.set_format(Pixel::YUV420P);
+        venc.set_format(yuv);
         venc.set_time_base((1, fps as i32));
         venc.set_frame_rate(Some((fps as i32, 1)));
-        venc.set_colorspace(color::Space::BT709);
+        venc.set_colorspace(space);
         venc.set_color_range(color::Range::MPEG);
         unsafe {
             let ctx = venc.as_mut_ptr();
-            (*ctx).color_primaries = ff::ffi::AVColorPrimaries::AVCOL_PRI_BT709;
-            (*ctx).color_trc = ff::ffi::AVColorTransferCharacteristic::AVCOL_TRC_BT709;
+            (*ctx).color_primaries = primaries;
+            (*ctx).color_trc = trc;
         }
         if global_header {
             venc.set_flags(ff::codec::Flags::GLOBAL_HEADER);
         }
         let mut vopts = ff::Dictionary::new();
-        for (name, value) in x264.iter().filter(|(name, _)| !name.is_empty()) {
+        for (name, value) in options.iter().filter(|(name, _)| !name.is_empty()) {
             vopts.set(name, value);
         }
         vopts.set("crf", &crf.to_string());
-        let venc = venc.open_with(vopts).context("Opening the H.264 encoder failed")?;
+        let venc = venc.open_with(vopts).with_context(|| format!("Opening the {} encoder failed", vcodec.name()))?;
         let vindex = {
             let mut st = octx.add_stream(vcodec)?;
             st.set_parameters(&venc);
+            if hdr {
+                // Apple's players and the Photos app play HEVC in MP4 only with the hvc1 sample entry.
+                unsafe { (*(*st.as_mut_ptr()).codecpar).codec_tag = u32::from_le_bytes(*b"hvc1") };
+            }
             st.set_time_base((1, fps as i32));
             st.index()
         };
@@ -638,19 +711,20 @@ impl Mp4Writer {
             fps,
             w,
             h,
-            to_yuv: to_yuv(w, h)?,
-            rgba: frame::Video::new(Pixel::RGBA, w, h),
-            yuv: frame::Video::new(Pixel::YUV420P, w, h),
+            to_yuv: to_yuv(w, h, hdr)?,
+            rgba: frame::Video::new(if hdr { Pixel::RGBA64LE } else { Pixel::RGBA }, w, h),
+            yuv: frame::Video::new(yuv, w, h),
+            hdr,
             aframe_size,
             audio_pos: 0,
             mix: vec![0f32; aframe_size * CHANNELS],
         })
     }
 
-    /// Frame `index`: straight RGBA, `w` × `h`, rows without padding.
+    /// Frame `index`: straight RGBA, `w` × `h`, rows without padding; 16-bit little-endian for HDR.
     pub(crate) fn frame(&mut self, index: u64, pixels: &[u8]) -> Result<()> {
         let stride = self.rgba.stride(0);
-        let row = self.w as usize * 4;
+        let row = self.w as usize * if self.hdr { 8 } else { 4 };
         let dst = self.rgba.data_mut(0);
         for y in 0..self.h as usize {
             dst[y * stride..y * stride + row].copy_from_slice(&pixels[y * row..(y + 1) * row]);
@@ -706,7 +780,11 @@ impl Mp4Writer {
     }
 }
 
-fn to_yuv(w: u32, h: u32) -> Result<Scaler> {
+fn to_yuv(w: u32, h: u32, hdr: bool) -> Result<Scaler> {
+    if hdr {
+        let colorspace = [(ff::ffi::SWS_CS_DEFAULT, true), (ff::ffi::SWS_CS_BT2020, false)];
+        return Scaler::new((Pixel::RGBA64LE, w, h), (Pixel::YUV420P10LE, w, h), scaling::Flags::BICUBIC, colorspace);
+    }
     let colorspace = [(ff::ffi::SWS_CS_DEFAULT, true), (ff::ffi::SWS_CS_ITU709, false)];
     Scaler::new((Pixel::RGBA, w, h), (Pixel::YUV420P, w, h), scaling::Flags::BICUBIC, colorspace)
 }
@@ -987,7 +1065,7 @@ mod tests {
         let mut expected = frame::Video::new(Pixel::YUV420P, w, h);
         one_pass.run(&rgba, &mut expected).unwrap();
 
-        let mut to_yuv = to_yuv(w, h).unwrap();
+        let mut to_yuv = to_yuv(w, h, false).unwrap();
         // A machine with one core converts on one thread; the pixels must match either way.
         let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
         assert!(to_yuv.threads() > 1 || cores == 1, "the conversion runs on {} thread", to_yuv.threads());
