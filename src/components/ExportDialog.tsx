@@ -27,8 +27,8 @@ export const QUALITIES: { id: ExportRequest["quality"]; label: string; bitsPerPi
   { id: "small", label: "Smaller file", bitsPerPixel: 0.035 },
 ];
 const AUDIO_BPS = 192_000;
-/** HDR's HEVC against H.264 at the same quality, measured on phone footage. */
-const HDR_BITS = 1;
+/** HDR's HEVC against H.264 at the same quality: half the video bits on a 20 s camera clip at 1080p. */
+const HDR_BITS = 0.5;
 const STORAGE_KEY = "nuzky.export";
 const NO_CAPTIONS = "No captions yet. Make them in the Captions tab first.";
 /** "off" when the recap ends without its nuzky.app card. */
@@ -681,6 +681,12 @@ export function ExportDialog() {
                 <p className="col-start-2 -mt-1 flex items-center gap-1.5 text-[12px] text-muted">
                   <Sun size={14} className="shrink-0" />
                   HLG, as iPhones record. Flatter on non-HDR screens.
+                </p>
+              )}
+              {/* HDR was picked last time: say why this video goes out in SDR instead. */}
+              {options.hdr && hdrUnavailable && (
+                <p className="col-start-2 -mt-1 text-[12px] text-muted" role="status">
+                  {hdrUnavailable} It exports in SDR.
                 </p>
               )}
               <span className="text-right text-[13px] text-muted">Captions</span>

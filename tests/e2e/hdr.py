@@ -170,7 +170,8 @@ def hdr_export(r):
     reason = 'No clip in this video was filmed in HDR.'
     off = wait(lambda: (b := r.s.run(RANGE)) and b['disabled'] and b, 10)
     r.check('without HDR footage HDR is off and says why, though HDR was picked last time',
-            off and off['title'] == reason and 'H.264 + AAC' in r.s.run(DIALOG) and r.s.run(PICKED) == 'SDR',
+            off and off['title'] == reason and 'H.264 + AAC' in r.s.run(DIALOG) and r.s.run(PICKED) == 'SDR'
+            and f'{reason} It exports in SDR.' in r.s.run(DIALOG),
             [off, r.s.run(DIALOG)[:200]])
     time.sleep(0.4)
     r.shot('hdr-export-sdr-video')
