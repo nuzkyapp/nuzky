@@ -179,7 +179,7 @@ impl Levels {
         let mut runs: Vec<(i64, i64)> = Vec::new();
         let mut start = None;
         for k in first..=last {
-            let quiet = k < last && self.db[k] < threshold;
+            let quiet = self.db[..last].get(k).is_some_and(|&db| db < threshold);
             match (quiet, start) {
                 (true, None) => start = Some(k),
                 (false, Some(s)) => {
