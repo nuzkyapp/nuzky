@@ -228,7 +228,7 @@ function CaptionLooks({
     return (
       <StyleTile
         key={original.name}
-        preset={original}
+        preset={look}
         font={style.fontFamily}
         current={current}
         disabled={!!lock}

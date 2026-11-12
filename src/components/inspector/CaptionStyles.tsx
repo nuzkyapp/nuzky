@@ -1,13 +1,13 @@
 import { Check, Ellipsis, Plus } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { Fragment, type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react";
 import { create } from "zustand";
 import { api, errorText, plainError } from "../../lib/api";
 import { CAPTION_STYLES, scaleStyle } from "../../lib/presets";
 import type { CaptionLook } from "../../lib/speech";
 import { previewHandlers, useEditor, type EditInput } from "../../lib/store";
-import type { CaptionPreset } from "../../lib/types";
+import type { Animation, CaptionPreset } from "../../lib/types";
 import { TRANSLATION_SIZE } from "../panel/CaptionLanguages";
-import { AnimatedSwatch, Button, IconButton, Menu, TextSwatch, lockedProps, useLockReason } from "../ui";
+import { Button, IconButton, Menu, lockedProps, swatchCss, useLockReason } from "../ui";
 
 /** Caption style tiles fill the row, as many as fit. */
 export const STYLE_GRID = "grid grid-cols-[repeat(auto-fill,minmax(96px,1fr))] gap-2";
@@ -54,7 +54,118 @@ export type OwnTile = { menu: (at: { x: number; y: number }, keyboard: boolean) 
 
 export type Tile = (preset: CaptionPreset, own?: OwnTile) => ReactNode;
 
-/** A caption style tile: its name drawn in the style, checked while the captions have the look. */
+/** The sentence a style tile plays, two captions timed as Whisper times speech; `key` the words Emphasis marks, a number. */
+const SAMPLE = [
+  { words: ["I", "made", "$500"], key: [2] },
+  { words: ["in", "one", "day"], key: [] },
+];
+const WORD_MS = 360;
+const GAP_MS = 80;
+const HOLD_MS = 500;
+const SAMPLE_MS = SAMPLE.reduce((sum, c) => sum + c.words.length * WORD_MS + HOLD_MS, 0) + 400;
+/** At rest: the first caption fully in, its second word being said. */
+const REST: SampleFrame = { loop: -1, cue: 0, lit: 1, out: false };
+const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+
+type SampleFrame = { loop: number; cue: number | null; lit: number | null; out: boolean };
+
+/** What the engine draws `t` ms into the sample: which caption, the word being said and whether it is leaving. */
+function sampleAt(t: number, outMs: number): SampleFrame {
+  const loop = Math.floor(t / SAMPLE_MS);
+  let at = loop * SAMPLE_MS;
+  for (const [cue, c] of SAMPLE.entries()) {
+    const length = c.words.length * WORD_MS + HOLD_MS;
+    const local = t - at;
+    if (local < length) {
+      const word = Math.floor(local / WORD_MS);
+      return { loop, cue, lit: word < c.words.length && local % WORD_MS < WORD_MS - GAP_MS ? word : null, out: local >= length - outMs };
+    }
+    at += length;
+  }
+  return { loop, cue: null, lit: null, out: false };
+}
+
+/** The words `keywords` colours, as `key_words` in the engine picks them. */
+function keyWords(cue: (typeof SAMPLE)[number], keywords: CaptionPreset["style"]["keywords"]): number[] {
+  const letters = (w: string) => w.replace(/[^\p{L}\p{N}]/gu, "").length;
+  switch (keywords?.pick) {
+    case "emphasis":
+      return cue.key;
+    case "first":
+      return [0];
+    case "last":
+      return [cue.words.length - 1];
+    case "longest":
+      return [cue.words.reduce((best, w, i) => (letters(w) > letters(cue.words[best]) ? i : best), 0)];
+    default:
+      return [];
+  }
+}
+
+/** A one-shot run of the `a-*` keyframes, whose move spans 15 %–70 %, over the animation's real duration. */
+function animationCss(animation: Animation | null | undefined, out: boolean): CSSProperties {
+  if (!animation) return {};
+  const length = animation.durationUs / 1000 / 0.55;
+  return {
+    animationName: `a-${animation.kind}`,
+    animationDuration: `${length}ms`,
+    animationDelay: `${-(out ? 0.3 : 0.15) * length}ms`,
+    animationDirection: out ? "reverse" : "normal",
+    animationFillMode: "both",
+    animationTimingFunction: animation.kind === "typewriter" ? "steps(5, end)" : "ease-out",
+  };
+}
+
+/**
+ * A style's captions as the engine draws them: each enters and leaves with the style's animations, karaoke lights the
+ * word being said and key words take their colour. Still at rest; plays in a loop while `playing`.
+ */
+function CaptionSample({ preset, font, playing }: { preset: CaptionPreset; font: string | null | undefined; playing: boolean }) {
+  const outMs = preset.animOut ? preset.animOut.durationUs / 1000 : 0;
+  const [frame, setFrame] = useState<SampleFrame | null>(null);
+  useEffect(() => {
+    if (!playing) return;
+    const start = performance.now();
+    let last = "";
+    const timer = window.setInterval(() => {
+      const next = sampleAt(performance.now() - start, outMs);
+      const id = `${next.loop} ${next.cue} ${next.lit} ${next.out}`;
+      if (id !== last) {
+        last = id;
+        setFrame(next);
+      }
+    }, 30);
+    return () => {
+      window.clearInterval(timer);
+      setFrame(null);
+    };
+  }, [playing, outMs]);
+  const at = playing ? (frame ?? sampleAt(0, outMs)) : REST;
+  if (at.cue === null) return null;
+  const cue = SAMPLE[at.cue];
+  const style = { ...preset.style, fontFamily: preset.style.fontFamily ?? font };
+  const keys = keyWords(cue, style.keywords);
+  return (
+    <span
+      key={`${at.loop} ${at.cue} ${at.out}`}
+      data-caption-sample
+      className="inline-block max-w-full overflow-hidden whitespace-nowrap rounded px-1 leading-6"
+      style={{ ...swatchCss(style, 12), ...(at.loop < 0 ? {} : animationCss(at.out ? preset.animOut : preset.animIn, at.out)) }}
+    >
+      {cue.words.map((word, i) => {
+        const color = style.highlight && i === at.lit ? style.highlight : keys.includes(i) ? style.keywords?.color : undefined;
+        return (
+          <Fragment key={i}>
+            {i > 0 && " "}
+            {color ? <span style={{ color }}>{word}</span> : word}
+          </Fragment>
+        );
+      })}
+    </span>
+  );
+}
+
+/** A caption style tile: its captions playing in the style over its name, checked while the captions have the look. */
 export function StyleTile({
   preset,
   font,
@@ -77,10 +188,20 @@ export function StyleTile({
   own?: OwnTile;
 }) {
   const lock = useLockReason();
+  const [playing, setPlaying] = useState(false);
   // The user's own styles are not the project: recognition running leaves renaming and deleting them alone.
   const openMenu = (at: { x: number; y: number }, keyboard: boolean) => !lock && own?.menu(at, keyboard);
+  const drawn = previewHandlers(disabled ? null : preview);
+  const play = (on: boolean) => setPlaying(on && !reducedMotion.matches);
   return (
     <div className="group relative min-w-0">
+      {/* Beside the button, under its clear box, so the button's text stays the style's name. */}
+      <span
+        aria-hidden
+        className={`pointer-events-none absolute inset-x-0 top-0 flex h-16 items-center justify-center overflow-hidden rounded-[10px] bg-white/[.06] px-1 ${disabled ? "opacity-40" : ""}`}
+      >
+        <CaptionSample preset={preset} font={font} playing={playing} />
+      </span>
       <button
         type="button"
         ref={own?.ref}
@@ -89,7 +210,23 @@ export function StyleTile({
         aria-disabled={disabled || undefined}
         title={title}
         onClick={disabled ? undefined : onApply}
-        {...previewHandlers(disabled ? null : preview)}
+        onClickCapture={drawn.onClickCapture}
+        onPointerEnter={() => {
+          play(true);
+          drawn.onPointerEnter?.();
+        }}
+        onPointerLeave={() => {
+          play(false);
+          drawn.onPointerLeave();
+        }}
+        onFocus={(e) => {
+          if (e.currentTarget.matches(":focus-visible")) play(true);
+          drawn.onFocus?.();
+        }}
+        onBlur={() => {
+          play(false);
+          drawn.onBlur();
+        }}
         onContextMenu={(e) => {
           if (!own) return;
           e.preventDefault();
@@ -106,18 +243,20 @@ export function StyleTile({
             openMenu({ x: r.left, y: r.bottom + 4 }, true);
           }
         }}
-        className={`relative flex h-12 w-full min-w-0 items-center justify-center rounded-[10px] border bg-white/[.06] transition-colors duration-[120ms] ease-out aria-disabled:cursor-not-allowed aria-disabled:opacity-40 px-1 ${
-          current ? "border-accent shadow-[0_0_0_1px_var(--color-accent)]" : disabled ? "border-white/[.08]" : "border-white/[.08] hover:border-white/30"
-        }`}
+        className="flex w-full min-w-0 flex-col gap-1.5 rounded-[10px] text-left aria-disabled:cursor-not-allowed"
       >
-        <AnimatedSwatch animation={preset.animIn?.kind}>
-          <TextSwatch style={{ ...preset.style, fontFamily: preset.style.fontFamily ?? font }} label={preset.name} size={13} />
-        </AnimatedSwatch>
-        {current && (
-          <span aria-hidden className="absolute top-1 right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-accent-strong text-white shadow-[0_1px_2px_rgb(0_0_0/.5)]">
-            <Check size={10} strokeWidth={3} />
-          </span>
-        )}
+        <span
+          className={`relative block h-16 w-full rounded-[10px] border transition-colors duration-[120ms] ease-out ${
+            current ? "border-accent shadow-[0_0_0_1px_var(--color-accent)]" : disabled ? "border-white/[.08]" : "border-white/[.08] group-hover:border-white/30"
+          }`}
+        >
+          {current && (
+            <span aria-hidden className="absolute top-1 right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-accent-strong text-white shadow-[0_1px_2px_rgb(0_0_0/.5)]">
+              <Check size={10} strokeWidth={3} />
+            </span>
+          )}
+        </span>
+        <span className={`w-full truncate text-center text-[11px] ${current ? "font-medium text-fg" : "text-muted"} ${disabled ? "opacity-40" : ""}`}>{preset.name}</span>
       </button>
       {own && !lock && (
         <button
@@ -129,7 +268,7 @@ export function StyleTile({
             const r = e.currentTarget.getBoundingClientRect();
             openMenu({ x: r.left, y: r.bottom + 4 }, false);
           }}
-          className="absolute right-1 bottom-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/55 text-fg opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100 hover:bg-black/75"
+          className="absolute top-11 right-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/55 text-fg opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100 hover:bg-black/75"
         >
           <Ellipsis size={12} />
         </button>
@@ -208,7 +347,7 @@ export function MyStyles({ look, mine, tile, grid = STYLE_GRID }: { look: Captio
               type="button"
               {...lockedProps(lock)}
               onClick={lock ? undefined : () => setNaming({ from: null })}
-              className="flex h-12 min-w-0 items-center justify-center gap-1 whitespace-nowrap rounded-[10px] border border-dashed border-white/[.15] text-[11px] text-muted transition-colors duration-[120ms] hover:border-white/30 hover:text-fg aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
+              className="flex h-16 min-w-0 items-center justify-center gap-1 whitespace-nowrap rounded-[10px] border border-dashed border-white/[.15] text-[11px] text-muted transition-colors duration-[120ms] hover:border-white/30 hover:text-fg aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
             >
               <Plus size={12} /> Save look
             </button>
