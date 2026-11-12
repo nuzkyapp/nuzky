@@ -438,6 +438,22 @@ def preview_rect(r):
         return {left: b.left, top: b.top, width: b.width, height: b.height, viewport: window.innerWidth};""")
 
 
+def title_place(r):
+    """How many px the project's name and Saved, taken together, lie off the middle of the window (None until Saved
+    shows), and the px between them and the right side of the top bar."""
+    return r.s.run("""const box = (e) => e.getBoundingClientRect();
+        const name = document.querySelector('header button[title="Rename project"], header button[aria-disabled]');
+        const saved = [...document.querySelectorAll('header [role=status]')].find((s) => s.textContent.trim() === 'Saved');
+        const centre = document.querySelector('header > div:nth-child(2) > div'), right = document.querySelector('header > div:nth-child(3) > *');
+        return {off: name && saved ? Math.round(Math.abs((box(name).left + box(saved).right) / 2 - window.innerWidth / 2)) : null,
+                room: centre && right ? Math.round(box(right).left - box(centre).right) : null};""")
+
+
+def title_centred(r):
+    """Whether the name and Saved sit in the middle of the window, waiting a few seconds for Saved."""
+    return wait(lambda: (lambda p: p['off'] is not None and p['off'] <= 1)(title_place(r)), 5)
+
+
 def preview_crop(screenshot, rect):
     from PIL import Image
     image = Image.open(screenshot).convert('RGB')

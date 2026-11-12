@@ -58,7 +58,7 @@ MUTED = 'rgb(161, 161, 169)'
 HEADER = """const h = document.querySelector('header'), x = (e) => e && [Math.round(e.getBoundingClientRect().left), Math.round(e.getBoundingClientRect().right)];
 const statuses = [...h.querySelectorAll('[role=status]')];
 return {update: x(h.querySelector('[data-update-button], [data-update-waiting], [data-update-progress]')),
-        name: x(h.querySelector('div.flex-1 > div.relative')?.firstElementChild),
+        name: x(h.querySelector(':scope > div:nth-child(2) > div')?.firstElementChild),
         saved: x(statuses.find((s) => /^(Saved|Saving)/.test(s.textContent.trim()))),
         run: x(statuses.find((s) => s.textContent.includes('AI is editing')))};"""
 # The sidebar row's text, percentage and Stop as drawn: hidden or covered, the percentage is not what a point on it hits.

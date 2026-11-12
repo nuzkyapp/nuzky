@@ -1,6 +1,6 @@
 import json, subprocess, time
 
-from e2e.harness import CLI, FIXTURES, LINUX, _windows, flow, preview_crop, wait, webdriver
+from e2e.harness import CLI, FIXTURES, LINUX, _windows, flow, preview_crop, title_centred, title_place, wait, webdriver
 
 # Nulls while the editor is still drawing after a reload.
 SIZES = """const width = (e) => e ? Math.round(e.getBoundingClientRect().width) : null;
@@ -134,6 +134,7 @@ def layout(r):
     r.check('the preview is black around the frame, so the video is the brightest thing there', max(stage) <= 2, stage)
     r.check('the media tile of a video the timeline uses carries a check and says so in its tooltip', look['used'], look)
     r.check('Saved in the top bar starts with a green dot', look['saved'] == 'rgb(48, 209, 88)', look['saved'])
+    r.check("the project's name and Saved sit in the middle of the window", title_centred(r), title_place(r))
     fade = r.s.run("""const img = [...document.querySelectorAll('[role=tablist][aria-label=Library] ~ [role=tabpanel] span')]
         .find((e) => e.textContent === 'talk.mp4').closest('.group').querySelector('img'); const st = getComputedStyle(img);
         return {loaded: img.dataset.loaded ?? null, opacity: st.opacity, fades: st.animationName === 'img-in' && st.animationDuration === '0.18s'};""")
@@ -189,6 +190,7 @@ def layout(r):
         rows = sorted({t['top'] for t in tabs})
         r.check('in the narrowest library the tabs take two rows of four, every label whole inside its tab',
                 len(tabs) == 8 and len(rows) == 2 and all(t['whole'] for t in tabs) and [t['top'] for t in tabs].count(rows[0]) == 4, tabs)
+        r.check('in the smallest window the name and Saved still sit in the middle', title_centred(r), title_place(r))
         r.shot('small-window')
         resize(r, w, h)
         r.check('back in the large window the inspector and the timeline are as the user left them',
