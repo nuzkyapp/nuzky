@@ -1,22 +1,22 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ownTransform } from "../../lib/keyframes";
 import { create } from "zustand";
 import { AlignCenter, AlignLeft, AlignRight, Ban, RotateCcw } from "lucide-react";
 import { LIMITS } from "../../lib/limits";
-import { BOX_RADIUS, KEYWORD_COLOR, KEYWORD_PICKS, TEXT_PRESETS, isLook, sameStyle, scaleStyle, weightOf } from "../../lib/presets";
+import { BOX_RADIUS, KEYWORD_COLOR, KEYWORD_PICKS, TEXT_GROUPS, TEXT_PRESETS, isLook, sameStyle, scaleStyle, weightOf } from "../../lib/presets";
 import { languageName } from "../../lib/speech";
-import { applyCaptionLook, editClip, isCaptionTrack, patched, placeCaptions, presetOver, restyleCaptions, useCanvasUnit, useEditor, type StylePatch } from "../../lib/store";
-import type { Animation, CaptionPreset, Clip, EditCmd, LetterCase, TextAlign, TextShadow, TextStyle, Track, Transform } from "../../lib/types";
+import { applyCaptionLook, captionLookCmds, editClip, endPreview, showPastEntry, isCaptionTrack, patched, placeCaptions, presetOver, restyleCaptions, useCanvasUnit, useEditor, type StylePatch } from "../../lib/store";
+import type { Animation, CaptionPreset, Clip, EditCmd, LetterCase, Project, TextAlign, TextPreset, TextShadow, TextStyle, Track, Transform } from "../../lib/types";
 import { FontPicker } from "../FontPicker";
 import { Select } from "../panel/SpeechControls";
 import { useSpeechLanguage } from "../panel/CaptionLanguages";
 import { MyStyles, StyleTile, builtInStyles, forTrack, useMyStyles, type Tile } from "./CaptionStyles";
 import { ALL_WEIGHTS, DEFAULT_FONT, WEIGHT_NAMES, useFontWeights } from "../../lib/fonts";
-import { Button, Checkbox, Chip, ColorInput, Disclosure, LockReason, PresetTile, Section, Segmented, Slider, TextSwatch, lockedProps, parseNumber, useLockReason } from "../ui";
+import { AnimatedSwatch, Button, Checkbox, Chip, ColorInput, Disclosure, LockReason, PresetTile, Section, Segmented, Slider, TextSwatch, lockedProps, parseNumber, useLockReason } from "../ui";
 import { captionKeys, keyAsText, markKeyWords } from "../../lib/keywords";
 
 /** Which text folds are open and whether a caption's inspector styles every caption, for this session, wherever they show. */
-export const useStyleUi = create<{ more: boolean; position: boolean; allCaptions: boolean }>(() => ({ more: false, position: false, allCaptions: true }));
+export const useStyleUi = create<{ more: boolean; position: boolean; allCaptions: boolean; allTitleStyles: boolean }>(() => ({ more: false, position: false, allCaptions: true, allTitleStyles: false }));
 
 /** A label above a full-width control, like the sliders' in the inspector. */
 export function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
@@ -92,7 +92,6 @@ const textStyles = (clips: Clip[]) => clips.flatMap((c) => (c.content.type === "
  * is always its own.
  */
 export function TextSection({ clip, text, style, caption }: { clip: Clip; text: string; style: TextStyle; caption: boolean }) {
-  const edit = useEditor((s) => s.edit);
   const all = useStyleUi((s) => s.allCaptions) && caption;
   // The captions of this caption's track, which an agent may have made beside another captions track, or a translation.
   const track = useEditor((s) => (caption ? s.snap?.project.tracks.find((t) => t.clips.some((c) => c.id === clip.id)) : undefined));
@@ -121,16 +120,7 @@ export function TextSection({ clip, text, style, caption }: { clip: Clip; text: 
         {caption ? (
           <CaptionLooks clip={clip} style={style} everyCaption={everyCaption} trackId={track?.id} translation={!spoken} unit={unit} />
         ) : (
-          <div className="grid grid-cols-3 gap-2">
-            {TEXT_PRESETS.map((p) => (
-              <PresetTile key={p.name} named label={p.name} selected={sameStyle(p.style, style, unit)} title={`Apply ${p.name} style`} onClick={() => edit({ type: "updateClip", clipId: clip.id, style: presetOver(p.style, style, unit) })}>
-                {/* As the Captions tab draws its styles: the name in the style, so the two lists read as one. */}
-                <span className="absolute inset-0 flex items-center justify-center px-1">
-                  <TextSwatch style={{ ...p.style, fontFamily: p.style.fontFamily ?? style.fontFamily }} label={p.name} size={13} />
-                </span>
-              </PresetTile>
-            ))}
-          </div>
+          <TitleLooks clip={clip} style={style} unit={unit} />
         )}
       </Section>
       {spoken && (
@@ -148,6 +138,57 @@ export function TextSection({ clip, text, style, caption }: { clip: Clip; text: 
       )}
       <MoreStyleFold style={style} styles={styles} setStyle={setStyle} unit={unit} />
       {everyCaption && <CaptionPosition clips={everyCaption} trackId={track?.id} title="Position of all captions" />}
+    </>
+  );
+}
+
+/** A text's style: its look, with the animations the style brings; the text keeps its own font when the style has none. */
+function titleCmds(p: TextPreset, clip: Clip, style: TextStyle, unit: number): EditCmd[] {
+  const animate = (slot: "in" | "out", animation: Animation | null | undefined): EditCmd[] => (animation ? [{ type: "setAnimation", clipId: clip.id, slot, animation }] : []);
+  return [{ type: "updateClip", clipId: clip.id, style: presetOver(p.style, style, unit) }, ...animate("in", p.animIn), ...animate("out", p.animOut)];
+}
+
+/**
+ * The Text tab's styles for a text that is not a caption: the first group, and the text's own style when it is in
+ * another, until Show all lists every group. Pointing at a tile draws the text in it in the preview.
+ */
+function TitleLooks({ clip, style, unit }: { clip: Clip; style: TextStyle; unit: number }) {
+  const edit = useEditor((s) => s.edit);
+  const all = useStyleUi((s) => s.allTitleStyles);
+  useEffect(() => endPreview, []);
+  const current = TEXT_PRESETS.find((p) => sameStyle(p.style, style, unit));
+  const tile = (p: TextPreset) => {
+    const cmds = titleCmds(p, clip, style, unit);
+    return (
+      <PresetTile key={p.name} named label={p.name} selected={p === current} title={`Apply ${p.name} style`} onClick={() => void edit(cmds).then((done) => done && showPastEntry(clip.startUs, p.animIn))} preview={cmds}>
+        {/* As the Captions tab draws its styles: the name in the style, so the two lists read as one. */}
+        <span className="absolute inset-0 flex items-center justify-center px-1">
+          <AnimatedSwatch animation={p.animIn?.kind}>
+            <TextSwatch style={{ ...p.style, fontFamily: p.style.fontFamily ?? style.fontFamily }} label={p.name} size={13} />
+          </AnimatedSwatch>
+        </span>
+      </PresetTile>
+    );
+  };
+  const first = TEXT_GROUPS[0];
+  return (
+    <>
+      {all ? (
+        TEXT_GROUPS.map((g) => (
+          <div key={g.name} role="group" aria-label={g.name} className="flex flex-col gap-1.5">
+            <span className="text-[12px] text-muted">{g.name}</span>
+            <div className="grid grid-cols-3 gap-2">{g.presets.map(tile)}</div>
+          </div>
+        ))
+      ) : (
+        <div className="grid grid-cols-3 gap-2">{[...first.presets, ...(current && current.group !== first.name ? [current] : [])].map(tile)}</div>
+      )}
+      {/* It only changes what the list shows, so it stays open while an agent edits. */}
+      <LockReason.Provider value={null}>
+        <Button variant="ghost" className="h-7 w-full text-[12px] text-accent! hover:text-accent!" aria-expanded={all} onClick={() => useStyleUi.setState({ allTitleStyles: !all })}>
+          {all ? "Show fewer styles" : `Show all ${TEXT_PRESETS.length} styles`}
+        </Button>
+      </LockReason.Provider>
     </>
   );
 }
@@ -174,11 +215,13 @@ function CaptionLooks({
   const edit = useEditor((s) => s.edit);
   const lock = useLockReason();
   const mine = useMyStyles();
-  const apply = (look: CaptionPreset) => {
-    if (everyCaption) return void applyCaptionLook({ style: look.style, animIn: look.animIn ?? null, animOut: look.animOut ?? null }, look.name, trackId);
-    const animate = (slot: "in" | "out", animation: Animation | null | undefined): EditCmd => ({ type: "setAnimation", clipId: clip.id, slot, animation: animation ?? null });
-    edit([{ type: "updateClip", clipId: clip.id, style: presetOver(look.style, style, unit) }, animate("in", look.animIn), animate("out", look.animOut)]);
-  };
+  useEffect(() => endPreview, []);
+  const captionLook = (look: CaptionPreset) => ({ style: look.style, animIn: look.animIn ?? null, animOut: look.animOut ?? null });
+  const animate = (slot: "in" | "out", animation: Animation | null | undefined): EditCmd => ({ type: "setAnimation", clipId: clip.id, slot, animation: animation ?? null });
+  const thisCaption = (look: CaptionPreset): EditCmd[] => [{ type: "updateClip", clipId: clip.id, style: presetOver(look.style, style, unit) }, animate("in", look.animIn), animate("out", look.animOut)];
+  const apply = (look: CaptionPreset) => (everyCaption ? void applyCaptionLook(captionLook(look), look.name, trackId) : edit(thisCaption(look)));
+  // What a tile under the pointer draws in the preview: the edits its click makes.
+  const preview = (look: CaptionPreset) => (everyCaption ? (project: Project) => captionLookCmds(project, captionLook(look), trackId) : thisCaption(look));
   const tile: Tile = (original, own) => {
     const look = forTrack(original, translation, !!own);
     const current = (everyCaption ?? [clip]).every((c) => c.content.type === "text" && isLook(look, c.content.style, c.animIn, c.animOut, unit));
@@ -191,6 +234,7 @@ function CaptionLooks({
         disabled={!!lock}
         title={lock ?? (everyCaption ? `Apply ${look.name} to all captions` : `Apply ${look.name} style`)}
         onApply={() => apply(look)}
+        preview={preview(look)}
         own={own}
       />
     );

@@ -311,5 +311,199 @@
       "kind": "typewriter",
       "durationUs": 300000
     }
+  },
+  {
+    "name": "Shadow",
+    "style": {
+      "fontSize": 88,
+      "color": "#ffffff",
+      "bold": true,
+      "strokeWidth": 0,
+      "strokeColor": "#000000",
+      "background": null,
+      "fontWeight": 600,
+      "shadow": {
+        "color": "#000000",
+        "opacity": 0.8,
+        "blur": 40,
+        "distance": 8,
+        "angle": -90
+      }
+    }
+  },
+  {
+    "name": "Violet",
+    "style": {
+      "fontSize": 86,
+      "color": "#ffffff",
+      "bold": true,
+      "strokeWidth": 3,
+      "strokeColor": "#c084fc",
+      "background": null,
+      "fontFamily": "Lexend",
+      "fontWeight": 600,
+      "shadow": {
+        "color": "#a855f7",
+        "opacity": 1,
+        "blur": 100,
+        "distance": 0,
+        "angle": -90
+      }
+    },
+    "animIn": {
+      "kind": "fade",
+      "durationUs": 150000
+    }
+  },
+  {
+    "name": "Lilac",
+    "style": {
+      "fontSize": 92,
+      "color": "#ffffff",
+      "bold": true,
+      "strokeWidth": 7,
+      "strokeColor": "#000000",
+      "background": null,
+      "fontFamily": "Poppins",
+      "highlight": "#c084fc"
+    },
+    "animIn": {
+      "kind": "pop",
+      "durationUs": 150000
+    }
+  },
+  {
+    "name": "Hot pink",
+    "style": {
+      "fontSize": 96,
+      "color": "#ffffff",
+      "bold": true,
+      "strokeWidth": 8,
+      "strokeColor": "#000000",
+      "background": null,
+      "fontFamily": "Montserrat",
+      "fontWeight": 900,
+      "letterCase": "upper",
+      "highlight": "#ff3ea5"
+    },
+    "animIn": {
+      "kind": "pop",
+      "durationUs": 150000
+    }
+  },
+  {
+    "name": "Red box",
+    "style": {
+      "fontSize": 70,
+      "color": "#ffffff",
+      "bold": true,
+      "strokeWidth": 0,
+      "strokeColor": "#000000",
+      "background": "#e11d48ee",
+      "fontFamily": "Montserrat",
+      "fontWeight": 800,
+      "letterCase": "upper"
+    },
+    "animIn": {
+      "kind": "pop",
+      "durationUs": 150000
+    }
+  },
+  {
+    "name": "Pill",
+    "style": {
+      "fontSize": 66,
+      "color": "#ffffff",
+      "bold": true,
+      "strokeWidth": 0,
+      "strokeColor": "#000000",
+      "background": "#000000b3",
+      "fontFamily": "Poppins",
+      "boxRadius": 1
+    },
+    "animIn": {
+      "kind": "fade",
+      "durationUs": 150000
+    }
+  },
+  {
+    "name": "Retro",
+    "style": {
+      "fontSize": 96,
+      "color": "#ffd76a",
+      "bold": true,
+      "strokeWidth": 0,
+      "strokeColor": "#000000",
+      "background": null,
+      "fontFamily": "Oswald",
+      "letterCase": "upper",
+      "shadow": {
+        "color": "#c2410c",
+        "opacity": 1,
+        "blur": 0,
+        "distance": 8,
+        "angle": -45
+      }
+    },
+    "animIn": {
+      "kind": "slideUp",
+      "durationUs": 200000
+    }
+  },
+  {
+    "name": "Pop art",
+    "style": {
+      "fontSize": 100,
+      "color": "#ffffff",
+      "bold": false,
+      "strokeWidth": 6,
+      "strokeColor": "#000000",
+      "background": null,
+      "fontFamily": "Anton",
+      "letterCase": "upper",
+      "shadow": {
+        "color": "#ec4899",
+        "opacity": 1,
+        "blur": 0,
+        "distance": 10,
+        "angle": -45
+      },
+      "keywords": {
+        "color": "#ffe14d",
+        "pick": "emphasis"
+      }
+    },
+    "animIn": {
+      "kind": "pop",
+      "durationUs": 160000
+    }
+  },
+  {
+    "name": "Cinema",
+    "style": {
+      "fontSize": 60,
+      "color": "#ffffff",
+      "bold": true,
+      "strokeWidth": 0,
+      "strokeColor": "#000000",
+      "background": null,
+      "letterSpacing": 0.08,
+      "shadow": {
+        "color": "#000000",
+        "opacity": 0.85,
+        "blur": 40,
+        "distance": 4,
+        "angle": -90
+      },
+      "fontWeight": 500
+    },
+    "animIn": {
+      "kind": "fade",
+      "durationUs": 200000
+    },
+    "animOut": {
+      "kind": "fade",
+      "durationUs": 200000
+    }
   }
 ]

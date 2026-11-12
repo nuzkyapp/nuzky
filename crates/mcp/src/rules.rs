@@ -114,6 +114,8 @@ pub(crate) const TOOLS: &[Rules] = &[
     rules("suggest_options", Always, false, true, false),
     // The creator's style, not the project: every change is a version they can restore.
     rules("get_style", Always, false, true, false),
+    // Lists the built-in text and caption styles and My styles; nothing is changed.
+    rules("text_styles", Always, false, true, false),
     rules("change_style", Never, false, false, false),
     // Plugins live in Nuzky's data, not the project; saving keeps the files it replaces.
     rules("list_plugins", Always, false, true, false),
@@ -169,6 +171,7 @@ mod tests {
                 "suggest_options",
                 "list_history",
                 "get_style",
+                "text_styles",
                 "search_sounds",
                 "list_plugins",
                 "clip_metadata",
@@ -216,6 +219,7 @@ mod tests {
                 "list_history",
                 "undo_to",
                 "get_style",
+                "text_styles",
                 "search_sounds",
                 "list_plugins",
                 "clip_metadata",

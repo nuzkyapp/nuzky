@@ -1192,4 +1192,31 @@ mod tests {
             assert!(error.starts_with("INVALID_PROJECT"), "{what}: {error}");
         }
     }
+
+    /// Every built-in text and caption style goes on a text and its animations as the Text tab and an agent put it,
+    /// in a font Nuzky ships.
+    #[test]
+    fn built_in_text_styles_are_valid() {
+        use nuzky_engine::edit::{AnimationSlot, caption_presets, text_presets};
+        let fonts: Vec<serde_json::Value> =
+            serde_json::from_str(include_str!("../../../assets/fonts/manifest.json")).unwrap();
+        let looks = text_presets()
+            .iter()
+            .map(|p| (&p.name, &p.style, &p.anim_in, &p.anim_out))
+            .chain(caption_presets().iter().map(|p| (&p.name, &p.style, &p.anim_in, &p.anim_out)));
+        for (name, style, anim_in, anim_out) in looks {
+            if let Some(family) = &style.font_family {
+                assert!(fonts.iter().any(|font| font["family"] == family.as_str()), "{name}: {family} is not bundled");
+            }
+            let mut project = Project::new("styles");
+            let added =
+                project.apply(EditCmd::AddText { start_us: 0, text: "Style".into(), style: style.clone() }).unwrap();
+            let clip_id = added.select[0].clone();
+            for (slot, animation) in [(AnimationSlot::In, anim_in), (AnimationSlot::Out, anim_out)] {
+                project.apply(EditCmd::SetAnimation { clip_id: clip_id.clone(), slot, animation: *animation }).unwrap();
+            }
+            validate(&project).unwrap_or_else(|error| panic!("{name}: {error}"));
+        }
+        assert_eq!(text_presets()[0].name, "Classic");
+    }
 }

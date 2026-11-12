@@ -55,6 +55,40 @@ pub fn caption_preset(name: &str) -> Option<&'static CaptionPreset> {
     caption_presets().iter().find(|preset| preset.name.eq_ignore_ascii_case(&name))
 }
 
+/// A style for titles and other text, the Text tab's tile: its look, the entry and exit animation it brings and
+/// the words its tile adds. The built-in ones are in `assets/presets/texts.json`, in the Text tab's groups.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TextPreset {
+    pub name: String,
+    pub group: String,
+    /// The words the Text tab's tile adds and draws.
+    pub text: String,
+    /// Sizes for a 1080 px short side; multiply by min(width, height)/1080 on another canvas.
+    pub style: TextStyle,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional = nullable))]
+    pub anim_in: Option<Animation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional = nullable))]
+    pub anim_out: Option<Animation>,
+}
+
+pub fn text_presets() -> &'static [TextPreset] {
+    static PRESETS: std::sync::LazyLock<Vec<TextPreset>> = std::sync::LazyLock::new(|| {
+        serde_json::from_str(include_str!("../../../assets/presets/texts.json")).expect("valid text presets")
+    });
+    &PRESETS
+}
+
+/// The text preset named `name`, as `caption_preset` finds one.
+pub fn text_preset(name: &str) -> Option<&'static TextPreset> {
+    let name = name.trim().replace(['_', '-'], " ");
+    text_presets().iter().find(|preset| preset.name.eq_ignore_ascii_case(&name))
+}
+
 /// Editing limits the engine enforces, sent to the UI at start so it never copies them.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[derive(Serialize)]

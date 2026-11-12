@@ -86,6 +86,7 @@ pub const COMMANDS: &[&str] = &[
     "pause",
     "peek_history",
     "play",
+    "preview_edits",
     "preview_plugin",
     "project_poster",
     "recap_info",

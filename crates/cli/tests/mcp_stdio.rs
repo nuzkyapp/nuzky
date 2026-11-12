@@ -1047,7 +1047,9 @@ fn initialize_list_state_edit_end_undo_over_stdio() {
     let mut c = Client::new(true);
     let list = c.rpc("tools/list", json!({}));
     let tools = list["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 50);
+    assert_eq!(tools.len(), 51);
+    let styles = tools.iter().find(|t| t["name"] == "text_styles").unwrap();
+    assert_eq!(styles["annotations"]["readOnlyHint"], true);
     let beats = tools.iter().find(|t| t["name"] == "cut_to_beats").unwrap();
     assert_eq!(
         (&beats["annotations"]["readOnlyHint"], &beats["annotations"]["destructiveHint"]),
@@ -2115,6 +2117,52 @@ fn caption_style_packages_over_stdio() {
     }
     let unknown = c.error("build_captions", json!({"run_id": run["run_id"], "style_preset": "missing_package"}));
     assert!(unknown.contains("My neon") && unknown.contains("hormozi") && unknown.contains("typewriter"), "{unknown}");
+    c.call("end_run", json!({"run_id": run["run_id"], "action": "keep"}));
+    c.finish();
+}
+
+#[test]
+fn text_styles_over_stdio() {
+    use nuzky_engine::edit::{text_preset, text_presets};
+
+    let mut c = Client::start(true, None, Some(None));
+    std::fs::write(c.dir.join("data/nuzky/caption-styles.json"), b"{damaged").unwrap();
+    let run = c.call("begin_run", json!({"label": "text styles"}));
+    let wide = json!([{"type": "setCanvas", "width": 3840, "height": 2160}]);
+    c.call("apply_edits", json!({"run_id": run["run_id"], "request_id": "4k", "edits": wide}));
+    let listed = c.call("text_styles", json!({}));
+    let titles = listed["titles"].as_array().unwrap();
+    assert_eq!(titles.len(), text_presets().len());
+    assert_eq!(titles[0]["name"], "Classic");
+    assert!(listed["captions"].as_array().unwrap().iter().any(|p| p["name"] == "Lilac"));
+    assert_eq!(listed["my_styles"], json!([]));
+    assert!(listed["my_styles_error"].as_str().unwrap().starts_with("STORE_UNREADABLE"), "{listed}");
+    // A 4K canvas has twice a 1080p preset's sizes, so the style goes on as listed.
+    let mut own = nuzky_engine::edit::caption_preset("neon_blue").unwrap().clone();
+    own.name = "My neon".into();
+    std::fs::write(c.dir.join("data/nuzky/caption-styles.json"), serde_json::to_vec(&vec![&own]).unwrap()).unwrap();
+    let mine = c.call("text_styles", json!({}));
+    assert_eq!(mine["my_styles"][0]["style"]["fontSize"], json!(own.style.font_size * 2.0), "{mine}");
+    let rise = titles.iter().find(|p| p["name"] == "Rise").unwrap();
+    let preset = text_preset("rise").unwrap();
+    assert_eq!(rise["style"]["fontSize"], json!(preset.style.font_size * 2.0));
+    let added = c.call(
+        "apply_edits",
+        json!({"run_id": run["run_id"], "request_id": "title",
+        "edits": [{"type": "addText", "startUs": 0, "text": "Rise up", "style": rise["style"]}]}),
+    );
+    let id = added["select"][0].clone();
+    c.call(
+        "apply_edits",
+        json!({"run_id": run["run_id"], "request_id": "animate", "edits": [
+            {"type": "setAnimation", "clipId": id, "slot": "in", "animation": rise["animIn"]},
+            {"type": "setAnimation", "clipId": id, "slot": "out", "animation": rise["animOut"]}]}),
+    );
+    let state = c.call("get_state", json!({"clip_ids": [id]}));
+    let clip = state["tracks"].as_array().unwrap().iter().flat_map(|t| t["clips"].as_array().unwrap()).next().unwrap();
+    assert_eq!(clip["content"]["style"], rise["style"]);
+    assert_eq!(clip["animIn"], json!(preset.anim_in));
+    assert_eq!(clip["animOut"], json!(preset.anim_out));
     c.call("end_run", json!({"run_id": run["run_id"], "action": "keep"}));
     c.finish();
 }
