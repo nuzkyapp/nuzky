@@ -1,9 +1,10 @@
 import { useEffect } from "react";
-import { TEXT_PRESETS, canvasUnit, scaleStyle } from "../../lib/presets";
+import { TEXT_GROUPS, canvasUnit, scaleStyle } from "../../lib/presets";
 import { addSticker, loadCatalog, loadThumbs, thumbKey, useStickers, type TextTab as Tab } from "../../lib/stickers";
-import { useEditor } from "../../lib/store";
-import type { StickerItem } from "../../lib/types";
-import { TabBar, TabPanel, TextSwatch, gridKeys, lockedProps, useLockReason } from "../ui";
+import { api } from "../../lib/api";
+import { aiLocked, endPreview, enqueue, previewHandlers, showPastEntry, useEditor } from "../../lib/store";
+import type { EditCmd, Project, Snapshot, StickerItem, TextPreset } from "../../lib/types";
+import { AnimatedSwatch, TabBar, TabPanel, TextSwatch, gridKeys, lockedProps, useLockReason } from "../ui";
 import { EmojiPicker } from "./EmojiPicker";
 
 const TABS: { id: Tab; label: string }[] = [
@@ -15,27 +16,74 @@ const TABS: { id: Tab; label: string }[] = [
 /** Sticker tiles are about 72 px; twice that keeps them sharp on a HiDPI screen. */
 const STICKER_PX = 144;
 
+/** The edits a text style's tile makes: its text at the playhead, centred, with the style's animations. */
+function addCmds(p: TextPreset, project: Project): EditCmd {
+  return { type: "addText", startUs: useEditor.getState().timeUs, text: p.text, style: scaleStyle(p.style, canvasUnit(project.canvas)) };
+}
+
+let adds = 0;
+
+/**
+ * Adds the style's text and gives it the style's animations as one undo step, in one place in the edit queue, so a
+ * second quick click never lands between the two. Each click has its own key, so two adds stay two steps.
+ */
+async function addStyled(p: TextPreset) {
+  if (aiLocked()) return;
+  const key = `text-style:${++adds}`;
+  let added: Snapshot | null = null;
+  const snap = await enqueue(async (epoch) => {
+    const project = useEditor.getState().snap?.project;
+    if (!project) return null;
+    added = await api.applyEdits([addCmds(p, project)], key, epoch);
+    const clipId = added.select[0];
+    if (!clipId || (!p.animIn && !p.animOut)) return added;
+    // Selects the new text now, as the animations' snapshot selects nothing.
+    useEditor.getState().setSnap(added);
+    return api.applyEdits(
+      [
+        { type: "setAnimation", clipId, slot: "in", animation: p.animIn ?? null },
+        { type: "setAnimation", clipId, slot: "out", animation: p.animOut ?? null },
+      ],
+      key,
+      epoch,
+    );
+  });
+  const id = (added as Snapshot | null)?.select[0];
+  const clip = snap?.project.tracks.flatMap((t) => t.clips).find((c) => c.id === id);
+  if (clip) showPastEntry(clip.startUs, p.animIn);
+}
+
 function TextStyles() {
-  const edit = useEditor((s) => s.edit);
   const lock = useLockReason();
+  useEffect(() => endPreview, []);
   return (
-    <div className="scroll-shown grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] content-start gap-x-2 gap-y-3 overflow-y-auto px-3.5 pt-1 pb-6">
-      {TEXT_PRESETS.map((p) => (
-        <button
-          key={p.name}
-          type="button"
-          title={`Add "${p.name}" text at the playhead`}
-          data-text-preset
-          onClick={() => edit((project) => ({ type: "addText", startUs: useEditor.getState().timeUs, text: p.text, style: scaleStyle(p.style, canvasUnit(project.canvas)) }))}
-          {...lockedProps(lock)}
-          className="group flex min-w-0 flex-col gap-1.5 text-left aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
-        >
-          {/* The text each preset adds, drawn large in its style, with the preset's name under the tile. */}
-          <span className="flex h-20 w-full items-center justify-center rounded-[10px] border border-white/[.08] bg-white/[.06] px-2 transition-colors duration-[120ms] ease-out group-hover:border-white/30 group-aria-disabled:group-hover:border-white/[.08]">
-            <TextSwatch style={p.style} label={p.text} size={19} />
-          </span>
-          <span className="truncate text-[11px] text-muted">{p.name}</span>
-        </button>
+    <div onKeyDown={gridKeys("[data-text-preset]")} className="scroll-shown flex flex-col gap-4 overflow-y-auto px-3.5 pt-1 pb-6">
+      {TEXT_GROUPS.map((g) => (
+        <section key={g.name} aria-label={g.name} className="flex flex-col gap-2">
+          <h3 className="text-[13px] font-semibold text-fg">{g.name}</h3>
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(100px,1fr))] gap-x-2 gap-y-3">
+            {g.presets.map((p) => (
+              <button
+                key={p.name}
+                type="button"
+                title={lock ?? `Add "${p.name}" text at the playhead`}
+                data-text-preset={p.name}
+                onClick={() => void addStyled(p)}
+                {...previewHandlers(lock ? null : (project: Project) => addCmds(p, project))}
+                {...lockedProps(lock)}
+                className="group flex min-w-0 flex-col gap-1.5 text-left aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
+              >
+                {/* The text each style adds, drawn large in it and playing its entry animation on hover, with the name under the tile. */}
+                <span className="flex h-20 w-full items-center justify-center overflow-hidden rounded-[10px] border border-white/[.08] bg-white/[.06] px-2 transition-colors duration-[120ms] ease-out group-hover:border-white/30 group-aria-disabled:group-hover:border-white/[.08]">
+                  <AnimatedSwatch animation={p.animIn?.kind}>
+                    <TextSwatch style={p.style} label={p.text} size={19} />
+                  </AnimatedSwatch>
+                </span>
+                <span className="truncate text-[11px] text-muted">{p.name}</span>
+              </button>
+            ))}
+          </div>
+        </section>
       ))}
     </div>
   );

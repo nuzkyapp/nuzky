@@ -4,10 +4,10 @@ import { create } from "zustand";
 import { api, errorText, plainError } from "../../lib/api";
 import { CAPTION_STYLES, scaleStyle } from "../../lib/presets";
 import type { CaptionLook } from "../../lib/speech";
-import { useEditor } from "../../lib/store";
+import { previewHandlers, useEditor, type EditInput } from "../../lib/store";
 import type { CaptionPreset } from "../../lib/types";
 import { TRANSLATION_SIZE } from "../panel/CaptionLanguages";
-import { Button, IconButton, Menu, TextSwatch, lockedProps, useLockReason } from "../ui";
+import { AnimatedSwatch, Button, IconButton, Menu, TextSwatch, lockedProps, useLockReason } from "../ui";
 
 /** Caption style tiles fill the row, as many as fit. */
 export const STYLE_GRID = "grid grid-cols-[repeat(auto-fill,minmax(96px,1fr))] gap-2";
@@ -62,6 +62,7 @@ export function StyleTile({
   disabled,
   title,
   onApply,
+  preview,
   own,
 }: {
   preset: CaptionPreset;
@@ -71,6 +72,8 @@ export function StyleTile({
   disabled: boolean;
   title: string;
   onApply: () => void;
+  /** The change the preview draws while the tile is pointed at or focused, before a click applies it. */
+  preview?: EditInput | null;
   own?: OwnTile;
 }) {
   const lock = useLockReason();
@@ -86,6 +89,7 @@ export function StyleTile({
         aria-disabled={disabled || undefined}
         title={title}
         onClick={disabled ? undefined : onApply}
+        {...previewHandlers(disabled ? null : preview)}
         onContextMenu={(e) => {
           if (!own) return;
           e.preventDefault();
@@ -106,7 +110,9 @@ export function StyleTile({
           current ? "border-accent shadow-[0_0_0_1px_var(--color-accent)]" : disabled ? "border-white/[.08]" : "border-white/[.08] hover:border-white/30"
         }`}
       >
-        <TextSwatch style={{ ...preset.style, fontFamily: preset.style.fontFamily ?? font }} label={preset.name} size={13} />
+        <AnimatedSwatch animation={preset.animIn?.kind}>
+          <TextSwatch style={{ ...preset.style, fontFamily: preset.style.fontFamily ?? font }} label={preset.name} size={13} />
+        </AnimatedSwatch>
         {current && (
           <span aria-hidden className="absolute top-1 right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-accent-strong text-white shadow-[0_1px_2px_rgb(0_0_0/.5)]">
             <Check size={10} strokeWidth={3} />

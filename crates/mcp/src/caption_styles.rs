@@ -1,9 +1,12 @@
-//! The user's own caption styles (My styles), kept beside the projects for the app and agents.
+//! The user's own caption styles (My styles), kept beside the projects for the app and agents, and the list of every
+//! text and caption style an agent can apply.
 
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, ensure};
-use nuzky_engine::edit::{CaptionPreset, caption_preset, caption_presets};
+use nuzky_engine::edit::{CaptionPreset, TextPreset, caption_preset, caption_presets, text_presets};
+use nuzky_engine::model::{Canvas, TextStyle};
+use serde_json::{Value, json};
 
 fn path() -> Result<PathBuf> {
     Ok(nuzky_engine::data_dir()
@@ -101,4 +104,26 @@ pub fn find(name: &str) -> Result<CaptionPreset> {
         .chain(styles.into_iter().map(|style| style.name))
         .collect();
     anyhow::bail!("INVALID_ARGUMENTS: unknown style_preset {name:?}; use one of {}", names.join(", "))
+}
+
+/// Every built-in title and caption style and My styles, saved like them for 1080p, with their sizes for `canvas`, for
+/// `text_styles`.
+pub fn text_styles(canvas: &Canvas) -> Result<Value> {
+    let scaled = |mut style: TextStyle| {
+        style.scale_pixels(canvas.unit());
+        style
+    };
+    let titles: Vec<_> = text_presets().iter().map(|p| TextPreset { style: scaled(p.style.clone()), ..p.clone() }).collect();
+    let captions: Vec<_> =
+        caption_presets().iter().map(|p| CaptionPreset { style: scaled(p.style.clone()), ..p.clone() }).collect();
+    // A damaged My styles file leaves the built-in styles usable and says why.
+    let (mine, error) = match list() {
+        Ok(mine) => (mine.into_iter().map(|p| CaptionPreset { style: scaled(p.style.clone()), ..p }).collect(), None),
+        Err(error) => (vec![], Some(format!("{error:#}"))),
+    };
+    let mut result = json!({"titles": titles, "captions": captions, "my_styles": mine});
+    if let Some(error) = error {
+        result["my_styles_error"] = json!(error);
+    }
+    Ok(result)
 }

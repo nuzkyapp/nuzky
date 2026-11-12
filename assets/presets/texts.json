@@ -1,0 +1,555 @@
+[
+  {
+    "name": "Classic",
+    "group": "Basic",
+    "text": "Your text",
+    "style": {
+      "fontSize": 84,
+      "color": "#ffffff",
+      "bold": true,
+      "strokeWidth": 7,
+      "strokeColor": "#000000",
+      "background": null
+    }
+  },
+  {
+    "name": "Title",
+    "group": "Basic",
+    "text": "BIG TITLE",
+    "style": {
+      "fontSize": 130,
+      "color": "#ffffff",
+      "bold": true,
+      "strokeWidth": 0,
+      "strokeColor": "#000000",
+      "background": null
+    }
+  },
+  {
+    "name": "Plain",
+    "group": "Basic",
+    "text": "Plain text",
+    "style": {
+      "fontSize": 64,
+      "color": "#ffffff",
+      "bold": false,
+      "strokeWidth": 0,
+      "strokeColor": "#000000",
+      "background": null
+    }
+  },
+  {
+    "name": "Thick",
+    "group": "Outline",
+    "text": "BOLD",
+    "style": {
+      "fontSize": 110,
+      "color": "#ffffff",
+      "bold": true,
+      "strokeWidth": 12,
+      "strokeColor": "#000000",
+      "background": null,
+      "fontFamily": "Montserrat",
+      "fontWeight": 900
+    }
+  },
+  {
+    "name": "Yellow",
+    "group": "Outline",
+    "text": "Wow!",
+    "style": {
+      "fontSize": 100,
+      "color": "#ffe14d",
+      "bold": true,
+      "strokeWidth": 9,
+      "strokeColor": "#000000",
+      "background": null,
+      "fontFamily": "Montserrat",
+      "fontWeight": 800
+    }
+  },
+  {
+    "name": "Inverse",
+    "group": "Outline",
+    "text": "Inverse",
+    "style": {
+      "fontSize": 96,
+      "color": "#111111",
+      "bold": true,
+      "strokeWidth": 8,
+      "strokeColor": "#ffffff",
+      "background": null,
+      "fontFamily": "Poppins"
+    }
+  },
+  {
+    "name": "Red edge",
+    "group": "Outline",
+    "text": "Hot take",
+    "style": {
+      "fontSize": 96,
+      "color": "#ffffff",
+      "bold": true,
+      "strokeWidth": 9,
+      "strokeColor": "#e11d48",
+      "background": null,
+      "fontFamily": "Montserrat",
+      "fontWeight": 800
+    }
+  },
+  {
+    "name": "Hard",
+    "group": "Shadow",
+    "text": "Shadow",
+    "style": {
+      "fontSize": 100,
+      "color": "#ffffff",
+      "bold": true,
+      "strokeWidth": 0,
+      "strokeColor": "#000000",
+      "background": null,
+      "fontFamily": "Poppins",
+      "shadow": {
+        "color": "#000000",
+        "opacity": 0.9,
+        "blur": 0,
+        "distance": 9,
+        "angle": -45
+      }
+    }
+  },
+  {
+    "name": "Soft",
+    "group": "Shadow",
+    "text": "Soft light",
+    "style": {
+      "fontSize": 92,
+      "color": "#ffffff",
+      "bold": true,
+      "strokeWidth": 0,
+      "strokeColor": "#000000",
+      "background": null,
+      "shadow": {
+        "color": "#000000",
+        "opacity": 0.75,
+        "blur": 60,
+        "distance": 10,
+        "angle": -90
+      }
+    }
+  },
+  {
+    "name": "Retro",
+    "group": "Shadow",
+    "text": "RETRO",
+    "style": {
+      "fontSize": 120,
+      "color": "#ffd76a",
+      "bold": true,
+      "strokeWidth": 0,
+      "strokeColor": "#000000",
+      "background": null,
+      "fontFamily": "Oswald",
+      "letterCase": "upper",
+      "shadow": {
+        "color": "#c2410c",
+        "opacity": 1,
+        "blur": 0,
+        "distance": 8,
+        "angle": -45
+      }
+    }
+  },
+  {
+    "name": "Pop art",
+    "group": "Shadow",
+    "text": "POW!",
+    "style": {
+      "fontSize": 118,
+      "color": "#ffffff",
+      "bold": true,
+      "strokeWidth": 6,
+      "strokeColor": "#000000",
+      "background": null,
+      "fontFamily": "Anton",
+      "letterCase": "upper",
+      "shadow": {
+        "color": "#ec4899",
+        "opacity": 1,
+        "blur": 0,
+        "distance": 10,
+        "angle": -45
+      }
+    }
+  },
+  {
+    "name": "Neon",
+    "group": "Glow",
+    "text": "Neon",
+    "style": {
+      "fontSize": 96,
+      "color": "#9cffd9",
+      "bold": true,
+      "strokeWidth": 5,
+      "strokeColor": "#0b6b4f",
+      "background": null
+    }
+  },
+  {
+    "name": "Pink",
+    "group": "Glow",
+    "text": "Pink",
+    "style": {
+      "fontSize": 96,
+      "color": "#ffe4f3",
+      "bold": true,
+      "strokeWidth": 3,
+      "strokeColor": "#ff3ea5",
+      "background": null,
+      "fontFamily": "Lexend",
+      "fontWeight": 600,
+      "shadow": {
+        "color": "#ff3ea5",
+        "opacity": 1,
+        "blur": 100,
+        "distance": 0,
+        "angle": -90
+      }
+    }
+  },
+  {
+    "name": "Ice",
+    "group": "Glow",
+    "text": "Ice",
+    "style": {
+      "fontSize": 96,
+      "color": "#e0f7ff",
+      "bold": true,
+      "strokeWidth": 3,
+      "strokeColor": "#38bdf8",
+      "background": null,
+      "fontFamily": "Lexend",
+      "fontWeight": 600,
+      "shadow": {
+        "color": "#38bdf8",
+        "opacity": 1,
+        "blur": 100,
+        "distance": 0,
+        "angle": -90
+      }
+    }
+  },
+  {
+    "name": "Gold",
+    "group": "Glow",
+    "text": "Gold",
+    "style": {
+      "fontSize": 104,
+      "color": "#fff3c4",
+      "bold": true,
+      "strokeWidth": 3,
+      "strokeColor": "#f59e0b",
+      "background": null,
+      "fontFamily": "Oswald",
+      "letterCase": "upper",
+      "shadow": {
+        "color": "#f59e0b",
+        "opacity": 1,
+        "blur": 100,
+        "distance": 0,
+        "angle": -90
+      }
+    }
+  },
+  {
+    "name": "Label",
+    "group": "Box",
+    "text": "Label",
+    "style": {
+      "fontSize": 72,
+      "color": "#111111",
+      "bold": true,
+      "strokeWidth": 0,
+      "strokeColor": "#000000",
+      "background": "#ffffffee"
+    }
+  },
+  {
+    "name": "Highlight",
+    "group": "Box",
+    "text": "Highlight",
+    "style": {
+      "fontSize": 84,
+      "color": "#111111",
+      "bold": true,
+      "strokeWidth": 0,
+      "strokeColor": "#000000",
+      "background": "#ffd400ee"
+    }
+  },
+  {
+    "name": "Dark",
+    "group": "Box",
+    "text": "Black box",
+    "style": {
+      "fontSize": 72,
+      "color": "#ffffff",
+      "bold": true,
+      "strokeWidth": 0,
+      "strokeColor": "#000000",
+      "background": "#000000cc"
+    }
+  },
+  {
+    "name": "Red",
+    "group": "Box",
+    "text": "BREAKING",
+    "style": {
+      "fontSize": 76,
+      "color": "#ffffff",
+      "bold": true,
+      "strokeWidth": 0,
+      "strokeColor": "#000000",
+      "background": "#e11d48ee",
+      "fontFamily": "Montserrat",
+      "fontWeight": 800,
+      "letterCase": "upper"
+    }
+  },
+  {
+    "name": "Blue",
+    "group": "Box",
+    "text": "New",
+    "style": {
+      "fontSize": 76,
+      "color": "#ffffff",
+      "bold": true,
+      "strokeWidth": 0,
+      "strokeColor": "#000000",
+      "background": "#2563ebee",
+      "fontFamily": "Poppins",
+      "boxRadius": 0.1
+    }
+  },
+  {
+    "name": "Pill",
+    "group": "Box",
+    "text": "Pill",
+    "style": {
+      "fontSize": 68,
+      "color": "#ffffff",
+      "bold": true,
+      "strokeWidth": 0,
+      "strokeColor": "#000000",
+      "background": "#000000b3",
+      "fontFamily": "Poppins",
+      "boxRadius": 1
+    }
+  },
+  {
+    "name": "Big caps",
+    "group": "Bold",
+    "text": "BIG CAPS",
+    "style": {
+      "fontSize": 140,
+      "color": "#ffffff",
+      "bold": false,
+      "strokeWidth": 0,
+      "strokeColor": "#000000",
+      "background": null,
+      "fontFamily": "Anton",
+      "letterCase": "upper",
+      "shadow": {
+        "color": "#000000",
+        "opacity": 0.6,
+        "blur": 30,
+        "distance": 6,
+        "angle": -90
+      }
+    }
+  },
+  {
+    "name": "Tall",
+    "group": "Bold",
+    "text": "TALL TITLE",
+    "style": {
+      "fontSize": 150,
+      "color": "#ffffff",
+      "bold": false,
+      "strokeWidth": 0,
+      "strokeColor": "#000000",
+      "background": null,
+      "fontFamily": "Bebas Neue",
+      "letterSpacing": 0.04,
+      "shadow": {
+        "color": "#000000",
+        "opacity": 0.7,
+        "blur": 40,
+        "distance": 6,
+        "angle": -90
+      }
+    }
+  },
+  {
+    "name": "Poster",
+    "group": "Bold",
+    "text": "POSTER",
+    "style": {
+      "fontSize": 124,
+      "color": "#ffe14d",
+      "bold": true,
+      "strokeWidth": 0,
+      "strokeColor": "#000000",
+      "background": null,
+      "fontFamily": "Oswald",
+      "letterCase": "upper",
+      "shadow": {
+        "color": "#000000",
+        "opacity": 0.7,
+        "blur": 40,
+        "distance": 6,
+        "angle": -90
+      }
+    }
+  },
+  {
+    "name": "Wide",
+    "group": "Bold",
+    "text": "WIDE",
+    "style": {
+      "fontSize": 72,
+      "color": "#ffffff",
+      "bold": false,
+      "strokeWidth": 0,
+      "strokeColor": "#000000",
+      "background": null,
+      "fontFamily": "Montserrat",
+      "fontWeight": 400,
+      "letterCase": "upper",
+      "letterSpacing": 0.3,
+      "shadow": {
+        "color": "#000000",
+        "opacity": 0.7,
+        "blur": 40,
+        "distance": 6,
+        "angle": -90
+      }
+    }
+  },
+  {
+    "name": "Pop",
+    "group": "Animated",
+    "text": "POP!",
+    "style": {
+      "fontSize": 110,
+      "color": "#ffffff",
+      "bold": true,
+      "strokeWidth": 10,
+      "strokeColor": "#000000",
+      "background": null,
+      "fontFamily": "Montserrat",
+      "fontWeight": 900
+    },
+    "animIn": {
+      "kind": "pop",
+      "durationUs": 200000
+    }
+  },
+  {
+    "name": "Typed",
+    "group": "Animated",
+    "text": "Typing…",
+    "style": {
+      "fontSize": 72,
+      "color": "#ffffff",
+      "bold": false,
+      "strokeWidth": 0,
+      "strokeColor": "#000000",
+      "background": "#000000a6",
+      "fontFamily": "Roboto",
+      "fontWeight": 500
+    },
+    "animIn": {
+      "kind": "typewriter",
+      "durationUs": 1200000
+    }
+  },
+  {
+    "name": "Rise",
+    "group": "Animated",
+    "text": "Rise up",
+    "style": {
+      "fontSize": 96,
+      "color": "#ffffff",
+      "bold": true,
+      "strokeWidth": 0,
+      "strokeColor": "#000000",
+      "background": null,
+      "fontFamily": "Poppins",
+      "shadow": {
+        "color": "#000000",
+        "opacity": 0.7,
+        "blur": 40,
+        "distance": 6,
+        "angle": -90
+      }
+    },
+    "animIn": {
+      "kind": "slideUp",
+      "durationUs": 300000
+    },
+    "animOut": {
+      "kind": "fade",
+      "durationUs": 250000
+    }
+  },
+  {
+    "name": "Punch in",
+    "group": "Animated",
+    "text": "PUNCH",
+    "style": {
+      "fontSize": 130,
+      "color": "#ffe14d",
+      "bold": false,
+      "strokeWidth": 8,
+      "strokeColor": "#000000",
+      "background": null,
+      "fontFamily": "Anton",
+      "letterCase": "upper"
+    },
+    "animIn": {
+      "kind": "zoomIn",
+      "durationUs": 300000
+    }
+  },
+  {
+    "name": "Gentle",
+    "group": "Animated",
+    "text": "Gently",
+    "style": {
+      "fontSize": 84,
+      "color": "#ffffff",
+      "bold": false,
+      "strokeWidth": 0,
+      "strokeColor": "#000000",
+      "background": null,
+      "fontFamily": "Lexend",
+      "fontWeight": 400,
+      "shadow": {
+        "color": "#000000",
+        "opacity": 0.7,
+        "blur": 40,
+        "distance": 6,
+        "angle": -90
+      }
+    },
+    "animIn": {
+      "kind": "fade",
+      "durationUs": 500000
+    },
+    "animOut": {
+      "kind": "fade",
+      "durationUs": 500000
+    }
+  }
+]

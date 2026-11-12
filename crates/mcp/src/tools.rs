@@ -289,6 +289,10 @@ impl Backend {
                 let a: ChangeStyle = parse(arguments)?;
                 crate::style::for_agent(&crate::style::Store::default().act_for_agent(a.action)?)
             }
+            "text_styles" => {
+                let _: TextStyles = parse(arguments)?;
+                crate::caption_styles::text_styles(&state.project.canvas)
+            }
             "list_plugins" => {
                 let a: ListPlugins = parse(arguments)?;
                 let mut result = json!({"plugins": plugins::list()?, "api": plugins::API});

@@ -99,6 +99,9 @@ pub struct ListHistory {
 pub struct GetStyle {}
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct TextStyles {}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ChangeStyle {
     /// The change, by its type: setOwn {text, index?}, accept {titles}, reject {title}, remove {title},
     /// revert {title}, learnAgain {title}, setText {text, baseVersion} or restore {index}.

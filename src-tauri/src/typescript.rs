@@ -130,6 +130,7 @@ fn generate() -> String {
     types.visit::<SnapshotCanvas>();
     types.visit::<EditCmd>();
     types.visit::<nuzky_engine::edit::CaptionPreset>();
+    types.visit::<nuzky_engine::edit::TextPreset>();
     types.visit::<Filmstrip>();
     types.visit::<crate::ProjectVersion>();
     types.visit::<crate::HistoryPeek>();

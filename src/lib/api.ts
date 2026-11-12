@@ -22,6 +22,8 @@ export const api = {
   applyEdit: (cmd: EditCmd, coalesce: string | null, epoch: Epoch) => invoke<Snapshot>("apply_edit", { cmd, coalesce, expectedEpoch: epoch }),
   /** All or nothing, as one undo step. */
   applyEdits: (cmds: EditCmd[], coalesce: string | null, epoch: Epoch) => invoke<Snapshot>("apply_edits", { cmds, coalesce, expectedEpoch: epoch }),
+  /** Draws the project with `cmds` applied, or as it is for null, without an edit; `id` grows with every call. */
+  previewEdits: (id: number, cmds: EditCmd[] | null, epoch: Epoch) => invoke<void>("preview_edits", { id, cmds, expectedEpoch: epoch }),
   undo: (epoch: Epoch) => invoke<Snapshot>("undo", { expectedEpoch: epoch }),
   /** The project undo (or redo) would restore and the step's name, without changing anything. */
   peekHistory: (epoch: Epoch, redo: boolean) => invoke<HistoryPeek | null>("peek_history", { expectedEpoch: epoch, redo }),

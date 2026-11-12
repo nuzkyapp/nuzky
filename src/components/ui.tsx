@@ -5,8 +5,8 @@ import { followPointer } from "../lib/drag";
 import { chose } from "../lib/exit";
 import { fontCss } from "../lib/fonts";
 import { weightOf } from "../lib/presets";
-import { AI_EDITING, useAiLocked } from "../lib/store";
-import type { TextShadow, TextStyle } from "../lib/types";
+import { AI_EDITING, previewHandlers, useAiLocked, type EditInput } from "../lib/store";
+import type { AnimationKind, TextShadow, TextStyle } from "../lib/types";
 
 type Variant = "primary" | "secondary" | "ghost" | "plain" | "danger" | "bar" | "accent";
 
@@ -1028,6 +1028,7 @@ export function PresetTile({
   title,
   named = false,
   short = false,
+  preview,
   children,
 }: {
   label: string;
@@ -1035,6 +1036,8 @@ export function PresetTile({
   onClick: () => void;
   disabled?: boolean;
   title?: string;
+  /** The change the preview draws while the tile is pointed at or focused, before a click applies it. */
+  preview?: EditInput | null;
   /** The preview names itself, as a caption style's name drawn in the style: a 48 px tile without a label under it. */
   named?: boolean;
   /** A 36 px drawing over its label, as a speed ramp's shape, where a picture's 4:3 would only add height. */
@@ -1049,6 +1052,7 @@ export function PresetTile({
       aria-pressed={selected}
       title={lock ?? title ?? label}
       {...disabledProps(disabled, onClick)}
+      {...previewHandlers(disabled ? null : preview)}
       className="group flex min-w-0 flex-col gap-1.5 rounded-[10px] text-left disabled:cursor-not-allowed disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
     >
       <span
@@ -1229,6 +1233,19 @@ export function TextSwatch({ style, label, size = 15, lines = 1 }: { style: Text
       ) : (
         label.slice(key)
       )}
+    </span>
+  );
+}
+
+/**
+ * A text style's preview that plays the entry animation the style brings, in a loop while its button is pointed at or
+ * focused; at rest it shows the text fully in.
+ */
+export function AnimatedSwatch({ animation, children }: { animation: AnimationKind | null | undefined; children: ReactNode }) {
+  if (!animation) return children;
+  return (
+    <span className={`pv inline-flex max-w-full ${animation === "typewriter" ? "a-typewriter" : ""}`} style={{ animationName: `a-${animation}`, animationDelay: "-0.98s" }}>
+      {children}
     </span>
   );
 }

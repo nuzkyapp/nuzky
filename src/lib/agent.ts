@@ -244,6 +244,7 @@ const TITLES: Record<string, string> = {
   apply_motion: "Adding motion",
   cut_to_beats: "Cutting to the beat",
   build_captions: "Adding captions",
+  text_styles: "Looking through text styles",
   translate_captions: "Translating the captions",
   inspect_frames: "Checking frames",
   activity: "Scanning picture and sound",

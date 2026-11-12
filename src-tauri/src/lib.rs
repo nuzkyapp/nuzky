@@ -98,6 +98,8 @@ pub struct AppState {
     voiceover: voiceover::Voiceover,
     source_preview: Mutex<Option<(Engine, String)>>,
     plugin_preview: Mutex<Arc<AtomicBool>>,
+    /// The latest `preview_edits` request, so one arriving after a newer one is dropped.
+    edit_preview: Mutex<u64>,
     gallery: plugins::GalleryState,
     /// What the last learning from imported timelines learned, by job, until the creator uses it,
     /// with the version of the style its EDIT.md was shown over.
@@ -586,6 +588,37 @@ fn apply_edits(
         Expect { revision: expected_revision, speech_layout_key: expected_speech_layout_key },
         expected_epoch.as_deref(),
     )
+}
+
+/// Shows the project with `cmds` applied in the preview, without changing it or its history, as a style tile under
+/// the pointer does; `None` shows the project again. Each request has a larger `id` than the one before, so one the
+/// webview sent earlier but that arrives later is dropped. Edits that would not apply show the project as it is.
+#[tauri::command]
+fn preview_edits(
+    state: State<'_, AppState>,
+    id: u64,
+    cmds: Option<Vec<EditCmd>>,
+    expected_epoch: Option<String>,
+) -> CmdResult<()> {
+    let current = lock_session(&state.session, expected_epoch.as_deref())?;
+    let mut last = state.edit_preview.lock().unwrap();
+    if id <= *last {
+        return Ok(());
+    }
+    *last = id;
+    let project = current.host.session.state().map_err(err)?.project;
+    let shown = cmds
+        .and_then(|cmds| {
+            let mut preview = project.clone();
+            let applied = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                cmds.into_iter().try_for_each(|cmd| preview.apply(cmd).map(drop))?;
+                nuzky_session::validate(&preview)
+            }));
+            matches!(applied, Ok(Ok(()))).then_some(preview)
+        })
+        .unwrap_or(project);
+    state.engine.send(Msg::Project(Arc::new(shown)));
+    Ok(())
 }
 
 #[tauri::command]
@@ -1387,6 +1420,7 @@ pub fn run() {
                 voiceover: Default::default(),
                 source_preview: Mutex::default(),
                 plugin_preview: Mutex::default(),
+                edit_preview: Mutex::default(),
                 gallery: Default::default(),
                 timeline_lessons: Mutex::new(None),
             };
@@ -1476,6 +1510,7 @@ pub fn run() {
             stop_run,
             apply_edit,
             apply_edits,
+            preview_edits,
             undo,
             redo,
             peek_history,

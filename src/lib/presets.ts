@@ -1,5 +1,6 @@
 import captionStyles from "../../assets/presets/captions.json";
-import type { Adjust, Animation, AnimationKind, CaptionPreset, Crop, KeywordPick, Shape, SplitLayout, TextShadow, TextStyle, Transform, TransitionKind } from "./types";
+import textStyles from "../../assets/presets/texts.json";
+import type { Adjust, Animation, AnimationKind, CaptionPreset, Crop, KeywordPick, Shape, SplitLayout, TextPreset, TextShadow, TextStyle, Transform, TransitionKind } from "./types";
 
 /** Canvas formats at 1080p; `canvasSize` gives them at another resolution. */
 export const FORMATS = [
@@ -61,14 +62,11 @@ export const ADJUST_ROWS: { key: keyof Adjust; label: string; min: number }[] = 
   { key: "vignette", label: "Vignette", min: 0 },
 ];
 
-export const TEXT_PRESETS: { name: string; text: string; style: TextStyle }[] = [
-  { name: "Classic", text: "Your text", style: { fontSize: 84, color: "#ffffff", bold: true, strokeWidth: 7, strokeColor: "#000000", background: null } },
-  { name: "Title", text: "BIG TITLE", style: { fontSize: 130, color: "#ffffff", bold: true, strokeWidth: 0, strokeColor: "#000000", background: null } },
-  { name: "Label", text: "Label", style: { fontSize: 72, color: "#111111", bold: true, strokeWidth: 0, strokeColor: "#000000", background: "#ffffffee" } },
-  { name: "Highlight", text: "Highlight", style: { fontSize: 84, color: "#111111", bold: true, strokeWidth: 0, strokeColor: "#000000", background: "#ffd400ee" } },
-  { name: "Neon", text: "Neon", style: { fontSize: 96, color: "#9cffd9", bold: true, strokeWidth: 5, strokeColor: "#0b6b4f", background: null } },
-  { name: "Plain", text: "Plain text", style: { fontSize: 64, color: "#ffffff", bold: false, strokeWidth: 0, strokeColor: "#000000", background: null } },
-];
+/** Styles for titles and other text, shared with the engine and MCP (assets/presets/texts.json), Classic first. */
+export const TEXT_PRESETS = textStyles as TextPreset[];
+
+/** The Text tab's groups of text styles, in the order the file lists them. */
+export const TEXT_GROUPS = [...new Set(TEXT_PRESETS.map((p) => p.group))].map((name) => ({ name, presets: TEXT_PRESETS.filter((p) => p.group === name) }));
 
 /**
  * Caption styles, shared with the engine and MCP (assets/presets/captions.json); Reel comes first. A style

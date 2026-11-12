@@ -5,7 +5,7 @@ import { closeSource, sourceOpen, toggleSourcePlay } from "./source";
 import { clipOffset, keyframeTolerance, ownTransform, transformAt, upsertKeyframe } from "./keyframes";
 import { canvasUnit, scaleStyle } from "./presets";
 import { US } from "./time";
-import type { Asset, Background, Clip, CopiedClip, Delivery, EditCmd, Filmstrip, JobEvent, Project, ProjectVersion, Snapshot, ModelQuestion, TextStyle, TimeRange, Track, Transform, Transition, ZoomsApplied } from "./types";
+import type { Animation, Asset, Background, Clip, CopiedClip, Delivery, EditCmd, Filmstrip, JobEvent, Project, ProjectVersion, Snapshot, ModelQuestion, TextStyle, TimeRange, Track, Transform, Transition, ZoomsApplied } from "./types";
 import type { CaptionLook } from "./speech";
 import { keysOf } from "./keys";
 
@@ -523,7 +523,11 @@ export const useEditor = create<EditorState>((set, get) => ({
   togglePlay: () => {
     if (sourceOpen()) toggleSourcePlay();
     else if (get().playing) api.pause();
-    else api.play();
+    else {
+      // Plays the project as it is, not a style previewed under the pointer; both calls reach the engine in order.
+      endPreview(true);
+      api.play();
+    }
   },
 
   setZoom: (zoom) => set({ zoom: Math.max(4, Math.min(600, zoom)) }),
@@ -1134,24 +1138,99 @@ export function presetOver(preset: TextStyle, style: TextStyle, unit: number): T
 /** The captions track `trackId`, or the captions of the speech. */
 const captionTrack = (project: Project, trackId?: string) => (trackId ? project.tracks.find((t) => t.id === trackId) : project.tracks.find(isSpeechCaptionTrack));
 
-/**
- * Gives every caption the look named `name`, made for 1080p, its style as `presetOver` puts it and its animations, as one undo
- * step, and offers Undo: one click changes every caption, karaoke included.
- */
-export async function applyCaptionLook(look: CaptionLook, name: string, trackId?: string) {
-  const snap = await useEditor.getState().edit(
-    (project) =>
-      captionTrack(project, trackId)?.clips.flatMap((c): EditCmd[] => {
-        if (c.content.type !== "text") return [];
-        return [
-          { type: "updateClip", clipId: c.id, style: presetOver(look.style, c.content.style, canvasUnit(project.canvas)) },
-          { type: "setAnimation", clipId: c.id, slot: "in", animation: look.animIn },
-          { type: "setAnimation", clipId: c.id, slot: "out", animation: look.animOut },
-        ];
-      }) ?? null,
+/** The edits that give every caption of the track the look, made for 1080p, its style as `presetOver` puts it and its animations. */
+export function captionLookCmds(project: Project, look: CaptionLook, trackId?: string): EditCmd[] | null {
+  return (
+    captionTrack(project, trackId)?.clips.flatMap((c): EditCmd[] => {
+      if (c.content.type !== "text") return [];
+      return [
+        { type: "updateClip", clipId: c.id, style: presetOver(look.style, c.content.style, canvasUnit(project.canvas)) },
+        { type: "setAnimation", clipId: c.id, slot: "in", animation: look.animIn },
+        { type: "setAnimation", clipId: c.id, slot: "out", animation: look.animOut },
+      ];
+    }) ?? null
   );
+}
+
+/** Gives every caption the look named `name` as one undo step, and offers Undo: one click changes every caption, karaoke included. */
+export async function applyCaptionLook(look: CaptionLook, name: string, trackId?: string) {
+  const snap = await useEditor.getState().edit((project) => captionLookCmds(project, look, trackId));
   const count = snap && captionTrack(snap.project, trackId)?.clips.length;
   if (count) useEditor.getState().toast({ kind: "info", text: `${name} applied to ${count === 1 ? "the caption" : `all ${count} captions`}`, action: undoAction(snap) });
+}
+
+/** How long the pointer rests on a style before the preview draws it, so sweeping across tiles draws only where it stops. */
+const PREVIEW_DELAY_MS = 120;
+/** How long the preview keeps a style after the pointer leaves it, so moving to the next tile goes straight to it. */
+const PREVIEW_END_MS = 150;
+let previewId = 0;
+let previewTimer = 0;
+let endTimer = 0;
+let previewing = false;
+
+/**
+ * Draws the project in the preview as `input` would leave it, without an edit, until `endPreview`: what a style tile
+ * under the pointer or the keyboard's focus would do, drawn by the renderer the export uses. It draws the restyled
+ * texts without animations, the style's or their own, as the playhead often sits where an entry animation hides them. Not while an AI run or playback goes on.
+ */
+export function previewEdit(input: EditInput) {
+  window.clearTimeout(previewTimer);
+  window.clearTimeout(endTimer);
+  previewTimer = window.setTimeout(() => {
+    const { snap, aiRun, playing } = useEditor.getState();
+    if (!snap || aiRun || playing) return void endPreview(true);
+    const out = typeof input === "function" ? input(snap.project) : input;
+    const cmds = (Array.isArray(out) ? out : out ? [out] : []).flatMap((c): EditCmd[] => {
+      if (c.type === "setAnimation") return [];
+      if (c.type !== "updateClip" || !c.style) return [c];
+      const still = (slot: "in" | "out"): EditCmd => ({ type: "setAnimation", clipId: c.clipId, slot, animation: null });
+      return [c, still("in"), still("out")];
+    });
+    if (cmds.length === 0) return;
+    previewing = true;
+    api.previewEdits(++previewId, cmds, snap.sessionEpoch).catch((e) => console.error("preview_edits", e));
+  }, PREVIEW_DELAY_MS);
+}
+
+/** Keeps what the preview draws but drops a preview still waiting: a tile's click applies the change it previews. */
+export function settlePreview() {
+  window.clearTimeout(previewTimer);
+}
+
+/**
+ * Handlers that preview `input` while a tile is pointed at or has the keyboard's focus, and settle before its click
+ * applies it, so the preview never flashes back to the project first. Leaving always ends a preview, also one a lock
+ * that came meanwhile disabled the tile under.
+ */
+export function previewHandlers(input: EditInput | null | undefined) {
+  const end = () => endPreview();
+  if (!input) return { onPointerLeave: end, onBlur: end };
+  const show = () => previewEdit(input);
+  return { onPointerEnter: show, onFocus: show, onPointerLeave: end, onBlur: end, onClickCapture: settlePreview };
+}
+
+/** Draws the project as it is again after `previewEdit`, a moment later unless `now`, so the next tile replaces it first. */
+export function endPreview(now = false) {
+  window.clearTimeout(previewTimer);
+  window.clearTimeout(endTimer);
+  const end = () => {
+    if (!previewing) return;
+    previewing = false;
+    api.previewEdits(++previewId, null, useEditor.getState().snap?.sessionEpoch).catch((e) => console.error("preview_edits", e));
+  };
+  if (now) end();
+  else endTimer = window.setTimeout(end, PREVIEW_END_MS);
+}
+
+// An AI run or playback that starts while a style is previewed works on the project as it is.
+useEditor.subscribe((s, before) => {
+  if ((s.aiRun && !before.aiRun) || (s.playing && !before.playing)) endPreview(true);
+});
+
+/** Moves the playhead past the entry animation of a clip starting at `startUs` when it sits inside it, so the text shows. */
+export function showPastEntry(startUs: number, animIn: Animation | null | undefined) {
+  const { timeUs, seek } = useEditor.getState();
+  if (animIn && timeUs >= startUs && timeUs < startUs + animIn.durationUs) seek(startUs + animIn.durationUs);
 }
 
 /**

@@ -2107,6 +2107,25 @@ export type Suggestion = {
 export type TextAlign = "left" | "center" | "right";
 
 /**
+ * A style for titles and other text, the Text tab's tile: its look, the entry and exit animation it brings and
+ * the words its tile adds. The built-in ones are in `assets/presets/texts.json`, in the Text tab's groups.
+ */
+export type TextPreset = {
+  name: string,
+  group: string,
+  /**
+   * The words the Text tab's tile adds and draws.
+   */
+  text: string,
+  /**
+   * Sizes for a 1080 px short side; multiply by min(width, height)/1080 on another canvas.
+   */
+  style: TextStyle,
+  animIn?: Animation | null,
+  animOut?: Animation | null,
+};
+
+/**
  * A drop shadow under text, in CapCut's numbers. Blur and distance follow the font size, so the shadow grows
  * and shrinks with the text.
  */
