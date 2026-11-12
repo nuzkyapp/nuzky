@@ -23,7 +23,8 @@ const USAGE: &str = "Usage:
   nuzky frame <project.json> <seconds> <out.png> [width]
   nuzky bench <project.json> [width] [seconds] [--proxy]
       plays and scrubs the preview; --proxy first makes the preview proxies of heavy video and plays from them
-  nuzky render <project.json> <out.mp4> [resolution] [fps] [--preset <name>]
+  nuzky render <project.json> <out.mp4> [resolution] [fps] [--preset <name>] [--hdr]
+      --hdr: 10-bit HEVC in HLG, keeping the light of HDR footage; the project needs HDR footage
       reels: Instagram Reels and TikTok, 1080x1920 at 30 fps, sound levelled to -14 LUFS (9:16 only)
       shorts: YouTube Shorts, 1080x1920 at project or given fps (max 60), sound levelled to -14 LUFS (9:16 only)
       youtube_1080p: YouTube, 1920x1080 at project or given fps (max 60), sound levelled to -14 LUFS (16:9 only)
@@ -42,13 +43,16 @@ const USAGE: &str = "Usage:
       the project's cover or YouTube thumbnail at full size; downloads the mask model first when it needs one
 ";
 
-/// `[resolution] [fps]` and an optional `--preset <name>` anywhere among them.
+/// `[resolution] [fps]`, an optional `--preset <name>` and `--hdr` anywhere among them.
 fn render_options(rest: &[&str]) -> Result<ExportOptions> {
     let mut delivery = None;
+    let mut hdr = false;
     let mut positional = Vec::new();
     let mut args = rest.iter();
     while let Some(&arg) = args.next() {
-        if arg == "--preset" {
+        if arg == "--hdr" {
+            hdr = true;
+        } else if arg == "--preset" {
             const NAMES: &str = "reels, shorts, youtube_1080p, youtube_4k, instagram_feed, square";
             let name = args.next().with_context(|| format!("--preset needs a name: {NAMES}"))?;
             delivery = Some(
@@ -64,6 +68,7 @@ fn render_options(rest: &[&str]) -> Result<ExportOptions> {
         resolution: positional.first().map(|s| s.parse()).transpose().context("Resolution must be a number")?,
         fps: positional.get(1).map(|s| s.parse()).transpose().context("Frame rate must be a number")?,
         delivery,
+        hdr,
         // The output path was typed on purpose, as with any command-line tool.
         replace_existing: true,
         replace_credits: true,

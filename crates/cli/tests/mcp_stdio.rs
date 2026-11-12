@@ -6089,3 +6089,58 @@ fn agents_describe_the_sample_and_follow_its_dog_over_stdio() {
     assert_eq!(absent["found"], 0.0, "{absent}");
     c.finish();
 }
+
+/// An agent asked to keep a phone's HDR: clip_metadata says which footage is HDR, export_video hdr: true refuses a
+/// video without it and writes 10-bit HEVC in HLG once the HDR clip is on the timeline.
+#[test]
+fn agents_export_hdr_only_for_hdr_footage_over_stdio() {
+    let encoders = Command::new("ffmpeg").args(["-hide_banner", "-encoders"]).output().unwrap();
+    if !String::from_utf8_lossy(&encoders.stdout).contains("libx265") {
+        eprintln!("SKIP: ffmpeg without libx265");
+        return;
+    }
+    let mut c = Client::new(true);
+    let sdr =
+        ffmpeg_media(&c, "screen.mp4", &["testsrc2=s=180x320:r=30:d=1"], &["-c:v", "libx264", "-preset", "ultrafast"]);
+    let x265 = "log-level=error:colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc";
+    let hlg = ffmpeg_media(
+        &c,
+        "IMG_0007.MOV",
+        &["testsrc2=s=180x320:r=30:d=1"],
+        &["-vf", "format=yuv420p10le", "-c:v", "libx265", "-x265-params", x265, "-tag:v", "hvc1"],
+    );
+    let run = c.call("begin_run", json!({"label":"hdr"}))["run_id"].clone();
+    let ids = c.call("import_media", json!({"run_id":run,"paths":[sdr, hlg]}))["asset_ids"].clone();
+    c.call("apply_edits", json!({"run_id":run,"request_id":"sdr","edits":[{"type":"addClip","assetId":ids[0]}]}));
+    let meta = c.call("clip_metadata", json!({}));
+    assert_eq!((&meta["assets"][0]["hdr"], &meta["assets"][1]["hdr"]), (&json!(false), &json!(true)), "{meta}");
+
+    let out = c.dir.join("hdr.mp4");
+    let error: Value =
+        serde_json::from_str(&c.error("export_video", json!({"path":out,"resolution":320,"fps":30,"hdr":true})))
+            .unwrap();
+    assert_eq!(error["error"], "HDR_UNAVAILABLE: No clip in this video was filmed in HDR. Export in SDR.");
+    assert!(!out.exists());
+
+    c.call("apply_edits", json!({"run_id":run,"request_id":"hlg","edits":[{"type":"addClip","assetId":ids[1]}]}));
+    c.call("end_run", json!({"run_id":run,"action":"keep"}));
+    let job = c.call("export_video", json!({"path":out,"resolution":320,"fps":30,"hdr":true}));
+    let done = wait_job(&mut c, &job, Duration::from_secs(120), |_| false);
+    assert_eq!((&done["status"], &done["result"]["hdr"]), (&json!("done"), &json!(true)), "{done}");
+    let probe = Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "v",
+            "-show_entries",
+            "stream=codec_name,color_transfer",
+            "-of",
+            "csv=p=0",
+        ])
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&probe.stdout).trim(), "hevc,arib-std-b67");
+    c.finish();
+}

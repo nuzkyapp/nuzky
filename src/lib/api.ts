@@ -171,6 +171,8 @@ export const api = {
     invoke<string[]>("export_captions", { path, replaceExisting, expectedEpoch: epoch }),
   /** The `.srt` files the captions would be saved as beside `path`; none without captions. */
   captionFiles: (path: string) => invoke<string[]>("caption_files", { path }),
+  /** Why the project cannot export in HDR, as a sentence; null when it can. */
+  exportHdrUnavailable: () => invoke<string | null>("export_hdr_unavailable"),
   filmstrip: (assetId: string) => invoke<Filmstrip | null>("filmstrip", { assetId }),
   layerBounds: (tUs: number) => invoke<LayerBounds[]>("layer_bounds", { tUs: Math.round(tUs) }),
   /** What a recap of an AI run, or with null of everything cut since the import, would count and how long it is. */

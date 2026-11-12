@@ -137,6 +137,9 @@ pub fn metadata(assets: &[&Asset]) -> Value {
                 row["missing"] = json!(true);
                 return row;
             }
+            if asset.kind != nuzky_engine::model::AssetKind::Audio {
+                row["hdr"] = json!(nuzky_engine::media::is_hdr(Path::new(&asset.path)).unwrap_or(false));
+            }
             match nuzky_engine::capture::capture(Path::new(&asset.path)) {
                 Ok(capture) => {
                     for (key, value) in

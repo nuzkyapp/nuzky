@@ -54,7 +54,61 @@ fn nuzky_hdr_to_sdr(rgb: vec3<f32>, transfer: f32) -> vec3<f32> {
     let sdr = clamp(nuzky_bt2020_to_bt709 * (scene * (lum / y * lum / (lum + nuzky_hdr_toe))), vec3<f32>(0.0), vec3<f32>(1.0));
     return pow(sdr, vec3<f32>(1.0 / 2.4));
 }
+
+// Linear BT.709 to BT.2020 primaries; columns are the BT.709 red, green and blue.
+const nuzky_bt709_to_bt2020 = mat3x3<f32>(
+    vec3<f32>(0.6274, 0.0691, 0.0164),
+    vec3<f32>(0.3293, 0.9195, 0.0880),
+    vec3<f32>(0.0433, 0.0114, 0.8956),
+);
+
+// HLG's OETF from scene light, 0..1.
+fn nuzky_hlg_oetf(scene: vec3<f32>) -> vec3<f32> {
+    let e = clamp(scene, vec3<f32>(0.0), vec3<f32>(1.0));
+    let log_part = 0.17883277 * log(max(12.0 * e - 0.28466892, vec3<f32>(1e-6))) + 0.55991073;
+    return select(log_part, sqrt(3.0 * e), e <= vec3<f32>(1.0 / 12.0));
+}
+
+// BT.2020 light on HLG's nominal 1000 nit display, 1 at 1000 nits, as HLG: the inverse of its OOTF (system gamma 1.2),
+// then its OETF. Light above 1000 nits clips, as BT.2100 converts PQ to HLG.
+fn nuzky_display_to_hlg(display: vec3<f32>) -> vec3<f32> {
+    let d = clamp(display, vec3<f32>(0.0), vec3<f32>(1.0));
+    return nuzky_hlg_oetf(d * pow(max(dot(d, nuzky_bt2020_luma), 1e-6), -1.0 / 6.0));
+}
+
+// SDR BT.709 colour, encoded for a BT.1886 display, as HLG BT.2020 with its white at HDR reference white, 203 nits or
+// 75 % HLG, where BT.2408 puts graphics and SDR in HDR. `gpu::sdr_to_hlg` is the same on the CPU.
+fn nuzky_sdr_to_hlg(rgb: vec3<f32>) -> vec3<f32> {
+    let linear = pow(clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0)), vec3<f32>(2.4));
+    return nuzky_display_to_hlg(nuzky_bt709_to_bt2020 * linear * 0.203);
+}
+
+// PQ or HLG BT.2020 colour as HLG for an HDR export: HLG stays as recorded, and PQ becomes the light it shows on a 1000
+// nit display.
+fn nuzky_hdr_to_hlg(rgb: vec3<f32>, transfer: f32) -> vec3<f32> {
+    if transfer < 1.5 {
+        return nuzky_display_to_hlg(nuzky_pq_to_nits(clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0))) / 1000.0);
+    }
+    return rgb;
+}
 "#;
+
+/// `nuzky_sdr_to_hlg` of the compositor for colours given to it.
+pub(crate) fn sdr_to_hlg(rgb: [f32; 3]) -> [f32; 3] {
+    const TO_2020: [[f32; 3]; 3] = [[0.6274, 0.3293, 0.0433], [0.0691, 0.9195, 0.0114], [0.0164, 0.0880, 0.8956]];
+    const LUMA: [f32; 3] = [0.2627, 0.678, 0.0593];
+    let linear = rgb.map(|v| v.clamp(0.0, 1.0).powf(2.4));
+    let display = TO_2020.map(|row| (row[0] * linear[0] + row[1] * linear[1] + row[2] * linear[2]) * 0.203);
+    let y = (LUMA[0] * display[0] + LUMA[1] * display[1] + LUMA[2] * display[2]).max(1e-6);
+    display.map(|d| {
+        let e = (d * y.powf(-1.0 / 6.0)).clamp(0.0, 1.0);
+        if e <= 1.0 / 12.0 {
+            (3.0 * e).sqrt()
+        } else {
+            0.17883277 * (12.0 * e - 0.28466892).max(1e-6).ln() + 0.559_910_7
+        }
+    })
+}
 
 /// One step of shrinking what effects drew to the size the layer is shown at, by at most `SHRINK_STEP` per side. Each
 /// output pixel averages, in premultiplied colour, every texel of the area it covers weighted by how much of it lies
@@ -104,7 +158,8 @@ const SHADER: &str = r#"
 struct Layer {
     corners: array<vec4<f32>, 4>, // xy = clip-space position, zw = uv
     local: array<vec4<f32>, 4>, // xy = output pixels from the centre of the visible part
-    opacity: vec4<f32>, // opacity, transfer (0 SDR, 1 PQ, 2 HLG), compare: output x left of which no adjustments apply
+    // opacity, transfer (0 SDR, 1 PQ, 2 HLG), compare: output x left of which no adjustments apply, output HLG (1) or SDR
+    opacity: vec4<f32>,
     adjust: vec4<f32>,
     effects: vec4<f32>,
     grading: vec4<f32>, // exposure, tint, highlights, shadows
@@ -301,7 +356,12 @@ fn fill_at(uv: vec2<f32>, layer_uv: vec2<f32>) -> vec4<f32> {
     } else if layer.matte.x < 2.5 {
         return layer.fill;
     }
-    return sample_straight(fill_tex, 0.5 + (layer_uv - 0.5) * layer.matte.yz);
+    let f = sample_straight(fill_tex, 0.5 + (layer_uv - 0.5) * layer.matte.yz);
+    if layer.opacity.w > 0.0 {
+        let rgb = select(vec3<f32>(0.0), f.rgb / f.a, f.a > 0.0);
+        return vec4<f32>(nuzky_sdr_to_hlg(rgb) * f.a, f.a);
+    }
+    return f;
 }
 
 @fragment
@@ -350,19 +410,33 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     let adjusting = graded
         && (any(layer.adjust != vec4<f32>(0.0)) || any(layer.grading != vec4<f32>(0.0)) || layer.effects.x != 0.0 || layer.effects.w != 0.0);
     let hdr = layer.opacity.y > 0.0;
+    let hdr_out = layer.opacity.w > 0.0;
     let log = graded && layer.color.x > 0.0;
     let file = graded && layer.color.z > 0.0;
-    if adjusting || hdr || log || file {
+    if adjusting || hdr || log || file || hdr_out {
         // Tone mapping, LUTs and adjustments work on straight colour.
         rgb = select(vec3<f32>(0.0), rgb / c.a, c.a > 0.0);
-        if hdr {
-            rgb = nuzky_hdr_to_sdr(rgb, layer.opacity.y);
-        }
-        if log {
-            rgb = log_to_display(rgb);
-        }
-        if file {
-            rgb = mix(rgb, lut3d(file_lut, rgb), layer.color.y);
+        if hdr_out && !log && !file {
+            // An HDR export keeps the light of HDR footage, and puts SDR, text and pictures at reference white.
+            if hdr {
+                rgb = nuzky_hdr_to_hlg(rgb, layer.opacity.y);
+            } else {
+                rgb = nuzky_sdr_to_hlg(rgb);
+            }
+        } else {
+            if hdr {
+                rgb = nuzky_hdr_to_sdr(rgb, layer.opacity.y);
+            }
+            if log {
+                rgb = log_to_display(rgb);
+            }
+            if file {
+                rgb = mix(rgb, lut3d(file_lut, rgb), layer.color.y);
+            }
+            // A log profile and a LUT make SDR colour, so an HDR export shows their clip as SDR.
+            if hdr_out {
+                rgb = nuzky_sdr_to_hlg(rgb);
+            }
         }
         if adjusting {
             // Every control scales or bends the picture instead of adding a constant to it, so black stays black
@@ -472,6 +546,39 @@ pub struct Image {
     pub width: u32,
     pub height: u32,
     pub data: Arc<Vec<u8>>,
+    pub texels: Texels,
+}
+
+impl Image {
+    /// An image of 8-bit texels.
+    pub fn new(width: u32, height: u32, data: Arc<Vec<u8>>) -> Self {
+        Self { width, height, data, texels: Texels::Rgba8 }
+    }
+}
+
+/// How an image stores its RGBA texels.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Texels {
+    #[default]
+    Rgba8,
+    /// 16-bit floats, little-endian: HDR footage in an HDR export, which 8 bits would show in bands.
+    Rgba16Float,
+}
+
+impl Texels {
+    pub fn bytes(self) -> usize {
+        match self {
+            Self::Rgba8 => 4,
+            Self::Rgba16Float => 8,
+        }
+    }
+
+    fn format(self) -> wgpu::TextureFormat {
+        match self {
+            Self::Rgba8 => wgpu::TextureFormat::Rgba8Unorm,
+            Self::Rgba16Float => wgpu::TextureFormat::Rgba16Float,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -706,6 +813,8 @@ pub struct Gpu {
     blank_curve: wgpu::Texture,
     blank_lut: wgpu::Texture,
     pub adapter_name: String,
+    /// Frames are HLG BT.2020 in 16-bit floats, for an HDR export, instead of SDR BT.709 in 8 bits.
+    hdr: bool,
 }
 
 /// Two textures a layer's effects draw into in turn, and the one their picture is shrunk into for a smaller output.
@@ -816,6 +925,13 @@ fn lut_texture(device: &wgpu::Device, queue: &wgpu::Queue, lut: &Lut3d) -> wgpu:
 
 impl Gpu {
     pub fn new() -> Result<Self> {
+        Self::with_range(false)
+    }
+
+    /// `hdr` draws frames as HLG BT.2020 and `render` returns them as 16-bit RGBA (`Texels::Rgba16Float` read back
+    /// as unsigned 16-bit integers), for an HDR export.
+    pub fn with_range(hdr: bool) -> Result<Self> {
+        let frame_format = if hdr { Texels::Rgba16Float } else { Texels::Rgba8 }.format();
         // Debug builds name every GPU object by default. Vulkan loaders before 1.4.345 look the device
         // up for each name without the lock that guards another renderer's new instance freeing unused
         // drivers, so preview and export starting together crashed. WGPU_DEBUG=1 still names them.
@@ -895,7 +1011,7 @@ impl Gpu {
                     entry_point: Some("fs"),
                     compilation_options: Default::default(),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        format: frame_format,
                         blend: Some(blend),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
@@ -973,7 +1089,30 @@ impl Gpu {
             blank_curve,
             blank_lut,
             adapter_name,
+            hdr,
         })
+    }
+
+    pub fn is_hdr(&self) -> bool {
+        self.hdr
+    }
+
+    fn frame_format(&self) -> wgpu::TextureFormat {
+        if self.hdr { Texels::Rgba16Float } else { Texels::Rgba8 }.format()
+    }
+
+    /// Bytes of a frame's texel as the GPU draws it.
+    fn frame_texel_bytes(&self) -> u32 {
+        if self.hdr { 8 } else { 4 }
+    }
+
+    /// An SDR colour, straight, in the frames' colour.
+    fn output_color([r, g, b, a]: [f32; 4], hdr: bool) -> [f32; 4] {
+        if !hdr {
+            return [r, g, b, a];
+        }
+        let [r, g, b] = sdr_to_hlg([r, g, b]);
+        [r, g, b, a]
     }
 
     pub fn max_texture_dimension(&self) -> u32 {
@@ -988,12 +1127,12 @@ impl Gpu {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8Unorm,
+                format: self.frame_format(),
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
                 view_formats: &[],
             });
             let view = texture.create_view(&Default::default());
-            let padded_row = (w * 4).div_ceil(256) * 256;
+            let padded_row = (w * self.frame_texel_bytes()).div_ceil(256) * 256;
             let readback = self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("readback"),
                 size: padded_row as u64 * h as u64,
@@ -1015,7 +1154,7 @@ impl Gpu {
         if image.width == 0
             || image.height == 0
             || image.width.max(image.height) > max
-            || image.data.len() < image.width as usize * image.height as usize * 4
+            || image.data.len() < image.width as usize * image.height as usize * image.texels.bytes()
         {
             anyhow::bail!("Cannot draw a {}×{} layer (GPU limit {max} px)", image.width, image.height);
         }
@@ -1026,7 +1165,7 @@ impl Gpu {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
+            format: image.texels.format(),
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
@@ -1038,7 +1177,11 @@ impl Gpu {
                 aspect: wgpu::TextureAspect::All,
             },
             &image.data,
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(image.width * 4), rows_per_image: None },
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(image.width * image.texels.bytes() as u32),
+                rows_per_image: None,
+            },
             size,
         );
         self.textures.insert(key, (image.data.clone(), tex.clone()));
@@ -1092,7 +1235,7 @@ impl Gpu {
                 }
                 // min and max rather than clamp, which panics on the NaN of a broken project.
                 let half = [((right - left) * size[0] / 2.0).max(1e-3), ((bottom - top) * size[1] / 2.0).max(1e-3)];
-                let [r, g, b, a] = mask.border_color;
+                let [r, g, b, a] = Self::output_color(mask.border_color, self.hdr);
                 (
                     [half[0], half[1], mask.radius.clamp(0.0, 1.0) * half[0].min(half[1]), mask.border],
                     [r * a, g * a, b * a, a],
@@ -1107,7 +1250,10 @@ impl Gpu {
         let (matte, fill) = match layer.matte.as_ref().map(|m| &m.fill) {
             None => ([0.0; 4], [0.0; 4]),
             Some(Fill::Footage(_)) => ([1.0, footage_transfer, 0.0, 0.0], [0.0; 4]),
-            Some(Fill::Color([r, g, b, a])) => ([2.0, 0.0, 0.0, 0.0], [r * a, g * a, b * a, *a]),
+            Some(Fill::Color(color)) => {
+                let [r, g, b, a] = Self::output_color(*color, self.hdr);
+                ([2.0, 0.0, 0.0, 0.0], [r * a, g * a, b * a, a])
+            }
             Some(Fill::Picture { scale, .. }) => ([3.0, scale[0], scale[1], 0.0], [0.0; 4]),
         };
         let [cutout, cutout_at, cutout_half] = layer.shape_mask.map_or([[0.0; 4]; 3], |m| cutout(&m, size));
@@ -1115,7 +1261,7 @@ impl Gpu {
         let uniform = LayerUniform {
             corners,
             local,
-            opacity: [layer.opacity.clamp(0.0, 1.0), picture_transfer, self.compare, 0.0],
+            opacity: [layer.opacity.clamp(0.0, 1.0), picture_transfer, self.compare, self.hdr as u8 as f32],
             adjust: [a.brightness, a.contrast, a.saturation, a.temperature],
             effects: [a.vignette, layer.blur, premult as u8 as f32, a.fade],
             grading: [a.exposure, a.tint, a.highlights, a.shadows],
@@ -1499,7 +1645,7 @@ impl Gpu {
                             mip_level_count: 1,
                             sample_count: 1,
                             dimension: wgpu::TextureDimension::D2,
-                            format: wgpu::TextureFormat::Rgba8Unorm,
+                            format: self.frame_format(),
                             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
                             view_formats: &[],
                         });
@@ -1532,7 +1678,12 @@ impl Gpu {
                             [1.0, -1.0, 1.0, 1.0],
                         ],
                         local: [[0.0; 4]; 4],
-                        opacity: [1.0, 0.0, 0.0, 0.0],
+                        // Its layers drew it in the frames' colour already: HLG stays HLG.
+                        opacity: if self.hdr {
+                            [1.0, Transfer::Hlg as u8 as f32, 0.0, 1.0]
+                        } else {
+                            [1.0, 0.0, 0.0, 0.0]
+                        },
                         adjust: [0.0; 4],
                         effects: [0.0, 0.0, 1.0, 0.0],
                         grading: [0.0; 4],
@@ -1559,6 +1710,7 @@ impl Gpu {
 
         self.target(w, h);
         let target = self.target.as_ref().unwrap();
+        let background = Self::output_color(background, self.hdr);
         self.draw_pass(&mut encoder, &target.view, background, &bind_groups, false);
         encoder.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {
@@ -1598,17 +1750,32 @@ impl Gpu {
             return Err(GpuFault::Lost("the frame could not be read back".into()).into());
         }
         mapped.context("Mapping readback buffer failed")?;
-        let mut out = Vec::with_capacity((w * h * 4) as usize);
+        let row = (w * self.frame_texel_bytes()) as usize;
+        let mut out = Vec::with_capacity(row * h as usize);
         {
             let data = slice.get_mapped_range().context("Reading back the frame failed")?;
-            let row = (w * 4) as usize;
             for y in 0..h as usize {
                 let start = y * target.padded_row as usize;
                 out.extend_from_slice(&data[start..start + row]);
             }
         }
         target.readback.unmap();
+        if self.hdr {
+            half_to_u16(&mut out);
+        }
         Ok(out)
+    }
+}
+
+/// 16-bit floats in 0..1 to 16-bit unsigned integers in place, both little-endian.
+fn half_to_u16(bytes: &mut [u8]) {
+    use half::slice::HalfFloatSliceExt as _;
+    let mut halves: Vec<half::f16> = bytes.as_chunks::<2>().0.iter().map(|b| half::f16::from_le_bytes(*b)).collect();
+    let mut floats = vec![0f32; halves.len()];
+    halves.convert_to_f32_slice(&mut floats);
+    halves.clear();
+    for (out, value) in bytes.as_chunks_mut::<2>().0.iter_mut().zip(floats) {
+        *out = ((value.clamp(0.0, 1.0) * 65535.0).round() as u16).to_le_bytes();
     }
 }
 
@@ -1655,7 +1822,7 @@ mod tests {
     fn transition_resources_reuse_and_resize() {
         let mut gpu = Gpu::new().unwrap();
         let layer = Layer {
-            image: Image { width: 1, height: 1, data: Arc::new(vec![80, 100, 120, 255]) },
+            image: Image::new(1, 1, Arc::new(vec![80, 100, 120, 255])),
             corners: [[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]],
             uv_rotation: 0,
             mirror: false,
@@ -1691,7 +1858,7 @@ mod tests {
     fn scaled_soft_edges_have_no_dark_fringe() {
         let mut gpu = Gpu::new().unwrap();
         let mut layer = Layer {
-            image: Image { width: 2, height: 1, data: Arc::new(vec![255, 255, 255, 255, 0, 0, 0, 0]) },
+            image: Image::new(2, 1, Arc::new(vec![255, 255, 255, 255, 0, 0, 0, 0])),
             corners: [[0.0, 0.0], [64.0, 0.0], [64.0, 2.0], [0.0, 2.0]],
             uv_rotation: 0,
             mirror: false,
@@ -1713,7 +1880,7 @@ mod tests {
             assert!(darkest >= 254, "adjust={adjust}: darkest edge pixel {darkest}");
         }
         // Half-covered texels keep their straight colour through adjustments.
-        layer.image = Image { width: 1, height: 1, data: Arc::new(vec![200, 100, 50, 128]) };
+        layer.image = Image::new(1, 1, Arc::new(vec![200, 100, 50, 128]));
         layer.adjust = Adjust { saturation: -1.0, ..Adjust::default() };
         let out = gpu.render(2, 2, [0.0, 0.0, 0.0, 1.0], &[Draw::Layer(layer)]).unwrap();
         let grey = (0.2126 * 200.0 + 0.7152 * 100.0 + 0.0722 * 50.0) * 128.0 / 255.0;
@@ -1729,7 +1896,7 @@ mod tests {
         let mut gpu = Gpu::new().unwrap();
         let shader = crate::plugin_effects::shader("fn effect(p: Pixel) -> vec4<f32> { return p.color; }");
         gpu.prepare_effect(1, &shader).unwrap();
-        let grey = |v: u8, a: u8| Image { width: 1, height: 1, data: Arc::new(vec![v, v, v, a]) };
+        let grey = |v: u8, a: u8| Image::new(1, 1, Arc::new(vec![v, v, v, a]));
         // Nobody in the matte, so all that shows is the footage.
         let matte = Matte { alpha: grey(0, 0), fill: Fill::Footage(grey(150, 255)) };
         let mut layer = Layer {
@@ -1768,7 +1935,7 @@ mod tests {
         use std::sync::atomic::{AtomicBool, Ordering};
         let draw = |gpu: &mut Gpu| {
             let layer = Layer {
-                image: Image { width: 1, height: 1, data: Arc::new(vec![80, 100, 120, 255]) },
+                image: Image::new(1, 1, Arc::new(vec![80, 100, 120, 255])),
                 corners: [[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]],
                 uv_rotation: 0,
                 mirror: false,
@@ -1812,7 +1979,7 @@ mod tests {
         let mut gpu = Gpu::new().unwrap();
         let pixels = vec![30, 80, 170, 255, 250, 130, 20, 255, 0, 255, 90, 255, 128, 128, 128, 255];
         let layer = Layer {
-            image: Image { width: 2, height: 2, data: Arc::new(pixels.clone()) },
+            image: Image::new(2, 2, Arc::new(pixels.clone())),
             corners: [[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]],
             uv_rotation: 0,
             mirror: false,

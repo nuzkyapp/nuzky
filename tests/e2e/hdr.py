@@ -1,8 +1,9 @@
+import json
 import math
 import subprocess
 import time
 
-from e2e.harness import CLI, flow, preview_crop, preview_rect
+from e2e.harness import CLI, FIXTURES, flow, preview_crop, preview_rect, wait
 
 # HLG signal values of a phone shot in a 2 x 4 grid: greys at 50 %, at HDR reference white (75 %) and in the
 # highlights above it, skin, a lit wall, and a face lit by a window in an iPhone clip, where a tenth of it is
@@ -100,4 +101,82 @@ def hdr(r):
             f'HLG {[round(v) for v in preview[worst]]}')
     grey = pq_preview['grey 75 %'][1]
     r.check("PQ's HDR reference white also shows as Apple's light grey (155)", abs(grey - 155) <= 8, round(grey))
+    r.check('nothing shows an error', not r.errors(), r.errors())
+
+
+DIALOG = "return document.querySelector('[role=dialog]')?.textContent ?? ''"
+HDR = "document.querySelector(\"[role=dialog] [aria-label='Dynamic range'] [data-seg=hdr]\")"
+RANGE = f"const b = {HDR}; return b && {{disabled: b.getAttribute('aria-disabled') === 'true', title: b.title}}"
+PICKED = "return document.querySelector(\"[role=dialog] [aria-label='Dynamic range'] [aria-pressed=true]\").textContent"
+EXPORT = "[...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent === 'Export…').click()"
+
+
+def hlg_frame(path, at):
+    """The frame at `at` seconds at the size of the phone clip, as 8-bit HLG signal read through BT.2020."""
+    raw = subprocess.run(['ffmpeg', '-v', 'error', '-ss', str(at), '-i', str(path), '-frames:v', '1', '-vf',
+                          f'scale={WIDTH}:{HEIGHT}:in_color_matrix=bt2020:in_range=tv:flags=accurate_rnd+full_chroma_int,format=rgb48le',
+                          '-f', 'rawvideo', '-'], capture_output=True, check=True).stdout
+    from PIL import Image
+    return Image.frombytes('RGB', (WIDTH, HEIGHT), bytes(raw[i] for i in range(1, len(raw), 2)))
+
+
+@flow('hdr_export', 'Export in HDR keeps an iPhone HLG clip HDR, 10-bit HEVC in HLG with the same light and its '
+                    'highlights above reference white, and a video without HDR footage says why HDR is off')
+def hdr_export(r):
+    hlg = phone_clip(r, 'hlg-phone', 'arib-std-b67', list(PATCHES.values()))
+    r.import_media(hlg)
+    r.add_clip(hlg.name)
+    r.s.call("window.__nuzky.store.getState().edit({type: 'addText', startUs: 0, text: 'HDR', style: {fontSize: 80, color: '#ffffff'}})")
+    r.key('e', ctrlKey=True)
+    r.check('Ctrl+E opens the export dialog', wait(lambda: r.s.run(DIALOG), 5))
+    r.check('Dynamic range offers HDR for a video filmed in HDR, starting on SDR',
+            wait(lambda: (b := r.s.run(RANGE)) and not b['disabled'], 10) and r.s.run(PICKED) == 'SDR', r.s.run(DIALOG))
+    r.s.run(f'{HDR}.click()')
+    dialog = wait(lambda: 'HEVC HDR' in (d := r.s.run(DIALOG)) and d, 5)
+    r.check('HDR picked says it writes HEVC in HLG', dialog and 'MP4 · HEVC HDR + AAC' in dialog
+            and 'HLG, as iPhones record. Flatter on non-HDR screens.' in dialog, dialog)
+    time.sleep(0.4)
+    r.shot('hdr-export-dialog')
+    target = r.work / 'hdr-export.mp4'
+    r.s.run('window.__nuzky.answerNextSave(arguments[0])', str(target))
+    r.s.run(EXPORT)
+    job = wait(lambda: next((j for j in r.state()['jobs'] if j['kind'] == 'export' and j['status'] != 'running'), None), 180)
+    r.check('the HDR export finishes', job and job['status'] == 'done' and target.exists(), job)
+    time.sleep(0.4)
+    r.shot('hdr-export-done')
+    probe = json.loads(subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v', '-show_entries',
+                                       'stream=codec_name,codec_tag_string,profile,pix_fmt,color_transfer,color_primaries,color_space',
+                                       '-of', 'json', str(target)], capture_output=True, text=True, check=True).stdout)['streams'][0]
+    r.check('the file is 10-bit HEVC (hvc1) tagged HLG BT.2020, as an iPhone records HDR',
+            probe == {'codec_name': 'hevc', 'codec_tag_string': 'hvc1', 'profile': 'Main 10', 'pix_fmt': 'yuv420p10le',
+                      'color_space': 'bt2020nc', 'color_transfer': 'arib-std-b67', 'color_primaries': 'bt2020'}, probe)
+    frame = hlg_frame(target, 1)
+    got = {name: [v / 255 for v in centre(frame, i)] for i, name in enumerate(PATCHES)}
+    off, worst = max((max(abs(a - b) for a, b in zip(got[name], PATCHES[name])), name) for name in PATCHES)
+    r.check('the exported light is the clip\'s own, within 2 % of HLG', off <= 0.02,
+            f'{off:.3f} off at {worst}: {[round(v, 3) for v in got[worst]]}, want {PATCHES[worst]}')
+    r.check('highlights stay above HDR reference white instead of being tone mapped to SDR',
+            got['grey 95 %'][1] > 0.9 and got['lit forehead'][0] > 0.9, [got['grey 95 %'], got['lit forehead']])
+    r.key('Escape')
+    wait(lambda: not r.s.run(DIALOG), 5)
+
+    # The same project with an SDR screen recording in place of the phone clip.
+    clip_id = r.track()[0]['id']
+    r.s.call("window.__nuzky.store.getState().edit({type: 'deleteClips', clipIds: [arguments[0]]})", clip_id)
+    r.import_media(FIXTURES / 'talk.mp4')
+    r.add_clip('talk.mp4')
+    r.key('e', ctrlKey=True)
+    wait(lambda: r.s.run(DIALOG), 5)
+    reason = 'No clip in this video was filmed in HDR.'
+    off = wait(lambda: (b := r.s.run(RANGE)) and b['disabled'] and b, 10)
+    r.check('without HDR footage HDR is off and says why, though HDR was picked last time',
+            off and off['title'] == reason and 'H.264 + AAC' in r.s.run(DIALOG) and r.s.run(PICKED) == 'SDR',
+            [off, r.s.run(DIALOG)[:200]])
+    time.sleep(0.4)
+    r.shot('hdr-export-sdr-video')
+    epoch = r.state()['epoch']
+    refused = r.s.call('window.__nuzky.api.startExport(arguments[0], arguments[1], arguments[2], true)', str(r.work / 'refused.mp4'),
+                       {'resolution': 720, 'fps': 30, 'quality': 'small', 'hdr': True}, epoch)
+    r.check('the engine refuses HDR for it with the same reason', not refused['ok'] and reason in refused['error']
+            and not (r.work / 'refused.mp4').exists(), refused)
     r.check('nothing shows an error', not r.errors(), r.errors())

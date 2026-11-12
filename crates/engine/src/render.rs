@@ -10,7 +10,7 @@ use anyhow::{Result, bail};
 
 use crate::color::{self, Lut3d};
 use crate::effects::{max_animation_scale, source_time, transform_at, transition_at, transition_window};
-use crate::gpu::{ClipColor, Draw, EffectPass, Fill, Gpu, GpuFault, Image, Layer, Mask, Matte};
+use crate::gpu::{ClipColor, Draw, EffectPass, Fill, Gpu, GpuFault, Image, Layer, Mask, Matte, Texels};
 use crate::matte::{Mattes, SIDE};
 use crate::media::{RgbaFrame, Transfer, VideoDecoder, decode_size, file_key, orient};
 use crate::model::{
@@ -320,17 +320,19 @@ fn decode_resolution(project: &Project, clip: &Clip, asset: &Asset, k: f32, max_
 
 impl Renderer {
     pub fn new() -> Result<Self> {
+        Self::with_range(false)
+    }
+
+    /// `hdr` draws HLG BT.2020 frames of 16-bit RGBA for an HDR export (`Gpu::with_range`); HDR footage keeps its light
+    /// and SDR sits at reference white. The preview always draws SDR.
+    pub fn with_range(hdr: bool) -> Result<Self> {
         Ok(Self {
-            gpu: Gpu::new()?,
+            gpu: Gpu::with_range(hdr)?,
             text: TextRenderer::new(),
             workers: HashMap::new(),
             needed: HashSet::new(),
             blurred: HashMap::new(),
-            solids: [[0, 0, 0, 0], [0, 0, 0, 255], [255; 4]].map(|c| Image {
-                width: 1,
-                height: 1,
-                data: Arc::new(c.to_vec()),
-            }),
+            solids: [[0, 0, 0, 0], [0, 0, 0, 255], [255; 4]].map(|c| Image::new(1, 1, Arc::new(c.to_vec()))),
             proxies: None,
             mattes: None,
             behind: HashMap::new(),
@@ -484,7 +486,7 @@ impl Renderer {
 
     /// A new device for one busy with a frame it failed on.
     fn renew_gpu(&mut self) -> Result<()> {
-        let mut fresh = Gpu::new()?;
+        let mut fresh = Gpu::with_range(self.gpu.is_hdr())?;
         fresh.hung_frames = self.gpu.hung_frames;
         fresh.compare = self.gpu.compare;
         let old = std::mem::replace(&mut self.gpu, fresh);
@@ -726,9 +728,11 @@ impl Renderer {
         let proxy = self.proxies.as_deref().and_then(|dir| crate::proxy::ready(dir, Path::new(path)));
         // Only the preview reads proxies, and it jumps around; export reads straight through.
         let preview = self.proxies.is_some();
+        let hdr = self.gpu.is_hdr();
         let spawn = |proxy: Option<PathBuf>| match proxy {
             Some(proxy) => VideoWorker::spawn_proxy(proxy),
             None if preview => VideoWorker::spawn_for_seeking(PathBuf::from(path)),
+            None if hdr => VideoWorker::spawn_deep(PathBuf::from(path)),
             None => VideoWorker::spawn(PathBuf::from(path)),
         };
         if !self.workers.contains_key(&key) {
@@ -818,7 +822,7 @@ impl Renderer {
                 if !background.is_none() {
                     matte = self.matte_for(project, asset, &frame, background, place.size)?;
                 }
-                let image = Image { width: frame.width, height: frame.height, data: frame.data };
+                let image = Image { texels: frame.texels, ..Image::new(frame.width, frame.height, frame.data) };
                 effects = self.effect_passes(clip, place.size, place.transform.scale, k, t_us);
                 color = ClipColor { log: color::log_conversion(*log), lut: self.lut(lut) };
                 // A log profile says how the picture encodes light, whatever its file's metadata claims.
@@ -900,7 +904,7 @@ impl Renderer {
             Background::Blur { strength } => {
                 let radius = (1.0 + strength.clamp(0.0, 1.0) * (BEHIND_MAX_RADIUS - 1.0)).round() as usize;
                 let key = (Arc::as_ptr(&frame.data) as usize, radius);
-                let image = Image { width: frame.width, height: frame.height, data: frame.data.clone() };
+                let image = Image { texels: frame.texels, ..Image::new(frame.width, frame.height, frame.data.clone()) };
                 let behind =
                     self.behind.entry(key).or_insert_with(|| (image.clone(), behind_person(&image, &alpha, radius)));
                 Fill::Footage(behind.1.clone())
@@ -920,7 +924,7 @@ impl Renderer {
                 }
             }
         };
-        Ok(Some(Box::new(Matte { alpha: Image { width: SIDE, height: SIDE, data: alpha }, fill })))
+        Ok(Some(Box::new(Matte { alpha: Image::new(SIDE, SIDE, alpha), fill })))
     }
 
     /// Forgets the decoded images `project` no longer shows behind a person or on a cover. The images on covers stay
@@ -958,16 +962,16 @@ impl Renderer {
             let frame = if alpha && long > PICTURE_MAX_SIDE && pixels <= ALPHA_SHRINK_MAX_PIXELS {
                 // Scaled as straight colour, a transparent edge would turn dark; averaged by alpha, as covers shrink.
                 let full = decoder.convert(&f, t, f.width(), f.height())?;
-                let full = Image { width: full.width, height: full.height, data: full.data };
+                let full = Image::new(full.width, full.height, full.data);
                 crate::thumbnail::shrink(&full, long.div_ceil(PICTURE_MAX_SIDE) as usize)
             } else {
                 let k = (PICTURE_MAX_SIDE as f32 / long as f32).min(1.0);
                 let size = ((f.width() as f32 * k).round() as u32, (f.height() as f32 * k).round() as u32);
                 let frame = decoder.convert(&f, t, size.0, size.1)?;
-                Image { width: frame.width, height: frame.height, data: frame.data }
+                Image::new(frame.width, frame.height, frame.data)
             };
             let (data, width, height) = orient(&frame.data, frame.width, frame.height, asset);
-            Ok(Image { width, height, data: Arc::new(data) })
+            Ok(Image::new(width, height, Arc::new(data)))
         })();
         match decoded {
             Ok(image) => {
@@ -1085,7 +1089,8 @@ fn behind_person(image: &Image, matte: &[u8], radius: usize) -> Image {
 }
 
 /// Shrinks the image to `size` pixels on its longer side, from up to `samples` × `samples` pixels of each block, and
-/// blurs it, weighting every pixel by how little of the person covers it when there is a `matte`.
+/// blurs it, weighting every pixel by how little of the person covers it when there is a `matte`. The result has 8-bit
+/// texels in the image's own colour: it is blurred too much to show bands.
 fn shrink_blur(
     image: &Image,
     size: f32,
@@ -1104,6 +1109,16 @@ fn shrink_blur(
     let (cols, rows): (Vec<usize>, Vec<usize>) =
         ((0..sw).map(|x| x * n / sw).collect(), (0..sh).map(|y| y * n / sh).collect());
     let weights: [f32; 256] = std::array::from_fn(|a| 1.0 - a as f32 / 255.0 * (1.0 - 1.0 / 64.0));
+    // Each channel of a texel, 0 to 255.
+    let texel = |i: usize| -> [f32; 4] {
+        match image.texels {
+            Texels::Rgba8 => std::array::from_fn(|c| f32::from(image.data[i * 4 + c])),
+            Texels::Rgba16Float => std::array::from_fn(|c| {
+                let at = i * 8 + c * 2;
+                half::f16::from_le_bytes([image.data[at], image.data[at + 1]]).to_f32() * 255.0
+            }),
+        }
+    };
     let mut pixels = vec![[0.0; 5]; w * h];
     for y in 0..h {
         for x in 0..w {
@@ -1117,11 +1132,11 @@ fn shrink_blur(
             let mut count = 0u64;
             for sy in (y0..y1.max(y0 + 1)).step_by(step_y) {
                 for sx in (x0..x1.max(x0 + 1)).step_by(step_x) {
-                    let src = &image.data[(sy * sw + sx) * 4..(sy * sw + sx) * 4 + 4];
-                    let alpha = src[3] as f32;
+                    let src = texel(sy * sw + sx);
+                    let alpha = src[3];
                     let weight = matte.map_or(1.0, |m| weights[m[(rows[sy] * n + cols[sx]) * 4 + 3] as usize]);
                     for c in 0..3 {
-                        sum[c] += src[c] as f32 * alpha * weight;
+                        sum[c] += src[c] * alpha * weight;
                     }
                     sum[3] += alpha * weight;
                     sum[4] += alpha;
@@ -1147,7 +1162,7 @@ fn shrink_blur(
         }
         data.push(pixel[4].clamp(0.0, 255.0).round() as u8);
     }
-    Image { width: w as u32, height: h as u32, data: Arc::new(data) }
+    Image::new(w as u32, h as u32, Arc::new(data))
 }
 
 fn box_blur<const N: usize>(
@@ -1237,21 +1252,21 @@ mod tests {
 
     #[test]
     fn background_averages_pixels_and_preserves_alpha() {
-        let image = Image {
-            width: 192,
-            height: 108,
-            data: Arc::new(
+        let image = Image::new(
+            192,
+            108,
+            Arc::new(
                 (0..108)
                     .flat_map(|y| {
                         (0..192).flat_map(move |x| if (x + y) % 2 == 0 { [255, 255, 255, 255] } else { [0, 0, 0, 255] })
                     })
                     .collect(),
             ),
-        };
+        );
         let blurred = small_image(&image, 3);
         assert_eq!((blurred.width, blurred.height), (96, 54));
         assert!(blurred.data.as_chunks::<4>().0.iter().all(|px| *px == [108, 108, 108, 255]));
-        let transparent = Image { width: 2, height: 1, data: Arc::new(vec![255, 0, 0, 0, 0, 255, 0, 255]) };
+        let transparent = Image::new(2, 1, Arc::new(vec![255, 0, 0, 0, 0, 255, 0, 255]));
         let blurred = small_image(&transparent, 3);
         assert!(blurred.data.as_chunks::<4>().0.iter().all(|px| px[0] == 0 && px[1] == 217 && px[2] == 0 && px[3] > 0));
     }

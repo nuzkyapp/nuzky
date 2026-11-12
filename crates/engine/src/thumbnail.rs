@@ -83,7 +83,7 @@ impl Renderer {
         );
         let (width, height) = (project.canvas.width, project.canvas.height);
         let rgba = self.render(&picture(project), thumbnail.time_us, width, height, Wait::Exact, false)?;
-        Ok(Image { width, height, data: Arc::new(rgba) })
+        Ok(Image::new(width, height, Arc::new(rgba)))
     }
 
     /// An image of the project on its own, as it is turned, at its size or the largest the GPU takes.
@@ -109,7 +109,7 @@ impl Renderer {
         let id = format!("still:{asset_id}:{}", file_version(&asset.path));
         still.tracks[0].clips.push(Clip::new(id, 0, 1_000_000, content));
         let rgba = self.render(&still, 0, width, height, Wait::Exact, false)?;
-        Ok(Image { width, height, data: Arc::new(rgba) })
+        Ok(Image::new(width, height, Arc::new(rgba)))
     }
 
     /// Draws the thumbnail of `project` `width` pixels wide from its frame and, when it needs one, the person's mask:
@@ -333,13 +333,13 @@ pub(crate) fn shrink(image: &Image, step: usize) -> Image {
             data.extend([colour[0], colour[1], colour[2], ((alpha + count / 2) / count) as u8]);
         }
     }
-    Image { width: w as u32, height: h as u32, data: Arc::new(data) }
+    Image::new(w as u32, h as u32, Arc::new(data))
 }
 
 /// The mask shrunk like the frame by `shrink`.
 fn shrink_alpha(mask: &[u8], width: u32, height: u32, step: usize) -> Vec<u8> {
     let rgba: Vec<u8> = mask.iter().flat_map(|&a| [a, a, a, a]).collect();
-    let image = shrink(&Image { width, height, data: Arc::new(rgba) }, step);
+    let image = shrink(&Image::new(width, height, Arc::new(rgba)), step);
     image.data.as_chunks::<4>().0.iter().map(|p| p[3]).collect()
 }
 
@@ -398,7 +398,7 @@ fn ring(coverage: &[f32], (w, h): (u32, u32), width: f32, color: [f32; 4]) -> Im
         let band = if c < 0.0 { 0.0 } else { (width + 0.5 - d).clamp(0.0, 1.0) * (1.0 - c) };
         data.extend([rgb[0], rgb[1], rgb[2], (band * color[3] * 255.0).round() as u8]);
     }
-    Image { width: w, height: h, data: Arc::new(data) }
+    Image::new(w, h, Arc::new(data))
 }
 
 /// Euclidean distance in pixels from each pixel to the nearest one mostly covered by the person
@@ -582,7 +582,7 @@ mod tests {
     #[test]
     fn shrinking_a_whole_large_frame_to_one_pixel_keeps_its_average() {
         let (w, h) = (4200, 4200);
-        let image = Image { width: w, height: h, data: Arc::new([200u8, 100, 50, 255].repeat((w * h) as usize)) };
+        let image = Image::new(w, h, Arc::new([200u8, 100, 50, 255].repeat((w * h) as usize)));
         assert_eq!(*shrink(&image, usize::MAX).data, [200, 100, 50, 255]);
     }
 

@@ -430,6 +430,9 @@ pub struct ExportRequest {
     /// Also save the captions beside the video as `.srt` files, one per language (`subtitles::files`).
     #[serde(default)]
     pub srt: bool,
+    /// HDR: 10-bit HEVC in HLG, keeping the light of HDR footage (`ExportOptions::hdr`).
+    #[serde(default)]
+    pub hdr: bool,
 }
 
 impl ExportRequest {
@@ -440,6 +443,7 @@ impl ExportRequest {
             resolution: Some(self.resolution),
             fps: Some(self.fps),
             delivery: self.preset,
+            hdr: self.hdr,
             ..ExportOptions::default()
         }
     }
