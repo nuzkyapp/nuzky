@@ -1307,8 +1307,21 @@ export type PlannedRecording = {
   missing: string | null,
 };
 
+export type PreviewProject = {
+  durationUs: number,
+  width: number,
+  height: number,
+};
+
 export type PreviewStarted = {
   durationUs: number,
+};
+
+export type PreviewWindowBoot = {
+  previewUrl: string,
+  transport: Transport,
+  engineError: string | null,
+  project: PreviewProject,
 };
 
 export type Project = {

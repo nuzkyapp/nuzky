@@ -24,6 +24,7 @@ import { Toasts } from "./components/Toasts";
 import { Tour } from "./components/Tour";
 import { listenAgentEvents, panelRunEnded, useAgent } from "./lib/agent";
 import { listenRemote, useRemote } from "./lib/remote";
+import { listenPreviewWindow, usePreviewWindow } from "./lib/previewWindow";
 import { togglePanel, useDock, useDockLayout, useWindowSize } from "./lib/dock";
 import { checkYtdlp, useSetup } from "./lib/setup";
 import { useTour } from "./lib/tour";
@@ -46,7 +47,7 @@ import { onBeatsFound } from "./lib/beats";
 import { closeSource, useSource } from "./lib/source";
 import { appWindow, toggleFullPreview, usePreview } from "./lib/preview";
 import { titleWindow } from "./lib/window";
-import { actionOf, chordsOf, useKeys } from "./lib/keys";
+import { actionOf, chordsOf, suppressSpaceRelease, useKeys } from "./lib/keys";
 import { useKeysQuestion } from "./lib/keysQuestion";
 import { openSettings, useSettings } from "./lib/settings";
 import { useMicLevel, useVoiceover } from "./lib/voiceover";
@@ -66,16 +67,6 @@ function usesSpace(el: HTMLElement | null) {
   if (!(el instanceof Element)) return false;
   if (el instanceof HTMLInputElement && (el.type === "checkbox" || el.type === "radio")) return true;
   return /^(checkbox|radio|switch|menuitem|menuitemradio|menuitemcheckbox|option)$/.test(el.getAttribute("role") ?? "");
-}
-
-/** Swallows the next Space release, which would otherwise click the focused button. */
-function suppressSpaceRelease() {
-  const up = (e: KeyboardEvent) => {
-    if (e.key !== " ") return;
-    e.preventDefault();
-    window.removeEventListener("keyup", up, true);
-  };
-  window.addEventListener("keyup", up, true);
 }
 
 function useShortcuts() {
@@ -476,7 +467,7 @@ useEditor.subscribe((s, prev) => {
 // Test hook for WebDriver runs; native file dialogs cannot be automated.
 if (import.meta.env.DEV)
   Object.assign(window, {
-    __nuzky: { importPaths, importLutPaths, luts: useLuts, exportVideo, plugins: usePlugins, runPlugin, gallery: useGallery, store: useEditor, cover: useCover, reels: useReels, openReelsToFind, speech: useSpeech, names: useNames, api, agent: useAgent, dock: useDock, setup: useSetup, library: useLibrary, style: useStyle, addProjects, findDrafts, newProjectFromMedia, capcut: useCapCut, openDraft, openDraftFolder, openProject, refreshLibrary, trashProjects, updates: useUpdates, checkForUpdates, sounds: useSounds, stickers: useStickers, tour: useTour, youtube: useYoutube, previewWindow: appWindow, remote: useRemote, source: useSource, keys: useKeys, keysQuestion: useKeysQuestion, settings: useSettings, openSettings, voiceover: useVoiceover, micLevel: useMicLevel, answerNextSave, savesAsked },
+    __nuzky: { importPaths, importLutPaths, luts: useLuts, exportVideo, plugins: usePlugins, runPlugin, gallery: useGallery, store: useEditor, cover: useCover, reels: useReels, openReelsToFind, speech: useSpeech, names: useNames, api, agent: useAgent, dock: useDock, setup: useSetup, library: useLibrary, style: useStyle, addProjects, findDrafts, newProjectFromMedia, capcut: useCapCut, openDraft, openDraftFolder, openProject, refreshLibrary, trashProjects, updates: useUpdates, checkForUpdates, sounds: useSounds, stickers: useStickers, tour: useTour, youtube: useYoutube, previewWindow: appWindow, separateWindow: usePreviewWindow, remote: useRemote, source: useSource, keys: useKeys, keysQuestion: useKeysQuestion, settings: useSettings, openSettings, voiceover: useVoiceover, micLevel: useMicLevel, answerNextSave, savesAsked },
   });
 
 async function startEditor() {
@@ -607,6 +598,7 @@ export default function App() {
   useUiContext();
   useEffect(listenAgentEvents, []);
   useEffect(listenRemote, []);
+  useEffect(listenPreviewWindow, []);
   const drawn = useDrawn(!!snap);
 
   if (!snap) return <BootScreen />;

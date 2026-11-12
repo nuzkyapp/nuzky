@@ -16,6 +16,7 @@ export const ACTIONS = [
   { id: "goEnd", group: "Playback", label: "Go to end" },
   { id: "mute", group: "Playback", label: "Mute the preview" },
   { id: "fullScreen", group: "Playback", label: "Full screen preview" },
+  { id: "previewWindow", group: "Playback", label: "Preview window" },
   { id: "split", group: "Edit", label: "Split at the playhead" },
   { id: "deleteLeft", group: "Edit", label: "Delete left of the playhead" },
   { id: "deleteRight", group: "Edit", label: "Delete right of the playhead" },
@@ -37,6 +38,9 @@ export const ACTIONS = [
 ] as const;
 
 export type ActionId = (typeof ACTIONS)[number]["id"];
+
+/** What the preview window's keys do in the editor: they play and move the playhead, as the window has no timeline. */
+export const FROM_PREVIEW_WINDOW = new Set<ActionId>(["playPause", "framePrev", "frameNext", "secondBack", "secondForward", "cutPrev", "cutNext", "goStart", "goEnd", "mute"]);
 export type Keymap = Record<ActionId, string[]>;
 
 const NUZKY: Keymap = {
@@ -51,6 +55,7 @@ const NUZKY: Keymap = {
   goEnd: ["End"],
   mute: ["M"],
   fullScreen: ["F"],
+  previewWindow: ["Shift+F"],
   split: ["S"],
   deleteLeft: ["Q"],
   deleteRight: ["W"],
@@ -83,6 +88,8 @@ const COMMON = {
   goEnd: ["End"],
   // None of the other editors has a key for these; M is a marker there, which Nuzky does not have.
   mute: ["M"],
+  // Full screen on another screen, beside each set's full screen key.
+  previewWindow: ["Shift+F"],
   aiPanel: ["Ctrl+J"],
   delete: ["Delete", "Backspace"],
   copy: ["Ctrl+C"],
@@ -174,6 +181,16 @@ export function chordsOf(e: Press): string[] {
   return chords.filter((c, i): c is string => !!c && chords.indexOf(c) === i);
 }
 
+/** Swallows the next Space release, which would otherwise click the focused button. */
+export function suppressSpaceRelease() {
+  const up = (e: KeyboardEvent) => {
+    if (e.key !== " ") return;
+    e.preventDefault();
+    window.removeEventListener("keyup", up, true);
+  };
+  window.addEventListener("keyup", up, true);
+}
+
 export type Saved = { preset: PresetId; changed: Partial<Keymap> };
 const KEY = "nuzky.keys";
 
@@ -194,6 +211,8 @@ function load(): Saved {
 
 export const useKeys = create<Saved>(() => load());
 useKeys.subscribe((s) => localStorage.setItem(KEY, JSON.stringify(s)));
+// The preview window follows keys changed in the editor's Settings while it is open.
+window.addEventListener("storage", (e) => e.key === KEY && useKeys.setState(load(), true));
 
 export const keysOf = (id: ActionId, s: Saved = useKeys.getState()) => s.changed[id] ?? PRESETS[s.preset].keys[id];
 

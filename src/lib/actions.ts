@@ -1,6 +1,7 @@
 import { exportCover, useCover } from "./cover";
 import type { ActionId } from "./keys";
 import { toggleFullPreview, toggleMuted } from "./preview";
+import { togglePreviewWindow } from "./previewWindow";
 import { seekSource, sourceDuration, useSource } from "./source";
 import { copySelection, cutSelection, deleteSelection, deleteSide, duplicateSelection, edgeBeside, freezeAtPlayhead, openExport, pasteAttributes, pasteClips, projectDuration, splitAtPlayhead, useEditor } from "./store";
 import { US, lastFrame, nearestFrame, stepFrame } from "./time";
@@ -10,7 +11,7 @@ import { pickAndImport } from "../components/panel/assets";
 /** What the cover editor holds back: nothing plays there, and the clips are not shown. */
 export const RESTS_IN_COVER = new Set<ActionId>(["playPause", "split", "deleteLeft", "deleteRight", "freeze", "duplicate", "copy", "cut", "paste", "pasteAttributes", "delete"]);
 /** What choosing reels lets through to the editor. */
-export const WORKS_IN_REELS = new Set<ActionId>(["undo", "redo", "framePrev", "frameNext", "secondBack", "secondForward"]);
+export const WORKS_IN_REELS = new Set<ActionId>(["undo", "redo", "framePrev", "frameNext", "secondBack", "secondForward", "previewWindow"]);
 /** What would change the hidden timeline unseen in the full screen preview. */
 export const RESTS_IN_FULL = new Set<ActionId>(["delete", "split", "deleteLeft", "deleteRight", "freeze", "duplicate", "import", "undo", "redo", "cut", "paste", "pasteAttributes"]);
 /** What a media item shown in the preview takes from the timeline. */
@@ -83,6 +84,8 @@ export function runAction(action: ActionId, repeat = false) {
       return repeat ? undefined : toggleMuted();
     case "fullScreen":
       return repeat ? undefined : void toggleFullPreview();
+    case "previewWindow":
+      return repeat ? undefined : void togglePreviewWindow();
     case "zoomIn":
       return s.setZoom(s.zoom * 1.3);
     case "zoomOut":

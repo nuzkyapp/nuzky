@@ -39,13 +39,16 @@ fn main() {
     let permissions =
         std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("cargo sets OUT_DIR")).join("app-acl");
     std::fs::create_dir_all(&permissions).expect("creating the app permissions folder");
-    let commands: Vec<String> = COMMANDS.iter().map(|command| format!("{command:?}")).collect();
-    let permission = format!(
-        "[[permission]]\nidentifier = \"main-ui\"\ndescription = \"Every app command, for the editor's own page.\"\n\
-         commands.allow = [{}]\n",
-        commands.join(", ")
-    );
-    std::fs::write(permissions.join("main-ui.toml"), permission).expect("writing the main-ui permission");
+    let permission = |identifier: &str, description: &str, commands: &[&str]| {
+        let commands: Vec<String> = commands.iter().map(|command| format!("{command:?}")).collect();
+        let text = format!(
+            "[[permission]]\nidentifier = \"{identifier}\"\ndescription = \"{description}\"\ncommands.allow = [{}]\n",
+            commands.join(", ")
+        );
+        std::fs::write(permissions.join(format!("{identifier}.toml")), text).expect("writing an app permission");
+    };
+    permission("main-ui", "Every app command, for the editor's own page.", COMMANDS);
+    permission("preview-window-ui", "What the preview window's page needs.", PREVIEW_WINDOW_COMMANDS);
     let pattern = permissions.join("*.toml").to_string_lossy().into_owned().leak();
     let manifest = tauri_build::AppManifest::new().permissions_path_pattern(pattern);
     let mut attributes = tauri_build::Attributes::new().app_manifest(manifest);

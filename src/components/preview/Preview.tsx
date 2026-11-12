@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { AudioLines, Maximize, Minimize, Pause, Play, SkipBack, SkipForward, Smartphone, SquareSplitHorizontal, Volume2, VolumeX, X } from "lucide-react";
+import { useFrameStream } from "../../lib/frameStream";
+import { AudioLines, Maximize, Minimize, Pause, Play, SkipBack, SkipForward, ScreenShare, Smartphone, SquareSplitHorizontal, Volume2, VolumeX, X } from "lucide-react";
 import { api } from "../../lib/api";
 import { useCover } from "../../lib/cover";
 import { stopPicking, useFollow } from "../../lib/follow";
 import { toggleCompare, toggleFullPreview, toggleMuted, usePreview } from "../../lib/preview";
 import { NO_ADJUST, sameAdjust } from "../../lib/presets";
+import { togglePreviewWindow, usePreviewWindow } from "../../lib/previewWindow";
 import { pictureAspect, useReels } from "../../lib/reels";
 import { closeSource, seekSource, sourceDuration, toggleSourcePlay, useSource } from "../../lib/source";
 import { projectDuration, useEditor } from "../../lib/store";
@@ -25,7 +27,6 @@ import { ReframeStatus } from "./ReframeStatus";
 import { VoiceoverCountdown } from "../panel/VoiceoverPanel";
 import { useKeyLabels } from "../../lib/keys";
 
-const HEADER = 24;
 const SAFE_ZONE_KEY = "nuzky.safeZone";
 
 /** The parts of the frame Reels and TikTok cover with their interface, dimmed, around the free area. */
@@ -51,68 +52,6 @@ const followPlayhead = (t: number, playing: boolean) => {
   // A frame rendered just before a pause can arrive after it; the pause already set the time.
   if (playing && useEditor.getState().playing) useEditor.setState({ timeUs: t });
 };
-
-/** Receives rendered frames from an engine and paints the newest one per display frame; `onFrame` gets its time. */
-export function useFrameStream(url: string, canvas: React.RefObject<HTMLCanvasElement | null>, onFrame: (t: number, playing: boolean) => void) {
-  const frame = useRef(onFrame);
-  frame.current = onFrame;
-  const [connected, setConnected] = useState(false);
-  useEffect(() => {
-    if (!url) return;
-    let ws: WebSocket | null = null;
-    let closed = false;
-    let latest: ArrayBuffer | null = null;
-    let raf = 0;
-    let retry = 0;
-
-    const draw = () => {
-      raf = 0;
-      const buf = latest;
-      latest = null;
-      const el = canvas.current;
-      if (!buf || !el) return;
-      const view = new DataView(buf);
-      if (view.getUint32(0, true) !== 0x31465043) return; // "CPF1"
-      const w = view.getUint32(4, true);
-      const h = view.getUint32(8, true);
-      const playing = (view.getUint32(12, true) & 1) === 1;
-      const t = Number(view.getBigInt64(16, true));
-      if (el.width !== w || el.height !== h) {
-        el.width = w;
-        el.height = h;
-      }
-      // Opaque: frames have no transparency, and an opaque canvas needs no blending with what is behind it.
-      el.getContext("2d", { alpha: false })?.putImageData(new ImageData(new Uint8ClampedArray(buf, HEADER, w * h * 4), w, h), 0, 0);
-      // The time of the frame on screen. After a seek the previous frame stays a moment; the UI flows wait for this.
-      el.dataset.us = String(t);
-      frame.current(t, playing);
-    };
-
-    const connect = () => {
-      ws = new WebSocket(url);
-      ws.binaryType = "arraybuffer";
-      ws.onopen = () => {
-        retry = 0;
-        setConnected(true);
-      };
-      ws.onmessage = (e) => {
-        latest = e.data as ArrayBuffer;
-        if (!raf) raf = requestAnimationFrame(draw);
-      };
-      ws.onclose = () => {
-        setConnected(false);
-        if (!closed) window.setTimeout(connect, Math.min(2000, 200 * ++retry));
-      };
-    };
-    connect();
-    return () => {
-      closed = true;
-      ws?.close();
-      cancelAnimationFrame(raf);
-    };
-  }, [url, canvas]);
-  return connected;
-}
 
 /** Playhead time and length; the only part of the preview that follows playback frame by frame. */
 function Timecode({ duration }: { duration: number }) {
@@ -236,6 +175,7 @@ export function Preview() {
       ),
   );
   const { muted, full, compare } = usePreview();
+  const windowOpen = usePreviewWindow((s) => s.open);
   const picking = useFollow((s) => !!s.picking);
   const { togglePlay, seek } = useEditor.getState();
   const sectionRef = useRef<HTMLElement>(null);
@@ -319,6 +259,14 @@ export function Preview() {
     <IconButton round label={withKey(muted ? "Unmute the preview" : "Mute the preview", "mute")} active={muted} onClick={toggleMuted}>
       {muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
     </IconButton>
+  );
+  // The window only shows the video, so it opens while an agent edits too. The smallest preview leaves it to Shift+F.
+  const windowButton = (
+    <LockReason.Provider value={null}>
+      <IconButton round label={withKey(windowOpen ? "Close the preview window" : "Open the preview window", "previewWindow")} active={windowOpen} onClick={() => void togglePreviewWindow()} className="@max-[440px]:hidden" data-preview-window>
+        <ScreenShare size={16} />
+      </IconButton>
+    </LockReason.Provider>
   );
   const fullButton = (
     <IconButton round label={withKey(full ? "Exit full screen" : "Full screen", "fullScreen")} onClick={() => void toggleFullPreview()}>
@@ -405,9 +353,10 @@ export function Preview() {
         {cover ? <CoverBar format={cover} /> : reels ? <ReelBar /> : source ? (
           <SourceTransport>
             {muteButton}
+            {windowButton}
             {fullButton}
           </SourceTransport>
-        ) : <div className="bar grid h-11 w-full max-w-[700px] grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-full px-1.5">
+        ) : <div className="bar grid h-11 w-full max-w-[760px] grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-full px-1.5">
           <Timecode duration={duration} />
           <div className="flex items-center gap-2.5">
             <IconButton round label={withKey("Go to start", "goStart")} onClick={() => seek(0)} disabled={empty} className="@max-[440px]:hidden">
@@ -452,6 +401,7 @@ export function Preview() {
               <Smartphone size={16} />
             </IconButton>
             {canvas && <RatioMenu />}
+            {windowButton}
             {fullButton}
           </div>
         </div>}

@@ -1,7 +1,7 @@
 //! Which webview may call which command, checked against the real capabilities and app manifest. The handler here
 //! answers every command it is reached with, so an error can only come from Tauri's ACL check before it.
 
-use crate::commands::COMMANDS;
+use crate::commands::{COMMANDS, PREVIEW_WINDOW_COMMANDS};
 use std::collections::BTreeSet;
 use tauri::ipc::{CallbackFn, InvokeBody};
 use tauri::test::{INVOKE_KEY, MockRuntime, mock_builder};
@@ -62,6 +62,24 @@ fn other_webviews_and_remote_pages_get_nothing() {
         }
         call(&main, command, "https://example.com/").expect_err(&format!("a remote page reached {command}"));
     }
+}
+
+#[test]
+fn preview_window_gets_only_its_own_commands() {
+    let app = app();
+    let window = WebviewWindowBuilder::new(&app, "preview", WebviewUrl::default()).build().unwrap();
+    for url in LOCAL_URLS {
+        for command in COMMANDS {
+            let allowed = PREVIEW_WINDOW_COMMANDS.contains(command);
+            assert_eq!(call(&window, command, url).is_ok(), allowed, "{command} from {url}");
+        }
+        // Without arguments an allowed call fails on them, after the permission check.
+        let refused = |command: &str| call(&window, command, url).is_err_and(|e| e.contains("not allowed"));
+        assert!(!refused("plugin:event|listen"), "the preview window follows playback");
+        assert!(refused("plugin:window|maximize"), "the preview window may change only its full screen");
+    }
+    call(&window, "preview_window_boot", "https://example.com/")
+        .expect_err("a remote page reached the preview window's commands");
 }
 
 #[test]

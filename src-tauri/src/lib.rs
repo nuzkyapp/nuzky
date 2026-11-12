@@ -22,6 +22,7 @@ mod luts;
 mod model_question;
 mod plugins;
 mod preview_server;
+mod preview_window;
 mod recap;
 mod reels;
 mod remote;
@@ -437,6 +438,7 @@ impl AppState {
         self.filmstrips.lock().unwrap().retain(|id, _| locks.contains_key(id));
         drop(locks);
         self.engine.send(Msg::Project(Arc::new(project.clone())));
+        preview_window::publish(&self.app, project);
     }
 
     fn apply_batch(
@@ -1525,6 +1527,11 @@ pub fn run() {
             pause,
             seek,
             set_preview_box,
+            preview_window::open_preview_window,
+            preview_window::close_preview_window,
+            preview_window::preview_window_boot,
+            preview_window::set_preview_window_box,
+            preview_window::preview_window_action,
             set_preview_compare,
             set_preview_muted,
             list_projects,
@@ -1654,6 +1661,18 @@ pub fn run() {
         .build(context)
         .expect("error while building Nuzky")
         .run(|app, event| match event {
+            tauri::RunEvent::WindowEvent { label, event, .. } if label == preview_window::LABEL => match event {
+                tauri::WindowEvent::CloseRequested { .. } => {
+                    if let Some(window) = app.get_webview_window(&label) {
+                        preview_window::closing(&window);
+                    }
+                }
+                tauri::WindowEvent::Destroyed => preview_window::closed(app),
+                _ => {}
+            },
+            tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } if label == "main" => {
+                preview_window::editor_closed(app)
+            }
             tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::CloseRequested { api, .. }, .. } => {
                 // Quitting would cut short the rewriting of the app; it restarts in a moment.
                 if updates::installing(app) {

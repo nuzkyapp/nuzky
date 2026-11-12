@@ -30,6 +30,8 @@ use serde_json::{Value, json};
 use tauri::{LogicalSize, Manager, WebviewWindow};
 
 static TOKEN: OnceLock<Option<String>> = OnceLock::new();
+/// The window the requests go to, by label.
+static CURRENT: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
 #[repr(C)]
 struct CGEvent {
@@ -148,7 +150,12 @@ pub fn ready(app: &tauri::AppHandle) -> Result<()> {
     if token().is_none() {
         return Ok(());
     }
-    let window = app.get_webview_window("main").context("the main window is missing")?;
+    keep_away(&app.get_webview_window("main").context("the main window is missing")?)
+}
+
+/// Shows a window of the app off every screen, drawn and focused as if a person used it: the editor once the app
+/// has launched, and the preview window when it opens.
+pub fn keep_away(window: &WebviewWindow) -> Result<()> {
     window.with_webview(|platform| unsafe {
         let webview = &*platform.inner().cast::<WKWebView>();
         let ns_window = &*platform.ns_window().cast::<NSWindow>();
@@ -215,7 +222,24 @@ fn connection(stream: UnixStream, app: &tauri::AppHandle, token: &str) -> Result
 fn handle(app: &tauri::AppHandle, method: &str, path: &str, body: &Value) -> Result<Value> {
     // `/session/<id>/<command>`; there is only one session, the app itself.
     let command = path.splitn(4, '/').nth(3).unwrap_or_default();
-    let window = app.get_webview_window("main").context("the window is closed")?;
+    // As WebDriver's Switch To Window: later requests go to the window with that label.
+    match (method, command) {
+        ("GET", "window/handles") => return Ok(json!(app.webview_windows().into_keys().collect::<Vec<_>>())),
+        ("GET", "window") => return Ok(json!(*CURRENT.lock().unwrap())),
+        ("POST", "window") => {
+            let label = body["handle"].as_str().context("no handle")?;
+            ensure!(app.get_webview_window(label).is_some(), "no window {label}");
+            *CURRENT.lock().unwrap() = label.to_owned();
+            return Ok(Value::Null);
+        }
+        _ => {}
+    }
+    if (method, path) == ("POST", "/session") {
+        *CURRENT.lock().unwrap() = "main".to_owned();
+    }
+    let label =
+        Some(CURRENT.lock().unwrap().clone()).filter(|label| !label.is_empty()).unwrap_or_else(|| "main".into());
+    let window = app.get_webview_window(&label).with_context(|| format!("the {label} window is closed"))?;
     if (method, path) == ("POST", "/session") {
         // Like WebKitWebDriver, once the page has loaded.
         evaluate(&window, "1", Instant::now() + Duration::from_secs(60))?;
