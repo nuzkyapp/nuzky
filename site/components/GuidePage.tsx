@@ -9,6 +9,7 @@ import { HeroDownload } from "./GetNuzky";
 import { JsonLd } from "./JsonLd";
 import { Nav } from "./Nav";
 import { SectionHeading } from "./SectionHeading";
+import { comparisons } from "@/lib/comparisons";
 import { guide, guides } from "@/lib/guides";
 import { shareMetadata } from "@/lib/share";
 import { getRelease, url } from "@/lib/site";
@@ -56,7 +57,7 @@ const structuredData = (path: string) => {
 export async function GuidePage({ path }: { path: string }) {
   const g = guide(path);
   const release = await getRelease();
-  const others = [...guides.filter((o) => o.path !== path), { path: "/capcut-alternative", name: "Nuzky vs CapCut" }];
+  const others = [...guides.filter((o) => o.path !== path), ...comparisons];
   return (
     <>
       <JsonLd data={structuredData(path)} />

@@ -1,21 +1,8 @@
 // The pages as plain Markdown for AI agents and LLM search (https://llmstxt.org), built from the same copy as
 // the HTML so the two never disagree.
 
-import {
-  type Faq,
-  capcutChecked,
-  capcutDraftParts,
-  capcutFaq,
-  capcutSources,
-  comparison,
-  faq,
-  features,
-  fromCapcut,
-  maker,
-  makerNote,
-  pickCapcut,
-  pickNuzky,
-} from "./content";
+import { type Comparison, comparisons } from "./comparisons";
+import { type Faq, capcutDraftParts, faq, features, maker, makerNote } from "./content";
 import { type Guide, guides } from "./guides";
 import { type Release, buildFromSource, license, releases, repo, systems, url } from "./site";
 
@@ -93,7 +80,7 @@ ${qa(faq)}
 ## Links
 
 - [Website](${url})
-- [Nuzky vs CapCut](${url}/capcut-alternative)
+${list(comparisons.map((c) => `[${c.name}](${url}${c.path})`))}
 ${list(guides.map((g) => `[${g.title}](${url}${g.path})`))}
 - [Source code on GitHub](${repo})
 - [Release notes](${r.notes})
@@ -102,39 +89,39 @@ ${list(guides.map((g) => `[${g.title}](${url}${g.path})`))}
 `;
 }
 
-export function alternativeMarkdown(r: Release) {
+export function comparisonMarkdown(c: Comparison, r: Release) {
   const cell = (s: string) => s.replace(/\|/g, "\\|");
-  return `# Nuzky vs CapCut: the open source CapCut alternative
+  return `# ${c.title}
 
-> Nuzky is a free, open source video editor for TikTok, Reels, Shorts and YouTube. It opens your CapCut drafts, auto captions are free with no limit, exports go up to 4K with no watermark, and there is no subscription or account. It does not have CapCut's template library or a phone app.
+> ${c.summary}
 
 ${status(r)}
 
-## Nuzky and CapCut, side by side
+## Nuzky and ${c.rival}, side by side
 
-| | Nuzky | CapCut |
+| | Nuzky | ${c.rival} |
 | --- | --- | --- |
-${comparison.map((row) => `| ${cell(row.label)} | ${cell(row.nuzky)} | ${cell(row.capcut)} |`).join("\n")}
+${c.rows.map((row) => `| ${cell(row.label)} | ${cell(row.nuzky)} | ${cell(row.rival)} |`).join("\n")}
 
 ## Pick Nuzky if
 
-${list(pickNuzky)}
+${list(c.pickNuzky)}
 
-## Stay with CapCut if
+## ${c.stayWith}
 
-${list(pickCapcut)}
+${list(c.pickRival)}
 
-## Coming from CapCut
+## ${c.moving.mdHeading}
 
-${list(fromCapcut.map((f) => `${f.title}: ${f.text}`))}
+${list(c.moving.items.map((f) => `${f.title}: ${f.text}`))}
 
-## Questions from CapCut users
+## ${c.faqHeading}
 
-${qa(capcutFaq)}
+${qa(c.faq)}
 
 ## Notes
 
-What this page says about CapCut was checked in ${capcutChecked} against ${capcutSources.map((s) => `[${s.label}](${s.href})`).join(", ")}. CapCut's plans change, so check them for the current details. CapCut is a trademark of ByteDance. Nuzky is an independent project and is not affiliated with ByteDance or CapCut.
+What this page says about ${c.rival} was checked in ${c.checked} against ${c.sources.map((s) => `[${s.label}](${s.href})`).join(", ")}. ${c.fineprint}
 
 - [Nuzky home page](${url})
 - [Source code on GitHub](${repo})
@@ -164,7 +151,7 @@ ${qa(g.faq)}
 
 - [Nuzky home page](${url})
 ${list(guides.filter((o) => o !== g).map((o) => `[${o.title}](${url}${o.path}.md)`))}
-- [Nuzky vs CapCut](${url}/capcut-alternative.md)
+${list(comparisons.map((c) => `[${c.name}](${url}${c.path}.md)`))}
 - [Source code on GitHub](${repo})
 `;
 }
@@ -181,7 +168,7 @@ No account, no watermark, no subscription. Editing, captions and export run on t
 ## Pages
 
 - [Nuzky](${url}/index.md): What Nuzky does, its features, how AI agents edit in it, the downloads and answers to common questions
-- [Nuzky vs CapCut](${url}/capcut-alternative.md): Price, platforms, privacy and AI editing compared, with when each one fits better
+${list(comparisons.map((c) => `[${c.name}](${url}${c.path}.md): ${c.covers}`))}
 ${list(guides.map((g) => `[${g.title}](${url}${g.path}.md): ${g.description}`))}
 - [Everything in one file](${url}/llms-full.txt): Every page above in a single Markdown file
 
@@ -202,7 +189,7 @@ ${list(guides.map((g) => `[${g.title}](${url}${g.path}.md): ${g.description}`))}
 }
 
 export function llmsFullTxt(r: Release) {
-  return [homeMarkdown(r), alternativeMarkdown(r), ...guides.map((g) => guideMarkdown(g, r))].join("\n---\n\n");
+  return [homeMarkdown(r), ...comparisons.map((c) => comparisonMarkdown(c, r)), ...guides.map((g) => guideMarkdown(g, r))].join("\n---\n\n");
 }
 
 // `Vary` keeps a cache from handing the Markdown to a browser, since `/` serves it to agents that ask for

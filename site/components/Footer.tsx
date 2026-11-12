@@ -1,10 +1,11 @@
 import Image from "next/image";
+import { comparisons } from "@/lib/comparisons";
 import { guides } from "@/lib/guides";
 import { buildFromSource, license, releases, repo } from "@/lib/site";
 
 export function Footer() {
   const links = [
-    ["Nuzky vs CapCut", "/capcut-alternative"],
+    ...comparisons.map((c) => [c.name, c.path] as const),
     ...guides.map((g) => [g.name, g.path] as const),
     ["GitHub", repo],
     ["Releases", releases],
