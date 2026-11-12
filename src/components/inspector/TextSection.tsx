@@ -162,9 +162,9 @@ function TitleLooks({ clip, style, unit }: { clip: Clip; style: TextStyle; unit:
     return (
       <PresetTile key={p.name} named label={p.name} selected={p === current} title={`Apply ${p.name} style`} onClick={() => void edit(cmds).then((done) => done && showPastEntry(clip.startUs, p.animIn))} preview={cmds}>
         {/* As the Captions tab draws its styles: the name in the style, so the two lists read as one. */}
-        <span className="absolute inset-0 flex items-center justify-center px-1">
+        <span className="@container absolute inset-0 flex items-center justify-center px-1">
           <AnimatedSwatch animation={p.animIn?.kind}>
-            <TextSwatch style={{ ...p.style, fontFamily: p.style.fontFamily ?? style.fontFamily }} label={p.name} size={13} />
+            <TextSwatch style={{ ...p.style, fontFamily: p.style.fontFamily ?? style.fontFamily }} label={p.name} size={13} fit />
           </AnimatedSwatch>
         </span>
       </PresetTile>

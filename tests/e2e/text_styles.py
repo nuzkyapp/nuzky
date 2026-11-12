@@ -53,6 +53,25 @@ def ink(image, colour):
     return len(found) / (w * h), ((min(xs) + max(xs)) / 2 / w, (min(ys) + max(ys)) / 2 / h), (max(xs) - min(xs)) / w
 
 
+def cut(r, swatches):
+    """The labels among `swatches`, each the style's text drawn in a tile, that the tile cuts short with an ellipsis.
+    WebKit measures a cut label only up to its ellipsis, so each is compared with an uncut copy of itself."""
+    return r.s.run(f"""return [...document.querySelectorAll(`{swatches}`)].filter((e) => {{
+      const copy = e.cloneNode(true);
+      Object.assign(copy.style, {{position: 'absolute', visibility: 'hidden', maxWidth: 'none', overflow: 'visible', textOverflow: 'clip'}});
+      e.after(copy);
+      const whole = copy.getBoundingClientRect().width;
+      copy.remove();
+      return whole > e.getBoundingClientRect().width + 0.5;
+    }}).map((e) => e.textContent)""")
+
+
+def whole(r, name, swatches):
+    """Every style's text fits its tile, at any width the panel has; fonts load late, so it waits for them."""
+    r.s.run('return document.fonts.ready.then(() => true)')
+    r.check(name, wait(lambda: cut(r, swatches) == [], 5) and r.s.run(f"return document.querySelectorAll(`{swatches}`).length") > 0, cut(r, swatches))
+
+
 def preview(r, name):
     r.shot(name)
     return preview_crop(r.work / f'{name}.png', preview_rect(r))
@@ -91,6 +110,7 @@ def text_styles(r):
             and sum(c for _, c in listed) == 30, listed)
     for width, height, suffix in ((1024, 640, '-1024'), (1440, 900, '')):
         window(r, width, height)
+        whole(r, f'at {width} px every style\'s text fits its tile in the Text tab', f'{LIBRARY} [data-text-preset] > span:first-child .truncate')
         r.shot(f'library{suffix}')
     time.sleep(1)
     before = r.s.run(REVISION)
@@ -179,6 +199,7 @@ def text_styles(r):
         window(r, width, height)
         r.s.run(f'{red_tile}.scrollIntoView({{block: "center"}})')
         time.sleep(0.5)
+        whole(r, f'at {width} px every title style\'s name fits its tile in the inspector', f'{SECTION} button[aria-pressed] .truncate')
         r.shot(f'inspector{suffix}')
     r.s.run(red_tile + OVER)
     ok, hovered = shows(r, 'title-hover-red-box', red, True)
