@@ -62,19 +62,22 @@ const SAMPLE = [
 const WORD_MS = 360;
 const GAP_MS = 80;
 const HOLD_MS = 500;
-const SAMPLE_MS = SAMPLE.reduce((sum, c) => sum + c.words.length * WORD_MS + HOLD_MS, 0) + 400;
 /** At rest: the first caption fully in, its second word being said. */
 const REST: SampleFrame = { loop: -1, cue: 0, lit: 1, out: false };
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 
 type SampleFrame = { loop: number; cue: number | null; lit: number | null; out: boolean };
 
+/** A caption of the sample, held long enough after its words for a saved style's long animations to play out whole. */
+const cueMs = (words: number, inMs: number, outMs: number) => words * WORD_MS + Math.max(HOLD_MS, inMs + outMs);
+
 /** What the engine draws `t` ms into the sample: which caption, the word being said and whether it is leaving. */
-function sampleAt(t: number, outMs: number): SampleFrame {
-  const loop = Math.floor(t / SAMPLE_MS);
-  let at = loop * SAMPLE_MS;
+function sampleAt(t: number, inMs: number, outMs: number): SampleFrame {
+  const sampleMs = SAMPLE.reduce((sum, c) => sum + cueMs(c.words.length, inMs, outMs), 0) + 400;
+  const loop = Math.floor(t / sampleMs);
+  let at = loop * sampleMs;
   for (const [cue, c] of SAMPLE.entries()) {
-    const length = c.words.length * WORD_MS + HOLD_MS;
+    const length = cueMs(c.words.length, inMs, outMs);
     const local = t - at;
     if (local < length) {
       const word = Math.floor(local / WORD_MS);
@@ -102,17 +105,22 @@ function keyWords(cue: (typeof SAMPLE)[number], keywords: CaptionPreset["style"]
   }
 }
 
+/** Exits the engine carries on in the entry's direction, which the entry played backwards would undo. */
+const EXITS = new Set(["zoomIn", "zoomOut", "slideUp", "slideDown", "slideLeft", "slideRight"]);
+
 /** A one-shot run of the `a-*` keyframes, whose move spans 15 %–70 %, over the animation's real duration. */
 function animationCss(animation: Animation | null | undefined, out: boolean): CSSProperties {
   if (!animation) return {};
   const length = animation.durationUs / 1000 / 0.55;
+  const own = out && EXITS.has(animation.kind);
+  const reverse = out && !own;
   return {
-    animationName: `a-${animation.kind}`,
+    animationName: own ? `a-${animation.kind}-out` : `a-${animation.kind}`,
     animationDuration: `${length}ms`,
-    animationDelay: `${-(out ? 0.3 : 0.15) * length}ms`,
-    animationDirection: out ? "reverse" : "normal",
+    animationDelay: `${-(reverse ? 0.3 : 0.15) * length}ms`,
+    animationDirection: reverse ? "reverse" : "normal",
     animationFillMode: "both",
-    animationTimingFunction: animation.kind === "typewriter" ? "steps(5, end)" : "ease-out",
+    animationTimingFunction: animation.kind === "typewriter" ? "steps(5, end)" : out ? "ease-in" : "ease-out",
   };
 }
 
@@ -121,6 +129,7 @@ function animationCss(animation: Animation | null | undefined, out: boolean): CS
  * word being said and key words take their colour. Still at rest; plays in a loop while `playing`.
  */
 function CaptionSample({ preset, font, playing }: { preset: CaptionPreset; font: string | null | undefined; playing: boolean }) {
+  const inMs = preset.animIn ? preset.animIn.durationUs / 1000 : 0;
   const outMs = preset.animOut ? preset.animOut.durationUs / 1000 : 0;
   const [frame, setFrame] = useState<SampleFrame | null>(null);
   useEffect(() => {
@@ -128,7 +137,7 @@ function CaptionSample({ preset, font, playing }: { preset: CaptionPreset; font:
     const start = performance.now();
     let last = "";
     const timer = window.setInterval(() => {
-      const next = sampleAt(performance.now() - start, outMs);
+      const next = sampleAt(performance.now() - start, inMs, outMs);
       const id = `${next.loop} ${next.cue} ${next.lit} ${next.out}`;
       if (id !== last) {
         last = id;
@@ -139,8 +148,8 @@ function CaptionSample({ preset, font, playing }: { preset: CaptionPreset; font:
       window.clearInterval(timer);
       setFrame(null);
     };
-  }, [playing, outMs]);
-  const at = playing ? (frame ?? sampleAt(0, outMs)) : REST;
+  }, [playing, inMs, outMs]);
+  const at = playing ? (frame ?? sampleAt(0, inMs, outMs)) : REST;
   if (at.cue === null) return null;
   const cue = SAMPLE[at.cue];
   const style = { ...preset.style, fontFamily: preset.style.fontFamily ?? font };
@@ -198,7 +207,7 @@ export function StyleTile({
       {/* Beside the button, under its clear box, so the button's text stays the style's name. */}
       <span
         aria-hidden
-        className={`pointer-events-none absolute inset-x-0 top-0 flex h-16 items-center justify-center overflow-hidden rounded-[10px] bg-white/[.06] px-1 ${disabled ? "opacity-40" : ""}`}
+        className={`pointer-events-none absolute inset-x-0 top-0 flex h-16 items-center justify-center overflow-hidden rounded-[10px] bg-white/[.16] px-1 ${disabled ? "opacity-40" : ""}`}
       >
         <CaptionSample preset={preset} font={font} playing={playing} />
       </span>
@@ -268,7 +277,7 @@ export function StyleTile({
             const r = e.currentTarget.getBoundingClientRect();
             openMenu({ x: r.left, y: r.bottom + 4 }, false);
           }}
-          className="absolute top-11 right-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/55 text-fg opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100 hover:bg-black/75"
+          className="absolute top-10 right-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/55 text-fg opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100 hover:bg-black/75"
         >
           <Ellipsis size={12} />
         </button>
