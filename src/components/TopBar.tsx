@@ -334,27 +334,30 @@ export function TopBar() {
   const reels = useReels((s) => s.open);
   const buttonsInBar = useWindowButtons((s) => s.inBar);
   return (
-    <header data-tauri-drag-region="deep" className={`flex h-12 shrink-0 items-center gap-2 px-1.5 ${buttonsInBar ? "pl-[78px]" : ""}`}>
-      {/* The cover editor takes over the panes, so its way back is where the eye starts. */}
-      {cover ? (
-        <Button variant="bar" pill title="Back to the video (Esc)" onClick={closeCover}>
-          <ChevronLeft size={15} /> Back to video
-        </Button>
-      ) : (
-        <>
-          <ProjectsButton />
-          <div className="bar flex items-center rounded-full">
-            <FeedbackButton />
-            <ShareButton />
-          </div>
-          <UpdateButton />
-        </>
-      )}
-      {/* The name sits in the middle of the space the two sides leave, so a long AI label never covers it.
-          The save state hangs off its right edge, so "Saving…" and "Saved" never move the name; the room kept at
-          its right holds it, so it never runs under the AI run capsule in a narrow window. */}
-      <div className="flex min-w-0 flex-1 justify-center pr-[72px]">
-        <div className="relative flex min-w-0 items-center">
+    // The middle column centres the name on the window; the side columns are equal until one side needs more room, and
+    // only then does the name move away from it.
+    <header data-tauri-drag-region="deep" className="grid h-12 shrink-0 grid-cols-[1fr_minmax(0,auto)_1fr] items-center gap-x-5 px-1.5">
+      <div className={`flex items-center gap-2 ${buttonsInBar ? "pl-[72px]" : ""}`}>
+        {/* The cover editor takes over the panes, so its way back is where the eye starts. */}
+        {cover ? (
+          <Button variant="bar" pill title="Back to the video (Esc)" onClick={closeCover}>
+            <ChevronLeft size={15} /> Back to video
+          </Button>
+        ) : (
+          <>
+            <ProjectsButton />
+            <div className="bar flex items-center rounded-full">
+              <FeedbackButton />
+              <ShareButton />
+            </div>
+            <UpdateButton />
+          </>
+        )}
+      </div>
+      {/* The save state hangs off the name's right edge, so "Saving…" and "Saved" never move the name; the room kept
+          for it is as wide as Saved, so the name and Saved together sit in the middle. */}
+      <div className="flex min-w-0 justify-center">
+        <div className="flex min-w-0 items-center gap-2">
           {cover ? (
             <span className="flex min-w-0 items-center gap-1.5 text-[13px]">
               <span className="shrink-0 font-semibold text-fg">Cover</span>
@@ -363,47 +366,54 @@ export function TopBar() {
           ) : (
             <ProjectName />
           )}
-          <div className="absolute left-full ml-2 whitespace-nowrap">
-            <SaveStatus />
+          <div className="relative shrink-0">
+            <span aria-hidden className="invisible flex items-center gap-1.5 text-[12px]">
+              <span className="h-1.5 w-1.5" /> Saved
+            </span>
+            <div className="absolute inset-y-0 left-0 flex items-center whitespace-nowrap">
+              <SaveStatus />
+            </div>
           </div>
         </div>
       </div>
-      <AiRunBar />
-      <RecordingIndicator />
-      <JobIndicator />
-      <AiToggle />
-      <div className="bar flex items-center rounded-full">
-        {/* Undo and Redo lead the timeline's toolbar; the cover editor and the reels list have none. */}
-        {(cover || reels) && (
-          <>
-            <IconButton round label={aiRun ? "Undo is available when the AI is done" : withKey("Undo", "undo")} disabled={!snap?.canUndo || !!aiRun} onClick={undo}>
-              <Undo2 size={16} />
-            </IconButton>
-            <IconButton round label={aiRun ? "Redo is available when the AI is done" : withKey("Redo", "redo")} disabled={!snap?.canRedo || !!aiRun} onClick={redo}>
-              <Redo2 size={16} />
-            </IconButton>
-          </>
+      <div className="flex items-center justify-end gap-2">
+        <AiRunBar />
+        <RecordingIndicator />
+        <JobIndicator />
+        <AiToggle />
+        <div className="bar flex items-center rounded-full">
+          {/* Undo and Redo lead the timeline's toolbar; the cover editor and the reels list have none. */}
+          {(cover || reels) && (
+            <>
+              <IconButton round label={aiRun ? "Undo is available when the AI is done" : withKey("Undo", "undo")} disabled={!snap?.canUndo || !!aiRun} onClick={undo}>
+                <Undo2 size={16} />
+              </IconButton>
+              <IconButton round label={aiRun ? "Redo is available when the AI is done" : withKey("Redo", "redo")} disabled={!snap?.canRedo || !!aiRun} onClick={redo}>
+                <Redo2 size={16} />
+              </IconButton>
+            </>
+          )}
+          <VersionsButton />
+          <IconButton round aria-haspopup="dialog" label="Settings (Ctrl+,)" onClick={() => openSettings()}>
+            <Settings size={16} />
+          </IconButton>
+        </div>
+        {/* The quality the video exports at sits just before Export; the cover and the reels export their own. */}
+        {!cover && !reels && <QualityChip />}
+        {!reels && (
+          <Button
+            data-tour="export"
+            variant="primary"
+            pill
+            disabled={empty}
+            disabledReason="Add a clip to the timeline to export"
+            title={withKey(cover ? "Export cover" : "Export video", "export")}
+            onClick={cover ? () => void exportCover() : openExport}
+          >
+            <Download size={15} /> {cover ? "Export cover" : "Export"}
+          </Button>
         )}
-        <VersionsButton />
-        <IconButton round aria-haspopup="dialog" label="Settings (Ctrl+,)" onClick={() => openSettings()}>
-          <Settings size={16} />
-        </IconButton>
       </div>
-      {/* The quality the video exports at sits just before Export; the cover and the reels export their own. */}
-      {!cover && !reels && <QualityChip />}
-      {!reels && (
-        <Button
-          data-tour="export"
-          variant="primary"
-          pill
-          disabled={empty}
-          disabledReason="Add a clip to the timeline to export"
-          title={withKey(cover ? "Export cover" : "Export video", "export")}
-          onClick={cover ? () => void exportCover() : openExport}
-        >
-          <Download size={15} /> {cover ? "Export cover" : "Export"}
-        </Button>
-      )}
     </header>
   );
 }

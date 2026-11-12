@@ -1,7 +1,7 @@
 import subprocess
 import time
 
-from e2e.harness import CLI, WINDOWS, changed_share, export, flow, preview_crop, preview_rect, wait, webdriver
+from e2e.harness import CLI, WINDOWS, changed_share, export, flow, preview_crop, preview_rect, title_place, wait, webdriver
 
 TIMED = """const done = arguments[arguments.length - 1];
 const api = window.__nuzky.api, took = {};
@@ -99,6 +99,18 @@ def proxy(r):
     running = wait(lambda: job(r, 'running'), 30, 0.05)
     r.check('the next phone clip gets its copy prepared', running, r.state()['jobs'])
     r.shot('preparing')
+    # The capsule takes more than its half of a 1440 px top bar, so the name gives way to it, never further.
+    place = wait(lambda: (lambda p: p if p['off'] is not None else None)(title_place(r)), 5) or title_place(r)
+    r.check("the name and Saved sit in the middle, or as near it as the job's capsule leaves them, 20 px from it",
+            place['off'] is not None and (place['off'] <= 1 or place['room'] == 20), place)
+    webdriver('POST', r.s.path + '/window/rect', {'width': 1024, 'height': 640})
+    wait(lambda: r.s.run('return window.innerWidth') == 1024, 5)
+    place = title_place(r)
+    rows = r.s.run("return [...document.querySelectorAll('header button')].every((b) => b.getBoundingClientRect().height <= 32)")
+    r.check('in the smallest window the job keeps 20 px from the name and Saved, and every top bar button stays on one line',
+            place['room'] is not None and place['room'] >= 20 and rows, [place, rows])
+    r.shot('preparing-small')
+    webdriver('POST', r.s.path + '/window/rect', {'width': 1440, 'height': 900})
     r.s.run("[...document.querySelectorAll('[role=status] button')].find((b) => b.textContent.trim() === 'Stop').click()")
     r.check('Stop ends the preparation within seconds', wait(lambda: job(r, 'cancelled'), 5), r.state()['jobs'])
     leftovers = [p.name for p in (r.work / 'cache/nuzky/proxy').iterdir() if not p.name.endswith('.lock')]
