@@ -267,6 +267,7 @@ def keys_question(r):
 
     r.check('opening the project again does not ask again', not asked_after_opening(r))
     relaunch(r)
+    hands = Hands(r)  # A new page after the restart, with no pointer listener yet.
     r.check('nor after a restart', not asked_after_opening(r) and r.s.run(KEYS)['preset'] == 'capcut', r.s.run(KEYS))
 
     r.key(',', ctrlKey=True)
@@ -297,6 +298,7 @@ def keys_question(r):
     r.s.run('localStorage.clear()')
     time.sleep(1)
     relaunch(r)
+    hands = Hands(r)
     r.s.run(OPEN_PROJECT)
     r.check("a fresh profile's first project asks", wait(lambda: r.s.run(QUESTION), 5))
     r.check('Not now is a button', click_at(hands, 'dialog[data-keys-question] .justify-end button'))

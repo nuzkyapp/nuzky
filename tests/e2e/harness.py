@@ -628,8 +628,8 @@ def swipe(phase, x, y, dx=0, dy=0):
     webdriver('POST', '/session/nuzky/nuzky/swipe', {'phase': phase, 'x': x, 'y': y, 'dx': dx, 'dy': dy})
 
 
-def close_window(d=None):
-    """Closes the app window like the title-bar button."""
+def close_window(d=None, title=None):
+    """Closes the app window, or on Linux the window with this title, like the title-bar button."""
     if MACOS:
         webdriver('DELETE', '/session/nuzky/window')
         return None
@@ -642,7 +642,7 @@ def close_window(d=None):
     d = d or display.Display()
     protocols, delete = d.intern_atom('WM_PROTOCOLS'), d.intern_atom('WM_DELETE_WINDOW')
     for w, name in _windows(d):
-        if name == 'Nuzky' or name.endswith(' — Nuzky'):
+        if name == title if title else name == 'Nuzky' or name.endswith(' — Nuzky'):
             w.send_event(event.ClientMessage(window=w, client_type=protocols, data=(32, [delete, X.CurrentTime, 0, 0, 0])))
     d.sync()
     return d

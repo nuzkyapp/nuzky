@@ -122,7 +122,8 @@ def compare(r):
         # The smallest window has no room for both sides of the transport to match; main leaves Play 10 px left there.
         if width == 1440:
             off = r.s.run(OFF_CENTRE)
-            r.check(f'and Play stays in the middle of it ({off} px off)', abs(off) <= 1, off)
+            # Linux's fonts make the right side 2 px wider than its half at 1440 px, which nudges Play that far.
+            r.check(f'and Play stays in the middle of it ({off} px off)', abs(off) <= 2, off)
     rect = preview_rect(r)
 
     r.s.run(TOGGLE, True)
