@@ -1530,7 +1530,7 @@ impl Gpu {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8Unorm,
+                format: self.frame_format(),
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
             });
@@ -1601,6 +1601,7 @@ impl Gpu {
         if w > max || h > max {
             anyhow::bail!("This resolution is larger than your GPU supports (max {max} px)");
         }
+        let background = Self::output_color(background, self.hdr);
         let mut used = Vec::new();
         let mut bind_groups = Vec::new();
         let mut encoder = self.device.create_command_encoder(&Default::default());
@@ -1616,13 +1617,20 @@ impl Gpu {
                     bind_groups.push(self.bind(layer, textures.each_ref(), w, h, false));
                 }
                 Draw::Adjustment(layer) => {
+                    // The picture below is in the frames' colour: HLG in an HDR export.
+                    let layer =
+                        &Layer { transfer: if self.hdr { Transfer::Hlg } else { layer.transfer }, ..layer.clone() };
                     let below = self.adjusted_target(adjusted_index, w, h);
                     adjusted_index += 1;
                     let view = below.create_view(&Default::default());
                     self.draw_pass(&mut encoder, &view, background, &bind_groups, false);
                     bind_groups.clear();
                     if layer.opacity < 1.0 {
-                        let plain = Layer { effects: Vec::new(), ..crate::render::solid(&layer.image, w, h) };
+                        let plain = Layer {
+                            effects: Vec::new(),
+                            transfer: layer.transfer,
+                            ..crate::render::solid(&layer.image, w, h)
+                        };
                         let textures = self.layer_textures(&plain, Some(&below), &mut used, &mut encoder, &mut 0)?;
                         bind_groups.push(self.bind(&plain, textures.each_ref(), w, h, true));
                     }
@@ -1710,7 +1718,6 @@ impl Gpu {
 
         self.target(w, h);
         let target = self.target.as_ref().unwrap();
-        let background = Self::output_color(background, self.hdr);
         self.draw_pass(&mut encoder, &target.view, background, &bind_groups, false);
         encoder.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {

@@ -235,6 +235,9 @@ fn hdr_export_draws_dissolves_blurred_backgrounds_crops_and_text() {
     p.tracks[0].clips.push(sdr);
     let style = serde_json::from_value(serde_json::json!({"fontSize": 60.0, "color": "#ffffff"})).unwrap();
     p.apply(EditCmd::AddText { start_us: 0, text: "HDR".into(), style }).unwrap();
+    // An adjustment layer over the first second grades the HLG picture below it in HLG, without converting it again.
+    let grey = Adjust { saturation: -1.0, ..Adjust::default() };
+    p.apply(EditCmd::AddAdjustment { start_us: 0, duration_us: Some(1_000_000), adjust: Some(grey) }).unwrap();
 
     let out = d.join("layers.mp4");
     export(&p, &d.join("cache"), &out, &hdr_options(), &AtomicBool::new(false), |_| {}).unwrap();
@@ -243,6 +246,8 @@ fn hdr_export_draws_dissolves_blurred_backgrounds_crops_and_text() {
     let brightest = f.iter().map(|p| p[1]).fold(0.0, f64::max);
     // The crop leaves the phone's greys up to reference white, so the white text is the brightest: reference white too.
     assert!((brightest - 0.75).abs() <= 0.02, "white text at HDR reference white: brightest {brightest:.3}");
+    let reference = around(&f, 260, H / 2);
+    assert!(off(reference, [0.75; 3]) <= 0.015, "the phone's 75 % grey under the adjustment layer: {reference:.3?}");
     // The blurred picture shows left of the clip, which takes the middle half.
     let behind = around(&f, 60, H / 2);
     assert!(behind.iter().all(|&v| (0.15..0.75).contains(&v)), "the blurred phone clip behind it: {behind:.3?}");
