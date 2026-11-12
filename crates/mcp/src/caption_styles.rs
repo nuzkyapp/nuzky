@@ -113,7 +113,8 @@ pub fn text_styles(canvas: &Canvas) -> Result<Value> {
         style.scale_pixels(canvas.unit());
         style
     };
-    let titles: Vec<_> = text_presets().iter().map(|p| TextPreset { style: scaled(p.style.clone()), ..p.clone() }).collect();
+    let titles: Vec<_> =
+        text_presets().iter().map(|p| TextPreset { style: scaled(p.style.clone()), ..p.clone() }).collect();
     let captions: Vec<_> =
         caption_presets().iter().map(|p| CaptionPreset { style: scaled(p.style.clone()), ..p.clone() }).collect();
     // A damaged My styles file leaves the built-in styles usable and says why.

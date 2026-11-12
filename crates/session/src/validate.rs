@@ -1209,12 +1209,11 @@ mod tests {
                 assert!(fonts.iter().any(|font| font["family"] == family.as_str()), "{name}: {family} is not bundled");
             }
             let mut project = Project::new("styles");
-            let added = project
-                .apply(EditCmd::AddText { start_us: 0, text: "Style".into(), style: style.clone() })
-                .unwrap();
+            let added =
+                project.apply(EditCmd::AddText { start_us: 0, text: "Style".into(), style: style.clone() }).unwrap();
             let clip_id = added.select[0].clone();
             for (slot, animation) in [(AnimationSlot::In, anim_in), (AnimationSlot::Out, anim_out)] {
-                project.apply(EditCmd::SetAnimation { clip_id: clip_id.clone(), slot, animation: animation.clone() }).unwrap();
+                project.apply(EditCmd::SetAnimation { clip_id: clip_id.clone(), slot, animation: *animation }).unwrap();
             }
             validate(&project).unwrap_or_else(|error| panic!("{name}: {error}"));
         }
