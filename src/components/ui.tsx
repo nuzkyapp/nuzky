@@ -1199,6 +1199,25 @@ function swatchShadow(shadow: TextShadow, size: number) {
   return `${x.toFixed(2)}px ${y.toFixed(2)}px ${((shadow.blur / 200) * size).toFixed(2)}px ${shadow.color.slice(0, 7)}${alpha}`;
 }
 
+/** A text style in CSS, as the engine draws it, on text `size` pixels high. */
+export function swatchCss(style: TextStyle, size: number): CSSProperties {
+  return {
+    fontSize: size,
+    fontFamily: fontCss(style.fontFamily),
+    color: style.color,
+    fontWeight: weightOf(style),
+    background: style.background ?? undefined,
+    // As the engine rounds the box and lines up a label of two lines; without either, the usual look.
+    borderRadius: style.boxRadius !== undefined ? `${style.boxRadius * size}px` : undefined,
+    textAlign: style.align && style.align !== "center" ? style.align : undefined,
+    WebkitTextStroke: style.strokeWidth > 0 ? `${Math.min(2, style.strokeWidth / 4)}px ${style.strokeColor}` : undefined,
+    paintOrder: "stroke fill",
+    textShadow: style.shadow ? swatchShadow(style.shadow, size) : undefined,
+    textTransform: CASE_CSS[style.letterCase ?? "none"],
+    letterSpacing: style.letterSpacing ? `${style.letterSpacing}em` : undefined,
+  };
+}
+
 /** A style preview in the font the engine draws it with. */
 export function TextSwatch({ style, label, size = 15, lines = 1 }: { style: TextStyle; label: string; /** Font size in px. */ size?: number; /** A long label wraps onto two. */ lines?: 1 | 2 }) {
   // Karaoke styles show the moment a word is spoken: the last word, or the end of a one-word label, lit.
@@ -1206,24 +1225,7 @@ export function TextSwatch({ style, label, size = 15, lines = 1 }: { style: Text
   const split = label.lastIndexOf(" ") + 1 || Math.ceil(label.length / 2);
   const key = style.keywords ? label.indexOf(" ") + 1 || Math.floor(label.length / 2) : 0;
   return (
-    <span
-      className={`inline-block max-w-full rounded px-1 ${lines === 2 ? "line-clamp-2 text-center leading-[15px]" : "truncate leading-6"}`}
-      style={{
-        fontSize: size,
-        fontFamily: fontCss(style.fontFamily),
-        color: style.color,
-        fontWeight: weightOf(style),
-        background: style.background ?? undefined,
-        // As the engine rounds the box and lines up a label of two lines; without either, the usual look.
-        borderRadius: style.boxRadius !== undefined ? `${style.boxRadius * size}px` : undefined,
-        textAlign: style.align && style.align !== "center" ? style.align : undefined,
-        WebkitTextStroke: style.strokeWidth > 0 ? `${Math.min(2, style.strokeWidth / 4)}px ${style.strokeColor}` : undefined,
-        paintOrder: "stroke fill",
-        textShadow: style.shadow ? swatchShadow(style.shadow, size) : undefined,
-        textTransform: CASE_CSS[style.letterCase ?? "none"],
-        letterSpacing: style.letterSpacing ? `${style.letterSpacing}em` : undefined,
-      }}
-    >
+    <span className={`inline-block max-w-full rounded px-1 ${lines === 2 ? "line-clamp-2 text-center leading-[15px]" : "truncate leading-6"}`} style={swatchCss(style, size)}>
       {key > 0 && <span style={{ color: style.keywords?.color }}>{label.slice(0, Math.min(key, style.highlight ? split : label.length))}</span>}
       {style.highlight ? (
         <>

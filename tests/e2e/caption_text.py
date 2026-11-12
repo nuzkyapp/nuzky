@@ -279,7 +279,7 @@ def caption_text(r):
         press(key)
     press('Return')
     r.check('Size 120 there goes on every caption', every(r, lambda c: c['style']['fontSize'] == 120), [c['style']['fontSize'] for c in captions(r)])
-    # My styles keeps the look, and its tile shows the box as round and the label lined up as the captions are.
+    # My styles keeps the look, and its tile's sample shows the box as round and lined up as the captions are.
     r.s.run(f"document.querySelector('{SECTION} button[aria-label=\"Save the current look as a style\"]').click()")
     name = f"document.querySelector('{SECTION} input[aria-label=\"Style name\"]')"
     if r.check('saving asks for a name in place', wait(lambda: r.s.run(f'return !!{name}'), 5)):
@@ -287,10 +287,10 @@ def caption_text(r):
                 "f.dispatchEvent(new Event('input', {bubbles: true}));"
                 "f.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));")
         swatch = lambda: r.s.run(f"""const t = [...document.querySelectorAll('{SECTION} [data-style-tile]')].find((b) => b.textContent.trim() === 'Round box');
-            const s = t && getComputedStyle(t.querySelector('span'));
+            const s = t && getComputedStyle(t.parentElement.querySelector('[data-caption-sample]'));
             return s ? {{radius: s.borderTopLeftRadius, align: s.textAlign}} : null""")
-        r.check('the saved style\'s tile draws a fully round box and lines its name up right',
-                wait(lambda: swatch() == {'radius': '13px', 'align': 'right'}, 5), swatch())
+        r.check('the saved style\'s tile draws its sample in a fully round box lined up right',
+                wait(lambda: swatch() == {'radius': '12px', 'align': 'right'}, 5), swatch())
     r.s.run(f"[...document.querySelectorAll('{SECTION} [data-style-tile]')].find((b) => b.textContent.trim() === 'Round box').click()")
     r.check('its tile gives every caption that look', every(r, lambda c: c['style']['color'] == '#ffffff'), [c['style']['color'] for c in captions(r)])
     r.s.run("[...document.querySelectorAll('[role=tab]')].find((t) => t.textContent.trim() === 'Captions').click()")

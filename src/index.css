@@ -509,6 +509,13 @@ button:focus-visible .pv {
 .a-typewriter {
   animation-timing-function: steps(5, end);
 }
+/* Exits as the engine draws them, carrying on where the entry was heading: zoom in grows, zoom out shrinks, a slide goes on out. */
+@keyframes a-zoomIn-out { 0%, 15% { opacity: 1; transform: scale(1) } 70%, 100% { opacity: 0; transform: scale(1.5) } }
+@keyframes a-zoomOut-out { 0%, 15% { opacity: 1; transform: scale(1) } 70%, 100% { opacity: 0; transform: scale(0.5) } }
+@keyframes a-slideUp-out { 0%, 15% { opacity: 1; transform: translateY(0) } 70%, 100% { opacity: 0; transform: translateY(-120%) } }
+@keyframes a-slideDown-out { 0%, 15% { opacity: 1; transform: translateY(0) } 70%, 100% { opacity: 0; transform: translateY(120%) } }
+@keyframes a-slideLeft-out { 0%, 15% { opacity: 1; transform: translateX(0) } 70%, 100% { opacity: 0; transform: translateX(-120%) } }
+@keyframes a-slideRight-out { 0%, 15% { opacity: 1; transform: translateX(0) } 70%, 100% { opacity: 0; transform: translateX(120%) } }
 
 /* Motion presets, stronger than the real move so it reads at tile size. Ken Burns grows from the right edge, as the engine zooms it. */
 @keyframes m-pushIn { 0%, 10% { transform: scale(1) } 90%, 100% { transform: scale(1.4) } }

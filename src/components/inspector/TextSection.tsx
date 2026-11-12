@@ -10,7 +10,7 @@ import type { Animation, CaptionPreset, Clip, EditCmd, LetterCase, Project, Text
 import { FontPicker } from "../FontPicker";
 import { Select } from "../panel/SpeechControls";
 import { useSpeechLanguage } from "../panel/CaptionLanguages";
-import { MyStyles, StyleTile, builtInStyles, forTrack, useMyStyles, type Tile } from "./CaptionStyles";
+import { MyStyles, STYLE_GRID, StyleTile, builtInStyles, forTrack, useMyStyles, type Tile } from "./CaptionStyles";
 import { ALL_WEIGHTS, DEFAULT_FONT, WEIGHT_NAMES, useFontWeights } from "../../lib/fonts";
 import { AnimatedSwatch, Button, Checkbox, Chip, ColorInput, Disclosure, LockReason, PresetTile, Section, Segmented, Slider, TextSwatch, lockedProps, parseNumber, useLockReason } from "../ui";
 import { captionKeys, keyAsText, markKeyWords } from "../../lib/keywords";
@@ -228,7 +228,7 @@ function CaptionLooks({
     return (
       <StyleTile
         key={original.name}
-        preset={original}
+        preset={look}
         font={style.fontFamily}
         current={current}
         disabled={!!lock}
@@ -239,7 +239,7 @@ function CaptionLooks({
       />
     );
   };
-  const grid = "grid grid-cols-3 gap-2";
+  const grid = STYLE_GRID;
   return (
     <>
       <div className={grid}>{builtInStyles(translation).map((p) => tile(p))}</div>
