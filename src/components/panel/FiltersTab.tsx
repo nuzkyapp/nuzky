@@ -85,8 +85,6 @@ export function FiltersTab() {
           <Palette size={14} className="shrink-0" /> Select one video, image or adjustment clip to add a LUT or filter.
         </p>
       )}
-      <LogFootage target={target} />
-      <Luts target={target} />
       <section className="flex flex-col gap-2" aria-label="Filters">
         <Heading title="Filters" />
         <div className={GRID}>
@@ -105,6 +103,8 @@ export function FiltersTab() {
         </div>
         {clipId && adjust && !FILTERS.some((f) => sameAdjust(adjust, f.adjust)) && <p className="text-[12px] text-muted">This clip uses custom adjustments. Picking a filter replaces them.</p>}
       </section>
+      <Luts target={target} />
+      <LogFootage target={target} />
     </div>
   );
 }
