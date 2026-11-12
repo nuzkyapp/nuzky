@@ -36,6 +36,7 @@ pub const COMMANDS: &[&str] = &[
     "chatgpt_status",
     "check_for_update",
     "clear_storage",
+    "close_preview_window",
     "color_previews",
     "confirm_youtube_rights",
     "connect_agent",
@@ -79,6 +80,7 @@ pub const COMMANDS: &[&str] = &[
     "open_capcut_draft",
     "open_feedback",
     "open_logs",
+    "open_preview_window",
     "open_project",
     "open_release_page",
     "open_sample",
@@ -88,6 +90,8 @@ pub const COMMANDS: &[&str] = &[
     "play",
     "preview_edits",
     "preview_plugin",
+    "preview_window_action",
+    "preview_window_boot",
     "project_poster",
     "recap_info",
     "redo",
@@ -129,6 +133,7 @@ pub const COMMANDS: &[&str] = &[
     "set_preview_box",
     "set_preview_compare",
     "set_preview_muted",
+    "set_preview_window_box",
     "set_sound_settings",
     "set_style_settings",
     "set_ui_context",
@@ -209,3 +214,7 @@ pub const COMMANDS: &[&str] = &[
     "youtube_video_stop_add",
     "ytdlp_downloaded",
 ];
+
+/// What the preview window's own page may call (capabilities/preview-window.json); every other command refuses it.
+pub const PREVIEW_WINDOW_COMMANDS: &[&str] =
+    &["close_preview_window", "log_ui_error", "preview_window_action", "preview_window_boot", "set_preview_window_box"];

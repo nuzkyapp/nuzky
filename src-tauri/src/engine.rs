@@ -26,6 +26,8 @@ pub enum Msg {
     Pause,
     /// Available preview box in device pixels.
     Resize(u32, u32),
+    /// The box of the preview window in device pixels while it is open; frames are drawn for the larger of the two.
+    WindowBox(Option<(u32, u32)>),
     /// Draws the frame again, as something it reads from the cache was made.
     Redraw,
     /// The share of the width, from the left, drawn without the clips' adjustments; `None` ends the comparison.
@@ -176,11 +178,18 @@ fn preview_size(project: &Project, box_w: u32, box_h: u32) -> (u32, u32) {
     (even(cw * scale), even(ch * scale))
 }
 
+/// One frame serves the editor's preview and the preview window, so it is drawn for the larger of them.
+fn render_size(project: &Project, editor: (u32, u32), window: Option<(u32, u32)>) -> (u32, u32) {
+    let own = preview_size(project, editor.0, editor.1);
+    window.map(|(w, h)| preview_size(project, w, h)).filter(|other| other.0 > own.0).unwrap_or(own)
+}
+
 struct State {
     project: Arc<Project>,
     shared_project: Arc<Mutex<Arc<Project>>>,
     t_us: i64,
     box_size: (u32, u32),
+    window_box: Option<(u32, u32)>,
     audio: Option<AudioOut>,
     dirty: bool,
     compare: Option<f32>,
@@ -223,6 +232,7 @@ fn run<F: Frames>(
         project,
         t_us: 0,
         box_size: (540, 960),
+        window_box: None,
         audio: None,
         dirty: true,
         compare: None,
@@ -302,6 +312,10 @@ fn run<F: Frames>(
                         st.box_size = (w.max(32), h.max(32));
                         st.dirty = true;
                     }
+                    Msg::WindowBox(size) => {
+                        st.window_box = size.map(|(w, h)| (w.max(32), h.max(32)));
+                        st.dirty = true;
+                    }
                     Msg::Redraw => st.dirty = true,
                     Msg::Compare(split) => {
                         st.compare = split;
@@ -328,7 +342,7 @@ fn run<F: Frames>(
 
             let playing = st.audio.is_some();
             if playing || st.dirty {
-                let (w, h) = preview_size(&st.project, st.box_size.0, st.box_size.1);
+                let (w, h) = render_size(&st.project, st.box_size, st.window_box);
                 let wait = if playing { Wait::Ready } else { Wait::Exact };
                 let started = Instant::now();
                 renderer.compare(st.compare);

@@ -6,7 +6,7 @@ import { AI_EDITING, useAiLocked, useEditor } from "../lib/store";
 import { formatLength, US } from "../lib/time";
 import type { Filmstrip, Part, VideoPreview, YoutubeVideo } from "../lib/types";
 import { addYoutubeVideo, useYoutube } from "../lib/youtube";
-import { useFrameStream } from "./preview/Preview";
+import { useFrameStream } from "../lib/frameStream";
 import { Button, IconButton, NumberInput, ProgressBar, trapTab } from "./ui";
 
 /** Footage kept hidden around the part is the backend's business; the dialog only ever shows the part. */
