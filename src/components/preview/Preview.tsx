@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useFrameStream } from "../../lib/frameStream";
-import { AudioLines, Maximize, Minimize, Pause, Play, SkipBack, SkipForward, Smartphone, SquareArrowOutUpRight, SquareSplitHorizontal, Volume2, VolumeX, X } from "lucide-react";
+import { AudioLines, Maximize, Minimize, Pause, Play, SkipBack, SkipForward, ScreenShare, Smartphone, SquareSplitHorizontal, Volume2, VolumeX, X } from "lucide-react";
 import { api } from "../../lib/api";
 import { useCover } from "../../lib/cover";
 import { stopPicking, useFollow } from "../../lib/follow";
@@ -260,6 +260,14 @@ export function Preview() {
       {muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
     </IconButton>
   );
+  // The window only shows the video, so it opens while an agent edits too. The smallest preview leaves it to Shift+F.
+  const windowButton = (
+    <LockReason.Provider value={null}>
+      <IconButton round label={withKey(windowOpen ? "Close the preview window" : "Open the preview window", "previewWindow")} active={windowOpen} onClick={() => void togglePreviewWindow()} className="@max-[440px]:hidden" data-preview-window>
+        <ScreenShare size={16} />
+      </IconButton>
+    </LockReason.Provider>
+  );
   const fullButton = (
     <IconButton round label={withKey(full ? "Exit full screen" : "Full screen", "fullScreen")} onClick={() => void toggleFullPreview()}>
       {full ? <Minimize size={16} /> : <Maximize size={16} />}
@@ -345,6 +353,7 @@ export function Preview() {
         {cover ? <CoverBar format={cover} /> : reels ? <ReelBar /> : source ? (
           <SourceTransport>
             {muteButton}
+            {windowButton}
             {fullButton}
           </SourceTransport>
         ) : <div className="bar grid h-11 w-full max-w-[760px] grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-full px-1.5">
@@ -392,12 +401,7 @@ export function Preview() {
               <Smartphone size={16} />
             </IconButton>
             {canvas && <RatioMenu />}
-            {/* The window only shows the video, so it opens while an agent edits too. */}
-            <LockReason.Provider value={null}>
-              <IconButton round label={withKey(windowOpen ? "Close the preview window" : "Open the preview in its own window", "previewWindow")} active={windowOpen} onClick={() => void togglePreviewWindow()} data-preview-window>
-                <SquareArrowOutUpRight size={16} />
-              </IconButton>
-            </LockReason.Provider>
+            {windowButton}
             {fullButton}
           </div>
         </div>}

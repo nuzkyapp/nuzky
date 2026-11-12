@@ -55,7 +55,7 @@ def preview_window(r):
     main = webdriver('GET', r.s.path + '/window')
     wait(lambda: r.s.run(f'return {BUTTON}?.getAttribute("aria-label")'), 10)
     label = r.s.run(f'return {BUTTON}.getAttribute("aria-label")')
-    r.check('the transport offers the preview window with its key', label == 'Open the preview in its own window (Shift+F)', label)
+    r.check('the transport offers the preview window with its key', label == 'Open the preview window (Shift+F)', label)
     off = r.s.run(OFF_CENTRE)
     r.check(f'with the button the transport keeps Play in its middle ({off} px off)', abs(off) <= 1, off)
     saved = r.saved_project().read_bytes()
@@ -134,6 +134,18 @@ def preview_window(r):
     r.s.run("document.querySelector('button[aria-label^=\"Pause\"]').click()")
     r.check('its Play and Pause buttons play and pause too', played and wait(lambda: not r.s.run(WINDOW_STATE)['playing'], 5))
 
+    switch(r, main)
+    r.s.run("window.__nuzky.keys.setState({changed: {playPause: ['P']}})")
+    switch(r, preview)
+    r.key('P')
+    replayed = wait(lambda: r.s.run(WINDOW_STATE)['playing'], 5)
+    r.key('P')
+    r.check('a key changed in Settings while the window is open plays there at once',
+            replayed and wait(lambda: not r.s.run(WINDOW_STATE)['playing'], 5))
+    switch(r, main)
+    r.s.run("window.__nuzky.keys.setState({changed: {}})")
+    switch(r, preview)
+
     r.key('f')
     r.check('F asks for full screen, and the button turns into Exit full screen',
             r.s.run('return window.__fullscreen') == [True]
@@ -181,6 +193,18 @@ def preview_window(r):
 
     r.s.run(f'{BUTTON}.click()')
     wait(lambda: len(handles(r)) == 2, 10)
+    switch(r, next(h for h in handles(r) if h != main))
+    wait(lambda: r.s.run("return !!document.querySelector('main[aria-label=\"Preview window\"] canvas')", retries=3), 10)
+    r.key('w', ctrlKey=True)
+    switch(r, main)
+    r.check('Ctrl+W in the window closes it', wait(lambda: len(handles(r)) == 1, 10) and wait(lambda: pressed(r) == 'false', 5), handles(r))
+
+    asset = r.s.run('return window.__nuzky.store.getState().snap.project.assets[0].id')
+    r.s.run("window.__nuzky.source.setState({asset: window.__nuzky.store.getState().snap.project.assets[0]})")
+    r.check('a media item shown in the preview keeps the button in its transport', asset and wait(lambda: pressed(r) == 'false', 5))
+    r.s.run(f'{BUTTON}.click()')
+    wait(lambda: len(handles(r)) == 2, 10)
+    r.s.run("window.__nuzky.source.setState({asset: null})")
     r.s.run("window.__nuzky.store.setState({view: 'home'})")
     r.check('leaving the editor for the projects closes the window', wait(lambda: len(handles(r)) == 1, 10), handles(r))
     r.s.run("window.__nuzky.store.setState({view: 'editor'})")

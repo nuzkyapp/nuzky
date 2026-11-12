@@ -16,7 +16,7 @@ export const ACTIONS = [
   { id: "goEnd", group: "Playback", label: "Go to end" },
   { id: "mute", group: "Playback", label: "Mute the preview" },
   { id: "fullScreen", group: "Playback", label: "Full screen preview" },
-  { id: "previewWindow", group: "Playback", label: "Preview in its own window" },
+  { id: "previewWindow", group: "Playback", label: "Preview window" },
   { id: "split", group: "Edit", label: "Split at the playhead" },
   { id: "deleteLeft", group: "Edit", label: "Delete left of the playhead" },
   { id: "deleteRight", group: "Edit", label: "Delete right of the playhead" },
@@ -211,6 +211,8 @@ function load(): Saved {
 
 export const useKeys = create<Saved>(() => load());
 useKeys.subscribe((s) => localStorage.setItem(KEY, JSON.stringify(s)));
+// The preview window follows keys changed in the editor's Settings while it is open.
+window.addEventListener("storage", (e) => e.key === KEY && useKeys.setState(load(), true));
 
 export const keysOf = (id: ActionId, s: Saved = useKeys.getState()) => s.changed[id] ?? PRESETS[s.preset].keys[id];
 

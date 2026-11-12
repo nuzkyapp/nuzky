@@ -15,7 +15,8 @@ const useWindow = create(() => ({
   url: "",
   playing: false,
   timeUs: 0,
-  project: { durationUs: 0, width: 1080, height: 1920 } as PreviewProject,
+  // No frame box until the window knows the project's shape, so it never shows the wrong one first.
+  project: { durationUs: 0, width: 0, height: 0 } as PreviewProject,
   engineError: null as string | null,
   full: false,
 }));
@@ -52,7 +53,14 @@ function Timecode() {
 function useKeys() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const action = actionOf(chordsOf(e));
+      const chords = chordsOf(e);
+      const action = actionOf(chords);
+      // A window of its own closes as other windows do; the editor's window keeps Ctrl+W for itself.
+      if (chords.includes("Ctrl+W")) {
+        e.preventDefault();
+        void api.closePreviewWindow();
+        return;
+      }
       if (e.key === "Escape") {
         if (useWindow.getState().full) void win.setFullscreen(false);
         return;
@@ -118,7 +126,7 @@ export default function PreviewWindow() {
   }, []);
 
   const aspect = width / height;
-  const fit = box.w / box.h > aspect ? { h: box.h, w: box.h * aspect } : { w: box.w, h: box.w / aspect };
+  const fit = height === 0 ? { w: 0, h: 0 } : box.w / box.h > aspect ? { h: box.h, w: box.h * aspect } : { w: box.w, h: box.w / aspect };
   const empty = durationUs === 0;
   return (
     <main className="@container fixed inset-0 flex flex-col bg-black" aria-label="Preview window">
