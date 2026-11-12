@@ -120,7 +120,8 @@ function animationCss(animation: Animation | null | undefined, out: boolean): CS
     animationDelay: `${-(reverse ? 0.3 : 0.15) * length}ms`,
     animationDirection: reverse ? "reverse" : "normal",
     animationFillMode: "both",
-    animationTimingFunction: animation.kind === "typewriter" ? "steps(5, end)" : out ? "ease-in" : "ease-out",
+    // Played backwards, ease-out turns into the ease-in the engine exits with.
+    animationTimingFunction: animation.kind === "typewriter" ? "steps(5, end)" : own ? "ease-in" : "ease-out",
   };
 }
 
