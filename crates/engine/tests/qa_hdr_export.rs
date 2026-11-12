@@ -197,7 +197,14 @@ fn hdr_export_refuses_a_video_without_hdr_footage() {
         return;
     }
     let d = dir("hdr-export-sdr");
-    let p = project(&sdr_clip(&d), 500_000);
+    let mut p = project(&sdr_clip(&d), 500_000);
+    // The sound of a phone's HDR clip kept on an audio track after its picture was replaced shows no HDR.
+    let phone = probe(&phone_clip(&d, "arib-std-b67"), "phone".into()).unwrap();
+    let mut sound = p.tracks[0].clone();
+    (sound.id, sound.kind, sound.clips) =
+        ("sound".into(), TrackKind::Audio, vec![clip("sound", &phone.id, 0, 500_000)]);
+    p.tracks.push(sound);
+    p.assets.push(phone);
     assert!(hdr_footage(&p).is_empty());
     let out = d.join("refused.mp4");
     std::fs::remove_file(&out).ok();

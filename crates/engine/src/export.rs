@@ -347,12 +347,12 @@ pub fn check_options(project: &Project, options: &ExportOptions) -> Result<()> {
     Ok(())
 }
 
-/// The names of the HDR files the video shows: on a track that is not hidden, without a log profile, which says how
+/// The names of the HDR files the video shows: on a video track that is not hidden, without a log profile, which says how
 /// its picture encodes light whatever its file claims. A file that cannot be read counts as not HDR.
 pub fn hdr_footage(project: &Project) -> Vec<String> {
     init();
     let mut names = Vec::new();
-    let shown = project.tracks.iter().filter(|t| !t.hidden && t.kind != TrackKind::Text).flat_map(|t| &t.clips);
+    let shown = project.tracks.iter().filter(|t| !t.hidden && t.kind == TrackKind::Video).flat_map(|t| &t.clips);
     for clip in shown.filter(|clip| clip.start_us < project.duration_us()) {
         let ClipContent::Media { asset_id, log, .. } = &clip.content else { continue };
         let Some(asset) = project.asset(asset_id).filter(|a| a.kind != AssetKind::Audio && log.is_none()) else {
