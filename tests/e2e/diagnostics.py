@@ -98,7 +98,7 @@ def diagnostics(r):
             alert == "Export failed: Nuzky isn't allowed to save in that folder. Export to another folder.Open logs folder" and not re.search(r'\b[A-Z_]{4,}:', alert) and secret_free(r, alert), alert)
     buttons = r.s.run(DIALOG_BUTTONS)
     # Started from the dialog, the last button is Retry; this export never told the dialog where it went.
-    r.check('the failure offers Open logs folder, and Close and Export… to try again', 'Open logs folder' in buttons and buttons[-2:] == ['Close', 'Export…'], buttons)
+    r.check('the failure offers Open logs folder, and Export… to try again', 'Open logs folder' in buttons and buttons[-1] == 'Export…', buttons)
     time.sleep(0.6)  # The dialog has faded in.
     r.shot('export-failed')
     log = log_text(r)

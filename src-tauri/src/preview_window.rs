@@ -55,7 +55,8 @@ pub async fn open_preview_window(app: AppHandle) -> CmdResult<()> {
     if flow {
         crate::test_bridge::keep_away(&window).map_err(err)?;
     }
-    if !flow {
+    // Under gamescope a window never shown keeps no size and draws nothing; it is off any screen of a person there.
+    if !flow || cfg!(target_os = "linux") {
         window.show().map_err(err)?;
     }
     app.emit_to("main", "preview-window", true).ok();

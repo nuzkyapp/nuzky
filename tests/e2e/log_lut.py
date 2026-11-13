@@ -14,7 +14,7 @@ CLICK = f"""const b = [...{SECTION}.querySelectorAll('button[aria-pressed]')].fi
 if (!b) return false; b.click(); return true"""
 PRESSED = f"""const b = [...{SECTION}.querySelectorAll('button[aria-pressed]')].find((b) => b.textContent.trim() === arguments[1]);
 return b ? b.getAttribute('aria-pressed') === 'true' : null"""
-SHOW_ALL = f"const b = [...{SECTION}.querySelectorAll('button')].find((b) => /^Show (all|fewer)/.test(b.textContent.trim())); b.click(); return b.textContent.trim()"
+SHOW_ALL = f"const b = [...{SECTION}.querySelectorAll('button')].find((b) => /^Show (all|fewer)/.test(b.textContent.trim())); const t = b.textContent.trim(); b.click(); return t"
 ALERT = f"const a = {SECTION}.querySelector('[role=alert]'); return a ? a.textContent : null"
 INSPECTOR = "const s = [...document.querySelectorAll('aside[aria-label=Inspector] section')].find((s) => s.querySelector('h3')?.textContent === 'Colour'); return s ? s.innerText : null"
 TOGGLE = """const b = [...document.querySelectorAll('section[aria-label=Preview] button')].find((b) => b.querySelector('.lucide-square-split-horizontal'));
