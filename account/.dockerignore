@@ -1,0 +1,7 @@
+.next
+node_modules
+deploy
+test
+scripts
+*.tsbuildinfo
+next-env.d.ts
