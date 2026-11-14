@@ -26,7 +26,7 @@ function Waiting() {
   return (
     <div role="status" className="flex h-10 w-full items-center gap-2.5 text-[13px] text-fg">
       <Loader2 size={16} className="shrink-0 animate-spin text-accent" />
-      <span className="flex-1">Finish signing in in your browser…</span>
+      <span className="flex-1">Continue in your browser…</span>
       <Button pill data-autofocus onClick={cancelSignIn}>
         Cancel
       </Button>
@@ -37,37 +37,36 @@ function Waiting() {
 function SignedOut({ email }: { email: string | null }) {
   const waiting = useAccount((s) => s.action === "signingIn");
   return (
-    <section aria-label="Sign in to Nuzky" className={`flex flex-col items-start gap-3 p-4 ${CARD}`}>
-      <div>
-        <h3 className="text-[13px] font-semibold text-fg">Sign in to Nuzky</h3>
-        <p className="mt-1 text-[12px] leading-[18px] text-muted">
-          Keep Your style and your caption styles the same on every computer. Everything in Nuzky works without an account.
-        </p>
-      </div>
-      {waiting ? (
-        <Waiting />
-      ) : (
-        <>
-          <GoogleButton />
-          <Button pill onClick={() => void signIn("email")} className="h-10 w-[236px] max-w-full text-[14px]">
-            <Mail size={15} />
-            Continue with email
-          </Button>
-          <p className="text-[12px] text-muted">
-            Both open your browser.
-            {email && (
-              <>
-                {" "}
-                Last signed in as <span className="text-fg/85">{email}</span>.{" "}
-                <button type="button" onClick={() => void signIn("email", true)} className="text-accent hover:underline">
-                  Use another account
-                </button>
-              </>
-            )}
+    <>
+      <section aria-label="Sign in to Nuzky" className={`flex flex-col items-start gap-3 p-4 ${CARD}`}>
+        <div>
+          <h3 className="text-[13px] font-semibold text-fg">Sign in to Nuzky</h3>
+          <p className="mt-1 text-[12px] leading-[18px] text-muted">
+            Keep Your style and your caption styles the same on every computer. Everything in Nuzky works without an account.
           </p>
-        </>
+        </div>
+        {waiting ? (
+          <Waiting />
+        ) : (
+          <>
+            <GoogleButton />
+            <Button pill onClick={() => void signIn("email")} className="h-10 w-[236px] max-w-full text-[14px]">
+              <Mail size={15} />
+              Continue with email
+            </Button>
+            <p className="text-[12px] text-muted">Both open your browser.</p>
+          </>
+        )}
+      </section>
+      {email && !waiting && (
+        <p className="text-[12px] leading-[18px] text-muted">
+          Last signed in as <span className="text-fg/85">{email}</span>.{" "}
+          <button type="button" onClick={() => void signIn("email", true)} className="text-accent hover:underline">
+            Use another account
+          </button>
+        </p>
       )}
-    </section>
+    </>
   );
 }
 
@@ -91,8 +90,6 @@ function SignedIn({ status }: { status: Extract<AccountStatus, { state: "signedI
         </div>
         <Button
           pill
-          variant="ghost"
-          data-autofocus
           disabled={action !== null}
           disabledReason={action === "signingOut" ? "Signing out…" : "Finish signing in first"}
           onClick={() => void signOut()}
@@ -103,9 +100,9 @@ function SignedIn({ status }: { status: Extract<AccountStatus, { state: "signedI
       <div className="flex min-h-[44px] items-center gap-3 border-t border-white/[.06] px-3.5 py-2.5">
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="text-[13px] font-medium text-fg">Manage account</span>
-          <span className="text-[12px] text-muted">Change your password or delete your account</span>
+          <span className="text-[12px] text-muted">Set or change your password, or delete your account</span>
         </div>
-        <Button pill onClick={() => void manage()}>
+        <Button pill data-autofocus onClick={() => void manage()}>
           Open <ExternalLink size={12} />
         </Button>
       </div>
@@ -150,7 +147,7 @@ export function AccountPane() {
             <p className="flex items-start gap-1.5 text-[12px] leading-[18px] text-fg" role="status">
               <AlertTriangle size={14} className="mt-0.5 shrink-0 text-warn" />
               {notice === "ended"
-                ? "Your sign-in ended, or the account was deleted. Sign in again to use your account."
+                ? "Your sign-in ended. Sign in again to keep using your account."
                 : "Signed out on this computer, but Nuzky couldn't reach the account server to end the sign-in there."}
             </p>
           )}

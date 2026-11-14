@@ -146,11 +146,12 @@ def account(r):
         r.key('Enter')
         r.check('Enter on it shows Settings › Account with Continue with Google on the keyboard',
                 wait(lambda: view(r).get('focused') == 'Continue with Google', 5), view(r))
+        time.sleep(2.6)  # The light on the row search found fades before the next picture.
 
         browse(r, 'ignore')
         click(r, 'Continue with email')
         r.check('while the browser signs in, the pane waits with Cancel',
-                wait(lambda: 'Finish signing in in your browser…' in view(r).get('text', ''), 5), view(r))
+                wait(lambda: 'Continue in your browser…' in view(r).get('text', ''), 5), view(r))
         shot(r, 'waiting')
         click(r, 'Cancel')
         r.check('Cancel goes back to the two buttons without an error or tokens',
@@ -161,6 +162,7 @@ def account(r):
         r.check('signing up with the mailed code signs Nuzky in as that email',
                 wait(lambda: EMAIL in view(r).get('text', '') and 'Sign out' in view(r)['text'], 20), view(r))
         authorize = urllib.parse.parse_qs(urllib.parse.urlsplit(visits(r)[0]['url']).query)
+        r.check('after signing in the keyboard is on Open, so Enter cannot sign out', view(r)['focused'] == 'Open', view(r))
         r.check('Nuzky asks for a code with PKCE S256 for its own client and a loopback callback, without Google or prompt',
                 authorize.get('client_id') == ['nuzky-desktop'] and authorize.get('code_challenge_method') == ['S256']
                 and authorize.get('scope') == ['openid email profile offline_access nuzky']
@@ -228,7 +230,7 @@ def account(r):
         close_settings(r)
         open_account(r)
         r.check("the next check ends a deleted account's sign-in and says so",
-                wait(lambda: 'Your sign-in ended, or the account was deleted.' in view(r).get('text', ''), 10)
+                wait(lambda: 'Your sign-in ended. Sign in again to keep using your account.' in view(r).get('text', ''), 10)
                 and f'Last signed in as {GOOGLE}.' in view(r)['text'] and not stored(r), view(r))
         shot(r, 'ended')
 
@@ -248,8 +250,12 @@ def account(r):
                 EMAIL in view(r)['text'] and 'Sign out' in view(r)['text'] and not view(r)['alert'] and stored(r) == before, view(r))
 
         if resize(r, 1024, 640):
-            time.sleep(0.5)
             shot(r, 'signed-in-small-window')
+        click(r, 'Sign out')
+        r.check('signing out without the server signs out here and says the server could not end the sign-in',
+                wait(lambda: "Signed out on this computer, but Nuzky couldn't reach the account server" in view(r).get('text', ''), 15)
+                and 'Continue with email' in view(r)['text'] and not stored(r), view(r))
+        shot(r, 'signed-out-offline')
         close_settings(r)
     finally:
         if r.server.poll() is None:

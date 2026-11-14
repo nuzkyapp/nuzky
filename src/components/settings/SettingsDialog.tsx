@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
+import { Fragment, useEffect, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
 import { HardDrive, Keyboard, Music, Puzzle, Settings, Shield, Sparkles, Subtitles, UserRound, X } from "lucide-react";
 import { initial, useAccount } from "../../lib/account";
 import { ACTIONS, keysOf, useKeys } from "../../lib/keys";
@@ -107,7 +107,7 @@ function AccountTab({ on }: { on: boolean }) {
       >
         {signedIn ? initial(signedIn) : <UserRound size={16} className={on ? "text-accent" : undefined} />}
       </span>
-      <span className="flex min-w-0 flex-col">
+      <span className="flex min-w-0 flex-col" title={signedIn ? [signedIn.name, signedIn.email].filter(Boolean).join("\n") : undefined}>
         <span className="truncate text-[13px] leading-4 font-medium">{signedIn ? (signedIn.name ?? signedIn.email) : "Sign in"}</span>
         <span className="truncate text-[11px] leading-[14px] font-normal text-muted">{signedIn?.name ? signedIn.email : "Nuzky account"}</span>
       </span>
@@ -280,30 +280,32 @@ function Dialog() {
                 const Icon = ICONS[id];
                 const on = id === pane;
                 return (
-                  <button
-                    key={id}
-                    type="button"
-                    role="tab"
-                    id={`settings-tab-${id}`}
-                    aria-selected={on}
-                    aria-controls="settings-panel"
-                    tabIndex={on ? 0 : -1}
-                    onClick={(e) => {
-                      show(id);
-                      // WebKit leaves the keyboard where it was on a click, so the ring would stay on the pane before.
-                      e.currentTarget.focus();
-                    }}
-                    className={`flex shrink-0 items-center text-left text-[13px] transition-colors duration-[120ms] ease-out ${id === "account" ? "mb-2 h-11 gap-2 rounded-[10px] px-2" : "h-8 gap-2.5 rounded-lg px-2.5"} ${on ? "bg-white/[.1] font-medium text-fg" : "text-fg hover:bg-white/[.05]"} ${id === "storage" ? "mt-3" : ""}`}
-                  >
-                    {id === "account" ? (
-                      <AccountTab on={on} />
-                    ) : (
-                      <>
-                        <Icon size={16} className={on ? "text-accent" : "text-muted"} />
-                        {PANE_TITLES[id]}
-                      </>
-                    )}
-                  </button>
+                  <Fragment key={id}>
+                    <button
+                      type="button"
+                      role="tab"
+                      id={`settings-tab-${id}`}
+                      aria-selected={on}
+                      aria-controls="settings-panel"
+                      tabIndex={on ? 0 : -1}
+                      onClick={(e) => {
+                        show(id);
+                        // WebKit leaves the keyboard where it was on a click, so the ring would stay on the pane before.
+                        e.currentTarget.focus();
+                      }}
+                      className={`flex shrink-0 items-center text-left text-[13px] transition-colors duration-[120ms] ease-out ${id === "account" ? "h-11 gap-2 rounded-[10px] px-2" : "h-8 gap-2.5 rounded-lg px-2.5"} ${on ? "bg-white/[.1] font-medium text-fg" : "text-fg hover:bg-white/[.05]"} ${id === "storage" ? "mt-3" : ""}`}
+                    >
+                      {id === "account" ? (
+                        <AccountTab on={on} />
+                      ) : (
+                        <>
+                          <Icon size={16} className={on ? "text-accent" : "text-muted"} />
+                          {PANE_TITLES[id]}
+                        </>
+                      )}
+                    </button>
+                    {id === "account" && <div aria-hidden="true" className="mx-2 my-1.5 h-px shrink-0 bg-white/[.06]" />}
+                  </Fragment>
                 );
               })}
             </div>
