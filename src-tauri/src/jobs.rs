@@ -132,6 +132,16 @@ pub(crate) fn unregister(app: &AppHandle, id: &str) {
     app.state::<AppState>().jobs.lock().unwrap().remove(id);
 }
 
+/// Opening another project stops speech recognition for the one open before: its captions could not be added any
+/// more, and recognition is free for the next project. Files recognised by then keep their transcript.
+pub(crate) fn stop_project_work(state: &AppState) {
+    for (id, cancel) in state.jobs.lock().unwrap().iter() {
+        if matches!(id.split(':').next(), Some("captions" | "transcript")) {
+            cancel.store(true, Ordering::Relaxed);
+        }
+    }
+}
+
 /// Decodes the audio of every asset once into the PCM cache used for playback, waveforms, export and
 /// captions, cleans the voice of files whose clips ask for it and makes the preview proxies of heavy video.
 pub fn prepare_media(state: &AppState, project: &Project) {

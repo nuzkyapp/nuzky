@@ -403,6 +403,19 @@ export function blobUrl(url: string): string {
   return URL.createObjectURL(new Blob([bytes], { type: head[1] }));
 }
 
+/** Speech recognition for the open project, which opening another project stops (`jobs::stop_project_work`). */
+const recognition = (job: JobEvent) => job.kind === "captions" || job.kind === "transcript";
+
+/** Recognition of the project open before, still stopping; its events until then belong to no open project. */
+const stopping = new Set<string>();
+
+/** True for an event of work the project open before still does as it stops, which no project here shows. */
+export function leftBehind(job: JobEvent): boolean {
+  if (!stopping.has(job.id)) return false;
+  if (job.status !== "running") stopping.delete(job.id);
+  return true;
+}
+
 /** Frees the blob URLs of previews dropped from the caches. */
 function revokePreviews(thumbs: (string | null)[], strips: (Filmstrip | null)[]) {
   for (const url of [...thumbs, ...strips.map((f) => f?.url ?? null)]) if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
@@ -465,6 +478,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       Object.entries(get().thumbs).flatMap(([id, url]) => (dropped(id) ? [url] : [])),
       Object.entries(get().filmstrips).flatMap(([id, strip]) => (dropped(id) ? [strip] : [])),
     );
+    if (switched) for (const job of Object.values(get().jobs)) if (recognition(job) && job.status === "running") stopping.add(job.id);
     set({
       snap,
       selection: snap.select.length > 0 ? snap.select : kept,
@@ -473,10 +487,10 @@ export const useEditor = create<EditorState>((set, get) => ({
       timeUs: Math.min(get().timeUs, projectDuration(snap.project)),
       aiRun: snap.openRunLabel,
       // A copied project can reuse asset ids for other files, so media previews start over.
-      // An agent's jobs end with their project, whose last events never arrive.
+      // An agent's jobs end with their project, whose last events never arrive, and recognition stops with it.
       // Copied text and borders are in the pixels of the canvas they came from.
       ...(!switched && canvasUnit(snap.project.canvas) !== canvasUnit(prev.project.canvas) ? { clipboard: null } : {}),
-      ...(switched ? { clipboard: null, thumbs: {}, filmstrips: {}, waveforms: {}, jobs: Object.fromEntries(Object.entries(get().jobs).filter(([, j]) => j.kind !== "agent")) } : {}),
+      ...(switched ? { clipboard: null, thumbs: {}, filmstrips: {}, waveforms: {}, jobs: Object.fromEntries(Object.entries(get().jobs).filter(([, j]) => j.kind !== "agent" && !recognition(j))) } : {}),
       ...(rebound.length > 0 ? { thumbs: without(get().thumbs), filmstrips: without(get().filmstrips), waveforms: without(get().waveforms) } : {}),
     });
     if (switched) waveformUse.clear();
