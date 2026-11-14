@@ -102,16 +102,27 @@ impl Reporter {
     }
 }
 
-/// Exports run one at a time; captions, transcripts and style learning share one recognition slot.
 pub(crate) fn register(app: &AppHandle, id: &str) -> Option<Arc<AtomicBool>> {
     let state = app.state::<AppState>();
     let mut jobs = state.jobs.lock().unwrap();
+    if busy(&jobs, id) {
+        return None;
+    }
+    let flag = Arc::new(AtomicBool::new(false));
+    jobs.insert(id.to_string(), flag.clone());
+    Some(flag)
+}
+
+/// Exports run one at a time; captions, transcripts and style learning share one recognition slot, which one being
+/// stopped leaves at once: the lock beside the models (`transcript::recognise`) makes the next wait until it has.
+fn busy(jobs: &HashMap<String, Arc<AtomicBool>>, id: &str) -> bool {
     let kind = id.split(':').next().unwrap_or(id);
-    let conflicts = |running: &str| {
+    let recognition = |kind: &str| matches!(kind, "captions" | "transcript" | "style");
+    let conflicts = |(running, cancel): (&String, &Arc<AtomicBool>)| {
         let running = running.split(':').next().unwrap_or(running);
         match kind {
             "export" => running == "export",
-            "captions" | "transcript" | "style" => matches!(running, "captions" | "transcript" | "style"),
+            _ if recognition(kind) => recognition(running) && !cancel.load(Ordering::Relaxed),
             "vision-models" | "scene-model" | "cover-pick" | "cover-mask" | "cover-export" | "reframe" | "follow"
             | "faces" | "reels" => running == kind,
             // Each one decodes a whole video; the next file waits, so the preview keeps some of the machine.
@@ -120,12 +131,7 @@ pub(crate) fn register(app: &AppHandle, id: &str) -> Option<Arc<AtomicBool>> {
             _ => false,
         }
     };
-    if jobs.contains_key(id) || jobs.keys().any(|id| conflicts(id)) {
-        return None;
-    }
-    let flag = Arc::new(AtomicBool::new(false));
-    jobs.insert(id.to_string(), flag.clone());
-    Some(flag)
+    jobs.contains_key(id) || jobs.iter().any(conflicts)
 }
 
 pub(crate) fn unregister(app: &AppHandle, id: &str) {
@@ -1799,6 +1805,18 @@ mod tests {
                 box_radius: nuzky_engine::model::BOX_RADIUS,
             },
         }
+    }
+
+    /// The project opened next transcribes at once, while the last one's recognition is still stopping.
+    #[test]
+    fn recognition_being_stopped_leaves_its_slot() {
+        let jobs: HashMap<_, _> =
+            ["transcript:a", "export:a"].map(|id| (id.to_string(), Arc::new(AtomicBool::new(false)))).into();
+        assert!(busy(&jobs, "captions:b") && busy(&jobs, "style:b") && busy(&jobs, "export:b"));
+        jobs.values().for_each(|cancel| cancel.store(true, Ordering::Relaxed));
+        assert!(!busy(&jobs, "transcript:b") && !busy(&jobs, "captions:b"));
+        assert!(busy(&jobs, "export:b"), "only recognition leaves its slot while it stops");
+        assert!(busy(&jobs, "transcript:a"), "the stopping job keeps its own id until it ends");
     }
 
     #[test]

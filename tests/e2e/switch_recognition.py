@@ -48,22 +48,27 @@ def switch_recognition(r):
     r.check('the long video is being recognised, with its percentage in the top bar', recognising, r.s.run(TOP_BAR))
     r.shot('recognising')
 
+    stopping = [job_id for job_id, status in r.s.run(SPEECH_JOBS) if status == 'running']
     open_project('short')
-    # Its recognition keeps sending progress until it stops, so the window is watched for a while, not once.
+    ready = wait(can_transcribe, 1, 0.05)
+    shown = speech_shown()
+    r.shot('opened')
+    r.check("the opened project shows nothing of the other project's recognition", not shown, {'shown': shown, 'top bar': r.s.run(TOP_BAR)})
+    r.check('Transcribe timeline is there at once', ready)
+    # Clicked while the other project's recognition may still be stopping.
+    if ready:
+        r.s.run(f'{button}.click()')
+    errors = set()
+    # That recognition keeps sending progress until it stops, so the jobs are watched for a while, not once.
     seen = []
     until = time.monotonic() + 4
     while time.monotonic() < until:
-        shown = speech_shown()
-        running = [job for job in r.s.run(SPEECH_JOBS) if job[1] == 'running']
-        if shown or running:
-            seen.append({'shown': shown, 'running': running, 'top bar': r.s.run(TOP_BAR)})
+        errors.update(r.errors())
+        left = [job for job in r.s.run(SPEECH_JOBS) if job[0] in stopping]
+        if left:
+            seen.append({'jobs': left, 'top bar': r.s.run(TOP_BAR)})
         time.sleep(0.2)
-    r.shot('opened')
-    r.check("the opened project shows nothing of the other project's recognition", not seen, seen[:3])
-
-    r.check('Transcribe timeline is there at once', can_transcribe())
-    r.s.run(f'if ({button}) {button}.click()')
-    errors = set()
+    r.check("the other project's recognition never comes back while it stops", not seen, seen[:3])
 
     def transcribed():
         errors.update(r.errors())
