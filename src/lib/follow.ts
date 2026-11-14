@@ -21,6 +21,11 @@ interface FollowState {
 
 export const useFollow = create<FollowState>(() => ({ picking: null, job: null, done: null }));
 
+// Another project opened: following in the one before stopped with it (`jobs::stop_project_work`), and its clip is gone.
+useEditor.subscribe((s, prev) => {
+  if (prev.snap && s.snap?.sessionEpoch !== prev.snap.sessionEpoch) useFollow.setState({ picking: null, job: null });
+});
+
 /**
  * Whether the picture, filling the frame at its zoom beyond filling it, can move to keep something in the frame, as
  * the engine places it (`Placement::has_room`).

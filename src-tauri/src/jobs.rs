@@ -113,18 +113,19 @@ pub(crate) fn register(app: &AppHandle, id: &str) -> Option<Arc<AtomicBool>> {
     Some(flag)
 }
 
-/// Exports run one at a time; captions, transcripts and style learning share one recognition slot, which one being
-/// stopped leaves at once: the lock beside the models (`transcript::recognise`) makes the next wait until it has.
+/// Exports run one at a time; captions, transcripts and style learning share one recognition slot. Project work
+/// being stopped leaves its slot at once, so the project opened next can start its own: the lock beside the models
+/// (`transcript::recognise`) makes recognition wait until the last one has let go.
 fn busy(jobs: &HashMap<String, Arc<AtomicBool>>, id: &str) -> bool {
     let kind = id.split(':').next().unwrap_or(id);
-    let recognition = |kind: &str| matches!(kind, "captions" | "transcript" | "style");
     let conflicts = |(running, cancel): (&String, &Arc<AtomicBool>)| {
         let running = running.split(':').next().unwrap_or(running);
+        let stopping = PROJECT_WORK.contains(&running) && cancel.load(Ordering::Relaxed);
         match kind {
             "export" => running == "export",
-            _ if recognition(kind) => recognition(running) && !cancel.load(Ordering::Relaxed),
+            "captions" | "transcript" | "style" => matches!(running, "captions" | "transcript" | "style") && !stopping,
             "vision-models" | "scene-model" | "cover-pick" | "cover-mask" | "cover-export" | "reframe" | "follow"
-            | "faces" | "reels" => running == kind,
+            | "faces" | "reels" => running == kind && !stopping,
             // Each one decodes a whole video; the next file waits, so the preview keeps some of the machine.
             "proxy" => running == "proxy",
             "matte" => running == "matte",
@@ -138,11 +139,17 @@ pub(crate) fn unregister(app: &AppHandle, id: &str) {
     app.state::<AppState>().jobs.lock().unwrap().remove(id);
 }
 
-/// Opening another project stops speech recognition for the one open before: its captions could not be added any
-/// more, and recognition is free for the next project. Files recognised by then keep their transcript.
+/// Work on the open project whose result only that project can take: recognition (files recognised by then keep their
+/// transcript), Reframe, following, the face check, picking the cover and finding its person, and making reels.
+const PROJECT_WORK: [&str; 8] =
+    ["captions", "transcript", "reframe", "follow", "faces", "reels", "cover-pick", "cover-mask"];
+
+/// Opening another project stops the project work of the one open before, so the next one shows none of it.
+/// `prepare_media` stops what was prepared for files the next one does not have. Exports, downloads and learning the
+/// style go on.
 pub(crate) fn stop_project_work(state: &AppState) {
     for (id, cancel) in state.jobs.lock().unwrap().iter() {
-        if matches!(id.split(':').next(), Some("captions" | "transcript")) {
+        if PROJECT_WORK.contains(&id.split(':').next().unwrap_or(id)) {
             cancel.store(true, Ordering::Relaxed);
         }
     }
@@ -152,6 +159,14 @@ pub(crate) fn stop_project_work(state: &AppState) {
 /// captions, cleans the voice of files whose clips ask for it and makes the preview proxies of heavy video.
 pub fn prepare_media(state: &AppState, project: &Project) {
     let app = state.app.clone();
+    // The sound of a file the project no longer has, as when another project opened, is not prepared any further,
+    // nor its beat found; both start again when the file comes back.
+    for (id, cancel) in state.jobs.lock().unwrap().iter() {
+        let asset = id.strip_prefix("audio:").or_else(|| id.strip_prefix("beats:"));
+        if asset.is_some_and(|asset| !project.assets.iter().any(|a| a.id == asset)) {
+            cancel.store(true, Ordering::Relaxed);
+        }
+    }
     // Missing media waits for relinking, and a source that failed is not retried on every edit.
     for asset in project.assets.iter().filter(|a| has_audio(a) && Path::new(&a.path).is_file()) {
         let path = nuzky_engine::audio::pcm_path(&state.cache_dir, asset);
@@ -1807,15 +1822,21 @@ mod tests {
         }
     }
 
-    /// The project opened next transcribes at once, while the last one's recognition is still stopping.
+    /// The project opened next starts its own work at once, while the last one's is still stopping.
     #[test]
-    fn recognition_being_stopped_leaves_its_slot() {
-        let jobs: HashMap<_, _> =
-            ["transcript:a", "export:a"].map(|id| (id.to_string(), Arc::new(AtomicBool::new(false)))).into();
-        assert!(busy(&jobs, "captions:b") && busy(&jobs, "style:b") && busy(&jobs, "export:b"));
+    fn project_work_being_stopped_leaves_its_slot() {
+        let jobs: HashMap<_, _> = ["transcript:a", "reframe:a", "export:a", "vision-models:a"]
+            .map(|id| (id.to_string(), Arc::new(AtomicBool::new(false))))
+            .into();
+        let next = ["captions:b", "style:b", "reframe:b", "export:b", "vision-models:b"];
+        let started = || next.into_iter().filter(|id| !busy(&jobs, id)).collect::<Vec<_>>();
+        assert_eq!(started(), Vec::<&str>::new());
         jobs.values().for_each(|cancel| cancel.store(true, Ordering::Relaxed));
-        assert!(!busy(&jobs, "transcript:b") && !busy(&jobs, "captions:b"));
-        assert!(busy(&jobs, "export:b"), "only recognition leaves its slot while it stops");
+        assert_eq!(
+            started(),
+            ["captions:b", "style:b", "reframe:b"],
+            "an export or a download keeps its slot until it ends"
+        );
         assert!(busy(&jobs, "transcript:a"), "the stopping job keeps its own id until it ends");
     }
 

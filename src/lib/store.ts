@@ -403,10 +403,20 @@ export function blobUrl(url: string): string {
   return URL.createObjectURL(new Blob([bytes], { type: head[1] }));
 }
 
-/** Speech recognition for the open project, which opening another project stops (`jobs::stop_project_work`). */
-const recognition = (job: JobEvent) => job.kind === "captions" || job.kind === "transcript";
+/**
+ * Whether a job stops when `project` opens instead of the one it works for: as `jobs::stop_project_work` decides, and
+ * `jobs::prepare_media` for files `project` does not have. Exports, downloads and learning the style go on.
+ */
+function stopsFor(job: JobEvent, project: Project): boolean {
+  const at = job.id.indexOf(":");
+  const [kind, key] = [job.id.slice(0, at), job.id.slice(at + 1)];
+  if (["captions", "transcript", "reframe", "follow", "faces", "reels", "cover-pick", "cover-mask"].includes(kind)) return true;
+  if (["audio", "voice", "dereverb", "level", "beats"].includes(kind)) return !project.assets.some((a) => a.id === key);
+  if (kind === "proxy" || kind === "matte") return !project.assets.some((a) => a.path === key);
+  return false;
+}
 
-/** Recognition of the project open before, still stopping; its events until then belong to no open project. */
+/** Work for the project open before, still stopping; its events until then belong to no open project. */
 const stopping = new Set<string>();
 
 /** True for an event of work the project open before still does as it stops, which no project here shows. */
@@ -478,7 +488,8 @@ export const useEditor = create<EditorState>((set, get) => ({
       Object.entries(get().thumbs).flatMap(([id, url]) => (dropped(id) ? [url] : [])),
       Object.entries(get().filmstrips).flatMap(([id, strip]) => (dropped(id) ? [strip] : [])),
     );
-    if (switched) for (const job of Object.values(get().jobs)) if (recognition(job) && job.status === "running") stopping.add(job.id);
+    const stops = (job: JobEvent) => switched && stopsFor(job, snap.project);
+    for (const job of Object.values(get().jobs)) if (stops(job) && job.status === "running") stopping.add(job.id);
     set({
       snap,
       selection: snap.select.length > 0 ? snap.select : kept,
@@ -487,10 +498,10 @@ export const useEditor = create<EditorState>((set, get) => ({
       timeUs: Math.min(get().timeUs, projectDuration(snap.project)),
       aiRun: snap.openRunLabel,
       // A copied project can reuse asset ids for other files, so media previews start over.
-      // An agent's jobs end with their project, whose last events never arrive, and recognition stops with it.
+      // An agent's jobs end with their project, whose last events never arrive; its other work stops with it.
       // Copied text and borders are in the pixels of the canvas they came from.
       ...(!switched && canvasUnit(snap.project.canvas) !== canvasUnit(prev.project.canvas) ? { clipboard: null } : {}),
-      ...(switched ? { clipboard: null, thumbs: {}, filmstrips: {}, waveforms: {}, jobs: Object.fromEntries(Object.entries(get().jobs).filter(([, j]) => j.kind !== "agent" && !recognition(j))) } : {}),
+      ...(switched ? { clipboard: null, thumbs: {}, filmstrips: {}, waveforms: {}, jobs: Object.fromEntries(Object.entries(get().jobs).filter(([, j]) => j.kind !== "agent" && !stops(j))) } : {}),
       ...(rebound.length > 0 ? { thumbs: without(get().thumbs), filmstrips: without(get().filmstrips), waveforms: without(get().waveforms) } : {}),
     });
     if (switched) waveformUse.clear();
