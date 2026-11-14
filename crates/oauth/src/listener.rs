@@ -8,22 +8,16 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
 
-const CALLBACK_PATH: &str = "/auth/callback";
+pub const CALLBACK_PATH: &str = "/auth/callback";
 /// A request line and headers; anything longer is not the browser coming back.
 const MAX_REQUEST: usize = 16 * 1024;
 
-pub(crate) const PAGE_DONE: &str = "You're signed in to ChatGPT. Go back to Nuzky; you can close this tab.";
-pub(crate) const PAGE_DENIED: &str = "Signing in was cancelled. Go back to Nuzky; you can close this tab.";
-pub(crate) const PAGE_FAILED: &str = "Signing in didn't work. Go back to Nuzky to see why.";
-pub(crate) const PAGE_STALE: &str =
-    "This sign-in page is out of date. Go back to Nuzky and choose Continue with ChatGPT again.";
-
-pub(crate) struct Listener {
+pub struct Listener {
     socket: TcpListener,
 }
 
 /// The browser's request for the callback, waiting for its answer.
-pub(crate) struct Request {
+pub struct Request {
     stream: TcpStream,
     pub query: String,
 }

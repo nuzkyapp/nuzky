@@ -4,7 +4,6 @@
 //! only in the system keychain; the frontend gets the status, never a token. See docs/AI-ARCHITECTURE.md,
 //! "ChatGPT sign-in".
 
-mod listener;
 mod oauth;
 mod store;
 
@@ -18,9 +17,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 
-use listener::Listener;
-use oauth::{Attempt, Authorize, Callback, CallbackError, TokenError};
-pub use store::Vault;
+pub use nuzky_oauth::Vault;
+use nuzky_oauth::{Attempt, Listener};
+use oauth::{Authorize, Callback, CallbackError, TokenError};
 use store::{Registration, Tokens};
 
 pub const ISSUER: &str = "https://auth.openai.com";
@@ -29,6 +28,11 @@ const MAX_BYTES: u64 = 256 * 1024;
 const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 /// Tokens this close to expiring are renewed first; access tokens live an hour.
 const RENEW_BEFORE: u64 = 5 * 60;
+
+const PAGE_DONE: &str = "You're signed in to ChatGPT. Go back to Nuzky; you can close this tab.";
+const PAGE_DENIED: &str = "Signing in was cancelled. Go back to Nuzky; you can close this tab.";
+const PAGE_FAILED: &str = "Signing in didn't work. Go back to Nuzky to see why.";
+const PAGE_STALE: &str = "This sign-in page is out of date. Go back to Nuzky and choose Continue with ChatGPT again.";
 
 /// What the ChatGPT dialog shows. It never carries a token.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -98,7 +102,7 @@ impl ChatGpt {
         let _lock = store::lock(&self.dir)?;
         let Some(mut reg) = Registration::load(&self.dir) else { return Ok(signed_out(None, None)) };
         let Some(client_id) = reg.client_id.clone() else { return Ok(signed_out(None, None)) };
-        let Some(tokens) = self.vault.load(&reg.host_id)?.filter(|t| t.client_id == client_id) else {
+        let Some(tokens) = self.vault.load::<Tokens>(reg.entry())?.filter(|t| t.client_id == client_id) else {
             return Ok(signed_out(reg.email, None));
         };
         if !renew || tokens.expires_at > now() + RENEW_BEFORE {
@@ -118,7 +122,7 @@ impl ChatGpt {
             "PLAN_UNAVAILABLE: ChatGPT hasn't allowed Nuzky to use your plan yet. Open ChatGPT account… and allow it.";
         let mut reg = Registration::load(&self.dir).context(missing)?;
         let client_id = reg.client_id.as_ref().context(missing)?;
-        let tokens = self.vault.load(&reg.host_id)?.filter(|t| &t.client_id == client_id).context(missing)?;
+        let tokens = self.vault.load::<Tokens>(reg.entry())?.filter(|t| &t.client_id == client_id).context(missing)?;
         if !tokens.plan() {
             bail!(plan);
         }
@@ -139,16 +143,16 @@ impl ChatGpt {
         match oauth::refresh(&self.http(), &self.issuer, &tokens.client_id, &tokens.refresh_token) {
             Ok(fresh) => {
                 let tokens = tokens.renewed(fresh, now());
-                self.vault.save(&reg.host_id, &tokens)?;
+                self.vault.save(reg.entry(), &tokens)?;
                 Ok(Some(tokens))
             }
             Err(TokenError::Refused { code, .. }) if oauth::UNUSABLE_REFRESH.contains(&code.as_str()) => {
-                self.vault.delete(&reg.host_id)?;
+                self.vault.delete(reg.entry())?;
                 Ok(None)
             }
             // The registration itself is gone, so the next sign-in registers Nuzky again.
             Err(TokenError::Refused { code, .. }) if code == "invalid_client" => {
-                self.vault.delete(&reg.host_id)?;
+                self.vault.delete(reg.entry())?;
                 reg.client_id = None;
                 reg.subject = None;
                 reg.save(&self.dir)?;
@@ -236,13 +240,13 @@ impl ChatGpt {
         cancel: &AtomicBool,
         open: impl FnOnce(&str) -> Result<()>,
     ) -> Result<Status> {
-        self.vault.check()?;
+        self.vault.check(store::NAME)?;
         let (reg, hint_tokens) = {
             let _lock = store::lock(&self.dir)?;
             let reg = Registration::load_or_create(&self.dir)?;
             let tokens = match &reg.client_id {
                 Some(client_id) if !another_account => {
-                    self.vault.load(&reg.host_id)?.filter(|t| &t.client_id == client_id)
+                    self.vault.load::<Tokens>(reg.entry())?.filter(|t| &t.client_id == client_id)
                 }
                 _ => None,
             };
@@ -269,18 +273,18 @@ impl ChatGpt {
             let request = listener.next(deadline, cancel)?;
             match oauth::parse_callback(&request.query, &attempt.state, saved_client) {
                 // Not this attempt's answer, such as a tab left from an earlier one: keep waiting.
-                Err(CallbackError::WrongState) => request.reply(400, listener::PAGE_STALE),
+                Err(CallbackError::WrongState) => request.reply(400, PAGE_STALE),
                 Err(CallbackError::Failed(why)) => {
-                    request.reply(400, listener::PAGE_FAILED);
+                    request.reply(400, PAGE_FAILED);
                     bail!("SIGN_IN_FAILED: {why}");
                 }
                 Ok(Callback::Denied) => {
-                    request.reply(200, listener::PAGE_DENIED);
+                    request.reply(200, PAGE_DENIED);
                     bail!("SIGN_IN_DENIED: Signing in to ChatGPT was cancelled in the browser.");
                 }
                 Ok(Callback::Code { code, client_id }) => {
                     let result = self.finish(&reg, another_account, &attempt, &client_id, &code, cancel);
-                    request.reply(200, if result.is_ok() { listener::PAGE_DONE } else { listener::PAGE_FAILED });
+                    request.reply(200, if result.is_ok() { PAGE_DONE } else { PAGE_FAILED });
                     return result;
                 }
             }
@@ -339,8 +343,9 @@ impl ChatGpt {
                 bail!("CANCELLED: Signing in was cancelled.");
             }
             let mut reg = Registration::load_or_create(&self.dir)?;
-            let replaced = self.vault.load(&reg.host_id).ok().flatten().filter(|old| old.client_id != tokens.client_id);
-            self.vault.save(&reg.host_id, &tokens)?;
+            let replaced =
+                self.vault.load::<Tokens>(reg.entry()).ok().flatten().filter(|old| old.client_id != tokens.client_id);
+            self.vault.save(reg.entry(), &tokens)?;
             reg.client_id = Some(tokens.client_id.clone());
             reg.subject = Some(identity.subject);
             reg.email = identity.email;
@@ -359,7 +364,7 @@ impl ChatGpt {
     pub fn sign_out(&self) -> Result<Status> {
         let _lock = store::lock(&self.dir)?;
         let Some(reg) = Registration::load(&self.dir) else { return Ok(signed_out(None, None)) };
-        let revoked = match self.vault.load(&reg.host_id) {
+        let revoked = match self.vault.load::<Tokens>(reg.entry()) {
             Ok(Some(tokens)) => oauth::revoke(&self.http(), &self.issuer, &tokens.client_id, &tokens.refresh_token),
             Ok(None) => true,
             Err(error) => {
@@ -367,18 +372,12 @@ impl ChatGpt {
                 false
             }
         };
-        self.vault.delete(&reg.host_id)?;
+        self.vault.delete(reg.entry())?;
         Ok(signed_out(reg.email, (!revoked).then_some(Notice::NotRevoked)))
     }
 
     fn http(&self) -> ureq::Agent {
-        ureq::Agent::config_builder()
-            .http_status_as_error(false)
-            .max_redirects(0)
-            .timeout_global(Some(Duration::from_secs(15)))
-            .user_agent(concat!("Nuzky/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .into()
+        nuzky_oauth::http()
     }
 }
 

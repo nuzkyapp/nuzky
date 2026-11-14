@@ -1,0 +1,18 @@
+[package]
+name = "nuzky-oauth"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "What Nuzky's browser sign-ins share: the loopback listener, PKCE, token requests and the keychain"
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+base64 = "0.23.1"
+keyring = "4.2.0"
+ring = "0.17.14"
+ureq = "3.4.2"
+url = "2.5.8"
+uuid = { version = "1.28.0", features = ["v4"] }

@@ -3795,8 +3795,8 @@ version = "0.1.10-alpha"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
- "keyring",
  "log",
+ "nuzky-oauth",
  "ring",
  "serde",
  "serde_json",
@@ -3899,6 +3899,22 @@ dependencies = [
  "ureq",
  "url",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "nuzky-oauth"
+version = "0.1.10-alpha"
+dependencies = [
+ "anyhow",
+ "base64 0.23.1",
+ "keyring",
+ "log",
+ "ring",
+ "serde",
+ "serde_json",
+ "ureq",
+ "url",
+ "uuid",
 ]
 
 [[package]]

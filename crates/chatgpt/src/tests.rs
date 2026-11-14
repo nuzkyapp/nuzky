@@ -84,7 +84,7 @@ fn header() -> Value {
 #[test]
 fn chatgpt_pkce_and_fresh_attempt_secrets() {
     assert_eq!(
-        oauth::challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
+        nuzky_oauth::challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
         "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
     );
     let a = Attempt::new("http://127.0.0.1:1234/auth/callback".into());
@@ -124,7 +124,7 @@ fn chatgpt_authorize_parameters_and_percent_encoding() {
         ("state".into(), attempt.state.clone()),
         ("nonce".into(), attempt.nonce.clone()),
         ("code_challenge_method".into(), "S256".into()),
-        ("code_challenge".into(), oauth::challenge(&attempt.verifier)),
+        ("code_challenge".into(), nuzky_oauth::challenge(&attempt.verifier)),
     ]);
     assert_eq!(params(url.query().unwrap()), expected);
     request.client_id = Some(CLIENT);
@@ -405,7 +405,7 @@ fn serve(method: &str, url: &Url, body: &str, issuer: &str, s: &mut ServerState)
                 assert_eq!(form["code"], "test-code");
                 assert_eq!(form["redirect_uri"], auth["redirect_uri"]);
                 assert_eq!(auth["code_challenge_method"], "S256");
-                assert_eq!(oauth::challenge(&form["code_verifier"]), auth["code_challenge"]);
+                assert_eq!(nuzky_oauth::challenge(&form["code_verifier"]), auth["code_challenge"]);
             }
             s.generation += 1;
             s.current_refresh = format!("test-refresh-{}", s.generation);
@@ -460,7 +460,7 @@ impl Flow {
             Ok(())
         });
         let page = browser.unwrap().join().unwrap().unwrap();
-        assert!(page.contains(if result.is_ok() { listener::PAGE_DONE } else { listener::PAGE_DENIED }));
+        assert!(page.contains(if result.is_ok() { PAGE_DONE } else { PAGE_DENIED }));
         result
     }
 }
@@ -588,9 +588,9 @@ fn chatgpt_access_token_refresh_503_preserves_tokens() {
     assert!(f.app().access_token(true).unwrap_err().to_string().starts_with("OFFLINE:"));
     assert_eq!(fs::read(f.tokens_path()).unwrap(), before);
     let reg = Registration::load(&f.dir.0).unwrap();
-    let mut tokens = f.app().vault.load(&reg.host_id).unwrap().unwrap();
+    let mut tokens: Tokens = f.app().vault.load(reg.entry()).unwrap().unwrap();
     tokens.expires_at = now() - 1;
-    f.app().vault.save(&reg.host_id, &tokens).unwrap();
+    f.app().vault.save(reg.entry(), &tokens).unwrap();
     assert!(f.app().access_token(false).unwrap_err().to_string().starts_with("OFFLINE:"));
     assert_eq!(f.tokens()["refresh_token"], "test-refresh-1");
     assert_eq!(f.server.state.lock().unwrap().token_requests.len(), 4);
@@ -603,7 +603,7 @@ fn chatgpt_access_token_renewed_plan_scope_is_required() {
     f.server.state.lock().unwrap().plan = false;
     assert!(f.app().access_token(true).unwrap_err().to_string().starts_with("PLAN_UNAVAILABLE:"));
     assert_eq!(f.tokens()["access_token"], "test-access-2");
-    assert!(!f.app().vault.load(&Registration::load(&f.dir.0).unwrap().host_id).unwrap().unwrap().plan());
+    assert!(!f.app().vault.load::<Tokens>(Registration::load(&f.dir.0).unwrap().entry()).unwrap().unwrap().plan());
     assert!(f.app().access_token(false).unwrap_err().to_string().starts_with("PLAN_UNAVAILABLE:"));
     assert_eq!(f.server.state.lock().unwrap().token_requests.len(), 2);
 }
@@ -830,7 +830,7 @@ fn chatgpt_listener_drops_a_stalled_connection() {
     let request = listener.next(Instant::now() + Duration::from_secs(20), &AtomicBool::new(false)).unwrap();
     assert!(start.elapsed() < Duration::from_secs(3), "waited {:?}", start.elapsed());
     assert_eq!(request.query, "state=s");
-    request.reply(200, listener::PAGE_DONE);
-    assert!(browser.join().unwrap().contains(listener::PAGE_DONE));
+    request.reply(200, PAGE_DONE);
+    assert!(browser.join().unwrap().contains(PAGE_DONE));
     stalled.join().unwrap();
 }
