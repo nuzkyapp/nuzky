@@ -25,6 +25,7 @@ nuzky-analysis.workspace = true
 nuzky-interchange.workspace = true
 nuzky-vision.workspace = true
 nuzky-chatgpt.workspace = true
+nuzky-account.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
@@ -66,6 +67,7 @@ minisign-verify = "0.3.0"
 nuzky-engine = { workspace = true, features = ["ts"] }
 nuzky-mcp = { workspace = true, features = ["ts"] }
 nuzky-chatgpt = { workspace = true, features = ["ts"] }
+nuzky-account = { workspace = true, features = ["ts"] }
 
 # How the UI flows drive the app on macOS (src/test_bridge.rs, debug builds only). wry already uses these crates.
 [target.'cfg(target_os = "macos")'.dependencies]

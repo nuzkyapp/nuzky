@@ -37,6 +37,7 @@ test("production refuses to start with test settings", async () => {
     MAIL_TRANSPORT: "file",
     MAIL_DIR: "/tmp/nuzky-mail",
     PWNED_PASSWORDS_URL: "http://127.0.0.1:9",
+    ACCESS_TOKEN_SECONDS: "60",
   });
   assert.equal(code, 1);
   for (const problem of [
@@ -46,6 +47,7 @@ test("production refuses to start with test settings", async () => {
     "GOOGLE_DISCOVERY_URL must be https://accounts.google.com/.well-known/openid-configuration",
     "MAIL_TRANSPORT must be smtp",
     "PWNED_PASSWORDS_URL is only for ACCOUNT_MODE=test",
+    "ACCESS_TOKEN_SECONDS is only for ACCOUNT_MODE=test",
   ]) {
     assert.ok(output.includes(problem), `missing "${problem}" in:\n${output}`);
   }

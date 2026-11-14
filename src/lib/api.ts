@@ -3,7 +3,7 @@ import type { GalleryPlugin, GalleryState } from "./gallery";
 import type { StorageUsage, StyleSettings } from "./types";
 import type { EffectIssue, ListedPlugin, PluginRow, PluginValues } from "./plugins";
 import type { ColorLook, LutInfo } from "./color";
-import type { AgentAccess, ImportedKeys, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, BeatCutDone, BeatPlans, Boot, BrollChoice, BrollSuggestions, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Mono, Part, PreviewStarted, PreviewWindowBoot, Project, ProjectPoster, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFinish, ReelFraming, Rhythm, Said, SampleRun, ScreenRecording, ScreenWindow, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied, VoiceoverState } from "./types";
+import type { AccountProvider, AccountStatus, AgentAccess, ImportedKeys, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, BeatCutDone, BeatPlans, Boot, BrollChoice, BrollSuggestions, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Mono, Part, PreviewStarted, PreviewWindowBoot, Project, ProjectPoster, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFinish, ReelFraming, Rhythm, Said, SampleRun, ScreenRecording, ScreenWindow, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied, VoiceoverState } from "./types";
 
 /**
  * The session a change was made for. Mutating commands carry it, so a change still in flight when
@@ -77,6 +77,15 @@ export const api = {
   chatgptSignIn: (anotherAccount: boolean) => invoke<ChatGptStatus>("chatgpt_sign_in", { anotherAccount }),
   chatgptCancelSignIn: () => invoke<void>("chatgpt_cancel_sign_in"),
   chatgptSignOut: () => invoke<ChatGptStatus>("chatgpt_sign_out"),
+  accountAvailable: () => invoke<boolean>("account_available"),
+  /** `renew`: renews the sign-in first when it is about to expire. */
+  accountStatus: (renew: boolean) => invoke<AccountStatus>("account_status", { renew }),
+  /** Opens the browser and answers once it came back, was cancelled or waited 5 minutes. */
+  accountSignIn: (provider: AccountProvider, anotherAccount: boolean) => invoke<AccountStatus>("account_sign_in", { provider, anotherAccount }),
+  accountCancelSignIn: () => invoke<void>("account_cancel_sign_in"),
+  accountSignOut: () => invoke<AccountStatus>("account_sign_out"),
+  /** Opens the account's page in the browser. */
+  accountManage: () => invoke<void>("account_manage"),
   newProject: (width: number, height: number) => invoke<Snapshot>("new_project", { width, height }),
   maximizeWindow: () => invoke<void>("maximize_window"),
   /** While the editor is shown, closing the window goes back to the projects (`close-to-home`). */

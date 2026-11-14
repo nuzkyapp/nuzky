@@ -3700,6 +3700,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "nuzky-account"
+version = "0.1.10-alpha"
+dependencies = [
+ "anyhow",
+ "log",
+ "nuzky-oauth",
+ "serde",
+ "serde_json",
+ "ts-rs",
+ "ureq",
+ "uuid",
+]
+
+[[package]]
 name = "nuzky-agent"
 version = "0.1.10-alpha"
 dependencies = [
@@ -3750,6 +3764,7 @@ dependencies = [
  "libc",
  "log",
  "minisign-verify",
+ "nuzky-account",
  "nuzky-agent",
  "nuzky-analysis",
  "nuzky-chatgpt",

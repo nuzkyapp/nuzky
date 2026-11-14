@@ -59,7 +59,7 @@ npm test
 ## The end-to-end server
 
 ```sh
-node account/scripts/e2e-server.mjs --data <dir> [--port <port>]
+node account/scripts/e2e-server.mjs --data <dir> [--port <port>] [--access-token-seconds <s>]
 ```
 
 It starts the built server (`npm ci && npm run build` in `account/` first) on a free port of 127.0.0.1 with a fresh database in `<dir>`, a mock Google (`oauth2-mock-server`) and the file mail transport, and prints one line on stdout once the server answers:
@@ -109,4 +109,4 @@ This is "the README sequence" in `test/google.test.ts`. Same headers and cookie 
 | `MAIL_DIR` | For the file transport. |
 | `ACCOUNT_MODE` | `production` unless it is `test`. |
 
-Unless `ACCOUNT_MODE=test`, the server refuses to start with an `http` base URL, a secret shorter than 32 characters, another Google discovery URL, the file mail transport, or any of the test-only variables `PWNED_PASSWORDS_URL`, `REFRESH_REUSE_SECONDS` and `UNVERIFIED_TTL_SECONDS`.
+Unless `ACCOUNT_MODE=test`, the server refuses to start with an `http` base URL, a secret shorter than 32 characters, another Google discovery URL, the file mail transport, or any of the test-only variables `PWNED_PASSWORDS_URL`, `ACCESS_TOKEN_SECONDS`, `REFRESH_REUSE_SECONDS` and `UNVERIFIED_TTL_SECONDS`.

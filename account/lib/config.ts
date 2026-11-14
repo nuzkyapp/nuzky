@@ -11,6 +11,7 @@ export type Config = {
   google: { clientId: string; clientSecret: string; discoveryUrl: string };
   mail: { transport: "smtp"; url: string; from: string } | { transport: "file"; dir: string; from: string };
   pwnedPasswordsUrl: string;
+  accessTokenSeconds: number;
   refreshReuseSeconds: number;
   unverifiedTtlSeconds: number;
 };
@@ -58,12 +59,14 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
     },
     mail,
     pwnedPasswordsUrl: PWNED_PASSWORDS_URL,
+    accessTokenSeconds: 60 * 60,
     refreshReuseSeconds: 60,
     unverifiedTtlSeconds: 24 * 60 * 60,
   };
 
   if (mode === "test") {
     config.pwnedPasswordsUrl = env.PWNED_PASSWORDS_URL?.trim() || PWNED_PASSWORDS_URL;
+    config.accessTokenSeconds = seconds(env, "ACCESS_TOKEN_SECONDS", config.accessTokenSeconds);
     config.refreshReuseSeconds = seconds(env, "REFRESH_REUSE_SECONDS", config.refreshReuseSeconds);
     config.unverifiedTtlSeconds = seconds(env, "UNVERIFIED_TTL_SECONDS", config.unverifiedTtlSeconds);
     return config;
@@ -74,7 +77,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (secret.length < 32) problems.push("AUTH_SECRET must be at least 32 characters");
   if (config.google.discoveryUrl !== GOOGLE_DISCOVERY_URL) problems.push(`GOOGLE_DISCOVERY_URL must be ${GOOGLE_DISCOVERY_URL}`);
   if (mail.transport !== "smtp") problems.push("MAIL_TRANSPORT must be smtp");
-  for (const name of ["PWNED_PASSWORDS_URL", "REFRESH_REUSE_SECONDS", "UNVERIFIED_TTL_SECONDS"]) {
+  for (const name of ["PWNED_PASSWORDS_URL", "ACCESS_TOKEN_SECONDS", "REFRESH_REUSE_SECONDS", "UNVERIFIED_TTL_SECONDS"]) {
     if (env[name]) problems.push(`${name} is only for ACCOUNT_MODE=test`);
   }
   if (problems.length) throw new Error(`Refusing to start in production: ${problems.join("; ")}.`);

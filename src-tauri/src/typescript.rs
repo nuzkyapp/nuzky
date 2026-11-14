@@ -191,6 +191,8 @@ fn generate() -> String {
     types.visit::<crate::style::CapCutDraft>();
     types.visit::<nuzky_chatgpt::Status>();
     types.visit::<nuzky_chatgpt::Model>();
+    types.visit::<nuzky_account::Status>();
+    types.visit::<nuzky_account::Provider>();
     let mut out = HEADER.to_string();
     for declaration in types.by_name.values() {
         out.push('\n');

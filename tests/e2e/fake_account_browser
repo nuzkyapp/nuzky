@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+"""A browser for the Nuzky account server, without a window: it walks the server's sign-in from the address Nuzky opens
+to the callback, as account/README.md describes it without JavaScript, and keeps its cookies between runs as a browser
+keeps its session. What it does comes from the JSON file in NUZKY_FAKE_ACCOUNT_PLAN: `mode` is signup, signin, google
+or ignore, with `email`, `password` and the account server's `mail` folder. The last page goes to
+NUZKY_FAKE_BROWSER_PAGE and every address it opened to NUZKY_FAKE_ACCOUNT_VISITS."""
+import json, os, sys, time, urllib.error, urllib.request
+from http.cookies import SimpleCookie
+from pathlib import Path
+from urllib.parse import quote, urlsplit
+
+plan = json.loads(Path(os.environ['NUZKY_FAKE_ACCOUNT_PLAN']).read_text())
+page = Path(os.environ['NUZKY_FAKE_BROWSER_PAGE'])
+visits = Path(os.environ['NUZKY_FAKE_ACCOUNT_VISITS'])
+jar_path = page.with_name('fake-account-cookies.json')
+server = plan['server']
+jar = json.loads(jar_path.read_text()) if jar_path.exists() else {}
+
+
+class Stay(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args):
+        return None
+
+
+opener = urllib.request.build_opener(Stay)
+
+
+def request(url, data=None):
+    """One request without following redirects; only the account server gets its cookies."""
+    headers = {'Accept': 'application/json' if data is not None else 'text/html'}
+    if url.startswith(server) and jar:
+        headers['Cookie'] = '; '.join(f'{k}={v}' for k, v in jar.items())
+    if data is not None:
+        headers.update({'Content-Type': 'application/json', 'Origin': server})
+    try:
+        response = opener.open(urllib.request.Request(url, data=json.dumps(data).encode() if data is not None else None,
+                                                      headers=headers), timeout=20)
+    except urllib.error.HTTPError as error:
+        response = error
+    with visits.open('a') as log:
+        log.write(json.dumps({'method': 'POST' if data is not None else 'GET', 'url': url, 'status': response.status}) + '\n')
+    if url.startswith(server):
+        for header in response.headers.get_all('Set-Cookie') or []:
+            for name, morsel in SimpleCookie(header).items():
+                if morsel.value and morsel['max-age'] != '0':
+                    jar[name] = morsel.value
+                else:
+                    jar.pop(name, None)
+        jar_path.write_text(json.dumps(jar))
+    return response.status, response.headers.get('Location'), response.read().decode('utf-8', 'replace')
+
+
+def post(path, body):
+    status, _, text = request(server + path, body)
+    if status != 200:
+        raise SystemExit(f'{path} answered {status}: {text[:300]}')
+    return json.loads(text or '{}')
+
+
+def code_for(email):
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        mails = sorted(Path(plan['mail']).glob('*.json'), key=lambda p: p.stat().st_mtime, reverse=True)
+        for mail in mails:
+            message = json.loads(mail.read_text())
+            if message['to'] == email and message.get('code'):
+                return message['code']
+        time.sleep(0.2)
+    raise SystemExit(f'no code was mailed to {email}')
+
+
+def sign_in_page(query):
+    """What a person does on /sign-in; the answer names the callback."""
+    email, password = plan['email'], plan['password']
+    if plan['mode'] == 'signup':
+        post('/api/auth/sign-up/email', {'email': email, 'password': password, 'name': ''})
+        return post('/api/auth/email-otp/verify-email', {'email': email, 'otp': code_for(email), 'oauth_query': query})['url']
+    return post('/api/auth/sign-in/email', {'email': email, 'password': password, 'oauth_query': query})['url']
+
+
+if plan['mode'] == 'ignore':
+    sys.exit(0)
+url = sys.argv[1]
+for _ in range(20):
+    status, location, body = request(url)
+    if status not in (301, 302, 303, 307, 308):
+        break
+    target = location if '://' in location else server + location
+    parts = urlsplit(target)
+    if target.startswith(server + '/sign-in?') and plan['mode'] in ('signup', 'signin'):
+        target = sign_in_page(parts.query)
+    elif plan['mode'] == 'google' and not target.startswith(server) and parts.path.endswith('/authorize') \
+            and 'login_hint=' not in parts.query:
+        target += '&login_hint=' + quote(plan['email'])
+    url = target
+temporary = page.with_suffix('.tmp')
+temporary.write_text(body)
+temporary.replace(page)

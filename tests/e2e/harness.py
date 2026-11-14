@@ -206,6 +206,9 @@ class Run:
                         # Nor does the app read the ChatGPT sign-in from the user's keychain or reach OpenAI; on macOS
                         # a separate home does not separate the keychain. tests/e2e/chatgpt.py serves its own issuer.
                         NUZKY_CHATGPT_ISSUER='http://127.0.0.1:9', NUZKY_TEST_KEYCHAIN=str(self.work / 'keychain.json'),
+                        # The same for the Nuzky account; tests/e2e/account.py runs its own account server.
+                        NUZKY_ACCOUNT_ISSUER='http://127.0.0.1:9',
+                        NUZKY_TEST_ACCOUNT_KEYCHAIN=str(self.work / 'account-keychain.json'),
                         # Nor does it run the person's own agents; a flow that needs one puts a stand-in there.
                         NUZKY_AGENT_CLAUDE=str(self.work / 'no-agent'), NUZKY_AGENT_CODEX=str(self.work / 'no-agent'),
                         NUZKY_AGENT_AGY=str(self.work / 'no-agent'), NUZKY_AGENT_OPENCODE=str(self.work / 'no-agent'), PYTHONDONTWRITEBYTECODE='1')

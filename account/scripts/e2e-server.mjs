@@ -16,6 +16,7 @@ const { values } = parseArgs({
   options: {
     data: { type: "string" },
     port: { type: "string" },
+    "access-token-seconds": { type: "string" },
     "refresh-reuse-seconds": { type: "string" },
     "unverified-ttl-seconds": { type: "string" },
   },
@@ -67,6 +68,7 @@ const env = {
   PWNED_PASSWORDS_URL: google.url,
   NEXT_TELEMETRY_DISABLED: "1",
 };
+if (values["access-token-seconds"]) env.ACCESS_TOKEN_SECONDS = values["access-token-seconds"];
 if (values["refresh-reuse-seconds"]) env.REFRESH_REUSE_SECONDS = values["refresh-reuse-seconds"];
 if (values["unverified-ttl-seconds"]) env.UNVERIFIED_TTL_SECONDS = values["unverified-ttl-seconds"];
 

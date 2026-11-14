@@ -32,7 +32,7 @@ pub(crate) fn chatgpt() -> ChatGpt {
 }
 
 /// Debug builds hand the address to `NUZKY_TEST_BROWSER` instead of the system browser.
-fn open_browser(app: &AppHandle, url: &str) -> anyhow::Result<()> {
+pub(crate) fn open_browser(app: &AppHandle, url: &str) -> anyhow::Result<()> {
     #[cfg(debug_assertions)]
     if let Some(browser) = std::env::var_os("NUZKY_TEST_BROWSER") {
         std::process::Command::new(browser).arg(url).spawn()?;

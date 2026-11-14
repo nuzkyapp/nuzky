@@ -95,7 +95,7 @@ export function createAuth(config: Config, database: DatabaseSync, mail: Mailer)
         scopes: SCOPES,
         grantTypes: ["authorization_code", "refresh_token"],
         codeExpiresIn: SIGN_IN_PAGE_SECONDS,
-        accessTokenExpiresIn: 60 * 60,
+        accessTokenExpiresIn: config.accessTokenSeconds,
         refreshTokenExpiresIn: 30 * 24 * 60 * 60,
         refreshTokenReuseInterval: config.refreshReuseSeconds,
         allowDynamicClientRegistration: false,
