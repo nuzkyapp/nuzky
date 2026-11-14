@@ -506,6 +506,7 @@ impl AppState {
         let (next, rx) = OpenSession::open(path).map_err(err)?;
         let snap = next.snapshot(Vec::new())?;
         current.prepare_switch().map_err(err)?;
+        jobs::stop_project_work(self, &snap.project);
         *current = next;
         self.source_preview.lock().unwrap().take();
         // The startup picker uses modification time, including projects opened without edits.

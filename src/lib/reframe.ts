@@ -12,6 +12,11 @@ interface ReframeState {
 
 export const useReframe = create<ReframeState>(() => ({ job: null, done: null }));
 
+// Another project opened: a reframe of the one before stopped with it (`jobs::stop_project_work`).
+useEditor.subscribe((s, prev) => {
+  if (prev.snap && s.snap?.sessionEpoch !== prev.snap.sessionEpoch) useReframe.setState({ job: null });
+});
+
 /** The video and image clips among `ids`. */
 export function picturedClips(project: Project, ids: string[]): string[] {
   return project.tracks

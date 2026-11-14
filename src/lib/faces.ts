@@ -24,6 +24,11 @@ interface FacesState {
 
 export const useFaces = create<FacesState>(() => ({ job: null, found: null, moved: null }));
 
+// Another project opened: the face check of the one before stopped with it (`jobs::stop_project_work`).
+useEditor.subscribe((s, prev) => {
+  if (prev.snap && s.snap?.sessionEpoch !== prev.snap.sessionEpoch) useFaces.setState({ job: null });
+});
+
 export async function checkFaces() {
   if (aiLocked() || useFaces.getState().job) return;
   await whenIdle();

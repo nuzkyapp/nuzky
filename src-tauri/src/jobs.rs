@@ -102,25 +102,10 @@ impl Reporter {
     }
 }
 
-/// Exports run one at a time; captions, transcripts and style learning share one recognition slot.
 pub(crate) fn register(app: &AppHandle, id: &str) -> Option<Arc<AtomicBool>> {
     let state = app.state::<AppState>();
     let mut jobs = state.jobs.lock().unwrap();
-    let kind = id.split(':').next().unwrap_or(id);
-    let conflicts = |running: &str| {
-        let running = running.split(':').next().unwrap_or(running);
-        match kind {
-            "export" => running == "export",
-            "captions" | "transcript" | "style" => matches!(running, "captions" | "transcript" | "style"),
-            "vision-models" | "scene-model" | "cover-pick" | "cover-mask" | "cover-export" | "reframe" | "follow"
-            | "faces" | "reels" => running == kind,
-            // Each one decodes a whole video; the next file waits, so the preview keeps some of the machine.
-            "proxy" => running == "proxy",
-            "matte" => running == "matte",
-            _ => false,
-        }
-    };
-    if jobs.contains_key(id) || jobs.keys().any(|id| conflicts(id)) {
+    if busy(&jobs, id) {
         return None;
     }
     let flag = Arc::new(AtomicBool::new(false));
@@ -128,8 +113,48 @@ pub(crate) fn register(app: &AppHandle, id: &str) -> Option<Arc<AtomicBool>> {
     Some(flag)
 }
 
+/// Exports run one at a time; captions, transcripts and style learning share one recognition slot. Project work
+/// being stopped leaves its slot at once, so the project opened next can start its own: the lock beside the models
+/// (`transcript::recognise`) makes recognition wait until the last one has let go.
+fn busy(jobs: &HashMap<String, Arc<AtomicBool>>, id: &str) -> bool {
+    let kind = id.split(':').next().unwrap_or(id);
+    let conflicts = |(running, cancel): (&String, &Arc<AtomicBool>)| {
+        let running = running.split(':').next().unwrap_or(running);
+        let stopping = PROJECT_WORK.contains(&running) && cancel.load(Ordering::Relaxed);
+        match kind {
+            "export" => running == "export",
+            "captions" | "transcript" | "style" => matches!(running, "captions" | "transcript" | "style") && !stopping,
+            "vision-models" | "scene-model" | "cover-pick" | "cover-mask" | "cover-export" | "reframe" | "follow"
+            | "faces" | "reels" => running == kind && !stopping,
+            // Each one decodes a whole video; the next file waits, so the preview keeps some of the machine.
+            "proxy" => running == "proxy",
+            "matte" => running == "matte",
+            _ => false,
+        }
+    };
+    jobs.contains_key(id) || jobs.iter().any(conflicts)
+}
+
 pub(crate) fn unregister(app: &AppHandle, id: &str) {
     app.state::<AppState>().jobs.lock().unwrap().remove(id);
+}
+
+/// Work on the open project whose result only that project can take: recognition (files recognised by then keep their
+/// transcript), Reframe, following, the face check, picking the cover and finding its person, and making reels.
+const PROJECT_WORK: [&str; 8] =
+    ["captions", "transcript", "reframe", "follow", "faces", "reels", "cover-pick", "cover-mask"];
+
+/// Opening `next` stops the project work of the one open before, so `next` shows none of it, and preparing the sound or
+/// finding the beat of files `next` does not have; `prepare_media` stops what else no clip of `next` needs. Exports,
+/// downloads and learning the style go on.
+pub(crate) fn stop_project_work(state: &AppState, next: &Project) {
+    for (id, cancel) in state.jobs.lock().unwrap().iter() {
+        let (kind, asset) = id.split_once(':').unwrap_or((id, ""));
+        let gone = matches!(kind, "audio" | "beats") && !next.assets.iter().any(|a| a.id == asset);
+        if PROJECT_WORK.contains(&kind) || gone {
+            cancel.store(true, Ordering::Relaxed);
+        }
+    }
 }
 
 /// Decodes the audio of every asset once into the PCM cache used for playback, waveforms, export and
@@ -164,10 +189,15 @@ pub fn prepare_media(state: &AppState, project: &Project) {
                 app.emit("audio-ready", asset.id.clone()).ok();
             }
             // A project opened meanwhile can use this asset id for another file (a copy keeps the
-            // ids); its request found this job running and was skipped, so it is made now.
+            // ids), or the project stopped for it opened again; its request found this job running and was skipped,
+            // so it is made now.
             let state = app.state::<AppState>();
+            let quitting = state.session.lock().unwrap().stopped.load(Ordering::Acquire);
+            let again = |a: &Asset| {
+                a.id == asset.id && (cancelled && !quitting || nuzky_engine::audio::pcm_path(&cache, a) != path)
+            };
             if let Ok(open) = state.project() {
-                if open.assets.iter().any(|a| a.id == asset.id && nuzky_engine::audio::pcm_path(&cache, a) != path) {
+                if open.assets.iter().any(again) {
                     prepare_media(&state, &open);
                 } else {
                     ensure_sound(&state, &open);
@@ -1789,6 +1819,24 @@ mod tests {
                 box_radius: nuzky_engine::model::BOX_RADIUS,
             },
         }
+    }
+
+    /// The project opened next starts its own work at once, while the last one's is still stopping.
+    #[test]
+    fn project_work_being_stopped_leaves_its_slot() {
+        let jobs: HashMap<_, _> = ["transcript:a", "reframe:a", "export:a", "vision-models:a"]
+            .map(|id| (id.to_string(), Arc::new(AtomicBool::new(false))))
+            .into();
+        let next = ["captions:b", "style:b", "reframe:b", "export:b", "vision-models:b"];
+        let started = || next.into_iter().filter(|id| !busy(&jobs, id)).collect::<Vec<_>>();
+        assert_eq!(started(), Vec::<&str>::new());
+        jobs.values().for_each(|cancel| cancel.store(true, Ordering::Relaxed));
+        assert_eq!(
+            started(),
+            ["captions:b", "style:b", "reframe:b"],
+            "an export or a download keeps its slot until it ends"
+        );
+        assert!(busy(&jobs, "transcript:a"), "the stopping job keeps its own id until it ends");
     }
 
     #[test]

@@ -11,7 +11,7 @@ import { onFollowJob } from "./lib/follow";
 import { canRetrySpeech, retrySpeech, useSpeech } from "./lib/speech";
 import { useNames } from "./lib/names";
 import { reportBug } from "./lib/diagnostics";
-import { currentEpoch, PLUGIN_RUN, runWasDiscarded, undoAction, useEditor } from "./lib/store";
+import { currentEpoch, leftBehind, PLUGIN_RUN, runWasDiscarded, undoAction, useEditor } from "./lib/store";
 import { formatDuration } from "./lib/time";
 import { MOVES_SOURCE, RESTS_IN_COVER, RESTS_IN_FULL, WORKS_IN_REELS, isClipboard, runAction } from "./lib/actions";
 import type { Asset, JobEvent, ProjectSummary, Snapshot, ModelQuestion, Transport } from "./lib/types";
@@ -182,6 +182,7 @@ function useShortcuts() {
 }
 
 function onJob(job: JobEvent) {
+  if (leftBehind(job)) return;
   const { toast, exportOpen, exportJobId } = useEditor.getState();
   useEditor.setState({ jobs: { ...useEditor.getState().jobs, [job.id]: job } });
   if (job.kind === "cover" || job.kind === "vision-models") onCoverJob(job);
