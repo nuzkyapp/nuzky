@@ -144,12 +144,14 @@ pub(crate) fn unregister(app: &AppHandle, id: &str) {
 const PROJECT_WORK: [&str; 8] =
     ["captions", "transcript", "reframe", "follow", "faces", "reels", "cover-pick", "cover-mask"];
 
-/// Opening another project stops the project work of the one open before, so the next one shows none of it.
-/// `prepare_media` stops what was prepared for files the next one does not have. Exports, downloads and learning the
-/// style go on.
-pub(crate) fn stop_project_work(state: &AppState) {
+/// Opening `next` stops the project work of the one open before, so `next` shows none of it, and preparing the sound or
+/// finding the beat of files `next` does not have; `prepare_media` stops what else no clip of `next` needs. Exports,
+/// downloads and learning the style go on.
+pub(crate) fn stop_project_work(state: &AppState, next: &Project) {
     for (id, cancel) in state.jobs.lock().unwrap().iter() {
-        if PROJECT_WORK.contains(&id.split(':').next().unwrap_or(id)) {
+        let (kind, asset) = id.split_once(':').unwrap_or((id, ""));
+        let gone = matches!(kind, "audio" | "beats") && !next.assets.iter().any(|a| a.id == asset);
+        if PROJECT_WORK.contains(&kind) || gone {
             cancel.store(true, Ordering::Relaxed);
         }
     }
@@ -159,14 +161,6 @@ pub(crate) fn stop_project_work(state: &AppState) {
 /// captions, cleans the voice of files whose clips ask for it and makes the preview proxies of heavy video.
 pub fn prepare_media(state: &AppState, project: &Project) {
     let app = state.app.clone();
-    // The sound of a file the project no longer has, as when another project opened, is not prepared any further,
-    // nor its beat found; both start again when the file comes back.
-    for (id, cancel) in state.jobs.lock().unwrap().iter() {
-        let asset = id.strip_prefix("audio:").or_else(|| id.strip_prefix("beats:"));
-        if asset.is_some_and(|asset| !project.assets.iter().any(|a| a.id == asset)) {
-            cancel.store(true, Ordering::Relaxed);
-        }
-    }
     // Missing media waits for relinking, and a source that failed is not retried on every edit.
     for asset in project.assets.iter().filter(|a| has_audio(a) && Path::new(&a.path).is_file()) {
         let path = nuzky_engine::audio::pcm_path(&state.cache_dir, asset);
@@ -195,10 +189,15 @@ pub fn prepare_media(state: &AppState, project: &Project) {
                 app.emit("audio-ready", asset.id.clone()).ok();
             }
             // A project opened meanwhile can use this asset id for another file (a copy keeps the
-            // ids); its request found this job running and was skipped, so it is made now.
+            // ids), or the project stopped for it opened again; its request found this job running and was skipped,
+            // so it is made now.
             let state = app.state::<AppState>();
+            let quitting = state.session.lock().unwrap().stopped.load(Ordering::Acquire);
+            let again = |a: &Asset| {
+                a.id == asset.id && (cancelled && !quitting || nuzky_engine::audio::pcm_path(&cache, a) != path)
+            };
             if let Ok(open) = state.project() {
-                if open.assets.iter().any(|a| a.id == asset.id && nuzky_engine::audio::pcm_path(&cache, a) != path) {
+                if open.assets.iter().any(again) {
                     prepare_media(&state, &open);
                 } else {
                     ensure_sound(&state, &open);

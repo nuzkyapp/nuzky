@@ -17,6 +17,8 @@ def setup(r):
     subprocess.run(['ffmpeg', '-v', 'error', '-i', str(FIXTURES / 'speech.wav'), '-f', 'lavfi', '-i', 'color=s=320x568:r=30',
                     '-af', 'aresample=16000,apad=whole_dur=16,aloop=loop=7:size=256000', '-c:v', 'libx264', '-preset', 'ultrafast',
                     '-c:a', 'aac', '-shortest', str(long)], check=True)
+    # Four hours of sound, still being prepared well after it was imported.
+    subprocess.run(['ffmpeg', '-v', 'error', '-stream_loop', '3', '-i', str(FIXTURES / 'hour.m4a'), '-c', 'copy', str(r.work / 'hours.m4a')], check=True)
     for name, media in (('long', long), ('short', FIXTURES / 'talk.mp4')):
         subprocess.run([str(CLI), 'new', str(r.work / f'data/nuzky/projects/{name}.nuzky'), str(media)], env=r.env, check=True, capture_output=True)
 
@@ -61,10 +63,10 @@ def switch_work(r):
         r.check(f'{what} runs in the long project', running and wait(lambda: shown(phrases), 10, 0.1), {'jobs': r.s.run(JOBS), 'top bar': r.s.run(TOP_BAR)})
         stopped = logged(f'job {kind} cancelled')
         open_project('short')
-        r.shot(f'opened-{kind}')
         ids = [job[0] for job in running or []]
         left = watch(3, lambda: {'shown': shown(phrases), 'jobs': [job for job in r.s.run(JOBS) if job[0] in ids]} if shown(phrases) or any(
             job[0] in ids for job in r.s.run(JOBS)) else None)
+        r.shot(f'opened-{kind}')
         r.check(f'the short project shows nothing of {what}', not left, left[:3])
         r.check(f'{what} stops', wait(lambda: logged(f'job {kind} cancelled') > stopped, 10), r.s.run(TOP_BAR))
 
@@ -111,8 +113,19 @@ def switch_work(r):
     r.check('the short project can reframe at once', why is None, why)
     r.key('Escape')
 
-    # A file only the long project has: preparing its sound stops, and the short project shows nothing of it.
-    stops_in_other_project('preparing the sound of hour.m4a', 'audio', ('Preparing audio for hour.m4a',), lambda: r.import_media(FIXTURES / 'hour.m4a'))
+    # A file only the long project has: preparing its sound stops, and the short project shows nothing of it. Removing
+    # the file and taking that back at once, in the same project, stops nothing.
+    def import_remove_undo():
+        r.import_media(r.work / 'hours.m4a')
+        asset = next(a['id'] for a in r.state()['assets'] if a['name'] == 'hours.m4a')
+        cancelled = logged('job audio cancelled')
+        r.s.call("window.__nuzky.store.getState().edit({type: 'removeAsset', assetId: arguments[0]})", asset)
+        r.s.call('window.__nuzky.store.getState().undo()')
+        back = wait(lambda: 'hours.m4a' in [a['name'] for a in r.state()['assets']], 5)
+        time.sleep(2)
+        r.check('removing hours.m4a and Undo at once keep preparing its sound', back and logged('job audio cancelled') == cancelled,
+                {'back': back, 'jobs': r.s.run(JOBS)})
+    stops_in_other_project('preparing the sound of hours.m4a', 'audio', ('Preparing audio for hours.m4a',), import_remove_undo)
 
     errors.update(r.errors())
     r.check('no error toast along the way, not even about the stopped work', not errors, sorted(errors))
