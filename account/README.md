@@ -33,6 +33,16 @@ The token response has `access_token` (opaque), `refresh_token`, `expires_in` (3
 
 Userinfo answers `sub`, `name`, `email`, `email_verified`. `name` is empty for accounts made with email and password, and the Google name for Google accounts.
 
+### Telemetry
+
+Neither endpoint needs an account or a token. Both take only `Content-Type: application/json` (anything else answers `415`) and a body of at most 512 KiB (`413`).
+
+`POST /api/telemetry` with `{"install": "<UUID v4, lowercase>", "version": "<at most 64 characters>", "system": "<at most 128 characters>", "events": [{"kind": "<^[a-z][A-Za-z]{0,31}$>", "at": "<ISO 8601 UTC>", "data": {…}}]}`, 1 to 500 events, each `data` an object of at most 64 KiB as JSON. It answers `200 {"stored": n, "skipped": m}`; an event whose `at` is more than 30 days old or more than a day ahead is skipped. Any kind is stored. A wrong shape answers `400 {"code":"INVALID"}` and stores nothing.
+
+`POST /api/telemetry/delete` with `{"install": "<uuid>"}` deletes every event of that install and answers `200 {"deleted": n}`.
+
+`429` comes with `Retry-After` in seconds: 30 requests an hour per install for both endpoints together, 120 an hour per client address, and at most 5000 stored events per install in 24 hours, so a batch that would go above answers `429`. While the stored events take more than 1 GiB, `POST /api/telemetry` answers `503` with `Retry-After: 3600`. Retry after `429`, `503` and other `5xx`; never retry `400`, `413` or `415`.
+
 ## Behaviour
 
 - An email and password account confirms its address with a 6-digit code in the same tab. Only the first password sign-in waits for the code, then the pending authorization continues to the app. "Send a new code" signs in again with the password, which sends a fresh code.
@@ -42,6 +52,8 @@ Userinfo answers `sub`, `name`, `email`, `email_verified`. `name` is empty for a
 - Passwords are hashed with argon2id (19 MiB, 2 passes, 1 lane), need at least 10 characters and are checked against Have I Been Pwned (only the first 5 characters of the SHA-1 leave the server).
 - Rate limits are stored in SQLite and keyed by the client address that Caddy puts in `X-Forwarded-For`: 5 password sign-ins per minute, 3 code checks per minute, and better-auth's defaults elsewhere.
 - Every browser POST must carry this server's `Origin`; only `/oauth2/token` and `/oauth2/revoke` accept requests without one. Every other better-auth endpoint answers 404, including dynamic client registration.
+- Telemetry is kept in its own `telemetry.db` beside `account.db` and is not backed up. A row holds the SHA-256 of the install id, never the id, with the kind, the time, the version, the system and the event's data, and nothing ties it to an account. No address, header or cookie is stored, the per-address limit is counted in memory only, and Caddy does not log `/api/telemetry*`. Rows are deleted 90 days after they arrived.
+- `/admin` shows the telemetry of the last 7 or 30 days to a browser signed in with an address in `ADMIN_EMAILS`. Everyone else gets a 404.
 - `/account` shows who is signed in, changes the password (or sets one for a Google account), signs this browser out and deletes the account. Deleting and setting a password need a sign-in from the last 10 minutes. Deleting removes the sessions, linked accounts and OAuth tokens, so the app's next refresh gets `invalid_grant`.
 
 ## Development
@@ -59,7 +71,7 @@ npm test
 ## The end-to-end server
 
 ```sh
-node account/scripts/e2e-server.mjs --data <dir> [--port <port>] [--access-token-seconds <s>]
+node account/scripts/e2e-server.mjs --data <dir> [--port <port>] [--access-token-seconds <s>] [--telemetry-retention-seconds <s>] [--admin-emails <a,b>]
 ```
 
 It starts the built server (`npm ci && npm run build` in `account/` first) on a free port of 127.0.0.1 with a fresh database in `<dir>`, a mock Google (`oauth2-mock-server`) and the file mail transport, and prints one line on stdout once the server answers:
@@ -100,7 +112,8 @@ This is "the README sequence" in `test/google.test.ts`. Same headers and cookie 
 |---|---|
 | `BASE_URL` | `https://account.nuzky.app` |
 | `AUTH_SECRET` | At least 32 characters. It signs cookies and encrypts Google's tokens and the signing keys. |
-| `DATA_DIR` | Where `account.db` lives, `/data` by default. |
+| `DATA_DIR` | Where `account.db` and `telemetry.db` live, `/data` by default. |
+| `ADMIN_EMAILS` | Comma-separated addresses whose signed-in browser sees `/admin`. Empty by default. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | The Google Cloud Web client. |
 | `GOOGLE_DISCOVERY_URL` | Google's by default; tests point it at the mock. |
 | `MAIL_TRANSPORT` | `smtp` (default) or `file`. |
@@ -109,4 +122,4 @@ This is "the README sequence" in `test/google.test.ts`. Same headers and cookie 
 | `MAIL_DIR` | For the file transport. |
 | `ACCOUNT_MODE` | `production` unless it is `test`. |
 
-Unless `ACCOUNT_MODE=test`, the server refuses to start with an `http` base URL, a secret shorter than 32 characters, another Google discovery URL, the file mail transport, or any of the test-only variables `PWNED_PASSWORDS_URL`, `ACCESS_TOKEN_SECONDS`, `REFRESH_REUSE_SECONDS` and `UNVERIFIED_TTL_SECONDS`.
+Unless `ACCOUNT_MODE=test`, the server refuses to start with an `http` base URL, a secret shorter than 32 characters, another Google discovery URL, the file mail transport, or any of the test-only variables `PWNED_PASSWORDS_URL`, `ACCESS_TOKEN_SECONDS`, `REFRESH_REUSE_SECONDS`, `UNVERIFIED_TTL_SECONDS` and `TELEMETRY_RETENTION_SECONDS`.

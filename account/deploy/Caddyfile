@@ -6,6 +6,7 @@ account.nuzky.app {
 	encode zstd gzip
 	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 	reverse_proxy account:3000
+	log_skip /api/telemetry*
 	log {
 		output stdout
 		format filter {
