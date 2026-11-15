@@ -44,7 +44,8 @@ function send(endpoint: string, body: unknown, { ip = uniqueIp(), type = "applic
   return rawRequest(new URL(endpoint, on.url), "POST", { "content-type": type, "x-forwarded-for": ip }, text);
 }
 
-function streamed(endpoint: string, body: string): Promise<number> {
+/** The status, or "reset" when the server stopped reading before the client had sent everything, which then loses the answer. */
+function streamed(endpoint: string, body: string): Promise<number | "reset"> {
   return new Promise((resolve, reject) => {
     const request = httpRequest(
       new URL(endpoint, stack.url),
@@ -54,7 +55,7 @@ function streamed(endpoint: string, body: string): Promise<number> {
         resolve(response.statusCode!);
       },
     );
-    request.on("error", reject);
+    request.on("error", (error: NodeJS.ErrnoException) => (error.code === "ECONNRESET" || error.code === "EPIPE" ? resolve("reset") : reject(error)));
     const bytes = Buffer.from(body);
     for (let i = 0; i < bytes.length; i += 16 * 1024) request.write(bytes.subarray(i, i + 16 * 1024));
     request.end();
@@ -130,7 +131,7 @@ describe("receiving", () => {
     assert.equal((await send("/api/telemetry", body, { type: "application/json; charset=utf-8" })).status, 200);
   });
 
-  test("a body over 512 KiB answers 413, also when it streams without a length", async () => {
+  test("a body over 512 KiB answers 413, and one that streams without a length is refused", async () => {
     const install = randomUUID();
     const big = JSON.stringify(
       batch(
@@ -139,7 +140,7 @@ describe("receiving", () => {
       ),
     );
     assert.ok(big.length > 512 * 1024);
-    assert.equal(await streamed("/api/telemetry", big), 413);
+    assert.ok([413, "reset"].includes(await streamed("/api/telemetry", big)));
     assert.equal((await send("/api/telemetry", big)).status, 413);
     assert.equal(stored(install).length, 0);
   });
