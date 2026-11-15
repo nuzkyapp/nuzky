@@ -76,12 +76,15 @@ impl Log for Logger {
             return;
         }
         self.stderr.log(record);
-        if let Some(file) = &self.file
-            && record.level() <= Level::Info
-        {
-            let now = jiff::Timestamp::now();
-            file.append(&format!("{now:.0} {} {}: {}\n", record.level(), record.target(), record.args()));
+        if record.level() > Level::Info {
+            return;
         }
+        let text = record.args().to_string();
+        if let Some(file) = &self.file {
+            let now = jiff::Timestamp::now();
+            file.append(&format!("{now:.0} {} {}: {text}\n", record.level(), record.target()));
+        }
+        crate::telemetry::log(record.level(), record.target(), &text);
     }
 
     fn flush(&self) {}
@@ -119,8 +122,16 @@ fn record_panics() {
         let place = info.location().map(|at| format!(" at {}:{}", at.file(), at.line())).unwrap_or_default();
         let message = info.payload_as_str().unwrap_or("no message");
         log::error!(target: "panic", "Thread {} panicked{place}: {message}", thread.name().unwrap_or("unnamed"));
+        let at = info.location().map(|at| format!("{}:{}", source_file(at.file()), at.line())).unwrap_or_default();
+        crate::telemetry::panic(thread.name().unwrap_or("unnamed"), &at, message);
         previous(info);
     }));
+}
+
+/// The crate and file of Nuzky's source or a dependency's, without the folders of the computer that built it.
+fn source_file(path: &str) -> String {
+    let parts: Vec<&str> = path.split(['/', '\\']).collect();
+    parts[parts.len().saturating_sub(3)..].join("/")
 }
 
 static CRASHED: AtomicBool = AtomicBool::new(false);
@@ -227,6 +238,20 @@ fn about(version: &str) -> Vec<String> {
         lines.push("The Nuzky before this one closed unexpectedly.".into());
     }
     lines
+}
+
+/// What `about` says of the computer, for Help improve Nuzky.
+pub(crate) fn facts() -> serde_json::Value {
+    let graphics = GRAPHICS.lock().unwrap_or_else(PoisonError::into_inner).clone();
+    let speech: Vec<_> = jobs::speech_models().into_iter().filter(|m| m.downloaded).map(|m| m.id).collect();
+    let faces = nuzky_vision::models::missing(nuzky_vision::models::ALL, &nuzky_analysis::models_dir()).is_empty();
+    serde_json::json!({
+        "graphics": graphics,
+        "memoryGb": memory_gb(),
+        "speechModels": speech,
+        "faceModels": faces,
+        "crashedBefore": crashed_before(),
+    })
 }
 
 #[cfg(unix)]
@@ -376,6 +401,13 @@ pub async fn diagnostics(app: AppHandle) -> CmdResult<String> {
     Ok(build(&app).await?.full)
 }
 
+/// The open project's shape and its files' formats, as a report has them. It opens each file.
+pub(crate) fn file_lines(app: &AppHandle) -> Vec<String> {
+    let state = app.state::<AppState>();
+    let session = state.session.lock().unwrap_or_else(PoisonError::into_inner).host.session.state().ok();
+    session.map(|s| project_lines(&s.project, s.open_run.is_some(), 0, describe)).unwrap_or_default()
+}
+
 static LAST_REPORT: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 #[derive(serde::Serialize)]
@@ -462,7 +494,18 @@ pub fn log_ui_error(message: String) {
 
 /// The log line without typed text, folders or secrets.
 pub fn scrub(text: &str) -> String {
-    hide_secrets(&shorten_paths(&hide_quoted(text)))
+    hide_secrets(&shorten_paths(&hide_quoted(text), true))
+}
+
+/// As `scrub`, and a path keeps only its file's extension, for what Nuzky sends by itself.
+pub(crate) fn scrub_names(text: &str) -> String {
+    hide_secrets(&shorten_paths(&hide_quoted(text), false))
+}
+
+/// Paths, which name the person's folders and files, out of text the person wrote or an agent answered; a path keeps
+/// only its extension.
+pub(crate) fn hide_folders(text: &str) -> String {
+    hide_secrets(&shorten_paths(text, false))
 }
 
 /// Text between double quotes, curly quotes or backticks on one line: captions, words and project names in error and
@@ -508,8 +551,8 @@ fn closing(chars: &[char], from: usize, quote: char) -> Option<usize> {
 
 /// Paths lose their folders, which name the person and where their files are. A folder may hold spaces, commas and
 /// apostrophes, so a path is taken to run to the end of its line, or to the line's last `'` when one opened it; that
-/// can drop words after it, never a folder.
-fn shorten_paths(text: &str) -> String {
+/// can drop words after it, never a folder. Without `keep_name` the file's name goes too, up to its extension.
+fn shorten_paths(text: &str, keep_name: bool) -> String {
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len());
     let mut i = 0;
@@ -525,10 +568,25 @@ fn shorten_paths(text: &str) -> String {
         let path = &chars[i..end];
         let trimmed = path.iter().rposition(|c| !is_separator(*c)).map_or(0, |last| last + 1);
         let name = path[..trimmed].iter().rposition(|c| is_separator(*c)).map_or(0, |sep| sep + 1);
-        out.extend(&path[name..]);
+        if keep_name {
+            out.extend(&path[name..]);
+        } else {
+            out.push('…');
+            out.extend(&path[name + extension(&path[name..]).unwrap_or(path.len() - name)..]);
+        }
         i = end;
     }
     out
+}
+
+/// Where a file name's extension starts: the dot before 1 to 5 letters or digits that end the name.
+fn extension(name: &[char]) -> Option<usize> {
+    (1..name.len()).find(|&dot| {
+        let ext = name[dot + 1..].iter().take_while(|c| c.is_ascii_alphanumeric()).count();
+        name[dot] == '.'
+            && (1..=5).contains(&ext)
+            && name.get(dot + 1 + ext).is_none_or(|&c| !c.is_alphanumeric() && c != '.')
+    })
 }
 
 fn is_separator(c: char) -> bool {
@@ -638,6 +696,20 @@ mod tests {
             ("https://huggingface.co/ggml-org/whisper-vad", "https://huggingface.co/ggml-org/whisper-vad"),
         ] {
             assert_eq!(scrub(line), clean, "{line}");
+        }
+    }
+
+    #[test]
+    fn what_nuzky_sends_keeps_only_a_files_extension() {
+        for (line, clean) in [
+            ("Cannot read /home/jana/Videos/Trip 2024/clip 1.mov: No such file", "Cannot read ….mov: No such file"),
+            ("ffmpeg: '/Users/jana/Movies/IMG_0042.MOV': Invalid data", "ffmpeg: '….MOV': Invalid data"),
+            (r"Cannot open C:\Users\Jana\Videos\My.Trip.mp4, skipping", "Cannot open ….mp4, skipping"),
+            ("Saved ~/Projects/wedding.nuzky", "Saved ….nuzky"),
+            ("No access to /Users/jana/Movies", "No access to …"),
+            ("Caption \"Ahoj, tady Jana\" is too long", "Caption \"…\" is too long"),
+        ] {
+            assert_eq!(scrub_names(line), clean, "{line}");
         }
     }
 

@@ -698,6 +698,7 @@ export function Checkbox({
   detail,
   children,
   tour,
+  describedBy,
 }: {
   label: string;
   checked: boolean;
@@ -715,6 +716,8 @@ export function Checkbox({
   children?: ReactNode;
   /** Names it for the first-run tour, which points at it. */
   tour?: string;
+  /** The id of the line that says what it does, for screen readers. */
+  describedBy?: string;
 }) {
   const lock = useLockReason();
   disabled = disabled || !!lock;
@@ -737,6 +740,7 @@ export function Checkbox({
           tabIndex={tabIndex}
           onChange={(e) => onChange(e.target.checked)}
           aria-label={children ? label : undefined}
+          aria-describedby={describedBy}
           className="peer absolute inset-0 m-0 h-full w-full cursor-[inherit] opacity-0"
         />
         <span
@@ -755,7 +759,7 @@ export function Checkbox({
 }
 
 /** An on/off setting that takes effect at once; `Space` or `Enter` flips it. */
-export function Switch({ label, checked, onChange, disabledReason }: { label: string; checked: boolean; onChange: (v: boolean) => void; disabledReason?: string }) {
+export function Switch({ label, checked, onChange, disabledReason, describedBy }: { label: string; checked: boolean; onChange: (v: boolean) => void; disabledReason?: string; /** As Checkbox's. */ describedBy?: string }) {
   const reason = useLockReason() ?? disabledReason;
   return (
     <button
@@ -763,6 +767,7 @@ export function Switch({ label, checked, onChange, disabledReason }: { label: st
       role="switch"
       aria-checked={checked}
       aria-label={label}
+      aria-describedby={describedBy}
       title={reason ?? label}
       {...disabledProps(!!reason, () => onChange(!checked))}
       className={`relative h-[22px] w-[38px] shrink-0 rounded-full transition-colors duration-[120ms] ease-out ${checked ? "bg-accent-strong" : "bg-white/[.16]"} ${

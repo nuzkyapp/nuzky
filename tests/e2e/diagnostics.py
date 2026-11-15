@@ -1,8 +1,8 @@
 """When something breaks, the person sees what happened with a way on and can send what Nuzky logged. An export to a
 folder it may not write to fails with Open logs folder and a way to export again, which works once the folder is
 writable; the log names the failure without the folders. Copy diagnostics gives the version, system, graphics, the format of the project's files, the last actions and the end of the log. After the app is killed, the
-next start says it closed unexpectedly and Report a bug… opens the report, which still holds what was done before the
-crash; after a normal quit it says nothing. A bug while drawing the window shows Reload instead of an empty window, and
+next start says it closed unexpectedly with Send crash report, which says when it cannot reach the server and offers Report
+a bug…, which opens the report, which still holds what was done before the crash; after a normal quit it says nothing. A bug while drawing the window shows Reload instead of an empty window, and
 Report a bug… there saves the report and opens the bug form. Nothing leaves the computer: the flow records the pages and folders the app would open, and the
 clipboard is the page's own, never the system's."""
 import re, subprocess, time, urllib.parse
@@ -103,7 +103,7 @@ def diagnostics(r):
     r.shot('export-failed')
     log = log_text(r)
     r.check('the log records the failed export with the file name and without its folders',
-            re.search(r'^\S+Z ERROR nuzky_app::jobs: Exporting out\.mp4 failed: .+$', log, re.M) and secret_free(r, log), log[-600:])
+            re.search(r'^\S+Z ERROR job: Exporting out\.mp4 failed: .+$', log, re.M) and secret_free(r, log), log[-600:])
 
     r.s.run(CLICK, '[role=dialog]', 'Open logs folder')
     r.check('Open logs folder opens the logs folder in the data folder',
@@ -173,12 +173,16 @@ def diagnostics(r):
     kill_hard(app_pid(r))
     restart(r)
     notice = wait(lambda: next((t for t in r.s.run(TOASTS) if t['text'] == CRASHED), None), 10)
-    r.check('after a crash the next start says Nuzky closed unexpectedly, with Report a bug…',
-            notice and notice['kind'] == 'warning' and notice['action'] == 'Report a bug…', r.s.run(TOASTS))
+    r.check('after a crash the next start says Nuzky closed unexpectedly, with Send crash report while sharing is off',
+            notice and notice['kind'] == 'warning' and notice['action'] == 'Send crash report', r.s.run(TOASTS))
     r.check('and the project opens with its clip', wait(lambda: r.track() == clips, 10), r.track())
     time.sleep(0.3)
     r.shot('crash-notice')
     before = len(opened(r))
+    r.s.run(CLICK, '[data-toast]', 'Send crash report')
+    failed = lambda: next((t for t in r.s.run(TOASTS) if "couldn't reach its server" in t['text']), None)
+    r.check("Send crash report says when it cannot reach the server and offers Report a bug… instead",
+            wait(failed, 30) and failed()['kind'] == 'error' and failed()['action'] == 'Report a bug…', r.s.run(TOASTS))
     r.s.run(CLICK, '[data-toast]', 'Report a bug…')
     r.check('Report a bug… asks what happened', wait(lambda: r.s.run(f"return document.querySelector('{REPORT_DIALOG}')?.open"), 5))
     r.s.run(f"[...document.querySelectorAll('{REPORT_DIALOG} button')].find((b) => b.textContent.startsWith('What the report')).click()")

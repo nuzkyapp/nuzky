@@ -62,6 +62,6 @@ docker compose start account litestream
 
 ## What runs where
 
-- `Caddyfile`: TLS for `account.nuzky.app`, HSTS, compression and an access log on stdout without query strings, redirect targets, cookies, `Authorization` or `Referer`, since those carry codes and tokens.
+- `Caddyfile`: TLS for `account.nuzky.app`, HSTS, compression and an access log on stdout without query strings, redirect targets, cookies, `Authorization` or `Referer`, since those carry codes and tokens. Requests to `/api/telemetry*` are not logged at all.
 - `compose.yml`: the account server runs as an unprivileged user on a read-only filesystem; only `/data`, `/tmp` and Next's cache are writable. Litestream runs as the same user on the same volume.
-- `litestream.yml`: one replica, `s3` with path-style addresses and signed payloads for OCI's S3 API. Replication and the restore steps above were tried with a local file replica, not yet against OCI; after the first start check that `docker compose exec litestream litestream ltx -config /etc/litestream.yml /data/account.db` lists files.
+- `litestream.yml`: one replica of `account.db`; `telemetry.db` is not backed up, `s3` with path-style addresses and signed payloads for OCI's S3 API. Replication and the restore steps above were tried with a local file replica, not yet against OCI; after the first start check that `docker compose exec litestream litestream ltx -config /etc/litestream.yml /data/account.db` lists files.

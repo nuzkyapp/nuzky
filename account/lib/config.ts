@@ -8,6 +8,9 @@ export type Config = {
   baseURL: string;
   secret: string;
   databasePath: string;
+  telemetryDatabasePath: string;
+  telemetryRetentionSeconds: number;
+  adminEmails: string[];
   google: { clientId: string; clientSecret: string; discoveryUrl: string };
   mail: { transport: "smtp"; url: string; from: string } | { transport: "file"; dir: string; from: string };
   pwnedPasswordsUrl: string;
@@ -52,6 +55,12 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
     baseURL,
     secret,
     databasePath: path.join(dataDir, "account.db"),
+    telemetryDatabasePath: path.join(dataDir, "telemetry.db"),
+    telemetryRetentionSeconds: 90 * 24 * 60 * 60,
+    adminEmails: (env.ADMIN_EMAILS ?? "")
+      .split(",")
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean),
     google: {
       clientId: required(env, "GOOGLE_CLIENT_ID"),
       clientSecret: required(env, "GOOGLE_CLIENT_SECRET"),
@@ -69,6 +78,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
     config.accessTokenSeconds = seconds(env, "ACCESS_TOKEN_SECONDS", config.accessTokenSeconds);
     config.refreshReuseSeconds = seconds(env, "REFRESH_REUSE_SECONDS", config.refreshReuseSeconds);
     config.unverifiedTtlSeconds = seconds(env, "UNVERIFIED_TTL_SECONDS", config.unverifiedTtlSeconds);
+    config.telemetryRetentionSeconds = seconds(env, "TELEMETRY_RETENTION_SECONDS", config.telemetryRetentionSeconds);
     return config;
   }
 
@@ -77,7 +87,13 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (secret.length < 32) problems.push("AUTH_SECRET must be at least 32 characters");
   if (config.google.discoveryUrl !== GOOGLE_DISCOVERY_URL) problems.push(`GOOGLE_DISCOVERY_URL must be ${GOOGLE_DISCOVERY_URL}`);
   if (mail.transport !== "smtp") problems.push("MAIL_TRANSPORT must be smtp");
-  for (const name of ["PWNED_PASSWORDS_URL", "ACCESS_TOKEN_SECONDS", "REFRESH_REUSE_SECONDS", "UNVERIFIED_TTL_SECONDS"]) {
+  for (const name of [
+    "PWNED_PASSWORDS_URL",
+    "ACCESS_TOKEN_SECONDS",
+    "REFRESH_REUSE_SECONDS",
+    "UNVERIFIED_TTL_SECONDS",
+    "TELEMETRY_RETENTION_SECONDS",
+  ]) {
     if (env[name]) problems.push(`${name} is only for ACCOUNT_MODE=test`);
   }
   if (problems.length) throw new Error(`Refusing to start in production: ${problems.join("; ")}.`);

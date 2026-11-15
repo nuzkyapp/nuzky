@@ -241,6 +241,10 @@ export type Boot = {
    */
   crashed: boolean,
   /**
+   * Help improve Nuzky: what the person allowed and whether it was asked.
+   */
+  telemetry: TelemetryStatus,
+  /**
    * What the Nuzky before this one left when it restarted to update (`restartToUpdate` in src/lib/updates.ts).
    */
   updateNote: string | null,
@@ -2200,6 +2204,22 @@ export type SyncStatus = {
    * Why the last sync failed, in plain words.
    */
   error: string | null,
+};
+
+/**
+ * What Settings › Privacy and the question after an update show.
+ */
+export type TelemetryStatus = {
+  problems: boolean,
+  conversations: boolean,
+  /**
+   * The person answered the question, sharing or not, so it never asks by itself again.
+   */
+  asked: boolean,
+  /**
+   * Events sent from this install since it last deleted what it shared.
+   */
+  sent: number,
 };
 
 /**

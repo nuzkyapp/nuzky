@@ -14,12 +14,16 @@ export const SCOPE = "openid email profile offline_access nuzky";
 
 export type Stack = { url: string; google: string; mail: string; stop: () => Promise<void> };
 
-export async function startStack(options: { refreshReuseSeconds?: number; unverifiedTtlSeconds?: number } = {}): Promise<Stack> {
+export async function startStack(
+  options: { refreshReuseSeconds?: number; unverifiedTtlSeconds?: number; telemetryRetentionSeconds?: number; adminEmails?: string[] } = {},
+): Promise<Stack> {
   mkdirSync(tmp, { recursive: true });
   const data = mkdtempSync(path.join(tmp, "account-test-"));
   const args = [path.join(root, "scripts", "e2e-server.mjs"), "--data", data];
   if (options.refreshReuseSeconds) args.push("--refresh-reuse-seconds", String(options.refreshReuseSeconds));
   if (options.unverifiedTtlSeconds) args.push("--unverified-ttl-seconds", String(options.unverifiedTtlSeconds));
+  if (options.telemetryRetentionSeconds) args.push("--telemetry-retention-seconds", String(options.telemetryRetentionSeconds));
+  if (options.adminEmails) args.push("--admin-emails", options.adminEmails.join(","));
   const child: ChildProcess = spawn(process.execPath, args, { stdio: ["ignore", "pipe", "pipe"] });
   const log: string[] = [];
   child.stderr!.on("data", (chunk) => log.push(String(chunk)));

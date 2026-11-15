@@ -15,9 +15,19 @@ const sections: { heading: string; body: React.ReactNode[] }[] = [
   {
     heading: "Nuzky on your computer",
     body: [
-      "Nuzky edits your videos on your computer, and your videos and projects stay there. We never receive them, and Nuzky sends no usage statistics.",
+      "Nuzky edits your videos on your computer, and your videos and projects stay there. We never receive them, and Nuzky sends nothing about how you use it unless you allow it under Help improve Nuzky below.",
       "The AI panel is the exception you choose. The agent you pick there, such as ChatGPT, Codex, Claude Code, OpenCode or Antigravity CLI, sends your messages to its provider together with what Nuzky's tools give it: the transcript, details of your project and the frames of your video it asks to look at.",
       "Other features that need the internet talk straight to the service they use: GitHub for updates and plugins, Hugging Face when you download a speech or vision model, Openverse or Freesound when you search for sounds, YouTube when you paste a link, and the address of a picture an AI agent asks Nuzky to download. Edit from your phone sends exports only to the phone you connect on your own network, and a plugin you allow full access can read your files and use the internet like any program you run. These services follow their own privacy policies. We don't see that traffic.",
+    ],
+  },
+  {
+    heading: "Help improve Nuzky",
+    body: [
+      "Nuzky asks once whether it may send us two things, and both stay off unless you tick them. You can change either at any time in Settings › Privacy.",
+      "Problems and usage: crashes and errors with the last steps before them, how long jobs such as exports take and how they end, the format of the files a failed job used (container, codecs, size, frame rate, rotation and the phone that recorded them), which agent and model you use in the AI panel and which of its tools fail, how often each feature is used, and your Nuzky version, system, graphics card and memory. Nuzky removes text you typed, folders and the names of your project and files before it sends anything. It never sends your videos, sound, frames, captions or transcripts.",
+      "AI conversations, only if you tick it separately: what you write in the AI panel, what the agent answers and the tools it calls. It never sends what those tools return, so no transcript or frame of your video. Your messages can contain anything you type, so leave this off if they are private.",
+      "If Nuzky closes unexpectedly, you can send us its bug report with one click, even with both off. It holds the same kind of information as Problems and usage and the end of Nuzky's log, with the same things removed.",
+      "Nuzky sends this to account.nuzky.app with a random number of your installation, never your account or email. The server doesn't store or log your IP address, keeps the data for 90 days, leaves it out of backups and deletes it when you choose Delete what was sent in Settings › Privacy. We use it only to fix Nuzky and decide what to improve, based on your consent, which you can withdraw at any time.",
     ],
   },
   {
