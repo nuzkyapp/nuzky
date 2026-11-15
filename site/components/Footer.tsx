@@ -11,6 +11,7 @@ export function Footer() {
     ["Releases", releases],
     ["Building from source", buildFromSource],
     ["License", license],
+    ["Privacy", "/privacy"],
   ] as const;
   return (
     <footer className="mx-auto w-full max-w-[1240px] px-5">
