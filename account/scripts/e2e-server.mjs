@@ -19,6 +19,8 @@ const { values } = parseArgs({
     "access-token-seconds": { type: "string" },
     "refresh-reuse-seconds": { type: "string" },
     "unverified-ttl-seconds": { type: "string" },
+    "telemetry-retention-seconds": { type: "string" },
+    "admin-emails": { type: "string" },
   },
 });
 
@@ -33,7 +35,8 @@ if (!existsSync(serverScript)) fail(`${serverScript} is missing. Run npm ci and 
 const dataDir = path.resolve(values.data);
 const mailDir = path.join(dataDir, "mail");
 mkdirSync(mailDir, { recursive: true });
-for (const name of ["account.db", "account.db-wal", "account.db-shm"]) rmSync(path.join(dataDir, name), { force: true });
+for (const name of ["account.db", "account.db-wal", "account.db-shm", "telemetry.db", "telemetry.db-wal", "telemetry.db-shm"])
+  rmSync(path.join(dataDir, name), { force: true });
 for (const name of readdirSync(mailDir)) if (name.endsWith(".json")) rmSync(path.join(mailDir, name));
 
 function freePort() {
@@ -71,6 +74,8 @@ const env = {
 if (values["access-token-seconds"]) env.ACCESS_TOKEN_SECONDS = values["access-token-seconds"];
 if (values["refresh-reuse-seconds"]) env.REFRESH_REUSE_SECONDS = values["refresh-reuse-seconds"];
 if (values["unverified-ttl-seconds"]) env.UNVERIFIED_TTL_SECONDS = values["unverified-ttl-seconds"];
+if (values["telemetry-retention-seconds"]) env.TELEMETRY_RETENTION_SECONDS = values["telemetry-retention-seconds"];
+if (values["admin-emails"]) env.ADMIN_EMAILS = values["admin-emails"];
 
 const server = spawn(process.execPath, [serverScript], { cwd: path.dirname(serverScript), env, stdio: ["ignore", "pipe", "pipe"] });
 server.stdout.pipe(process.stderr);

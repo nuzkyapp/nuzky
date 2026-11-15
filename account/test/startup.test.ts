@@ -38,6 +38,7 @@ test("production refuses to start with test settings", async () => {
     MAIL_DIR: "/tmp/nuzky-mail",
     PWNED_PASSWORDS_URL: "http://127.0.0.1:9",
     ACCESS_TOKEN_SECONDS: "60",
+    TELEMETRY_RETENTION_SECONDS: "60",
   });
   assert.equal(code, 1);
   for (const problem of [
@@ -48,6 +49,7 @@ test("production refuses to start with test settings", async () => {
     "MAIL_TRANSPORT must be smtp",
     "PWNED_PASSWORDS_URL is only for ACCOUNT_MODE=test",
     "ACCESS_TOKEN_SECONDS is only for ACCOUNT_MODE=test",
+    "TELEMETRY_RETENTION_SECONDS is only for ACCOUNT_MODE=test",
   ]) {
     assert.ok(output.includes(problem), `missing "${problem}" in:\n${output}`);
   }
