@@ -1,3 +1,4 @@
+import { isPasswordCompromised } from "better-auth/plugins";
 import { isFresh } from "@/lib/fresh";
 import { forbidden, isSameOrigin } from "@/lib/origin";
 import { getAuth } from "@/lib/server";
@@ -10,5 +11,6 @@ export async function POST(request: Request) {
   if (!isFresh(session.session.createdAt)) return Response.json({ code: "SESSION_NOT_FRESH" }, { status: 403 });
   const body = await request.json().catch(() => null);
   const newPassword = typeof body?.newPassword === "string" ? body.newPassword : "";
+  if (await isPasswordCompromised(newPassword)) return Response.json({ code: "PASSWORD_COMPROMISED" }, { status: 400 });
   return auth.api.setPassword({ body: { newPassword }, headers: request.headers, asResponse: true });
 }

@@ -230,6 +230,27 @@ describe("email and password", () => {
     assert.equal((await exchange(stack.url, code, redirectUri, verifier)).status, 200);
   });
 
+  test("wrong reset codes answer the same for any address, also once the code is used up", async () => {
+    const { email } = await signedUpWithTokens(uniqueEmail("guess"));
+    const nobody = uniqueEmail("nobody");
+    for (const address of [email, nobody])
+      assert.equal((await new Browser(stack.url).post("/api/auth/email-otp/request-password-reset", { email: address })).status, 200);
+    await waitForMail(stack.mail, email, 1);
+    const answers = async (address: string) => {
+      const all = [];
+      for (let i = 0; i < 4; i++) {
+        const response = await new Browser(stack.url).post("/api/auth/email-otp/reset-password", {
+          email: address,
+          otp: "000000",
+          password: "a brand new password",
+        });
+        all.push({ status: response.status, body: await json(response) });
+      }
+      return all;
+    };
+    assert.deepEqual(await answers(email), await answers(nobody));
+  });
+
   test("an unverified account's first password sign-in waits for the code, then continues to the app", async () => {
     const email = uniqueEmail("later");
     const browser = new Browser(stack.url);

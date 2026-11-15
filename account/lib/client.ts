@@ -24,7 +24,7 @@ const MESSAGES: Record<string, string> = {
   PASSWORD_TOO_SHORT: "Use at least 10 characters.",
   PASSWORD_TOO_LONG: "Use at most 128 characters.",
   PASSWORD_COMPROMISED: "This password has appeared in a data leak. Choose a different one.",
-  INVALID_OTP: "That code is not right. Check the email and try again.",
+  INVALID_OTP: "That code is not right or no longer works. Check the email, or ask for a new code.",
   OTP_EXPIRED: "That code has expired. Ask for a new one.",
   TOO_MANY_ATTEMPTS: "Too many wrong codes. Ask for a new one.",
   SESSION_NOT_FRESH: "For your safety, sign in again first.",

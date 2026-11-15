@@ -20,6 +20,8 @@ const GETS = new Set([
   "/.well-known/oauth-authorization-server",
   "/callback/google",
 ]);
+const RESET_PASSWORD = "/email-otp/reset-password";
+const CODE_FAILURES = new Set(["INVALID_OTP", "OTP_EXPIRED", "TOO_MANY_ATTEMPTS"]);
 
 function endpoint(request: Request): string {
   return new URL(request.url).pathname.slice("/api/auth".length);
@@ -27,6 +29,17 @@ function endpoint(request: Request): string {
 
 function notFound(): Response {
   return Response.json({ code: "NOT_FOUND" }, { status: 404 });
+}
+
+/** An address without an account has no code, so a used up or expired code answers as a wrong one. */
+async function sameForEveryAddress(response: Response): Promise<Response> {
+  if (response.ok) return response;
+  const body = await response
+    .clone()
+    .json()
+    .catch(() => null);
+  if (!CODE_FAILURES.has(body?.code)) return response;
+  return Response.json({ code: "INVALID_OTP", message: "Invalid OTP" }, { status: 400 });
 }
 
 export async function GET(request: Request) {
@@ -39,5 +52,6 @@ export async function POST(request: Request) {
   if (APP_POSTS.has(path)) return (await getAuth()).handler(request);
   if (!BROWSER_POSTS.has(path)) return notFound();
   if (!(await isSameOrigin(request))) return forbidden();
-  return (await getAuth()).handler(request);
+  const response = await (await getAuth()).handler(request);
+  return path === RESET_PASSWORD ? sameForEveryAddress(response) : response;
 }

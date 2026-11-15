@@ -117,6 +117,15 @@ describe("Google", () => {
     assert.equal(after.status, 401, "the unconfirmed password no longer opens the account");
   });
 
+  test("a Google account's first password is checked for leaks too", async () => {
+    const browser = new Browser(stack.url);
+    await signInWithGoogle(browser, uniqueEmail("first-password"));
+    const leaked = await browser.post("/api/account/set-password", { newPassword: "password1234" });
+    assert.equal(leaked.status, 400);
+    assert.equal((await leaked.json()).code, "PASSWORD_COMPROMISED");
+    assert.equal((await browser.post("/api/account/set-password", { newPassword: "a password of my own" })).status, 200);
+  });
+
   test("a second Google sign-in reaches the same account", async () => {
     const email = uniqueEmail("again");
     const first = await signInWithGoogle(new Browser(stack.url), email);
