@@ -15,23 +15,24 @@ const sections: { heading: string; body: React.ReactNode[] }[] = [
   {
     heading: "Nuzky on your computer",
     body: [
-      "Nuzky edits your videos on your computer. Your videos, projects, transcripts and exports stay there. We never receive them, and Nuzky sends no usage statistics.",
-      "Features that need the internet talk straight to the service they use: GitHub for updates and plugins, Hugging Face when you download a speech or vision model, Openverse or Freesound when you search for sounds, YouTube when you paste a link, OpenAI when you use ChatGPT in the AI panel, and the address of a picture an AI agent asks Nuzky to download. Those services follow their own privacy policies. We don't see that traffic.",
+      "Nuzky edits your videos on your computer, and your videos and projects stay there. We never receive them, and Nuzky sends no usage statistics.",
+      "The AI panel is the exception you choose. The agent you pick there, such as ChatGPT, Codex, Claude Code, OpenCode or Antigravity CLI, sends your messages to its provider together with what Nuzky's tools give it: the transcript, details of your project and the frames of your video it asks to look at.",
+      "Other features that need the internet talk straight to the service they use: GitHub for updates and plugins, Hugging Face when you download a speech or vision model, Openverse or Freesound when you search for sounds, YouTube when you paste a link, and the address of a picture an AI agent asks Nuzky to download. Edit from your phone sends exports only to the phone you connect on your own network, and a plugin you allow full access can read your files and use the internet like any program you run. These services follow their own privacy policies. We don't see that traffic.",
     ],
   },
   {
     heading: "The optional Nuzky account",
     body: [
-      "You don't need an account to use Nuzky. If you create one, the account server at account.nuzky.app keeps your email address, your name, your profile picture address when you sign in with Google, and a one-way hash of your password, never the password itself. When you sign in with Google, it receives your name, email address and profile picture from Google and keeps Google's sign-in tokens encrypted. For each signed-in browser or computer it keeps the IP address and browser name, until you sign out or the sign-in expires.",
+      "You don't need an account to use Nuzky. If you create one, the account server at account.nuzky.app keeps your email address, your name, your profile picture address when you sign in with Google, and a one-way hash of your password, never the password itself. When you sign in with Google, it receives your name, email address and profile picture from Google and keeps Google's sign-in tokens encrypted. For each signed-in browser or computer it keeps the IP address and the browser's user agent until you sign out there or delete the account.",
       "When you choose a password, the server sends the first five characters of its SHA-1 hash to Have I Been Pwned to check whether it appeared in a data leak. The password itself never leaves the server.",
-      "The server sends you sign-in and password codes by email through Resend. Its logs record the IP address, time and page of each request, without codes, tokens or cookies, and we use them only to find faults and stop abuse.",
+      "The server sends you sign-in and password codes by email through Resend. Its logs record the IP address, time and page of each request, without codes, tokens or cookies. To stop password guessing it also counts recent requests per IP address and page, even before you sign in. We use these only to find faults and stop abuse.",
       "The server and its backups run on Oracle Cloud in Frankfurt, Germany. We use your data only to sign you in and to keep your account working. We don't sell it, share it for advertising or use it to train AI.",
     ],
   },
   {
     heading: "This website",
     body: [
-      "nuzky.app runs on Vercel. Vercel Web Analytics counts page visits without cookies and without storing anything that identifies you.",
+      "nuzky.app runs on Vercel. Vercel Web Analytics records the page, the page you came from, your approximate location (country, region and city) and your browser, operating system and device type, without cookies. It tells visitors apart by a hash that it discards after a day, so a visit can't be tied to you.",
     ],
   },
   {
