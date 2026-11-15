@@ -6,6 +6,7 @@ import { emailOTP, genericOAuth, haveIBeenPwned, jwt } from "better-auth/plugins
 import type { Config } from "./config";
 import { FRESH_SIGN_IN_SECONDS } from "./fresh";
 import { codeMessage, existingAccountMessage, type Mailer } from "./mail";
+import { sync } from "./sync-endpoints";
 
 export const CLIENT_ID = "nuzky-desktop";
 export const SCOPES = ["openid", "email", "profile", "offline_access", "nuzky"];
@@ -131,6 +132,7 @@ export function createAuth(config: Config, database: DatabaseSync, mail: Mailer)
       haveIBeenPwned({
         customPasswordCompromisedMessage: "This password has appeared in a data leak. Choose a different one.",
       }),
+      sync(database, CLIENT_ID),
     ],
   });
 }

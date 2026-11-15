@@ -1,6 +1,8 @@
-import { useEffect, useRef } from "react";
-import { AlertCircle, AlertTriangle, ExternalLink, Loader2, Mail } from "lucide-react";
-import { cancelSignIn, check, initial, manage, signIn, signOut, useAccount } from "../../lib/account";
+import { useEffect, useRef, useState } from "react";
+import { AlertCircle, AlertTriangle, ExternalLink, Loader2, Mail, RefreshCw } from "lucide-react";
+import { cancelSignIn, check, initial, manage, signIn, signOut, syncNow, useAccount } from "../../lib/account";
+import { openHistory } from "../../lib/history";
+import { whenLabel } from "../../lib/library";
 import type { AccountStatus } from "../../lib/types";
 import { GoogleLogo } from "../GoogleLogo";
 import { Button } from "../ui";
@@ -70,6 +72,49 @@ function SignedOut({ email }: { email: string | null }) {
   );
 }
 
+/** "Synced 12 min ago", kept current while it shows. */
+function useSyncedLabel(ms: number | null) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+  if (ms === null) return null;
+  const when = whenLabel(ms, Math.max(now, ms));
+  return `Synced ${when === "Just now" || when === "Yesterday" ? when.toLowerCase() : when}`;
+}
+
+/** Your style and caption styles: when they last synced, or why they didn't, and Sync now. */
+function SyncRow() {
+  const sync = useAccount((s) => s.sync);
+  const synced = useSyncedLabel(sync?.syncedMs ?? null);
+  const syncing = !sync || sync.syncing;
+  return (
+    <div className="flex min-h-[44px] items-center gap-3 border-t border-white/[.06] px-3.5 py-2.5">
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="text-[13px] font-medium text-fg">Your style and caption styles</span>
+        {sync?.error && !syncing ? (
+          <span role="status" className="flex items-start gap-1.5 text-[12px] leading-[18px] text-fg">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0 text-warn" />
+            {sync.error}
+          </span>
+        ) : (
+          <span role="status" className="text-[12px] text-muted">
+            {syncing ? "Syncing…" : (synced ?? "The same on every computer you sign in on")}
+          </span>
+        )}
+      </div>
+      <Button pill onClick={() => openHistory()}>
+        History…
+      </Button>
+      <Button pill disabled={syncing} disabledReason="Syncing…" onClick={syncNow}>
+        <RefreshCw size={12} className={syncing ? "animate-spin" : undefined} />
+        Sync now
+      </Button>
+    </div>
+  );
+}
+
 function SignedIn({ status }: { status: Extract<AccountStatus, { state: "signedIn" }> }) {
   const action = useAccount((s) => s.action);
   return (
@@ -97,6 +142,7 @@ function SignedIn({ status }: { status: Extract<AccountStatus, { state: "signedI
           {action === "signingOut" ? "Signing out…" : "Sign out"}
         </Button>
       </div>
+      <SyncRow />
       <div className="flex min-h-[44px] items-center gap-3 border-t border-white/[.06] px-3.5 py-2.5">
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="text-[13px] font-medium text-fg">Manage account</span>

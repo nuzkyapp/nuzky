@@ -1,6 +1,6 @@
 # Nuzky account server
 
-The optional Nuzky account at `https://account.nuzky.app`: sign up and sign in with email and password or with Google, in the system browser, for one public native client, the Nuzky desktop app. Nothing in Nuzky needs it. Later the same account syncs the creator's style and caption styles.
+The optional Nuzky account at `https://account.nuzky.app`: sign up and sign in with email and password or with Google, in the system browser, for one public native client, the Nuzky desktop app. Nothing in Nuzky needs it. Signed in, the app keeps the creator's style and caption styles in it, the same on every computer.
 
 Next.js 16 (App Router, standalone output) with better-auth 1.7 and its OAuth 2.1 provider, SQLite through `node:sqlite`, Node 26. Deployment is in [`deploy/`](deploy/README.md).
 
@@ -42,6 +42,19 @@ Neither endpoint needs an account or a token. Both take only `Content-Type: appl
 `POST /api/telemetry/delete` with `{"install": "<uuid>"}` deletes every event of that install and answers `200 {"deleted": n}`.
 
 `429` comes with `Retry-After` in seconds: 30 batches an hour per install (deleting is not limited per install), 120 an hour per client address, and at most 5000 stored events per install in 24 hours, so a batch that would go above answers `429`. While the stored events take more than 1 GiB, `POST /api/telemetry` answers `503` with `Retry-After: 3600`. Retry after `429`, `503` and other `5xx`; never retry `400`, `413` or `415`.
+
+## Sync
+
+The app keeps one JSON document per kind in the account: `style` (EDIT.md and what learning knows of its rules) and `caption-styles` (`{"styles": […]}`). Both endpoints take the app's access token as `Authorization: Bearer`, which must be the `nuzky-desktop` client's with the `nuzky` scope, and answer `401` with `WWW-Authenticate` otherwise. They share a limit of 120 requests a minute per address.
+
+| | Path |
+|---|---|
+| Read | `GET /api/auth/sync?style=<revision>&caption-styles=<revision>` |
+| Write | `PUT /api/auth/sync/<kind>` with `{"revision": <the one the app has>, "body": {…}}` |
+
+Read answers `{"documents": {"style": {"revision": 3, "body": {…}}, "caption-styles": {"revision": 0, "body": null}}}`; a kind whose revision the app named comes without its body. Revision 0 without a body is no document yet. Write stores the body as the next revision while the document is still at the given revision (0 creates it) and answers `{"revision": 4}`; otherwise `409 {"code": "CONFLICT", "revision", "body"}` with the document as it is now, which the app merges and writes again. A body is a JSON object of at most 256 KB, larger answers `413`; an unknown kind `404`. A write may say where it comes from, `"origin": {"computer", "computerId", "label"}`, short texts the history shows (80, 80 and 200 characters at most), otherwise `400`.
+
+Every stored revision is kept with its origin for 90 days, at most 500 of each document, and always the one the document is at; an hourly sweep forgets the rest. `GET /api/auth/sync/<kind>/history` answers `{"revisions": [{"revision", "computer", "computerId", "label", "at"}]}` newest first, without the bodies, and `GET /api/auth/sync/<kind>/history/<revision>` one of them with its `body`, or `404` once it is forgotten. Deleting the account deletes its documents and their history.
 
 ## Behaviour
 

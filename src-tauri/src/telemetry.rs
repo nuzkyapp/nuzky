@@ -50,7 +50,7 @@ struct Settings {
 pub struct TelemetryStatus {
     pub problems: bool,
     pub conversations: bool,
-    /// The person answered the question or chose Not now, so it never asks by itself again.
+    /// The person answered the question, sharing or not, so it never asks by itself again.
     pub asked: bool,
     /// Events sent from this install since it last deleted what it shared.
     #[cfg_attr(test, ts(type = "number"))]
@@ -598,7 +598,7 @@ pub fn set_telemetry(problems: bool, conversations: bool) -> CmdResult<Telemetry
     .map_err(err)
 }
 
-/// Not now: the question does not come back by itself.
+/// Don't share: the question does not come back by itself.
 #[tauri::command]
 pub fn telemetry_not_now() -> CmdResult<()> {
     with(|s| {

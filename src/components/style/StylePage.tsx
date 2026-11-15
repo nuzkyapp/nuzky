@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { AlertCircle, Check, ChevronDown, ChevronRight, FileText, History, MoreHorizontal, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
 import { useEditor } from "../../lib/store";
+import { useAccount } from "../../lib/account";
+import { openHistory } from "../../lib/history";
 import { changeStyle, loadStyle, useStyle } from "../../lib/style";
 import { when } from "../../lib/time";
 import type { StyleConfidence, StyleFrozen, StyleRule, StyleSource, StyleView, Suggestion } from "../../lib/types";
@@ -381,6 +383,7 @@ function LearnedFrom({ view }: { view: StyleView }) {
 
 function VersionsButton({ view, onReset }: { view: StyleView; onReset: () => void }) {
   const [menu, setMenu] = useState<{ at: { x: number; y: number; align: "end" }; keyboard: boolean; back: HTMLElement } | null>(null);
+  const signedIn = useAccount((s) => s.available && s.status?.state === "signedIn");
   return (
     <>
       <IconButton
@@ -409,6 +412,7 @@ function VersionsButton({ view, onReset }: { view: StyleView; onReset: () => voi
               run: v.index === view.version ? undefined : () => void changeStyle({ type: "restore", index: v.index }).then((done) => done && toastUndo(`Restored “${v.label}”`, view.version)),
             })),
             "separator" as const,
+            ...(signedIn ? [{ label: "History from all your computers…", run: () => openHistory("style") }] : []),
             { label: "Back to default…", danger: true, disabled: view.text === null && view.sources.length === 0 ? "Your style is the default already" : null, run: onReset },
           ]}
           onClose={(chose) => {

@@ -15,7 +15,7 @@ static WAITING: Mutex<Option<Arc<AtomicBool>>> = Mutex::new(None);
 /// Debug builds can sign in to a test server on 127.0.0.1 (`NUZKY_ACCOUNT_ISSUER`) and keep the
 /// tokens in a file (`NUZKY_TEST_ACCOUNT_KEYCHAIN`), as the end-to-end flow does; release builds
 /// always use account.nuzky.app and the system keychain.
-fn account() -> Account {
+pub(crate) fn account() -> Account {
     let dir = crate::store::data_dir();
     #[cfg(debug_assertions)]
     if let Ok(issuer) = std::env::var("NUZKY_ACCOUNT_ISSUER")
@@ -37,10 +37,15 @@ pub fn account_available() -> bool {
     cfg!(debug_assertions)
 }
 
-/// The account; with `renew`, its tokens renewed when they are about to expire.
+/// The account; with `renew`, its tokens renewed when they are about to expire, and then synced.
 #[tauri::command]
 pub async fn account_status(renew: bool) -> CmdResult<Status> {
-    tauri::async_runtime::spawn_blocking(move || account().status(renew).map_err(err)).await.map_err(err)?
+    let status =
+        tauri::async_runtime::spawn_blocking(move || account().status(renew).map_err(err)).await.map_err(err)??;
+    if renew && matches!(status, Status::SignedIn { .. }) {
+        crate::sync::nudge();
+    }
+    Ok(status)
 }
 
 /// Opens the browser to sign in and answers once it came back, was cancelled or timed out.
@@ -63,6 +68,9 @@ pub async fn account_sign_in(app: AppHandle, provider: Provider, another_account
     let mut waiting = WAITING.lock().unwrap();
     if waiting.as_ref().is_some_and(|current| Arc::ptr_eq(current, &cancel)) {
         *waiting = None;
+    }
+    if matches!(result, Ok(Status::SignedIn { .. })) {
+        crate::sync::nudge();
     }
     result
 }

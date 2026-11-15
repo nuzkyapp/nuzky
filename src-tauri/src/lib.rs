@@ -36,6 +36,7 @@ mod stickers;
 mod storage;
 mod store;
 mod style;
+mod sync;
 mod telemetry;
 #[cfg(all(target_os = "macos", debug_assertions))]
 pub mod test_bridge;
@@ -1442,6 +1443,7 @@ pub fn run() {
             app.state::<AppState>().session.lock().unwrap().start_pump(app.handle().clone(), events);
             jobs::prepare_media(&app.state::<AppState>(), &project);
             style::watch(app.handle().clone());
+            sync::start(app.handle().clone(), account::account);
             plugins::watch(app.handle().clone());
             telemetry::start(app.handle());
             app.emit("ready", ()).ok();
@@ -1678,6 +1680,12 @@ pub fn run() {
             account::account_cancel_sign_in,
             account::account_sign_out,
             account::account_manage,
+            sync::sync_status,
+            sync::sync_now,
+            sync::sync_history,
+            sync::sync_revision,
+            sync::sync_restore,
+            sync::sync_undo_restore,
             agent_panel::agent_models,
         ])
         .build(context)
@@ -1692,6 +1700,9 @@ pub fn run() {
                 tauri::WindowEvent::Destroyed => preview_window::closed(app),
                 _ => {}
             },
+            tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Focused(true), .. } if label == "main" => {
+                sync::came_to_front()
+            }
             tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } if label == "main" => {
                 preview_window::editor_closed(app)
             }

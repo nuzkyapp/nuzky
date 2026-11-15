@@ -317,6 +317,11 @@ export type CapCutDraft = {
 };
 
 /**
+ * What restoring a revision does to one caption style.
+ */
+export type CaptionChange = "back" | "goes" | "changes" | "same";
+
+/**
  * A caption style: its look, a font when it brings its own, the entry and exit animation of every caption
  * and how it marks key words. The built-in ones are in `assets/presets/captions.json`; the user's own live
  * beside the projects.
@@ -1537,6 +1542,31 @@ export type ReelFraming = "crop" | "blur";
 
 export type ReelStatus = "proposed" | "picked" | "rejected" | "made";
 
+/**
+ * A revision as the History dialog previews it.
+ */
+export type RevisionView = {
+  revision: SyncRevision,
+  /**
+   * For Your style: EDIT.md in that revision and now; none without a style.
+   */
+  text: string | null,
+  nowText: string | null,
+  /**
+   * For caption styles: every style in that revision or now, by name.
+   */
+  captionStyles: Array<[string, CaptionChange]>,
+  /**
+   * Restoring it would change nothing.
+   */
+  same: boolean,
+  /**
+   * Stands for the style or caption styles as this preview compared with, so Restore never
+   * replaces a change that came after it.
+   */
+  seen: string,
+};
+
 export type Rhythm = "calm" | "builds" | "fast";
 
 export type RhythmPlan = {
@@ -2139,13 +2169,51 @@ export type Suggestion = {
 };
 
 /**
+ * One revision in the account's history of a document.
+ */
+export type SyncRevision = {
+  revision: number,
+  /**
+   * The name of the computer that stored it.
+   */
+  computer: string,
+  /**
+   * Stored by this computer.
+   */
+  mine: boolean,
+  /**
+   * What changed, as that computer said.
+   */
+  label: string,
+  /**
+   * Milliseconds since 1970.
+   */
+  atMs: number,
+};
+
+/**
+ * What Settings › Account shows of syncing.
+ */
+export type SyncStatus = {
+  syncing: boolean,
+  /**
+   * When this computer and the account last agreed, in milliseconds since 1970.
+   */
+  syncedMs: number | null,
+  /**
+   * Why the last sync failed, in plain words.
+   */
+  error: string | null,
+};
+
+/**
  * What Settings › Privacy and the question after an update show.
  */
 export type TelemetryStatus = {
   problems: boolean,
   conversations: boolean,
   /**
-   * The person answered the question or chose Not now, so it never asks by itself again.
+   * The person answered the question, sharing or not, so it never asks by itself again.
    */
   asked: boolean,
   /**

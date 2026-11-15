@@ -1,8 +1,9 @@
+import { listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import { api, errorText, plainError } from "./api";
 import { paneShown } from "./settings";
 import { useEditor } from "./store";
-import type { AccountProvider, AccountStatus } from "./types";
+import type { AccountProvider, AccountStatus, SyncStatus } from "./types";
 
 /**
  * The optional Nuzky account as Settings › Account shows it. The backend keeps the tokens; this knows
@@ -17,6 +18,8 @@ type Account = {
   action: "signingIn" | "signingOut" | null;
   /** What went wrong last, in plain words. */
   error: string | null;
+  /** How syncing Your style and caption styles goes; null until the backend answers. */
+  sync: SyncStatus | null;
 };
 
 export const useAccount = create<Account>(() => ({
@@ -25,6 +28,7 @@ export const useAccount = create<Account>(() => ({
   checking: false,
   action: null,
   error: null,
+  sync: null,
 }));
 
 void api
@@ -32,7 +36,10 @@ void api
   .then((available) => {
     useAccount.setState({ available });
     // The rail shows who is signed in, so it reads what is stored, without the network.
-    if (available) void check(false);
+    if (!available) return;
+    void check(false);
+    void listen<SyncStatus>("sync-changed", (e) => useAccount.setState({ sync: e.payload }));
+    void api.syncStatus().then((sync) => useAccount.setState({ sync }));
   })
   .catch(() => {});
 
@@ -119,6 +126,11 @@ export async function manage() {
   } catch (e) {
     useAccount.setState({ error: accountError(errorText(e)) });
   }
+}
+
+export function syncNow() {
+  useAccount.setState({ sync: { ...(useAccount.getState().sync ?? { syncedMs: null, error: null }), syncing: true } });
+  void api.syncNow();
 }
 
 /** The letter in the account's circle: the name's first, else the email's. */

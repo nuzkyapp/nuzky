@@ -5,6 +5,7 @@ import { getMigrations } from "better-auth/db/migration";
 import { CLIENT_ID, createAuth, REDIRECT_URI, SCOPES, type Auth } from "./auth";
 import { PWNED_PASSWORDS_URL, readConfig, type Config } from "./config";
 import { createMailer } from "./mail";
+import { createSyncTable, pruneHistory } from "./sync";
 
 type Server = { auth: Auth; config: Config };
 
@@ -38,13 +39,21 @@ async function start(): Promise<Server> {
   const auth = createAuth(config, database, createMailer(config.mail));
   const { runMigrations } = await getMigrations(auth.options);
   await runMigrations();
+  createSyncTable(database);
   await seedDesktopClient(auth);
   await deleteUnverifiedAccounts(auth, config.unverifiedTtlSeconds);
+  pruneHistory(database);
   const sweep = setInterval(
-    () =>
+    () => {
       deleteUnverifiedAccounts(auth, config.unverifiedTtlSeconds).catch((error) =>
         console.error("Deleting unverified accounts failed", error),
-      ),
+      );
+      try {
+        pruneHistory(database);
+      } catch (error) {
+        console.error("Forgetting old synced revisions failed", error);
+      }
+    },
     Math.min(config.unverifiedTtlSeconds, 60 * 60) * 1000,
   );
   sweep.unref();

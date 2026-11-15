@@ -142,23 +142,30 @@ pub async fn style_use_learned(app: AppHandle, job_id: String) -> CmdResult<Styl
 
 /// Tells the UI whenever the style changes, whoever changes it: the AI panel's agent and other
 /// agents (their own processes), learning, `nuzky style learn`, another window or a text editor.
-/// It looks at the style's files twice a second, a few `stat`s each time.
+/// A change of the style or of My caption styles, whoever made it, also syncs them with the
+/// Nuzky account. It looks at their files twice a second, a few `stat`s each time.
 pub fn watch(app: AppHandle) {
-    let stamp = || -> Vec<Option<(SystemTime, u64)>> {
-        Store::default()
-            .files()
-            .iter()
-            .map(|p| std::fs::metadata(p).ok().and_then(|m| Some((m.modified().ok()?, m.len()))))
-            .collect()
+    fn stamp(paths: &[PathBuf]) -> Vec<Option<(SystemTime, u64)>> {
+        paths.iter().map(|p| std::fs::metadata(p).ok().and_then(|m| Some((m.modified().ok()?, m.len())))).collect()
+    }
+    let style = || stamp(&Store::default().files());
+    let synced = || {
+        let [edit_md, versions, _] = Store::default().files();
+        stamp(&[edit_md, versions, nuzky_mcp::caption_styles::path().unwrap_or_default()])
     };
     let spawned = std::thread::Builder::new().name("style-watch".into()).spawn(move || {
-        let mut last = stamp();
+        let (mut last, mut last_synced) = (style(), synced());
         loop {
             std::thread::sleep(Duration::from_millis(500));
-            let now = stamp();
+            let now = style();
             if now != last {
                 last = now;
                 app.emit("style-changed", ()).ok();
+            }
+            let now = synced();
+            if now != last_synced {
+                last_synced = now;
+                crate::sync::nudge();
             }
         }
     });

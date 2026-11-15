@@ -61,7 +61,7 @@ async function act(run: () => Promise<TelemetryStatus>) {
 export const setTelemetry = (problems: boolean, conversations: boolean) => act(() => api.setTelemetry(problems, conversations));
 export const deleteTelemetry = () => act(api.deleteTelemetry);
 
-/** The question's answer: Share with what was ticked, or Not now. */
+/** The question's answer: Share with what was ticked, or Don't share. */
 export async function answerTelemetry(choice: { problems: boolean; conversations: boolean } | null) {
   useTelemetry.setState({ open: false });
   if (!choice) {

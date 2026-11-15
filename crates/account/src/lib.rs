@@ -1,8 +1,10 @@
 //! The optional Nuzky account at account.nuzky.app (`account/` in this repository). The system
 //! browser signs in, with an email and password or with Google, a listener on 127.0.0.1 takes the
 //! code back, and the tokens live only in the system keychain; the frontend gets the status, never
-//! a token. Nothing in Nuzky needs the account.
+//! a token. Nothing in Nuzky needs the account. Signed in, it keeps documents the app syncs between
+//! the user's computers, which the app reads and writes here, so the token never leaves this crate.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,6 +24,9 @@ const AUTHORIZE: &str = "/api/auth/oauth2/authorize";
 const TOKEN: &str = "/api/auth/oauth2/token";
 const REVOKE: &str = "/api/auth/oauth2/revoke";
 const USERINFO: &str = "/api/auth/oauth2/userinfo";
+const SYNC: &str = "/api/auth/sync";
+/// The server keeps each document under 256 KB; the answer holds every kind.
+const MAX_DOCUMENTS: u64 = 4 << 20;
 /// Whose sign-in the keychain entry and the messages name.
 const NAME: &str = "Nuzky account";
 const WHO: &str = "Nuzky's account server";
@@ -71,6 +76,71 @@ pub enum Notice {
 pub enum Provider {
     Google,
     Email,
+}
+
+/// One document as the account keeps it: revision 0 without a body is none yet. The body is left out
+/// when the app named this revision, so it has it already.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct Remote {
+    pub revision: u64,
+    #[serde(default)]
+    pub body: Option<serde_json::Value>,
+}
+
+/// The account's documents by kind, and the account they belong to.
+#[derive(Debug)]
+pub struct Documents {
+    pub subject: String,
+    pub kinds: BTreeMap<String, Remote>,
+}
+
+/// One revision in the account's history of a document.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts", ts(rename = "SyncRevision"))]
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Revision {
+    pub revision: u64,
+    /// The name of the computer that stored it.
+    pub computer: String,
+    /// Stored by this computer.
+    pub mine: bool,
+    /// What changed, as that computer said.
+    pub label: String,
+    /// Milliseconds since 1970.
+    pub at_ms: u64,
+}
+
+/// A revision as the server lists it.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Listed {
+    revision: u64,
+    #[serde(default)]
+    computer: String,
+    #[serde(default)]
+    computer_id: String,
+    #[serde(default)]
+    label: String,
+    at: String,
+    #[serde(default)]
+    body: Option<serde_json::Value>,
+}
+
+impl Listed {
+    fn shown(self, host_id: &str) -> (Revision, Option<serde_json::Value>) {
+        let at_ms = self.at.parse::<jiff::Timestamp>().map_or(0, |at| u64::try_from(at.as_millisecond()).unwrap_or(0));
+        let mine = !self.computer_id.is_empty() && self.computer_id == host_id;
+        (Revision { revision: self.revision, computer: self.computer, mine, label: self.label, at_ms }, self.body)
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Stored {
+    /// The document's new revision.
+    Revision(u64),
+    /// Someone stored another revision meanwhile; this is the document as it is now.
+    Conflict(Remote),
 }
 
 pub struct Account {
@@ -268,6 +338,162 @@ impl Account {
         };
         self.vault.delete(reg.entry())?;
         Ok(signed_out(reg.email, (!revoked).then_some(Notice::NotRevoked)))
+    }
+
+    /// The account's documents, without the bodies of the revisions in `known`; none when signed out.
+    pub fn documents(&self, known: &[(&str, u64)]) -> Result<Option<Documents>> {
+        let revisions: Vec<(&str, String)> =
+            known.iter().map(|(kind, revision)| (*kind, revision.to_string())).collect();
+        let query: Vec<(&str, &str)> = revisions.iter().map(|(kind, revision)| (*kind, revision.as_str())).collect();
+        let url = nuzky_oauth::with_query(&self.url(SYNC), &query);
+        #[derive(Deserialize)]
+        struct Answer {
+            documents: BTreeMap<String, Remote>,
+        }
+        let Some((subject, status, body)) = self.authorized(None, |http, token| {
+            http.get(&url)
+                .header("Authorization", format!("Bearer {token}"))
+                .header("Accept", "application/json")
+                .call()
+        })?
+        else {
+            return Ok(None);
+        };
+        ensure!(status == 200, "SYNC_FAILED: {WHO} answered {status}");
+        let answer: Answer = serde_json::from_str(&body).context("SYNC_FAILED: Reading the account's documents")?;
+        Ok(Some(Documents { subject, kinds: answer.documents }))
+    }
+
+    /// Stores `body` as the next revision of `kind` over `revision`, the one this computer last had
+    /// from the account `subject`, saying it comes from `computer` and what changed (`label`); none
+    /// when signed out or signed in to another account meanwhile.
+    pub fn store(
+        &self,
+        subject: &str,
+        kind: &str,
+        revision: u64,
+        body: &serde_json::Value,
+        computer: &str,
+        label: &str,
+    ) -> Result<Option<Stored>> {
+        let url = format!("{}/{}", self.url(SYNC), nuzky_oauth::encode(kind));
+        let origin = serde_json::json!({
+            "computer": computer.chars().take(80).collect::<String>(),
+            "computerId": self.host_id(),
+            "label": label.chars().take(200).collect::<String>(),
+        });
+        let request = serde_json::to_vec(&serde_json::json!({ "revision": revision, "body": body, "origin": origin }))?;
+        let Some((_, status, answer)) = self.authorized(Some(subject), |http, token| {
+            http.put(&url)
+                .header("Authorization", format!("Bearer {token}"))
+                .header("Accept", "application/json")
+                .header("Content-Type", "application/json")
+                .send(&request[..])
+        })?
+        else {
+            return Ok(None);
+        };
+        #[derive(Deserialize)]
+        struct Revision {
+            revision: u64,
+        }
+        match status {
+            200 => Ok(Some(Stored::Revision(
+                serde_json::from_str::<Revision>(&answer).context("SYNC_FAILED: Reading the new revision")?.revision,
+            ))),
+            409 => Ok(Some(Stored::Conflict(
+                serde_json::from_str(&answer).context("SYNC_FAILED: Reading the account's document")?,
+            ))),
+            413 => bail!("TOO_LARGE: {WHO} keeps at most 256 KB of each"),
+            _ => bail!("SYNC_FAILED: {WHO} answered {status}"),
+        }
+    }
+
+    /// The revisions of `kind` the account keeps, newest first; none when signed out.
+    pub fn history(&self, kind: &str) -> Result<Option<Vec<Revision>>> {
+        #[derive(Deserialize)]
+        struct Answer {
+            revisions: Vec<Listed>,
+        }
+        let url = format!("{}/{}/history", self.url(SYNC), nuzky_oauth::encode(kind));
+        let Some(answer) = self.read(&url)? else { return Ok(None) };
+        let answer: Answer = serde_json::from_str(&answer).context("SYNC_FAILED: Reading the history")?;
+        let host_id = self.host_id();
+        Ok(Some(answer.revisions.into_iter().map(|listed| listed.shown(&host_id).0).collect()))
+    }
+
+    /// One revision of `kind` with its body; none when signed out or the account no longer keeps it.
+    pub fn revision(&self, kind: &str, revision: u64) -> Result<Option<(Revision, serde_json::Value)>> {
+        let url = format!("{}/{}/history/{revision}", self.url(SYNC), nuzky_oauth::encode(kind));
+        let Some(answer) = self.read(&url)? else { return Ok(None) };
+        let listed: Listed = serde_json::from_str(&answer).context("SYNC_FAILED: Reading the revision")?;
+        let (shown, body) = listed.shown(&self.host_id());
+        Ok(body.map(|body| (shown, body)))
+    }
+
+    /// This data folder's id, which the account keeps beside what it stores.
+    fn host_id(&self) -> String {
+        Registration::load(&self.dir).map(|reg| reg.host_id).unwrap_or_default()
+    }
+
+    /// A GET with the access token; none when signed out or not found.
+    fn read(&self, url: &str) -> Result<Option<String>> {
+        let Some((_, status, body)) = self.authorized(None, |http, token| {
+            http.get(url).header("Authorization", format!("Bearer {token}")).header("Accept", "application/json").call()
+        })?
+        else {
+            return Ok(None);
+        };
+        match status {
+            200 => Ok(Some(body)),
+            404 => Ok(None),
+            _ => bail!("SYNC_FAILED: {WHO} answered {status}"),
+        }
+    }
+
+    /// Sends a request with the access token, renewed first when it is about to expire, and once
+    /// more after a renewal when the server refused it. Answers the account, the status and the
+    /// body; none when signed out, the sign-in ended or it is another account than `subject`.
+    fn authorized(
+        &self,
+        subject: Option<&str>,
+        send: impl Fn(&ureq::Agent, &str) -> Result<ureq::http::Response<ureq::Body>, ureq::Error>,
+    ) -> Result<Option<(String, u16, String)>> {
+        let http = nuzky_oauth::http();
+        for renew in [false, true] {
+            let Some((signed_in, token)) = self.access(renew)? else { return Ok(None) };
+            if subject.is_some_and(|subject| subject != signed_in) {
+                return Ok(None);
+            }
+            let mut response =
+                send(&http, &token).map_err(|error| anyhow!("SYNC_FAILED: Could not reach {WHO}: {error}"))?;
+            let status = response.status().as_u16();
+            if status == 401 && !renew {
+                continue;
+            }
+            let body = response.body_mut().with_config().limit(MAX_DOCUMENTS).read_to_string()?;
+            return Ok(Some((signed_in, status, body)));
+        }
+        bail!("SYNC_FAILED: {WHO} did not accept the sign-in")
+    }
+
+    /// The account and its access token, renewed first when it expires within five minutes, or at
+    /// once with `renew`; none when signed out or the server no longer renews it.
+    fn access(&self, renew: bool) -> Result<Option<(String, String)>> {
+        let _lock = lock(&self.dir)?;
+        let Some(mut reg) = Registration::load(&self.dir) else { return Ok(None) };
+        let Some(tokens) = self.vault.load::<Tokens>(reg.entry())? else { return Ok(None) };
+        let tokens = if renew || tokens.expires_at <= now() + RENEW_BEFORE {
+            if !self.refresh(&mut reg, tokens)? {
+                return Ok(None);
+            }
+            let Some(tokens) = self.vault.load::<Tokens>(reg.entry())? else { return Ok(None) };
+            tokens
+        } else {
+            tokens
+        };
+        let subject = reg.subject.context("SYNC_FAILED: the sign-in names no account")?;
+        Ok(Some((subject, tokens.access_token)))
     }
 
     fn url(&self, path: &str) -> String {
