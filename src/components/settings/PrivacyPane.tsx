@@ -70,7 +70,11 @@ export function PrivacyPane() {
 
   return (
     <div data-setting="privacy" className="flex flex-col gap-6">
-      <p className="text-[12px] text-muted">Captions, faces, Your style and every edit stay on this computer.</p>
+      <p className="text-[12px] text-muted">
+        {account?.state === "signedIn"
+          ? "Captions, faces and every edit stay on this computer. Your style and caption styles sync with your Nuzky account."
+          : "Captions, faces, Your style and every edit stay on this computer."}
+      </p>
       <div className="flex flex-col gap-2">
         <h3 className="text-[13px] font-semibold text-fg">Goes online</h3>
         <Rows rows={online} label="Goes online" />
