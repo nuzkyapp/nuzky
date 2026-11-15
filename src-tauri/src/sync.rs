@@ -280,6 +280,8 @@ fn sync_captions(
     struct Body {
         styles: Vec<Value>,
     }
+    // What the next attempt merges against when writing here was refused: the list this computer had.
+    let mut base: Option<Vec<Value>> = None;
     for _ in 0..ATTEMPTS {
         if kept.as_ref().is_some_and(|kept| kept.revision > remote.revision) {
             *kept = None;
@@ -293,8 +295,8 @@ fn sync_captions(
             }
             _ => body::<Vec<Value>>(&remote, kept)?.unwrap_or_default(),
         };
-        let base = kept.as_ref().map_or(&[][..], |kept| &kept.content[..]);
-        let (merged, mine) = merge(base, &local, &theirs);
+        let agreed = kept.as_ref().map_or(&[][..], |kept| &kept.content[..]);
+        let (merged, mine) = merge(base.as_deref().unwrap_or(agreed), &local, &theirs);
         if merged != theirs {
             match store(account, subject, CAPTIONS, remote.revision, &json!({ "styles": merged }))? {
                 Stored::Revision(revision) => remote = Remote { revision, body: Some(json!({ "styles": merged })) },
@@ -312,8 +314,10 @@ fn sync_captions(
             *kept = Some(Kept { revision: remote.revision, content: merged });
             return Ok(true);
         }
-        // Changed here meanwhile: merge again over what both last agreed on, so what came from the
-        // account and never reached this computer is not taken as deleted here.
+        // Changed here meanwhile: the account has the merge, so merge again against the list this
+        // computer had then. What came from the account stays, and this computer's new change, a
+        // style renamed or deleted since, applies to it.
+        base = Some(local.iter().filter_map(|style| serde_json::to_value(style).ok()).collect());
         remote = Remote { revision: remote.revision, body: Some(json!({ "styles": merged })) };
     }
     bail!("SYNC_FAILED: your caption styles kept changing while they synced")
@@ -425,6 +429,16 @@ mod tests {
         // Deleted there but changed here, it comes back.
         let (merged, _) = merge(&[value(&a)], &[style("A", "#ff0000")], &[]);
         assert_eq!(names(&merged), ["A #ff0000"]);
+    }
+
+    #[test]
+    fn a_style_renamed_here_while_the_merge_was_sent_stays_renamed() {
+        // The account has [A, B, D] from merging [A, D] here with B from there; D was renamed E meanwhile.
+        let (a, b, d) = (style("A", "#ffffff"), style("B", "#ffffff"), style("D", "#ffffff"));
+        let sent_from = [value(&a), value(&d)];
+        let (merged, mine) = merge(&sent_from, &[a.clone(), style("E", "#ffffff")], &[value(&a), value(&b), value(&d)]);
+        assert_eq!(names(&merged), ["A #ffffff", "B #ffffff", "E #ffffff"]);
+        assert_eq!(mine.len(), 3);
     }
 
     #[test]
