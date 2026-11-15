@@ -205,8 +205,11 @@ def account(r):
         privacy = lambda: r.s.run("return document.querySelector('[data-setting=privacy]')?.innerText ?? ''")
         r.check('Privacy names the Nuzky account as signed in', wait(lambda: 'Nuzky account' in privacy(), 5)
                 and 'Signed in' in privacy().split('Nuzky account', 1)[1].split('Claude Code', 1)[0], privacy())
+        shown = stored(r)['refresh_token']
         r.s.run("document.querySelector('#settings-tab-account').click()")
         wait(lambda: 'Sign out' in view(r).get('text', ''), 5)
+        # Showing the account renews the sign-in; the refresh token to sign out is the renewed one.
+        wait(lambda: stored(r).get('refresh_token') not in (None, shown), 10)
 
         spent = stored(r)['refresh_token']
         click(r, 'Sign out')
