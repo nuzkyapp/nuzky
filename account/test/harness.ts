@@ -54,7 +54,7 @@ export function uniqueIp(): string {
   return `10.${bytes[0]}.${bytes[1]}.${bytes[2]}`;
 }
 
-export type Mail = { to: string; subject: string; text: string; code: string | null };
+export type Mail = { to: string; subject: string; text: string; html: string; code: string | null };
 
 export async function waitForMail(dir: string, to: string, after = 0): Promise<Mail[]> {
   const deadline = Date.now() + 5000;

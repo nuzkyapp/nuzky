@@ -175,11 +175,10 @@ function CodeStep({ email, password, oauthQuery }: Flow & { email: string; passw
         inputMode="numeric"
         autoComplete="one-time-code"
         pattern="[0-9]{6}"
-        maxLength={6}
         required
         autoFocus
         value={code}
-        onChange={(e) => setCode(e.target.value)}
+        onChange={(e) => setCode(e.target.value.replace(/\s/g, ""))}
       />
       {problem ? <Problem>{problem}</Problem> : null}
       {note ? <Note>{note}</Note> : null}
@@ -255,11 +254,10 @@ export function ResetForm({ oauthQuery }: Flow) {
         inputMode="numeric"
         autoComplete="one-time-code"
         pattern="[0-9]{6}"
-        maxLength={6}
         required
         autoFocus
         value={code}
-        onChange={(e) => setCode(e.target.value)}
+        onChange={(e) => setCode(e.target.value.replace(/\s/g, ""))}
       />
       <Field
         label="New password"
