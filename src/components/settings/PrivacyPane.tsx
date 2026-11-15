@@ -45,7 +45,7 @@ export function PrivacyPane() {
       : [
           {
             title: "Nuzky account",
-            detail: "account.nuzky.app, only while you sign in or out and when the sign-in is renewed.",
+            detail: "account.nuzky.app, while you sign in or out, when the sign-in is renewed and to sync Your style and your caption styles.",
             state: account?.state === "signedIn" ? "Signed in" : "Signed out",
             on: account?.state === "signedIn",
             pane: "account" as const,

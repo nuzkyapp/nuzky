@@ -205,6 +205,7 @@ def account(r):
         privacy = lambda: r.s.run("return document.querySelector('[data-setting=privacy]')?.innerText ?? ''")
         r.check('Privacy names the Nuzky account as signed in', wait(lambda: 'Nuzky account' in privacy(), 5)
                 and 'Signed in' in privacy().split('Nuzky account', 1)[1].split('Claude Code', 1)[0], privacy())
+        shot(r, 'privacy')
         r.s.run("document.querySelector('#settings-tab-account').click()")
         wait(lambda: 'Sign out' in view(r).get('text', ''), 5)
 

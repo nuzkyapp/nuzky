@@ -1,3 +1,4 @@
+import { listen } from "@tauri-apps/api/event";
 import { Check, Ellipsis, Plus } from "lucide-react";
 import { Fragment, type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react";
 import { create } from "zustand";
@@ -27,15 +28,23 @@ export function forTrack(preset: CaptionPreset, translation: boolean, own: boole
 /** The user's own caption styles, one list for the Captions tab and every caption's inspector. */
 const useOwnStyles = create<{ styles: CaptionPreset[]; error: string | null }>(() => ({ styles: [], error: null }));
 
-/** The user's own caption styles, read again each time a place showing them opens, as an agent may have saved one meanwhile. */
+const loadOwnStyles = () =>
+  api.captionStyles().then(
+    (styles) => useOwnStyles.setState({ styles, error: null }),
+    (e) => useOwnStyles.setState({ error: plainError(errorText(e)) }),
+  );
+
+/**
+ * The user's own caption styles, read again each time a place showing them opens, as an agent may have saved one
+ * meanwhile, and when they synced from another computer.
+ */
 export function useMyStyles() {
   const styles = useOwnStyles((s) => s.styles);
   const error = useOwnStyles((s) => s.error);
   useEffect(() => {
-    api.captionStyles().then(
-      (styles) => useOwnStyles.setState({ styles, error: null }),
-      (e) => useOwnStyles.setState({ error: plainError(errorText(e)) }),
-    );
+    void loadOwnStyles();
+    const off = listen("caption-styles-changed", () => void loadOwnStyles());
+    return () => void off.then((unlisten) => unlisten());
   }, []);
   /** Runs a change and shows the list it returns; resolves to why it failed, or null. */
   const change = async (run: () => Promise<CaptionPreset[]>) => {

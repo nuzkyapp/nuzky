@@ -8,13 +8,15 @@ use nuzky_engine::edit::{CaptionPreset, TextPreset, caption_preset, caption_pres
 use nuzky_engine::model::{Canvas, TextStyle};
 use serde_json::{Value, json};
 
-fn path() -> Result<PathBuf> {
+/// Where My styles are kept.
+pub fn path() -> Result<PathBuf> {
     Ok(nuzky_engine::data_dir()
         .context("STORE_UNAVAILABLE: no data directory for caption styles")?
         .join("caption-styles.json"))
 }
 
-fn normalized(name: &str) -> String {
+/// A style's name as two names that are the same compare: "My_Style" and "my style".
+pub fn normalized(name: &str) -> String {
     name.trim().replace(['_', '-'], " ").to_lowercase()
 }
 
@@ -88,6 +90,23 @@ pub fn delete(name: &str) -> Result<Vec<CaptionPreset>> {
         .with_context(|| format!("UNKNOWN_STYLE: no caption style named {name:?}"))?;
     styles.remove(index);
     write(styles)
+}
+
+/// Whether `style` may join `styles` as it is: a free name of 1 to 40 characters and valid looks.
+pub fn check(style: &CaptionPreset, styles: &[CaptionPreset]) -> Result<()> {
+    ensure!(style.name.trim() == style.name, "INVALID_ARGUMENTS: a style name has no spaces around it");
+    name_available(&style.name, styles)?;
+    validate(style)
+}
+
+/// Replaces My styles with `styles`, which `check` let in, but only while they are still `over`;
+/// false when they changed meanwhile.
+pub fn replace(over: &[CaptionPreset], styles: Vec<CaptionPreset>) -> Result<bool> {
+    if list()? != over {
+        return Ok(false);
+    }
+    write(styles)?;
+    Ok(true)
 }
 
 pub fn find(name: &str) -> Result<CaptionPreset> {

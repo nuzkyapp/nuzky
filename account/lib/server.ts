@@ -5,6 +5,7 @@ import { getMigrations } from "better-auth/db/migration";
 import { CLIENT_ID, createAuth, REDIRECT_URI, SCOPES, type Auth } from "./auth";
 import { PWNED_PASSWORDS_URL, readConfig, type Config } from "./config";
 import { createMailer } from "./mail";
+import { createSyncTable } from "./sync";
 
 type Server = { auth: Auth; config: Config };
 
@@ -38,6 +39,7 @@ async function start(): Promise<Server> {
   const auth = createAuth(config, database, createMailer(config.mail));
   const { runMigrations } = await getMigrations(auth.options);
   await runMigrations();
+  createSyncTable(database);
   await seedDesktopClient(auth);
   await deleteUnverifiedAccounts(auth, config.unverifiedTtlSeconds);
   const sweep = setInterval(

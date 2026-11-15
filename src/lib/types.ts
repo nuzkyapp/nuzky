@@ -2135,6 +2135,21 @@ export type Suggestion = {
 };
 
 /**
+ * What Settings › Account shows of syncing.
+ */
+export type SyncStatus = {
+  syncing: boolean,
+  /**
+   * When this computer and the account last agreed, in milliseconds since 1970.
+   */
+  syncedMs: number | null,
+  /**
+   * Why the last sync failed, in plain words.
+   */
+  error: string | null,
+};
+
+/**
  * Where the lines of a text line up.
  */
 export type TextAlign = "left" | "center" | "right";

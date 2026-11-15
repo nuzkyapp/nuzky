@@ -1,6 +1,6 @@
 # Nuzky account server
 
-The optional Nuzky account at `https://account.nuzky.app`: sign up and sign in with email and password or with Google, in the system browser, for one public native client, the Nuzky desktop app. Nothing in Nuzky needs it. Later the same account syncs the creator's style and caption styles.
+The optional Nuzky account at `https://account.nuzky.app`: sign up and sign in with email and password or with Google, in the system browser, for one public native client, the Nuzky desktop app. Nothing in Nuzky needs it. Signed in, the app keeps the creator's style and caption styles in it, the same on every computer.
 
 Next.js 16 (App Router, standalone output) with better-auth 1.7 and its OAuth 2.1 provider, SQLite through `node:sqlite`, Node 26. Deployment is in [`deploy/`](deploy/README.md).
 
@@ -32,6 +32,17 @@ The app gets `http://127.0.0.1:<port>/auth/callback?code=…&state=…&iss=https
 The token response has `access_token` (opaque), `refresh_token`, `expires_in` (3600), `expires_at`, `token_type` (`Bearer`), `scope` and `id_token`. A code lives 2 minutes and works once. A refresh token lives 30 days and rotates on every use. Using a rotated one again within 60 seconds returns the same answer; after that it is refused with `invalid_grant` and the whole chain ends, so the app has to sign in again. A revoked token, a deleted account or an unknown token answers `400 {"error":"invalid_grant",…}`.
 
 Userinfo answers `sub`, `name`, `email`, `email_verified`. `name` is empty for accounts made with email and password, and the Google name for Google accounts.
+
+## Sync
+
+The app keeps one JSON document per kind in the account: `style` (EDIT.md and what learning knows of its rules) and `caption-styles` (`{"styles": […]}`). Both endpoints take the app's access token as `Authorization: Bearer`, which must be the `nuzky-desktop` client's with the `nuzky` scope, and answer `401` with `WWW-Authenticate` otherwise. They share a limit of 120 requests a minute per address.
+
+| | Path |
+|---|---|
+| Read | `GET /api/auth/sync?style=<revision>&caption-styles=<revision>` |
+| Write | `PUT /api/auth/sync/<kind>` with `{"revision": <the one the app has>, "body": {…}}` |
+
+Read answers `{"documents": {"style": {"revision": 3, "body": {…}}, "caption-styles": {"revision": 0, "body": null}}}`; a kind whose revision the app named comes without its body. Revision 0 without a body is no document yet. Write stores the body as the next revision while the document is still at the given revision (0 creates it) and answers `{"revision": 4}`; otherwise `409 {"code": "CONFLICT", "revision", "body"}` with the document as it is now, which the app merges and writes again. A body is a JSON object of at most 256 KB, larger answers `413`; an unknown kind `404`. Deleting the account deletes its documents.
 
 ## Behaviour
 

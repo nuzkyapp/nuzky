@@ -356,6 +356,33 @@ pub enum StyleAction {
     Reset,
 }
 
+/// The style as the user's other computers get it through their Nuzky account: EDIT.md and what
+/// learning needs to know of its rules, without what this computer learned from its own videos.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Shared {
+    text: Option<String>,
+    #[serde(default)]
+    accepted: BTreeMap<String, Accepted>,
+    #[serde(default)]
+    frozen: BTreeMap<String, Frozen>,
+    /// When it changed, in milliseconds since 1970; none for no style yet.
+    #[serde(default)]
+    pub at_ms: u64,
+}
+
+impl Shared {
+    /// The same style, whenever it changed.
+    pub fn same(&self, other: &Shared) -> bool {
+        (&self.text, &self.accepted, &self.frozen) == (&other.text, &other.accepted, &other.frozen)
+    }
+
+    /// No style: the guide's defaults.
+    pub fn is_default(&self) -> bool {
+        self.same(&Shared::default())
+    }
+}
+
 pub struct Store {
     dir: PathBuf,
 }
@@ -661,6 +688,27 @@ impl Store {
         self.commit(&versions, &format!("{by}{label}"), text, accepted, frozen)?;
         versions = self.read_versions()?;
         self.show(&versions)
+    }
+
+    /// The style as it is now, for the user's other computers.
+    pub fn shared(&self) -> Result<Shared> {
+        let _lock = self.lock()?;
+        let current = self.synced()?.pop().unwrap_or_default();
+        Ok(Shared { text: current.text, accepted: current.accepted, frozen: current.frozen, at_ms: current.at_ms })
+    }
+
+    /// Makes `shared`, the style from another computer, the style, as a version, but only while the
+    /// style is still `over`; false when it changed meanwhile.
+    pub fn take_shared(&self, shared: &Shared, over: &Shared) -> Result<bool> {
+        let _lock = self.lock()?;
+        let versions = self.synced()?;
+        let current = versions.last().cloned().unwrap_or_default();
+        if !over.same(&Shared { text: current.text, accepted: current.accepted, frozen: current.frozen, at_ms: 0 }) {
+            return Ok(false);
+        }
+        let label = "From another computer";
+        self.commit(&versions, label, shared.text.clone(), shared.accepted.clone(), shared.frozen.clone())?;
+        Ok(true)
     }
 
     /// The versions, after recording a change made to EDIT.md outside Nuzky.
