@@ -1,0 +1,20 @@
+{
+	email {$ACME_EMAIL}
+}
+
+account.nuzky.app {
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	reverse_proxy account:3000
+	log {
+		output stdout
+		format filter {
+			request>uri regexp \?.* ""
+			request>headers>Referer delete
+			request>headers>Cookie delete
+			request>headers>Authorization delete
+			resp_headers>Location regexp \?.* ""
+			resp_headers>Set-Cookie delete
+		}
+	}
+}

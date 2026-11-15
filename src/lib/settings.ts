@@ -1,9 +1,10 @@
 import { create } from "zustand";
 
-export const PANES = ["general", "ai", "models", "sounds", "plugins", "keyboard", "storage", "privacy"] as const;
+export const PANES = ["account", "general", "ai", "models", "sounds", "plugins", "keyboard", "storage", "privacy"] as const;
 export type Pane = (typeof PANES)[number];
 
 export const PANE_TITLES: Record<Pane, string> = {
+  account: "Account",
   general: "General",
   ai: "AI",
   models: "Models",

@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
-import { HardDrive, Keyboard, Music, Puzzle, Settings, Shield, Sparkles, Subtitles, X } from "lucide-react";
+import { Fragment, useEffect, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
+import { HardDrive, Keyboard, Music, Puzzle, Settings, Shield, Sparkles, Subtitles, UserRound, X } from "lucide-react";
+import { initial, useAccount } from "../../lib/account";
 import { ACTIONS, keysOf, useKeys } from "../../lib/keys";
 import { PANES, PANE_TITLES, closeSettings, useSettings, type Pane } from "../../lib/settings";
 import { useUpdates } from "../../lib/updates";
 import { IconButton, SearchField, trapTab } from "../ui";
+import { AccountPane } from "./AccountPane";
 import { AiPane } from "./AiPane";
 import { GeneralPane } from "./GeneralPane";
 import { KeysPane } from "./KeysPane";
@@ -14,6 +16,7 @@ import { SoundsPane } from "./SoundsPane";
 import { StoragePane } from "./StoragePane";
 
 const ICONS: Record<Pane, ComponentType<{ size?: number; className?: string }>> = {
+  account: UserRound,
   general: Settings,
   ai: Sparkles,
   models: Subtitles,
@@ -25,6 +28,7 @@ const ICONS: Record<Pane, ComponentType<{ size?: number; className?: string }>> 
 };
 
 const BODIES: Record<Pane, ComponentType> = {
+  account: AccountPane,
   general: GeneralPane,
   ai: AiPane,
   models: ModelsPane,
@@ -37,6 +41,7 @@ const BODIES: Record<Pane, ComponentType> = {
 
 /** What search finds besides the keys: a setting's name, the pane and row it is on, and other words people use for it. */
 const ENTRIES: { label: string; pane: Pane; target: string; words?: string }[] = [
+  { label: "Nuzky account", pane: "account", target: "account", words: "sign in sign up log in register create google email password profile" },
   { label: "Check for updates", pane: "general", target: "updates", words: "version update new" },
   { label: "Check for updates automatically", pane: "general", target: "auto-update", words: "daily" },
   { label: "Get set up", pane: "general", target: "setup", words: "start models download" },
@@ -68,12 +73,12 @@ const fold = (text: string) =>
 
 type Result = { label: string; pane: Pane; target: string; keys?: string[] };
 
-function search(query: string, updates: boolean): Result[] {
+function search(query: string, updates: boolean, account: boolean): Result[] {
   const words = fold(query).split(/\s+/).filter(Boolean);
   if (!words.length) return [];
   const hit = (text: string) => words.every((w) => fold(text).includes(w));
   // A copy that doesn't update itself has no update settings to find.
-  const settings = ENTRIES.filter((e) => (updates || (e.target !== "updates" && e.target !== "auto-update")) && hit(`${e.label} ${PANE_TITLES[e.pane]} ${e.words ?? ""}`));
+  const settings = ENTRIES.filter((e) => (updates || (e.target !== "updates" && e.target !== "auto-update")) && (account || e.pane !== "account") && hit(`${e.label} ${PANE_TITLES[e.pane]} ${e.words ?? ""}`));
   const keys = ACTIONS.filter((a) => hit(`${a.label} ${keysOf(a.id).join(" ")} shortcut key`)).map((a) => ({
     label: a.label,
     pane: "keyboard" as const,
@@ -90,8 +95,31 @@ export function SettingsDialog() {
   return open ? <Dialog /> : null;
 }
 
+/** The account at the top of the panes, as macOS shows the Apple Account: who is signed in, or Sign in. */
+function AccountTab({ on }: { on: boolean }) {
+  const status = useAccount((s) => s.status);
+  const signedIn = status?.state === "signedIn" ? status : null;
+  return (
+    <>
+      <span
+        aria-hidden="true"
+        className={`flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-full text-[13px] font-semibold ${signedIn ? "bg-white/[.14] text-fg" : "bg-white/[.1] text-muted"}`}
+      >
+        {signedIn ? initial(signedIn) : <UserRound size={16} className={on ? "text-accent" : undefined} />}
+      </span>
+      <span className="flex min-w-0 flex-col" title={signedIn ? [signedIn.name, signedIn.email].filter(Boolean).join("\n") : undefined}>
+        <span className="truncate text-[13px] leading-4 font-medium">{signedIn ? (signedIn.name ?? signedIn.email) : "Sign in"}</span>
+        <span className="truncate text-[11px] leading-[14px] font-normal text-muted">{signedIn?.name ? signedIn.email : "Nuzky account"}</span>
+      </span>
+    </>
+  );
+}
+
 function Dialog() {
-  const pane = useSettings((s) => s.pane);
+  const asked = useSettings((s) => s.pane);
+  const account = useAccount((s) => s.available);
+  const panes: readonly Pane[] = account ? PANES : PANES.filter((p) => p !== "account");
+  const pane = panes.includes(asked) ? asked : "general";
   const target = useSettings((s) => s.target);
   useKeys();
   const [query, setQuery] = useState("");
@@ -99,7 +127,7 @@ function Dialog() {
   const updates = useUpdates((s) => s.enabled);
   const dialog = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
-  const results = search(query, updates);
+  const results = search(query, updates, account);
   const Body = BODIES[pane];
 
   useEffect(() => {
@@ -162,11 +190,11 @@ function Dialog() {
       dialog.current?.querySelector<HTMLElement>("input[type=search]")?.focus();
       return;
     }
-    const i = PANES.indexOf(pane);
-    const to = { ArrowUp: i - 1, ArrowDown: i + 1, Home: 0, End: PANES.length - 1 }[e.key];
+    const i = panes.indexOf(pane);
+    const to = { ArrowUp: i - 1, ArrowDown: i + 1, Home: 0, End: panes.length - 1 }[e.key];
     if (to === undefined) return;
     e.preventDefault();
-    const next = PANES[Math.max(0, Math.min(PANES.length - 1, to))];
+    const next = panes[Math.max(0, Math.min(panes.length - 1, to))];
     show(next);
     e.currentTarget.querySelector<HTMLElement>(`#settings-tab-${next}`)?.focus();
   };
@@ -247,29 +275,37 @@ function Dialog() {
               ))}
             </div>
           ) : (
-            <div role="tablist" aria-orientation="vertical" aria-label="Settings" onKeyDown={railKeys} className="-mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-1">
-              {PANES.map((id) => {
+            <div role="tablist" aria-orientation="vertical" aria-label="Settings" onKeyDown={railKeys} className="-mx-1 -my-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-1 py-1">
+              {panes.map((id) => {
                 const Icon = ICONS[id];
                 const on = id === pane;
                 return (
-                  <button
-                    key={id}
-                    type="button"
-                    role="tab"
-                    id={`settings-tab-${id}`}
-                    aria-selected={on}
-                    aria-controls="settings-panel"
-                    tabIndex={on ? 0 : -1}
-                    onClick={(e) => {
-                      show(id);
-                      // WebKit leaves the keyboard where it was on a click, so the ring would stay on the pane before.
-                      e.currentTarget.focus();
-                    }}
-                    className={`flex h-8 shrink-0 items-center gap-2.5 rounded-lg px-2.5 text-left text-[13px] transition-colors duration-[120ms] ease-out ${on ? "bg-white/[.1] font-medium text-fg" : "text-fg hover:bg-white/[.05]"} ${id === "storage" ? "mt-3" : ""}`}
-                  >
-                    <Icon size={16} className={on ? "text-accent" : "text-muted"} />
-                    {PANE_TITLES[id]}
-                  </button>
+                  <Fragment key={id}>
+                    <button
+                      type="button"
+                      role="tab"
+                      id={`settings-tab-${id}`}
+                      aria-selected={on}
+                      aria-controls="settings-panel"
+                      tabIndex={on ? 0 : -1}
+                      onClick={(e) => {
+                        show(id);
+                        // WebKit leaves the keyboard where it was on a click, so the ring would stay on the pane before.
+                        e.currentTarget.focus();
+                      }}
+                      className={`flex shrink-0 items-center text-left text-[13px] transition-colors duration-[120ms] ease-out ${id === "account" ? "h-11 gap-2 rounded-[10px] px-2" : "h-8 gap-2.5 rounded-lg px-2.5"} ${on ? "bg-white/[.1] font-medium text-fg" : "text-fg hover:bg-white/[.05]"} ${id === "storage" ? "mt-3" : ""}`}
+                    >
+                      {id === "account" ? (
+                        <AccountTab on={on} />
+                      ) : (
+                        <>
+                          <Icon size={16} className={on ? "text-accent" : "text-muted"} />
+                          {PANE_TITLES[id]}
+                        </>
+                      )}
+                    </button>
+                    {id === "account" && <div aria-hidden="true" className="mx-2 my-1.5 h-px shrink-0 bg-white/[.06]" />}
+                  </Fragment>
                 );
               })}
             </div>

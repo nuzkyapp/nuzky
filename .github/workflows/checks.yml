@@ -105,3 +105,47 @@ jobs:
           done
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="qemu-x86_64-static -cpu Nehalem" \
             cargo test --locked --workspace --lib -- --include-ignored runtime:: the_face_models
+
+  account:
+    name: Account server
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+    defaults:
+      run:
+        working-directory: account
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Changed
+        id: changed
+        working-directory: .
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [[ -n $BASE && $BASE != 0000000000000000000000000000000000000000 ]] \
+            && git fetch --quiet --no-tags --depth=1 origin "$BASE" \
+            && git diff --quiet "$BASE" HEAD -- account; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.changed.outputs.run == 'true'
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: account/package-lock.json
+      - if: steps.changed.outputs.run == 'true'
+        run: npm ci
+      - if: steps.changed.outputs.run == 'true'
+        run: npm audit --audit-level=high
+      - if: steps.changed.outputs.run == 'true'
+        run: npm run typecheck
+      - if: steps.changed.outputs.run == 'true'
+        run: npm run lint
+      - if: steps.changed.outputs.run == 'true'
+        run: npm run build
+      - if: steps.changed.outputs.run == 'true'
+        run: npm test

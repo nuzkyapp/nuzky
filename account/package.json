@@ -1,0 +1,38 @@
+{
+  "name": "nuzky-account",
+  "private": true,
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "engines": {
+    "node": ">=26"
+  },
+  "dependencies": {
+    "@better-auth/oauth-provider": "1.7.25",
+    "@node-rs/argon2": "2.2.2",
+    "better-auth": "1.7.25",
+    "next": "16.4.6",
+    "nodemailer": "10.5.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.3.5",
+    "@types/node": "26.6.6",
+    "@types/nodemailer": "8.0.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "oauth2-mock-server": "9.3.0",
+    "oxlint": "1.93.0",
+    "tailwindcss": "4.3.5",
+    "typescript": "7.0.2"
+  },
+  "scripts": {
+    "dev": "ACCOUNT_MODE=test next dev --port 3100",
+    "build": "next build && node -e \"require('fs').cpSync('.next/static', '.next/standalone/.next/static', { recursive: true })\"",
+    "start": "node .next/standalone/server.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint",
+    "test": "node --test --test-concurrency=1 test/",
+    "e2e-server": "node scripts/e2e-server.mjs"
+  }
+}

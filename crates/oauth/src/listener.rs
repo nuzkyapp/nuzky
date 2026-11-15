@@ -64,6 +64,14 @@ impl Request {
     pub fn reply(self, status: u16, message: &str) {
         reply(self.stream, status, message);
     }
+
+    /// Sends the browser on to `location`, such as the server's own page saying the sign-in worked.
+    pub fn redirect(mut self, location: &str) {
+        let head = format!(
+            "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n"
+        );
+        let _ = self.stream.write_all(head.as_bytes()).and_then(|()| self.stream.flush());
+    }
 }
 
 /// The target of a GET, such as `/auth/callback?code=…`. A connection that has not sent its whole

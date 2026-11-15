@@ -1,0 +1,10 @@
+dbs:
+  - path: /data/account.db
+    replica:
+      type: s3
+      bucket: ${LITESTREAM_BUCKET}
+      path: account
+      endpoint: ${LITESTREAM_ENDPOINT}
+      region: ${LITESTREAM_REGION}
+      force-path-style: true
+      sign-payload: true

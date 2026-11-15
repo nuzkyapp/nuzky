@@ -20,3 +20,7 @@ core.[0-9]*
 /core
 /src-tauri/core
 /crates/*/core
+/account/node_modules
+/account/.next
+/account/next-env.d.ts
+/account/deploy/.env
