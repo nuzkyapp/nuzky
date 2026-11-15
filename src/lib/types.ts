@@ -1552,6 +1552,15 @@ export type RevisionView = {
    * For caption styles: every style in that revision or now, by name.
    */
   captionStyles: Array<[string, CaptionChange]>,
+  /**
+   * Restoring it would change nothing.
+   */
+  same: boolean,
+  /**
+   * Stands for the style or caption styles as this preview compared with, so Restore never
+   * replaces a change that came after it.
+   */
+  seen: string,
 };
 
 export type Rhythm = "calm" | "builds" | "fast";

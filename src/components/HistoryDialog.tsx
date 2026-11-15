@@ -37,12 +37,6 @@ const when = (ms: number) => {
 const backAgain = (kind: Kind, ms: number) =>
   kind === "style" ? `Your style is back as it was ${when(ms)}.` : `Your caption styles are back as they were ${when(ms)}.`;
 
-/** Whether restoring the version would change nothing: it is the same as now. */
-function unchanged(view: RevisionView, kind: Kind) {
-  if (kind === "style") return view.text === view.nowText;
-  return view.captionStyles.every(([, change]) => change === "same");
-}
-
 export function HistoryDialog() {
   const open = useHistory((s) => s.open);
   return open ? <Dialog /> : null;
@@ -98,7 +92,6 @@ function Dialog() {
     let live = true;
     const [kind, revision] = chosenKey.split(":") as [Kind, string];
     setPreview({ key: chosenKey, view: null, error: null });
-    setRestoreError(null);
     api.syncRevision(kind, Number(revision)).then(
       (view) => live && setPreview({ key: chosenKey, view, error: null }),
       (e) => live && setPreview({ key: chosenKey, view: null, error: plainError(errorText(e)) }),
@@ -108,8 +101,11 @@ function Dialog() {
     };
   }, [chosenKey, previewAttempt]);
 
+  // Why Restore failed belongs to the version it was tried on; the preview loading again keeps it.
+  useEffect(() => setRestoreError(null), [chosenKey]);
+
   const view = preview && preview.key === chosenKey ? preview : null;
-  const same = !!(chosen && view?.view && unchanged(view.view, chosen.kind));
+  const same = !!view?.view?.same;
 
   // The first line that changes, in the middle of the well, as a long EDIT.md may change far down.
   useEffect(() => {
@@ -117,17 +113,16 @@ function Dialog() {
   }, [view?.view]);
 
   const restore = async () => {
-    if (!chosen) return;
+    if (!chosen || !view?.view) return;
     const { kind, rev } = chosen;
-    const was = newest[kind];
     setRestoring(true);
     setRestoreError(null);
     try {
-      await api.syncRestore(kind, rev.revision);
+      await api.syncRestore(kind, rev.revision, view.view.seen);
       useEditor.getState().toast({
         kind: "success",
         text: `${backAgain(kind, rev.atMs)} Your other computers get it too.`,
-        action: { label: "Undo", run: () => void api.syncRestore(kind, was).catch((e) => useEditor.getState().toast({ kind: "error", text: errorText(e) })) },
+        action: { label: "Undo", run: () => void api.syncUndoRestore().catch((e) => useEditor.getState().toast({ kind: "error", text: errorText(e) })) },
       });
       close();
     } catch (e) {

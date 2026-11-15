@@ -199,6 +199,7 @@ pub const COMMANDS: &[&str] = &[
     "sync_restore",
     "sync_revision",
     "sync_status",
+    "sync_undo_restore",
     "thumbnail",
     "transcript_view",
     "trash_projects",

@@ -16,7 +16,7 @@ use anyhow::{Context, Result, bail};
 use nuzky_account::{Account, Remote, Revision, Stored};
 use nuzky_engine::edit::CaptionPreset;
 use nuzky_mcp::caption_styles;
-use nuzky_mcp::style::{Shared, Store};
+use nuzky_mcp::style::{Shared, Store, StyleAction};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tauri::{AppHandle, Emitter};
@@ -100,6 +100,36 @@ pub struct RevisionView {
     pub now_text: Option<String>,
     /// For caption styles: every style in that revision or now, by name.
     pub caption_styles: Vec<(String, CaptionChange)>,
+    /// Restoring it would change nothing.
+    pub same: bool,
+    /// Stands for the style or caption styles as this preview compared with, so Restore never
+    /// replaces a change that came after it.
+    pub seen: String,
+}
+
+/// What the Undo of the last restore puts back: the style's version before it, or My caption
+/// styles as they were.
+enum Before {
+    Style(u64),
+    Captions(Vec<CaptionPreset>),
+}
+
+static BEFORE: Mutex<Option<Before>> = Mutex::new(None);
+
+/// The same text for the same content within this run of Nuzky.
+fn fingerprint(content: &impl Serialize) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    serde_json::to_string(content).unwrap_or_default().hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+/// The style's fingerprint, whenever and by whom it changed.
+fn style_fingerprint(style: &Shared) -> String {
+    let mut style = style.clone();
+    style.at_ms = 0;
+    style.label.clear();
+    fingerprint(&style)
 }
 
 fn kind(kind: &str) -> Result<&'static str> {
@@ -134,6 +164,8 @@ pub async fn sync_revision(kind: String, revision: u64) -> CmdResult<RevisionVie
                 text: then.text().map(str::to_owned),
                 now_text: now.text().map(str::to_owned),
                 caption_styles: vec![],
+                same: then.same(&now),
+                seen: style_fingerprint(&now),
             });
         }
         let then = restorable(&body);
@@ -155,7 +187,15 @@ pub async fn sync_revision(kind: String, revision: u64) -> CmdResult<RevisionVie
                 .filter(|n| !then.iter().any(|t| key(t) == key(n)))
                 .map(|n| (n.name.clone(), CaptionChange::Goes)),
         );
-        Ok(RevisionView { revision, text: None, now_text: None, caption_styles: changes })
+        let same = changes.iter().all(|(_, change)| *change == CaptionChange::Same);
+        Ok(RevisionView {
+            revision,
+            text: None,
+            now_text: None,
+            caption_styles: changes,
+            same,
+            seen: fingerprint(&now),
+        })
     })
     .await
     .map_err(err)?
@@ -165,7 +205,7 @@ pub async fn sync_revision(kind: String, revision: u64) -> CmdResult<RevisionVie
 /// Makes a revision the style or My caption styles again, as a change of this computer's, which then
 /// syncs to the others.
 #[tauri::command]
-pub async fn sync_restore(app: AppHandle, kind: String, revision: u64) -> CmdResult<()> {
+pub async fn sync_restore(app: AppHandle, kind: String, revision: u64, seen: String) -> CmdResult<()> {
     tauri::async_runtime::spawn_blocking(move || -> Result<()> {
         let kind = self::kind(&kind)?;
         let (shown, body) = kept(kind, revision)?;
@@ -175,14 +215,45 @@ pub async fn sync_restore(app: AppHandle, kind: String, revision: u64) -> CmdRes
                 format!("Restored: {}", if shown.label.is_empty() { "an earlier version" } else { &shown.label });
             let store = Store::default();
             let now = store.shared()?;
+            anyhow::ensure!(style_fingerprint(&now) == seen, "RESTORE_CHANGED: your style changed meanwhile");
+            let before = store.view()?.version;
             anyhow::ensure!(store.take_shared(&then, &now, &label)?, "RESTORE_CHANGED: your style changed meanwhile");
+            *BEFORE.lock().unwrap() = Some(Before::Style(before));
         } else {
             let now = caption_styles::list()?;
+            anyhow::ensure!(fingerprint(&now) == seen, "RESTORE_CHANGED: your caption styles changed meanwhile");
             anyhow::ensure!(
                 caption_styles::replace(&now, restorable(&body))?,
                 "RESTORE_CHANGED: your caption styles changed meanwhile"
             );
+            *BEFORE.lock().unwrap() = Some(Before::Captions(now));
             app.emit("caption-styles-changed", ()).ok();
+        }
+        nudge();
+        Ok(())
+    })
+    .await
+    .map_err(err)?
+    .map_err(err)
+}
+
+/// Puts back what the last restore replaced on this computer, also what had not synced yet.
+#[tauri::command]
+pub async fn sync_undo_restore(app: AppHandle) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<()> {
+        let before = BEFORE.lock().unwrap().take().context("NOTHING_TO_UNDO: nothing was restored")?;
+        match before {
+            Before::Style(index) => {
+                Store::default().act(StyleAction::Restore { index })?;
+            }
+            Before::Captions(styles) => {
+                let now = caption_styles::list()?;
+                anyhow::ensure!(
+                    caption_styles::replace(&now, styles)?,
+                    "RESTORE_CHANGED: your caption styles changed meanwhile"
+                );
+                app.emit("caption-styles-changed", ()).ok();
+            }
         }
         nudge();
         Ok(())

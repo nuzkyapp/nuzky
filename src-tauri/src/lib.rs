@@ -1671,6 +1671,7 @@ pub fn run() {
             sync::sync_history,
             sync::sync_revision,
             sync::sync_restore,
+            sync::sync_undo_restore,
             agent_panel::agent_models,
         ])
         .build(context)
