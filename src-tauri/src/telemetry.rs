@@ -57,6 +57,7 @@ pub struct TelemetryStatus {
     pub sent: u64,
 }
 
+#[derive(Default)]
 struct State {
     dir: PathBuf,
     settings: Settings,
@@ -204,12 +205,23 @@ impl State {
         self.forget(diagnostics::hide_folders(text))
     }
 
-    /// A tool's input with its keys and numbers, each text cleaned as what was said.
+    /// A tool's input with its keys and numbers, each text cleaned as what was said. A key that is no plain field
+    /// name, such as a file's, becomes "…", and the text under a key that names a secret goes.
     fn clean_input(&self, input: &Value) -> Value {
         match input {
             Value::String(text) => Value::String(cap(&self.clean_said(text), 300)),
             Value::Array(items) => items.iter().map(|item| self.clean_input(item)).collect(),
-            Value::Object(fields) => fields.iter().map(|(key, value)| (key.clone(), self.clean_input(value))).collect(),
+            Value::Object(fields) => fields
+                .iter()
+                .map(|(key, value)| {
+                    let plain = key.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+                        && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+                    let lower = key.to_ascii_lowercase();
+                    let secret = ["key", "token", "secret", "password", "auth"].iter().any(|word| lower.contains(word));
+                    let value = if secret && value.is_string() { json!("[hidden]") } else { self.clean_input(value) };
+                    (if plain { key.clone() } else { "…".into() }, value)
+                })
+                .collect(),
             other => other.clone(),
         }
     }
@@ -541,18 +553,23 @@ fn allowed(settings: &Settings, event: &Value) -> bool {
     if event["kind"] == "aiChat" { settings.conversations } else { settings.problems }
 }
 
-/// Drops from the queued batches what the person no longer allows.
+/// Drops from the queued batches what the person no longer allows; a batch a window is sending drops it as that
+/// window sends it or puts it back.
 fn drop_disallowed(queue: &Path, settings: &Settings) {
     let entries = std::fs::read_dir(queue).into_iter().flatten().flatten().map(|entry| entry.path());
     for path in entries.filter(|path| path.extension().is_some_and(|x| x == "json")) {
-        let events: Vec<Value> =
-            std::fs::read(&path).ok().and_then(|json| serde_json::from_slice(&json).ok()).unwrap_or_default();
-        let kept: Vec<&Value> = events.iter().filter(|event| allowed(settings, event)).collect();
-        if kept.is_empty() {
-            std::fs::remove_file(&path).ok();
-        } else if kept.len() < events.len() {
-            std::fs::write(&path, serde_json::to_vec(&kept).unwrap_or_default()).ok();
-        }
+        keep_allowed(&path, settings);
+    }
+}
+
+fn keep_allowed(path: &Path, settings: &Settings) {
+    let events: Vec<Value> =
+        std::fs::read(path).ok().and_then(|json| serde_json::from_slice(&json).ok()).unwrap_or_default();
+    let kept: Vec<&Value> = events.iter().filter(|event| allowed(settings, event)).collect();
+    if kept.is_empty() {
+        std::fs::remove_file(path).ok();
+    } else if kept.len() < events.len() {
+        std::fs::write(path, serde_json::to_vec(&kept).unwrap_or_default()).ok();
     }
 }
 
@@ -588,8 +605,13 @@ fn send_round() {
     let url = server();
     let taken = take_queue(&queue);
     for (n, path) in taken.iter().enumerate() {
-        // What the person allows now: a batch sent before reads another window's change.
-        let Some(now) = with(|s| s.settings.clone()) else { break };
+        // What the person allows now, also when another window changed it during this round.
+        let Some(now) = with(|s| {
+            s.reload();
+            s.settings.clone()
+        }) else {
+            break;
+        };
         let events: Vec<Value> =
             std::fs::read(path).ok().and_then(|json| serde_json::from_slice(&json).ok()).unwrap_or_default();
         let events: Vec<Value> = events.into_iter().filter(|event| allowed(&now, event)).collect();
@@ -609,7 +631,10 @@ fn send_round() {
                 std::fs::remove_file(path).ok();
             }
             Err(Failure::Later) => {
-                taken[n..].iter().for_each(|rest| put_back(rest));
+                for rest in &taken[n..] {
+                    keep_allowed(rest, &now);
+                    put_back(rest);
+                }
                 break;
             }
         }
@@ -726,6 +751,16 @@ fn without_job_labels(report: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tool_input_keeps_its_fields_but_no_secret_or_file_name() {
+        let state = State { names: vec!["Client Deliverable".into()], ..State::default() };
+        let input = json!({ "startUs": 1_000_000, "inputs": { "api_key": "sk-private" }, "text": "cut Client Deliverable",
+                            "files": { "Client Deliverable.png": "/Users/jana/Client Deliverable.png" } });
+        let clean = json!({ "startUs": 1_000_000, "inputs": { "api_key": "[hidden]" }, "text": "cut …",
+                            "files": { "…": "….png" } });
+        assert_eq!(state.clean_input(&input), clean);
+    }
 
     #[test]
     fn a_failed_jobs_log_line_loses_its_label() {
