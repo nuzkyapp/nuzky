@@ -97,9 +97,9 @@ export const api = {
    * Makes a revision Your style or My caption styles again, only while they are as the preview saw them (`seen`); it then
    * syncs to the other computers.
    */
-  syncRestore: (kind: "style" | "caption-styles", revision: number, seen: string) => invoke<void>("sync_restore", { kind, revision, seen }),
-  /** Puts back what the last restore replaced on this computer. */
-  syncUndoRestore: () => invoke<void>("sync_undo_restore"),
+  syncRestore: (kind: "style" | "caption-styles", revision: number, seen: string) => invoke<number>("sync_restore", { kind, revision, seen }),
+  /** Puts back what restore `number` replaced on this computer, while it is the last restore. */
+  syncUndoRestore: (number: number) => invoke<void>("sync_undo_restore", { number }),
   newProject: (width: number, height: number) => invoke<Snapshot>("new_project", { width, height }),
   maximizeWindow: () => invoke<void>("maximize_window"),
   /** While the editor is shown, closing the window goes back to the projects (`close-to-home`). */

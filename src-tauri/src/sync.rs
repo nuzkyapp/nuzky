@@ -114,7 +114,9 @@ enum Before {
     Captions(Vec<CaptionPreset>),
 }
 
-static BEFORE: Mutex<Option<Before>> = Mutex::new(None);
+/// The last restore's number and what it replaced; an Undo names the restore it belongs to.
+static BEFORE: Mutex<Option<(u64, Before)>> = Mutex::new(None);
+static RESTORES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// The same text for the same content within this run of Nuzky.
 fn fingerprint(content: &impl Serialize) -> String {
@@ -205,11 +207,12 @@ pub async fn sync_revision(kind: String, revision: u64) -> CmdResult<RevisionVie
 /// Makes a revision the style or My caption styles again, as a change of this computer's, which then
 /// syncs to the others.
 #[tauri::command]
-pub async fn sync_restore(app: AppHandle, kind: String, revision: u64, seen: String) -> CmdResult<()> {
-    tauri::async_runtime::spawn_blocking(move || -> Result<()> {
+/// Answers the restore's number, which its Undo names.
+pub async fn sync_restore(app: AppHandle, kind: String, revision: u64, seen: String) -> CmdResult<u64> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<u64> {
         let kind = self::kind(&kind)?;
         let (shown, body) = kept(kind, revision)?;
-        if kind == STYLE {
+        let before = if kind == STYLE {
             let then: Shared = serde_json::from_value(body).context("NEWER_NUZKY: reading that version")?;
             let label =
                 format!("Restored: {}", if shown.label.is_empty() { "an earlier version" } else { &shown.label });
@@ -218,7 +221,7 @@ pub async fn sync_restore(app: AppHandle, kind: String, revision: u64, seen: Str
             anyhow::ensure!(style_fingerprint(&now) == seen, "RESTORE_CHANGED: your style changed meanwhile");
             let before = store.view()?.version;
             anyhow::ensure!(store.take_shared(&then, &now, &label)?, "RESTORE_CHANGED: your style changed meanwhile");
-            *BEFORE.lock().unwrap() = Some(Before::Style(before));
+            Before::Style(before)
         } else {
             let now = caption_styles::list()?;
             anyhow::ensure!(fingerprint(&now) == seen, "RESTORE_CHANGED: your caption styles changed meanwhile");
@@ -226,22 +229,32 @@ pub async fn sync_restore(app: AppHandle, kind: String, revision: u64, seen: Str
                 caption_styles::replace(&now, restorable(&body))?,
                 "RESTORE_CHANGED: your caption styles changed meanwhile"
             );
-            *BEFORE.lock().unwrap() = Some(Before::Captions(now));
             app.emit("caption-styles-changed", ()).ok();
-        }
+            Before::Captions(now)
+        };
+        let number = RESTORES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        *BEFORE.lock().unwrap() = Some((number, before));
         nudge();
-        Ok(())
+        Ok(number)
     })
     .await
     .map_err(err)?
     .map_err(err)
 }
 
-/// Puts back what the last restore replaced on this computer, also what had not synced yet.
+/// Puts back what restore `number` replaced on this computer, also what had not synced yet, while
+/// it is the last restore.
 #[tauri::command]
-pub async fn sync_undo_restore(app: AppHandle) -> CmdResult<()> {
+pub async fn sync_undo_restore(app: AppHandle, number: u64) -> CmdResult<()> {
     tauri::async_runtime::spawn_blocking(move || -> Result<()> {
-        let before = BEFORE.lock().unwrap().take().context("NOTHING_TO_UNDO: nothing was restored")?;
+        let before = {
+            let mut last = BEFORE.lock().unwrap();
+            anyhow::ensure!(
+                last.as_ref().is_some_and(|(last, _)| *last == number),
+                "NOTHING_TO_UNDO: a later restore replaced this one; restore from History instead"
+            );
+            last.take().map(|(_, before)| before).context("NOTHING_TO_UNDO: nothing was restored")?
+        };
         match before {
             Before::Style(index) => {
                 Store::default().act(StyleAction::Restore { index })?;

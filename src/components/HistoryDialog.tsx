@@ -118,11 +118,11 @@ function Dialog() {
     setRestoring(true);
     setRestoreError(null);
     try {
-      await api.syncRestore(kind, rev.revision, view.view.seen);
+      const number = await api.syncRestore(kind, rev.revision, view.view.seen);
       useEditor.getState().toast({
         kind: "success",
         text: `${backAgain(kind, rev.atMs)} Your other computers get it too.`,
-        action: { label: "Undo", run: () => void api.syncUndoRestore().catch((e) => useEditor.getState().toast({ kind: "error", text: errorText(e) })) },
+        action: { label: "Undo", run: () => void api.syncUndoRestore(number).catch((e) => useEditor.getState().toast({ kind: "error", text: errorText(e) })) },
       });
       close();
     } catch (e) {
