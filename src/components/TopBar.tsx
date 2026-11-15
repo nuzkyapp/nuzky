@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { AlertCircle, ChevronLeft, Download, FolderOpen, History, Loader2, Puzzle, Redo2, Settings, Sparkles, Undo2 } from "lucide-react";
 import { useAgent } from "../lib/agent";
 import { api, errorText } from "../lib/api";
-import { togglePanel, useDock } from "../lib/dock";
+import { togglePanel, useDock, useWindowSize } from "../lib/dock";
 import { closeCover, exportCover, openCover, useCover } from "../lib/cover";
 import { useReels } from "../lib/reels";
 import { stopRecording, useScreen, watchScreenRecording } from "../lib/screen";
@@ -238,12 +238,13 @@ function AiToggle() {
 /** While an agent edits, what it is doing and a way to take over. */
 export function AiRunBar() {
   const label = useEditor((s) => (s.lockShown ? s.aiRun : null));
+  const compact = useWindowSize().w < 1280;
   if (!label) return null;
   const plugin = label.startsWith(PLUGIN_RUN) ? label.slice(PLUGIN_RUN.length) : null;
   return (
     <div data-tour="run-bar" className="bar flex h-8 min-w-0 max-w-[420px] items-center gap-2 rounded-full pl-3 pr-1 text-[12px] font-medium text-fg" role="status">
       {plugin ? <Puzzle size={14} className="shrink-0 text-accent" /> : <Sparkles size={14} className="shrink-0 text-accent" />}
-      <span className="truncate">
+      <span className={`truncate ${compact ? "max-w-[140px]" : ""}`}>
         {plugin ? (
           <>
             {plugin} <span className="font-normal text-muted">is running</span>
