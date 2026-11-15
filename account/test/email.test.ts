@@ -57,6 +57,7 @@ async function signUp(browser: Browser, email: string, redirectUri = loopback())
   assert.equal(created.status, 200);
   const [mail] = await waitForMail(stack.mail, email);
   assert.match(mail.code ?? "", /^\d{6}$/);
+  assert.ok(mail.html.split("<body")[1].replace(/<[^>]+>/g, "").includes(mail.code!), "the code copies from the HTML email as one word");
 
   const verified = await browser.post("/api/auth/email-otp/verify-email", { email, otp: mail.code, oauth_query: oauthQuery });
   assert.equal(verified.status, 200);
