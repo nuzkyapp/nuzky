@@ -94,6 +94,47 @@ pub struct Documents {
     pub kinds: BTreeMap<String, Remote>,
 }
 
+/// One revision in the account's history of a document.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts", ts(rename = "SyncRevision"))]
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Revision {
+    pub revision: u64,
+    /// The name of the computer that stored it.
+    pub computer: String,
+    /// Stored by this computer.
+    pub mine: bool,
+    /// What changed, as that computer said.
+    pub label: String,
+    /// Milliseconds since 1970.
+    pub at_ms: u64,
+}
+
+/// A revision as the server lists it.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Listed {
+    revision: u64,
+    #[serde(default)]
+    computer: String,
+    #[serde(default)]
+    computer_id: String,
+    #[serde(default)]
+    label: String,
+    at: String,
+    #[serde(default)]
+    body: Option<serde_json::Value>,
+}
+
+impl Listed {
+    fn shown(self, host_id: &str) -> (Revision, Option<serde_json::Value>) {
+        let at_ms = self.at.parse::<jiff::Timestamp>().map_or(0, |at| u64::try_from(at.as_millisecond()).unwrap_or(0));
+        let mine = !self.computer_id.is_empty() && self.computer_id == host_id;
+        (Revision { revision: self.revision, computer: self.computer, mine, label: self.label, at_ms }, self.body)
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub enum Stored {
     /// The document's new revision.
@@ -324,10 +365,24 @@ impl Account {
     }
 
     /// Stores `body` as the next revision of `kind` over `revision`, the one this computer last had
-    /// from the account `subject`; none when signed out or signed in to another account meanwhile.
-    pub fn store(&self, subject: &str, kind: &str, revision: u64, body: &serde_json::Value) -> Result<Option<Stored>> {
+    /// from the account `subject`, saying it comes from `computer` and what changed (`label`); none
+    /// when signed out or signed in to another account meanwhile.
+    pub fn store(
+        &self,
+        subject: &str,
+        kind: &str,
+        revision: u64,
+        body: &serde_json::Value,
+        computer: &str,
+        label: &str,
+    ) -> Result<Option<Stored>> {
         let url = format!("{}/{}", self.url(SYNC), nuzky_oauth::encode(kind));
-        let request = serde_json::to_vec(&serde_json::json!({ "revision": revision, "body": body }))?;
+        let origin = serde_json::json!({
+            "computer": computer.chars().take(80).collect::<String>(),
+            "computerId": self.host_id(),
+            "label": label.chars().take(200).collect::<String>(),
+        });
+        let request = serde_json::to_vec(&serde_json::json!({ "revision": revision, "body": body, "origin": origin }))?;
         let Some((_, status, answer)) = self.authorized(Some(subject), |http, token| {
             http.put(&url)
                 .header("Authorization", format!("Bearer {token}"))
@@ -350,6 +405,48 @@ impl Account {
                 serde_json::from_str(&answer).context("SYNC_FAILED: Reading the account's document")?,
             ))),
             413 => bail!("TOO_LARGE: {WHO} keeps at most 256 KB of each"),
+            _ => bail!("SYNC_FAILED: {WHO} answered {status}"),
+        }
+    }
+
+    /// The revisions of `kind` the account keeps, newest first; none when signed out.
+    pub fn history(&self, kind: &str) -> Result<Option<Vec<Revision>>> {
+        #[derive(Deserialize)]
+        struct Answer {
+            revisions: Vec<Listed>,
+        }
+        let url = format!("{}/{}/history", self.url(SYNC), nuzky_oauth::encode(kind));
+        let Some(answer) = self.read(&url)? else { return Ok(None) };
+        let answer: Answer = serde_json::from_str(&answer).context("SYNC_FAILED: Reading the history")?;
+        let host_id = self.host_id();
+        Ok(Some(answer.revisions.into_iter().map(|listed| listed.shown(&host_id).0).collect()))
+    }
+
+    /// One revision of `kind` with its body; none when signed out or the account no longer keeps it.
+    pub fn revision(&self, kind: &str, revision: u64) -> Result<Option<(Revision, serde_json::Value)>> {
+        let url = format!("{}/{}/history/{revision}", self.url(SYNC), nuzky_oauth::encode(kind));
+        let Some(answer) = self.read(&url)? else { return Ok(None) };
+        let listed: Listed = serde_json::from_str(&answer).context("SYNC_FAILED: Reading the revision")?;
+        let (shown, body) = listed.shown(&self.host_id());
+        Ok(body.map(|body| (shown, body)))
+    }
+
+    /// This data folder's id, which the account keeps beside what it stores.
+    fn host_id(&self) -> String {
+        Registration::load(&self.dir).map(|reg| reg.host_id).unwrap_or_default()
+    }
+
+    /// A GET with the access token; none when signed out or not found.
+    fn read(&self, url: &str) -> Result<Option<String>> {
+        let Some((_, status, body)) = self.authorized(None, |http, token| {
+            http.get(url).header("Authorization", format!("Bearer {token}")).header("Accept", "application/json").call()
+        })?
+        else {
+            return Ok(None);
+        };
+        match status {
+            200 => Ok(Some(body)),
+            404 => Ok(None),
             _ => bail!("SYNC_FAILED: {WHO} answered {status}"),
         }
     }

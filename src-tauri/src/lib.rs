@@ -1668,6 +1668,10 @@ pub fn run() {
             account::account_manage,
             sync::sync_status,
             sync::sync_now,
+            sync::sync_history,
+            sync::sync_revision,
+            sync::sync_restore,
+            sync::sync_undo_restore,
             agent_panel::agent_models,
         ])
         .build(context)

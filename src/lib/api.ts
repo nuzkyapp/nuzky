@@ -3,7 +3,7 @@ import type { GalleryPlugin, GalleryState } from "./gallery";
 import type { StorageUsage, StyleSettings } from "./types";
 import type { EffectIssue, ListedPlugin, PluginRow, PluginValues } from "./plugins";
 import type { ColorLook, LutInfo } from "./color";
-import type { AccountProvider, AccountStatus, AgentAccess, ImportedKeys, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, BeatCutDone, BeatPlans, Boot, BrollChoice, BrollSuggestions, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Mono, Part, PreviewStarted, PreviewWindowBoot, Project, ProjectPoster, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFinish, ReelFraming, Rhythm, Said, SampleRun, ScreenRecording, ScreenWindow, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, SyncStatus, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied, VoiceoverState } from "./types";
+import type { AccountProvider, AccountStatus, AgentAccess, ImportedKeys, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, BeatCutDone, BeatPlans, Boot, BrollChoice, BrollSuggestions, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Mono, Part, PreviewStarted, PreviewWindowBoot, Project, ProjectPoster, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFinish, ReelFraming, Rhythm, Said, SampleRun, ScreenRecording, ScreenWindow, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, SyncRevision, SyncStatus, RevisionView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied, VoiceoverState } from "./types";
 
 /**
  * The session a change was made for. Mutating commands carry it, so a change still in flight when
@@ -90,6 +90,16 @@ export const api = {
   syncStatus: () => invoke<SyncStatus>("sync_status"),
   /** Syncs in a few seconds. */
   syncNow: () => invoke<void>("sync_now"),
+  /** The revisions of Your style (`style`) or My caption styles (`caption-styles`) the account keeps, newest first. */
+  syncHistory: (kind: "style" | "caption-styles") => invoke<SyncRevision[]>("sync_history", { kind }),
+  syncRevision: (kind: "style" | "caption-styles", revision: number) => invoke<RevisionView>("sync_revision", { kind, revision }),
+  /**
+   * Makes a revision Your style or My caption styles again, only while they are as the preview saw them (`seen`); it then
+   * syncs to the other computers.
+   */
+  syncRestore: (kind: "style" | "caption-styles", revision: number, seen: string) => invoke<number>("sync_restore", { kind, revision, seen }),
+  /** Puts back what restore `number` replaced on this computer, while it is the last restore. */
+  syncUndoRestore: (number: number) => invoke<void>("sync_undo_restore", { number }),
   newProject: (width: number, height: number) => invoke<Snapshot>("new_project", { width, height }),
   maximizeWindow: () => invoke<void>("maximize_window"),
   /** While the editor is shown, closing the window goes back to the projects (`close-to-home`). */
@@ -401,6 +411,11 @@ const PLAIN: Record<string, string | ((detail: string) => string)> = {
   MODEL_IN_USE: (detail) => detail,
   SETTINGS_UNWRITABLE: (detail) => detail,
   EPOCH_CHANGED: "Another project was opened meanwhile, so this did not happen.",
+  SYNC_FAILED: "Nuzky couldn't reach your account. Check the connection, then try again.",
+  SIGNED_OUT: "Sign in to your Nuzky account in Settings › Account first.",
+  NOT_KEPT: "That version is older than 90 days and is no longer kept.",
+  NEWER_NUZKY: "A newer Nuzky saved that version. Update Nuzky to see or restore it.",
+  RESTORE_CHANGED: "It changed meanwhile. Check the preview, then restore again.",
   EDIT_REJECTED: (detail) => {
     const what = detail.replace(/; project unchanged$/, "").replace(/\.$/, "");
     // A clip, track or media item that went away meanwhile, e.g. through Undo or an AI edit.

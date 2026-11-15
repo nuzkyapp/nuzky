@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertCircle, AlertTriangle, ExternalLink, Loader2, Mail, RefreshCw } from "lucide-react";
 import { cancelSignIn, check, initial, manage, signIn, signOut, syncNow, useAccount } from "../../lib/account";
+import { openHistory } from "../../lib/history";
 import { whenLabel } from "../../lib/library";
 import type { AccountStatus } from "../../lib/types";
 import { GoogleLogo } from "../GoogleLogo";
@@ -103,6 +104,9 @@ function SyncRow() {
           </span>
         )}
       </div>
+      <Button pill onClick={() => openHistory()}>
+        History…
+      </Button>
       <Button pill disabled={syncing} disabledReason="Syncing…" onClick={syncNow}>
         <RefreshCw size={12} className={syncing ? "animate-spin" : undefined} />
         Sync now

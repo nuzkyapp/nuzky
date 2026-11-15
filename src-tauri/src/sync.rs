@@ -4,21 +4,24 @@
 //! shows and every five minutes. When both changed the style meanwhile the newer change wins, and
 //! the older one stays in Versions on the computer it was made on. Caption styles merge by name:
 //! one added, changed or deleted on either side stays so, and when both changed the same style
-//! this computer's wins.
+//! this computer's wins. The account keeps every revision with the computer it came from, which
+//! the History dialog lists and restores.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::{Condvar, Mutex};
+use std::sync::{Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
-use nuzky_account::{Account, Remote, Stored};
+use nuzky_account::{Account, Remote, Revision, Stored};
 use nuzky_engine::edit::CaptionPreset;
 use nuzky_mcp::caption_styles;
-use nuzky_mcp::style::{Shared, Store};
+use nuzky_mcp::style::{Shared, Store, StyleAction};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tauri::{AppHandle, Emitter};
+
+use crate::{CmdResult, err};
 
 const STYLE: &str = "style";
 const CAPTIONS: &str = "caption-styles";
@@ -70,6 +73,225 @@ pub fn sync_status() -> SyncStatus {
 #[tauri::command]
 pub fn sync_now() {
     nudge();
+}
+
+/// What restoring a revision does to one caption style.
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CaptionChange {
+    /// Not in My styles now; restoring brings it back.
+    Back,
+    /// Only in My styles now; restoring deletes it.
+    Goes,
+    /// Restoring changes how it looks.
+    Changes,
+    Same,
+}
+
+/// A revision as the History dialog previews it.
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevisionView {
+    pub revision: Revision,
+    /// For Your style: EDIT.md in that revision and now; none without a style.
+    pub text: Option<String>,
+    pub now_text: Option<String>,
+    /// For caption styles: every style in that revision or now, by name.
+    pub caption_styles: Vec<(String, CaptionChange)>,
+    /// Restoring it would change nothing.
+    pub same: bool,
+    /// Stands for the style or caption styles as this preview compared with, so Restore never
+    /// replaces a change that came after it.
+    pub seen: String,
+}
+
+/// What the Undo of the last restore puts back: the style's version before it, or My caption
+/// styles as they were.
+enum Before {
+    Style(u64),
+    Captions(Vec<CaptionPreset>),
+}
+
+/// The last restore's number and what it replaced; an Undo names the restore it belongs to.
+static BEFORE: Mutex<Option<(u64, Before)>> = Mutex::new(None);
+static RESTORES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The same text for the same content within this run of Nuzky.
+fn fingerprint(content: &impl Serialize) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    serde_json::to_string(content).unwrap_or_default().hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+/// The style's fingerprint, whenever and by whom it changed.
+fn style_fingerprint(style: &Shared) -> String {
+    let mut style = style.clone();
+    style.at_ms = 0;
+    style.label.clear();
+    fingerprint(&style)
+}
+
+fn kind(kind: &str) -> Result<&'static str> {
+    [STYLE, CAPTIONS]
+        .into_iter()
+        .find(|known| *known == kind)
+        .with_context(|| format!("INVALID_ARGUMENTS: no synced {kind}"))
+}
+
+/// The revisions of Your style (`style`) or My caption styles (`caption-styles`) the account keeps.
+#[tauri::command]
+pub async fn sync_history(kind: String) -> CmdResult<Vec<Revision>> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<Vec<Revision>> {
+        let kind = self::kind(&kind)?;
+        crate::account::account().history(kind)?.context("SIGNED_OUT: sign in to see the history")
+    })
+    .await
+    .map_err(err)?
+    .map_err(err)
+}
+
+#[tauri::command]
+pub async fn sync_revision(kind: String, revision: u64) -> CmdResult<RevisionView> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<RevisionView> {
+        let kind = self::kind(&kind)?;
+        let (revision, body) = kept(kind, revision)?;
+        if kind == STYLE {
+            let then: Shared = serde_json::from_value(body).context("NEWER_NUZKY: reading that version")?;
+            let now = Store::default().shared()?;
+            return Ok(RevisionView {
+                revision,
+                text: then.text().map(str::to_owned),
+                now_text: now.text().map(str::to_owned),
+                caption_styles: vec![],
+                same: then.same(&now),
+                seen: style_fingerprint(&now),
+            });
+        }
+        let then = restorable(&body);
+        let now = caption_styles::list()?;
+        let key = |style: &CaptionPreset| caption_styles::normalized(&style.name);
+        let mut changes: Vec<(String, CaptionChange)> = then
+            .iter()
+            .map(|style| {
+                let change = match now.iter().find(|n| key(n) == key(style)) {
+                    None => CaptionChange::Back,
+                    Some(n) if n != style => CaptionChange::Changes,
+                    Some(_) => CaptionChange::Same,
+                };
+                (style.name.clone(), change)
+            })
+            .collect();
+        changes.extend(
+            now.iter()
+                .filter(|n| !then.iter().any(|t| key(t) == key(n)))
+                .map(|n| (n.name.clone(), CaptionChange::Goes)),
+        );
+        let same = changes.iter().all(|(_, change)| *change == CaptionChange::Same);
+        Ok(RevisionView {
+            revision,
+            text: None,
+            now_text: None,
+            caption_styles: changes,
+            same,
+            seen: fingerprint(&now),
+        })
+    })
+    .await
+    .map_err(err)?
+    .map_err(err)
+}
+
+/// Makes a revision the style or My caption styles again, as a change of this computer's, which then
+/// syncs to the others.
+#[tauri::command]
+/// Answers the restore's number, which its Undo names.
+pub async fn sync_restore(app: AppHandle, kind: String, revision: u64, seen: String) -> CmdResult<u64> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<u64> {
+        let kind = self::kind(&kind)?;
+        let (shown, body) = kept(kind, revision)?;
+        let before = if kind == STYLE {
+            let then: Shared = serde_json::from_value(body).context("NEWER_NUZKY: reading that version")?;
+            let label =
+                format!("Restored: {}", if shown.label.is_empty() { "an earlier version" } else { &shown.label });
+            let store = Store::default();
+            let now = store.shared()?;
+            anyhow::ensure!(style_fingerprint(&now) == seen, "RESTORE_CHANGED: your style changed meanwhile");
+            let before = store.view()?.version;
+            anyhow::ensure!(store.take_shared(&then, &now, &label)?, "RESTORE_CHANGED: your style changed meanwhile");
+            Before::Style(before)
+        } else {
+            let now = caption_styles::list()?;
+            anyhow::ensure!(fingerprint(&now) == seen, "RESTORE_CHANGED: your caption styles changed meanwhile");
+            anyhow::ensure!(
+                caption_styles::replace(&now, restorable(&body))?,
+                "RESTORE_CHANGED: your caption styles changed meanwhile"
+            );
+            app.emit("caption-styles-changed", ()).ok();
+            Before::Captions(now)
+        };
+        let number = RESTORES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        *BEFORE.lock().unwrap() = Some((number, before));
+        nudge();
+        Ok(number)
+    })
+    .await
+    .map_err(err)?
+    .map_err(err)
+}
+
+/// Puts back what restore `number` replaced on this computer, also what had not synced yet, while
+/// it is the last restore.
+#[tauri::command]
+pub async fn sync_undo_restore(app: AppHandle, number: u64) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<()> {
+        let before = {
+            let mut last = BEFORE.lock().unwrap();
+            anyhow::ensure!(
+                last.as_ref().is_some_and(|(last, _)| *last == number),
+                "NOTHING_TO_UNDO: a later restore replaced this one; restore from History instead"
+            );
+            last.take().map(|(_, before)| before).context("NOTHING_TO_UNDO: nothing was restored")?
+        };
+        match before {
+            Before::Style(index) => {
+                Store::default().act(StyleAction::Restore { index })?;
+            }
+            Before::Captions(styles) => {
+                let now = caption_styles::list()?;
+                anyhow::ensure!(
+                    caption_styles::replace(&now, styles)?,
+                    "RESTORE_CHANGED: your caption styles changed meanwhile"
+                );
+                app.emit("caption-styles-changed", ()).ok();
+            }
+        }
+        nudge();
+        Ok(())
+    })
+    .await
+    .map_err(err)?
+    .map_err(err)
+}
+
+/// A revision the account still keeps, with its body.
+fn kept(kind: &str, revision: u64) -> Result<(Revision, Value)> {
+    crate::account::account().revision(kind, revision)?.context("NOT_KEPT: the account no longer keeps that version")
+}
+
+/// The caption styles of a revision this version can read and use, in their order.
+fn restorable(body: &Value) -> Vec<CaptionPreset> {
+    let mut styles = Vec::new();
+    for style in body.get("styles").and_then(Value::as_array).into_iter().flatten() {
+        if let Ok(style) = serde_json::from_value::<CaptionPreset>(style.clone())
+            && caption_styles::check(&style, &styles).is_ok()
+        {
+            styles.push(style);
+        }
+    }
+    styles
 }
 
 /// Syncs on its own thread from now on, first at once, in builds that offer the account.
@@ -222,10 +444,29 @@ fn body<T: Clone + for<'de> Deserialize<'de>>(remote: &Remote, kept: &Option<Kep
     }
 }
 
-fn store(account: &Account, subject: &str, kind: &str, revision: u64, body: &Value) -> Result<Stored> {
+fn store(account: &Account, subject: &str, kind: &str, revision: u64, body: &Value, label: &str) -> Result<Stored> {
     account
-        .store(subject, kind, revision, body)?
+        .store(subject, kind, revision, body, computer(), label)?
         .context("SIGNED_OUT: signed out or into another account while syncing")
+}
+
+/// This computer's name as the user sees it, which the history shows beside each change.
+fn computer() -> &'static str {
+    static NAME: OnceLock<String> = OnceLock::new();
+    NAME.get_or_init(|| {
+        #[cfg(target_os = "macos")]
+        let name = std::process::Command::new("scutil")
+            .args(["--get", "ComputerName"])
+            .output()
+            .ok()
+            .filter(|out| out.status.success())
+            .map(|out| String::from_utf8_lossy(&out.stdout).into_owned());
+        #[cfg(target_os = "windows")]
+        let name = std::env::var("COMPUTERNAME").ok();
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        let name = std::fs::read_to_string("/etc/hostname").ok();
+        name.map(|name| name.trim().to_owned()).filter(|name| !name.is_empty()).unwrap_or_else(|| "A computer".into())
+    })
 }
 
 fn sync_style(account: &Account, subject: &str, kept: &mut Option<Kept<Shared>>, mut remote: Remote) -> Result<()> {
@@ -252,18 +493,20 @@ fn sync_style(account: &Account, subject: &str, kept: &mut Option<Kept<Shared>>,
         };
         match take {
             Some(theirs) => {
-                if styles.take_shared(&theirs, &local)? {
+                if styles.take_shared(&theirs, &local, "From another computer")? {
                     *kept = Some(Kept { revision: remote.revision, content: theirs });
                     return Ok(());
                 }
             }
-            None => match store(account, subject, STYLE, remote.revision, &serde_json::to_value(&local)?)? {
-                Stored::Revision(revision) => {
-                    *kept = Some(Kept { revision, content: local });
-                    return Ok(());
+            None => {
+                match store(account, subject, STYLE, remote.revision, &serde_json::to_value(&local)?, &local.label)? {
+                    Stored::Revision(revision) => {
+                        *kept = Some(Kept { revision, content: local });
+                        return Ok(());
+                    }
+                    Stored::Conflict(now) => remote = now,
                 }
-                Stored::Conflict(now) => remote = now,
-            },
+            }
         }
     }
     bail!("SYNC_FAILED: your style kept changing while it synced")
@@ -298,7 +541,8 @@ fn sync_captions(
         let agreed = kept.as_ref().map_or(&[][..], |kept| &kept.content[..]);
         let (merged, mine) = merge(base.as_deref().unwrap_or(agreed), &local, &theirs);
         if merged != theirs {
-            match store(account, subject, CAPTIONS, remote.revision, &json!({ "styles": merged }))? {
+            let label = described(&theirs, &merged);
+            match store(account, subject, CAPTIONS, remote.revision, &json!({ "styles": merged }), &label)? {
                 Stored::Revision(revision) => remote = Remote { revision, body: Some(json!({ "styles": merged })) },
                 Stored::Conflict(now) => {
                     remote = now;
@@ -372,6 +616,29 @@ fn merge(base: &[Value], local: &[CaptionPreset], remote: &[Value]) -> (Vec<Valu
         }
     }
     (merged, mine)
+}
+
+/// What changed between two lists of caption styles: "Added Team yellow", "Deleted Mine, changed Bold pop".
+fn described(before: &[Value], after: &[Value]) -> String {
+    let name = |style: &Value| style.get("name").and_then(Value::as_str).unwrap_or_default().to_owned();
+    let find = |list: &[Value], wanted: &str| {
+        list.iter()
+            .find(|style| caption_styles::normalized(&name(style)) == caption_styles::normalized(wanted))
+            .cloned()
+    };
+    let mut parts = Vec::new();
+    for (verb, names) in [
+        ("added", after.iter().map(name).filter(|n| find(before, n).is_none()).collect::<Vec<_>>()),
+        ("deleted", before.iter().map(name).filter(|n| find(after, n).is_none()).collect()),
+        ("changed", after.iter().filter(|s| find(before, &name(s)).is_some_and(|b| b != **s)).map(name).collect()),
+    ] {
+        if !names.is_empty() {
+            parts.push(format!("{verb} {}", names.join(", ")));
+        }
+    }
+    let text = parts.join("; ");
+    let mut chars = text.chars();
+    chars.next().map_or_else(|| "Caption styles".into(), |first| first.to_uppercase().chain(chars).collect())
 }
 
 fn now_ms() -> u64 {
