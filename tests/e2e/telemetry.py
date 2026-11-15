@@ -173,14 +173,15 @@ def telemetry(r):
     wait(lambda: r.s.run("return !!document.querySelector('aside[aria-label=AI] textarea')"), 5)
     r.s.run("""const t = document.querySelector('aside[aria-label=AI] textarea'); t.focus();
         Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(t, arguments[0]);
-        t.dispatchEvent(new Event('input', {bubbles: true}));""", 'Please cut the slow start')
+        t.dispatchEvent(new Event('input', {bubbles: true}));""", f'Please cut the slow start of {NAME}.mp4')
     r.key('Enter')
     chat = lambda: events(r, 'aiChat') and events(r, 'aiTurn')
     r.check("the panel's message, answer and tools arrive", wait(chat, 60), [e['kind'] for e in events(r)])
     said = events(r, 'aiChat')[0]['data']
     turn = events(r, 'aiTurn')[0]['data']
-    r.check('with the message as written and the tools the agent called',
-            said['prompt'] == 'Please cut the slow start' and said['answer'] and said['tools'] and said['agent'] == 'Claude Code'
+    r.check("with the message as written but for the file's name, and the tools the agent called with their inputs' keys",
+            said['prompt'] == 'Please cut the slow start of …' and said['answer'] and said['agent'] == 'Claude Code'
+            and any(isinstance(t['input'], dict) and t['input'] and '…' not in t['input'] for t in said['tools'])
             and turn['tools'] and turn['end'] == 'done', {'chat': said, 'turn': turn})
     r.check("nothing sent names the project or its file, or this run's folders", not private(r), private(r))
     sent = [req for req in r.received if req['path'] == '/api/telemetry']

@@ -185,14 +185,52 @@ impl State {
         self.settings.problems || self.settings.conversations
     }
 
-    /// Text from an error, a panic or a report, without typed text, folders, secrets or the names of the project
-    /// and its files.
-    fn clean(&self, text: &str) -> String {
-        let mut text = diagnostics::scrub_names(text);
+    fn forget(&self, mut text: String) -> String {
         for name in &self.names {
             text = text.replace(name.as_str(), "…");
         }
         text
+    }
+
+    /// Text from an error, a panic or a report, without typed text, folders, secrets or the names of the projects
+    /// and files.
+    fn clean(&self, text: &str) -> String {
+        self.forget(diagnostics::scrub_names(text))
+    }
+
+    /// What the person wrote or the agent answered, as it was but for paths, secrets and the names of the projects
+    /// and files.
+    fn clean_said(&self, text: &str) -> String {
+        self.forget(diagnostics::hide_folders(text))
+    }
+
+    /// A tool's input with its keys and numbers, each text cleaned as what was said.
+    fn clean_input(&self, input: &Value) -> Value {
+        match input {
+            Value::String(text) => Value::String(cap(&self.clean_said(text), 300)),
+            Value::Array(items) => items.iter().map(|item| self.clean_input(item)).collect(),
+            Value::Object(fields) => fields.iter().map(|(key, value)| (key.clone(), self.clean_input(value))).collect(),
+            other => other.clone(),
+        }
+    }
+
+    /// What another Nuzky window saved since, so no window writes back a choice the person changed in another.
+    fn reload(&mut self) {
+        let saved = std::fs::read(self.dir.join("settings.json")).ok();
+        if let Some(mut saved) = saved.and_then(|json| serde_json::from_slice::<Settings>(&json).ok()) {
+            if uuid::Uuid::parse_str(&saved.install).is_err() {
+                saved.install = self.settings.install.clone();
+            }
+            self.settings = saved;
+        }
+    }
+
+    /// Counts what was sent and keeps it for Show what was sent.
+    fn sent(&mut self, events: &[Value]) {
+        keep_sent(&self.dir, events);
+        self.reload();
+        self.settings.sent += events.len() as u64;
+        self.save().ok();
     }
 
     fn actions(&self) -> Vec<String> {
@@ -431,13 +469,14 @@ impl AiTurn {
                     .iter()
                     .take(20)
                     .map(|tool| {
-                        let input = tool.input.as_ref().map(|input| cap(&s.clean(&input.to_string()), 300));
+                        let input = tool.input.as_ref().map(|input| s.clean_input(input));
+                        let input = input.filter(|input| input.to_string().len() <= 2000);
                         json!({ "name": tool.name, "input": input, "status": tool.status })
                     })
                     .collect();
                 let data = json!({ "chat": self.chat, "agent": self.agent, "model": self.model, "end": end,
-                                   "prompt": cap(&diagnostics::hide_folders(&self.prompt), 4000),
-                                   "answer": cap(&diagnostics::hide_folders(&self.answer), 8000), "tools": tools });
+                                   "prompt": cap(&s.clean_said(&self.prompt), 4000),
+                                   "answer": cap(&s.clean_said(&self.answer), 8000), "tools": tools });
                 s.events.push(event("aiChat", data));
             }
         });
@@ -483,6 +522,8 @@ fn take_queue(queue: &Path) -> Vec<PathBuf> {
         let Some(batch) = batch else { continue };
         let mine = queue.join(format!("{batch}.json.taken{}", std::process::id()));
         if std::fs::rename(&path, &mine).is_ok() {
+            // Taken now, however old the batch: another window waits an hour before it takes it over.
+            std::fs::File::options().write(true).open(&mine).and_then(|file| file.set_modified(SystemTime::now())).ok();
             taken.push(mine);
         }
     }
@@ -493,6 +534,25 @@ fn put_back(path: &Path) {
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     if let Some((batch, _)) = name.split_once(".json.taken") {
         std::fs::rename(path, path.with_file_name(format!("{batch}.json"))).ok();
+    }
+}
+
+fn allowed(settings: &Settings, event: &Value) -> bool {
+    if event["kind"] == "aiChat" { settings.conversations } else { settings.problems }
+}
+
+/// Drops from the queued batches what the person no longer allows.
+fn drop_disallowed(queue: &Path, settings: &Settings) {
+    let entries = std::fs::read_dir(queue).into_iter().flatten().flatten().map(|entry| entry.path());
+    for path in entries.filter(|path| path.extension().is_some_and(|x| x == "json")) {
+        let events: Vec<Value> =
+            std::fs::read(&path).ok().and_then(|json| serde_json::from_slice(&json).ok()).unwrap_or_default();
+        let kept: Vec<&Value> = events.iter().filter(|event| allowed(settings, event)).collect();
+        if kept.is_empty() {
+            std::fs::remove_file(&path).ok();
+        } else if kept.len() < events.len() {
+            std::fs::write(&path, serde_json::to_vec(&kept).unwrap_or_default()).ok();
+        }
     }
 }
 
@@ -514,11 +574,7 @@ fn keep_sent(dir: &Path, batch: &[Value]) {
 fn send_round() {
     let facts = diagnostics::facts();
     let Some((dir, settings, envelope)) = with(|s| {
-        // Another Nuzky window may have changed the settings.
-        let saved = std::fs::read(s.dir.join("settings.json")).ok();
-        if let Some(saved) = saved.and_then(|json| serde_json::from_slice::<Settings>(&json).ok()) {
-            s.settings = saved;
-        }
+        s.reload();
         s.queue(Some(facts));
         (s.dir.clone(), s.settings.clone(), s.envelope(Vec::new()))
     }) else {
@@ -530,36 +586,30 @@ fn send_round() {
         return;
     }
     let url = server();
-    for path in take_queue(&queue) {
+    let taken = take_queue(&queue);
+    for (n, path) in taken.iter().enumerate() {
+        // What the person allows now: a batch sent before reads another window's change.
+        let Some(now) = with(|s| s.settings.clone()) else { break };
         let events: Vec<Value> =
-            std::fs::read(&path).ok().and_then(|json| serde_json::from_slice(&json).ok()).unwrap_or_default();
-        let allowed =
-            |event: &Value| if event["kind"] == "aiChat" { settings.conversations } else { settings.problems };
-        let events: Vec<Value> = events.into_iter().filter(allowed).collect();
-        // Delete what I shared, meanwhile, made this a new install; the old one's events go nowhere.
-        if events.is_empty() || with(|s| s.settings.install != settings.install).unwrap_or(true) {
-            std::fs::remove_file(&path).ok();
+            std::fs::read(path).ok().and_then(|json| serde_json::from_slice(&json).ok()).unwrap_or_default();
+        let events: Vec<Value> = events.into_iter().filter(|event| allowed(&now, event)).collect();
+        // Delete what was sent, meanwhile, made this a new install; the old one's events go nowhere.
+        if events.is_empty() || now.install != settings.install {
+            std::fs::remove_file(path).ok();
             continue;
         }
         let mut body = envelope.clone();
         body["events"] = json!(events);
         match post(&url, &body) {
             Ok(()) => {
-                std::fs::remove_file(&path).ok();
-                keep_sent(&dir, &events);
-                with(|s| {
-                    s.settings.sent += events.len() as u64;
-                    s.save().ok();
-                });
+                std::fs::remove_file(path).ok();
+                with(|s| s.sent(&events));
             }
             Err(Failure::Never) => {
-                std::fs::remove_file(&path).ok();
+                std::fs::remove_file(path).ok();
             }
             Err(Failure::Later) => {
-                put_back(&path);
-                for rest in take_queue(&queue) {
-                    put_back(&rest);
-                }
+                taken[n..].iter().for_each(|rest| put_back(rest));
                 break;
             }
         }
@@ -579,6 +629,7 @@ pub fn telemetry_status() -> TelemetryStatus {
 #[tauri::command]
 pub fn set_telemetry(problems: bool, conversations: bool) -> CmdResult<TelemetryStatus> {
     with(|s| {
+        s.reload();
         s.settings.problems = problems;
         s.settings.conversations = conversations;
         s.settings.asked = true;
@@ -589,7 +640,9 @@ pub fn set_telemetry(problems: bool, conversations: bool) -> CmdResult<Telemetry
         if !conversations {
             s.events.retain(|event| event["kind"] != "aiChat");
         }
-        if !s.on() {
+        if s.on() {
+            drop_disallowed(&s.dir.join("queue"), &s.settings);
+        } else {
             std::fs::remove_dir_all(s.dir.join("queue")).ok();
         }
         s.save().map(|()| s.status())
@@ -602,6 +655,7 @@ pub fn set_telemetry(problems: bool, conversations: bool) -> CmdResult<Telemetry
 #[tauri::command]
 pub fn telemetry_not_now() -> CmdResult<()> {
     with(|s| {
+        s.reload();
         s.settings.asked = true;
         s.save()
     })
@@ -643,22 +697,46 @@ pub fn show_telemetry(app: AppHandle) -> CmdResult<()> {
 pub async fn send_report(app: AppHandle, description: String) -> CmdResult<()> {
     let report = diagnostics::diagnostics(app).await?;
     let library = tauri::async_runtime::spawn_blocking(library_names).await.map_err(err)?;
-    let body = with(|s| {
+    let (report, body) = with(|s| {
         remember(&mut s.names, library);
-        let data = json!({ "text": cap(&s.clean(&report), 60_000), "description": cap(&description, 4000) });
-        s.envelope(vec![event("report", data)])
+        let text = cap(&s.clean(&without_job_labels(&report)), 60_000);
+        let report = event("report", json!({ "text": text, "description": cap(&description, 4000) }));
+        (report.clone(), s.envelope(vec![report]))
     })
     .ok_or(STARTING)?;
     let url = server();
     tauri::async_runtime::spawn_blocking(move || post(&url, &body))
         .await
         .map_err(err)?
-        .map_err(|_| UNREACHABLE.to_owned())
+        .map_err(|_| UNREACHABLE.to_owned())?;
+    with(|s| s.sent(&[report]));
+    Ok(())
+}
+
+/// A failed job's log line names the job as the person saw it, such as `Exporting <file> failed`, which can name a
+/// file from any earlier launch; only why it failed stays.
+fn without_job_labels(report: &str) -> String {
+    let lines = report.lines().map(|line| {
+        let failed = line.split_once(" ERROR job: ").and_then(|(at, rest)| Some((at, rest.split_once(" failed: ")?.1)));
+        failed.map_or_else(|| line.to_owned(), |(at, why)| format!("{at} ERROR job: … failed: {why}"))
+    });
+    lines.collect::<Vec<_>>().join("\n")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failed_jobs_log_line_loses_its_label() {
+        let report = "Last 2 lines of the log:\n  2026-11-15T13:00:00Z ERROR job: Exporting Client Deliverable.mp4 failed: \
+                      Cannot write ….mp4\n  2026-11-15T13:00:01Z INFO action: job export failed";
+        assert_eq!(
+            without_job_labels(report),
+            "Last 2 lines of the log:\n  2026-11-15T13:00:00Z ERROR job: … failed: Cannot write ….mp4\n  \
+             2026-11-15T13:00:01Z INFO action: job export failed"
+        );
+    }
 
     #[test]
     fn usage_counts_an_action_by_its_name_without_its_numbers() {

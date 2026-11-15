@@ -502,9 +502,10 @@ pub(crate) fn scrub_names(text: &str) -> String {
     hide_secrets(&shorten_paths(&hide_quoted(text), false))
 }
 
-/// Folders and home folders, which name the person, out of text the person wrote or an agent answered.
+/// Paths, which name the person's folders and files, out of text the person wrote or an agent answered; a path keeps
+/// only its extension.
 pub(crate) fn hide_folders(text: &str) -> String {
-    hide_secrets(&shorten_paths(text, true))
+    hide_secrets(&shorten_paths(text, false))
 }
 
 /// Text between double quotes, curly quotes or backticks on one line: captions, words and project names in error and
