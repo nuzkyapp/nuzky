@@ -194,6 +194,8 @@ pub const COMMANDS: &[&str] = &[
     "style_view",
     "suggest_broll",
     "suggest_zooms",
+    "sync_now",
+    "sync_status",
     "thumbnail",
     "transcript_view",
     "trash_projects",

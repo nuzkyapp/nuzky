@@ -193,6 +193,7 @@ fn generate() -> String {
     types.visit::<nuzky_chatgpt::Model>();
     types.visit::<nuzky_account::Status>();
     types.visit::<nuzky_account::Provider>();
+    types.visit::<crate::sync::SyncStatus>();
     let mut out = HEADER.to_string();
     for declaration in types.by_name.values() {
         out.push('\n');

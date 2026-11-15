@@ -8,13 +8,15 @@ use nuzky_engine::edit::{CaptionPreset, TextPreset, caption_preset, caption_pres
 use nuzky_engine::model::{Canvas, TextStyle};
 use serde_json::{Value, json};
 
-fn path() -> Result<PathBuf> {
+/// Where My styles are kept.
+pub fn path() -> Result<PathBuf> {
     Ok(nuzky_engine::data_dir()
         .context("STORE_UNAVAILABLE: no data directory for caption styles")?
         .join("caption-styles.json"))
 }
 
-fn normalized(name: &str) -> String {
+/// A style's name as two names that are the same compare: "My_Style" and "my style".
+pub fn normalized(name: &str) -> String {
     name.trim().replace(['_', '-'], " ").to_lowercase()
 }
 
@@ -51,6 +53,22 @@ pub fn list() -> Result<Vec<CaptionPreset>> {
     serde_json::from_slice(&bytes).context("STORE_UNREADABLE: your caption styles file is damaged")
 }
 
+/// Held while My styles are read and written again, so the app, agents and syncing never write
+/// over each other's change.
+fn lock() -> Result<std::fs::File> {
+    let path = path()?;
+    let dir = path.parent().context("STORE_WRITE_FAILED: no folder for your caption styles")?;
+    std::fs::create_dir_all(dir).context("STORE_WRITE_FAILED: cannot save your caption styles")?;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(dir.join("caption-styles.lock"))
+        .context("STORE_WRITE_FAILED: cannot save your caption styles")?;
+    file.lock().context("STORE_WRITE_FAILED: cannot save your caption styles")?;
+    Ok(file)
+}
+
 fn write(styles: Vec<CaptionPreset>) -> Result<Vec<CaptionPreset>> {
     let path = path()?;
     std::fs::create_dir_all(path.parent().unwrap()).context("STORE_WRITE_FAILED: cannot save your caption styles")?;
@@ -59,6 +77,7 @@ fn write(styles: Vec<CaptionPreset>) -> Result<Vec<CaptionPreset>> {
 }
 
 pub fn save(mut style: CaptionPreset) -> Result<Vec<CaptionPreset>> {
+    let _lock = lock()?;
     let mut styles = list()?;
     style.name = style.name.trim().into();
     name_available(&style.name, &styles)?;
@@ -68,6 +87,7 @@ pub fn save(mut style: CaptionPreset) -> Result<Vec<CaptionPreset>> {
 }
 
 pub fn rename(from: &str, to: &str) -> Result<Vec<CaptionPreset>> {
+    let _lock = lock()?;
     let mut styles = list()?;
     let index = styles
         .iter()
@@ -81,6 +101,7 @@ pub fn rename(from: &str, to: &str) -> Result<Vec<CaptionPreset>> {
 }
 
 pub fn delete(name: &str) -> Result<Vec<CaptionPreset>> {
+    let _lock = lock()?;
     let mut styles = list()?;
     let index = styles
         .iter()
@@ -88,6 +109,24 @@ pub fn delete(name: &str) -> Result<Vec<CaptionPreset>> {
         .with_context(|| format!("UNKNOWN_STYLE: no caption style named {name:?}"))?;
     styles.remove(index);
     write(styles)
+}
+
+/// Whether `style` may join `styles` as it is: a free name of 1 to 40 characters and valid looks.
+pub fn check(style: &CaptionPreset, styles: &[CaptionPreset]) -> Result<()> {
+    ensure!(style.name.trim() == style.name, "INVALID_ARGUMENTS: a style name has no spaces around it");
+    name_available(&style.name, styles)?;
+    validate(style)
+}
+
+/// Replaces My styles with `styles`, which `check` let in, but only while they are still `over`;
+/// false when they changed meanwhile.
+pub fn replace(over: &[CaptionPreset], styles: Vec<CaptionPreset>) -> Result<bool> {
+    let _lock = lock()?;
+    if list()? != over {
+        return Ok(false);
+    }
+    write(styles)?;
+    Ok(true)
 }
 
 pub fn find(name: &str) -> Result<CaptionPreset> {

@@ -95,6 +95,17 @@ def check_private(r, name):
     r.check(name, tokens and not leaked, {'leaked': leaked, 'stored': sorted(tokens)})
 
 
+def settled(r):
+    """The refresh token once syncing, which renews it, has stopped for a while."""
+    last, since, deadline = None, time.time(), time.time() + 30
+    while time.time() - since < 4 and time.time() < deadline:
+        now = stored(r).get('refresh_token')
+        if now != last or 'Syncing' in view(r).get('text', ''):
+            last, since = now, time.time()
+        time.sleep(0.2)
+    return last
+
+
 def refresh_refused(r, refresh_token):
     """Whether the server refuses `refresh_token` as an app would send it."""
     form = urllib.parse.urlencode({'grant_type': 'refresh_token', 'client_id': 'nuzky-desktop', 'refresh_token': refresh_token})
@@ -205,10 +216,14 @@ def account(r):
         privacy = lambda: r.s.run("return document.querySelector('[data-setting=privacy]')?.innerText ?? ''")
         r.check('Privacy names the Nuzky account as signed in', wait(lambda: 'Nuzky account' in privacy(), 5)
                 and 'Signed in' in privacy().split('Nuzky account', 1)[1].split('Claude Code', 1)[0], privacy())
+        r.check('and says Your style and caption styles sync with the account, not that they stay here',
+                'Your style and caption styles sync with your Nuzky account.' in privacy()
+                and 'Your style and every edit stay' not in privacy(), privacy())
+        shot(r, 'privacy')
         r.s.run("document.querySelector('#settings-tab-account').click()")
         wait(lambda: 'Sign out' in view(r).get('text', ''), 5)
 
-        spent = stored(r)['refresh_token']
+        spent = settled(r)
         click(r, 'Sign out')
         r.check('Sign out remembers the email and offers both ways to sign in again',
                 wait(lambda: f'Last signed in as {EMAIL}.' in view(r).get('text', '') and 'Continue with Google' in view(r)['text'], 10)

@@ -45,7 +45,7 @@ export function PrivacyPane() {
       : [
           {
             title: "Nuzky account",
-            detail: "account.nuzky.app, only while you sign in or out and when the sign-in is renewed.",
+            detail: "account.nuzky.app, while you sign in or out, when the sign-in is renewed and to sync Your style and your caption styles.",
             state: account?.state === "signedIn" ? "Signed in" : "Signed out",
             on: account?.state === "signedIn",
             pane: "account" as const,
@@ -70,7 +70,11 @@ export function PrivacyPane() {
 
   return (
     <div data-setting="privacy" className="flex flex-col gap-6">
-      <p className="text-[12px] text-muted">Captions, faces, Your style and every edit stay on this computer.</p>
+      <p className="text-[12px] text-muted">
+        {account?.state === "signedIn"
+          ? "Captions, faces and every edit stay on this computer. Your style and caption styles sync with your Nuzky account."
+          : "Captions, faces, Your style and every edit stay on this computer."}
+      </p>
       <div className="flex flex-col gap-2">
         <h3 className="text-[13px] font-semibold text-fg">Goes online</h3>
         <Rows rows={online} label="Goes online" />
