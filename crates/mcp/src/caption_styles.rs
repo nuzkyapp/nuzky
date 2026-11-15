@@ -53,6 +53,22 @@ pub fn list() -> Result<Vec<CaptionPreset>> {
     serde_json::from_slice(&bytes).context("STORE_UNREADABLE: your caption styles file is damaged")
 }
 
+/// Held while My styles are read and written again, so the app, agents and syncing never write
+/// over each other's change.
+fn lock() -> Result<std::fs::File> {
+    let path = path()?;
+    let dir = path.parent().context("STORE_WRITE_FAILED: no folder for your caption styles")?;
+    std::fs::create_dir_all(dir).context("STORE_WRITE_FAILED: cannot save your caption styles")?;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(dir.join("caption-styles.lock"))
+        .context("STORE_WRITE_FAILED: cannot save your caption styles")?;
+    file.lock().context("STORE_WRITE_FAILED: cannot save your caption styles")?;
+    Ok(file)
+}
+
 fn write(styles: Vec<CaptionPreset>) -> Result<Vec<CaptionPreset>> {
     let path = path()?;
     std::fs::create_dir_all(path.parent().unwrap()).context("STORE_WRITE_FAILED: cannot save your caption styles")?;
@@ -61,6 +77,7 @@ fn write(styles: Vec<CaptionPreset>) -> Result<Vec<CaptionPreset>> {
 }
 
 pub fn save(mut style: CaptionPreset) -> Result<Vec<CaptionPreset>> {
+    let _lock = lock()?;
     let mut styles = list()?;
     style.name = style.name.trim().into();
     name_available(&style.name, &styles)?;
@@ -70,6 +87,7 @@ pub fn save(mut style: CaptionPreset) -> Result<Vec<CaptionPreset>> {
 }
 
 pub fn rename(from: &str, to: &str) -> Result<Vec<CaptionPreset>> {
+    let _lock = lock()?;
     let mut styles = list()?;
     let index = styles
         .iter()
@@ -83,6 +101,7 @@ pub fn rename(from: &str, to: &str) -> Result<Vec<CaptionPreset>> {
 }
 
 pub fn delete(name: &str) -> Result<Vec<CaptionPreset>> {
+    let _lock = lock()?;
     let mut styles = list()?;
     let index = styles
         .iter()
@@ -102,6 +121,7 @@ pub fn check(style: &CaptionPreset, styles: &[CaptionPreset]) -> Result<()> {
 /// Replaces My styles with `styles`, which `check` let in, but only while they are still `over`;
 /// false when they changed meanwhile.
 pub fn replace(over: &[CaptionPreset], styles: Vec<CaptionPreset>) -> Result<bool> {
+    let _lock = lock()?;
     if list()? != over {
         return Ok(false);
     }

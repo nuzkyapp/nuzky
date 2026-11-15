@@ -202,9 +202,9 @@ fn once(account: &Account, dir: &std::path::Path) -> Result<Option<Changed>> {
     }
     let remote = |kind: &str| documents.kinds.get(kind).cloned().unwrap_or(Remote { revision: 0, body: None });
 
-    let style = sync_style(account, &mut state.style, remote(STYLE));
+    let style = sync_style(account, &documents.subject, &mut state.style, remote(STYLE));
     state.save(dir)?;
-    let captions = sync_captions(account, &mut state.caption_styles, remote(CAPTIONS));
+    let captions = sync_captions(account, &documents.subject, &mut state.caption_styles, remote(CAPTIONS));
     state.save(dir)?;
     style?;
     Ok(Some(Changed { captions: captions? }))
@@ -222,11 +222,13 @@ fn body<T: Clone + for<'de> Deserialize<'de>>(remote: &Remote, kept: &Option<Kep
     }
 }
 
-fn store(account: &Account, kind: &str, revision: u64, body: &Value) -> Result<Stored> {
-    account.store(kind, revision, body)?.context("SIGNED_OUT: signed out while syncing")
+fn store(account: &Account, subject: &str, kind: &str, revision: u64, body: &Value) -> Result<Stored> {
+    account
+        .store(subject, kind, revision, body)?
+        .context("SIGNED_OUT: signed out or into another account while syncing")
 }
 
-fn sync_style(account: &Account, kept: &mut Option<Kept<Shared>>, mut remote: Remote) -> Result<()> {
+fn sync_style(account: &Account, subject: &str, kept: &mut Option<Kept<Shared>>, mut remote: Remote) -> Result<()> {
     let styles = Store::default();
     for _ in 0..ATTEMPTS {
         // The account lost what this computer synced, as after a restore: start afresh.
@@ -255,7 +257,7 @@ fn sync_style(account: &Account, kept: &mut Option<Kept<Shared>>, mut remote: Re
                     return Ok(());
                 }
             }
-            None => match store(account, STYLE, remote.revision, &serde_json::to_value(&local)?)? {
+            None => match store(account, subject, STYLE, remote.revision, &serde_json::to_value(&local)?)? {
                 Stored::Revision(revision) => {
                     *kept = Some(Kept { revision, content: local });
                     return Ok(());
@@ -268,7 +270,12 @@ fn sync_style(account: &Account, kept: &mut Option<Kept<Shared>>, mut remote: Re
 }
 
 /// True when this computer's caption styles changed.
-fn sync_captions(account: &Account, kept: &mut Option<Kept<Vec<Value>>>, mut remote: Remote) -> Result<bool> {
+fn sync_captions(
+    account: &Account,
+    subject: &str,
+    kept: &mut Option<Kept<Vec<Value>>>,
+    mut remote: Remote,
+) -> Result<bool> {
     #[derive(Clone, Deserialize)]
     struct Body {
         styles: Vec<Value>,
@@ -289,7 +296,7 @@ fn sync_captions(account: &Account, kept: &mut Option<Kept<Vec<Value>>>, mut rem
         let base = kept.as_ref().map_or(&[][..], |kept| &kept.content[..]);
         let (merged, mine) = merge(base, &local, &theirs);
         if merged != theirs {
-            match store(account, CAPTIONS, remote.revision, &json!({ "styles": merged }))? {
+            match store(account, subject, CAPTIONS, remote.revision, &json!({ "styles": merged }))? {
                 Stored::Revision(revision) => remote = Remote { revision, body: Some(json!({ "styles": merged })) },
                 Stored::Conflict(now) => {
                     remote = now;
@@ -305,8 +312,8 @@ fn sync_captions(account: &Account, kept: &mut Option<Kept<Vec<Value>>>, mut rem
             *kept = Some(Kept { revision: remote.revision, content: merged });
             return Ok(true);
         }
-        // Changed here meanwhile: the account has the merge, and the next attempt sends this change too.
-        *kept = Some(Kept { revision: remote.revision, content: merged.clone() });
+        // Changed here meanwhile: merge again over what both last agreed on, so what came from the
+        // account and never reached this computer is not taken as deleted here.
         remote = Remote { revision: remote.revision, body: Some(json!({ "styles": merged })) };
     }
     bail!("SYNC_FAILED: your caption styles kept changing while they synced")

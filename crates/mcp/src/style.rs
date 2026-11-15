@@ -733,6 +733,13 @@ impl Store {
             return Ok(versions);
         }
         let (mut accepted, mut frozen) = (current.accepted, current.frozen);
+        // When the file changed, which may be long before Nuzky noticed: the user's other computers
+        // compare it with their own changes.
+        let changed_ms = fs::metadata(self.edit_md())
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|at| at.duration_since(UNIX_EPOCH).ok())
+            .map_or_else(now_ms, |since| since.as_millis() as u64);
         let label = if versions.is_empty() {
             // Whoever wrote it, learning leaves the text around the rules as it is.
             for name in ["header", "overview", "rare"] {
@@ -744,7 +751,7 @@ impl Store {
             hand_edits(&old, &Doc::parse(file.as_deref().unwrap_or("")), &mut accepted, &mut frozen);
             "Changed outside Nuzky"
         };
-        self.append(&versions, label, file, accepted, frozen)?;
+        self.append(&versions, label, file, accepted, frozen, changed_ms)?;
         self.read_versions()
     }
 
@@ -759,7 +766,7 @@ impl Store {
         // The version is the commit point; a file not written yet is finished on the next change.
         let index = versions.last().map_or(1, |v| v.index + 1);
         write_whole(&self.writing_path(), index.to_string().as_bytes())?;
-        self.append(versions, label, text.clone(), accepted, frozen)?;
+        self.append(versions, label, text.clone(), accepted, frozen, now_ms())?;
         write_style(&self.edit_md(), text.as_deref())?;
         fs::remove_file(self.writing_path()).context("Finishing a change of the style")
     }
@@ -771,10 +778,11 @@ impl Store {
         text: Option<String>,
         accepted: BTreeMap<String, Accepted>,
         frozen: BTreeMap<String, Frozen>,
+        at_ms: u64,
     ) -> Result<()> {
         let version = Version {
             index: versions.last().map_or(1, |v| v.index + 1),
-            at_ms: now_ms(),
+            at_ms,
             label: label.to_owned(),
             text,
             accepted,
@@ -1949,8 +1957,13 @@ mod tests {
         let outside = learned.replace("Cut every earlier attempt", "Cut each earlier attempt");
         assert_ne!(outside, learned);
         fs::write(dir.join("EDIT.md"), outside).unwrap();
+        // Edited while Nuzky was closed: the version says when, so a newer change on another computer wins over it.
+        let edited_ms = now_ms() - 3_600_000;
+        let edited_at = UNIX_EPOCH + std::time::Duration::from_millis(edited_ms);
+        File::options().write(true).open(dir.join("EDIT.md")).unwrap().set_modified(edited_at).unwrap();
         let view = store.view().unwrap();
         assert_eq!(view.versions[0].label, "Changed outside Nuzky");
+        assert_eq!(store.shared().unwrap().at_ms, edited_ms);
         assert!(view.rules.iter().any(|r| r.title == "Restarted sentences" && r.by_you), "{:?}", view.rules);
 
         let view = store.act(StyleAction::Restore { index: accepted.version }).unwrap();

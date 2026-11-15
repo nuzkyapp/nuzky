@@ -309,7 +309,7 @@ impl Account {
         struct Answer {
             documents: BTreeMap<String, Remote>,
         }
-        let Some((subject, status, body)) = self.authorized(|http, token| {
+        let Some((subject, status, body)) = self.authorized(None, |http, token| {
             http.get(&url)
                 .header("Authorization", format!("Bearer {token}"))
                 .header("Accept", "application/json")
@@ -323,12 +323,12 @@ impl Account {
         Ok(Some(Documents { subject, kinds: answer.documents }))
     }
 
-    /// Stores `body` as the next revision of `kind` over `revision`, the one this computer last had;
-    /// none when signed out.
-    pub fn store(&self, kind: &str, revision: u64, body: &serde_json::Value) -> Result<Option<Stored>> {
+    /// Stores `body` as the next revision of `kind` over `revision`, the one this computer last had
+    /// from the account `subject`; none when signed out or signed in to another account meanwhile.
+    pub fn store(&self, subject: &str, kind: &str, revision: u64, body: &serde_json::Value) -> Result<Option<Stored>> {
         let url = format!("{}/{}", self.url(SYNC), nuzky_oauth::encode(kind));
         let request = serde_json::to_vec(&serde_json::json!({ "revision": revision, "body": body }))?;
-        let Some((_, status, answer)) = self.authorized(|http, token| {
+        let Some((_, status, answer)) = self.authorized(Some(subject), |http, token| {
             http.put(&url)
                 .header("Authorization", format!("Bearer {token}"))
                 .header("Accept", "application/json")
@@ -356,14 +356,18 @@ impl Account {
 
     /// Sends a request with the access token, renewed first when it is about to expire, and once
     /// more after a renewal when the server refused it. Answers the account, the status and the
-    /// body; none when signed out or the sign-in ended.
+    /// body; none when signed out, the sign-in ended or it is another account than `subject`.
     fn authorized(
         &self,
+        subject: Option<&str>,
         send: impl Fn(&ureq::Agent, &str) -> Result<ureq::http::Response<ureq::Body>, ureq::Error>,
     ) -> Result<Option<(String, u16, String)>> {
         let http = nuzky_oauth::http();
         for renew in [false, true] {
-            let Some((subject, token)) = self.access(renew)? else { return Ok(None) };
+            let Some((signed_in, token)) = self.access(renew)? else { return Ok(None) };
+            if subject.is_some_and(|subject| subject != signed_in) {
+                return Ok(None);
+            }
             let mut response =
                 send(&http, &token).map_err(|error| anyhow!("SYNC_FAILED: Could not reach {WHO}: {error}"))?;
             let status = response.status().as_u16();
@@ -371,7 +375,7 @@ impl Account {
                 continue;
             }
             let body = response.body_mut().with_config().limit(MAX_DOCUMENTS).read_to_string()?;
-            return Ok(Some((subject, status, body)));
+            return Ok(Some((signed_in, status, body)));
         }
         bail!("SYNC_FAILED: {WHO} did not accept the sign-in")
     }
