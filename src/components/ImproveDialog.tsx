@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertCircle, Check, ChevronDown, ChevronRight, Loader2, Mail } from "lucide-react";
-import { cancelSignIn, signIn, useAccount } from "../lib/account";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { answerTelemetry, useTelemetry } from "../lib/telemetry";
-import { GoogleButton } from "./settings/AccountPane";
 import { Button, Checkbox, trapTab } from "./ui";
 
 const EXAMPLE = `Export failed: MEDIA_UNREADABLE
@@ -22,54 +20,12 @@ const CHOICES = [
   },
 ] as const;
 
-/** The account's row: sign in to keep Your style the same everywhere, or who is signed in. */
-function AccountRow() {
-  const { status, action, error } = useAccount();
-  return (
-    <div className="flex flex-col gap-2.5 px-3.5 py-3">
-      <div className="flex flex-col gap-0.5">
-        <span className="text-[13px] font-medium">Your style on every computer</span>
-        <span className="text-[12px] text-muted">Sign in to keep Your style and your caption styles the same everywhere.</span>
-      </div>
-      {status?.state === "signedIn" ? (
-        <p role="status" className="flex items-center gap-1.5 text-[12px] text-fg">
-          <Check size={14} strokeWidth={2.5} className="shrink-0 text-ok" />
-          Signed in as {status.email}
-        </p>
-      ) : action === "signingIn" ? (
-        <div role="status" className="flex h-8 items-center gap-2.5 text-[13px]">
-          <Loader2 size={16} className="shrink-0 animate-spin text-accent" />
-          <span className="flex-1">Continue in your browser…</span>
-          <Button pill onClick={cancelSignIn}>
-            Cancel
-          </Button>
-        </div>
-      ) : (
-        <div className="flex flex-wrap gap-2">
-          <GoogleButton size="h-8 text-[13px]" />
-          <Button pill onClick={() => void signIn("email")}>
-            <Mail size={14} />
-            Continue with email
-          </Button>
-        </div>
-      )}
-      {error && (
-        <p role="alert" className="flex items-start gap-1.5 text-[12px] leading-[18px]">
-          <AlertCircle size={14} className="mt-0.5 shrink-0 text-danger" />
-          {error}
-        </p>
-      )}
-    </div>
-  );
-}
-
 /**
- * The question after the update: what Nuzky may send its author, both unticked, and the optional account. Share
+ * The question after the update: what Nuzky may send its author, both unticked. Share
  * keeps what is ticked; Don't share, Esc and a click beside it keep both off, and it does not ask again by itself.
  */
 export function ImproveDialog() {
   const open = useTelemetry((s) => s.open);
-  const account = useAccount((s) => s.available);
   const [ticked, setTicked] = useState<Record<string, boolean>>({});
   const [example, setExample] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -151,11 +107,6 @@ export function ImproveDialog() {
               <pre className="mt-1 whitespace-pre-wrap break-words rounded-[10px] bg-black/25 px-3 py-2.5 font-mono text-[11px] leading-[17px] text-fg/80 shadow-[inset_0_0_0_1px_rgb(255_255_255/.06)]">
                 {EXAMPLE}
               </pre>
-            )}
-            {account && (
-              <div className="mt-3 rounded-xl bg-white/[.055] shadow-[inset_0_0_0_1px_rgb(255_255_255/.06)]">
-                <AccountRow />
-              </div>
             )}
           </div>
           <div className="flex shrink-0 justify-end gap-2 px-6 pt-4 pb-6">

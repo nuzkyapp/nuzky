@@ -5,6 +5,7 @@ import { changeStyle, loadStyle, useStyle } from "../../lib/style";
 import { when } from "../../lib/time";
 import type { StyleConfidence, StyleFrozen, StyleRule, StyleSource, StyleView, Suggestion } from "../../lib/types";
 import { Bars, Button, IconButton, Menu, type MenuEntry } from "../ui";
+import { SignInCard } from "./SignInCard";
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
@@ -566,7 +567,7 @@ export function StylePage() {
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-24">
           <div className="flex max-w-[920px] flex-col gap-8">
-            {empty && <Empty />}
+            {empty ? <Empty /> : <SignInCard />}
             {view.suggestions.length > 0 && (
               <section aria-label="Suggestions">
                 <SectionTitle title="Suggestions" count={view.suggestions.length}>

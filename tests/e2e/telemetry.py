@@ -103,9 +103,9 @@ def telemetry(r):
     resize(r, 1440, 900)
     r.check('nothing was sent while both were off', not r.received, r.received)
     q = wait(lambda: r.s.run(QUESTION, DIALOG), 10)
-    r.check('the next launch asks by itself, both unticked and Share disabled',
+    r.check('the next launch asks by itself, both unticked and Share disabled, without the account',
             q and 'Can you help me make Nuzky better?' in q['text'] and 'Tomáš Mach' in q['text'] and q['ticked'] == [False, False]
-            and q['share'] == 'true', q)
+            and q['share'] == 'true' and 'Continue with' not in q['text'], q)
     r.check('the crash notice offers its report', any('closed unexpectedly' in t for t in r.s.run(TOASTS)), r.s.run(TOASTS))
     time.sleep(0.5)  # The dialog fades in.
     r.shot('question')
@@ -203,4 +203,19 @@ def telemetry(r):
     r.check('the account server deleted what this install sent', deleted()[0]['status'] == 200
             and deleted()[0]['answer']['deleted'] == sum(len(req['body']['events']) for req in sent), deleted()[0]['answer'])
     r.shot('privacy-deleted')
+    r.key('Escape')
     r.server.terminate()
+
+    # The account is offered where keeping a style means something: Your style, once there is one, until closed.
+    r.s.call("window.__nuzky.api.styleView().then((v) => window.__nuzky.api.styleAct({type: 'setText', text: arguments[0], baseVersion: v.version}))",
+             '# Editing style\n\n## Your rules\n\n- Cut every pause longer than a second.\n')
+    r.s.run("window.__nuzky.store.setState({view: 'home'})")
+    r.s.run("document.querySelector('nav[aria-label=Collections] button[data-row]:nth-of-type(2)').click()")
+    card = lambda: r.s.run("return document.querySelector('main[aria-label=\"Your style\"] [data-style-sign-in]')?.innerText ?? null")
+    r.check('Your style offers to keep the style on every computer with both ways to sign in',
+            wait(lambda: card() and 'Continue with Google' in card() and 'Continue with email' in card(), 10), card())
+    time.sleep(0.5)  # The screenshot can trail a change made just before it.
+    r.shot('style-sign-in')
+    r.s.run("document.querySelector('[data-style-sign-in] button[aria-label=\"Don\\'t show again\"]').click()")
+    r.check("Don't show again closes it for good", wait(lambda: card() is None, 3)
+            and r.s.run("return localStorage.getItem('nuzky.styleSignIn')") == 'closed', card())
