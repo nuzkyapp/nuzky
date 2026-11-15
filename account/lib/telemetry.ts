@@ -24,6 +24,11 @@ type Event = { kind: string; at: number; data: string };
 
 const state = globalThis as typeof globalThis & { nuzkyTelemetry?: Promise<Telemetry> };
 
+/** When the last `days` began, for the admin page. */
+export function daysAgo(days: number): number {
+  return Date.now() - days * DAY_MS;
+}
+
 export function getTelemetry(): Promise<Telemetry> {
   state.nuzkyTelemetry ??= open();
   return state.nuzkyTelemetry;
@@ -186,8 +191,6 @@ export async function forget(request: Request): Promise<Response> {
   if (read instanceof Response) return read;
   const install = isObject(read.body) ? hashInstall(read.body.install) : null;
   if (!install) return invalid();
-  const wait = waitSeconds(telemetry, `install:${install}`, INSTALL_REQUESTS_PER_HOUR, now);
-  if (wait) return tooMany(wait);
   const { changes } = telemetry.database.prepare("DELETE FROM events WHERE install = ?").run(install);
   return Response.json({ deleted: Number(changes) });
 }

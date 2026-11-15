@@ -177,17 +177,16 @@ describe("receiving", () => {
 });
 
 describe("limits", () => {
-  test("an install gets 30 requests an hour across both endpoints, then 429 with Retry-After", async () => {
+  test("an install sends 30 batches an hour, then 429 with Retry-After, and can still delete", async () => {
     const install = randomUUID();
     const ip = uniqueIp();
-    for (let i = 0; i < 29; i++) assert.equal((await send("/api/telemetry", batch(install, [event("usage")]), { ip })).status, 200);
-    assert.equal((await send("/api/telemetry/delete", { install }, { ip })).status, 200);
+    for (let i = 0; i < 30; i++) assert.equal((await send("/api/telemetry", batch(install, [event("usage")]), { ip })).status, 200);
 
     const limited = await send("/api/telemetry", batch(install, [event("usage")]), { ip });
     assert.equal(limited.status, 429);
     const retryAfter = Number(limited.headers.get("retry-after"));
     assert.ok(retryAfter > 3500 && retryAfter <= 3600, `Retry-After ${retryAfter}`);
-    assert.equal((await send("/api/telemetry/delete", { install }, { ip })).status, 429);
+    assert.deepEqual(await (await send("/api/telemetry/delete", { install }, { ip })).json(), { deleted: 30 });
     assert.equal((await send("/api/telemetry", batch(randomUUID(), [event("usage")]), { ip })).status, 200);
   });
 

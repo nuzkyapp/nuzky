@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import type { SearchParams } from "@/lib/oauth-query";
 import { getServer } from "@/lib/server";
-import { getTelemetry } from "@/lib/telemetry";
+import { daysAgo, getTelemetry } from "@/lib/telemetry";
 
 type Row = Record<string, string | number | null>;
 
@@ -95,7 +95,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Search
   if (!session?.user.emailVerified || !config.adminEmails.includes(session.user.email.toLowerCase())) notFound();
 
   const days = (await searchParams).days === "30" ? 30 : 7;
-  const since = Date.now() - days * 24 * 60 * 60 * 1000;
+  const since = daysAgo(days);
   const { database } = await getTelemetry();
   const all = (sql: string, ...params: (string | number)[]) => database.prepare(sql).all(...params) as Row[];
 

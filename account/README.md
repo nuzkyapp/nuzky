@@ -41,7 +41,7 @@ Neither endpoint needs an account or a token. Both take only `Content-Type: appl
 
 `POST /api/telemetry/delete` with `{"install": "<uuid>"}` deletes every event of that install and answers `200 {"deleted": n}`.
 
-`429` comes with `Retry-After` in seconds: 30 requests an hour per install for both endpoints together, 120 an hour per client address, and at most 5000 stored events per install in 24 hours, so a batch that would go above answers `429`. While the stored events take more than 1 GiB, `POST /api/telemetry` answers `503` with `Retry-After: 3600`. Retry after `429`, `503` and other `5xx`; never retry `400`, `413` or `415`.
+`429` comes with `Retry-After` in seconds: 30 batches an hour per install (deleting is not limited per install), 120 an hour per client address, and at most 5000 stored events per install in 24 hours, so a batch that would go above answers `429`. While the stored events take more than 1 GiB, `POST /api/telemetry` answers `503` with `Retry-After: 3600`. Retry after `429`, `503` and other `5xx`; never retry `400`, `413` or `415`.
 
 ## Behaviour
 
