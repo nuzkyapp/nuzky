@@ -96,6 +96,19 @@ def account_history(r):
         r.check('and on the other computer', wait(lambda: other.captions() == ['Team yellow'], 15), other.captions())
         r.check('the dialog closes after restoring', wait(lambda: not r.s.run(f"return !!document.querySelector('{DIALOG}')"), 5))
         close_settings(r)
+
+        r.s.run("window.__nuzky.store.setState({view: 'home'})")
+        wait(lambda: r.s.run("return !!document.querySelector('nav[aria-label=Collections] button[data-row]')"), 10)
+        r.s.run("document.querySelector('nav[aria-label=Collections] button[data-row]:nth-of-type(2)').click()")
+        wait(lambda: r.s.run("return !!document.querySelector('main[aria-label=\"Your style\"]')"), 10)
+        r.s.run("document.querySelector('button[aria-label=\"Versions of your style\"]').click()")
+        item = "[...document.querySelectorAll('[role=menuitem]')].find((i) => i.textContent.includes('History from all your computers'))"
+        r.check("Your style's Versions menu offers the history from all computers", wait(lambda: r.s.run(f"return !!{item}"), 5))
+        r.s.run(f"{item}.click()")
+        pressed = f"return document.querySelector('{DIALOG} [data-seg][aria-pressed=true]')?.textContent.trim()"
+        r.check('and opens it on Your style', wait(lambda: r.s.run(pressed) == 'Your style', 5), r.s.run(pressed))
+        r.key('Escape')
+        r.check('Esc closes it', wait(lambda: not r.s.run(f"return !!document.querySelector('{DIALOG}')"), 5))
     finally:
         if r.server.poll() is None:
             r.server.terminate()
