@@ -49,6 +49,7 @@ pub(crate) struct Reporter {
     app: AppHandle,
     event: JobEvent,
     last: Instant,
+    started: Instant,
 }
 
 impl Reporter {
@@ -65,7 +66,7 @@ impl Reporter {
             output: None,
         };
         app.emit("job", &event).ok();
-        Self { app: app.clone(), event, last: Instant::now() }
+        Self { app: app.clone(), event, last: Instant::now(), started: Instant::now() }
     }
 
     pub(crate) fn progress(&mut self, p: f32, phase: Option<&str>) {
@@ -92,12 +93,15 @@ impl Reporter {
             }
             Err(_) if cancelled => self.event.status = "cancelled",
             Err(e) => {
-                log::error!("{} failed: {e:#}", self.event.label);
+                log::error!(target: "job", "{} failed: {e:#}", self.event.label);
                 self.event.status = "failed";
                 self.event.message = Some(format!("{e:#}"));
             }
         }
         log::info!(target: "action", "job {} {}", self.event.kind, self.event.status);
+        let error = (self.event.status == "failed").then(|| self.event.message.clone()).flatten();
+        let seconds = self.started.elapsed().as_secs_f64();
+        crate::telemetry::job(&self.app, self.event.kind, self.event.status, seconds, error);
         self.app.emit("job", &self.event).ok();
     }
 }

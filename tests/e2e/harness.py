@@ -199,6 +199,9 @@ class Run:
         self.name, self.work = name, OUT / name
         shutil.rmtree(self.work, ignore_errors=True)
         (self.work / 'data/nuzky/projects').mkdir(parents=True)
+        # Nor is it asked whether Nuzky may send its author anything; tests/e2e/telemetry.py asks.
+        (self.work / 'data/nuzky/telemetry').mkdir()
+        (self.work / 'data/nuzky/telemetry/settings.json').write_text('{"asked": true}')
         self.env = dict(os.environ, XDG_DATA_HOME=str(self.work / 'data'), XDG_CACHE_HOME=str(self.work / 'cache'),
                         XDG_RUNTIME_DIR=runtime, DBUS_SESSION_BUS_ADDRESS='disabled:', GDK_BACKEND='x11',
                         # Flows never ask GitHub for a new version; tests/e2e/updates.py serves its own.
@@ -208,6 +211,8 @@ class Run:
                         NUZKY_CHATGPT_ISSUER='http://127.0.0.1:9', NUZKY_TEST_KEYCHAIN=str(self.work / 'keychain.json'),
                         # The same for the Nuzky account; tests/e2e/account.py runs its own account server.
                         NUZKY_ACCOUNT_ISSUER='http://127.0.0.1:9',
+                        # Nor does anything go to Nuzky's author; tests/e2e/telemetry.py serves its own server.
+                        NUZKY_TELEMETRY_URL='http://127.0.0.1:9',
                         NUZKY_TEST_ACCOUNT_KEYCHAIN=str(self.work / 'account-keychain.json'),
                         # Nor does it run the person's own agents; a flow that needs one puts a stand-in there.
                         NUZKY_AGENT_CLAUDE=str(self.work / 'no-agent'), NUZKY_AGENT_CODEX=str(self.work / 'no-agent'),

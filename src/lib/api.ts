@@ -1,6 +1,6 @@
 import { invoke, type Channel } from "@tauri-apps/api/core";
 import type { GalleryPlugin, GalleryState } from "./gallery";
-import type { StorageUsage, StyleSettings } from "./types";
+import type { StorageUsage, StyleSettings, TelemetryStatus } from "./types";
 import type { EffectIssue, ListedPlugin, PluginRow, PluginValues } from "./plugins";
 import type { ColorLook, LutInfo } from "./color";
 import type { AccountProvider, AccountStatus, AgentAccess, ImportedKeys, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, BeatCutDone, BeatPlans, Boot, BrollChoice, BrollSuggestions, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Mono, Part, PreviewStarted, PreviewWindowBoot, Project, ProjectPoster, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFinish, ReelFraming, Rhythm, Said, SampleRun, ScreenRecording, ScreenWindow, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied, VoiceoverState } from "./types";
@@ -328,6 +328,16 @@ export const api = {
   openLogs: () => invoke<void>("open_logs"),
   /** Writes an error of the interface into the log. */
   logUiError: (message: string) => invoke<void>("log_ui_error", { message }),
+  /** Help improve Nuzky: what Nuzky may send its author (src-tauri/src/telemetry.rs). */
+  telemetryStatus: () => invoke<TelemetryStatus>("telemetry_status"),
+  setTelemetry: (problems: boolean, conversations: boolean) => invoke<TelemetryStatus>("set_telemetry", { problems, conversations }),
+  telemetryNotNow: () => invoke<void>("telemetry_not_now"),
+  /** Deletes what this install sent from the server and turns both off. */
+  deleteTelemetry: () => invoke<TelemetryStatus>("delete_telemetry"),
+  /** The newest batches sent, in the file manager. */
+  showTelemetry: () => invoke<void>("show_telemetry"),
+  /** Sends the bug report to Nuzky's author at once, whether or not Problems and usage is on. */
+  sendReport: (description: string) => invoke<void>("send_report", { description }),
   styleView: () => invoke<StyleView>("style_view"),
   styleAct: (action: StyleAction) => invoke<StyleView>("style_act", { action }),
   /** Learns from 1 to 3 recordings, each with the video cut from it, as a `style` job. */

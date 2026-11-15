@@ -8,13 +8,13 @@ import { Button } from "../ui";
 const CARD = "rounded-xl bg-white/[.055] shadow-[inset_0_0_0_1px_rgb(255_255_255/.06)]";
 
 /** Google's own Sign in with Google button in its dark format, as Google's branding guidelines ask. */
-function GoogleButton() {
+export function GoogleButton({ size = "h-10 w-[236px] text-[14px]" }: { size?: string }) {
   return (
     <button
       type="button"
       data-autofocus
       onClick={() => void signIn("google")}
-      className="inline-flex h-10 w-[236px] max-w-full shrink-0 items-center justify-center gap-2.5 rounded-full bg-[#131314] pr-4 pl-3 text-[14px] font-medium text-[#e3e3e3] shadow-[inset_0_0_0_1px_#8e918f] transition-colors duration-[120ms] ease-out hover:bg-[#1f1f20] active:brightness-90"
+      className={`inline-flex ${size} max-w-full shrink-0 items-center justify-center gap-2.5 rounded-full bg-[#131314] pr-4 pl-3 font-medium text-[#e3e3e3] shadow-[inset_0_0_0_1px_#8e918f] transition-colors duration-[120ms] ease-out hover:bg-[#1f1f20] active:brightness-90`}
     >
       <GoogleLogo />
       Continue with Google

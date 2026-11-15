@@ -241,6 +241,10 @@ export type Boot = {
    */
   crashed: boolean,
   /**
+   * Help improve Nuzky: what the person allowed and whether it was asked.
+   */
+  telemetry: TelemetryStatus,
+  /**
    * What the Nuzky before this one left when it restarted to update (`restartToUpdate` in src/lib/updates.ts).
    */
   updateNote: string | null,
@@ -2132,6 +2136,22 @@ export type Suggestion = {
    * The rule as EDIT.md would hold it.
    */
   text: string,
+};
+
+/**
+ * What Settings › Privacy and the question after an update show.
+ */
+export type TelemetryStatus = {
+  problems: boolean,
+  conversations: boolean,
+  /**
+   * The person answered the question or chose Not now, so it never asks by itself again.
+   */
+  asked: boolean,
+  /**
+   * Events sent from this install since it last deleted what it shared.
+   */
+  sent: number,
 };
 
 /**

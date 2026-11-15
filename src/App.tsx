@@ -11,6 +11,7 @@ import { onFollowJob } from "./lib/follow";
 import { canRetrySpeech, retrySpeech, useSpeech } from "./lib/speech";
 import { useNames } from "./lib/names";
 import { reportBug } from "./lib/diagnostics";
+import { CRASHED, sendReport, startTelemetry, useTelemetry } from "./lib/telemetry";
 import { currentEpoch, leftBehind, PLUGIN_RUN, runWasDiscarded, undoAction, useEditor } from "./lib/store";
 import { formatDuration } from "./lib/time";
 import { MOVES_SOURCE, RESTS_IN_COVER, RESTS_IN_FULL, WORKS_IN_REELS, isClipboard, runAction } from "./lib/actions";
@@ -468,7 +469,7 @@ useEditor.subscribe((s, prev) => {
 // Test hook for WebDriver runs; native file dialogs cannot be automated.
 if (import.meta.env.DEV)
   Object.assign(window, {
-    __nuzky: { importPaths, importLutPaths, luts: useLuts, exportVideo, plugins: usePlugins, runPlugin, gallery: useGallery, store: useEditor, cover: useCover, reels: useReels, openReelsToFind, speech: useSpeech, names: useNames, api, agent: useAgent, dock: useDock, setup: useSetup, library: useLibrary, style: useStyle, addProjects, findDrafts, newProjectFromMedia, capcut: useCapCut, openDraft, openDraftFolder, openProject, refreshLibrary, trashProjects, updates: useUpdates, checkForUpdates, sounds: useSounds, stickers: useStickers, tour: useTour, youtube: useYoutube, previewWindow: appWindow, separateWindow: usePreviewWindow, remote: useRemote, source: useSource, keys: useKeys, keysQuestion: useKeysQuestion, settings: useSettings, openSettings, voiceover: useVoiceover, micLevel: useMicLevel, answerNextSave, savesAsked },
+    __nuzky: { importPaths, importLutPaths, luts: useLuts, exportVideo, plugins: usePlugins, runPlugin, gallery: useGallery, store: useEditor, cover: useCover, reels: useReels, openReelsToFind, speech: useSpeech, names: useNames, api, agent: useAgent, dock: useDock, setup: useSetup, library: useLibrary, style: useStyle, addProjects, findDrafts, newProjectFromMedia, capcut: useCapCut, openDraft, openDraftFolder, openProject, refreshLibrary, trashProjects, updates: useUpdates, checkForUpdates, sounds: useSounds, stickers: useStickers, tour: useTour, youtube: useYoutube, previewWindow: appWindow, separateWindow: usePreviewWindow, remote: useRemote, source: useSource, keys: useKeys, keysQuestion: useKeysQuestion, telemetry: useTelemetry, settings: useSettings, openSettings, voiceover: useVoiceover, micLevel: useMicLevel, answerNextSave, savesAsked },
   });
 
 async function startEditor() {
@@ -479,6 +480,7 @@ async function startEditor() {
   useEditor.getState().setSnap(boot.snapshot, true, true);
   useEditor.setState({ saveState: "saved" });
   startUpdates(boot.version, boot.updateChecks, boot.updateNote);
+  startTelemetry(boot.telemetry);
   void checkYtdlp();
   // A warning stays until dismissed, so the reason a different project opened is not missed.
   // Once per launch: StrictMode and Try again can start the editor more than once.
@@ -487,12 +489,16 @@ async function startEditor() {
     useEditor.getState().toast({ kind: "warning", text: boot.startupNotice });
   }
   // The project opens as Nuzky last saved it, about a second after the last edit; an unfinished AI edit asks itself.
+  // With Problems and usage on, the report goes by itself; otherwise one click sends it.
   if (boot.crashed && !crashNoticeShown) {
     crashNoticeShown = true;
+    const sends = boot.telemetry.problems;
+    if (sends) void api.sendReport("").catch(() => {});
+    else useTelemetry.setState({ crashReport: true });
     useEditor.getState().toast({
       kind: "warning",
-      text: "Nuzky closed unexpectedly. Your project is as it was last saved.",
-      action: { label: "Report a bug…", run: reportBug },
+      text: CRASHED,
+      action: sends ? { label: "Report a bug…", run: reportBug } : { label: "Send crash report", run: () => void sendReport() },
     });
   }
 }

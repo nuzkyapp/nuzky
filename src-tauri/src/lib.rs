@@ -36,6 +36,7 @@ mod stickers;
 mod storage;
 mod store;
 mod style;
+mod telemetry;
 #[cfg(all(target_os = "macos", debug_assertions))]
 pub mod test_bridge;
 mod thumbs;
@@ -160,6 +161,8 @@ pub struct Boot {
     update_checks: bool,
     /// The Nuzky that ran before this one ended without quitting.
     crashed: bool,
+    /// Help improve Nuzky: what the person allowed and whether it was asked.
+    telemetry: telemetry::TelemetryStatus,
     /// What the Nuzky before this one left when it restarted to update (`restartToUpdate` in src/lib/updates.ts).
     update_note: Option<String>,
 }
@@ -440,6 +443,7 @@ impl AppState {
         drop(locks);
         self.engine.send(Msg::Project(Arc::new(project.clone())));
         preview_window::publish(&self.app, project);
+        telemetry::forget_names(project);
     }
 
     fn apply_batch(
@@ -539,6 +543,7 @@ fn boot(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Boot> {
         // Taken first: a Nuzky that ended for its update did not crash.
         update_note: updates::take_note(),
         crashed: diagnostics::crashed_before(),
+        telemetry: telemetry::status(),
     })
 }
 
@@ -1341,6 +1346,7 @@ fn lowercase_first(text: &str) -> String {
 
 pub fn run() {
     diagnostics::init();
+    telemetry::init();
     let (builder, context) = (tauri::Builder::default(), tauri::generate_context!());
     #[cfg(all(target_os = "macos", debug_assertions))]
     let (builder, context) = test_bridge::prepare(builder, context);
@@ -1391,6 +1397,7 @@ pub fn run() {
             let server = Arc::new(PreviewServer::start()?);
             let (session, events, startup_notice) = initial_project()?;
             let project = session.host.session.state()?.project;
+            telemetry::forget_names(&project);
             let cache_dir = store::cache_dir();
             youtube_videos::forget(&cache_dir);
             let engine =
@@ -1436,6 +1443,7 @@ pub fn run() {
             jobs::prepare_media(&app.state::<AppState>(), &project);
             style::watch(app.handle().clone());
             plugins::watch(app.handle().clone());
+            telemetry::start(app.handle());
             app.emit("ready", ()).ok();
             #[cfg(target_os = "macos")]
             if let Err(error) = file_dialogs::watch(app) {
@@ -1652,6 +1660,12 @@ pub fn run() {
             diagnostics::diagnostics,
             diagnostics::open_logs,
             diagnostics::report_bug,
+            telemetry::telemetry_status,
+            telemetry::set_telemetry,
+            telemetry::telemetry_not_now,
+            telemetry::delete_telemetry,
+            telemetry::show_telemetry,
+            telemetry::send_report,
             diagnostics::show_bug_report,
             diagnostics::log_ui_error,
             chatgpt::chatgpt_status,
@@ -1734,6 +1748,7 @@ pub fn run() {
                 app.state::<AppState>().voiceover.quit();
                 app.state::<AppState>().quit();
                 diagnostics::quit();
+                telemetry::quit();
                 #[cfg(target_os = "linux")]
                 updates::start_again(app);
             }

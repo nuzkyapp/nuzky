@@ -699,6 +699,7 @@ fn send(
 ) -> CmdResult<()> {
     validate_model_effort(model.as_deref(), effort.as_deref())?;
     validate_chat_id(&chat)?;
+    let telemetry_model = model.clone();
     let panel = app.state::<AgentPanel>();
     // Another project opening, or Stop, while this starts must stop it once it runs.
     let stops = panel.stops.load(Ordering::Acquire);
@@ -784,7 +785,11 @@ fn send(
         return Ok(());
     }
     let (handle, chat_id) = (app.clone(), id.clone());
+    let mut telemetry = crate::telemetry::AiTurn::new(agent.name(), telemetry_model.as_deref(), &id, text);
     let emit = move |event| {
+        if let Some(turn) = &mut telemetry {
+            turn.see(&event);
+        }
         let panel = handle.state::<AgentPanel>();
         if let AgentEvent::Session { id } = event {
             if let Some(chat) = panel.chats.lock().unwrap().get_mut(&chat_id) {
