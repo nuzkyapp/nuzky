@@ -631,6 +631,11 @@ fn send_round() {
                 std::fs::remove_file(path).ok();
             }
             Err(Failure::Later) => {
+                let now = with(|s| {
+                    s.reload();
+                    s.settings.clone()
+                })
+                .unwrap_or(now);
                 for rest in &taken[n..] {
                     keep_allowed(rest, &now);
                     put_back(rest);
