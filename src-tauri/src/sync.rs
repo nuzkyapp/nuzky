@@ -103,7 +103,10 @@ pub struct RevisionView {
 }
 
 fn kind(kind: &str) -> Result<&'static str> {
-    [STYLE, CAPTIONS].into_iter().find(|known| *known == kind).with_context(|| format!("INVALID_ARGUMENTS: no synced {kind}"))
+    [STYLE, CAPTIONS]
+        .into_iter()
+        .find(|known| *known == kind)
+        .with_context(|| format!("INVALID_ARGUMENTS: no synced {kind}"))
 }
 
 /// The revisions of Your style (`style`) or My caption styles (`caption-styles`) the account keeps.
@@ -111,7 +114,7 @@ fn kind(kind: &str) -> Result<&'static str> {
 pub async fn sync_history(kind: String) -> CmdResult<Vec<Revision>> {
     tauri::async_runtime::spawn_blocking(move || -> Result<Vec<Revision>> {
         let kind = self::kind(&kind)?;
-        Ok(crate::account::account().history(kind)?.context("SIGNED_OUT: sign in to see the history")?)
+        crate::account::account().history(kind)?.context("SIGNED_OUT: sign in to see the history")
     })
     .await
     .map_err(err)?
@@ -126,7 +129,12 @@ pub async fn sync_revision(kind: String, revision: u64) -> CmdResult<RevisionVie
         if kind == STYLE {
             let then: Shared = serde_json::from_value(body).context("NEWER_NUZKY: reading that version")?;
             let now = Store::default().shared()?;
-            return Ok(RevisionView { revision, text: then.text().map(str::to_owned), now_text: now.text().map(str::to_owned), caption_styles: vec![] });
+            return Ok(RevisionView {
+                revision,
+                text: then.text().map(str::to_owned),
+                now_text: now.text().map(str::to_owned),
+                caption_styles: vec![],
+            });
         }
         let then = restorable(&body);
         let now = caption_styles::list()?;
@@ -142,7 +150,11 @@ pub async fn sync_revision(kind: String, revision: u64) -> CmdResult<RevisionVie
                 (style.name.clone(), change)
             })
             .collect();
-        changes.extend(now.iter().filter(|n| !then.iter().any(|t| key(t) == key(n))).map(|n| (n.name.clone(), CaptionChange::Goes)));
+        changes.extend(
+            now.iter()
+                .filter(|n| !then.iter().any(|t| key(t) == key(n)))
+                .map(|n| (n.name.clone(), CaptionChange::Goes)),
+        );
         Ok(RevisionView { revision, text: None, now_text: None, caption_styles: changes })
     })
     .await
@@ -159,15 +171,16 @@ pub async fn sync_restore(app: AppHandle, kind: String, revision: u64) -> CmdRes
         let (shown, body) = kept(kind, revision)?;
         if kind == STYLE {
             let then: Shared = serde_json::from_value(body).context("NEWER_NUZKY: reading that version")?;
-            let label = format!("Restored: {}", if shown.label.is_empty() { "an earlier version" } else { &shown.label });
+            let label =
+                format!("Restored: {}", if shown.label.is_empty() { "an earlier version" } else { &shown.label });
             let store = Store::default();
             let now = store.shared()?;
-            anyhow::ensure!(store.take_shared(&then, &now, &label)?, "STYLE_CHANGED: your style changed meanwhile. Try again.");
+            anyhow::ensure!(store.take_shared(&then, &now, &label)?, "RESTORE_CHANGED: your style changed meanwhile");
         } else {
             let now = caption_styles::list()?;
             anyhow::ensure!(
                 caption_styles::replace(&now, restorable(&body))?,
-                "STYLE_CHANGED: your caption styles changed meanwhile. Try again."
+                "RESTORE_CHANGED: your caption styles changed meanwhile"
             );
             app.emit("caption-styles-changed", ()).ok();
         }
@@ -401,13 +414,15 @@ fn sync_style(account: &Account, subject: &str, kept: &mut Option<Kept<Shared>>,
                     return Ok(());
                 }
             }
-            None => match store(account, subject, STYLE, remote.revision, &serde_json::to_value(&local)?, &local.label)? {
-                Stored::Revision(revision) => {
-                    *kept = Some(Kept { revision, content: local });
-                    return Ok(());
+            None => {
+                match store(account, subject, STYLE, remote.revision, &serde_json::to_value(&local)?, &local.label)? {
+                    Stored::Revision(revision) => {
+                        *kept = Some(Kept { revision, content: local });
+                        return Ok(());
+                    }
+                    Stored::Conflict(now) => remote = now,
                 }
-                Stored::Conflict(now) => remote = now,
-            },
+            }
         }
     }
     bail!("SYNC_FAILED: your style kept changing while it synced")
@@ -523,7 +538,9 @@ fn merge(base: &[Value], local: &[CaptionPreset], remote: &[Value]) -> (Vec<Valu
 fn described(before: &[Value], after: &[Value]) -> String {
     let name = |style: &Value| style.get("name").and_then(Value::as_str).unwrap_or_default().to_owned();
     let find = |list: &[Value], wanted: &str| {
-        list.iter().find(|style| caption_styles::normalized(&name(style)) == caption_styles::normalized(wanted)).cloned()
+        list.iter()
+            .find(|style| caption_styles::normalized(&name(style)) == caption_styles::normalized(wanted))
+            .cloned()
     };
     let mut parts = Vec::new();
     for (verb, names) in [

@@ -717,7 +717,8 @@ impl Store {
         let _lock = self.lock()?;
         let versions = self.synced()?;
         let current = versions.last().cloned().unwrap_or_default();
-        let now = Shared { text: current.text, accepted: current.accepted, frozen: current.frozen, ..Shared::default() };
+        let now =
+            Shared { text: current.text, accepted: current.accepted, frozen: current.frozen, ..Shared::default() };
         if !over.same(&now) {
             return Ok(false);
         }

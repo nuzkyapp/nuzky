@@ -123,8 +123,10 @@ describe("sync", () => {
     assert.equal((await browser.post("/api/auth/delete-user", {})).status, 200);
     assert.equal((await read(accessToken)).status, 401);
     const { n } = database.prepare("SELECT count(*) AS n FROM sync_document WHERE user_id = ?").get(id) as { n: number };
+    const history = database.prepare("SELECT count(*) AS n FROM sync_revision WHERE user_id = ?").get(id) as { n: number };
     database.close();
     assert.equal(n, 0);
+    assert.equal(history.n, 0, "the history goes with the account");
   });
 
   test("every stored revision is kept with the computer and the change it came with, newest first", async () => {

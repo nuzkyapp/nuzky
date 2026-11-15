@@ -406,6 +406,11 @@ const PLAIN: Record<string, string | ((detail: string) => string)> = {
   MODEL_IN_USE: (detail) => detail,
   SETTINGS_UNWRITABLE: (detail) => detail,
   EPOCH_CHANGED: "Another project was opened meanwhile, so this did not happen.",
+  SYNC_FAILED: "Nuzky couldn't reach your account. Check the connection, then try again.",
+  SIGNED_OUT: "Sign in to your Nuzky account in Settings › Account first.",
+  NOT_KEPT: "That version is older than 90 days and is no longer kept.",
+  NEWER_NUZKY: "A newer Nuzky saved that version. Update Nuzky to see or restore it.",
+  RESTORE_CHANGED: "It changed meanwhile. Check the preview, then restore again.",
   EDIT_REJECTED: (detail) => {
     const what = detail.replace(/; project unchanged$/, "").replace(/\.$/, "");
     // A clip, track or media item that went away meanwhile, e.g. through Undo or an AI edit.

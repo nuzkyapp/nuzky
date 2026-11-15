@@ -105,7 +105,7 @@ function SyncRow() {
         )}
       </div>
       <Button pill onClick={() => openHistory()}>
-        History
+        History…
       </Button>
       <Button pill disabled={syncing} disabledReason="Syncing…" onClick={syncNow}>
         <RefreshCw size={12} className={syncing ? "animate-spin" : undefined} />
