@@ -59,8 +59,11 @@ async function sameForEveryAddress(response: Response): Promise<Response> {
   return Response.json({ code: "INVALID_OTP", message: "Invalid OTP" }, { status: 400 });
 }
 
+const HISTORY = /^\/sync\/[a-z-]+\/history(\/[0-9]+)?$/;
+
 export async function GET(request: Request) {
-  if (!GETS.has(endpoint(request))) return notFound();
+  const path = endpoint(request);
+  if (!GETS.has(path) && !HISTORY.test(path)) return notFound();
   return (await getAuth()).handler(request);
 }
 

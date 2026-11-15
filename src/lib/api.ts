@@ -3,7 +3,7 @@ import type { GalleryPlugin, GalleryState } from "./gallery";
 import type { StorageUsage, StyleSettings } from "./types";
 import type { EffectIssue, ListedPlugin, PluginRow, PluginValues } from "./plugins";
 import type { ColorLook, LutInfo } from "./color";
-import type { AccountProvider, AccountStatus, AgentAccess, ImportedKeys, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, BeatCutDone, BeatPlans, Boot, BrollChoice, BrollSuggestions, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Mono, Part, PreviewStarted, PreviewWindowBoot, Project, ProjectPoster, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFinish, ReelFraming, Rhythm, Said, SampleRun, ScreenRecording, ScreenWindow, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, SyncStatus, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied, VoiceoverState } from "./types";
+import type { AccountProvider, AccountStatus, AgentAccess, ImportedKeys, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, BeatCutDone, BeatPlans, Boot, BrollChoice, BrollSuggestions, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Mono, Part, PreviewStarted, PreviewWindowBoot, Project, ProjectPoster, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFinish, ReelFraming, Rhythm, Said, SampleRun, ScreenRecording, ScreenWindow, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, SyncRevision, SyncStatus, RevisionView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied, VoiceoverState } from "./types";
 
 /**
  * The session a change was made for. Mutating commands carry it, so a change still in flight when
@@ -90,6 +90,11 @@ export const api = {
   syncStatus: () => invoke<SyncStatus>("sync_status"),
   /** Syncs in a few seconds. */
   syncNow: () => invoke<void>("sync_now"),
+  /** The revisions of Your style (`style`) or My caption styles (`caption-styles`) the account keeps, newest first. */
+  syncHistory: (kind: "style" | "caption-styles") => invoke<SyncRevision[]>("sync_history", { kind }),
+  syncRevision: (kind: "style" | "caption-styles", revision: number) => invoke<RevisionView>("sync_revision", { kind, revision }),
+  /** Makes a revision Your style or My caption styles again; it then syncs to the other computers. */
+  syncRestore: (kind: "style" | "caption-styles", revision: number) => invoke<void>("sync_restore", { kind, revision }),
   newProject: (width: number, height: number) => invoke<Snapshot>("new_project", { width, height }),
   maximizeWindow: () => invoke<void>("maximize_window"),
   /** While the editor is shown, closing the window goes back to the projects (`close-to-home`). */

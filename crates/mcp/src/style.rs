@@ -369,12 +369,20 @@ pub struct Shared {
     /// When it changed, in milliseconds since 1970; none for no style yet.
     #[serde(default)]
     pub at_ms: u64,
+    /// What changed, as Versions names it.
+    #[serde(default)]
+    pub label: String,
 }
 
 impl Shared {
     /// The same style, whenever it changed.
     pub fn same(&self, other: &Shared) -> bool {
         (&self.text, &self.accepted, &self.frozen) == (&other.text, &other.accepted, &other.frozen)
+    }
+
+    /// EDIT.md as it is in this style; none without one.
+    pub fn text(&self) -> Option<&str> {
+        self.text.as_deref()
     }
 
     /// No style: the guide's defaults.
@@ -694,19 +702,25 @@ impl Store {
     pub fn shared(&self) -> Result<Shared> {
         let _lock = self.lock()?;
         let current = self.synced()?.pop().unwrap_or_default();
-        Ok(Shared { text: current.text, accepted: current.accepted, frozen: current.frozen, at_ms: current.at_ms })
+        Ok(Shared {
+            text: current.text,
+            accepted: current.accepted,
+            frozen: current.frozen,
+            at_ms: current.at_ms,
+            label: current.label,
+        })
     }
 
-    /// Makes `shared`, the style from another computer, the style, as a version, but only while the
-    /// style is still `over`; false when it changed meanwhile.
-    pub fn take_shared(&self, shared: &Shared, over: &Shared) -> Result<bool> {
+    /// Makes `shared`, a style from the account, the style, as a version called `label`, but only
+    /// while the style is still `over`; false when it changed meanwhile.
+    pub fn take_shared(&self, shared: &Shared, over: &Shared, label: &str) -> Result<bool> {
         let _lock = self.lock()?;
         let versions = self.synced()?;
         let current = versions.last().cloned().unwrap_or_default();
-        if !over.same(&Shared { text: current.text, accepted: current.accepted, frozen: current.frozen, at_ms: 0 }) {
+        let now = Shared { text: current.text, accepted: current.accepted, frozen: current.frozen, ..Shared::default() };
+        if !over.same(&now) {
             return Ok(false);
         }
-        let label = "From another computer";
         self.commit(&versions, label, shared.text.clone(), shared.accepted.clone(), shared.frozen.clone())?;
         Ok(true)
     }

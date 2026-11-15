@@ -58,9 +58,9 @@ class OtherComputer:
     def read(self):
         return self.request('GET', '/api/auth/sync', headers={'Authorization': f'Bearer {self.token}'})['documents']
 
-    def write(self, kind, body):
+    def write(self, kind, body, origin=None):
         revision = self.read()[kind]['revision']
-        answer = self.request('PUT', f'/api/auth/sync/{kind}', {'revision': revision, 'body': body},
+        answer = self.request('PUT', f'/api/auth/sync/{kind}', {'revision': revision, 'body': body, 'origin': origin},
                               {'Authorization': f'Bearer {self.token}'})
         if 'revision' not in answer or 'status' in answer:
             raise RuntimeError(f'the other computer could not store {kind}: {answer}')

@@ -2,6 +2,7 @@ import { useStyle } from "../lib/style";
 import { useEditor } from "../lib/store";
 import { BugReportDialog } from "./BugReportDialog";
 import { ExportDialog } from "./ExportDialog";
+import { HistoryDialog } from "./HistoryDialog";
 import { Launcher } from "./home/Launcher";
 import { OpenedDraftDialog } from "./home/OpenedDraftDialog";
 import { KeysQuestionDialog } from "./KeysQuestionDialog";
@@ -33,6 +34,7 @@ export default function Dialogs() {
       <ShareDialog />
       <KeysQuestionDialog />
       <SettingsDialog />
+      <HistoryDialog />
     </>
   );
 }
