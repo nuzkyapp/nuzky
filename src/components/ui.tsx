@@ -1260,9 +1260,11 @@ export function TextSwatch({
       setPerPx((prev) => (prev === next ? prev : next));
     };
     measure();
+    const css = getComputedStyle(el);
+    void document.fonts.load(`${css.fontStyle} ${css.fontWeight} ${size}px ${css.fontFamily}`, label).then(measure);
     document.fonts.addEventListener("loadingdone", measure);
     return () => document.fonts.removeEventListener("loadingdone", measure);
-  }, [looks]);
+  }, [looks, label, size]);
   // Karaoke styles show the moment a word is spoken: the last word, or the end of a one-word label, lit.
   // Key words take the first word, or the start of a one-word label.
   const split = label.lastIndexOf(" ") + 1 || Math.ceil(label.length / 2);

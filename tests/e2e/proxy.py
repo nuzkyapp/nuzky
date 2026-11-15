@@ -10,8 +10,9 @@ const later = new Promise((go) => setTimeout(go, 50)).then(() => timed('thumbnai
 Promise.all([timed('filmstrip'), later]).then(() => done(took));"""
 
 
-def phone_clip(path, seconds):
-    """HEVC 10 bit HLG as a phone records it: stored landscape and shown portrait, at a jittered frame rate."""
+def phone_clip(path, seconds, loops=0):
+    """HEVC 10 bit HLG as a phone records it: stored landscape and shown portrait, at a jittered frame rate, repeated
+    `loops` more times without encoding it again."""
     stored = path.with_suffix('.stored.mov')
     times = "settb=1/600,setpts='(N*20+eq(mod(N\\,4)\\,1)*7)/600/TB'"
     subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', f'testsrc2=s=2560x1440:r=30:d={seconds}', '-vf',
@@ -19,8 +20,8 @@ def phone_clip(path, seconds):
                     '-enc_time_base', '1/600', '-c:v', 'libx265', '-preset', 'ultrafast', '-x265-params',
                     'log-level=error:colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc', '-tag:v', 'hvc1',
                     '-video_track_timescale', '600', str(stored)], check=True)
-    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-display_rotation', '-90', '-i', str(stored), '-c', 'copy', str(path)],
-                   check=True)
+    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-stream_loop', str(loops), '-display_rotation', '-90', '-i', str(stored),
+                    '-c', 'copy', str(path)], check=True)
 
 
 def job(r, status):
@@ -49,7 +50,7 @@ def shown(r, name, size):
 def proxy(r):
     clip, long_clip = r.work / 'phone.mov', r.work / 'phone-long.mov'
     phone_clip(clip, 3)
-    phone_clip(long_clip, 12)
+    phone_clip(long_clip, 12, loops=19)
     r.import_media(clip)
     r.add_clip(clip.name)
     done = wait(lambda: job(r, 'done'), 120)
