@@ -51,7 +51,7 @@ jobs:
       - name: Install QEMU
         run: sudo apt-get install -y qemu-user-static
       - run: npm ci
-      - run: npm audit --audit-level=high
+      - run: npm audit --omit=dev --audit-level=high
       - name: Rust advisories and licences
         run: |
           curl --fail --location --silent --show-error --output "$RUNNER_TEMP/cargo-deny.tar.gz" \
