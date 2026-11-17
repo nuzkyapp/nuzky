@@ -3303,7 +3303,7 @@ mod tests {
         let p = &mut editor.project;
         assert_eq!(copies(p), vec![(1, 0, 2_000_000), (1, 2_000_000, 3_000_000)], "the copy splits with its clip");
         p.apply(layout(None, Layout::Fade)).unwrap();
-        assert!(copies(&p).is_empty(), "Fade takes both halves of the copy away");
+        assert!(copies(p).is_empty(), "Fade takes both halves of the copy away");
 
         let refused = p.apply(layout(Some(vec![pip.clone()]), Layout::Fade)).unwrap_err().to_string();
         assert!(refused.contains("main track"), "{refused}");
