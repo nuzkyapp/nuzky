@@ -12,6 +12,7 @@ use nuzky_engine::{
     Pending, Project, Renderer, check,
     edit::{EditCmd, TimeRange, new_id},
     export::{ExportOptions, ExportPhase, Quality, check_options, export},
+    layout::Layout,
     media::probe,
     model::{ClipContent, ReelStatus, Thumbnail, ThumbnailFormat},
     thumbnail::ImageKind,
@@ -1213,6 +1214,14 @@ impl Backend {
             "1:1" => (short, short),
             _ => anyhow::bail!("INVALID_ARGUMENTS: format is \"9:16\", \"4:5\" or \"1:1\""),
         };
+        let layout = match args.layout {
+            ReframeLayout::Fill => None,
+            ReframeLayout::Fade => Some(Layout::Fade),
+            ReframeLayout::Stack => Some(Layout::Stack),
+        };
+        if let Some(layout) = layout {
+            return self.lay_out(args, (width, height), layout, state);
+        }
         let project = self.media_project(&state.project);
         let models = nuzky_analysis::models_dir();
         vision_models::check(nuzky_vision::models::REFRAME, &self.vision_refused)?;
@@ -1256,6 +1265,34 @@ impl Backend {
                 "followed":result.followed, "centred":result.centred, "revision":applied.stamp.revision}))
             },
         )
+    }
+
+    /// Reframe's Fade and Stack, which need no face: one edit of the run, as a job like Fill's.
+    fn lay_out(
+        &self,
+        args: Reframe,
+        (width, height): (u32, u32),
+        layout: Layout,
+        state: &SessionState,
+    ) -> Result<Value> {
+        let clips: Vec<String> = nuzky_engine::layout::targets(&state.project, args.clip_ids.as_deref())?
+            .into_iter()
+            .map(|(clip, _)| clip.id.clone())
+            .collect();
+        let host = Arc::downgrade(&self.host);
+        let revision = state.stamp.revision;
+        let run_id = args.run_id.clone();
+        self.host.start_job(&self.client.id, Some(&args.run_id), "reframe", state.stamp.clone(), move |_, _| {
+            let host = host.upgrade().context("APP_CLOSED: project is closed")?;
+            let applied = host.session.apply_edits(
+                &run_id,
+                &new_id(),
+                vec![EditCmd::SetLayout { width, height, clip_ids: args.clip_ids, layout }],
+                Expect { revision: Some(revision), ..Expect::default() },
+            )?;
+            Ok(json!({"format":args.format, "width":width, "height":height, "layout":layout, "clips":clips,
+                "revision":applied.stamp.revision}))
+        })
     }
 
     /// Follows a boxed thing through a video clip as a job and places the clip to keep it in the frame, as one edit of

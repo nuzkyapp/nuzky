@@ -1033,6 +1033,7 @@ export function PresetTile({
   title,
   named = false,
   short = false,
+  menuItem = false,
   preview,
   children,
 }: {
@@ -1047,6 +1048,8 @@ export function PresetTile({
   named?: boolean;
   /** A 36 px drawing over its label, as a speed ramp's shape, where a picture's 4:3 would only add height. */
   short?: boolean;
+  /** An item of a menu, which ↑ and ↓ reach, rather than a toggle. */
+  menuItem?: boolean;
   children: ReactNode;
 }) {
   const lock = useLockReason();
@@ -1054,7 +1057,7 @@ export function PresetTile({
   return (
     <button
       type="button"
-      aria-pressed={selected}
+      {...(menuItem ? { role: "menuitem" } : { "aria-pressed": selected })}
       title={lock ?? title ?? label}
       {...disabledProps(disabled, onClick)}
       {...previewHandlers(disabled ? null : preview)}

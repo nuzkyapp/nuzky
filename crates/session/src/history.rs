@@ -252,6 +252,7 @@ pub(crate) fn label(cmds: &[EditCmd]) -> &'static str {
         EditCmd::AddOverlay { .. } => "Overlay",
         EditCmd::AddAdjustment { .. } => "Adjustment layer",
         EditCmd::SplitScreen { .. } => "Split screen",
+        EditCmd::SetLayout { .. } => "Layout",
         EditCmd::MoveClip { .. } => "Move clip",
         EditCmd::MoveClips { .. } => "Move clips",
         EditCmd::TrimClip { .. } => "Trim clip",

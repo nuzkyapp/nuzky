@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { api, errorText, plainError } from "./api";
 import { useFollow } from "./follow";
 import { aiLocked, currentEpoch, useEditor, whenIdle } from "./store";
-import type { JobEvent, Project, Snapshot } from "./types";
+import type { JobEvent, Layout, Project, Snapshot } from "./types";
 
 interface ReframeState {
   job: string | null;
@@ -48,6 +48,24 @@ export async function reframe(width: number, height: number) {
   } catch (e) {
     toast({ kind: "error", text: plainError(errorText(e)) });
   }
+}
+
+/**
+ * Layout's Fade or Stack: changes the canvas to `width`×`height` and lays out the selected video and image clips, or
+ * every one when none is selected, as one undo step; the preview then offers Undo. Fill is `reframe`.
+ */
+export async function layOut(width: number, height: number, layout: Layout) {
+  if (aiLocked() || useReframe.getState().job || useFollow.getState().job) return;
+  await whenIdle();
+  const { snap, selection, edit, toast } = useEditor.getState();
+  if (!snap) return;
+  const ids = picturedClips(snap.project, selection);
+  useReframe.setState({ done: null });
+  useFollow.setState({ done: null, picking: null });
+  const after = await edit({ type: "setLayout", width, height, clipIds: ids.length > 0 ? ids : null, layout });
+  if (!after) return;
+  if (after.revision === snap.revision) toast({ kind: "info", text: "Nothing to change: the clips already have this layout." });
+  else useReframe.setState({ done: { snap: after, text: layout === "fade" ? "Layout: Fade" : "Layout: Stack" } });
 }
 
 export function onReframeJob(job: JobEvent) {

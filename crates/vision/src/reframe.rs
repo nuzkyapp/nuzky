@@ -5,11 +5,12 @@
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, bail};
 use nuzky_engine::{
     Project, Renderer, Wait,
-    edit::{EditCmd, MAIN_TRACK},
-    model::{Asset, AssetKind, Background, Canvas, Clip, ClipContent, Crop, Ease, Keyframe, TrackKind, Transform},
+    edit::EditCmd,
+    layout::{self, base, covering, fitted},
+    model::{Asset, AssetKind, Background, Canvas, Clip, ClipContent, Crop, Ease, Keyframe, Transform},
 };
 
 use crate::frame::Frame;
@@ -44,7 +45,8 @@ struct Face {
 }
 
 /// Changes the canvas to `width`×`height` and places the clips `clip_ids`, by default every video and image clip of
-/// the main track and any other that filled the canvas, to follow a face its crop leaves visible. A clip's zoom beyond
+/// the main track and any other that filled the canvas, to follow a face its crop leaves visible; their Stack copies
+/// go. A clip's zoom beyond
 /// filling the canvas stays, and so do its opacity and crop; it is set upright and its keyframes are replaced.
 pub fn reframe(
     project: &Project,
@@ -55,7 +57,8 @@ pub fn reframe(
     progress: &mut dyn FnMut(f32),
 ) -> Result<Reframe> {
     models::require(models::REFRAME, models_dir)?;
-    let clips = targets(project, clip_ids)?;
+    let clips = layout::targets(project, clip_ids)?;
+    let copies = layout::stack_copies(project, &clips.iter().map(|(clip, _)| clip.id.clone()).collect::<Vec<_>>());
     if let Some((_, asset)) = clips.iter().find(|(_, asset)| !Path::new(&asset.path).is_file()) {
         bail!("MEDIA_MISSING: {}", asset.path);
     }
@@ -89,7 +92,13 @@ pub fn reframe(
         },
     )?;
     let mut out = Reframe {
-        commands: vec![EditCmd::SetCanvas { width, height, background: None, background_blur: None, fps: None }],
+        commands: [
+            (!copies.is_empty()).then_some(EditCmd::DeleteClips { clip_ids: copies }),
+            Some(EditCmd::SetCanvas { width, height, background: None, background_blur: None, fps: None }),
+        ]
+        .into_iter()
+        .flatten()
+        .collect(),
         followed: Vec::new(),
         centred: Vec::new(),
     };
@@ -126,47 +135,6 @@ pub fn reframe(
         }
     }
     Ok(out)
-}
-
-/// The clips to reframe with their pictures.
-fn targets<'a>(project: &'a Project, clip_ids: Option<&[String]>) -> Result<Vec<(&'a Clip, &'a Asset)>> {
-    let pictured = |clip: &'a Clip| match &clip.content {
-        ClipContent::Media { asset_id, .. } => project.asset(asset_id).filter(|a| a.kind != AssetKind::Audio),
-        ClipContent::Text { .. } | ClipContent::Adjustment { .. } => None,
-    };
-    let video = project.tracks.iter().filter(|t| t.kind == TrackKind::Video);
-    let found: Vec<_> = match clip_ids {
-        Some(ids) => {
-            for id in ids {
-                ensure!(
-                    video.clone().flat_map(|t| &t.clips).any(|c| &c.id == id && pictured(c).is_some()),
-                    "INVALID_ARGUMENTS: {id} is not a video or image clip"
-                );
-            }
-            video
-                .flat_map(|t| &t.clips)
-                .filter(|c| ids.contains(&c.id))
-                .filter_map(|c| Some((c, pictured(c)?)))
-                .collect()
-        }
-        None => video
-            .flat_map(|t| t.clips.iter().map(move |c| (t, c)))
-            .filter_map(|(t, c)| Some((t, c, pictured(c)?)))
-            .filter(|(t, c, asset)| t.id == MAIN_TRACK || (!t.hidden && fills(&project.canvas, asset, &base(c))))
-            .map(|(_, c, asset)| (c, asset))
-            .collect(),
-    };
-    ensure!(!found.is_empty(), "INVALID_ARGUMENTS: there is no video or image clip to reframe");
-    Ok(found)
-}
-
-/// The clip's own framing: its first keyframe when it has keyframes, which replace its transform.
-fn base(clip: &Clip) -> Transform {
-    match (&clip.content, clip.keyframes.first()) {
-        (_, Some(key)) => key.transform,
-        (ClipContent::Media { transform, .. } | ClipContent::Text { transform, .. }, None) => *transform,
-        (ClipContent::Adjustment { .. }, None) => Transform::default(),
-    }
 }
 
 /// The clip alone on a canvas of its picture's shape with the long side `side` pixels, as recorded: no framing,
@@ -251,38 +219,11 @@ impl Placement {
     }
 }
 
-/// The picture's size on the canvas at scale 1, which fits it inside.
-fn fitted(canvas: &Canvas, asset: &Asset) -> [f32; 2] {
-    let (w, h) = (asset.width.max(1) as f32, asset.height.max(1) as f32);
-    let fit = (canvas.width as f32 / w).min(canvas.height as f32 / h);
-    [w * fit, h * fit]
-}
-
 /// The scale at which the `visible` part of the picture just covers the canvas.
 fn filling(canvas: &Canvas, asset: &Asset, visible: [f32; 4]) -> f32 {
     let [w, h] = fitted(canvas, asset);
     let [left, top, right, bottom] = visible;
     (canvas.width as f32 / (w * (right - left)).max(1e-3)).max(canvas.height as f32 / (h * (bottom - top)).max(1e-3))
-}
-
-/// The positions, as transform x or y, at which a picture `size` pixels long, visible from `from` to `to` of its
-/// length, covers a canvas side `side` pixels long.
-fn covering(side: f32, size: f32, from: f32, to: f32) -> (f32, f32) {
-    (0.5 - (to - 0.5) * size / side, -0.5 - (from - 0.5) * size / side)
-}
-
-/// Whether the clip's visible picture covers the whole canvas, as a clip that fills the frame does and a picture
-/// in picture does not.
-fn fills(canvas: &Canvas, asset: &Asset, t: &Transform) -> bool {
-    let visible = Crop::visible(t.crop);
-    let size = fitted(canvas, asset).map(|v| v * t.scale);
-    let side = [canvas.width as f32, canvas.height as f32];
-    t.rotation.rem_euclid(360.0) == 0.0
-        && [t.x, t.y].into_iter().enumerate().all(|(i, at)| {
-            let (low, high) = covering(side[i], size[i], visible[i], visible[i + 2]);
-            let slack = 1.0 / side[i];
-            low - slack <= at && at <= high + slack
-        })
 }
 
 /// Where the face goes on the canvas, in fractions of it: across the middle of what Reels and TikTok leave free on
@@ -447,9 +388,9 @@ mod tests {
         let again = Transform { scale: p.scale, ..Transform::default() };
         assert!((Placement::new(&tall, &tall, &asset(1920, 1080), &again).scale - p.scale).abs() < 1e-4);
         // A picture in picture does not fill the canvas, a full frame does.
-        assert!(!fills(&wide, &asset(1920, 1080), &Transform { scale: 0.45, x: 0.25, ..Transform::default() }));
-        assert!(fills(&wide, &asset(1920, 1080), &Transform::default()));
-        assert!(!fills(&tall, &asset(1920, 1080), &Transform::default()));
+        assert!(!layout::fills(&wide, &asset(1920, 1080), &Transform { scale: 0.45, x: 0.25, ..Transform::default() }));
+        assert!(layout::fills(&wide, &asset(1920, 1080), &Transform::default()));
+        assert!(!layout::fills(&tall, &asset(1920, 1080), &Transform::default()));
     }
 
     #[test]

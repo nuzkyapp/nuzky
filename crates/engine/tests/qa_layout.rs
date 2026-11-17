@@ -7,6 +7,7 @@ use nuzky_engine::{
     Pending, Renderer, Wait,
     edit::{EditCmd, SplitLayout},
     export::{ExportOptions, export},
+    layout::Layout,
     media::probe,
     model::*,
 };
@@ -239,4 +240,73 @@ fn an_adjustment_layer_grades_every_clip_below_it_and_nothing_above_it_or_after_
     let mut neutral = plain.clone();
     neutral.apply(EditCmd::AddAdjustment { start_us: 0, duration_us: None, adjust: None }).unwrap();
     assert_eq!(frame_at(&mut renderer, &neutral, t), without);
+}
+
+/// A wide video on a vertical canvas: Fade draws it whole across the middle as FFmpeg scales it, over a blurred copy;
+/// Stack draws it over both halves as FFmpeg scales and crops it, with a silent copy of the clip; each replaces the
+/// other, and the export shows what the preview does.
+#[test]
+fn fade_and_stack_lay_a_wide_video_out_on_a_vertical_canvas_as_the_export_does() {
+    if !available() {
+        return;
+    }
+    let d = dir("layout-reel");
+    let wide = d.join("wide.mp4");
+    ff(&["-f", "lavfi", "-i", "testsrc2=size=160x80:rate=25:duration=0.4", "-c:v", "libx264", "-crf", "8"], &wide);
+    let mut p = project(&wide, LENGTH_US);
+    (p.canvas.width, p.canvas.height, p.canvas.fps) = (160, 80, FPS as u32);
+    p.canvas.background = "#000000".into();
+    let t = 120_000;
+    let index = (t * FPS / 1_000_000) as usize;
+    let mut renderer = Renderer::new().unwrap();
+    renderer.use_mattes(d.join("cache"), Pending::Fail);
+    let rows = |frame: &[u8], from: usize, to: usize| frame[from * 108 * 4..to * 108 * 4].to_vec();
+
+    p.apply(EditCmd::SetLayout { width: 108, height: 192, clip_ids: None, layout: Layout::Fade }).unwrap();
+    assert_eq!((p.canvas.width, p.canvas.height, p.canvas.background_blur), (108, 192, 0.5));
+    let fade = frame_at(&mut renderer, &p, t);
+    // The 2:1 picture is 108 × 54 across the middle, from row 69.
+    let reference = raw(&wide, &["-vf", &format!("scale=108:54:flags={SWS_FLAGS}")]);
+    let reference = &reference[index * 108 * 54 * 4..(index + 1) * 108 * 54 * 4];
+    let error = mae(&rows(&fade, 69, 123), reference);
+    assert!(error < 6.0, "the middle differs from FFmpeg's scaled picture: MAE {error}");
+    // Above and below it a soft copy of the picture fills the canvas instead of its black background.
+    for band in [rows(&fade, 0, 66), rows(&fade, 126, 192)] {
+        let mean =
+            band.chunks(4).map(|p| p[0] as f64 + p[1] as f64 + p[2] as f64).sum::<f64>() / (band.len() / 4) as f64;
+        assert!(mean > 90.0, "the blurred copy is missing: mean {mean}");
+    }
+    let error = mae(&exported(&p, &d, t), &fade);
+    assert!(error < 4.0, "the Fade export differs from the preview: MAE {error}");
+
+    p.apply(EditCmd::SetLayout { width: 108, height: 192, clip_ids: None, layout: Layout::Stack }).unwrap();
+    let copies: Vec<&Clip> =
+        p.tracks[1..].iter().filter(|t| t.kind == TrackKind::Video).flat_map(|t| &t.clips).collect();
+    assert_eq!(copies.len(), 1, "one copy of the clip over the main track");
+    let ClipContent::Media { asset_id, source_in_us, volume, .. } = &copies[0].content else { panic!() };
+    assert_eq!(
+        (asset_id.as_str(), *source_in_us, *volume),
+        ("qa-source", 0, 0.0),
+        "the copy plays the same picture silently"
+    );
+    assert_eq!(
+        (copies[0].start_us, copies[0].duration_us),
+        (p.tracks[0].clips[0].start_us, p.tracks[0].clips[0].duration_us)
+    );
+    let stack = frame_at(&mut renderer, &p, t);
+    // Each half is the picture scaled to cover 108 × 96 and cropped in the middle.
+    let reference = raw(&wide, &["-vf", &format!("scale=192:96:flags={SWS_FLAGS},crop=108:96")]);
+    let reference = &reference[index * 108 * 96 * 4..(index + 1) * 108 * 96 * 4];
+    for (half, from) in [("top", 0), ("bottom", 96)] {
+        let error = mae(&rows(&stack, from, from + 96), reference);
+        assert!(error < 6.0, "the {half} half differs from FFmpeg's scaled and cropped picture: MAE {error}");
+    }
+    let error = mae(&exported(&p, &d, t), &stack);
+    assert!(error < 4.0, "the Stack export differs from the preview: MAE {error}");
+
+    // Fade again takes the copy away and shows the picture whole.
+    p.apply(EditCmd::SetLayout { width: 108, height: 192, clip_ids: None, layout: Layout::Fade }).unwrap();
+    assert_eq!(p.tracks.iter().filter(|t| t.kind == TrackKind::Video).count(), 1, "the copy and its track are gone");
+    let error = mae(&frame_at(&mut renderer, &p, t), &fade);
+    assert!(error < 1.0, "Fade after Stack differs from Fade: MAE {error}");
 }

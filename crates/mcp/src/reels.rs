@@ -22,8 +22,6 @@ use crate::transcript::{self, Derived};
 pub const DEFAULT_MAX_DURATION_US: i64 = 60_000_000;
 const WIDTH: u32 = 1080;
 const HEIGHT: u32 = 1920;
-/// The blur the inspector's Canvas: Blur starts with.
-const BLUR: f32 = 0.5;
 /// A shot this short that opens a reel, with words said in it before an original cut of the picture, reads as a
 /// flash of another shot.
 const OPENING_SLIVER_US: i64 = 600_000;
@@ -547,7 +545,7 @@ pub fn forget(made: &[MadeReel], source: &Project) -> bool {
 /// A 9:16 canvas. Cropping scales every main-track picture, keyframes too, until it covers the frame, keeping its
 /// own zoom; a wider picture then loses its sides evenly.
 fn frame(reel: &mut Project, framing: Framing) -> Result<()> {
-    let blur = if framing == Framing::Blur { BLUR } else { 0.0 };
+    let blur = if framing == Framing::Blur { nuzky_engine::layout::DEFAULT_BACKGROUND_BLUR } else { 0.0 };
     reel.apply(EditCmd::SetCanvas {
         width: WIDTH,
         height: HEIGHT,

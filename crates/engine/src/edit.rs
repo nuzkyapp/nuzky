@@ -4,6 +4,7 @@
 use anyhow::{Result, anyhow, bail, ensure};
 use serde::{Deserialize, Serialize};
 
+use crate::layout::{DEFAULT_BACKGROUND_BLUR, Layout};
 use crate::model::{
     Adjust, Animation, Asset, AssetKind, Background, CAPTIONS_TRACK, Canvas, CaptionWord, Clip, ClipContent, Crop,
     Ease, Effect, Keyframe, Keywords, LetterCase, LogProfile, Lut, MAX_CANVAS_SIDE, MAX_CLIP_EFFECTS, MAX_FPS,
@@ -253,6 +254,19 @@ pub enum EditCmd {
     SplitScreen {
         clip_ids: Vec<String>,
         layout: SplitLayout,
+    },
+    /// Changes the canvas to `width`×`height` and lays the video and image clips `clip_ids` out on it, by default
+    /// every one of the main track and any other that filled the canvas. `fade` fits each picture whole in the middle
+    /// without rotation, crop, mask or keyframes and turns on the canvas's background blur when it is off, so a
+    /// blurred copy of the main track fills the rest. `stack` puts each clip over the top half and a silent copy of it
+    /// over the bottom half, on a video track above, each covering its half as `splitScreen` `topAndBottom` does.
+    /// Either first removes the Stack copies of these clips, as `reframe` does.
+    #[cfg_attr(feature = "ts", ts(optional_fields = nullable))]
+    SetLayout {
+        width: u32,
+        height: u32,
+        clip_ids: Option<Vec<String>>,
+        layout: Layout,
     },
     /// `track_id: None` moves the clip to a new track of the right kind. With `new_track` it always goes on a new
     /// track right above or below `track_id` as the timeline shows it, or its own track without one; on screen a
@@ -1188,6 +1202,9 @@ impl Project {
             }
             EditCmd::PasteClips { clips, at_us } => self.paste_clips(clips, at_us, &mut out)?,
             EditCmd::SplitScreen { clip_ids, layout } => self.split_screen(&clip_ids, layout)?,
+            EditCmd::SetLayout { width, height, clip_ids, layout } => {
+                self.set_layout(width, height, clip_ids.as_deref(), layout)?
+            }
             EditCmd::ReplaceMainClips { clips } => self.replace_main_clips(clips)?,
             EditCmd::PasteAttributes { source, clip_ids } => self.paste_attributes(source, clip_ids, &mut out)?,
             EditCmd::RestyleTrack { track_id, style, transform } => {
@@ -2479,6 +2496,55 @@ impl Project {
                 *transform = placed;
             }
             clip.keyframes.clear();
+        }
+        Ok(())
+    }
+
+    fn set_layout(&mut self, width: u32, height: u32, clip_ids: Option<&[String]>, layout: Layout) -> Result<()> {
+        let targets: Vec<String> =
+            crate::layout::targets(self, clip_ids)?.into_iter().map(|(clip, _)| clip.id.clone()).collect();
+        let copies = crate::layout::stack_copies(self, &targets);
+        for track in &mut self.tracks {
+            track.clips.retain(|c| !copies.contains(&c.id));
+        }
+        let blur = (layout == Layout::Fade && self.canvas.background_blur == 0.0).then_some(DEFAULT_BACKGROUND_BLUR);
+        self.apply_tracks(EditCmd::SetCanvas { width, height, background: None, background_blur: blur, fps: None })?;
+        for id in &targets {
+            let (ti, ci) = self.find_clip(id).ok_or_else(|| anyhow!("Unknown clip"))?;
+            let clip = &self.tracks[ti].clips[ci];
+            let opacity = crate::effects::framing_at(clip, clip.start_us).opacity;
+            let asset = match &clip.content {
+                ClipContent::Media { asset_id, .. } => self.asset(asset_id).cloned(),
+                _ => None,
+            }
+            .ok_or_else(|| anyhow!("Unknown media"))?;
+            let [top, bottom] = [0, 1].map(|i| SplitLayout::TopAndBottom.cells()[i]);
+            let placed = match layout {
+                Layout::Fade => Transform { opacity, ..Transform::default() },
+                Layout::Stack => cell_transform(&self.canvas, &asset, top, opacity),
+            };
+            let clip = &mut self.tracks[ti].clips[ci];
+            if let ClipContent::Media { transform, .. } = &mut clip.content {
+                *transform = placed;
+            }
+            clip.keyframes.clear();
+            if layout == Layout::Stack {
+                let mut copy = clip.clone();
+                copy.id = new_id();
+                copy.transition_in = None;
+                if let ClipContent::Media { transform, volume, .. } = &mut copy.content {
+                    *transform = cell_transform(&self.canvas, &asset, bottom, opacity);
+                    *volume = 0.0;
+                }
+                // Above its clip, so it draws over nothing the clip covered.
+                let (start, end) = (copy.start_us, copy.end_us());
+                let free = (ti + 1..self.tracks.len()).find(|&i| {
+                    let track = &self.tracks[i];
+                    track.kind == TrackKind::Video && !track.keep_in_place && self.is_free(i, start, end, None)
+                });
+                let track = free.unwrap_or_else(|| self.insert_track(ti + 1, TrackKind::Video, false));
+                self.tracks[track].clips.push(copy);
+            }
         }
         Ok(())
     }
