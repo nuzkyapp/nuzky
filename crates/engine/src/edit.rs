@@ -1728,11 +1728,18 @@ impl Project {
             EditCmd::SplitClip { clip_id, at_us } => {
                 let (ti, ci) = self.find_clip(&clip_id).ok_or_else(|| anyhow!("Unknown clip"))?;
                 let clip = &self.tracks[ti].clips[ci];
-                if at_us < clip.start_us + min || at_us > clip.end_us() - min {
-                    bail!("Move the playhead inside the clip to split it");
+                // A Stack copy whose clip this batch already split there, with it.
+                let split = at_us == clip.end_us()
+                    && (0..ti).any(|tj| self.tracks[tj].clips.iter().any(|o| crate::layout::is_copy(clip, o)));
+                if split {
+                    out.select.extend(self.tracks[ti].clips.get(ci + 1).map(|c| c.id.clone()));
+                } else {
+                    if at_us < clip.start_us + min || at_us > clip.end_us() - min {
+                        bail!("Move the playhead inside the clip to split it");
+                    }
+                    let second = self.split_clip(ti, ci, at_us);
+                    out.select.push(self.tracks[ti].clips[second].id.clone());
                 }
-                let second = self.split_clip(ti, ci, at_us);
-                out.select.push(self.tracks[ti].clips[second].id.clone());
             }
             EditCmd::FreezeFrame { clip_id, at_us, duration_us } => {
                 let (ti, ci) = self.find_clip(&clip_id).ok_or_else(|| anyhow!("Unknown clip"))?;
@@ -3288,8 +3295,13 @@ mod tests {
         assert_eq!(copies(&p), vec![(1, 0, 5_000_000)], "a new shown track right above the main track");
         assert!(!p.tracks[1].hidden && p.tracks[2].id == hidden);
 
-        p.apply(EditCmd::SplitClip { clip_id: a.clone(), at_us: 2_000_000 }).unwrap();
-        assert_eq!(copies(&p), vec![(1, 0, 2_000_000), (1, 2_000_000, 3_000_000)], "the copy splits with its clip");
+        // Splitting the clip and its copy together, as the playhead does with both selected, splits each once.
+        let copy = p.tracks[1].clips[0].id.clone();
+        let split = |clip_id: &String| EditCmd::SplitClip { clip_id: clip_id.clone(), at_us: 2_000_000 };
+        let mut editor = Editor::new(p);
+        editor.apply_batch(vec![split(&a), split(&copy)], None).unwrap();
+        let p = &mut editor.project;
+        assert_eq!(copies(p), vec![(1, 0, 2_000_000), (1, 2_000_000, 3_000_000)], "the copy splits with its clip");
         p.apply(layout(None, Layout::Fade)).unwrap();
         assert!(copies(&p).is_empty(), "Fade takes both halves of the copy away");
 

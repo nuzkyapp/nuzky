@@ -1061,7 +1061,7 @@ export function PresetTile({
       title={lock ?? title ?? label}
       {...disabledProps(disabled, onClick)}
       {...previewHandlers(disabled ? null : preview)}
-      className="group flex min-w-0 flex-col gap-1.5 rounded-[10px] text-left disabled:cursor-not-allowed disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
+      className={`group flex min-w-0 flex-col gap-1.5 rounded-[10px] text-left ${menuItem ? "focus-visible:outline-offset-[3px]" : ""} disabled:cursor-not-allowed disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:opacity-40`}
     >
       <span
         className={`relative block w-full overflow-hidden rounded-[10px] border ${named ? "h-12 bg-white/[.06]" : short ? "h-9 bg-white/[.06]" : "aspect-[4/3] bg-bg"} ${

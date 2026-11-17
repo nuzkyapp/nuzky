@@ -24,7 +24,7 @@ const STYLES: { style: Style; label: string; title: (which: string) => string; f
     frame: (
       <>
         <span className="absolute inset-0 bg-fg/25" />
-        <span className="absolute inset-x-0 top-1/2 h-[7px] -translate-y-1/2 bg-fg/70" />
+        <span className="absolute inset-x-0 top-1/2 h-[10px] -translate-y-1/2 bg-fg/70" />
       </>
     ),
   },
@@ -34,8 +34,8 @@ const STYLES: { style: Style; label: string; title: (which: string) => string; f
     title: (which) => `Show ${which} twice, one above the other`,
     frame: (
       <>
-        <span className="absolute inset-x-0 top-0 h-[calc(50%-0.5px)] bg-fg/70" />
-        <span className="absolute inset-x-0 bottom-0 h-[calc(50%-0.5px)] bg-fg/70" />
+        <span className="absolute inset-x-0 top-0 h-[calc(50%-1px)] bg-fg/70" />
+        <span className="absolute inset-x-0 bottom-0 h-[calc(50%-1px)] bg-fg/70" />
       </>
     ),
   },
@@ -158,7 +158,7 @@ export function RatioMenu() {
                         pill
                         role="menuitem"
                         aria-expanded={expanded}
-                        className="h-6 px-2.5 text-[12px]"
+                        className="h-6 px-2.5 text-[12px] aria-expanded:bg-white/20"
                         title={switching(`Choose how ${which} fill the frame`)}
                         disabled={!!why}
                         disabledReason={why ?? undefined}
@@ -185,7 +185,7 @@ export function RatioMenu() {
                   <div data-layouts role="group" aria-label={`Layout for ${f.label}`} className="grid grid-cols-3 gap-2 px-2 pb-2 pt-1">
                     {STYLES.map((s) => (
                       <PresetTile key={s.style} menuItem short label={s.label} selected={false} disabled={!!why} title={why ?? switching(s.title(which))} onClick={() => choose(s.style)}>
-                        <span className="absolute left-1/2 top-1/2 h-6 w-[14px] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[2px] bg-black/40 outline outline-1 outline-white/25">
+                        <span className="absolute left-1/2 top-1/2 h-8 w-[18px] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[2px] bg-black/40 outline outline-1 outline-white/25">
                           {s.frame}
                         </span>
                       </PresetTile>
