@@ -1275,10 +1275,7 @@ impl Backend {
         layout: Layout,
         state: &SessionState,
     ) -> Result<Value> {
-        let clips: Vec<String> = nuzky_engine::layout::targets(&state.project, args.clip_ids.as_deref())?
-            .into_iter()
-            .map(|(clip, _)| clip.id.clone())
-            .collect();
+        let clips = nuzky_engine::layout::placed(&state.project, args.clip_ids.as_deref(), layout)?;
         let host = Arc::downgrade(&self.host);
         let revision = state.stamp.revision;
         let run_id = args.run_id.clone();

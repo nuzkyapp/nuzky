@@ -256,10 +256,11 @@ pub enum EditCmd {
         layout: SplitLayout,
     },
     /// Changes the canvas to `width`×`height` and lays the video and image clips `clip_ids` out on it, by default
-    /// every one of the main track and any other that filled the canvas. `fade` fits each picture whole in the middle
-    /// without rotation, crop, mask or keyframes and turns on the canvas's background blur when it is off, so a
-    /// blurred copy of the main track fills the rest. `stack` puts each clip over the top half and a silent copy of it
-    /// over the bottom half, on a video track above, each covering its half as `splitScreen` `topAndBottom` does.
+    /// every one of the main track and any other that filled the canvas. `fade` fits each main-track picture whole in
+    /// the middle without rotation, crop, mask or keyframes and turns on the canvas's background blur when it is off,
+    /// so a blurred copy of it fills the rest; it leaves other tracks, and naming one of their clips is an error.
+    /// `stack` puts each clip over the top half and a silent copy of it over the bottom half, on a shown video track
+    /// right above, each covering its half as `splitScreen` `topAndBottom` does; splitting the clip splits its copy.
     /// Either first removes the Stack copies of these clips, as `reframe` does.
     #[cfg_attr(feature = "ts", ts(optional_fields = nullable))]
     SetLayout {
@@ -979,8 +980,24 @@ impl Project {
         followed.map(|i| (clips[i].start_us, clips[i].duration_us))
     }
 
-    /// Splits a clip at `at_us` (strictly inside it) and returns the index of the second half.
+    /// Splits a clip at `at_us` (strictly inside it), and its Stack copies with it, so they stay its copies, and
+    /// returns the index of the second half.
     fn split_clip(&mut self, ti: usize, ci: usize, at_us: i64) -> usize {
+        let clip = &self.tracks[ti].clips[ci];
+        let copies: Vec<(usize, usize)> = (ti + 1..self.tracks.len())
+            .filter(|&tj| self.tracks[tj].kind == TrackKind::Video)
+            .flat_map(|tj| {
+                let found = self.tracks[tj].clips.iter().position(|c| crate::layout::is_copy(c, clip));
+                found.map(|cj| (tj, cj))
+            })
+            .collect();
+        for (tj, cj) in copies {
+            self.split_one(tj, cj, at_us);
+        }
+        self.split_one(ti, ci, at_us)
+    }
+
+    fn split_one(&mut self, ti: usize, ci: usize, at_us: i64) -> usize {
         let clip = &mut self.tracks[ti].clips[ci];
         let offset = at_us - clip.start_us;
         let mut second = clip.clone();
@@ -2501,8 +2518,7 @@ impl Project {
     }
 
     fn set_layout(&mut self, width: u32, height: u32, clip_ids: Option<&[String]>, layout: Layout) -> Result<()> {
-        let targets: Vec<String> =
-            crate::layout::targets(self, clip_ids)?.into_iter().map(|(clip, _)| clip.id.clone()).collect();
+        let targets = crate::layout::placed(self, clip_ids, layout)?;
         let copies = crate::layout::stack_copies(self, &targets);
         for track in &mut self.tracks {
             track.clips.retain(|c| !copies.contains(&c.id));
@@ -2536,13 +2552,15 @@ impl Project {
                     *transform = cell_transform(&self.canvas, &asset, bottom, opacity);
                     *volume = 0.0;
                 }
-                // Above its clip, so it draws over nothing the clip covered.
+                // Right above its clip, on a shown track, so it covers nothing the clip did not.
                 let (start, end) = (copy.start_us, copy.end_us());
-                let free = (ti + 1..self.tracks.len()).find(|&i| {
-                    let track = &self.tracks[i];
-                    track.kind == TrackKind::Video && !track.keep_in_place && self.is_free(i, start, end, None)
+                let above = self.tracks.get(ti + 1).is_some_and(|t| {
+                    t.kind == TrackKind::Video
+                        && !t.hidden
+                        && !t.keep_in_place
+                        && self.is_free(ti + 1, start, end, None)
                 });
-                let track = free.unwrap_or_else(|| self.insert_track(ti + 1, TrackKind::Video, false));
+                let track = if above { ti + 1 } else { self.insert_track(ti + 1, TrackKind::Video, false) };
                 self.tracks[track].clips.push(copy);
             }
         }
@@ -3235,6 +3253,48 @@ mod tests {
                 assert_eq!((source_in_us, clip.duration_us), (from, length), "{id}");
             }
         }
+    }
+
+    #[test]
+    fn stack_copies_sit_on_a_shown_track_right_above_follow_a_split_and_fade_stays_on_the_main_track() {
+        let mut p = project();
+        let add = |p: &mut Project, cmd| p.apply(cmd).unwrap().select[0].clone();
+        let a = add(&mut p, EditCmd::AddClip { asset_id: "a".into(), start_us: None, track_id: None });
+        // A picture in picture after the clip, on a track that is free over it but hidden.
+        let pip = add(
+            &mut p,
+            EditCmd::AddPictureInPicture { asset_id: "b".into(), start_us: 5_000_000, duration_us: Some(1_000_000) },
+        );
+        let layout =
+            |ids: Option<Vec<String>>, layout| EditCmd::SetLayout { width: 1080, height: 1920, clip_ids: ids, layout };
+        let hidden = p.tracks[1].id.clone();
+        p.apply(EditCmd::UpdateTrack {
+            track_id: hidden.clone(),
+            muted: None,
+            hidden: Some(true),
+            keep_in_place: None,
+        })
+        .unwrap();
+        p.apply(layout(Some(vec![a.clone()]), Layout::Stack)).unwrap();
+        let copies = |p: &Project| -> Vec<(usize, i64, i64)> {
+            p.tracks
+                .iter()
+                .enumerate()
+                .flat_map(|(ti, t)| t.clips.iter().map(move |c| (ti, c)))
+                .filter(|(_, c)| matches!(c.content, ClipContent::Media { volume, .. } if volume == 0.0))
+                .map(|(ti, c)| (ti, c.start_us, c.duration_us))
+                .collect()
+        };
+        assert_eq!(copies(&p), vec![(1, 0, 5_000_000)], "a new shown track right above the main track");
+        assert!(!p.tracks[1].hidden && p.tracks[2].id == hidden);
+
+        p.apply(EditCmd::SplitClip { clip_id: a.clone(), at_us: 2_000_000 }).unwrap();
+        assert_eq!(copies(&p), vec![(1, 0, 2_000_000), (1, 2_000_000, 3_000_000)], "the copy splits with its clip");
+        p.apply(layout(None, Layout::Fade)).unwrap();
+        assert!(copies(&p).is_empty(), "Fade takes both halves of the copy away");
+
+        let refused = p.apply(layout(Some(vec![pip.clone()]), Layout::Fade)).unwrap_err().to_string();
+        assert!(refused.contains("main track"), "{refused}");
     }
 
     #[test]

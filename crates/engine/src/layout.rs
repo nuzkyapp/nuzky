@@ -69,6 +69,22 @@ pub fn targets<'a>(project: &'a Project, clip_ids: Option<&[String]>) -> Result<
     Ok(found)
 }
 
+/// The ids of the clips `layout` places, as `targets` picks them. Fade's blurred copy shows only behind the main
+/// track, so Fade places only its clips: others are left as they are, and naming one is an error.
+pub fn placed(project: &Project, clip_ids: Option<&[String]>, layout: Layout) -> Result<Vec<String>> {
+    let on_main = |id: &str| project.tracks.iter().any(|t| t.id == MAIN_TRACK && t.clips.iter().any(|c| c.id == id));
+    let mut ids: Vec<String> = targets(project, clip_ids)?.into_iter().map(|(clip, _)| clip.id.clone()).collect();
+    if layout == Layout::Fade {
+        ensure!(
+            clip_ids.is_none() || ids.iter().all(|id| on_main(id)),
+            "INVALID_ARGUMENTS: Fade blurs only behind the main track. Move the clip onto the main track, or choose Fill or Stack"
+        );
+        ids.retain(|id| on_main(id));
+    }
+    ensure!(!ids.is_empty(), "INVALID_ARGUMENTS: there is no video or image clip to lay out");
+    Ok(ids)
+}
+
 /// The Stack copies of `clip_ids`, which another layout removes.
 pub fn stack_copies(project: &Project, clip_ids: &[String]) -> Vec<String> {
     let video = || {
@@ -93,7 +109,7 @@ fn original<'a>(video: &[(usize, &'a Clip)], ti: usize, clip: &'a Clip) -> &'a C
 
 /// Whether `copy` is a silent copy of `of` that plays the same part of the same file at the same time, as Stack
 /// makes it.
-fn is_copy(copy: &Clip, of: &Clip) -> bool {
+pub(crate) fn is_copy(copy: &Clip, of: &Clip) -> bool {
     let (
         ClipContent::Media { asset_id: a, source_in_us: a_in, volume, speed: a_speed, reverse: a_rev, .. },
         ClipContent::Media { asset_id: b, source_in_us: b_in, speed: b_speed, reverse: b_rev, .. },
