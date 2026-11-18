@@ -8,6 +8,7 @@ import { copySelection, cutSelection, deleteSelection, deleteSide, duplicateSele
 import { US, lastFrame, nearestFrame, stepFrame } from "./time";
 import { togglePanel } from "./dock";
 import { pickAndImport } from "../components/panel/assets";
+import { useVoiceover } from "./voiceover";
 
 /** What the cover editor holds back: nothing plays there, and the clips are not shown. */
 export const RESTS_IN_COVER = new Set<ActionId>(["playPause", "playBackward", "stop", "playForward", "split", "deleteLeft", "deleteRight", "freeze", "duplicate", "copy", "cut", "paste", "pasteAttributes", "delete"]);
@@ -17,6 +18,9 @@ export const WORKS_IN_REELS = new Set<ActionId>(["undo", "redo", "framePrev", "f
 export const RESTS_IN_FULL = new Set<ActionId>(["delete", "split", "deleteLeft", "deleteRight", "freeze", "duplicate", "import", "undo", "redo", "cut", "paste", "pasteAttributes"]);
 /** What a media item shown in the preview takes from the timeline. */
 export const MOVES_SOURCE = new Set<ActionId>(["framePrev", "frameNext", "secondBack", "secondForward", "goStart", "goEnd"]);
+
+/** A voiceover is recorded against the picture at 1x, so the speed waits until it ends. */
+export const recordingVoiceover = (phase = useVoiceover.getState().phase) => phase === "countdown" || phase === "recording";
 
 /** The next of SPEEDS above `rate`, or the fastest. */
 const faster = (rate: number) => SPEEDS.find((s) => s > rate + 1e-6) ?? SPEEDS[SPEEDS.length - 1];
@@ -33,7 +37,7 @@ export function shuttle(direction: -1 | 0 | 1) {
   }
   const s = useEditor.getState();
   if (direction === 0) return void (s.playing && api.pause());
-  if (!s.snap || projectDuration(s.snap.project) === 0) return;
+  if (recordingVoiceover() || !s.snap || projectDuration(s.snap.project) === 0) return;
   const { rate, speed } = usePreview.getState();
   const along = s.playing && Math.sign(rate) === direction;
   const next = along ? faster(Math.abs(rate)) : direction > 0 ? speed : 1;
@@ -44,6 +48,7 @@ export function shuttle(direction: -1 | 0 | 1) {
 
 /** Chooses the speed Play plays at; playing, the preview goes on at it, the same way round. */
 export function chooseSpeed(speed: number) {
+  if (recordingVoiceover()) return;
   rememberSpeed(speed);
   const { rate } = usePreview.getState();
   if (useEditor.getState().playing && Math.abs(rate) !== speed) void api.playAt(rate < 0 ? -speed : speed);

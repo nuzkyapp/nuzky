@@ -10,6 +10,7 @@ const end = [performance.now(), st.getState().timeUs];
 return JSON.stringify((end[1] - start[1]) / 1e3 / (end[0] - start[0])); })()"""
 PILL = "const b = document.querySelector('[data-speed]'); return b && {text: b.textContent.trim(), label: b.getAttribute('aria-label')}"
 PLAYING = 'return window.__nuzky.store.getState().playing'
+TIME = 'return window.__nuzky.store.getState().timeUs'
 PROJECT = """const st = window.__nuzky.store.getState();
 return {revision: st.snap.revision, canUndo: st.snap.canUndo,
   speeds: st.snap.project.tracks.flatMap((t) => t.clips).map((c) => c.content.speed ?? null)}"""
@@ -70,6 +71,16 @@ def preview_speed(r):
     r.shot('playing-backwards')
     r.key('k')
     wait(lambda: not r.s.run(PLAYING), 5)
+
+    r.seek(0)
+    wait(lambda: r.s.run(TIME) == 0, 5)
+    r.key('j')
+    near_end = wait(lambda: r.s.run(PLAYING) and r.s.run(TIME) > 30_000_000, 5)
+    from_end = pace()
+    r.check('J at the start plays backwards from the end', near_end and -1.15 < from_end < -0.85, (from_end, r.s.run(TIME)))
+    r.key('k')
+    wait(lambda: not r.s.run(PLAYING), 5)
+    r.seek(2_000_000)
 
     r.check('the menu chooses 1.5x', choose('1.5x', 'speed-menu'))
     r.s.run(CALM)

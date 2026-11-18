@@ -351,7 +351,7 @@ fn run<F: Frames>(
                 let end = st.project.duration_us();
                 let now = audio.now_us();
                 let backward = audio.rate() < 0.0;
-                if now >= end || (backward && now <= 0) {
+                if if backward { now <= 0 } else { now >= end } {
                     st.audio = None;
                     st.t_us = now.clamp(0, end);
                     st.dirty = true;

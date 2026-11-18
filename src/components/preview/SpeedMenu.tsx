@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Check, Rewind } from "lucide-react";
-import { chooseSpeed } from "../../lib/actions";
+import { chooseSpeed, recordingVoiceover } from "../../lib/actions";
+import { useVoiceover } from "../../lib/voiceover";
 import { chose } from "../../lib/exit";
 import { SPEEDS, speedLabel, usePreview } from "../../lib/preview";
 import { useEditor } from "../../lib/store";
@@ -12,13 +13,14 @@ export function SpeedMenu({ disabled }: { disabled: boolean }) {
   const playing = useEditor((s) => s.playing);
   const rate = usePreview((s) => s.rate);
   const speed = usePreview((s) => s.speed);
+  const recording = useVoiceover((s) => recordingVoiceover(s.phase));
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const shown = playing ? Math.abs(rate) : speed;
   const backward = playing && rate < 0;
   const keys = [key("playBackward"), key("stop"), key("playForward")].filter(Boolean).join(", ");
-  const title = `Preview speed${keys ? ` (${keys})` : ""}`;
+  const title = recording ? "The voiceover records at 1x" : `Preview speed${keys ? ` (${keys})` : ""}`;
 
   const closeToTrigger = () => {
     setOpen(false);
@@ -62,7 +64,7 @@ export function SpeedMenu({ disabled }: { disabled: boolean }) {
         aria-expanded={open}
         aria-label={`${title}: ${backward ? "backwards at " : ""}${speedLabel(shown)}`}
         title={title}
-        disabled={disabled}
+        disabled={disabled || recording}
         onClick={() => setOpen(!open)}
         className={`tabular flex h-8 min-w-[44px] items-center justify-center gap-1 rounded-full px-2 text-[12px] font-medium transition-colors duration-[120ms] ease-out disabled:cursor-not-allowed disabled:opacity-40 ${
           open ? "bg-white/[.14]" : "enabled:hover:bg-white/[.08]"
