@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 use anyhow::{Result, anyhow};
 
 /// Keep in step with VERSION in scripts/fetch-onnxruntime.mjs, which puts this build beside the app.
-pub const RUNTIME_VERSION: &str = "1.28.3";
+pub const RUNTIME_VERSION: &str = "1.28.0";
 
 #[cfg(target_os = "linux")]
 const LIBRARY: &str = "libonnxruntime.so.1";
