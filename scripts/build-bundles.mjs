@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { COMMIT as ORT_COMMIT, VERSION as ORT_VERSION, fetchOnnxRuntime } from './fetch-onnxruntime.mjs';
@@ -128,10 +128,19 @@ const tauri = (...args) => {
 if (process.platform === 'darwin') {
   tauri('build', '--bundles', bundles);
 } else {
-  // whisper.cpp and ggml are shared libraries here, built where only the build knows (crates/analysis/src/ggml.rs).
-  // The app's build script names their directory, so the bundles are made once the app is built.
+  // whisper.cpp and ggml are shared libraries here, which whisper-rs-sys installs in its build directory
+  // (crates/analysis/src/ggml.rs), so the bundles are made once the app is built, from the newest such directory.
   tauri('build', '--no-bundle');
-  const ggml = readFileSync(path.join(target, 'release', 'nuzky-ggml-dir.txt'), 'utf8').trim();
+  const whisper = process.platform === 'win32' ? 'whisper.dll' : 'libwhisper.so.1';
+  const found = readdirSync(path.join(target, 'release'), { recursive: true })
+    .filter((file) => path.basename(file) === whisper && path.basename(path.dirname(file)) === 'lib'
+      && file.split(path.sep).some((part) => part.startsWith('whisper-rs-sys')))
+    .map((file) => path.join(target, 'release', file))
+    .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
+  if (!found.length) throw new Error(`No ${whisper} in ${path.join(target, 'release')}`);
+  const ggml = path.dirname(found[0]);
+  // scripts/verify-linux-bundle.sh checks these libraries.
+  writeFileSync(path.join(target, 'release', 'nuzky-ggml-dir.txt'), ggml);
   const libraries = readdirSync(ggml).filter((name) => process.platform === 'win32'
     ? name.endsWith('.dll')
     : /^lib(whisper|ggml|ggml-base)\.so\.\d+$/.test(name) || /^libggml-(?!base\.)[\w-]+\.so$/.test(name));

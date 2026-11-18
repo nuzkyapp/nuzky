@@ -20,15 +20,8 @@ fn main() {
             println!("cargo:rerun-if-changed={path}");
         }
     }
-    // The AppImage, deb and rpm keep whisper.cpp's libraries in Tauri's resource directory, and scripts/build-bundles.mjs
-    // reads from this file which ones the app was built with, beside the app in the build.
-    let ggml = std::env::var("DEP_NUZKY_GGML_DIR").ok();
-    if let Some(dir) = &ggml {
-        let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("cargo sets OUT_DIR"));
-        let profile = out.ancestors().nth(3).expect("OUT_DIR lies in target/<profile>/build/<crate>/out");
-        std::fs::write(profile.join("nuzky-ggml-dir.txt"), dir).expect("writing where whisper.cpp's libraries are");
-    }
-    link_ggml(ggml, Some("../lib/Nuzky"));
+    // The AppImage, deb and rpm keep whisper.cpp's libraries in Tauri's resource directory (scripts/build-bundles.mjs).
+    link_ggml(std::env::var("DEP_NUZKY_GGML_DIR").ok(), Some("../lib/Nuzky"));
     let msvc = std::env::var("CARGO_CFG_TARGET_ENV").is_ok_and(|env| env == "msvc");
     if msvc {
         // Tauri's manifest, which asks for Common Controls 6. tauri-build embeds it in the app only, and the tests,
