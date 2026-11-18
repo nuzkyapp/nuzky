@@ -7659,7 +7659,7 @@ dependencies = [
 [[package]]
 name = "whisper-rs-sys"
 version = "0.15.0"
-source = "git+https://github.com/nuzkyapp/whisper-rs?rev=0eb77b5c0728aa924c5f0c29d4c8d51a799a99b5#0eb77b5c0728aa924c5f0c29d4c8d51a799a99b5"
+source = "git+https://github.com/nuzkyapp/whisper-rs?rev=63b6c581d031bc58710de2e9533a3998b5c9dd36#63b6c581d031bc58710de2e9533a3998b5c9dd36"
 dependencies = [
  "bindgen",
  "cfg-if",
