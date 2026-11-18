@@ -137,12 +137,18 @@ fn export_cancellation_is_prompt_and_preserves_destination() {
     let cancel = AtomicBool::new(false);
     let now = Instant::now();
     let mut last = 0;
+    let mut cancelled_at = None;
     let result = export(&p, &d.join("cache"), &out, &options(), &cancel, |progress| {
         last = progress.frame;
         if progress.frame == 2 {
             cancel.store(true, Ordering::Relaxed);
+            cancelled_at = Some(Instant::now());
         }
     });
+    let ended = Instant::now();
+    let started = cancelled_at.unwrap() - now;
+    panic!("DIAG start-to-cancel {:?} cancel-to-return {:?} total {:?}", started, ended - cancelled_at.unwrap(), ended - now);
+    #[allow(unreachable_code)]
     assert!(result.is_err());
     assert!(format!("{:#}", result.unwrap_err()).contains("cancel"));
     assert!(now.elapsed().as_secs_f64() < 5.0, "cancellation took {:?}", now.elapsed());
