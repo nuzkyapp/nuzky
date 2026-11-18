@@ -247,13 +247,15 @@ Inspected `~/.cargo/registry/src/*/ffmpeg-sys-next-9.0.0/build.rs`, particularly
 
 Covers (`crates/vision`) run their models with ONNX Runtime, which Nuzky opens at run time and never links (`ort` with `load-dynamic`). `ort`'s default, pyke's prebuilt static library, needs AVX2: linked into `nuzky-app` it stopped the app before `main` on CPUs without AVX2, checked under `qemu-x86_64-static -cpu Nehalem`. Microsoft's official build picks its CPU kernels at run time and runs there, so that is what ships.
 
-`node scripts/fetch-onnxruntime.mjs` downloads the pinned ONNX Runtime 1.28.3 release archive for the platform from [microsoft/onnxruntime](https://github.com/microsoft/onnxruntime/releases/tag/v1.28.3), checks its SHA-256 and keeps only the library, `LICENSE` and `ThirdPartyNotices.txt` in `<deps>/onnxruntime-1.28.3/` (`~/.cache/nuzky/deps`, `%LOCALAPPDATA%\Nuzky\build-deps` on Windows, or `NUZKY_DEPS`). The Linux and Windows setup scripts, `scripts/check.sh`, `scripts/repro.py`, CI and `build-bundles.mjs` run it; on macOS and Ubuntu run it once after `npm ci`. Debug builds load the library from there, release builds only from their own install:
+`node scripts/fetch-onnxruntime.mjs` downloads Microsoft's NuGet package [Microsoft.ML.OnnxRuntime 1.28.0](https://www.nuget.org/packages/Microsoft.ML.OnnxRuntime/1.28.0) from `api.nuget.org`, checks its pinned SHA-256 and keeps only this system's library from its `runtimes/<system>/native/`, `LICENSE` and `ThirdPartyNotices.txt` in `<deps>/onnxruntime-1.28.0/` (`~/.cache/nuzky/deps`, `%LOCALAPPDATA%\Nuzky\build-deps` on Windows, or `NUZKY_DEPS`). The Linux and Windows setup scripts, `scripts/check.sh`, `scripts/repro.py`, CI and `build-bundles.mjs` run it; on macOS and Ubuntu run it once after `npm ci`. Debug builds load the library from there, release builds only from their own install:
 
 | Install | Library |
 |---|---|
 | AppImage and deb | `usr/lib/Nuzky/libonnxruntime.so.1`, Tauri's resource directory, named after `productName` |
 | .app | `Contents/Frameworks/libonnxruntime.1.dylib`, copied and signed by `bundle-macos-libs.py` |
 | NSIS | `onnxruntime.dll` beside `nuzky-app.exe`, next to the VC++ runtime Tauri already bundles |
+
+Microsoft publishes the same versions of its official build as release archives of [microsoft/onnxruntime](https://github.com/microsoft/onnxruntime/releases), which Nuzky downloaded until that repository started answering 404 on 17 November 2026. To return to them, revert the commit that moved `scripts/fetch-onnxruntime.mjs` to NuGet, which brings back a pin per system with its archive's SHA-256 and the extraction with `tar`, then set `VERSION` there and `RUNTIME_VERSION` in `crates/vision/src/runtime.rs` to the release you pin.
 
 `NUZKY_ONNXRUNTIME=<file>` replaces the lookup, for packagers and release builds run outside an install. When the library cannot load, the app works as before and the cover tools answer `VISION_UNAVAILABLE` with the reason, before any model is downloaded. Telemetry, which Microsoft's Windows build turns on by default, is switched off as it loads. The library adds about 4 MB to the NSIS installer, 7–9 MB to the AppImage and deb and 11 MB to the dmg (compressed sizes of the library); the executables do not grow.
 
@@ -321,7 +323,7 @@ Collect the rest by hand. Collecting the third-party source is a required releas
 
 - **macOS.** `build-info-darwin.txt` lists every copied dylib with its Homebrew Cellar path, which names the formula and its version, and the FFmpeg release the formula builds. For each formula add the source tarball and patches, which `brew fetch --build-from-source <formula>` downloads while Homebrew still offers that version, the formula file and its licences.
 - **Windows.** `build-info-win32.txt` names the BtbN build, the FFmpeg commit it was built from and the FFmpeg-Builds tag whose `scripts.d` pin the source of every library in it. Add FFmpeg at that commit, the build scripts at that tag and each source they pin.
-- **ONNX Runtime** is MIT, © Microsoft; the installers carry its `LICENSE` and `ThirdPartyNotices.txt` in `licenses/onnxruntime/`. Add the 1.28.3 source (commit `0d68ff6b3b72b04aac578decd6c4c45d322bb962`) with the dependencies its `cmake/deps.txt` lists.
+- **ONNX Runtime** is MIT, © Microsoft; the installers carry its `LICENSE` and `ThirdPartyNotices.txt` in `licenses/onnxruntime/`. Add the 1.28.0 source (commit `da9b5e364c465de65c49d91e696cd6485270757f`, which the NuGet package's nuspec names) with the dependencies its `cmake/deps.txt` lists.
 
 ### Bundled sounds
 
