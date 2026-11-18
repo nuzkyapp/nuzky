@@ -705,6 +705,12 @@ export type EditCmd = {
   clipIds: Array<string>,
   layout: SplitLayout,
 } | {
+  "type": "setLayout",
+  width: number,
+  height: number,
+  clipIds?: Array<string> | null,
+  layout: Layout,
+} | {
   "type": "moveClip",
   clipId: string,
   trackId?: string | null,
@@ -1115,6 +1121,11 @@ export type LayerBounds = {
    */
   frame: [[number, number], [number, number], [number, number], [number, number]],
 };
+
+/**
+ * A layout that needs no face: Fill is `reframe`.
+ */
+export type Layout = "fade" | "stack";
 
 /**
  * How the letters of a text are drawn, whatever case they were typed in.

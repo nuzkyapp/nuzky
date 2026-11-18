@@ -1397,6 +1397,45 @@ fn split_screen_and_an_adjustment_layer_over_stdio() {
     );
 }
 
+/// Reframe's Stack and Fade need no face model: Stack lays the clip over the top half and a silent copy of it over
+/// the bottom half, and Fade then takes the copy away and fits the picture whole over the canvas's blur.
+#[test]
+fn reframe_stacks_and_fades_a_wide_clip_without_a_model_over_stdio() {
+    let mut c = Client::new(true);
+    let wide = c.dir.join("wide.ppm");
+    std::fs::write(&wide, [b"P6\n16 8\n255\n".as_slice(), &[120; 16 * 8 * 3]].concat()).unwrap();
+    let run = c.call("begin_run", json!({"label":"layout"}));
+    let ids = c.call("import_media", json!({"run_id":run["run_id"],"paths":[wide]}))["asset_ids"].clone();
+    let place = json!([{"type":"addClip","assetId":ids[0]},{"type":"setCanvas","width":1920,"height":1080}]);
+    c.call("apply_edits", json!({"run_id":run["run_id"],"request_id":"place","edits":place}));
+    assert!(c.error("reframe", json!({"run_id":run["run_id"],"format":"9:16","layout":"tile"})).contains("tile"));
+
+    let job = c.call("reframe", json!({"run_id":run["run_id"],"format":"9:16","layout":"stack"}));
+    let done = c.call("job", json!({"job_id":job["job_id"],"action":"wait"}));
+    assert_eq!((&done["status"], &done["result"]["layout"]), (&json!("done"), &json!("stack")), "{done}");
+    let state = c.call("get_state", json!({}));
+    assert_eq!((&state["canvas"]["width"], &state["canvas"]["height"]), (&json!(1080), &json!(1920)), "{state}");
+    let (clip, copy) = (&state["tracks"][0]["clips"][0], &state["tracks"][1]["clips"][0]);
+    assert_eq!(done["result"]["clips"], json!([clip["id"]]), "{done}");
+    assert_eq!((&copy["content"]["assetId"], &copy["content"]["volume"]), (&ids[0], &json!(0.0)), "{state}");
+    assert_eq!((&copy["startUs"], &copy["durationUs"]), (&clip["startUs"], &clip["durationUs"]), "{state}");
+    let y = |c: &Value| c["content"]["transform"]["y"].as_f64().unwrap();
+    assert_eq!((y(clip), y(copy)), (-0.25, 0.25), "{state}");
+
+    let job = c.call("reframe", json!({"run_id":run["run_id"],"format":"9:16","layout":"fade"}));
+    assert_eq!(c.call("job", json!({"job_id":job["job_id"],"action":"wait"}))["status"], "done");
+    let state = c.call("get_state", json!({}));
+    let video = state["tracks"].as_array().unwrap().iter().filter(|t| t["kind"] == "video").count();
+    assert_eq!(video, 1, "the copy is gone: {state}");
+    let transform = &state["tracks"][0]["clips"][0]["content"]["transform"];
+    assert_eq!(
+        (&transform["scale"], &transform["y"], &state["canvas"]["backgroundBlur"]),
+        (&json!(1.0), &json!(0.0), &json!(0.5))
+    );
+    c.call("end_run", json!({"run_id":run["run_id"],"action":"keep"}));
+    c.finish();
+}
+
 /// B-roll from a screen recording: "Teď otevřu Claudu Code." names the recording of the Claude Code window in its Czech
 /// ending, so find_broll suggests it over that sentence with why and the edit that places it; once placed it is not
 /// suggested again, a range that names nothing gets nothing, and a range needs the transcript key.

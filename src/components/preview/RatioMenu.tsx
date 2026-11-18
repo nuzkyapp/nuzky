@@ -1,16 +1,51 @@
-import { useEffect, useRef, type KeyboardEvent } from "react";
+import { Fragment, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Check, ChevronDown, RectangleHorizontal } from "lucide-react";
 import { chose } from "../../lib/exit";
 import { FORMATS, canvasSize, formatLabel, sameRatio } from "../../lib/presets";
 import { useFollow } from "../../lib/follow";
-import { picturedClips, reframe, useReframe } from "../../lib/reframe";
+import { layOut, picturedClips, reframe, useReframe } from "../../lib/reframe";
 import { AI_EDITING, useAiLocked, useEditor } from "../../lib/store";
-import { Button } from "../ui";
+import { Button, PresetTile } from "../ui";
+
+type Style = "fill" | "fade" | "stack";
+
+/** A vertical frame drawn as each layout fills it. */
+const STYLES: { style: Style; label: string; title: (which: string) => string; frame: ReactNode }[] = [
+  {
+    style: "fill",
+    label: "Fill",
+    title: (which) => `Fill the frame and keep the speaker's face in ${which}`,
+    frame: <span className="absolute inset-0 bg-fg/70" />,
+  },
+  {
+    style: "fade",
+    label: "Fade",
+    title: (which) => `Show ${which} whole across the middle, a blurred copy behind`,
+    frame: (
+      <>
+        <span className="absolute inset-0 bg-fg/25" />
+        <span className="absolute inset-x-0 top-1/2 h-[10px] -translate-y-1/2 bg-fg/70" />
+      </>
+    ),
+  },
+  {
+    style: "stack",
+    label: "Stack",
+    title: (which) => `Show ${which} twice, one above the other`,
+    frame: (
+      <>
+        <span className="absolute inset-x-0 top-0 h-[calc(50%-1px)] bg-fg/70" />
+        <span className="absolute inset-x-0 bottom-0 h-[calc(50%-1px)] bg-fg/70" />
+      </>
+    ),
+  },
+];
 
 /**
  * CapCut's "Ratio" control next to the player: the one place to change the canvas format, and beside each format
- * Reframe, which also places the clips to follow the face. A format keeps the resolution, which the quality chip in the
- * top bar sets. Open state lives in the store so the Format row in the Project inspector can open it too.
+ * Reframe, which also places the clips to follow the face, or on a vertical format Layout, whose Fill is Reframe and
+ * whose Fade and Stack show a wide picture whole or twice. A format keeps the resolution, which the quality chip in
+ * the top bar sets. Open state lives in the store so the Format row in the Project inspector can open it too.
  */
 export function RatioMenu() {
   const canvas = useEditor((s) => s.snap!.project.canvas);
@@ -23,6 +58,7 @@ export function RatioMenu() {
   const locked = useAiLocked();
   const short = Math.min(canvas.width, canvas.height);
   const setOpen = (ratioOpen: boolean) => useEditor.setState({ ratioOpen });
+  const [layouts, setLayouts] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const closeToTrigger = () => {
@@ -31,7 +67,11 @@ export function RatioMenu() {
   };
 
   useEffect(() => {
-    if (!open) return;
+    if (layouts) ref.current?.querySelector<HTMLElement>("[data-layouts] [role=menuitem]")?.focus();
+  }, [layouts]);
+
+  useEffect(() => {
+    if (!open) return setLayouts(null);
     ref.current?.querySelector<HTMLElement>("[aria-checked=true]")?.focus();
     const close = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
     const key = (e: globalThis.KeyboardEvent) => {
@@ -48,7 +88,8 @@ export function RatioMenu() {
     };
   }, [open]);
 
-  // Like the clip menu: ↑/↓ move through each format and its Reframe, and no key reaches the editor's shortcuts.
+  // Like the clip menu: ↑/↓ move through each format, its Reframe or Layout and Layout's styles, and no key reaches the
+  // editor's shortcuts.
   const onMenuKey = (e: KeyboardEvent<HTMLDivElement>) => {
     e.stopPropagation();
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
@@ -83,42 +124,75 @@ export function RatioMenu() {
           {FORMATS.map((f) => {
             const on = sameRatio(f, canvas);
             const size = canvasSize(f, short);
+            const vertical = f.height > f.width;
+            const expanded = layouts === f.label;
             const why = !pictures ? "Add a video to the timeline first" : reframing ? "Already following the face" : following ? "Already following a clip. Stop it in the preview." : null;
             const which = selected > 0 ? `the ${selected} selected clip${selected === 1 ? "" : "s"}` : "every full-frame clip";
+            const switching = (title: string) => (on ? title : `Switch to ${f.label}. ${title}`);
+            const choose = (style: Style) => {
+              closeToTrigger();
+              if (style === "fill") void reframe(size.width, size.height);
+              else void layOut(size.width, size.height, style);
+            };
             return (
-              <div key={f.label} className="group flex items-center gap-1 rounded-md pr-1 hover:bg-white/[.08] has-[:focus-visible]:bg-white/[.08]">
-                <button
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={on}
-                  onClick={(e) => {
-                    chose(e.currentTarget);
-                    if (!on) edit({ type: "setCanvas", ...size });
-                    closeToTrigger();
-                  }}
-                  className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-left focus-visible:outline-offset-[-2px]"
-                >
-                  <span className="tabular w-11 shrink-0 text-[13px] font-medium text-fg">{f.label}</span>
-                  <span className="flex-1 truncate text-[12px] text-muted">{f.hint}</span>
-                  {on && <Check size={14} className="shrink-0 text-accent" />}
-                </button>
-                <span className="shrink-0 opacity-0 group-hover:opacity-100 group-has-[:focus-visible]:opacity-100">
-                  <Button
-                    pill
-                    role="menuitem"
-                    className="h-6 px-2.5 text-[12px]"
-                    title={on ? `Keep the speaker's face in ${which}` : `Switch to ${f.label} and keep the speaker's face in ${which}`}
-                    disabled={!!why}
-                    disabledReason={why ?? undefined}
-                    onClick={() => {
+              <Fragment key={f.label}>
+                <div className="group flex items-center gap-1 rounded-md pr-1 hover:bg-white/[.08] has-[:focus-visible]:bg-white/[.08]">
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={on}
+                    onClick={(e) => {
+                      chose(e.currentTarget);
+                      if (!on) edit({ type: "setCanvas", ...size });
                       closeToTrigger();
-                      void reframe(size.width, size.height);
                     }}
+                    className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-left focus-visible:outline-offset-[-2px]"
                   >
-                    Reframe
-                  </Button>
-                </span>
-              </div>
+                    <span className="tabular w-11 shrink-0 text-[13px] font-medium text-fg">{f.label}</span>
+                    <span className="flex-1 truncate text-[12px] text-muted">{f.hint}</span>
+                    {on && <Check size={14} className="shrink-0 text-accent" />}
+                  </button>
+                  <span className={`shrink-0 group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 ${expanded ? "opacity-100" : "opacity-0"}`}>
+                    {vertical ? (
+                      <Button
+                        pill
+                        role="menuitem"
+                        aria-expanded={expanded}
+                        className="h-6 px-2.5 text-[12px] aria-expanded:bg-white/20"
+                        title={switching(`Choose how ${which} fill the frame`)}
+                        disabled={!!why}
+                        disabledReason={why ?? undefined}
+                        onClick={() => setLayouts(expanded ? null : f.label)}
+                      >
+                        Layout
+                      </Button>
+                    ) : (
+                      <Button
+                        pill
+                        role="menuitem"
+                        className="h-6 px-2.5 text-[12px]"
+                        title={switching(`Keep the speaker's face in ${which}`)}
+                        disabled={!!why}
+                        disabledReason={why ?? undefined}
+                        onClick={() => choose("fill")}
+                      >
+                        Reframe
+                      </Button>
+                    )}
+                  </span>
+                </div>
+                {expanded && (
+                  <div data-layouts role="group" aria-label={`Layout for ${f.label}`} className="grid grid-cols-3 gap-2 px-2 pb-2 pt-1">
+                    {STYLES.map((s) => (
+                      <PresetTile key={s.style} menuItem short label={s.label} selected={false} disabled={!!why} title={why ?? switching(s.title(which))} onClick={() => choose(s.style)}>
+                        <span className="absolute left-1/2 top-1/2 h-8 w-[18px] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[2px] bg-black/40 outline outline-1 outline-white/25">
+                          {s.frame}
+                        </span>
+                      </PresetTile>
+                    ))}
+                  </div>
+                )}
+              </Fragment>
             );
           })}
         </div>

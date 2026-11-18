@@ -94,14 +94,19 @@ def reframe(r):
     time.sleep(1)
     r.shot('reframe-before')
 
-    # Reframe beside 9:16, by keyboard: the menu opens on 16:9, and ↑ reaches the Reframe of the row above.
+    # Layout's Fill beside 9:16, by keyboard: the menu opens on 16:9, ↑ reaches the Layout of the row above, and Enter
+    # opens its styles with the keyboard on Fill.
     r.s.run(f'document.querySelector("{RATIO}").click()')
     wait(lambda: r.s.run('return document.activeElement?.getAttribute("role") === "menuitemradio"'), 5)
     press('Up')
     focused = wait(lambda: r.s.run("""const a = document.activeElement;
-        return a?.getAttribute('role') === 'menuitem' && a.textContent.trim() === 'Reframe'
+        return a?.getAttribute('role') === 'menuitem' && a.textContent.trim() === 'Layout'
             && a.closest('div.group')?.textContent.startsWith('9:16') && getComputedStyle(a.parentElement).opacity === '1'"""), 5)
-    r.check('↑ from 16:9 reaches the Reframe of 9:16, which shows while focused', focused)
+    r.check('↑ from 16:9 reaches the Layout of 9:16, which shows while focused', focused)
+    press('Return')
+    fill = wait(lambda: r.s.run("""const a = document.activeElement;
+        return a?.closest('[data-layouts]') && a.textContent.trim() === 'Fill'"""), 5)
+    r.check('Enter opens the styles with the keyboard on Fill', fill)
     time.sleep(0.3)
     r.shot('reframe-menu')
     press('Return')

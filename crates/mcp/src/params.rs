@@ -45,6 +45,18 @@ pub struct Reframe {
     /// Target canvas: "9:16", "4:5" or "1:1".
     pub format: String,
     pub clip_ids: Option<Vec<String>>,
+    /// "fill" (default) crops each picture to the frame and follows the face; "fade" shows it whole across the
+    /// middle over a blurred copy of itself; "stack" shows the clip twice, over the top and the bottom half.
+    #[serde(default)]
+    pub layout: ReframeLayout,
+}
+#[derive(Clone, Copy, Default, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReframeLayout {
+    #[default]
+    Fill,
+    Fade,
+    Stack,
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

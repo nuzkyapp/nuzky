@@ -13,6 +13,7 @@ pub mod export;
 pub mod gpu;
 mod hevc;
 pub mod join;
+pub mod layout;
 pub mod level;
 pub mod loudness;
 pub mod matte;

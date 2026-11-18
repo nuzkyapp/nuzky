@@ -1033,6 +1033,7 @@ export function PresetTile({
   title,
   named = false,
   short = false,
+  menuItem = false,
   preview,
   children,
 }: {
@@ -1047,6 +1048,8 @@ export function PresetTile({
   named?: boolean;
   /** A 36 px drawing over its label, as a speed ramp's shape, where a picture's 4:3 would only add height. */
   short?: boolean;
+  /** An item of a menu, which ↑ and ↓ reach, rather than a toggle. */
+  menuItem?: boolean;
   children: ReactNode;
 }) {
   const lock = useLockReason();
@@ -1054,11 +1057,11 @@ export function PresetTile({
   return (
     <button
       type="button"
-      aria-pressed={selected}
+      {...(menuItem ? { role: "menuitem" } : { "aria-pressed": selected })}
       title={lock ?? title ?? label}
       {...disabledProps(disabled, onClick)}
       {...previewHandlers(disabled ? null : preview)}
-      className="group flex min-w-0 flex-col gap-1.5 rounded-[10px] text-left disabled:cursor-not-allowed disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
+      className={`group flex min-w-0 flex-col gap-1.5 rounded-[10px] text-left ${menuItem ? "focus-visible:outline-offset-[3px]" : ""} disabled:cursor-not-allowed disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:opacity-40`}
     >
       <span
         className={`relative block w-full overflow-hidden rounded-[10px] border ${named ? "h-12 bg-white/[.06]" : short ? "h-9 bg-white/[.06]" : "aspect-[4/3] bg-bg"} ${
