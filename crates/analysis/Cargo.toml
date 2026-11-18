@@ -5,9 +5,11 @@ edition.workspace = true
 license.workspace = true
 # candle-core uses NEON f16 intrinsics on Apple Silicon, stable since Rust 1.94.
 rust-version = "1.94"
+# Tells the binaries that link this crate where whisper.cpp's libraries are (build.rs).
+links = "nuzky-ggml"
 
 [features]
-gpu = ["whisper-rs/vulkan"]
+gpu = ["whisper-rs-sys/vulkan"]
 
 [dependencies]
 nuzky-engine.workspace = true
@@ -24,6 +26,11 @@ unicode-normalization = "0.1.25"
 rayon = "1"
 libm = "0.2"
 realfft = "3.5"
+
+# whisper.cpp and ggml as shared libraries, with ggml's CPU code built once per instruction set; ggml loads the
+# fastest this processor runs (src/ggml.rs).
+[target.'cfg(any(target_os = "linux", windows))'.dependencies]
+whisper-rs-sys = { version = "0.15.0", features = ["dynamic-backends"] }
 
 # Speech recognition on the GPU through Metal. whisper.cpp embeds its shaders in the binary.
 [target.'cfg(target_os = "macos")'.dependencies]

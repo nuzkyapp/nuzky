@@ -65,6 +65,7 @@ pub fn use_gpu() -> bool {
         // The devices whisper.cpp picks from (whisper_backend_init_gpu). Without a Vulkan driver, or with only a
         // software one, ggml lists none.
         cfg!(feature = "gpu")
+            && crate::ggml::ready().is_ok()
             && *GPU.get_or_init(|| {
                 // SAFETY: ggml builds its device list once and keeps it for the process; these only read it.
                 (0..unsafe { sys::ggml_backend_dev_count() }).any(|i| {
@@ -138,10 +139,7 @@ pub fn transcribe_with_regions(
         Ok::<_, anyhow::Error>(())
     };
     check()?;
-    ensure!(
-        language == "auto" || (!language.contains('\0') && whisper_rs::get_lang_id(language).is_some()),
-        "Unknown language: {language}"
-    );
+    crate::check_language(language)?;
     ensure!(model_path.is_file(), "Speech model not found: {}", model_path.display());
     let converted;
     let audio = match source {
@@ -219,6 +217,7 @@ pub fn transcribe_with_regions(
 }
 
 pub(crate) fn speech_context(model_path: &Path) -> Result<WhisperContext> {
+    crate::ggml::ready()?;
     let mut params = WhisperContextParameters::default();
     let gpu = use_gpu();
     params.use_gpu(gpu);
@@ -395,6 +394,7 @@ fn append_segments(
 fn voice_regions(audio: &[f32], model: &Path) -> Result<Vec<(usize, usize)>> {
     let model = model.to_str().context("VAD model path must be UTF-8")?;
     ensure!(!model.contains('\0'), "VAD model path contains a NUL byte");
+    crate::ggml::ready()?;
     let mut context_params = WhisperVadContextParams::new();
     context_params.set_n_threads(4);
     context_params.set_use_gpu(false);

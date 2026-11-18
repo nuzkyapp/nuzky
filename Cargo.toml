@@ -45,3 +45,8 @@ opt-level = 0
 # share them: with none, whisper.cpp and the FFmpeg bindings built twice in every new checkout.
 [profile.dev.build-override]
 debug = "line-tables-only"
+
+# whisper-rs-sys 0.15.0 with whisper.cpp and ggml as shared libraries and ggml's CPU code built once per instruction
+# set, which no whisper-rs-sys release offers yet (docs/BUILDING.md, Patched whisper-rs-sys).
+[patch.crates-io]
+whisper-rs-sys = { git = "https://github.com/nuzkyapp/whisper-rs", rev = "0eb77b5c0728aa924c5f0c29d4c8d51a799a99b5" }
