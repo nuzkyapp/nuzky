@@ -164,6 +164,12 @@ def voiceover(r):
             and not r.s.run("return !!document.querySelector('[data-voiceover-countdown]')"), phase(r))
     time.sleep(3)
     r.check('and the cancelled countdown never starts a take', phase(r) == 'ready' and not recordings(r), [phase(r), recordings(r)])
+    click(r, 'Record')
+    wait(lambda: phase(r) == 'countdown', 3)
+    press('k')
+    r.check("Stop's key K cancels the countdown too", wait(lambda: phase(r) == 'ready', 3), phase(r))
+    time.sleep(3)
+    r.check('and never starts a take', phase(r) == 'ready' and not recordings(r), [phase(r), recordings(r)])
 
     # A take: the video plays from the playhead while it records, and the take grows on the timeline.
     seconds, _ = ffprobe(str(FIXTURES / 'speech.wav'))
@@ -180,6 +186,10 @@ def voiceover(r):
         time.sleep(0.5)
         seen['widths'].append(r.s.run(width))
         seen['panel'] = panel(r)
+        # The take keeps time with the picture at 1x: the preview's speed waits.
+        r.key('l')
+        time.sleep(0.4)
+        seen['speed'] = r.s.run("const b = document.querySelector('[data-speed]'); return b && [b.disabled, b.title, b.getAttribute('aria-label')]")
         # The editor's keys wait while it records, Command ones too: Cmd+Z would undo the typed script.
         r.key('z', metaKey=True)
         r.key('z', ctrlKey=True)
@@ -192,6 +202,7 @@ def voiceover(r):
     widths = seen.get('widths') or [0, 0]
     r.check('it grows on the timeline as it records', widths[0] and widths[1] and widths[1] > widths[0], widths)
     r.check('Cmd+Z and Ctrl+Z wait while it records', seen.get('undo') == [SCRIPT, 'recording'], seen.get('undo'))
+    r.check('L and the preview speed wait while it records, and the pill says why', seen.get('speed') == [True, 'The voiceover records at 1x', 'Preview speed: 1x'], seen.get('speed'))
     p = seen.get('panel')
     r.check('the script shows large to read, and Stop takes Record\'s place', p and p['reading'] == SCRIPT and 'StopSpace' in p['buttons'], p)
     before = len(r.state()['assets'])

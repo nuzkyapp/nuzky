@@ -62,7 +62,7 @@ export function SpeedMenu({ disabled }: { disabled: boolean }) {
         data-speed
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={`${title}: ${backward ? "backwards at " : ""}${speedLabel(shown)}`}
+        aria-label={`Preview speed: ${backward ? "backwards at " : ""}${speedLabel(shown)}`}
         title={title}
         disabled={disabled || recording}
         onClick={() => setOpen(!open)}
