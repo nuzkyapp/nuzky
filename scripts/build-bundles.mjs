@@ -122,14 +122,15 @@ const configPath = path.join(target, 'bundle-config.json');
 const tauri = (...args) => {
   writeFileSync(configPath, JSON.stringify(config, null, 2));
   // Call the installed CLI with Node to avoid Windows .cmd quoting/shell differences.
-  run(process.execPath, ['node_modules/@tauri-apps/cli/tauri.js', ...args, '--config', configPath]);
+  run(process.execPath, ['node_modules/@tauri-apps/cli/tauri.js', ...args, '--config', configPath,
+    ...(args[0] === 'build' ? ['--', '--locked'] : [])]);
 };
 if (process.platform === 'darwin') {
-  tauri('build', '--bundles', bundles, '--', '--locked');
+  tauri('build', '--bundles', bundles);
 } else {
   // whisper.cpp and ggml are shared libraries here, built where only the build knows (crates/analysis/src/ggml.rs).
   // The app's build script names their directory, so the bundles are made once the app is built.
-  tauri('build', '--no-bundle', '--', '--locked');
+  tauri('build', '--no-bundle');
   const ggml = readFileSync(path.join(target, 'release', 'nuzky-ggml-dir.txt'), 'utf8').trim();
   const libraries = readdirSync(ggml).filter((name) => process.platform === 'win32'
     ? name.endsWith('.dll')
