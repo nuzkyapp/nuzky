@@ -1,8 +1,6 @@
-//! Loads the Vulkan loader on first use, for the reason crates/analysis/build.rs gives.
+include!("../analysis/link_ggml.rs");
+
 fn main() {
     println!("cargo::rerun-if-changed=build.rs");
-    if std::env::var("CARGO_CFG_TARGET_ENV").is_ok_and(|env| env == "msvc") {
-        println!("cargo::rustc-link-arg=/DELAYLOAD:vulkan-1.dll");
-        println!("cargo::rustc-link-arg=delayimp.lib");
-    }
+    link_ggml(std::env::var("DEP_NUZKY_GGML_DIR").ok(), None);
 }

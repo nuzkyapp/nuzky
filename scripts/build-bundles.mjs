@@ -118,13 +118,38 @@ switch (process.platform) {
   }
   default: throw new Error(`Unsupported platform: ${process.platform}`);
 }
-// ggml builds whisper.cpp for the CPU of the machine it builds on, and GitHub's runners differ: a release built on one
-// with AVX-512 crashed speech recognition on every CPU without it. Off, it uses AVX2, FMA, F16C and BMI2.
-if (process.arch === 'x64') process.env.GGML_NATIVE = 'OFF';
 const configPath = path.join(target, 'bundle-config.json');
-writeFileSync(configPath, JSON.stringify(config, null, 2));
-// Call the installed CLI with Node to avoid Windows .cmd quoting/shell differences.
-run(process.execPath, ['node_modules/@tauri-apps/cli/tauri.js', 'build', '--bundles', bundles, '--config', configPath, '--', '--locked']);
+const tauri = (...args) => {
+  writeFileSync(configPath, JSON.stringify(config, null, 2));
+  // Call the installed CLI with Node to avoid Windows .cmd quoting/shell differences.
+  run(process.execPath, ['node_modules/@tauri-apps/cli/tauri.js', ...args, '--config', configPath]);
+};
+if (process.platform === 'darwin') {
+  tauri('build', '--bundles', bundles, '--', '--locked');
+} else {
+  // whisper.cpp and ggml are shared libraries here, built where only the build knows (crates/analysis/src/ggml.rs).
+  // The app's build script names their directory, so the bundles are made once the app is built.
+  tauri('build', '--no-bundle', '--', '--locked');
+  const ggml = readFileSync(path.join(target, 'release', 'nuzky-ggml-dir.txt'), 'utf8').trim();
+  const libraries = readdirSync(ggml).filter((name) => process.platform === 'win32'
+    ? name.endsWith('.dll')
+    : /^lib(whisper|ggml|ggml-base)\.so\.\d+$/.test(name) || /^libggml-(?!base\.)[\w-]+\.so$/.test(name));
+  for (const kind of ['whisper', 'ggml-base', 'ggml-cpu-x64', 'ggml-vulkan']) {
+    if (!libraries.some((name) => name.replace(/^lib/, '').startsWith(`${kind}.`))) throw new Error(`${kind} missing from ${ggml}`);
+  }
+  // Copied as files, not the links CMake installs, and named relative to src-tauri for the reason given above.
+  const stage = path.join(target, 'bundle-ggml');
+  rmSync(stage, { recursive: true, force: true });
+  mkdirSync(stage, { recursive: true });
+  for (const [from, to] of [...libraries.map((name) => [path.join(ggml, name), name]),
+    [path.join(ggml, '..', 'whisper.cpp', 'LICENSE'), 'licenses/whisper.cpp/LICENSE']]) {
+    const copy = path.join(stage, to);
+    mkdirSync(path.dirname(copy), { recursive: true });
+    copyFileSync(from, copy);
+    config.bundle.resources[path.relative('src-tauri', copy)] = to;
+  }
+  tauri('bundle', '--bundles', bundles);
+}
 
 if (process.platform === 'darwin') {
   const app = path.join(bundle, 'macos', 'Nuzky.app');
