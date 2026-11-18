@@ -46,7 +46,8 @@ opt-level = 0
 [profile.dev.build-override]
 debug = "line-tables-only"
 
-# whisper-rs-sys 0.15.0 with whisper.cpp and ggml as shared libraries and ggml's CPU code built once per instruction
-# set, which no whisper-rs-sys release offers yet (docs/BUILDING.md, Patched whisper-rs-sys).
+# whisper-rs 0.16.0 and whisper-rs-sys 0.15.0 with whisper.cpp and ggml as shared libraries and ggml's CPU code built
+# once per instruction set, which no whisper-rs release offers yet (docs/BUILDING.md, Patched whisper-rs).
 [patch.crates-io]
-whisper-rs-sys = { git = "https://github.com/nuzkyapp/whisper-rs", rev = "63b6c581d031bc58710de2e9533a3998b5c9dd36" }
+whisper-rs = { git = "https://github.com/nuzkyapp/whisper-rs", rev = "36c36405b3a65d480c2d2f1040a990be8c8da55f" }
+whisper-rs-sys = { git = "https://github.com/nuzkyapp/whisper-rs", rev = "36c36405b3a65d480c2d2f1040a990be8c8da55f" }

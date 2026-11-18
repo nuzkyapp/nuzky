@@ -9,7 +9,7 @@ rust-version = "1.94"
 links = "nuzky-ggml"
 
 [features]
-gpu = ["whisper-rs-sys/vulkan"]
+gpu = ["whisper-rs/vulkan"]
 
 [dependencies]
 nuzky-engine.workspace = true
@@ -30,7 +30,9 @@ realfft = "3.5"
 # whisper.cpp and ggml as shared libraries, with ggml's CPU code built once per instruction set; ggml loads the
 # fastest this processor runs (src/ggml.rs).
 [target.'cfg(any(target_os = "linux", windows))'.dependencies]
-whisper-rs-sys = { version = "0.15.0", features = ["dynamic-backends"] }
+whisper-rs = { version = "0.16.0", features = ["dynamic-backends"] }
+# Only for DEP_WHISPER_LIB_DIR in build.rs, which whisper-rs-sys gives the crates that depend on it directly.
+whisper-rs-sys = "0.15.0"
 
 # Speech recognition on the GPU through Metal. whisper.cpp embeds its shaders in the binary.
 [target.'cfg(target_os = "macos")'.dependencies]
