@@ -1,6 +1,6 @@
 name: Checks
 
-# Lint, types, both builds, Rust tests, dependency audits and the check without AVX2 on Linux for every
+# Lint, types, both builds, Rust tests, dependency audits and the checks without AVX on Linux for every
 # non-draft pull request and push to main. Public-repository runners are free. scripts/check.sh adds
 # the full tests with media and models and the UI flows locally before a release.
 on:
@@ -48,8 +48,8 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install Linux dependencies
         run: bash scripts/setup-ubuntu-deps.sh
-      - name: Install QEMU
-        run: sudo apt-get install -y qemu-user-static
+      - name: Install QEMU and espeak-ng
+        run: sudo apt-get install -y qemu-user-static espeak-ng
       - run: npm ci
       - run: npm audit --omit=dev --audit-level=high
       - name: Rust advisories and licences
@@ -105,6 +105,27 @@ jobs:
           done
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="qemu-x86_64-static -cpu Nehalem" \
             cargo test --locked --workspace --lib -- --include-ignored runtime:: the_face_models
+      # ggml loads the processor code this CPU runs (crates/analysis/src/ggml.rs); code for a newer one stops the
+      # process with an illegal instruction at the first call into ggml.
+      - name: Recognises speech without AVX
+        env:
+          XDG_DATA_HOME: ${{ github.workspace }}/tmp-test/xdg/data
+          XDG_CACHE_HOME: ${{ github.workspace }}/tmp-test/xdg/cache
+        run: |
+          ulimit -c 0
+          models=tmp-test/xdg/data/nuzky/models
+          curl --fail --location --silent --show-error --output "$models/ggml-tiny.bin" \
+            https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.bin
+          echo "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21  $models/ggml-tiny.bin" | sha256sum --check
+          curl --fail --location --silent --show-error --output "$models/ggml-silero-v5.1.2.bin" \
+            https://huggingface.co/ggml-org/whisper-vad/resolve/9ffd54a1e1ee413ddf265af9913beaf518d1639b/ggml-silero-v5.1.2.bin
+          echo "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf  $models/ggml-silero-v5.1.2.bin" | sha256sum --check
+          espeak-ng -v en-us -s 150 -w tmp-test/nehalem.wav "Nuzky cuts the video and writes the captions."
+          said=$(qemu-x86_64-static -cpu Nehalem target/debug/nuzky-analyze tmp-test/nehalem.wav words --lang en \
+            --model "$models/ggml-tiny.bin" --vad-model "$models/ggml-silero-v5.1.2.bin" --cache tmp-test/nehalem-cache)
+          echo "$said"
+          jq -e '[.words[].text | ascii_downcase] | any(startswith("video")) and any(startswith("caption"))' <<<"$said" \
+            || { echo "nuzky-analyze did not recognise the speech on a CPU without AVX" >&2; exit 1; }
 
   account:
     name: Account server
