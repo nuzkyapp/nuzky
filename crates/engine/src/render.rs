@@ -89,6 +89,8 @@ pub struct Renderer {
     skipped_ever: Vec<String>,
     /// The share of the frame's width, from the left, drawn without the clips' adjustments; `None` for none.
     compare: Option<f32>,
+    /// The preview plays the timeline backwards, so each clip reads its file the other way.
+    reverse: bool,
 }
 
 type LutStamp = (u64, Option<std::time::SystemTime>);
@@ -347,11 +349,17 @@ impl Renderer {
             skipped: Vec::new(),
             skipped_ever: Vec::new(),
             compare: None,
+            reverse: false,
         })
     }
 
     /// Draws the share of the frame's width `split` from the left without the clips' adjustments, so the preview
     /// shows the picture before and after them side by side. Only the preview sets it; an export never does.
+    /// Whether the timeline plays backwards in the preview, so decoders read ahead towards the start.
+    pub fn set_reverse(&mut self, reverse: bool) {
+        self.reverse = reverse;
+    }
+
     pub fn set_compare(&mut self, split: Option<f32>) {
         self.compare = split.filter(|s| s.is_finite()).map(|s| s.clamp(0.0, 1.0));
     }
@@ -801,7 +809,7 @@ impl Renderer {
                 } else {
                     source_time(clip, t_us).min((asset.duration_us - 1).max(0))
                 };
-                let backward = crate::retime::Retime::of(clip).is_some_and(|map| map.reverse());
+                let backward = crate::retime::Retime::of(clip).is_some_and(|map| map.reverse()) != self.reverse;
                 let worker = self.worker(&clip.id, &asset.path, wait == Wait::Exact);
                 let frame = worker.get(source_t, size, playing, wait == Wait::Exact, backward);
                 if wait == Wait::Exact {

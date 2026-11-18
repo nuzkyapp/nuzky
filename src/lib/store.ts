@@ -8,6 +8,7 @@ import { US } from "./time";
 import type { Animation, Asset, Background, Clip, CopiedClip, Delivery, EditCmd, Filmstrip, JobEvent, Project, ProjectVersion, Snapshot, ModelQuestion, TextStyle, TimeRange, Track, Transform, Transition, ZoomsApplied } from "./types";
 import type { CaptionLook } from "./speech";
 import { keysOf } from "./keys";
+import { usePreview } from "./preview";
 
 export interface Toast {
   id: number;
@@ -551,7 +552,8 @@ export const useEditor = create<EditorState>((set, get) => ({
     else {
       // Plays the project as it is, not a style previewed under the pointer; both calls reach the engine in order.
       endPreview(true);
-      api.play();
+      const { speed } = usePreview.getState();
+      void (speed === 1 ? api.play() : api.playAt(speed));
     }
   },
 

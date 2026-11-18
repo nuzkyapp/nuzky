@@ -2727,6 +2727,10 @@ export type TransitionKind = "dissolve" | "fadeBlack" | "fadeWhite" | "slideLeft
 export type Transport = {
   playing: boolean,
   tUs: number,
+  /**
+   * The speed it plays at, below zero backwards; 1 when paused.
+   */
+  rate: number,
 };
 
 export type VideoPreview = {

@@ -139,6 +139,59 @@ impl Stretch {
     }
 }
 
+/// Plays a stream of sound faster while keeping its pitch, for the preview's playback speed: the same
+/// pieces as a clip's speed, each placed where it best continues the one before. Output frame `n`
+/// sounds the stream within half a piece of frame `n * rate`.
+pub struct Tempo {
+    rate: f64,
+    /// Interleaved stereo; `input[0]` is stream frame `offset`.
+    input: Vec<f32>,
+    offset: i64,
+    piece: i64,
+    previous: Option<i64>,
+    /// The second half of the last piece, which the next one overlaps.
+    tail: [f32; HOP as usize * CHANNELS],
+}
+
+impl Tempo {
+    pub fn new(rate: f64) -> Self {
+        Self { rate, input: Vec::new(), offset: 0, piece: 0, previous: None, tail: [0.0; HOP as usize * CHANNELS] }
+    }
+
+    /// Adds the next frames of the stream.
+    pub fn push(&mut self, frames: &[f32]) {
+        self.input.extend_from_slice(frames);
+    }
+
+    /// Appends to `out` every frame the stream so far can sound.
+    pub fn pull(&mut self, out: &mut Vec<f32>) {
+        loop {
+            let nominal = (self.piece as f64 * HOP as f64 * self.rate).round() as i64;
+            let reach =
+                (nominal + FRAME as i64 + SEEK + COARSE).max(self.previous.map_or(0, |p| p + HOP + FRAME as i64));
+            if reach > self.offset + (self.input.len() / CHANNELS) as i64 {
+                return;
+            }
+            let start = match self.previous {
+                None => nominal,
+                Some(previous) => best(&self.input, previous + HOP - self.offset, nominal - self.offset) + self.offset,
+            };
+            let at = |frame: i64, channel: usize| self.input[(frame - self.offset) as usize * CHANNELS + channel];
+            for n in 0..HOP as usize {
+                for c in 0..CHANNELS {
+                    out.push(self.tail[n * CHANNELS + c] + WINDOW[n] * at(start + n as i64, c));
+                    self.tail[n * CHANNELS + c] = WINDOW[n + HOP as usize] * at(start + HOP + n as i64, c);
+                }
+            }
+            self.previous = Some(start);
+            self.piece += 1;
+            let keep = (start.min(nominal) - SEEK).max(self.offset);
+            self.input.drain(..(keep - self.offset) as usize * CHANNELS);
+            self.offset = keep;
+        }
+    }
+}
+
 /// Mean square of the sound around a piece that starts at `start`, wherever the search could move
 /// it. Nobody hears how a piece among quiet sound joins, so it starts where speed puts it, and the
 /// pieces after it depend on nothing before it: playback started late in a long clip finds its
@@ -232,5 +285,33 @@ mod tests {
         let mut stretch = Stretch::new(48_000, 1.25);
         stretch.reach(&tone, 70 * 48_000, 70 * 48_000 + 1024);
         assert!(stretch.found.len() as i64 <= 2 * SPAN * BLOCK + 4, "{} pieces found", stretch.found.len());
+    }
+
+    /// The preview at 2x plays a 440 Hz tone as 440 Hz in half the time, steady, whatever buffers the stream comes in.
+    #[test]
+    fn the_preview_speed_keeps_a_tone_at_its_pitch_in_half_the_time() {
+        let tone: Vec<f32> = (0..4 * 48_000)
+            .flat_map(|i| [(std::f64::consts::TAU * 440.0 * i as f64 / 48_000.0).sin() as f32 * 0.25; 2])
+            .collect();
+        let play = |chunk: usize| {
+            let (mut tempo, mut out) = (Tempo::new(2.0), Vec::new());
+            for part in tone.chunks(chunk * CHANNELS) {
+                tempo.push(part);
+                tempo.pull(&mut out);
+            }
+            out
+        };
+        let out = play(1024);
+        assert!(play(333) == out, "the sound depends on the buffers it came in");
+        let frames = out.len() / CHANNELS;
+        assert!((frames as i64 - 2 * 48_000).abs() < 2048, "{frames} frames for 4 s at 2x");
+        let left: Vec<f32> = out.iter().step_by(CHANNELS).copied().skip(HOP as usize).collect();
+        let crossings = left.windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count();
+        let hz = crossings as f64 / (left.len() as f64 / 48_000.0);
+        assert!((hz - 440.0).abs() < 4.0, "the tone plays at {hz} Hz");
+        for (index, window) in left.chunks(2400).filter(|w| w.len() == 2400).enumerate() {
+            let rms = (window.iter().map(|s| s * s).sum::<f32>() / window.len() as f32).sqrt();
+            assert!((rms / (0.25 / 2f32.sqrt()) - 1.0).abs() < 0.05, "window {index} is at {rms}");
+        }
     }
 }

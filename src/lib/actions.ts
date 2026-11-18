@@ -1,21 +1,53 @@
 import { exportCover, useCover } from "./cover";
 import type { ActionId } from "./keys";
-import { toggleFullPreview, toggleMuted } from "./preview";
+import { SPEEDS, rememberSpeed, toggleFullPreview, toggleMuted, usePreview } from "./preview";
+import { api } from "./api";
 import { togglePreviewWindow } from "./previewWindow";
-import { seekSource, sourceDuration, useSource } from "./source";
-import { copySelection, cutSelection, deleteSelection, deleteSide, duplicateSelection, edgeBeside, freezeAtPlayhead, openExport, pasteAttributes, pasteClips, projectDuration, splitAtPlayhead, useEditor } from "./store";
+import { seekSource, sourceDuration, toggleSourcePlay, useSource } from "./source";
+import { copySelection, cutSelection, deleteSelection, deleteSide, duplicateSelection, edgeBeside, endPreview, freezeAtPlayhead, openExport, pasteAttributes, pasteClips, projectDuration, splitAtPlayhead, useEditor } from "./store";
 import { US, lastFrame, nearestFrame, stepFrame } from "./time";
 import { togglePanel } from "./dock";
 import { pickAndImport } from "../components/panel/assets";
 
 /** What the cover editor holds back: nothing plays there, and the clips are not shown. */
-export const RESTS_IN_COVER = new Set<ActionId>(["playPause", "split", "deleteLeft", "deleteRight", "freeze", "duplicate", "copy", "cut", "paste", "pasteAttributes", "delete"]);
+export const RESTS_IN_COVER = new Set<ActionId>(["playPause", "playBackward", "stop", "playForward", "split", "deleteLeft", "deleteRight", "freeze", "duplicate", "copy", "cut", "paste", "pasteAttributes", "delete"]);
 /** What choosing reels lets through to the editor. */
 export const WORKS_IN_REELS = new Set<ActionId>(["undo", "redo", "framePrev", "frameNext", "secondBack", "secondForward", "previewWindow"]);
 /** What would change the hidden timeline unseen in the full screen preview. */
 export const RESTS_IN_FULL = new Set<ActionId>(["delete", "split", "deleteLeft", "deleteRight", "freeze", "duplicate", "import", "undo", "redo", "cut", "paste", "pasteAttributes"]);
 /** What a media item shown in the preview takes from the timeline. */
 export const MOVES_SOURCE = new Set<ActionId>(["framePrev", "frameNext", "secondBack", "secondForward", "goStart", "goEnd"]);
+
+/** The next of SPEEDS above `rate`, or the fastest. */
+const faster = (rate: number) => SPEEDS.find((s) => s > rate + 1e-6) ?? SPEEDS[SPEEDS.length - 1];
+
+/**
+ * J and L play backwards and forwards, each press while already going that way one speed faster; K stops. Forwards
+ * starts at the speed Play uses and becomes it; backwards starts at 1x. A media item in the preview only plays and stops.
+ */
+export function shuttle(direction: -1 | 0 | 1) {
+  const source = useSource.getState();
+  if (source.asset) {
+    if (direction > 0 ? !source.playing : source.playing) toggleSourcePlay();
+    return;
+  }
+  const s = useEditor.getState();
+  if (direction === 0) return void (s.playing && api.pause());
+  if (!s.snap || projectDuration(s.snap.project) === 0) return;
+  const { rate, speed } = usePreview.getState();
+  const along = s.playing && Math.sign(rate) === direction;
+  const next = along ? faster(Math.abs(rate)) : direction > 0 ? speed : 1;
+  if (direction > 0) rememberSpeed(next);
+  endPreview(true);
+  void api.playAt(direction * next);
+}
+
+/** Chooses the speed Play plays at; playing, the preview goes on at it, the same way round. */
+export function chooseSpeed(speed: number) {
+  rememberSpeed(speed);
+  const { rate } = usePreview.getState();
+  if (useEditor.getState().playing && Math.abs(rate) !== speed) void api.playAt(rate < 0 ? -speed : speed);
+}
 
 const CLIPBOARD = { copy: copySelection, cut: cutSelection, paste: pasteClips, pasteAttributes } as const;
 export const isClipboard = (action: ActionId): action is keyof typeof CLIPBOARD => action in CLIPBOARD;
@@ -35,6 +67,10 @@ export function runAction(action: ActionId, repeat = false) {
   switch (action) {
     case "playPause":
       return repeat ? undefined : s.togglePlay();
+    case "playBackward":
+    case "stop":
+    case "playForward":
+      return repeat ? undefined : shuttle(action === "playBackward" ? -1 : action === "stop" ? 0 : 1);
     case "undo":
       return s.undo();
     case "redo":

@@ -23,6 +23,8 @@ pub enum Msg {
     Project(Arc<Project>),
     Seek(i64),
     Play,
+    /// The preview's playback speed, below zero backwards; it plays at once. Not part of the project.
+    PlayAt(f64),
     Pause,
     /// Available preview box in device pixels.
     Resize(u32, u32),
@@ -35,11 +37,13 @@ pub enum Msg {
 }
 
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[derive(Clone, Copy, Serialize, Default)]
+#[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Transport {
     pub playing: bool,
     pub t_us: i64,
+    /// The speed it plays at, below zero backwards; 1 when paused.
+    pub rate: f64,
 }
 
 /// Where the preview thread reports playback and errors: the webview in the app.
@@ -49,6 +53,12 @@ trait Events: Send + 'static {
     fn error(&self, error: Option<&str>);
     /// The plugin effects the preview now draws without, by name, whenever they change.
     fn effects_skipped(&self, _names: &[String]) {}
+}
+
+impl Default for Transport {
+    fn default() -> Self {
+        Self { playing: false, t_us: 0, rate: 1.0 }
+    }
 }
 
 impl Events for AppHandle {
@@ -91,6 +101,7 @@ trait Frames {
         &[]
     }
     fn compare(&mut self, _split: Option<f32>) {}
+    fn reverse(&mut self, _reverse: bool) {}
 }
 
 impl Frames for Renderer {
@@ -104,6 +115,10 @@ impl Frames for Renderer {
 
     fn compare(&mut self, split: Option<f32>) {
         self.set_compare(split);
+    }
+
+    fn reverse(&mut self, reverse: bool) {
+        self.set_reverse(reverse);
     }
 }
 
@@ -239,7 +254,11 @@ fn run<F: Frames>(
     };
 
     let emit = |st: &State| {
-        let tr = Transport { playing: st.audio.is_some(), t_us: st.t_us };
+        let tr = Transport {
+            playing: st.audio.is_some(),
+            t_us: st.t_us,
+            rate: st.audio.as_ref().map_or(1.0, AudioOut::rate),
+        };
         *transport.lock().unwrap() = tr;
         events.transport(tr);
     };
@@ -277,10 +296,11 @@ fn run<F: Frames>(
                     }
                     Msg::Seek(t) => {
                         st.t_us = t.clamp(0, st.project.duration_us().max(0));
-                        if st.audio.is_some() {
+                        if let Some(rate) = st.audio.as_ref().map(AudioOut::rate) {
                             st.audio = Some(AudioOut::start(
                                 st.shared_project.clone(),
                                 st.t_us,
+                                rate,
                                 cache_dir.clone(),
                                 muted.clone(),
                             ));
@@ -289,18 +309,21 @@ fn run<F: Frames>(
                         state_changed = true;
                     }
                     Msg::Play if st.audio.is_none() => {
-                        let end = st.project.duration_us();
-                        if end <= 0 {
-                            continue;
-                        }
-                        if st.t_us >= end - st.project.frame_duration_us() as i64 {
-                            st.t_us = 0;
-                        }
-                        st.audio =
-                            Some(AudioOut::start(st.shared_project.clone(), st.t_us, cache_dir.clone(), muted.clone()));
-                        state_changed = true;
+                        state_changed |= play(&mut st, 1.0, &cache_dir, &muted);
                     }
                     Msg::Play => {}
+                    Msg::PlayAt(rate) => {
+                        let rate = if rate.is_finite() { rate.clamp(-MAX_RATE, MAX_RATE) } else { 1.0 };
+                        if rate.abs() < MIN_RATE {
+                            continue;
+                        }
+                        if let Some(a) = st.audio.take() {
+                            st.t_us = a.now_us().clamp(0, st.project.duration_us().max(0));
+                        }
+                        play(&mut st, rate, &cache_dir, &muted);
+                        st.dirty = true;
+                        state_changed = true;
+                    }
                     Msg::Pause => {
                         if let Some(a) = st.audio.take() {
                             st.t_us = a.now_us().min(st.project.duration_us());
@@ -327,15 +350,17 @@ fn run<F: Frames>(
             if let Some(audio) = &st.audio {
                 let end = st.project.duration_us();
                 let now = audio.now_us();
-                if now >= end {
+                let backward = audio.rate() < 0.0;
+                if now >= end || (backward && now <= 0) {
                     st.audio = None;
-                    st.t_us = end;
+                    st.t_us = now.clamp(0, end);
                     st.dirty = true;
                     state_changed = true;
                 } else {
                     st.t_us = now;
                 }
             }
+            renderer.reverse(st.audio.as_ref().is_some_and(|a| a.rate() < 0.0));
             if state_changed {
                 emit(&st);
             }
@@ -381,6 +406,27 @@ fn run<F: Frames>(
             emit(&st);
         }
     }
+}
+
+/// The preview's playback speed stays within these, as faster sound cannot be followed and slower barely moves.
+const MAX_RATE: f64 = 4.0;
+const MIN_RATE: f64 = 0.25;
+
+/// Starts playback at `rate` from the playhead, from the start when forwards at the end, from the end when
+/// backwards at the start. Returns whether it plays.
+fn play(st: &mut State, rate: f64, cache_dir: &std::path::Path, muted: &Arc<AtomicBool>) -> bool {
+    let end = st.project.duration_us();
+    if end <= 0 {
+        return false;
+    }
+    let frame = st.project.frame_duration_us() as i64;
+    if rate > 0.0 && st.t_us >= end - frame {
+        st.t_us = 0;
+    } else if rate < 0.0 && st.t_us <= frame {
+        st.t_us = end;
+    }
+    st.audio = Some(AudioOut::start(st.shared_project.clone(), st.t_us, rate, cache_dir.to_path_buf(), muted.clone()));
+    true
 }
 
 /// The playhead may rest on the very end, where no clip plays; the preview then keeps the last frame.

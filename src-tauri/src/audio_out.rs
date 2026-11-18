@@ -8,9 +8,9 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use nuzky_engine::Project;
 use nuzky_engine::audio::{Mixer, us_to_samples};
 use nuzky_engine::model::{CHANNELS, SAMPLE_RATE};
+use nuzky_engine::{Project, Tempo};
 
 const CHUNK: usize = 1024;
 const RING_FRAMES: usize = SAMPLE_RATE as usize / 5; // 200 ms
@@ -29,12 +29,20 @@ pub struct AudioOut {
     stop: Arc<AtomicBool>,
     mixer: Option<JoinHandle<()>>,
     start_us: i64,
+    rate: f64,
     started: Instant,
 }
 
 impl AudioOut {
-    /// `muted` silences the output while the clock keeps running, so the picture plays on in time.
-    pub fn start(project: Arc<Mutex<Arc<Project>>>, start_us: i64, cache_dir: PathBuf, muted: Arc<AtomicBool>) -> Self {
+    /// `muted` silences the output while the clock keeps running, so the picture plays on in time. `rate` is the
+    /// preview's playback speed, below zero backwards; faster sound keeps its pitch.
+    pub fn start(
+        project: Arc<Mutex<Arc<Project>>>,
+        start_us: i64,
+        rate: f64,
+        cache_dir: PathBuf,
+        muted: Arc<AtomicBool>,
+    ) -> Self {
         let (mut producer, mut consumer) = rtrb::RingBuffer::<f32>::new(RING_FRAMES * CHANNELS);
         let stop = Arc::new(AtomicBool::new(false));
         let started = Instant::now();
@@ -46,17 +54,36 @@ impl AudioOut {
                 let mut mixer = Mixer::new(cache_dir);
                 let mut pos = us_to_samples(start_us);
                 let mut buf = vec![0f32; CHUNK * CHANNELS];
+                let mut tempo = (rate.abs() != 1.0).then(|| Tempo::new(rate.abs()));
+                let mut ready: Vec<f32> = Vec::new();
                 while !stop_mix.load(Ordering::Relaxed) {
-                    if producer.slots() < buf.len() {
+                    if ready.is_empty() {
+                        let snapshot = project.lock().unwrap().clone();
+                        if rate < 0.0 {
+                            pos -= CHUNK as i64;
+                            mixer.mix(&snapshot, pos, &mut buf);
+                            reverse_frames(&mut buf);
+                        } else {
+                            mixer.mix(&snapshot, pos, &mut buf);
+                            pos += CHUNK as i64;
+                        }
+                        match &mut tempo {
+                            Some(tempo) => {
+                                tempo.push(&buf);
+                                tempo.pull(&mut ready);
+                            }
+                            None => ready.extend_from_slice(&buf),
+                        }
+                        continue;
+                    }
+                    let n = producer.slots().min(ready.len()) / CHANNELS * CHANNELS;
+                    if n == 0 {
                         std::thread::sleep(Duration::from_millis(4));
                         continue;
                     }
-                    let snapshot = project.lock().unwrap().clone();
-                    mixer.mix(&snapshot, pos, &mut buf);
-                    if let Ok(chunk) = producer.write_chunk_uninit(buf.len()) {
-                        chunk.fill_from_iter(buf.iter().copied());
+                    if let Ok(chunk) = producer.write_chunk_uninit(n) {
+                        chunk.fill_from_iter(ready.drain(..n));
                     }
-                    pos += CHUNK as i64;
                 }
             })
             .ok();
@@ -77,12 +104,18 @@ impl AudioOut {
         if stream.is_none() {
             log::warn!("No audio output; playback runs silent on the system clock");
         }
-        Self { stream, clock, stop, mixer, start_us, started }
+        Self { stream, clock, stop, mixer, start_us, rate, started }
     }
 
+    pub fn rate(&self) -> f64 {
+        self.rate
+    }
+
+    /// Where on the timeline the sound now heard plays.
     pub fn now_us(&self) -> i64 {
+        let along = |played_us: i64| self.start_us + (played_us as f64 * self.rate).round() as i64;
         if self.stream.is_none() {
-            return self.start_us + self.started.elapsed().as_micros() as i64;
+            return along(self.started.elapsed().as_micros() as i64);
         }
         let consumed = self.clock.consumed.load(Ordering::Acquire) as i64;
         let at = Duration::from_nanos(self.clock.last_callback_ns.load(Ordering::Acquire));
@@ -93,7 +126,17 @@ impl AudioOut {
         if consumed == 0 {
             return self.start_us;
         }
-        self.start_us + (played + since - latency).max(0)
+        along((played + since - latency).max(0))
+    }
+}
+
+/// Puts the stereo frames of `buf` in reverse order.
+fn reverse_frames(buf: &mut [f32]) {
+    let frames = buf.len() / CHANNELS;
+    for i in 0..frames / 2 {
+        for c in 0..CHANNELS {
+            buf.swap(i * CHANNELS + c, (frames - 1 - i) * CHANNELS + c);
+        }
     }
 }
 

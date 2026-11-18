@@ -50,6 +50,8 @@ export const api = {
   /** The side of the file's sound that has it all when a microphone recorded on one side only, else null; null until its sound is prepared. */
   soundOnlyIn: (assetId: string) => invoke<Mono | null>("sound_only_in", { assetId }),
   play: () => invoke<void>("play"),
+  /** Plays at `rate` times the speed, below zero backwards, on this computer only; the project and the export keep theirs. */
+  playAt: (rate: number) => invoke<void>("play_at", { rate }),
   pause: () => invoke<void>("pause"),
   seek: (tUs: number) => invoke<void>("seek", { tUs: Math.round(tUs) }),
   setPreviewBox: (width: number, height: number) => invoke<void>("set_preview_box", { width, height }),

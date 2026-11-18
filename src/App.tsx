@@ -252,6 +252,7 @@ function useBackendEvents() {
         // The timeline playing, from the phone or the AI panel, shows the timeline again.
         if (e.payload.playing) closeSource();
         useEditor.setState({ playing: e.payload.playing, timeUs: e.payload.tUs });
+        usePreview.setState({ rate: e.payload.rate });
       }),
     );
     offs.push(listen<Transport>("source-transport", (e) => useSource.setState({ playing: e.payload.playing, timeUs: e.payload.tUs })));

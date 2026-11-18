@@ -35,6 +35,7 @@ pub mod worker;
 
 pub use model::Project;
 pub use render::{Pending, Renderer, Wait};
+pub use stretch::Tempo;
 
 /// Nuzky's own data folder: projects, models, transcripts, styles and sounds. `NUZKY_DATA_DIR` moves it,
 /// also on Windows, where no environment variable moves the system's application data.
