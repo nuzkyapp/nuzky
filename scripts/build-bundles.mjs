@@ -192,8 +192,11 @@ if (rpmHost) {
 } else if (process.platform === 'linux') {
   // linuxdeploy copied these libraries from Ubuntu's packages; docs/BUILDING.md fetches their source by this list.
   const appdir = path.join(bundle, 'appimage', 'Nuzky.AppDir');
-  const libs = output('find', [appdir, '-type', 'f', '-name', '*.so*', '-not', '-path', '*/usr/lib/Nuzky/*', '-printf', '%f\n']);
-  const owners = output('dpkg', ['-S', ...new Set(libs.split('\n').map((name) => `*/${name}`))]).split('\n')
+  // linuxdeploy also copies whisper.cpp's libraries, which Nuzky itself builds, from usr/lib/Nuzky into usr/lib.
+  const own = new Set(readdirSync(path.join(appdir, 'usr', 'lib', 'Nuzky')));
+  const libs = output('find', [appdir, '-type', 'f', '-name', '*.so*', '-not', '-path', '*/usr/lib/Nuzky/*', '-printf', '%f\n'])
+    .split('\n').filter((name) => !own.has(name));
+  const owners = output('dpkg', ['-S', ...new Set(libs.map((name) => `*/${name}`))]).split('\n')
     .flatMap((line) => line.slice(0, line.lastIndexOf(': ')).split(', '));
   const sources = output('dpkg-query', ['-W', '-f=${source:Package} ${source:Version}\n', ...new Set(owners)]);
   info.push(`Ubuntu source packages of the libraries in the AppImage:\n${[...new Set(sources.split('\n'))].sort().join('\n')}`);
