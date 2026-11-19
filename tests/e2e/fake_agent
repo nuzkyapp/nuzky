@@ -17,6 +17,8 @@ stream-json user messages from stdin while it works; Codex and OpenCode read one
              with inspect_image, puts the logo in from 2 s for 3 s and recolours the Captions track in one run
   "numbered list"  answers with loose Markdown lists: numbered from 1, numbered on from 4, and bullets
   "work as reels"  (Find reels) proposes four reels of at least 15 s from the transcript
+  "youtube chapters"  (Suggest chapters) proposes three chapters at the sentences nearest the start, a third and two
+             thirds of the transcript, and answers with the list Nuzky timed
   "slow"     opens a run, splits the clip and keeps working until stopped
   "steer me" splits at 2 s, waits for another message and splits at 4 s if it says "split", in the same run;
              Codex keeps working until stopped, like "slow"
@@ -618,6 +620,22 @@ elif 'work as reels' in message:
     call('propose_reels', {'run_id': run, 'transcript_key': transcript['transcript_key'], 'candidates': found})
     call('end_run', {'run_id': run, 'action': 'keep'})
     say(f'Našel jsem {len(found)} momenty. Vyber si, které z nich udělat.')
+elif 'youtube chapters' in message:
+    transcript = call('get_transcript', {})
+    words = transcript['words']
+    starts = [i for i in range(len(words)) if i == 0 or words[i - 1]['text'].rstrip().endswith(('.', '!', '?', '…'))
+              or words[i]['start_us'] - words[i - 1]['end_us'] >= 600_000]
+    # The opening and the sentences that start nearest a third and two thirds of the way through; Nuzky times them.
+    last = words[-1]['start_us']
+    near = lambda share: min(starts, key=lambda i: abs(words[i]['start_us'] - share * last))
+    found = [{'from': 0, 'title': 'Úvod'}, {'from': near(1 / 3), 'title': 'Jak to funguje'}, {'from': near(2 / 3), 'title': 'Co z toho plyne'}]
+    say('Čtu přepis a hledám, kde se mění téma.')
+    run = call('begin_run', {'label': 'Suggest chapters'})['run_id']
+    # Long enough for the flow to see the agent at work.
+    time.sleep(2)
+    proposed = call('propose_chapters', {'run_id': run, 'transcript_key': transcript['transcript_key'], 'chapters': found})
+    call('end_run', {'run_id': run, 'action': 'keep'})
+    say('Kapitoly pro YouTube:\n\n' + proposed['text'])
 elif 'retakes' in message:
     for attempt in range(1, 5):
         started, error = time.monotonic(), None

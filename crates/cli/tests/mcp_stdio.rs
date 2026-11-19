@@ -1047,7 +1047,7 @@ fn initialize_list_state_edit_end_undo_over_stdio() {
     let mut c = Client::new(true);
     let list = c.rpc("tools/list", json!({}));
     let tools = list["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 51);
+    assert_eq!(tools.len(), 53);
     let styles = tools.iter().find(|t| t["name"] == "text_styles").unwrap();
     assert_eq!(styles["annotations"]["readOnlyHint"], true);
     let beats = tools.iter().find(|t| t["name"] == "cut_to_beats").unwrap();
@@ -6229,5 +6229,171 @@ fn agents_export_hdr_only_for_hdr_footage_over_stdio() {
         .output()
         .unwrap();
     assert_eq!(String::from_utf8_lossy(&probe.stdout).trim(), "hevc,arib-std-b67");
+    c.finish();
+}
+
+/// Where each beep of `hz` starts in the sound of `video`, found 5 ms at a time with the Goertzel filter.
+fn beeps(video: &std::path::Path, hz: f64) -> Vec<i64> {
+    let decoded = Command::new("ffmpeg")
+        .args(["-hide_banner", "-loglevel", "error", "-i"])
+        .arg(video)
+        .args(["-vn", "-ac", "1", "-ar", "48000", "-f", "s16le", "-"])
+        .output()
+        .unwrap();
+    assert!(decoded.status.success());
+    let samples: Vec<f64> =
+        decoded.stdout.as_chunks::<2>().0.iter().map(|b| f64::from(i16::from_le_bytes(*b)) / 32768.0).collect();
+    let window = 240;
+    let k = 2.0 * (2.0 * std::f64::consts::PI * hz / 48_000.0).cos();
+    let mut onsets = Vec::new();
+    let mut on = false;
+    for (i, chunk) in samples.chunks(window).enumerate() {
+        let (mut s1, mut s2) = (0.0, 0.0);
+        for x in chunk {
+            let s = x + k * s1 - s2;
+            s2 = s1;
+            s1 = s;
+        }
+        let amplitude = (s1 * s1 + s2 * s2 - k * s1 * s2).max(0.0).sqrt() * 2.0 / chunk.len() as f64;
+        if amplitude > 0.1 && !on {
+            onsets.push(i as i64 * 5_000);
+        }
+        on = amplitude > 0.05;
+    }
+    onsets
+}
+
+/// A minute of talk with a word every 2 s, the three that open its chapters said at 880 Hz and the rest at 440 Hz. The
+/// agent cuts 6 s out and speeds the rest up by half, then proposes chapters: Nuzky times them on the cut video,
+/// refuses lists YouTube would not show, and export_video chapters: true writes the list beside the MP4, where each
+/// chapter's time is the second its first word is heard in the file.
+#[test]
+fn chapters_are_timed_on_the_cut_and_sped_up_video_over_stdio() {
+    use nuzky_session::transcripts::{Record, TranscriptStore, VERSION};
+    let mut c = Client::start(true, None, Some(None));
+    let opening = [0usize, 10, 20];
+    let at = |k: usize| 500_000 + k as i64 * 2_000_000;
+    let tone = |k: usize| if opening.contains(&k) { 880 } else { 440 };
+    let sound: Vec<String> = (0..30)
+        .map(|k| {
+            format!(
+                r"between(t\,{:.1}\,{:.1})*sin(2*PI*{}*t)",
+                at(k) as f64 / 1e6,
+                (at(k) + 300_000) as f64 / 1e6,
+                tone(k)
+            )
+        })
+        .collect();
+    let video = ffmpeg_media(
+        &c,
+        "talk.mov",
+        &["color=c=gray:s=320x180:r=30:d=60", &format!("aevalsrc=0.5*({}):s=48000:d=60", sound.join("+"))],
+        &["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le"],
+    );
+    let asset = nuzky_engine::media::probe(&video, "talk".into()).unwrap();
+    let store = TranscriptStore::at(c.dir.join("data/nuzky/transcripts")).unwrap();
+    let words = (0..30)
+        .map(|k| nuzky_engine::speech::Word {
+            start_us: at(k),
+            end_us: at(k) + 300_000,
+            text: format!("w{k}."),
+            probability: 0.9,
+        })
+        .collect();
+    let record = Record {
+        version: VERSION,
+        fingerprint: store.fingerprint(&asset).unwrap(),
+        duration_us: asset.duration_us,
+        model: "fixture".into(),
+        language: "cs".into(),
+        words,
+        segments: vec![],
+        alignment: None,
+    };
+    store.put(&asset, &record).unwrap();
+
+    let run = c.call("begin_run", json!({"label": "chapters"}))["run_id"].clone();
+    let edits = json!([{"type":"addAssets","assets":[asset]},{"type":"addClip","assetId":"talk"},
+        {"type":"setCanvas","width":320,"height":180}]);
+    c.call("apply_edits", json!({"run_id":run,"request_id":"place","edits":edits}));
+    let cut = json!([{"type":"rippleDeleteRanges","ranges":[{"startUs":10_000_000,"endUs":16_000_000}]}]);
+    c.call("apply_edits", json!({"run_id":run,"request_id":"cut","edits":cut}));
+    let rest = c.call("get_state", json!({}))["tracks"][0]["clips"][1]["id"].clone();
+    let faster = json!([{"type":"updateClip","clipId":rest,"speed":1.5,"keepPitch":true}]);
+    c.call("apply_edits", json!({"run_id":run,"request_id":"speed","edits":faster}));
+    let transcript = c.call("get_transcript", json!({}));
+    let key = transcript["transcript_key"].clone();
+    // Words 5 to 7 were cut, so source word k is word k - 3 of the transcript from then on.
+    let index = |k: usize| if k < 5 { k } else { k - 3 };
+    assert_eq!(transcript["words"][index(10)]["text"], "w10.");
+    let propose = |c: &mut Client, chapters: Value| {
+        let args = json!({"run_id": run, "transcript_key": key, "chapters": chapters});
+        c.rpc("tools/call", json!({"name": "propose_chapters", "arguments": args}))
+    };
+    let refused = |c: &mut Client, chapters: Value| {
+        let result = propose(c, chapters);
+        assert_eq!(result["result"]["isError"], true, "{result}");
+        let text: Value = serde_json::from_str(result["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        text["error"].as_str().unwrap().to_owned()
+    };
+    let chapter = |k: usize, title: &str| json!({"from": index(k), "title": title});
+    let revision = c.call("get_state", json!({}))["revision"].clone();
+    let close =
+        refused(&mut c, json!([chapter(0, "Úvod"), chapter(10, "Proč"), chapter(11, "Hned"), chapter(20, "Jak")]));
+    assert!(close.starts_with("CHAPTERS_INVALID") && close.contains(r#"chapter 3 "Hned" at 00:14"#), "{close}");
+    let two = refused(&mut c, json!([chapter(0, "Úvod"), chapter(20, "Jak")]));
+    assert!(two.starts_with("CHAPTERS_INVALID") && two.contains("3 or more"), "{two}");
+    assert!(
+        refused(&mut c, json!([chapter(0, "Úvod"), chapter(20, "Jak"), chapter(10, "Proč")]))
+            .starts_with("CHAPTER_ORDER")
+    );
+    assert!(
+        refused(&mut c, json!([chapter(0, "Úvod"), chapter(10, "Pro\nč"), chapter(20, "Jak")]))
+            .starts_with("CHAPTER_TITLE")
+    );
+    assert!(
+        refused(&mut c, json!([chapter(0, "A"), chapter(10, "B"), {"from": 99, "title": "C"}]))
+            .starts_with("CHAPTER_OUTSIDE_TRANSCRIPT")
+    );
+    assert_eq!(c.call("get_state", json!({}))["revision"], revision, "a refused list changes nothing");
+    assert_eq!(c.call("get_chapters", json!({}))["chapters"], json!([]));
+
+    let proposed =
+        propose(&mut c, json!([chapter(0, "Úvod"), chapter(10, " Proč to dělat "), chapter(20, "Jak na to")]));
+    let proposed = proposed["result"]["structuredContent"].clone();
+    // Word 10 is 20.5 s into the file and 16 s of it play from 10 s at 1.5x: 10 + 4.5 / 1.5 = 13 s. Word 20 at 40.5 s
+    // plays at 10 + 24.5 / 1.5 = 26.33 s.
+    let starts: Vec<_> = proposed["chapters"].as_array().unwrap().iter().map(|c| c["startUs"].clone()).collect();
+    assert_eq!(starts, [json!(0), json!(13_000_000), json!(26_333_333)], "{proposed}");
+    assert_eq!(proposed["text"], "00:00 Úvod\n00:13 Proč to dělat\n00:26 Jak na to", "{proposed}");
+    assert_eq!(proposed["problem"], Value::Null);
+    c.call("end_run", json!({"run_id": run, "action": "keep"}));
+    let listed = c.call("get_chapters", json!({}));
+    assert_eq!((&listed["text"], &listed["duration_us"]), (&proposed["text"], &json!(39_333_333)), "{listed}");
+
+    let out = c.dir.join("talk export.mp4");
+    let job = c.call("export_video", json!({"path": out, "resolution": 180, "fps": 30, "chapters": true}));
+    let done = wait_job(&mut c, &job, Duration::from_secs(180), |_| false);
+    assert_eq!(done["status"], "done", "{done}");
+    let file = done["result"]["chapters_path"].as_str().unwrap();
+    assert_eq!(file.replace(".chapters.txt", ".mp4"), done["result"]["path"].as_str().unwrap(), "beside the video");
+    let text = std::fs::read_to_string(c.dir.join("talk export.chapters.txt")).unwrap();
+    assert_eq!(text, "00:00 Úvod\n00:13 Proč to dělat\n00:26 Jak na to\n");
+
+    // In the exported file, the words that open the chapters are heard where the chapters say.
+    let heard = beeps(&out, 880.0);
+    assert_eq!(heard.len(), 3, "{heard:?}");
+    for (chapter, onset) in proposed["chapters"].as_array().unwrap().iter().zip(&heard).skip(1) {
+        let start = chapter["startUs"].as_i64().unwrap();
+        assert!((start - onset).abs() <= 25_000, "{chapter} starts at {start}, its word is heard at {onset}");
+        let seconds = onset / 1_000_000;
+        assert_eq!(chapter["time"], format!("00:{seconds:02}"), "{chapter} vs {onset}");
+    }
+    assert!(heard[0] <= 1_000_000, "the first chapter's word opens the video: {heard:?}");
+
+    let args = json!({"path": c.dir.join("other.mp4"), "resolution": 180, "fps": 30, "chapters": true,
+        "leave_out_us": [[2_000_000, 7_000_000]]});
+    let again = c.error("export_video", args);
+    assert!(again.contains("CHAPTERS_INVALID"), "leaving out 5 s brings the chapters too close: {again}");
     c.finish();
 }

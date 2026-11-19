@@ -30,6 +30,9 @@ pub struct Project {
     /// Moments of a long video that could each be a reel of their own, in timeline order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reel_candidates: Vec<ReelCandidate>,
+    /// The video's chapters for YouTube, in the order they play (`chapters::place`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub chapters: Vec<Chapter>,
     /// The timeline of another editor the project was opened from.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional = nullable))]
@@ -42,6 +45,24 @@ pub struct Project {
 
 /// The longest voiceover script, in characters: about an hour of speech.
 pub const MAX_SCRIPT_CHARS: usize = 60_000;
+
+/// A chapter of the video. It belongs to the word it opens with, as transcripts belong to their files, so it
+/// follows every cut and speed change; the first chapter starts at 0:00 whatever its word.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Chapter {
+    pub title: String,
+    /// The file the chapter's first word is said in.
+    pub asset_id: String,
+    /// Where that word starts in the file.
+    pub source_us: i64,
+}
+
+/// The longest chapter title, in characters, and the most chapters a project keeps.
+pub const MAX_CHAPTER_TITLE_CHARS: usize = 100;
+pub const MAX_CHAPTERS: usize = 100;
 
 /// A timeline cut in another editor, such as a CapCut draft, as it was opened into this project.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -1440,6 +1461,7 @@ impl Project {
             word_corrections: Vec::new(),
             thumbnails: Vec::new(),
             reel_candidates: Vec::new(),
+            chapters: Vec::new(),
             imported: None,
             script: String::new(),
         }
@@ -1560,8 +1582,10 @@ mod tests {
         let old = r##"{"version":1,"name":"Old","canvas":{"width":1080,"height":1920,"fps":30,"background":"#000000"},"assets":[],"tracks":[{"id":"main","kind":"video","name":"Main","muted":false,"hidden":false,"clips":[]}]}"##;
         let project: Project = serde_json::from_str(old).unwrap();
         assert_eq!(project.script, "");
+        assert!(project.chapters.is_empty());
         let saved = serde_json::to_value(&project).unwrap();
         assert!(saved.get("script").is_none(), "an empty script adds nothing to the file");
+        assert!(saved.get("chapters").is_none(), "a project without chapters saves as before");
         assert_eq!(serde_json::to_value(serde_json::from_value::<Project>(saved.clone()).unwrap()).unwrap(), saved);
 
         let mut with = project;

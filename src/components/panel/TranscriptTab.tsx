@@ -11,6 +11,7 @@ import { JobError, SpeechFields, SpeechJobCard, useSpeechJobs } from "./SpeechCo
 import { TranscriptText } from "./TranscriptText";
 import { SuggestZoomsButton, ZoomBar, useZoomSuggestions } from "./TranscriptZooms";
 import { BrollBar, SuggestBrollButton, useBrollSuggestions } from "./TranscriptBroll";
+import { ChaptersBar, ChaptersButton } from "./TranscriptChapters";
 
 /** Audio tracks with a checkbox: checked ones are not cut, so music keeps playing across cuts. */
 function KeepTracks({ project }: { project: Project }) {
@@ -119,22 +120,28 @@ export function TranscriptTab() {
   if (!view && !error) return null;
   if (!view || view.words.length === 0)
     return (
-      <div className="flex flex-col gap-3.5 overflow-y-auto p-3.5">
-        <p className="text-[12px] text-muted">Transcribe the timeline, then cut the video by deleting words.</p>
-        <SpeechFields disabled={busy} />
-        {running ? (
-          <SpeechJobCard job={running} />
-        ) : (
-          <span className="flex">
-            {/* With every clip transcribed but no words, transcribing again may use another language. */}
-            <Button variant="primary" className="flex-1" data-transcribe disabled={!!blocker || !view} disabledReason={blocker ?? undefined} onClick={() => startSpeech(null, view?.untranscribed.length === 0)}>
-              <ScrollText size={15} /> Transcribe timeline
-            </Button>
-          </span>
-        )}
-        {!running && <JobError job={last} />}
-        {errorNote}
-        <ReelsButton project={project} className="self-start" />
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex flex-col gap-3.5 overflow-y-auto p-3.5">
+          <p className="text-[12px] text-muted">Transcribe the timeline, then cut the video by deleting words.</p>
+          <SpeechFields disabled={busy} />
+          {running ? (
+            <SpeechJobCard job={running} />
+          ) : (
+            <span className="flex">
+              {/* With every clip transcribed but no words, transcribing again may use another language. */}
+              <Button variant="primary" className="flex-1" data-transcribe disabled={!!blocker || !view} disabledReason={blocker ?? undefined} onClick={() => startSpeech(null, view?.untranscribed.length === 0)}>
+                <ScrollText size={15} /> Transcribe timeline
+              </Button>
+            </span>
+          )}
+          {!running && <JobError job={last} />}
+          {errorNote}
+          <div className="flex gap-2 self-start">
+            <ReelsButton project={project} />
+            <ChaptersButton />
+          </div>
+        </div>
+        <ChaptersBar />
       </div>
     );
 
@@ -144,6 +151,7 @@ export function TranscriptTab() {
         {/* What the transcript is, on its own line; under it the actions that work from it, side by side. */}
         <div className="-my-1 flex items-center gap-2">
           <span className="tabular flex-1 whitespace-nowrap text-[12px] text-muted">{view.words.length} word{view.words.length === 1 ? "" : "s"}</span>
+          <ChaptersButton />
           <IconButton label={blocker ?? (busy ? "Wait for speech recognition to finish" : "Transcribe again")} className="h-6 w-6" disabled={!!blocker || busy} onClick={() => startSpeech(null, true)} data-transcribe>
             <RefreshCw size={13} />
           </IconButton>
@@ -202,6 +210,7 @@ export function TranscriptTab() {
       </div>
       <ZoomBar state={zooms} blocker={cutBlocker} />
       <BrollBar state={broll} blocker={null} />
+      <ChaptersBar />
       <TranscriptText
         tokens={tokens}
         blocker={cutBlocker}

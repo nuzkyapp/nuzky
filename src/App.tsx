@@ -44,6 +44,7 @@ import { addProjects, findDrafts, listenStyle, loadStyle, useStyle } from "./lib
 import { closeCover, closeExport, deleteOverlay, deleteText, loadModels as loadVisionModels, onCoverJob, selectedOverlay, useCover } from "./lib/cover";
 import { answerNextSave, savesAsked } from "./lib/exportFolder";
 import { candidateOf, closeReels, onReelsJob, openReelsToFind, playEnding, toggleReelPlay, useReels } from "./lib/reels";
+import { useChapters } from "./lib/chapters";
 import { onBeatsFound } from "./lib/beats";
 import { closeSource, useSource } from "./lib/source";
 import { appWindow, toggleFullPreview, usePreview } from "./lib/preview";
@@ -469,7 +470,7 @@ useEditor.subscribe((s, prev) => {
 // Test hook for WebDriver runs; native file dialogs cannot be automated.
 if (import.meta.env.DEV)
   Object.assign(window, {
-    __nuzky: { importPaths, importLutPaths, luts: useLuts, exportVideo, plugins: usePlugins, runPlugin, gallery: useGallery, store: useEditor, cover: useCover, reels: useReels, openReelsToFind, speech: useSpeech, names: useNames, api, agent: useAgent, dock: useDock, setup: useSetup, library: useLibrary, style: useStyle, addProjects, findDrafts, newProjectFromMedia, capcut: useCapCut, openDraft, openDraftFolder, openProject, refreshLibrary, trashProjects, updates: useUpdates, checkForUpdates, sounds: useSounds, stickers: useStickers, tour: useTour, youtube: useYoutube, previewWindow: appWindow, separateWindow: usePreviewWindow, remote: useRemote, source: useSource, keys: useKeys, keysQuestion: useKeysQuestion, telemetry: useTelemetry, settings: useSettings, openSettings, voiceover: useVoiceover, micLevel: useMicLevel, answerNextSave, savesAsked },
+    __nuzky: { importPaths, importLutPaths, luts: useLuts, exportVideo, plugins: usePlugins, runPlugin, gallery: useGallery, store: useEditor, cover: useCover, reels: useReels, chapters: useChapters, openReelsToFind, speech: useSpeech, names: useNames, api, agent: useAgent, dock: useDock, setup: useSetup, library: useLibrary, style: useStyle, addProjects, findDrafts, newProjectFromMedia, capcut: useCapCut, openDraft, openDraftFolder, openProject, refreshLibrary, trashProjects, updates: useUpdates, checkForUpdates, sounds: useSounds, stickers: useStickers, tour: useTour, youtube: useYoutube, previewWindow: appWindow, separateWindow: usePreviewWindow, remote: useRemote, source: useSource, keys: useKeys, keysQuestion: useKeysQuestion, telemetry: useTelemetry, settings: useSettings, openSettings, voiceover: useVoiceover, micLevel: useMicLevel, answerNextSave, savesAsked },
   });
 
 async function startEditor() {

@@ -3,7 +3,7 @@ import type { GalleryPlugin, GalleryState } from "./gallery";
 import type { StorageUsage, StyleSettings, TelemetryStatus } from "./types";
 import type { EffectIssue, ListedPlugin, PluginRow, PluginValues } from "./plugins";
 import type { ColorLook, LutInfo } from "./color";
-import type { AccountProvider, AccountStatus, AgentAccess, ImportedKeys, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, BeatCutDone, BeatPlans, Boot, BrollChoice, BrollSuggestions, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Mono, Part, PreviewStarted, PreviewWindowBoot, Project, ProjectPoster, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFinish, ReelFraming, Rhythm, Said, SampleRun, ScreenRecording, ScreenWindow, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, SyncRevision, SyncStatus, RevisionView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied, VoiceoverState } from "./types";
+import type { AccountProvider, AccountStatus, AgentAccess, ImportedKeys, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, BeatCutDone, BeatPlans, Boot, BrollChoice, BrollSuggestions, CapCutDraft, CaptionPreset, ChapterList, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Mono, Part, PreviewStarted, PreviewWindowBoot, Project, ProjectPoster, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFinish, ReelFraming, Rhythm, Said, SampleRun, ScreenRecording, ScreenWindow, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, SyncRevision, SyncStatus, RevisionView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied, VoiceoverState } from "./types";
 
 /**
  * The session a change was made for. Mutating commands carry it, so a change still in flight when
@@ -194,8 +194,8 @@ export const api = {
   /** Without `replaceExisting` an existing file is kept and the export fails with DESTINATION_EXISTS. */
   /** CC BY sounds and footage bring `<name>.credits.txt`; without `replaceCredits` an existing one fails with CREDITS_EXIST. */
   /** With `options.srt` the captions go beside it as `.srt`; without `replaceCaptions` existing ones fail with CAPTIONS_EXIST. */
-  startExport: (path: string, options: ExportRequest, epoch: Epoch, replaceExisting: boolean, replaceCredits = false, replaceCaptions = false) =>
-    invoke<string>("start_export", { path, options, expectedEpoch: epoch, replaceExisting, replaceCredits, replaceCaptions }),
+  startExport: (path: string, options: ExportRequest, epoch: Epoch, replaceExisting: boolean, replaceCredits = false, replaceCaptions = false, replaceChapters = false) =>
+    invoke<string>("start_export", { path, options, expectedEpoch: epoch, replaceExisting, replaceCredits, replaceCaptions, replaceChapters }),
   /** Saves only the captions as `.srt` beside `path` (`reel.srt`, or `reel.cs.srt` and `reel.en.srt`) and returns the files. */
   exportCaptions: (path: string, replaceExisting: boolean, epoch: Epoch) =>
     invoke<string[]>("export_captions", { path, replaceExisting, expectedEpoch: epoch }),
@@ -269,6 +269,8 @@ export const api = {
   /** Recognises the heard media without a transcript, or all of it with `refresh`. */
   startTranscript: (model: string, language: string, refresh: boolean, epoch: Epoch) => invoke<string>("start_transcript", { model, language, refresh, expectedEpoch: epoch }),
   transcriptView: (pauseUs: number) => invoke<TranscriptView>("transcript_view", { pauseUs: Math.round(pauseUs) }),
+  /** The project's chapters where the video plays them now, and the list for YouTube. */
+  chapterList: () => invoke<ChapterList>("chapter_list"),
   /** The language most of the timeline's speech was recognised in, such as "cs"; null before any is recognised. */
   speechLanguage: () => invoke<string | null>("speech_language"),
   /** Inclusive word index ranges and the hesitations after these words, as one undo step. */

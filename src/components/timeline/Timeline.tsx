@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { Copy, Magnet, Maximize2, Mic, PanelLeftClose, PanelRightClose, RotateCwSquare, Scissors, Snowflake, Trash2, Unlink, ZoomIn, ZoomOut } from "lucide-react";
+import { Copy, ListVideo, Magnet, Maximize2, Mic, PanelLeftClose, PanelRightClose, RotateCwSquare, Scissors, Snowflake, Trash2, Unlink, ZoomIn, ZoomOut } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import {
   MAIN_TRACK,
@@ -35,6 +35,8 @@ import { IconButton, RangeInput } from "../ui";
 import { ClipMenu, type MenuAt } from "./ClipMenu";
 import { ClipView } from "./ClipView";
 import { CutMarkers } from "./CutMarkers";
+import { BAND_H, ChapterBand, useChapterBandShown } from "./ChapterBand";
+import { chaptersBlocked, openChapters, useChapters } from "../../lib/chapters";
 import { HistoryButton, type Peek } from "./HistoryButton";
 import { TrackHeader } from "./TrackHeader";
 import { SNAP_PX, dragFade, dragResult, isFade, snap, useTimelineGestures, type Drag } from "./useTimelineGestures";
@@ -45,7 +47,6 @@ const HEADER_W = 152;
 const RULER_H = 28;
 /** Space between lanes. It belongs to the rows, so the track header column runs unbroken. */
 const ROW_GAP = 4;
-const LANES_AT = { left: HEADER_W, top: RULER_H };
 /** How far into each end of a clip dropped media still goes in beside it instead of replacing it, in px. */
 const REPLACE_END = 24;
 const OVERLAY_LANE_H = 20;
@@ -213,15 +214,15 @@ function restack(clipId: string, up: boolean, moving: () => void) {
   });
 }
 
-/** Focuses a clip and scrolls it into view, clear of the sticky ruler and track headers. */
-function focusClipIn(box: HTMLDivElement | null, id: string) {
+/** Focuses a clip and scrolls it into view, clear of the sticky ruler, the chapters under it and the track headers. */
+function focusClipIn(box: HTMLDivElement | null, id: string, lanesTop: number) {
   const el = box?.querySelector<HTMLElement>(`[data-clip-id="${id}"]`);
   if (!box || !el) return;
   el.focus({ preventScroll: true });
   const view = box.getBoundingClientRect();
   const r = el.getBoundingClientRect();
   const [left, right] = [view.left + HEADER_W, view.left + box.clientWidth];
-  const [top, bottom] = [view.top + RULER_H, view.top + box.clientHeight];
+  const [top, bottom] = [view.top + lanesTop, view.top + box.clientHeight];
   if (r.left < left) box.scrollLeft -= left - r.left + 24;
   else if (r.right > right) box.scrollLeft += Math.min(r.left - left - 24, r.right - right + 24);
   if (r.top < top) box.scrollTop -= top - r.top;
@@ -351,6 +352,14 @@ export function Timeline({ height }: { height: number }) {
   const locked = useAiLocked();
   // In the cover editor the timeline chooses the cover's frame: clicks and drags move the playhead, which is the frame.
   const cover = useCover((s) => s.open);
+  const chapterBand = useChapterBandShown() && !cover;
+  const lanesTop = RULER_H + (chapterBand ? BAND_H : 0);
+  const lanesAt = useMemo(() => ({ left: HEADER_W, top: lanesTop }), [lanesTop]);
+  const chaptersOpen = useChapters((s) => s.open);
+  const transcriptTab = useEditor((s) => s.panelTab === "transcript");
+  const chaptersShown = chaptersOpen && transcriptTab;
+  const lanesTopNow = useRef(lanesTop);
+  lanesTopNow.current = lanesTop;
   const voiceoverOpen = useVoiceover((s) => s.phase !== "closed");
   // Stop or Cancel in the voiceover ends a take; this button only closes it between takes.
   const voiceoverBusy = useVoiceover((s) => s.phase === "countdown" || s.phase === "recording" || s.phase === "stopping");
@@ -384,7 +393,7 @@ export function Timeline({ height }: { height: number }) {
     [zoom],
   );
 
-  const { drag: gesture, box, startClipDrag, startScrub, startBoxSelect } = useTimelineGestures({ project, zoom, snapping, minUs, rows, lane: overlayLane, scroller, lanesAt: LANES_AT, timeAt });
+  const { drag: gesture, box, startClipDrag, startScrub, startBoxSelect } = useTimelineGestures({ project, zoom, snapping, minUs, rows, lane: overlayLane, scroller, lanesAt, timeAt });
   // While Undo or Redo is hovered, the lanes draw the project that step would restore, with what changes marked.
   // Only the drawing: selection, focus and edits keep working on the project as it is. A box select passing over
   // the button never shows it, since the box selects the clips drawn.
@@ -531,7 +540,7 @@ export function Timeline({ height }: { height: number }) {
     if (findClip(project, id)) {
       // A clip moved to another track is drawn anew there and keeps the focus.
       if (!document.activeElement || document.activeElement === document.body) {
-        if (restacked.current === id) focusClipIn(scroller.current, id);
+        if (restacked.current === id) focusClipIn(scroller.current, id, lanesTopNow.current);
         else scroller.current?.querySelector<HTMLElement>(`[data-clip-id="${id}"]`)?.focus({ preventScroll: true });
       }
       restacked.current = null;
@@ -625,7 +634,7 @@ export function Timeline({ height }: { height: number }) {
   const known = (id: string | null | undefined) => !!id && allClips(project).some((c) => c.id === id);
   const tabStop = known(focusId) ? focusId : known(selection[0]) ? selection[0] : (mainClips(project)[0]?.id ?? tracks.find((t) => t.clips.length > 0)?.clips[0]?.id ?? null);
 
-  const focusClip = (id: string) => focusClipIn(scroller.current, id);
+  const focusClip = (id: string) => focusClipIn(scroller.current, id, lanesTop);
 
   // Arrows move between clips and select the one they reach, so Delete, S, Q, W and Ctrl+D act on
   // the clip with focus. Ctrl+arrows move focus only, to add clips with Shift+Enter; Alt+←/→
@@ -770,6 +779,18 @@ export function Timeline({ height }: { height: number }) {
         {!cover && (
           <IconButton
             round
+            label={voiceoverBusy ? `Chapters for YouTube: ${chaptersBlocked() ?? ""}` : "Chapters for YouTube"}
+            active={chaptersShown && !voiceoverOpen}
+            disabled={voiceoverBusy}
+            onClick={() => (chaptersShown && !voiceoverOpen ? useChapters.setState({ open: false }) : openChapters())}
+            data-chapters-timeline
+          >
+            <ListVideo size={16} />
+          </IconButton>
+        )}
+        {!cover && (
+          <IconButton
+            round
             label={voiceoverOpen ? "Close voiceover" : locked ? lockedLabel("Record voiceover") : "Record voiceover"}
             active={voiceoverOpen}
             disabled={voiceoverOpen ? voiceoverBusy : locked}
@@ -860,6 +881,8 @@ export function Timeline({ height }: { height: number }) {
                 ))}
             </div>
           </div>
+
+          {chapterBand && <ChapterBand zoom={zoom} header={HEADER_W} top={RULER_H} endUs={videoEnd} />}
 
           {/* Tracks */}
           <div
@@ -984,7 +1007,7 @@ export function Timeline({ height }: { height: number }) {
 
           {/* Ghost for a drag onto a new track follows the pointer row-less. */}
           {drag?.moved && drag.target === null && ghostTiming && (
-            <div className="pointer-events-none absolute z-30" style={{ left: HEADER_W, top: RULER_H, height: ghostHeight, width: laneWidth }}>
+            <div className="pointer-events-none absolute z-30" style={{ left: HEADER_W, top: lanesTop, height: ghostHeight, width: laneWidth }}>
               <ClipView
                 clip={drag.clip}
                 track={dragTrack!}
@@ -1003,7 +1026,7 @@ export function Timeline({ height }: { height: number }) {
           {pastEnd && (
             <div
               className="pointer-events-none absolute bottom-0 z-[15] border-l border-dashed border-muted bg-black/30"
-              style={{ left: HEADER_W + endX, top: RULER_H, width: laneWidth - endX }}
+              style={{ left: HEADER_W + endX, top: lanesTop, width: laneWidth - endX }}
             />
           )}
 

@@ -450,6 +450,7 @@ fn reel_project(
     reel.name = candidate.title.clone();
     reel.reel_candidates.clear();
     reel.thumbnails.clear();
+    reel.chapters.clear();
     reel.imported = None;
     frame(&mut reel, framing)?;
     nuzky_session::validate(&reel)?;

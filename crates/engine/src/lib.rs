@@ -3,6 +3,7 @@
 
 pub mod audio;
 pub mod capture;
+pub mod chapters;
 pub mod check;
 pub mod color;
 pub mod credits;

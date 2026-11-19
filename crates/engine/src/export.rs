@@ -120,8 +120,12 @@ pub struct ExportOptions {
     pub replace_credits: bool,
     /// Captions written beside the video once it is saved, as `subtitles::files` names them.
     pub captions: Vec<(PathBuf, String)>,
+    /// The chapters file written beside the video once it is saved (`chapters::file_path`).
+    pub chapters: Option<(PathBuf, String)>,
     /// The captions files may replace ones beside the video, asked apart from the video like the credits.
     pub replace_captions: bool,
+    /// The chapters file may replace the one beside the video that someone agreed to replace.
+    pub replace_chapters: bool,
     /// x264 speed preset.
     pub preset: String,
     /// Short side of the output in pixels (720, 1080, 1440, 2160); `None` keeps the canvas size.
@@ -142,7 +146,9 @@ impl Default for ExportOptions {
             replace_existing: false,
             replace_credits: false,
             captions: Vec::new(),
+            chapters: None,
             replace_captions: false,
+            replace_chapters: false,
             // Every platform encodes the upload again and keeps only the detail the file still has. At the
             // same CRF, medium keeps visibly more of it than veryfast, for about twice the export time.
             preset: "medium".into(),
@@ -205,9 +211,9 @@ pub fn export(
     if credits.is_some() && !options.replace_credits && credits_out.symlink_metadata().is_ok() {
         bail!("OUTPUT_EXISTS: {} already exists; choose a new export path", credits_out.display());
     }
-    if !options.replace_captions
-        && let Some((path, _)) = options.captions.iter().find(|(path, _)| path.symlink_metadata().is_ok())
-    {
+    let captions = options.captions.iter().filter(|_| !options.replace_captions);
+    let chapters = options.chapters.iter().filter(|_| !options.replace_chapters);
+    if let Some((path, _)) = captions.chain(chapters).find(|(path, _)| path.symlink_metadata().is_ok()) {
         bail!("OUTPUT_EXISTS: {} already exists; choose a new export path", path.display());
     }
     prepare_sound(project, cache_dir, cancel)?;
@@ -223,6 +229,11 @@ pub fn export(
     }
     crate::subtitles::write(&options.captions, options.replace_captions)
         .context("The video is saved, but its captions could not be written")?;
+    if let Some((path, text)) = &options.chapters {
+        write_text(text, path, options.replace_chapters).with_context(|| {
+            format!("The video is saved, but its chapters could not be written to {}", path.display())
+        })?;
+    }
     Ok(measured)
 }
 

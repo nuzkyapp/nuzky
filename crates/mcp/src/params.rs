@@ -114,6 +114,9 @@ pub struct GetStyle {}
 pub struct TextStyles {}
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct GetChapters {}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ChangeStyle {
     /// The change, by its type: setOwn {text, index?}, accept {titles}, reject {title}, remove {title},
     /// revert {title}, learnAgain {title}, setText {text, baseVersion} or restore {index}.
@@ -496,6 +499,16 @@ pub struct ProposeReels {
 }
 #[derive(Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct ProposeChapters {
+    pub run_id: String,
+    /// Reuse this id with identical arguments to retry a failed save without proposing twice.
+    pub request_id: Option<String>,
+    pub transcript_key: String,
+    /// In the order they play; [] removes the chapters.
+    pub chapters: Vec<crate::chapters::ChapterProposal>,
+}
+#[derive(Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct MakeReels {
     pub run_id: String,
     /// Reuse this id with identical arguments to retry a failed save without making the reels twice.
@@ -621,6 +634,9 @@ pub struct Export {
     /// as the other hooks when exporting one variant per hook. The project does not change.
     #[serde(default)]
     pub leave_out_us: Vec<[i64; 2]>,
+    /// Also write the chapters list beside the video as <name>.chapters.txt, timed on this file.
+    #[serde(default)]
+    pub chapters: bool,
 }
 
 #[derive(Deserialize, JsonSchema)]
