@@ -15,6 +15,8 @@ REGION = "document.querySelector('[data-chapters]')"
 ROWS = f"""return [...({REGION}?.querySelectorAll('[data-chapter]') ?? [])].map((li) => ({{
   time: li.querySelector('[data-chapter-time]').textContent, title: li.querySelector('input').value,
   leftOut: li.querySelector('[data-left-out]')?.textContent ?? null}}))"""
+SEGMENTS = """return [...document.querySelectorAll('[data-chapter-segment]')]
+  .map((b) => [b.textContent, parseFloat(b.style.left), parseFloat(b.style.width)])"""
 CLICK = """const b = [...(arguments[1] ? document.querySelector(arguments[1]) : document).querySelectorAll('button')]
   .find((b) => b.textContent.trim() === arguments[0] || b.getAttribute('aria-label') === arguments[0]);
 if (!b) return null; b.click(); return b.getAttribute('aria-disabled') ?? 'false';"""
@@ -71,10 +73,12 @@ def small_window(r, name):
                 const text = document.querySelector('[role=listbox][aria-label=Transcript]').getBoundingClientRect();
                 return region.bottom <= text.top + 1;""")
             r.check('in the smallest window the chapters scroll inside their region and never cover the text', apart)
-            r.check('and the first chapter shows there, the rest a scroll away', r.s.run(f"""const region = {REGION}.getBoundingClientRect();
-                const pane = {REGION}.parentElement.getBoundingClientRect();
-                const first = {REGION}.querySelector('[data-chapter]').getBoundingClientRect();
-                return first.bottom <= Math.min(region.bottom, pane.bottom) + 1;"""))
+            reach = r.s.run(f"""const body = {REGION}.querySelector('.overflow-y-auto'); body.scrollTop = body.scrollHeight;
+                const button = {REGION}.querySelector('[data-suggest-chapters]').getBoundingClientRect();
+                const region = {REGION}.getBoundingClientRect(), pane = {REGION}.parentElement.getBoundingClientRect();
+                const shown = button.top >= region.top && button.bottom <= Math.min(region.bottom, pane.bottom) + 1;
+                body.scrollTop = 0; return shown;""")
+            r.check('and every chapter and Suggest again can be scrolled to inside the pane', reach)
 
 
 @flow('chapters', 'Chapters in the Transcript tab: the AI names three chapters of a cut and sped-up talk, Nuzky times them '
@@ -144,6 +148,7 @@ def suggest(r):
                                 if i['kind'] == 'agent' and 'Kapitoly' in i.get('text', '')), None), 10)
     r.check('the agent got the list Nuzky timed', answer and listed['text'] in answer, answer)
     r.s.run("window.__nuzky.dock.setState({open: false})")
+    r.s.run("document.querySelector('[aria-label=\"Fit timeline to view\"]').click()")
     time.sleep(0.5)
     r.shot('chapters')
     small_window(r, 'chapters-small')
@@ -152,6 +157,32 @@ def suggest(r):
     r.s.run(f"{REGION}.querySelectorAll('[data-chapter-time]')[1].click()")
     playhead = lambda: r.s.run('return window.__nuzky.store.getState().timeUs')
     r.check('clicking a time moves the playhead to the chapter', wait(lambda: playhead() == second, 5), playhead())
+    band(r, listed)
+
+
+def band(r, listed):
+    """The timeline splits the video into the chapters, as YouTube's player bar does."""
+    shown = r.s.run(SEGMENTS)
+    zoom = r.s.run('return window.__nuzky.store.getState().zoom')
+    duration = r.s.run('return window.__nuzky.store.getState().snap.project.tracks[0].clips.reduce((e, c) => Math.max(e, c.startUs + c.durationUs), 0)')
+    starts = [c['startUs'] for c in listed['chapters']]
+    ends = starts[1:] + [duration]
+    expected = [(c['title'], round(s / 1e6 * zoom), round((e - s) / 1e6 * zoom - 2)) for c, s, e in zip(listed['chapters'], starts, ends)]
+    r.check('the timeline shows one segment per chapter, from its start to the next, with its title',
+            [(t, round(x), round(w)) for t, x, w in shown] == expected, [shown, expected])
+    r.s.run("document.querySelectorAll('[data-chapter-segment]')[2].click()")
+    r.check('clicking a segment moves the playhead to its chapter', wait(lambda: r.s.run('return window.__nuzky.store.getState().timeUs') == starts[2], 5))
+    r.check('the segment under the playhead is marked', wait(lambda: 'bg-accent' in r.s.run("return document.querySelectorAll('[data-chapter-segment]')[2].className"), 5))
+    r.s.run("document.querySelectorAll('[data-chapter-segment]')[1].dispatchEvent(new MouseEvent('dblclick', {bubbles: true}))")
+    focused = wait(lambda: r.s.run("return document.activeElement?.getAttribute('aria-label')") == 'Title of chapter 2', 5)
+    r.check('double-clicking a segment opens its title to type in', focused, r.s.run("return document.activeElement?.outerHTML.slice(0, 120)"))
+    r.key('Escape')
+    toggle = "document.querySelector('[data-chapters-timeline]')"
+    r.s.run(f"{toggle}.click()")
+    r.check('Chapters on the timeline closes the list', wait(lambda: not r.s.run(f'return !!{REGION}'), 5)
+            and r.s.run(f"return {toggle}.getAttribute('aria-pressed')") == 'false')
+    r.s.run(f"{toggle}.click()")
+    r.check('and opens it again in the Transcript tab', wait(lambda: r.s.run(f'return !!{REGION}'), 5))
 
 
 def rename_and_copy(r):
@@ -180,7 +211,7 @@ def rename_and_copy(r):
 
     r.s.run('window.__copied = null; navigator.clipboard.writeText = async (t) => { window.__copied = t; };')
     toasts = len(r.state()['toasts'])
-    r.s.run(CLICK, 'Copy', '[data-chapters]')
+    r.s.run(CLICK, 'Copy for YouTube', '[data-chapters]')
     copied = wait(lambda: r.s.run('return window.__copied'), 5)
     r.check('Copy puts the list YouTube takes on the clipboard', copied == chapter_list(r)['text'] and copied.startswith('00:00 '), copied)
     toast = wait(lambda: r.state()['toasts'][toasts:], 5)
@@ -195,11 +226,14 @@ def left_out(r):
     r.s.run(EDIT, cut)
     shown = wait(lambda: (rows(r)[2]['leftOut'] or '').startswith('Left out') and rows(r), 10)
     r.check('the chapter the cut brought within 10 s says it is left out and why', shown
-            and 'Less than 10 s from the chapter next to it' in shown[2]['leftOut'], rows(r))
+            and 'less than 10 s from the chapter next to it' in shown[2]['leftOut'], rows(r))
     problem = r.s.run(f'return {REGION}.innerText')
-    copy = r.s.run(f"return [...{REGION}.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Copy')?.getAttribute('aria-disabled')")
-    r.check('with fewer than 3 left, the list says to suggest them again and Copy is off', 'and only 2 are left. Suggest chapters again.' in problem
+    copy = r.s.run(f"return [...{REGION}.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Copy for YouTube')?.getAttribute('aria-disabled')")
+    r.check('with fewer than 3 left, the list says to suggest them again and Copy is off', 'and only 2 are left.' in problem
             and copy == 'true', [problem, copy])
+    marks = r.s.run("return [document.querySelectorAll('[data-chapter-segment]').length, document.querySelectorAll('[data-chapter-left-out]').length]")
+    r.check('on the timeline the left-out chapter is a dashed mark, not a segment', marks == [2, 1], marks)
+    time.sleep(0.8)  # the cut slides the clips into place
     r.shot('chapters-left-out')
     r.s.call('window.__nuzky.store.getState().undo()')
     r.check('undoing the cut brings the chapter back', wait(lambda: chapter_list(r)['problem'] is None and all(c['leftOut'] is None for c in rows(r)), 10), rows(r))
@@ -209,7 +243,7 @@ def left_out(r):
     r.s.run(EDIT, {'type': 'updateTrack', 'trackId': main['id'], 'muted': True})
     shown = wait(lambda: (now := rows(r)) and len(now) == 3 and now[1]['time'].strip() == '--:--' and now, 10)
     r.check('a muted talk keeps its chapters in the Transcript tab, each saying its words are gone', shown
-            and all('Its words were cut or moved' in (c['leftOut'] or '') for c in shown[1:]), rows(r))
+            and all('its words were cut or moved' in (c['leftOut'] or '') for c in shown[1:]), rows(r))
     r.s.call('window.__nuzky.store.getState().undo()')
     wait(lambda: chapter_list(r)['problem'] is None, 10)
 
@@ -232,9 +266,9 @@ def export(r):
 
     open_dialog(r)
     r.s.run(TOGGLE, 'Also save as .srt')
-    r.s.run(TOGGLE, 'Also save for YouTube')
-    boxes = wait(lambda: (s := r.s.run(BOX, 'Also save as .srt'), c := r.s.run(BOX, 'Also save for YouTube'))[0]['checked'] and c['checked'] and (s, c), 5)
-    r.check('Also save for YouTube sits under the captions and can be checked', boxes, boxes)
+    r.s.run(TOGGLE, 'Also save as .chapters.txt')
+    boxes = wait(lambda: (s := r.s.run(BOX, 'Also save as .srt'), c := r.s.run(BOX, 'Also save as .chapters.txt'))[0]['checked'] and c['checked'] and (s, c), 5)
+    r.check('Also save as .chapters.txt sits under the captions and can be checked', boxes, boxes)
     r.shot('export-chapters')
     save(r, 'Export…', to=folder / 'Morning routine.mp4')
     job = wait(lambda: (j := next((j for j in r.state()['jobs'] if j['kind'] == 'export'), None)) and j['status'] != 'running' and j, 300)
@@ -258,7 +292,7 @@ def export(r):
     asked = wait(lambda: 'already exist' in r.s.run(DIALOG) and r.s.run(DIALOG), 10)
     r.check('an existing chapters file is kept and the dialog asks', asked and 'Morning routine.chapters.txt' in asked
             and (folder / 'Morning routine.chapters.txt').read_text() == 'my own notes', asked)
-    boxes = [r.s.run(BOX, 'Also save as .srt'), r.s.run(BOX, 'Also save for YouTube')]
+    boxes = [r.s.run(BOX, 'Also save as .srt'), r.s.run(BOX, 'Also save as .chapters.txt')]
     r.check('while it asks, which files go beside the video cannot change', all(b['disabled'] for b in boxes), boxes)
     close_dialog(r)
 
@@ -268,7 +302,7 @@ def export(r):
     open_dialog(r)
     save(r, 'Export…', to=folder / 'Morning routine.mp4')
     asked = wait(lambda: 'already exist' in r.s.run(DIALOG) and r.s.run(DIALOG), 10)
-    r.check('with only the captions there, the dialog asks about them alone', asked and 'chapters.txt' not in asked, asked)
+    r.check('with only the captions there, the dialog asks about them alone', asked and 'Morning routine.chapters.txt' not in asked, asked)
     chapters_file.write_text("a colleague's notes")
     r.s.run("[...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent.trim() === 'Replace').click()")
     again = wait(lambda: 'Morning routine.chapters.txt already exists' in r.s.run(DIALOG) and r.s.run(DIALOG), 10)

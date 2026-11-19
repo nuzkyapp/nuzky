@@ -715,7 +715,7 @@ export function ExportDialog() {
               {options.srt && captionNames.length > 1 && <p className="col-start-2 -mt-1 text-[12px] text-muted">{captionNames.join(" · ")}</p>}
               <span className="text-right text-[13px] text-muted">Chapters</span>
               <Checkbox
-                label="Also save for YouTube"
+                label="Also save as .chapters.txt"
                 checked={options.chapters && !noChapters}
                 disabled={!!noChapters || !!asking}
                 title={noChapters ?? undefined}

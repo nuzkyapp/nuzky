@@ -23,9 +23,24 @@ interface ChaptersState {
   open: boolean;
   /** Suggest chapters sent its message and the agent is answering it. */
   finding: boolean;
+  /** The chapter whose title takes focus once the region shows it. */
+  focus: number | null;
 }
 
-export const useChapters = create<ChaptersState>(() => ({ open: false, finding: false }));
+export const useChapters = create<ChaptersState>(() => ({ open: false, finding: false, focus: null }));
+
+/** Shows the chapters in the Transcript tab, with the title of chapter `focus` ready to type in. */
+export function openChapters(focus: number | null = null) {
+  useEditor.setState({ panelTab: "transcript" });
+  useChapters.setState({ open: true, focus });
+}
+
+/** The last of `starts` the playhead has passed, or -1 before the first. */
+export function currentChapter(starts: number[], timeUs: number) {
+  let current = -1;
+  starts.forEach((start, i) => start <= timeUs && (current = i));
+  return current;
+}
 
 /** Why Suggest chapters cannot ask the AI panel's agent now, or null. */
 export function suggestBlocked(durationUs: number): string | null {
@@ -63,6 +78,9 @@ export function renameChapters(titles: string[]) {
   });
 }
 
+/** One request serves every view that asks for the same revision at once. */
+let fetching: { at: string; list: Promise<ChapterList> } | null = null;
+
 /** The project's chapters as the video plays them now, asked again after every edit and recognition. */
 export function useChapterList(): { list: ChapterList | null; error: string | null } {
   const revision = useEditor((s) => s.snap?.revision);
@@ -74,7 +92,8 @@ export function useChapterList(): { list: ChapterList | null; error: string | nu
   useEffect(() => {
     if (!has) return;
     let live = true;
-    api.chapterList().then(
+    if (fetching?.at !== at) fetching = { at, list: api.chapterList() };
+    fetching.list.then(
       (list) => live && setState({ at, list, error: null }),
       (e) => live && setState({ at, list: null, error: plainError(errorText(e)) }),
     );

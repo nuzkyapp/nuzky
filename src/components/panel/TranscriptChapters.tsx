@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { AlertTriangle, Copy, ListVideo, Loader2, Sparkles, X } from "lucide-react";
-import { MAX_CHAPTER_TITLE, MIN_CHAPTERS_VIDEO_US, renameChapters, suggestBlocked, suggestChapters, useChapterList, useChapters } from "../../lib/chapters";
+import { AlertTriangle, ListVideo, Loader2, Sparkles, X } from "lucide-react";
+import { MAX_CHAPTER_TITLE, MIN_CHAPTERS_VIDEO_US, currentChapter, renameChapters, suggestBlocked, suggestChapters, useChapterList, useChapters } from "../../lib/chapters";
 import { copyText } from "../../lib/clipboard";
 import { useAgent } from "../../lib/agent";
 import { useChatGpt } from "../../lib/chatgpt";
@@ -48,6 +48,17 @@ export function ChaptersBar() {
   const bar = useRef<HTMLDivElement>(null);
   const titles = list?.chapters.map((c) => c.title).join("\n");
   useEffect(() => setDrafts(null), [titles]);
+  const focus = useChapters((s) => s.focus);
+  const rows = list?.chapters.length ?? 0;
+  useEffect(() => {
+    if (!open || focus === null || focus >= rows) return;
+    const field = bar.current?.querySelector<HTMLInputElement>(`[aria-label="Title of chapter ${focus + 1}"]`);
+    field?.focus();
+    field?.select();
+    useChapters.setState({ focus: null });
+  }, [open, focus, rows]);
+  const starts = (list?.chapters ?? []).map((c) => (c.leftOut || c.startUs === null ? Infinity : c.startUs));
+  const current = useEditor((s) => currentChapter(starts, s.timeUs));
   if (!open) return null;
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -69,10 +80,10 @@ export function ChaptersBar() {
   };
   const save = () => drafts && void renameChapters(drafts);
   const chapters = list?.chapters ?? [];
+  const listedCount = chapters.filter((c) => !c.leftOut).length;
   const suggest = (again: boolean) => (
     <Button
-      variant={again ? "secondary" : "primary"}
-      className={again ? "h-7 px-2 text-[12px]" : "h-7 px-2.5 text-[12px]"}
+      className="h-7 px-2 text-[12px]"
       data-suggest-chapters
       disabled={!!blocked || finding}
       disabledReason={blocked ?? "Your AI is finding chapters…"}
@@ -84,13 +95,22 @@ export function ChaptersBar() {
   );
 
   return (
-    <div ref={bar} role="region" aria-label="Chapters" data-chapters className="flex max-h-[60%] shrink-0 flex-col border-b border-white/[.07] py-2" onKeyDown={onKeyDown}>
+    <div ref={bar} role="region" aria-label="Chapters" data-chapters className="flex max-h-[60%] min-h-0 flex-col border-b border-white/[.07] py-2" onKeyDown={onKeyDown}>
       <div className="flex shrink-0 items-center gap-2 px-3.5">
-        <ListVideo size={14} className="shrink-0 text-accent" aria-hidden />
-        <span className="tabular flex-1 truncate text-[12px] text-muted">{chapters.length ? `${chapters.length} chapters` : "Chapters for YouTube"}</span>
+        <span className="tabular min-w-0 flex-1 whitespace-nowrap text-[13px] font-semibold text-fg">
+          {chapters.length === 0 ? (
+            "Chapters for YouTube"
+          ) : listedCount < chapters.length ? (
+            <>
+              {listedCount} <span className="font-normal text-muted">of {chapters.length}</span> chapters
+            </>
+          ) : (
+            `${chapters.length} chapters`
+          )}
+        </span>
         {chapters.length > 0 && (
-          <Button variant="primary" className="h-7 px-2.5 text-[12px]" data-copy-chapters disabled={!list?.text} disabledReason={list?.problem ?? undefined} onClick={() => void copy()}>
-            <Copy size={14} /> Copy
+          <Button className="h-7 shrink-0 px-2.5 text-[12px]" data-copy-chapters disabled={!list?.text} disabledReason={list?.problem ?? undefined} onClick={() => void copy()}>
+            Copy for YouTube
           </Button>
         )}
         <IconButton
@@ -110,6 +130,7 @@ export function ChaptersBar() {
             {chapters.map((c, i) => (
               <li key={i} className="flex flex-col py-0.5" data-chapter>
                 <div className="flex items-center gap-1.5">
+                  <span aria-hidden className={`size-2 shrink-0 rounded-[2px] ${i === current ? "bg-accent" : c.leftOut ? "border border-warn/70" : "bg-white/25"}`} />
                   {c.startUs === null ? (
                     <span data-chapter-time className="tabular w-[52px] shrink-0 px-1 text-[12px] text-muted">
                       --:--
@@ -126,7 +147,7 @@ export function ChaptersBar() {
                     </button>
                   )}
                   <input
-                    className="h-7 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1.5 text-[13px] text-fg/90 outline-none hover:bg-white/[.05] focus:border-accent focus:bg-raised disabled:cursor-not-allowed"
+                    className={`h-7 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1.5 text-[13px] outline-none hover:bg-white/[.05] focus:border-accent focus:bg-raised focus:text-fg disabled:cursor-not-allowed ${c.leftOut ? "text-muted" : "text-fg/90"}`}
                     aria-label={`Title of chapter ${i + 1}`}
                     value={drafts?.[i] ?? c.title}
                     maxLength={MAX_CHAPTER_TITLE}
@@ -148,7 +169,7 @@ export function ChaptersBar() {
                   />
                 </div>
                 {c.leftOut && (
-                  <span data-left-out className="flex items-center gap-1.5 pl-[58px] text-[11px] text-muted">
+                  <span data-left-out className="flex items-center gap-1.5 pl-[60px] text-[11px] text-muted">
                     <AlertTriangle size={12} className="shrink-0 text-warn" aria-hidden />
                     Left out: {c.leftOut}
                   </span>
@@ -175,10 +196,10 @@ export function ChaptersBar() {
         ) : chapters.length > 0 ? (
           <div className="flex">{suggest(true)}</div>
         ) : (
-          <div className="flex items-center gap-2">
-            <span className="flex-1 text-[12px] text-muted">Your AI names them, Nuzky times them on the finished video.</span>
-            {suggest(false)}
-          </div>
+          <>
+            <p className="text-[12px] text-muted">Your AI names them, Nuzky times them on the finished video.</p>
+            <div className="flex">{suggest(false)}</div>
+          </>
         )}
       </div>
     </div>

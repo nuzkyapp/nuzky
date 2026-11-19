@@ -20,9 +20,9 @@ pub const MIN_VIDEO_US: i64 = MIN_CHAPTERS as i64 * MIN_CHAPTER_US;
 const SECOND: i64 = 1_000_000;
 const HOUR: i64 = 3600 * SECOND;
 
-pub const WORDS_CUT: &str = "Its words were cut or moved";
-pub const TOO_CLOSE: &str = "Less than 10 s from the chapter next to it";
-pub const TOO_LATE: &str = "Less than 10 s before the end";
+pub const WORDS_CUT: &str = "its words were cut or moved";
+pub const TOO_CLOSE: &str = "less than 10 s from the chapter next to it";
+pub const TOO_LATE: &str = "less than 10 s before the end";
 
 /// A chapter of the project where it plays in the video.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -97,7 +97,7 @@ pub fn place(project: &Project, words: &[TimelineWord]) -> ChapterList {
         ))
     } else if kept.len() < MIN_CHAPTERS {
         Some(format!(
-            "YouTube needs 3 chapters, each 10 s or longer, and only {} {} left. Suggest chapters again.",
+            "YouTube needs 3 chapters, each 10 s or longer, and only {} {} left.",
             kept.len(),
             if kept.len() == 1 { "is" } else { "are" }
         ))
@@ -329,7 +329,7 @@ mod tests {
         assert_eq!(list.text, "");
         assert_eq!(
             list.problem.as_deref(),
-            Some("YouTube needs 3 chapters, each 10 s or longer, and only 2 are left. Suggest chapters again.")
+            Some("YouTube needs 3 chapters, each 10 s or longer, and only 2 are left.")
         );
         assert_eq!(file_text(&list), None);
 
