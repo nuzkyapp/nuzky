@@ -37,6 +37,7 @@ export function ChaptersBar() {
   const open = useChapters((s) => s.open);
   const finding = useChapters((s) => s.finding);
   const { list, error } = useChapterList();
+  const stored = useEditor((s) => s.snap?.project.chapters?.length ?? 0);
   const duration = useEditor((s) => (s.snap ? projectDuration(s.snap.project) : 0));
   const lock = useLockReason();
   useAgent((s) => s.status);
@@ -80,6 +81,7 @@ export function ChaptersBar() {
   };
   const save = () => drafts && void renameChapters(drafts);
   const chapters = list?.chapters ?? [];
+  const loading = !list && !error && stored > 0;
   const listedCount = chapters.filter((c) => !c.leftOut).length;
   const suggest = (again: boolean) => (
     <Button
@@ -98,7 +100,9 @@ export function ChaptersBar() {
     <div ref={bar} role="region" aria-label="Chapters" data-chapters className="flex max-h-[60%] min-h-0 flex-col border-b border-white/[.07] py-2" onKeyDown={onKeyDown}>
       <div className="flex shrink-0 items-center gap-2 px-3.5">
         <span className="tabular min-w-0 flex-1 whitespace-nowrap text-[13px] font-semibold text-fg">
-          {chapters.length === 0 ? (
+          {loading ? (
+            `${stored} chapters`
+          ) : chapters.length === 0 ? (
             "Chapters for YouTube"
           ) : listedCount < chapters.length ? (
             <>
@@ -189,7 +193,7 @@ export function ChaptersBar() {
             {error}
           </p>
         )}
-        {finding ? (
+        {loading ? null : finding ? (
           <p className="flex h-7 items-center gap-1.5 text-[12px] text-muted" role="status">
             <Loader2 size={14} className="shrink-0 animate-spin text-accent" /> Your AI is finding chapters…
           </p>

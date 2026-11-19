@@ -44,6 +44,9 @@ def setup(r):
     subprocess.run([str(CLI), 'new', str(project), str(video)], env=r.env, check=True, capture_output=True)
     (r.work / 'home/Movies').mkdir(parents=True, exist_ok=True)
     r.env.update(NUZKY_AGENT_CLAUDE=str(FAKE), NUZKY_AGENT_CODEX=str(r.work / 'no-codex'), NUZKY_FAKE_AGENT_LOG=str(r.work / 'fake'))
+    # A silent stand-in microphone, so the voiceover panel can open.
+    (r.work / 'mic.f32').write_bytes(bytes(4 * 48_000))
+    r.env.update(NUZKY_FAKE_MICROPHONE=str(r.work / 'mic.f32'))
 
 
 def project(r):
@@ -183,9 +186,16 @@ def band(r, listed):
             and r.s.run(f"return {toggle}.getAttribute('aria-pressed')") == 'false')
     r.s.run(f"{toggle}.click()")
     r.check('and opens it again in the Transcript tab', wait(lambda: r.s.run(f'return !!{REGION}'), 5))
+    phase = lambda: r.s.run('return window.__nuzky.voiceover.getState().phase')
+    r.s.run("document.querySelector('[data-voiceover-button]').click()")
+    ready = wait(lambda: phase() == 'ready', 10)
+    r.s.run(f"{toggle}.click()")
+    r.check('with the voiceover open, Chapters for YouTube gives the pane back to the chapters', ready
+            and wait(lambda: phase() == 'closed' and r.s.run(f'return !!{REGION}'), 10), phase())
 
 
 def rename_and_copy(r):
+    wait(lambda: len(rows(r)) == 3, 10)
     original = rows(r)[1]['title']
     field = f"{REGION}.querySelectorAll('[data-chapter] input')[1]"
     r.s.run(f"{field}.focus()")
@@ -237,6 +247,7 @@ def left_out(r):
     r.shot('chapters-left-out')
     r.s.call('window.__nuzky.store.getState().undo()')
     r.check('undoing the cut brings the chapter back', wait(lambda: chapter_list(r)['problem'] is None and all(c['leftOut'] is None for c in rows(r)), 10), rows(r))
+    two_marks(r)
 
     # With nothing heard, the transcript is empty and the chapters still say why they are out.
     main = next(t for t in project(r)['tracks'] if t['id'] == 'main')
@@ -246,6 +257,22 @@ def left_out(r):
             and all('its words were cut or moved' in (c['leftOut'] or '') for c in shown[1:]), rows(r))
     r.s.call('window.__nuzky.store.getState().undo()')
     wait(lambda: chapter_list(r)['problem'] is None, 10)
+
+
+def two_marks(r):
+    """Two chapters left out inside one segment: its title runs under neither mark."""
+    before = project(r)['chapters']
+    asset = project(r)['assets'][0]['id']
+    # After the cut at 6-10 s, the second clip plays the file 4 s later than the timeline.
+    chapters = [{'title': t, 'assetId': asset, 'sourceUs': us} for t, us in
+                (('Úvod', 400_000), ('Jak to funguje', 24_000_000), ('Krok jedna', 27_000_000), ('Krok dva', 30_000_000), ('Závěr', 44_000_000))]
+    r.s.run(EDIT, {'type': 'setChapters', 'chapters': chapters})
+    clear = wait(lambda: r.s.run("""const marks = [...document.querySelectorAll('[data-chapter-left-out]')].map((m) => m.getBoundingClientRect());
+        const titles = [...document.querySelectorAll('[data-chapter-segment] span')].map((t) => t.getBoundingClientRect());
+        return marks.length === 2 && titles.every((t) => marks.every((m) => t.right <= m.left || t.left >= m.right));"""), 10)
+    r.check('a segment with two left-out marks draws its title clear of both', clear)
+    r.shot('chapters-two-marks')
+    r.s.run(EDIT, {'type': 'setChapters', 'chapters': before})
 
 
 def export(r):

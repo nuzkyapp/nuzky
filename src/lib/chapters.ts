@@ -5,6 +5,7 @@ import { anyAgent, send, sendBlocked, useAgent } from "./agent";
 import { useDock } from "./dock";
 import { useSpeech } from "./speech";
 import { aiLocked, projectDuration, useEditor } from "./store";
+import { closeVoiceover, useVoiceover } from "./voiceover";
 import { US } from "./time";
 import type { ChapterList } from "./types";
 
@@ -29,8 +30,16 @@ interface ChaptersState {
 
 export const useChapters = create<ChaptersState>(() => ({ open: false, finding: false, focus: null }));
 
-/** Shows the chapters in the Transcript tab, with the title of chapter `focus` ready to type in. */
+/** Why the chapters cannot show in the Transcript tab now, or null. */
+export function chaptersBlocked(): string | null {
+  const { phase } = useVoiceover.getState();
+  return phase === "countdown" || phase === "recording" || phase === "stopping" ? "Stop recording the voiceover first" : null;
+}
+
+/** Shows the chapters in the Transcript tab, with the title of chapter `focus` ready to type in; an idle voiceover gives the pane back. */
 export function openChapters(focus: number | null = null) {
+  if (chaptersBlocked()) return;
+  if (useVoiceover.getState().phase !== "closed") void closeVoiceover();
   useEditor.setState({ panelTab: "transcript" });
   useChapters.setState({ open: true, focus });
 }
@@ -78,8 +87,10 @@ export function renameChapters(titles: string[]) {
   });
 }
 
-/** One request serves every view that asks for the same revision at once. */
+/** One request in flight serves every view that asks for the same revision; a settled one is asked again. */
 let fetching: { at: string; list: Promise<ChapterList> } | null = null;
+/** The last list that arrived, so a view shown again starts from it rather than from nothing. */
+let arrived: { at: string; list: ChapterList } | null = null;
 
 /** The project's chapters as the video plays them now, asked again after every edit and recognition. */
 export function useChapterList(): { list: ChapterList | null; error: string | null } {
@@ -87,14 +98,24 @@ export function useChapterList(): { list: ChapterList | null; error: string | nu
   const epoch = useEditor((s) => s.snap?.sessionEpoch);
   const has = useEditor((s) => (s.snap?.project.chapters?.length ?? 0) > 0);
   const recognised = useSpeech((s) => s.stored);
-  const [state, setState] = useState<{ at: string; list: ChapterList | null; error: string | null }>({ at: "", list: null, error: null });
   const at = `${epoch} ${revision} ${recognised}`;
+  const [state, setState] = useState<{ at: string; list: ChapterList | null; error: string | null }>(() => ({ at: arrived?.at ?? "", list: arrived?.list ?? null, error: null }));
   useEffect(() => {
     if (!has) return;
     let live = true;
-    if (fetching?.at !== at) fetching = { at, list: api.chapterList() };
-    fetching.list.then(
-      (list) => live && setState({ at, list, error: null }),
+    if (fetching?.at !== at) {
+      const request = { at, list: api.chapterList() };
+      fetching = request;
+      const done = () => {
+        if (fetching === request) fetching = null;
+      };
+      request.list.then(done, done);
+    }
+    fetching!.list.then(
+      (list) => {
+        arrived = { at, list };
+        if (live) setState({ at, list, error: null });
+      },
       (e) => live && setState({ at, list: null, error: plainError(errorText(e)) }),
     );
     return () => {

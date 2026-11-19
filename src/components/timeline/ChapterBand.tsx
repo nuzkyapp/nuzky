@@ -5,6 +5,22 @@ import { useEditor } from "../../lib/store";
 import { US, formatDuration } from "../../lib/time";
 
 export const BAND_H = 24;
+/** A segment's padding, half a left-out mark and the space kept between a mark and a title, in px. */
+const PAD = 6;
+const HALF_MARK = 7;
+
+/** Where a segment `width` px wide draws its title so it runs under none of the marks at `marks` px into it: the
+ * widest stretch between the marks and the segment's padding. */
+function titleRoom(marks: number[], width: number) {
+  if (marks.length === 0) return undefined;
+  const edges = [PAD, ...[...marks].sort((a, b) => a - b).flatMap((m) => [m - HALF_MARK - PAD, m + HALF_MARK + PAD]), width - PAD];
+  let best = { from: PAD, room: -1 };
+  for (let i = 0; i < edges.length; i += 2) {
+    const [from, to] = [Math.max(PAD, edges[i]), Math.min(width - PAD, edges[i + 1])];
+    if (to - from > best.room) best = { from, room: to - from };
+  }
+  return { marginLeft: best.from - PAD, maxWidth: Math.max(0, best.room) };
+}
 
 /** The band shows while the project has chapters or the AI is finding them. */
 export function useChapterBandShown() {
@@ -51,9 +67,10 @@ export function ChapterBand({ zoom, header, top, endUs }: { zoom: number; header
           {listed.map((c, k) => {
             const next = starts[k + 1] ?? endUs;
             const width = Math.max(4, x(next) - x(c.startUs!) - 2);
-            const mark = marks.find((m) => m > c.startUs! && m < next);
-            const room = mark === undefined ? null : x(mark) - x(c.startUs!);
-            const clear = room === null ? undefined : room - 19 >= width - room - 25 ? { maxWidth: room - 19 } : { marginLeft: room + 7 };
+            const clear = titleRoom(
+              marks.filter((m) => m > c.startUs! && m < next).map((m) => x(m) - x(c.startUs!)),
+              width,
+            );
             return (
               <button
                 key={c.i}

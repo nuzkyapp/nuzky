@@ -36,7 +36,7 @@ import { ClipMenu, type MenuAt } from "./ClipMenu";
 import { ClipView } from "./ClipView";
 import { CutMarkers } from "./CutMarkers";
 import { BAND_H, ChapterBand, useChapterBandShown } from "./ChapterBand";
-import { openChapters, useChapters } from "../../lib/chapters";
+import { chaptersBlocked, openChapters, useChapters } from "../../lib/chapters";
 import { HistoryButton, type Peek } from "./HistoryButton";
 import { TrackHeader } from "./TrackHeader";
 import { SNAP_PX, dragFade, dragResult, isFade, snap, useTimelineGestures, type Drag } from "./useTimelineGestures";
@@ -777,7 +777,14 @@ export function Timeline({ height }: { height: number }) {
         )}
         <div className="flex-1" />
         {!cover && (
-          <IconButton round label="Chapters for YouTube" active={chaptersShown} onClick={() => (chaptersShown ? useChapters.setState({ open: false }) : openChapters())} data-chapters-timeline>
+          <IconButton
+            round
+            label={voiceoverBusy ? `Chapters for YouTube: ${chaptersBlocked() ?? ""}` : "Chapters for YouTube"}
+            active={chaptersShown && !voiceoverOpen}
+            disabled={voiceoverBusy}
+            onClick={() => (chaptersShown && !voiceoverOpen ? useChapters.setState({ open: false }) : openChapters())}
+            data-chapters-timeline
+          >
             <ListVideo size={16} />
           </IconButton>
         )}
