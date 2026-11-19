@@ -89,7 +89,7 @@ export function renameChapters(titles: string[]) {
 
 /** One request in flight serves every view that asks for the same revision; a settled one is asked again. */
 let fetching: { at: string; list: Promise<ChapterList> } | null = null;
-/** The last list that arrived, so a view shown again starts from it rather than from nothing. */
+/** The last list that arrived, so a view shown again for the same revision starts from it rather than from nothing. */
 let arrived: { at: string; list: ChapterList } | null = null;
 
 /** The project's chapters as the video plays them now, asked again after every edit and recognition. */
@@ -99,7 +99,7 @@ export function useChapterList(): { list: ChapterList | null; error: string | nu
   const has = useEditor((s) => (s.snap?.project.chapters?.length ?? 0) > 0);
   const recognised = useSpeech((s) => s.stored);
   const at = `${epoch} ${revision} ${recognised}`;
-  const [state, setState] = useState<{ at: string; list: ChapterList | null; error: string | null }>(() => ({ at: arrived?.at ?? "", list: arrived?.list ?? null, error: null }));
+  const [state, setState] = useState<{ at: string; list: ChapterList | null; error: string | null }>(() => (arrived?.at === at ? { at, list: arrived.list, error: null } : { at: "", list: null, error: null }));
   useEffect(() => {
     if (!has) return;
     let live = true;

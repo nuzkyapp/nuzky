@@ -68,7 +68,7 @@ export function ChapterBand({ zoom, header, top, endUs }: { zoom: number; header
             const next = starts[k + 1] ?? endUs;
             const width = Math.max(4, x(next) - x(c.startUs!) - 2);
             const clear = titleRoom(
-              marks.filter((m) => m > c.startUs! && m < next).map((m) => x(m) - x(c.startUs!)),
+              marks.map((m) => x(m) - x(c.startUs!)).filter((at) => at + HALF_MARK + PAD > 0 && at - HALF_MARK - PAD < width),
               width,
             );
             return (
