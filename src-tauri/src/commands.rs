@@ -36,6 +36,7 @@ pub const COMMANDS: &[&str] = &[
     "capcut_draft_cover",
     "caption_files",
     "caption_styles",
+    "chapter_list",
     "chatgpt_cancel_sign_in",
     "chatgpt_sign_in",
     "chatgpt_sign_out",

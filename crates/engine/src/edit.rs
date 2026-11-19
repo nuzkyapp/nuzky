@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::layout::{DEFAULT_BACKGROUND_BLUR, Layout};
 use crate::model::{
-    Adjust, Animation, Asset, AssetKind, Background, CAPTIONS_TRACK, Canvas, CaptionWord, Clip, ClipContent, Crop,
-    Ease, Effect, Keyframe, Keywords, LetterCase, LogProfile, Lut, MAX_CANVAS_SIDE, MAX_CLIP_EFFECTS, MAX_FPS,
+    Adjust, Animation, Asset, AssetKind, Background, CAPTIONS_TRACK, Canvas, CaptionWord, Chapter, Clip, ClipContent,
+    Crop, Ease, Effect, Keyframe, Keywords, LetterCase, LogProfile, Lut, MAX_CANVAS_SIDE, MAX_CLIP_EFFECTS, MAX_FPS,
     MAX_SCRIPT_CHARS, Mono, Project, ReelCandidate, Shape, SpeedPoint, TextAlign, TextShadow, TextStyle, Thumbnail,
     ThumbnailFormat, Track, TrackKind, Transform, Transition, WordCorrection, word_ranges,
 };
@@ -552,6 +552,10 @@ pub enum EditCmd {
     /// Replaces the reel candidate with the same id.
     UpdateReelCandidate {
         candidate: ReelCandidate,
+    },
+    /// Replaces the video's chapters for YouTube; none removes them.
+    SetChapters {
+        chapters: Vec<Chapter>,
     },
 }
 
@@ -1262,6 +1266,10 @@ impl Project {
                     .ok_or_else(|| anyhow!("Unknown reel candidate"))?;
                 *slot = candidate;
                 self.reel_candidates.sort_by_key(|c| c.start_us);
+            }
+            EditCmd::SetChapters { chapters } => {
+                self.chapters =
+                    chapters.into_iter().map(|c| Chapter { title: c.title.trim().to_owned(), ..c }).collect()
             }
         }
         // A clip added in between main-track clips pushes the clips after it along, so the other tracks open the same

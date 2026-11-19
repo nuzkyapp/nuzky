@@ -367,6 +367,38 @@ export type CaptionWord = {
   marked?: boolean | null,
 };
 
+/**
+ * A chapter of the video. It belongs to the word it opens with, as transcripts belong to their files, so it
+ * follows every cut and speed change; the first chapter starts at 0:00 whatever its word.
+ */
+export type Chapter = {
+  title: string,
+  /**
+   * The file the chapter's first word is said in.
+   */
+  assetId: string,
+  /**
+   * Where that word starts in the file.
+   */
+  sourceUs: number,
+};
+
+/**
+ * The project's chapters and the list YouTube takes from them.
+ */
+export type ChapterList = {
+  /**
+   * Every chapter of the project, in its order.
+   */
+  chapters: Array<PlacedChapter>,
+  /**
+   * The list for the description, a "time title" line for each chapter not left out; empty while `problem` says
+   * why there is none.
+   */
+  text: string,
+  problem: string | null,
+};
+
 export type ChatGptNotice = "ended" | "notRevoked";
 
 /**
@@ -934,6 +966,9 @@ export type EditCmd = {
 } | {
   "type": "updateReelCandidate",
   candidate: ReelCandidate,
+} | {
+  "type": "setChapters",
+  chapters: Array<Chapter>,
 };
 
 /**
@@ -988,6 +1023,10 @@ export type ExportRequest = {
    * Also save the captions beside the video as `.srt` files, one per language (`subtitles::files`).
    */
   srt: boolean,
+  /**
+   * Also save the YouTube chapters beside the video (`chapters::file_path`).
+   */
+  chapters: boolean,
   /**
    * HDR: 10-bit HEVC in HLG, keeping the light of HDR footage (`ExportOptions::hdr`).
    */
@@ -1334,6 +1373,26 @@ export type PastEnd = {
   overlays: number,
 };
 
+/**
+ * A chapter of the project where it plays in the video.
+ */
+export type PlacedChapter = {
+  title: string,
+  /**
+   * Where its first word is heard, 0 for the first chapter; none when cuts took all its words.
+   */
+  startUs: number | null,
+  /**
+   * Its time as YouTube reads it, in whole seconds: "01:23", or "1:01:23" in a video over an hour; empty without
+   * a start.
+   */
+  time: string,
+  /**
+   * Why YouTube would not take it, when it is left out of the list.
+   */
+  leftOut: string | null,
+};
+
 export type PlannedRecording = {
   path: string,
   name: string,
@@ -1386,6 +1445,10 @@ export type Project = {
    * Moments of a long video that could each be a reel of their own, in timeline order.
    */
   reelCandidates?: Array<ReelCandidate>,
+  /**
+   * The video's chapters for YouTube, in the order they play (`chapters::place`).
+   */
+  chapters?: Array<Chapter>,
   /**
    * The timeline of another editor the project was opened from.
    */

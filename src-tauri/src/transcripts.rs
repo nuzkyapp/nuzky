@@ -4,6 +4,7 @@
 use anyhow::{Context, Result, ensure};
 use nuzky_engine::{
     Project,
+    chapters::ChapterList,
     edit::{TimeRange, merge_ranges},
     model::MAX_CORRECTION_CHARS,
 };
@@ -211,6 +212,25 @@ pub async fn transcript_view(app: AppHandle, pause_us: i64) -> CmdResult<Transcr
     })
     .await
     .map_err(crate::err)?
+}
+
+/// The project's chapters where the video plays them now, and the list YouTube takes from them.
+#[tauri::command]
+pub async fn chapter_list(app: AppHandle) -> CmdResult<ChapterList> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let host = app.state::<AppState>().session.lock().unwrap().host.clone();
+        chapters(&host).map_err(explain)
+    })
+    .await
+    .map_err(crate::err)?
+}
+
+pub(crate) fn chapters(host: &Host) -> Result<ChapterList> {
+    let project = host.session.state()?.project;
+    if project.chapters.is_empty() {
+        return Ok(ChapterList::default());
+    }
+    Ok(nuzky_mcp::chapters::list(&project, &transcript::derive(&project, &host.transcripts)?))
 }
 
 /// The language most heard files of the timeline were recognised in, to name the captions of the speech; `None`

@@ -91,6 +91,10 @@ pub(crate) const TOOLS: &[Rules] = &[
     rules("cut_to_beats", When(|args| args["dry_run"] == true), true, false, true),
     // Leaves clips that already move alone, so the same call again changes nothing.
     rules("apply_motion", Never, false, true, false),
+    // Only reads the stored words and times the chapters on the timeline.
+    rules("get_chapters", Always, false, true, false),
+    // Replaces the chapters of the project.
+    rules("propose_chapters", Never, true, false, false),
     // Proposing replaces the reels proposed before; making only adds new projects beside the source.
     rules("propose_reels", Never, true, false, false),
     rules("make_reels", Never, false, false, false),
@@ -161,6 +165,7 @@ mod tests {
             set(&[
                 "get_state",
                 "get_transcript",
+                "get_chapters",
                 "find_broll",
                 "inspect_frames",
                 "activity",
@@ -194,6 +199,7 @@ mod tests {
                 "translate_captions",
                 "apply_zooms",
                 "cut_to_beats",
+                "propose_chapters",
                 "propose_reels",
                 "reframe",
                 "follow_object",
@@ -206,6 +212,7 @@ mod tests {
             set(&[
                 "get_state",
                 "get_transcript",
+                "get_chapters",
                 "find_broll",
                 "inspect_frames",
                 "activity",

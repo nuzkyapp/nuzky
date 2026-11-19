@@ -615,6 +615,15 @@ pub fn summarize(before: &Project, after: &Project) -> Vec<RunChange> {
             });
         }
     }
+    let chapters = match (before.chapters.as_slice(), after.chapters.as_slice()) {
+        (was, now) if was == now => None,
+        (_, []) => Some("Removed the chapters".to_owned()),
+        ([], now) => Some(format!("Suggested {}", count(now.len(), "chapter", "chapters"))),
+        _ => Some("Changed the chapters".to_owned()),
+    };
+    if let Some(text) = chapters {
+        out.push(RunChange { text, clip_ids: Vec::new(), at_us: None });
+    }
     if before.name != after.name {
         out.push(RunChange {
             text: format!("Renamed the project to {}", quote(&after.name)),
@@ -811,6 +820,24 @@ mod tests {
             json!({"type": "setReelCandidates", "candidates": [candidate("a", 0, "made"), candidate("c", 10, "proposed")]}),
         );
         assert_eq!(texts(&summarize(&before, &e.project)), ["Proposed 1 reel", "Removed 1 reel"]);
+    }
+
+    #[test]
+    fn chapters_say_whether_they_were_suggested_changed_or_removed() {
+        let mut e = editor();
+        let chapters = |titles: &[&str]| {
+            json!({"type": "setChapters", "chapters": titles.iter().enumerate()
+                .map(|(i, t)| json!({"title": t, "assetId": "t1", "sourceUs": i as i64 * 20_000_000})).collect::<Vec<_>>()})
+        };
+        let before = e.project.clone();
+        apply(&mut e, chapters(&["Intro", "Why", "How"]));
+        assert_eq!(texts(&summarize(&before, &e.project)), ["Suggested 3 chapters"]);
+        let before = e.project.clone();
+        apply(&mut e, chapters(&["Intro", "Why it works", "How"]));
+        assert_eq!(texts(&summarize(&before, &e.project)), ["Changed the chapters"]);
+        let before = e.project.clone();
+        apply(&mut e, chapters(&[]));
+        assert_eq!(texts(&summarize(&before, &e.project)), ["Removed the chapters"]);
     }
 
     #[test]

@@ -288,6 +288,7 @@ pub(crate) fn label(cmds: &[EditCmd]) -> &'static str {
         EditCmd::SetReelCandidates { .. } => "Propose reels",
         EditCmd::UpdateReelCandidate { candidate } if candidate.status == ReelStatus::Made => "Make reels",
         EditCmd::UpdateReelCandidate { .. } => "Change reel",
+        EditCmd::SetChapters { .. } => "Chapters",
     }
 }
 

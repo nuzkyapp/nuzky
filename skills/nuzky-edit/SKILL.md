@@ -105,6 +105,14 @@ When the user wants several reels from one long recording (a podcast, a talk, a 
 3. In a run, `make_reels(ids)` makes the picked ones (status `picked` in get_state's `reel_candidates`), or the ones the user named. Each becomes a new project beside this one with only its words on a 9:16 canvas: `canvas: "crop"` (default) fills it with the middle of the picture, `"blur"` shows the whole picture over a blurred copy, better when the speaker is off centre or several people share the frame. Optional `finish: {clean: true, captions: true, zooms: true}` cuts retakes, fillers and hesitations, builds captions as `build_captions` does without arguments and adds emphasis zooms; steps that cannot run are named with their reasons in each reel's `skipped`. The long video stays as it was. Report the paths.
 4. Each reel is its own project, and this server edits only this one. Captions, a cover and the export happen in the reel, with the steps above, once the user opens it in Nuzky or through an MCP server started on its path (`nuzky mcp --project <path> --allow-write`).
 
+## YouTube chapters
+
+When the user asks for chapters, or for a YouTube description of a video with speech, suggest them from what is said; Nuzky times them.
+
+1. Read the video with `get_transcript(detail: "sentences")`, page by page with `limit` and `cursor` for a long one, and find where the topic changes. Transcribe first when it has no transcript.
+2. In a run, `propose_chapters(transcript_key, chapters: [{from, title}])` in the order they play: `from` is the first word of the sentence that opens the chapter, the title a few words in the language of the video, as a viewer would scan them ("Why I switched", not "Chapter 2"). The first chapter starts at 00:00 whatever its word, so let it be the opening. YouTube shows chapters only when there are 3 or more, each 10 s or longer, so the tool refuses a list that breaks that with CHAPTERS_INVALID naming the chapters to merge or move, and a video under 30 s gets none: tell the user. Never compute or write the times yourself. Proposing again replaces the chapters. Then `end_run` keep.
+3. The result's `text` is the list for the description, one `time title` line each. Give it to the user as it is. Chapters belong to their first words, so they follow later cuts and speed changes; read `get_chapters` again after editing, where `leftOut` says which chapter a cut brought within 10 s of another and `problem` says when fewer than 3 are left. `export_video(…, chapters: true)` writes the list beside the video as `<name>.chapters.txt`, timed on that file.
+
 ## Hook variants
 
 When the user recorded several hooks (openings) for one video and wants a file per hook, say to try them as Instagram Trial Reels, keep everything after the hook the same in every file.

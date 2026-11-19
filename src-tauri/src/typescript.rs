@@ -149,6 +149,7 @@ fn generate() -> String {
     types.visit::<crate::library::Said>();
     types.visit::<crate::library::ProjectPoster>();
     types.visit::<crate::transcripts::TranscriptView>();
+    types.visit::<nuzky_engine::chapters::ChapterList>();
     types.visit::<crate::transcripts::TranscriptCut>();
     types.visit::<crate::transcripts::WordsCorrected>();
     types.visit::<crate::sample::SampleRun>();

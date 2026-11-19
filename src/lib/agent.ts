@@ -246,6 +246,8 @@ const TITLES: Record<string, string> = {
   build_captions: "Adding captions",
   text_styles: "Looking through text styles",
   translate_captions: "Translating the captions",
+  get_chapters: "Reading the chapters",
+  propose_chapters: "Suggesting chapters",
   inspect_frames: "Checking frames",
   activity: "Scanning picture and sound",
   import_media: "Importing media",

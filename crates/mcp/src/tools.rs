@@ -26,7 +26,9 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
-use crate::{activity, inputs, media, params::*, plugins, reels, transcript, translate, vision_models, waveform};
+use crate::{
+    activity, chapters, inputs, media, params::*, plugins, reels, transcript, translate, vision_models, waveform,
+};
 
 const PREVIEW_CHARS: usize = 400;
 /// apply_edits leaves out clips longer than this: restyling 117 captions once answered 64 thousand characters,
@@ -371,6 +373,11 @@ impl Backend {
             "apply_zooms" => self.apply_zooms(parse(arguments)?, state),
             "cut_to_beats" => self.cut_to_beats(parse(arguments)?, state),
             "apply_motion" => self.apply_motion(parse(arguments)?, state),
+            "get_chapters" => {
+                let GetChapters {} = parse(arguments)?;
+                self.get_chapters(state)
+            }
+            "propose_chapters" => self.propose_chapters(parse(arguments)?, state),
             "propose_reels" => self.propose_reels(parse(arguments)?, state),
             "make_reels" => self.make_reels(parse(arguments)?, state),
             "export_video" => self.export(parse(arguments)?, state),
@@ -1926,6 +1933,39 @@ impl Backend {
             "changed": result.changed, "skipped": result.outcome.skipped}))
     }
 
+    fn get_chapters(&self, state: &SessionState) -> Result<Value> {
+        let derived = transcript::derive(&self.media_project(&state.project), &self.host.transcripts)?;
+        let mut out = json!(chapters::list(&state.project, &derived));
+        out["duration_us"] = json!(state.project.duration_us());
+        Ok(out)
+    }
+
+    /// The chapters replace those of the project, as one edit of the run. A retry with the same request_id after a
+    /// failed save applies what was planned the first time.
+    fn propose_chapters(&self, args: ProposeChapters, state: &SessionState) -> Result<Value> {
+        owns_run(state, &args.run_id)?;
+        let request_id = args.request_id.clone().unwrap_or_else(new_id);
+        let key = (args.run_id.clone(), request_id.clone());
+        let arguments = json!({ "propose_chapters": &args });
+        let mut requests = self.transcript_requests.lock().unwrap();
+        requests.retain(|(run, _), _| run == &args.run_id);
+        if let Some(prepared) = requests.get(&key) {
+            ensure!(prepared.arguments == arguments, "REQUEST_CONFLICT: request_id was used with different arguments");
+            return self.apply_transcript_edit(&args.run_id, &request_id, prepared);
+        }
+        let derived = transcript::derive(&self.media_project(&state.project), &self.host.transcripts)?;
+        transcript::check_key(&state.project, &derived, &args.transcript_key)?;
+        let proposed = chapters::plan(&state.project, &derived, &args.chapters)?;
+        let placed = chapters::list(&Project { chapters: proposed.clone(), ..state.project.clone() }, &derived);
+        let prepared = requests.entry(key).or_insert(PreparedTranscriptEdit {
+            arguments,
+            edits: vec![EditCmd::SetChapters { chapters: proposed }],
+            expect: Expect { revision: Some(state.stamp.revision), speech_layout_key: None },
+            response: json!(placed),
+        });
+        self.apply_transcript_edit(&args.run_id, &request_id, prepared)
+    }
+
     /// The candidates replace those not made yet, as one edit of the run. A retry with the same request_id after a
     /// failed save applies what was planned the first time.
     fn propose_reels(&self, args: ProposeReels, state: &SessionState) -> Result<Value> {
@@ -2033,6 +2073,21 @@ impl Backend {
                 .map_err(|e| anyhow!("INVALID_ARGUMENTS: {e:#}"))?;
             ensure!(project.duration_us() > 0, "INVALID_ARGUMENTS: leave_out_us leaves nothing to export");
         }
+        let chapters = if args.chapters {
+            let list = chapters::list(&project, &transcript::derive(&project, &self.host.transcripts)?);
+            ensure!(!list.chapters.is_empty(), "NO_CHAPTERS: propose_chapters first");
+            let text = nuzky_engine::chapters::file_text(&list)
+                .with_context(|| format!("CHAPTERS_INVALID: {}", list.problem.unwrap_or_default()))?;
+            let path = nuzky_engine::chapters::file_path(&out);
+            ensure!(
+                path.symlink_metadata().is_err(),
+                "OUTPUT_EXISTS: {} already exists; choose a new export path",
+                path.display()
+            );
+            Some((path, text))
+        } else {
+            None
+        };
         let options = ExportOptions {
             resolution: args.resolution,
             fps: args.fps,
@@ -2040,6 +2095,7 @@ impl Backend {
             replace_existing: false,
             delivery: args.preset,
             hdr: args.hdr,
+            chapters,
             ..ExportOptions::default()
         };
         check_options(&project, &options).map_err(|e| match e.to_string() {
@@ -2093,6 +2149,9 @@ impl Backend {
                 let check = check_export(&project, &measured, &cancel, &progress);
                 let mut done =
                     json!({"path": out, "duration_us": project.duration_us(), "preset": options.delivery, "hdr": options.hdr, "check": check});
+                if let Some((path, _)) = &options.chapters {
+                    done["chapters_path"] = json!(path);
+                }
                 if !measured.drawn_without.is_empty() {
                     let issues = nuzky_engine::plugin_effects::issues(&project);
                     done["warning"] = json!(nuzky_engine::plugin_effects::exported_without(&measured.drawn_without, &issues));

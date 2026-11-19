@@ -4,6 +4,7 @@ pub mod beats;
 pub mod bridge;
 pub mod broll;
 pub mod caption_styles;
+pub mod chapters;
 mod fonts;
 pub mod glossary;
 pub mod import;
@@ -239,6 +240,14 @@ fn catalog() -> Result<Vec<Tool>> {
         tool::<params::ApplyMotion>(
             "apply_motion",
             "A slow camera move as one edit of the run, without working out keyframes: kind pushIn zooms in, pullOut starts zoomed in and ends on the clip's own framing, kenBurns zooms in while drifting right; strength is how far, 0.06 subtle, 0.1 or 0.15 strong (0.02-0.5). clip_id moves one video or image clip on any track, over the part of it inside range_us or its whole length; without clip_id, range_us moves every main-track video and image clip under it as one continuous motion, e.g. one sentence from get_transcript start_us of its first word to end_us of its last. Each clip gets two keyframes on a smooth curve (ease \"smooth\": it starts and ends gently) from its own transform, editable afterwards with setKeyframes. The zoom centres on the middle of the IG/TikTok safe area on vertical canvases, else on the canvas centre, so a face framed there stays put. Clips that already have keyframes are left alone and listed in skipped; remove their keyframes first to replace them. Requires run_id. Optional request_id: reuse it with identical arguments after a save failure. Returns revision, changed clip ids and skipped.",
+        )?,
+        tool::<params::GetChapters>(
+            "get_chapters",
+            "The video's chapters for YouTube as they play now, timed by Nuzky on the timeline after every cut and speed change: chapters [{title, startUs, time, leftOut}] in their order, text (the list for the video's description, one \"time title\" line per chapter, time 00:00 style, 0:00:00 style in a video over an hour) and problem. A chapter is tied to its first word, so cuts move it; startUs is null when cuts took all its words. YouTube shows chapters only when the first is at 00:00, there are at least 3 in ascending order and each lasts 10 s or more: leftOut says why a chapter is not in text, and text is empty while problem says why there is no list (a video under 30 s, or fewer than 3 chapters left 10 s apart: propose again). Also duration_us. Only reads.",
+        )?,
+        tool::<params::ProposeChapters>(
+            "propose_chapters",
+            "Suggest the video's chapters for YouTube from what is said, as one edit of your run, when the user asks for chapters or for a YouTube description. Read the video first with get_transcript(detail: \"sentences\") page by page and split it where the topic changes. chapters [{from, title}] in the order they play: from is the word of the current transcript_key the chapter starts with, a sentence's first word (SPEECH_CHANGED when stale; CHAPTER_OUTSIDE_TRANSCRIPT; CHAPTER_ORDER when not ascending); the first chapter starts at 0:00 whatever its from. title: short, in the language of the video, up to 100 characters on one line (CHAPTER_TITLE). Nuzky times them, never you: each starts at its first word as the video plays now, in whole seconds counted down. Refused with CHAPTERS_INVALID and the reason unless YouTube would show every chapter: 3 to 100 chapters, each lasting 10 s or more, in a video of 30 s or more; merge or move the ones it names. [] removes them. Replaces the chapters proposed before. Returns what get_chapters returns. The user edits the titles and copies the list in the Transcript tab's Chapters, and export_video chapters: true writes it beside the video. Requires run_id. Optional request_id: reuse it with identical arguments after a save failure.",
         )?,
         tool::<params::ProposeReels>(
             "propose_reels",

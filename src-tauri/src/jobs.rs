@@ -464,6 +464,9 @@ pub struct ExportRequest {
     /// Also save the captions beside the video as `.srt` files, one per language (`subtitles::files`).
     #[serde(default)]
     pub srt: bool,
+    /// Also save the YouTube chapters beside the video (`chapters::file_path`).
+    #[serde(default)]
+    pub chapters: bool,
     /// HDR: 10-bit HEVC in HLG, keeping the light of HDR footage (`ExportOptions::hdr`).
     #[serde(default)]
     pub hdr: bool,
@@ -498,7 +501,7 @@ pub fn start_export(
     request: ExportRequest,
     replace_existing: bool,
     replace_credits: bool,
-    replace_captions: bool,
+    (replace_captions, replace_chapters): (bool, bool),
     expected_epoch: Option<&str>,
 ) -> Result<String, String> {
     check_destination(&out, replace_existing)?;
@@ -520,10 +523,17 @@ pub fn start_export(
         return Err(format!("CREDITS_EXIST: {name} already exists"));
     }
     let captions = if request.srt { caption_files(&project, &transcripts, &out)? } else { Vec::new() };
-    if !replace_captions {
-        check_captions(&captions)?;
-    }
-    let options = ExportOptions { replace_credits, captions, replace_captions, ..request.options(replace_existing) };
+    let chapters = if request.chapters { Some(chapters_file(&project, &transcripts, &out)?) } else { None };
+    let unasked = captions.iter().filter(|_| !replace_captions).chain(chapters.iter().filter(|_| !replace_chapters));
+    check_captions(&unasked.cloned().collect::<Vec<_>>())?;
+    let options = ExportOptions {
+        replace_credits,
+        captions,
+        chapters,
+        replace_captions,
+        replace_chapters,
+        ..request.options(replace_existing)
+    };
     check_options(&project, &options).map_err(|e| e.to_string())?;
     let id = format!("export:{}", new_id());
     let cancel = register(app, &id).ok_or("An export is already running")?;
@@ -583,7 +593,18 @@ pub(crate) fn caption_files(
     Ok(nuzky_engine::subtitles::files(project, speech.as_deref(), base))
 }
 
-/// Captions files that are already there are replaced only once someone said so, as the credits are.
+/// The YouTube chapters of the project as the file beside `base` holds them.
+fn chapters_file(project: &Project, transcripts: &TranscriptStore, base: &Path) -> Result<(PathBuf, String), String> {
+    let derived = nuzky_mcp::transcript::derive(project, transcripts).map_err(|e| format!("{e:#}"))?;
+    let list = nuzky_mcp::chapters::list(project, &derived);
+    if list.chapters.is_empty() {
+        return Err("There are no chapters to save. Suggest them in the Transcript tab first.".into());
+    }
+    let text = nuzky_engine::chapters::file_text(&list).ok_or_else(|| list.problem.unwrap_or_default())?;
+    Ok((nuzky_engine::chapters::file_path(base), text))
+}
+
+/// Captions and chapters files that are already there are replaced only once someone said so, as the credits are.
 fn check_captions(files: &[(PathBuf, String)]) -> Result<(), String> {
     let name = |path: &PathBuf| path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let existing: Vec<String> =

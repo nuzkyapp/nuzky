@@ -1158,6 +1158,7 @@ fn open_project(
 /// `replace_existing` is true once the user confirmed this exact path; false fails with
 /// DESTINATION_EXISTS when the file is already there. Absent means true.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn start_export(
     app: AppHandle,
     path: String,
@@ -1165,11 +1166,12 @@ fn start_export(
     replace_existing: Option<bool>,
     replace_credits: Option<bool>,
     replace_captions: Option<bool>,
+    replace_chapters: Option<bool>,
     expected_epoch: Option<String>,
 ) -> CmdResult<String> {
     let (replace, credits) = (replace_existing.unwrap_or(true), replace_credits.unwrap_or(false));
-    let captions = replace_captions.unwrap_or(false);
-    jobs::start_export(&app, PathBuf::from(path), options, replace, credits, captions, expected_epoch.as_deref())
+    let sidecars = (replace_captions.unwrap_or(false), replace_chapters.unwrap_or(false));
+    jobs::start_export(&app, PathBuf::from(path), options, replace, credits, sidecars, expected_epoch.as_deref())
 }
 
 /// Saves only the captions as `.srt` files beside `path` and returns them.
@@ -1596,6 +1598,7 @@ pub fn run() {
             cover::start_cover_mask,
             cover::start_cover_export,
             transcripts::transcript_view,
+            transcripts::chapter_list,
             transcripts::speech_language,
             transcripts::cut_words,
             transcripts::remove_pauses,

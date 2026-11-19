@@ -6,10 +6,11 @@ use nuzky_engine::{
     Project,
     model::{
         Adjust, Asset, AssetKind, Background, Clip, ClipContent, EffectValue, LETTER_SPACING, LINE_SPACING, Lut,
-        MAX_BORDER_WIDTH, MAX_CANVAS_SIDE, MAX_CLIP_EFFECTS, MAX_CORRECTION_CHARS, MAX_FONT_HEIGHT_RATIO, MAX_LEFT_OUT,
-        MAX_LEFT_OUT_CHARS, MAX_MASK_OFFSET, MAX_MASK_SIZE, MAX_REEL_HOOK_CHARS, MAX_REEL_TITLE_CHARS,
-        MAX_REEL_WHY_CHARS, MAX_SCRIPT_CHARS, MAX_SHADOW, MAX_TEXT_WIDTH_RATIO, PROJECT_VERSION, ReelCandidate,
-        ReelStatus, TextStyle, Thumbnail, TrackKind, Transform, language_name, max_stroke_width, unit_of,
+        MAX_BORDER_WIDTH, MAX_CANVAS_SIDE, MAX_CHAPTER_TITLE_CHARS, MAX_CHAPTERS, MAX_CLIP_EFFECTS,
+        MAX_CORRECTION_CHARS, MAX_FONT_HEIGHT_RATIO, MAX_LEFT_OUT, MAX_LEFT_OUT_CHARS, MAX_MASK_OFFSET, MAX_MASK_SIZE,
+        MAX_REEL_HOOK_CHARS, MAX_REEL_TITLE_CHARS, MAX_REEL_WHY_CHARS, MAX_SCRIPT_CHARS, MAX_SHADOW,
+        MAX_TEXT_WIDTH_RATIO, PROJECT_VERSION, ReelCandidate, ReelStatus, TextStyle, Thumbnail, TrackKind, Transform,
+        language_name, max_stroke_width, unit_of,
     },
 };
 
@@ -88,7 +89,27 @@ pub fn validate(project: &Project) -> Result<()> {
     word_corrections(project)?;
     thumbnails(project)?;
     imported(project)?;
-    reel_candidates(project)
+    reel_candidates(project)?;
+    chapters(project)
+}
+
+/// The app shows each title as it is and puts it on a line of the YouTube list, so it is one line.
+fn chapters(project: &Project) -> Result<()> {
+    ensure!(project.chapters.len() <= MAX_CHAPTERS, "INVALID_PROJECT: more than {MAX_CHAPTERS} chapters");
+    for chapter in &project.chapters {
+        let title = chapter.title.trim();
+        ensure!(
+            !title.is_empty()
+                && title.chars().count() <= MAX_CHAPTER_TITLE_CHARS
+                && !title.chars().any(char::is_control),
+            "INVALID_PROJECT: a chapter's title is one line of 1 to {MAX_CHAPTER_TITLE_CHARS} characters"
+        );
+        ensure!(
+            !chapter.asset_id.is_empty() && chapter.source_us >= 0,
+            "INVALID_PROJECT: a chapter without the file and time of its first word"
+        );
+    }
+    Ok(())
 }
 
 /// The app shows these lines as they are, so each is one short line, and there are not unboundedly many.
@@ -1037,6 +1058,21 @@ mod tests {
             let error = youtube(change).unwrap_err().to_string();
             assert!(error.starts_with("INVALID_PROJECT") || error.starts_with("INVALID_COLOR"), "{what}: {error}");
         }
+    }
+
+    #[test]
+    fn a_shared_project_cannot_bring_chapters_the_list_cannot_show() {
+        use nuzky_engine::model::Chapter;
+        let chapter = |title: &str, source_us: i64| Chapter { title: title.into(), asset_id: "a".into(), source_us };
+        let mut project = Project::new("chapters");
+        project.chapters = vec![chapter("Intro", 0), chapter("Úvod a proč", 12_000_000)];
+        validate(&project).unwrap();
+        for bad in [chapter(" ", 0), chapter("two\nlines", 0), chapter(&"ž".repeat(101), 0), chapter("Late", -1)] {
+            project.chapters = vec![bad];
+            assert!(validate(&project).is_err(), "{:?}", project.chapters);
+        }
+        project.chapters = vec![chapter("A", 0); MAX_CHAPTERS + 1];
+        assert!(validate(&project).is_err(), "a project file cannot grow without bound");
     }
 
     /// A shared project can carry anything here, and the app shows these texts and may open the path.
