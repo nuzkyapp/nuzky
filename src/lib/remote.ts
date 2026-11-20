@@ -25,6 +25,7 @@ import {
   splitAtPlayhead,
   useEditor,
 } from "./store";
+import { toggleReelPlay, useReels } from "./reels";
 import { importPaths } from "../components/panel/assets";
 import { exportVideo, loadOptions, outputSize } from "../components/ExportDialog";
 
@@ -160,7 +161,7 @@ function act(a: Action) {
   if (a.action === "seek") return useEditor.getState().seek(a.us);
   if (a.action === "stop") return void stop();
   if (a.action === "export") return void exportForPage();
-  if (a.action === "play") return useEditor.getState().togglePlay();
+  if (a.action === "play") return useReels.getState().open ? toggleReelPlay() : useEditor.getState().togglePlay();
   if (a.action === "undo") return void useEditor.getState().undo();
   if (a.action === "redo") return void useEditor.getState().redo();
   if (a.action === "split") {

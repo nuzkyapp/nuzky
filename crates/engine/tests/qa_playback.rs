@@ -139,3 +139,31 @@ fn cut_pieces_of_one_file_share_a_decoder_and_show_the_right_frames() {
         }
     }
 }
+
+/// Playing backwards across a cut into another file shows that file's last frame at once, as playing forwards
+/// shows the next file's first frame: its decoder read it while the clip after the cut played.
+#[test]
+fn playing_backwards_across_a_cut_shows_the_earlier_file_at_once() {
+    if !available() {
+        return;
+    }
+    let d = dir("backwards-across-a-cut");
+    let (red, blue) = (d.join("red.mp4"), d.join("blue.mp4"));
+    for (path, colour) in [(&red, "red"), (&blue, "blue")] {
+        let source = format!("color=c={colour}:size=96x64:rate=25:duration=3");
+        ff(&["-f", "lavfi", "-i", &source, "-c:v", "libx264", "-g", "25", "-pix_fmt", "yuv420p"], path);
+    }
+    let mut p = project(&red, 3_000_000);
+    let second = nuzky_engine::media::probe(&blue, "qa-blue".into()).unwrap();
+    p.tracks[0].clips.push(clip("qa-blue-clip", &second.id, 3_000_000, 3_000_000));
+    p.assets.push(second);
+    let mut renderer = Renderer::new().unwrap();
+    renderer.set_reverse(true);
+    for t in (3_000_000..=5_000_000).rev().step_by(40_000) {
+        renderer.render(&p, t, 96, 64, Wait::Ready, true).unwrap();
+        std::thread::sleep(Duration::from_millis(40));
+    }
+    let frame = renderer.render(&p, 2_960_000, 96, 64, Wait::Ready, true).unwrap();
+    let red_pixels = frame.chunks(4).filter(|px| px[0] > 150 && px[2] < 100).count();
+    assert!(red_pixels * 10 > frame.len() / 4 * 9, "{red_pixels} of {} pixels are red", frame.len() / 4);
+}

@@ -311,7 +311,14 @@ fn run<F: Frames>(
                     Msg::Play if st.audio.is_none() => {
                         state_changed |= play(&mut st, 1.0, &cache_dir, &muted);
                     }
-                    Msg::Play => {}
+                    Msg::Play => {
+                        if let Some(a) = st.audio.take_if(|a| a.rate() != 1.0) {
+                            st.t_us = a.now_us().clamp(0, st.project.duration_us().max(0));
+                            play(&mut st, 1.0, &cache_dir, &muted);
+                            st.dirty = true;
+                            state_changed = true;
+                        }
+                    }
                     Msg::PlayAt(rate) => {
                         let rate = if rate.is_finite() { rate.clamp(-MAX_RATE, MAX_RATE) } else { 1.0 };
                         if rate.abs() < MIN_RATE {
@@ -326,7 +333,7 @@ fn run<F: Frames>(
                     }
                     Msg::Pause => {
                         if let Some(a) = st.audio.take() {
-                            st.t_us = a.now_us().min(st.project.duration_us());
+                            st.t_us = a.now_us().clamp(0, st.project.duration_us().max(0));
                             st.dirty = true;
                             state_changed = true;
                         }

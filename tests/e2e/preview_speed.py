@@ -59,6 +59,12 @@ def preview_speed(r):
     two = pace()
     r.check('a third L plays at 2x and the pill says so', 1.75 < two < 2.25 and pill()['text'] == '2x', (two, pill()))
     r.shot('playing-at-2x')
+    # The voiceover and a reel play at 1x with Play: Play while faster goes on at 1x and keeps the speed Play uses.
+    r.s.run('window.__nuzky.api.play()')
+    wait(lambda: (pill() or {}).get('text') == '1x', 5)
+    time.sleep(0.3)
+    played = pace()
+    r.check('Play while playing faster goes on at 1x', 0.85 < played < 1.15, played)
 
     r.key('k')
     r.check('K stops', wait(lambda: not r.s.run(PLAYING), 5))

@@ -176,7 +176,13 @@ impl Tempo {
                 None => nominal,
                 Some(previous) => best(&self.input, previous + HOP - self.offset, nominal - self.offset) + self.offset,
             };
-            let at = |frame: i64, channel: usize| self.input[(frame - self.offset) as usize * CHANNELS + channel];
+            let at = |frame: i64, channel: usize| {
+                usize::try_from(frame - self.offset)
+                    .ok()
+                    .and_then(|f| self.input.get(f * CHANNELS + channel))
+                    .copied()
+                    .unwrap_or(0.0)
+            };
             for n in 0..HOP as usize {
                 for c in 0..CHANNELS {
                     out.push(self.tail[n * CHANNELS + c] + WINDOW[n] * at(start + n as i64, c));
@@ -313,5 +319,19 @@ mod tests {
             let rms = (window.iter().map(|s| s * s).sum::<f32>() / window.len() as f32).sqrt();
             assert!((rms / (0.25 / 2f32.sqrt()) - 1.0).abs() < 0.05, "window {index} is at {rms}");
         }
+    }
+
+    /// At half speed the second piece may search before the stream's start, where `best` hears silence; a
+    /// matching click there must play that silence, not read before the buffer.
+    #[test]
+    fn half_speed_plays_a_piece_found_before_the_start_as_silence() {
+        let mut clicks = vec![0f32; 4096 * CHANNELS];
+        for at in [256, 992] {
+            clicks[at * CHANNELS..(at + 1) * CHANNELS].fill(0.5);
+        }
+        let (mut tempo, mut out) = (Tempo::new(0.5), Vec::new());
+        tempo.push(&clicks);
+        tempo.pull(&mut out);
+        assert!(out.len() >= 2 * HOP as usize * CHANNELS, "{} samples", out.len());
     }
 }
