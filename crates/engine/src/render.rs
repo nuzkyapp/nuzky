@@ -150,13 +150,13 @@ pub(crate) fn visible_clips(track: &Track, t_us: i64) -> impl Iterator<Item = Vi
 fn upcoming(track: &Track, t_us: i64, reverse: bool) -> impl Iterator<Item = (&Clip, i64)> {
     let video = !track.hidden && track.kind == TrackKind::Video;
     let main = track.id == crate::edit::MAIN_TRACK;
-    track.clips.iter().filter_map(move |clip| {
+    let next = track.clips.iter().skip(1).map(Some).chain([None]);
+    track.clips.iter().zip(next).filter_map(move |(clip, next)| {
         if reverse {
             let end = clip.start_us + clip.duration_us;
-            let shown_until = if main {
-                track.clips.iter().find(|next| next.start_us == end).and_then(transition_window).map_or(end, |w| w.1)
-            } else {
-                end
+            let shown_until = match next {
+                Some(next) if main && next.start_us == end => transition_window(next).map_or(end, |w| w.1),
+                _ => end,
             };
             return (video && shown_until <= t_us && shown_until > t_us - PREFETCH_US)
                 .then_some((clip, shown_until - 1));
