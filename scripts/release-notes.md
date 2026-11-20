@@ -1,13 +1,14 @@
-The eleventh alpha of Nuzky, a free, open-source video editor for your computer. It's early, so expect rough edges. Nuzky never changes or deletes your original videos.
+The twelfth alpha of Nuzky, a free, open-source video editor for your computer. It's early, so expect rough edges. Nuzky never changes or deletes your original videos.
 
 ## What's new
 
-- **Help improve Nuzky.** Nuzky asks once whether it may send me, its author, what goes wrong and how it's used, so I can fix what breaks on your computer and not only on mine. You choose two things separately, and both stay off unless you tick them: problems and usage (crashes, errors, which features you use and how fast Nuzky runs), and your conversations in the AI panel. Never your videos, sound, captions or file names, and never tied to your name or email. Settings › Privacy turns either on or off, shows what was sent and deletes it.
-- **Send crash report.** After Nuzky closes unexpectedly, the message offers to send a crash report in one click, even with both of the above off.
+- **Chapters for YouTube.** In a video of 30 seconds or longer, Suggest chapters in the Transcript tab asks the AI panel's agent to split what's said where the topic changes and to title each part. Nuzky times every chapter on the finished video itself, so they move with your cuts and speed changes. The chapters show under the timeline's ruler the way YouTube's player shows them: click one to jump there, double-click it to rename it. Copy puts the list on the clipboard for the video's description, and Export can save it beside the video as a `.chapters.txt` file. The list always keeps YouTube's rules (the first chapter at 00:00, at least three, each 10 seconds or longer), and when an edit breaks them, Nuzky says which chapter it left out and why.
+- **Layout for a wide video on a vertical canvas.** Beside 9:16 and 4:5, the Ratio menu has Layout with three styles. Fill is Reframe, which keeps the face in the frame. Fade shows the whole picture across the middle over a blurred copy of it. Stack shows the clip in the top half and a silent copy of it in the bottom half. Each style is one undo step, and an agent in the AI panel can pick them too.
 
 ## Fixed
 
-- Opening another project stops the work started for the one before, such as recognising speech, Reframe or preparing the sound of a long recording. Before, that work kept running and showed in the project you opened, which then couldn't transcribe or reframe its own video until it ended.
+- In a narrow window, the AI run in the top bar no longer covers Saved.
+- Text style tiles in the Text tab fit their whole word, such as BREAKING, instead of ending it with "…".
 
 ## Not yet
 
@@ -35,4 +36,4 @@ Open an issue at https://github.com/nuzkyapp/nuzky/issues, or use Send feedback 
 
 ## Source
 
-Nuzky is GPL-3.0-or-later, and its source is the Source code archive below. The installers include FFmpeg, ONNX Runtime and other libraries. Their source, and what each installer was built from, is in [Third-party source for Nuzky v0.1.11-alpha](https://github.com/nuzkyapp/nuzky/releases/tag/third-party-source-0.1.11-alpha).
+Nuzky is GPL-3.0-or-later, and its source is the Source code archive below. The installers include FFmpeg, ONNX Runtime and other libraries. Their source, and what each installer was built from, is in [Third-party source for Nuzky v0.1.12-alpha](https://github.com/nuzkyapp/nuzky/releases/tag/third-party-source-0.1.12-alpha).
