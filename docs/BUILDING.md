@@ -118,11 +118,11 @@ For a local Fedora/Nobara AppImage, or a separate build directory:
 ```sh
 export PATH="$HOME/.local/bin:$PATH"
 export CARGO_TARGET_DIR="$PWD/target-release"
-APPIMAGE_EXTRACT_AND_RUN=1 npm run tauri build -- --bundles appimage
+node scripts/build-bundles.mjs appimage
 bash scripts/verify-linux-bundle.sh
 ```
 
-`APPIMAGE_EXTRACT_AND_RUN=1` lets AppImage build tools run without FUSE. The verifier checks `ldd`, then only the bundles it finds, so here the AppImage: it extracts the AppImage without launching the GUI, checks the embedded binary's libraries and asserts the five linked FFmpeg libraries are included. It is not a GUI startup test. A Nobara-built image inherits Nobara's glibc baseline and is not the release artifact for Ubuntu. Release images are built on Ubuntu 24.04; older distributions are not supported. Drivers/display services still come from the host.
+`build-bundles.mjs` adds whisper.cpp's and ggml's libraries and ONNX Runtime, which the app needs, and lets AppImage build tools run without FUSE. The verifier checks `ldd`, then only the bundles it finds, so here the AppImage: it extracts the AppImage without launching the GUI, checks the embedded binary's libraries and asserts the five linked FFmpeg libraries are included. It is not a GUI startup test. A Nobara-built image inherits Nobara's glibc baseline and is not the release artifact for Ubuntu. Release images are built on Ubuntu 24.04; older distributions are not supported. Drivers/display services still come from the host.
 
 ## macOS, Apple Silicon
 
