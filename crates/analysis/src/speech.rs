@@ -569,7 +569,7 @@ mod tests {
     #[ignore = "requires the small model in tmp-test/xdg/data/nuzky/models"]
     fn a_stop_request_ends_recognition_inside_whisper() {
         let model = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tmp-test/xdg/data/nuzky/models/ggml-small.bin");
-        let context = WhisperContext::new_with_params(&model, WhisperContextParameters::default()).unwrap();
+        let context = speech_context(&model).unwrap();
         let mut state = context.create_state().unwrap();
         let tone: Vec<f32> = (0..16_000 * 5).map(|i| (i as f32 * 0.05).sin() * 0.3).collect();
         let asked = std::cell::Cell::new(0);

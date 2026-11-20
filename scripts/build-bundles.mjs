@@ -53,7 +53,9 @@ const rpmHost = process.platform === 'linux' && !debianLike() && hasCommand('rpm
 switch (process.platform) {
   case 'linux': {
     if (rpmHost) {
-      bundles = 'rpm';
+      // `node scripts/build-bundles.mjs appimage` builds a local AppImage instead (docs/BUILDING.md).
+      bundles = process.argv[2] === 'appimage' ? 'appimage' : 'rpm';
+      if (bundles === 'appimage') process.env.APPIMAGE_EXTRACT_AND_RUN = '1';
       // Requirements by SONAME, which rpm-based distributions provide whatever their packages are called, so the
       // package installs only where the FFmpeg it was linked against is present. Tauri adds WebKitGTK and GTK itself.
       const sonames = ['libasound.so.2', 'libvulkan.so.1'];
@@ -64,7 +66,8 @@ switch (process.platform) {
       config.bundle.linux = { rpm: { depends: sonames.map((name) => `${name}()(64bit)`) } };
       const libdir = output('pkg-config', ['--variable=libdir', 'libavcodec']);
       const avcodec = path.join(libdir, sonames.find((name) => name.startsWith('libavcodec')));
-      ffmpegSource = `The .rpm bundles no FFmpeg; it uses the system's, here ${output('rpm', ['-qf', avcodec])} from ${output('rpm', ['-qf', '--qf', '%{SOURCERPM}', avcodec])}.`;
+      const system = `${output('rpm', ['-qf', avcodec])} from ${output('rpm', ['-qf', '--qf', '%{SOURCERPM}', avcodec])}`;
+      ffmpegSource = bundles === 'rpm' ? `The .rpm bundles no FFmpeg; it uses the system's, here ${system}.` : `FFmpeg in the AppImage: ${system}.`;
       // Resources land in usr/lib/Nuzky, where the app looks.
       config.bundle.resources = { [ort.library]: path.basename(ort.library), ...notices };
       break;
@@ -129,12 +132,15 @@ if (process.platform === 'darwin') {
   tauri('build', '--bundles', bundles);
 } else {
   // whisper.cpp and ggml are shared libraries here, which whisper-rs-sys installs in its build directory
-  // (crates/analysis/src/ggml.rs), so the bundles are made once the app is built, from the newest such directory.
+  // (crates/analysis/src/ggml.rs), so the bundles are made once the app is built, from the newest such directory
+  // with the app's Vulkan backend.
   tauri('build', '--no-bundle');
   const whisper = process.platform === 'win32' ? 'whisper.dll' : 'libwhisper.so.1';
+  const vulkan = process.platform === 'win32' ? 'ggml-vulkan.dll' : 'libggml-vulkan.so';
   const found = readdirSync(path.join(target, 'release'), { recursive: true })
     .filter((file) => path.basename(file) === whisper && path.basename(path.dirname(file)) === 'lib'
-      && file.split(path.sep).some((part) => part.startsWith('whisper-rs-sys')))
+      && file.split(path.sep).some((part) => part.startsWith('whisper-rs-sys'))
+      && existsSync(path.join(target, 'release', path.dirname(file), vulkan)))
     .map((file) => path.join(target, 'release', file))
     .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
   if (!found.length) throw new Error(`No ${whisper} in ${path.join(target, 'release')}`);
