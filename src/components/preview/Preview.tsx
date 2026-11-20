@@ -22,6 +22,7 @@ import { FollowPicker, FollowStatus } from "./FollowPicker";
 import { LayerOverlay } from "./LayerOverlay";
 import { PreviewDrop } from "./PreviewDrop";
 import { RatioMenu } from "./RatioMenu";
+import { SpeedMenu } from "./SpeedMenu";
 import { FacesStatus } from "./FacesStatus";
 import { ReframeStatus } from "./ReframeStatus";
 import { VoiceoverCountdown } from "../panel/VoiceoverPanel";
@@ -357,7 +358,13 @@ export function Preview() {
             {fullButton}
           </SourceTransport>
         ) : <div className="bar grid h-11 w-full max-w-[760px] grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-full px-1.5">
-          <Timecode duration={duration} />
+          <div className="flex min-w-0 items-center justify-between gap-1">
+            <Timecode duration={duration} />
+            {/* The speed changes nothing in the project, so it stays open to the user while an agent edits. */}
+            <LockReason.Provider value={null}>
+              <SpeedMenu disabled={empty} />
+            </LockReason.Provider>
+          </div>
           <div className="flex items-center gap-2.5">
             <IconButton round label={withKey("Go to start", "goStart")} onClick={() => seek(0)} disabled={empty} className="@max-[440px]:hidden">
               <SkipBack size={16} />

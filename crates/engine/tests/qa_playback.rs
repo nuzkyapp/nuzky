@@ -139,3 +139,41 @@ fn cut_pieces_of_one_file_share_a_decoder_and_show_the_right_frames() {
         }
     }
 }
+
+/// Playing backwards across a cut into another file shows that file's last frame at once, as playing forwards
+/// shows the next file's first frame: its decoder read it while the clip after the cut played.
+#[test]
+fn playing_backwards_across_a_cut_shows_the_earlier_file_at_once() {
+    if !available() {
+        return;
+    }
+    let d = dir("backwards-across-a-cut");
+    let (red, blue) = (d.join("red.mp4"), d.join("blue.mp4"));
+    for (path, colour) in [(&red, "red"), (&blue, "blue")] {
+        let source = format!("color=c={colour}:size=96x64:rate=25:duration=3");
+        ff(&["-f", "lavfi", "-i", &source, "-c:v", "libx264", "-g", "25", "-pix_fmt", "yuv420p"], path);
+    }
+    let mut p = project(&red, 3_000_000);
+    let second = nuzky_engine::media::probe(&blue, "qa-blue".into()).unwrap();
+    p.tracks[0].clips.push(clip("qa-blue-clip", &second.id, 3_000_000, 3_000_000));
+    p.assets.push(second);
+    let red_after = |p: &nuzky_engine::model::Project, from: i64, at: i64| {
+        let mut renderer = Renderer::new().unwrap();
+        renderer.set_reverse(true);
+        for t in (at + 40_000..=from).rev().step_by(40_000) {
+            renderer.render(p, t, 192, 128, Wait::Ready, true).unwrap();
+            std::thread::sleep(Duration::from_millis(40));
+        }
+        let frame = renderer.render(p, at, 192, 128, Wait::Ready, true).unwrap();
+        frame.chunks(4).filter(|px| px[0] > 150 && px[2] < 100).count()
+    };
+    let red_pixels = red_after(&p, 5_000_000, 2_960_000);
+    assert!(red_pixels * 10 > 192 * 128 * 9, "{red_pixels} of {} pixels are red at the cut", 192 * 128);
+    // A 2 s wipe shows the earlier file a second before the cut, from the wipe's first frame backwards.
+    p.tracks[0].clips[1].transition_in = Some(nuzky_engine::model::Transition {
+        kind: nuzky_engine::model::TransitionKind::WipeLeft,
+        duration_us: 2_000_000,
+    });
+    let red_pixels = red_after(&p, 5_500_000, 3_960_000);
+    assert!(red_pixels > 100, "{red_pixels} pixels are red where the wipe starts");
+}

@@ -74,7 +74,7 @@ function useKeys() {
       if (action === "fullScreen") {
         if (!e.repeat) void toggleFull();
       } else if (action === "previewWindow") void api.closePreviewWindow();
-      else if (FROM_PREVIEW_WINDOW.has(action) && !(e.repeat && (action === "playPause" || action === "mute"))) send(action);
+      else if (FROM_PREVIEW_WINDOW.has(action) && !(e.repeat && (action === "playPause" || action === "mute" || action === "playBackward" || action === "stop" || action === "playForward"))) send(action);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

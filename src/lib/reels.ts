@@ -126,7 +126,8 @@ export function toggleReelPlay() {
   const { playing, snap, timeUs, seek, togglePlay } = useEditor.getState();
   const c = candidateOf(snap?.project, useReels.getState().current);
   if (!playing && c && timeUs === c.endUs) seek(c.startUs);
-  togglePlay();
+  // A reel is judged at the pace it will be watched.
+  void (playing ? togglePlay() : api.play());
 }
 
 /** The last seconds of the current reel, to hear how it ends. */

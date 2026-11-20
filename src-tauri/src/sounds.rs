@@ -144,7 +144,7 @@ pub async fn sound_preview(app: AppHandle, id: String) -> CmdResult<PreviewStart
     std::thread::Builder::new()
         .name("sound-preview".into())
         .spawn(move || {
-            let out = AudioOut::start(Arc::new(Mutex::new(Arc::new(project))), 0, cache, Default::default());
+            let out = AudioOut::start(Arc::new(Mutex::new(Arc::new(project))), 0, 1.0, cache, Default::default());
             while !stop.load(Ordering::Relaxed) && out.now_us() < duration_us + 150_000 {
                 std::thread::sleep(Duration::from_millis(30));
             }

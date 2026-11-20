@@ -89,6 +89,8 @@ pub struct Renderer {
     skipped_ever: Vec<String>,
     /// The share of the frame's width, from the left, drawn without the clips' adjustments; `None` for none.
     compare: Option<f32>,
+    /// The preview plays the timeline backwards, so each clip reads its file the other way.
+    reverse: bool,
 }
 
 type LutStamp = (u64, Option<std::time::SystemTime>);
@@ -143,16 +145,24 @@ pub(crate) fn visible_clips(track: &Track, t_us: i64) -> impl Iterator<Item = Vi
     clips.into_iter().flatten()
 }
 
-/// Video clips that start within the prefetch window after `t_us`.
-fn upcoming(track: &Track, t_us: i64) -> impl Iterator<Item = &Clip> {
+/// Video clips that come into view within the prefetch window after `t_us`, or playing backwards, before it, each with
+/// the timeline time of the frame they first show.
+fn upcoming(track: &Track, t_us: i64, reverse: bool) -> impl Iterator<Item = (&Clip, i64)> {
     let video = !track.hidden && track.kind == TrackKind::Video;
-    track.clips.iter().filter(move |clip| {
-        let start = if track.id == crate::edit::MAIN_TRACK {
-            transition_window(clip).map(|w| w.0).unwrap_or(clip.start_us)
-        } else {
-            clip.start_us
-        };
-        video && start > t_us && start <= t_us + PREFETCH_US
+    let main = track.id == crate::edit::MAIN_TRACK;
+    let next = track.clips.iter().skip(1).map(Some).chain([None]);
+    track.clips.iter().zip(next).filter_map(move |(clip, next)| {
+        if reverse {
+            let end = clip.start_us + clip.duration_us;
+            let shown_until = match next {
+                Some(next) if main && next.start_us == end => transition_window(next).map_or(end, |w| w.1),
+                _ => end,
+            };
+            return (video && shown_until <= t_us && shown_until > t_us - PREFETCH_US)
+                .then_some((clip, shown_until - 1));
+        }
+        let start = if main { transition_window(clip).map(|w| w.0).unwrap_or(clip.start_us) } else { clip.start_us };
+        (video && start > t_us && start <= t_us + PREFETCH_US).then_some((clip, clip.start_us))
     })
 }
 
@@ -347,7 +357,13 @@ impl Renderer {
             skipped: Vec::new(),
             skipped_ever: Vec::new(),
             compare: None,
+            reverse: false,
         })
+    }
+
+    /// Whether the timeline plays backwards in the preview, so decoders read ahead towards the start.
+    pub fn set_reverse(&mut self, reverse: bool) {
+        self.reverse = reverse;
     }
 
     /// Draws the share of the frame's width `split` from the left without the clips' adjustments, so the preview
@@ -559,7 +575,9 @@ impl Renderer {
         self.frame_effects.clear();
         for track in &project.tracks {
             let visible = visible_clips(track, t_us).map(|v| v.clip);
-            self.needed.extend(visible.chain(upcoming(track, t_us)).map(|clip| clip.id.clone()));
+            self.needed.extend(
+                visible.chain(upcoming(track, t_us, self.reverse).map(|(clip, _)| clip)).map(|clip| clip.id.clone()),
+            );
         }
         let canvas = &project.canvas;
         let k = out_w as f32 / canvas.width.max(1) as f32;
@@ -699,7 +717,8 @@ impl Renderer {
     }
 
     fn prefetch(&mut self, project: &Project, t_us: i64, k: f32) {
-        for clip in project.tracks.iter().flat_map(|track| upcoming(track, t_us)) {
+        let reverse = self.reverse;
+        for (clip, first) in project.tracks.iter().flat_map(|track| upcoming(track, t_us, reverse)) {
             let ClipContent::Media { asset_id, .. } = &clip.content else { continue };
             let Some(asset) =
                 project.asset(asset_id).filter(|a| a.kind != AssetKind::Audio && a.width > 0 && a.height > 0)
@@ -707,9 +726,9 @@ impl Renderer {
                 continue;
             };
             let size = decode_resolution(project, clip, asset, k, self.gpu.max_texture_dimension());
-            let backward = crate::retime::Retime::of(clip).is_some_and(|map| map.reverse());
+            let backward = crate::retime::Retime::of(clip).is_some_and(|map| map.reverse()) != reverse;
             self.worker(&clip.id, &asset.path, false).get(
-                source_time(clip, clip.start_us),
+                source_time(clip, first).min((asset.duration_us - 1).max(0)),
                 size,
                 false,
                 false,
@@ -801,7 +820,7 @@ impl Renderer {
                 } else {
                     source_time(clip, t_us).min((asset.duration_us - 1).max(0))
                 };
-                let backward = crate::retime::Retime::of(clip).is_some_and(|map| map.reverse());
+                let backward = crate::retime::Retime::of(clip).is_some_and(|map| map.reverse()) != self.reverse;
                 let worker = self.worker(&clip.id, &asset.path, wait == Wait::Exact);
                 let frame = worker.get(source_t, size, playing, wait == Wait::Exact, backward);
                 if wait == Wait::Exact {

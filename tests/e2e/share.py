@@ -305,6 +305,28 @@ def share_editor(r):
     page.act(action='play')
     r.check('and pauses it', wait(lambda: not r.s.run('return window.__nuzky.store.getState().playing'), 10))
 
+    # A reel is judged at the pace it will be watched: in reels, Play on the page plays at 1x whatever the preview's speed.
+    speed = """const item = [...document.querySelectorAll('[role=menu][aria-label="Preview speed"] [role=menuitemradio]')]
+        .find((i) => i.textContent.trim() === arguments[0]); item?.click(); return !!item"""
+    pace = """(async () => { const st = window.__nuzky.store; const start = [performance.now(), st.getState().timeUs];
+        await new Promise((d) => setTimeout(d, 1500)); const end = [performance.now(), st.getState().timeUs];
+        return JSON.stringify((end[1] - start[1]) / 1e3 / (end[0] - start[0])); })()"""
+    r.s.run("window.__nuzky.store.setState({view: 'editor'})")
+    r.s.run("document.querySelector('[data-speed]').click()")
+    wait(lambda: r.s.run(speed, '2x'), 5)
+    r.s.run("const st = window.__nuzky.store.getState(); window.__nuzky.reels.setState({open: true, before: {timeUs: st.timeUs, selection: []}})")
+    page.act(action='play')
+    wait(lambda: r.s.run('return window.__nuzky.store.getState().playing'), 10)
+    time.sleep(0.3)
+    reel = json.loads(r.s.call(pace)['value'])
+    page.act(action='play')
+    wait(lambda: not r.s.run('return window.__nuzky.store.getState().playing'), 10)
+    r.s.run("window.__nuzky.reels.setState({open: false, before: null})")
+    r.check('in reels, Play on the page plays at 1x whatever the preview speed', 0.85 < reel < 1.15, reel)
+    r.s.run("document.querySelector('[data-speed]').click()")
+    wait(lambda: r.s.run(speed, '1x'), 5)
+    r.s.run("window.__nuzky.store.setState({view: 'home'})")
+
     page.act(action='seek', us=clip['durationUs'] // 2)
     wait(lambda: r.s.run('return window.__nuzky.store.getState().timeUs') == clip['durationUs'] // 2, 10)
     page.act(action='split', clipId=clip['id'])

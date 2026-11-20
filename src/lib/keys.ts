@@ -6,6 +6,9 @@ import { create } from "zustand";
  */
 export const ACTIONS = [
   { id: "playPause", group: "Playback", label: "Play or pause" },
+  { id: "playBackward", group: "Playback", label: "Play backwards, faster with each press" },
+  { id: "stop", group: "Playback", label: "Stop" },
+  { id: "playForward", group: "Playback", label: "Play, faster with each press" },
   { id: "framePrev", group: "Playback", label: "Previous frame" },
   { id: "frameNext", group: "Playback", label: "Next frame" },
   { id: "secondBack", group: "Playback", label: "Back 1 second" },
@@ -40,11 +43,14 @@ export const ACTIONS = [
 export type ActionId = (typeof ACTIONS)[number]["id"];
 
 /** What the preview window's keys do in the editor: they play and move the playhead, as the window has no timeline. */
-export const FROM_PREVIEW_WINDOW = new Set<ActionId>(["playPause", "framePrev", "frameNext", "secondBack", "secondForward", "cutPrev", "cutNext", "goStart", "goEnd", "mute"]);
+export const FROM_PREVIEW_WINDOW = new Set<ActionId>(["playPause", "playBackward", "stop", "playForward", "framePrev", "frameNext", "secondBack", "secondForward", "cutPrev", "cutNext", "goStart", "goEnd", "mute"]);
 export type Keymap = Record<ActionId, string[]>;
 
 const NUZKY: Keymap = {
   playPause: ["Space"],
+  playBackward: ["J"],
+  stop: ["K"],
+  playForward: ["L"],
   framePrev: ["←"],
   frameNext: ["→"],
   secondBack: ["Shift+←"],
@@ -78,6 +84,10 @@ const NUZKY: Keymap = {
 
 const COMMON = {
   playPause: ["Space"],
+  // Every one of these editors shuttles with J, K and L.
+  playBackward: ["J"],
+  stop: ["K"],
+  playForward: ["L"],
   framePrev: ["←"],
   frameNext: ["→"],
   secondBack: ["Shift+←"],

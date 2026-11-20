@@ -5,6 +5,7 @@ import { usePreview } from "./preview";
 import { aiLocked, currentEpoch, projectDuration, undoAction, useEditor } from "./store";
 import { US, formatTime } from "./time";
 import { closeSource } from "./source";
+import { actionOf, chordsOf } from "./keys";
 import type { Asset, MicLevel, Project } from "./types";
 
 /**
@@ -261,8 +262,9 @@ export function voiceoverKeys(e: KeyboardEvent) {
   e.preventDefault();
   e.stopPropagation();
   if (e.repeat) return;
-  if (phase === "countdown" && (e.key === "Escape" || e.key === " ")) cancelCountdown();
-  else if (phase === "recording" && e.key === " ") void stopVoiceover(true);
+  const stop = e.key === " " || actionOf(chordsOf(e)) === "stop";
+  if (phase === "countdown" && (e.key === "Escape" || stop)) cancelCountdown();
+  else if (phase === "recording" && stop) void stopVoiceover(true);
   else if (phase === "recording" && e.key in SCROLL) {
     const view = document.querySelector<HTMLElement>("[data-voiceover-reading]");
     const still = matchMedia("(prefers-reduced-motion: reduce)").matches;

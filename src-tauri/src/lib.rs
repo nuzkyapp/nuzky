@@ -879,6 +879,12 @@ fn play(state: State<'_, AppState>) {
 }
 
 #[tauri::command]
+fn play_at(state: State<'_, AppState>, rate: f64) {
+    log::info!(target: "action", "play at {rate}x");
+    state.engine.send(Msg::PlayAt(rate));
+}
+
+#[tauri::command]
 fn pause(state: State<'_, AppState>) {
     log::info!(target: "action", "pause");
     state.engine.send(Msg::Pause);
@@ -1539,6 +1545,7 @@ pub fn run() {
             sound_only_in,
             play,
             pause,
+            play_at,
             seek,
             set_preview_box,
             preview_window::open_preview_window,
