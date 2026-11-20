@@ -70,7 +70,7 @@ export function suggestChapters() {
 }
 
 useEditor.subscribe(function showSuggestedChapters(s, prev) {
-  const count = (snap: typeof s.snap) => snap?.project.chapters?.length ?? 0;
+  const count = (snap: typeof s.snap) => snap?.project?.chapters?.length ?? 0;
   if (s.snap?.sessionEpoch === prev.snap?.sessionEpoch && count(prev.snap) === 0 && count(s.snap) > 0) useChapters.setState({ open: true });
 });
 
