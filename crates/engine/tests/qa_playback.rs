@@ -157,13 +157,23 @@ fn playing_backwards_across_a_cut_shows_the_earlier_file_at_once() {
     let second = nuzky_engine::media::probe(&blue, "qa-blue".into()).unwrap();
     p.tracks[0].clips.push(clip("qa-blue-clip", &second.id, 3_000_000, 3_000_000));
     p.assets.push(second);
-    let mut renderer = Renderer::new().unwrap();
-    renderer.set_reverse(true);
-    for t in (3_000_000..=5_000_000).rev().step_by(40_000) {
-        renderer.render(&p, t, 96, 64, Wait::Ready, true).unwrap();
-        std::thread::sleep(Duration::from_millis(40));
-    }
-    let frame = renderer.render(&p, 2_960_000, 96, 64, Wait::Ready, true).unwrap();
-    let red_pixels = frame.chunks(4).filter(|px| px[0] > 150 && px[2] < 100).count();
-    assert!(red_pixels * 10 > frame.len() / 4 * 9, "{red_pixels} of {} pixels are red", frame.len() / 4);
+    let red_after = |p: &nuzky_engine::model::Project, from: i64, at: i64| {
+        let mut renderer = Renderer::new().unwrap();
+        renderer.set_reverse(true);
+        for t in (at + 40_000..=from).rev().step_by(40_000) {
+            renderer.render(p, t, 192, 128, Wait::Ready, true).unwrap();
+            std::thread::sleep(Duration::from_millis(40));
+        }
+        let frame = renderer.render(p, at, 192, 128, Wait::Ready, true).unwrap();
+        frame.chunks(4).filter(|px| px[0] > 150 && px[2] < 100).count()
+    };
+    let red_pixels = red_after(&p, 5_000_000, 2_960_000);
+    assert!(red_pixels * 10 > 192 * 128 * 9, "{red_pixels} of {} pixels are red at the cut", 192 * 128);
+    // A 2 s wipe shows the earlier file a second before the cut, from the wipe's first frame backwards.
+    p.tracks[0].clips[1].transition_in = Some(nuzky_engine::model::Transition {
+        kind: nuzky_engine::model::TransitionKind::WipeLeft,
+        duration_us: 2_000_000,
+    });
+    let red_pixels = red_after(&p, 5_500_000, 3_960_000);
+    assert!(red_pixels > 100, "{red_pixels} pixels are red where the wipe starts");
 }
