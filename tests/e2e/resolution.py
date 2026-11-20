@@ -9,7 +9,7 @@ from e2e.home import resize
 from e2e.quality import chip, quality
 
 PROJECT = 'return window.__nuzky.store.getState().snap.project'
-RATIO = 'section[aria-label=Preview] button[aria-haspopup=menu]'
+RATIO = 'section[aria-label=Preview] button[data-ratio]'
 TEXTS = "return window.__nuzky.store.getState().snap.project.tracks.flatMap((t) => t.clips).filter((c) => c.content.type === 'text').map((c) => c.content.style)"
 BORDER = "return window.__nuzky.store.getState().snap.project.tracks[0].clips[0].content.shape.borderWidth"
 
