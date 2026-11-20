@@ -87,6 +87,20 @@ jobs:
       - name: Verify Linux bundle
         if: runner.os == 'Linux' && matrix.part == 'installers'
         run: bash scripts/verify-linux-bundle.sh
+      # whisper.cpp's libraries and ggml's backends go beside nuzky-app.exe (crates/analysis/src/ggml.rs).
+      - name: Verify Windows installer
+        if: runner.os == 'Windows' && matrix.part == 'installers'
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'Nuzky'
+          $setup = Get-Item target/release/bundle/nsis/*-setup.exe
+          Start-Process $setup.FullName -ArgumentList '/S', "/D=$dir" -Wait
+          $dlls = 'whisper.dll', 'ggml.dll', 'ggml-base.dll', 'ggml-vulkan.dll', 'ggml-cpu-x64.dll', 'ggml-cpu-sse42.dll',
+            'ggml-cpu-haswell.dll', 'onnxruntime.dll'
+          foreach ($dll in $dlls) {
+            if (-not (Test-Path (Join-Path $dir $dll))) { throw "$dll is missing beside nuzky-app.exe" }
+          }
+          Get-ChildItem $dir -Filter *.dll | Select-Object Name, Length | Format-Table -AutoSize
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: matrix.part == 'installers'
         with:

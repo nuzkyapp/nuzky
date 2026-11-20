@@ -888,9 +888,7 @@ pub fn start_speech_setup(app: AppHandle, model: String, language: String) -> Re
     let Some((.., integrity)) = MODELS.iter().find(|(id, ..)| *id == model) else {
         return Err("Unknown speech model".into());
     };
-    if language != "auto" && (language.contains('\0') || whisper_rs::get_lang_id(&language).is_none()) {
-        return Err(format!("Unknown language: {language}"));
-    }
+    nuzky_analysis::check_language(&language).map_err(crate::err)?;
     let missing = missing_setup_bytes(&model, &language, integrity.size);
     if let Some(free) = free_bytes(&models_dir())
         && missing > free
@@ -1265,9 +1263,7 @@ fn start_speech(app: AppHandle, request: SpeechRequest, expected_epoch: Option<&
         return Err("Unknown speech model".into());
     }
     let language = &request.language;
-    if language != "auto" && (language.contains('\0') || whisper_rs::get_lang_id(language).is_none()) {
-        return Err(format!("Unknown language: {language}"));
-    }
+    nuzky_analysis::check_language(language).map_err(crate::err)?;
     let state = app.state::<AppState>();
     let (host, project) = {
         let current = crate::lock_session(&state.session, expected_epoch)?;

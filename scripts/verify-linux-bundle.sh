@@ -4,17 +4,25 @@ repo="$(cd "$(dirname "$0")/.." && pwd)"
 target="${CARGO_TARGET_DIR:-$repo/target}"
 target="$(cd "$target" && pwd)"
 binary="$target/release/nuzky-app"
-ldd "$binary" | tee "$target/release/ldd.txt"
+# whisper.cpp's libraries, which the build keeps outside target/release (crates/analysis/src/ggml.rs).
+ggml="$(cat "$target/release/nuzky-ggml-dir.txt")"
+LD_LIBRARY_PATH="$ggml" ldd "$binary" | tee "$target/release/ldd.txt"
 if grep -q 'not found' "$target/release/ldd.txt"; then
   echo 'Unresolved runtime dependency' >&2
   exit 1
 fi
-# Speech recognition must run on CPUs without AVX-512 (GGML_NATIVE in scripts/build-bundles.mjs).
-avx512="$(objdump -d --no-show-raw-insn "$binary" | awk '/^[0-9a-f]+ <.*>:$/ { ggml = /ggml/ } ggml && /%zmm|%k[1-7]/' | wc -l)"
-if [ "$avx512" -ne 0 ]; then
-  echo "whisper.cpp's ggml uses AVX-512 in $avx512 instructions, so speech recognition crashes on CPUs without it" >&2
-  exit 1
-fi
+# Everything but ggml's processor libraries must run on any x86-64 CPU, or speech recognition stops with an illegal
+# instruction before ggml picks the variant this CPU runs.
+for lib in libwhisper.so.1 libggml.so.0 libggml-base.so.0; do
+  wide="$(objdump -d --no-show-raw-insn "$ggml/$lib" | grep -cE '%[yz]mm|%k[1-7]' || true)"
+  if [ "$wide" -ne 0 ]; then
+    echo "$lib uses AVX in $wide instructions, so speech recognition crashes on CPUs without it" >&2
+    exit 1
+  fi
+done
+# The libraries every installer carries in usr/lib/Nuzky, with the processor variant for CPUs without AVX.
+ggml_libs=(libwhisper.so.1 libggml.so.0 libggml-base.so.0 libggml-vulkan.so libggml-cpu-x64.so libggml-cpu-sse42.so
+  libggml-cpu-haswell.so)
 shopt -s nullglob
 
 # Exactly one package of a kind, or the check would pass on an old build left beside the new one.
@@ -49,6 +57,12 @@ verify_rpm() {
     echo 'ONNX Runtime missing from the rpm' >&2
     exit 1
   fi
+  for lib in "${ggml_libs[@]}"; do
+    grep -Eq "^-.* /usr/lib/Nuzky/${lib//./\\.}\$" "$target/release/rpm-contents.txt" || {
+      echo "$lib missing from the rpm" >&2
+      exit 1
+    }
+  done
   if ! grep -Eq '^-.* /usr/bin/nuzky-app$' "$target/release/rpm-contents.txt"; then
     echo 'nuzky-app missing from the rpm' >&2
     exit 1
@@ -105,6 +119,23 @@ verify_appimage() {
     echo 'Unresolved ONNX Runtime dependency' >&2
     exit 1
   fi
+  # The app finds whisper.cpp by its own run path, without help from the environment.
+  env -u LD_LIBRARY_PATH ldd "$app_binary" | grep -F "libwhisper.so.1 => $extract/squashfs-root/" || {
+    echo 'The AppImage does not find its own libwhisper.so.1' >&2
+    exit 1
+  }
+  for lib in "${ggml_libs[@]}"; do
+    test -f "$extract/squashfs-root/usr/lib/Nuzky/$lib" || {
+      echo "$lib missing from the AppImage" >&2
+      exit 1
+    }
+    LD_LIBRARY_PATH="$libs" ldd "$extract/squashfs-root/usr/lib/Nuzky/$lib" >"$target/release/ggml-ldd.txt"
+    if grep -q 'not found' "$target/release/ggml-ldd.txt"; then
+      echo "Unresolved dependency of $lib in the AppImage" >&2
+      cat "$target/release/ggml-ldd.txt" >&2
+      exit 1
+    fi
+  done
   stat --printf='%n: %s bytes\n' "${images[0]}"
 }
 
@@ -116,6 +147,20 @@ verify_deb() {
     echo 'ONNX Runtime missing from the deb' >&2
     exit 1
   fi
+  unpacked="$(mktemp -d)"
+  dpkg-deb -x "${debs[0]}" "$unpacked"
+  env -u LD_LIBRARY_PATH ldd "$unpacked/usr/bin/nuzky-app" | grep -F "libwhisper.so.1 => $unpacked/" || {
+    echo 'The deb does not find its own libwhisper.so.1' >&2
+    rm -rf "$unpacked"
+    exit 1
+  }
+  rm -rf "$unpacked"
+  for lib in "${ggml_libs[@]}"; do
+    grep -Eq "^-.* (\./)?usr/lib/Nuzky/${lib//./\\.}\$" "$target/release/deb-contents.txt" || {
+      echo "$lib missing from the deb" >&2
+      exit 1
+    }
+  done
   stat --printf='%n: %s bytes\n' "${debs[0]}"
 }
 
