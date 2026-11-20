@@ -6,7 +6,7 @@ TOP_BAR = "return [...document.querySelector('header').querySelectorAll('[role=s
 PREVIEW = 'return document.querySelector("section[aria-label=Preview]").innerText'
 JOBS = 'return Object.values(window.__nuzky.store.getState().jobs).map((j) => [j.id, j.kind, j.status])'
 TAB = "[...document.querySelectorAll('[role=tab]')].find((t) => t.textContent.trim() === arguments[0]).click()"
-RATIO = 'section[aria-label=Preview] button[aria-haspopup=menu]'
+RATIO = 'section[aria-label=Preview] button[data-ratio]'
 REFRAME_WIDE = '[role=menu][aria-label="Canvas ratio"] [role=menuitem][title^="Switch to 16:9"]'
 
 

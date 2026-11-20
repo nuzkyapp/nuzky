@@ -12,7 +12,7 @@ import json
 from e2e.harness import CLI, FIXTURES, Bridge, changed_share, ffprobe, flow, link_models, preview_crop, preview_rect, press, wait
 from e2e.home import resize
 
-RATIO = 'section[aria-label=Preview] button[aria-haspopup=menu]'
+RATIO = 'section[aria-label=Preview] button[data-ratio]'
 PROJECT = 'return window.__nuzky.store.getState().snap.project'
 # The fixture's face, in fractions of the picture: centre across before and after its move, and its width.
 FACE_BEFORE, FACE_AFTER, FACE_WIDTH = 1 / 3, 2 / 3, 0.17
