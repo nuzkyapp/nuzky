@@ -243,6 +243,12 @@ Inspected `~/.cargo/registry/src/*/ffmpeg-sys-next-9.0.0/build.rs`, particularly
 - `LIBCLANG_PATH` locates libclang for bindgen. `BINDGEN_EXTRA_CLANG_ARGS` can supply missing compiler include paths (used by the no-root Linux setup). These are bindgen inputs, not FFmpeg runtime paths.
 - Build-time discovery does not arrange runtime loading. AppImage collection, macOS relocation and Windows DLL placement above are separate required steps.
 
+## Patched wgpu
+
+The root `Cargo.toml` takes wgpu and its crates from the branch `nuzky-30.0.1` of [nuzkyapp/wgpu](https://github.com/nuzkyapp/wgpu), pinned by commit, instead of crates.io. That branch is wgpu's tag `v30.0.1` plus one commit, wgpu's own fix [gfx-rs/wgpu#10124](https://github.com/gfx-rs/wgpu/pull/10124). Every crate from the wgpu repository is patched, because patching wgpu-hal alone brings in a second naga and wgpu-types.
+
+wgpu-core creates an empty bind group layout for every device, and wgpu-hal 30.0.1 gives it a Vulkan descriptor pool with no pool sizes, which Vulkan allows only since 1.3.215. Intel's older Vulkan driver for Core graphics crashes on it: in a user's crash dumps, `igvk64.dll` 31.0.101.2112 with a Pentium G4560 (HD Graphics 610) closed Nuzky a few seconds after every start, before the preview showed anything ([gfx-rs/wgpu#9845](https://github.com/gfx-rs/wgpu/issues/9845)). [gfx-rs/wgpu#10985](https://github.com/gfx-rs/wgpu/pull/10985) asks for the fix in wgpu 30. When a wgpu release has it, move to that release and delete the `[patch.crates-io]` section.
+
 ## ONNX Runtime
 
 Covers (`crates/vision`) run their models with ONNX Runtime, which Nuzky opens at run time and never links (`ort` with `load-dynamic`). `ort`'s default, pyke's prebuilt static library, needs AVX2: linked into `nuzky-app` it stopped the app before `main` on CPUs without AVX2, checked under `qemu-x86_64-static -cpu Nehalem`. Microsoft's official build picks its CPU kernels at run time and runs there, so that is what ships.
