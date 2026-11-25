@@ -615,8 +615,9 @@ useEditor.subscribe((s, prev) => {
     void pump();
   }
   if (!s.snap || !prev.snap || s.snap === prev.snap || s.snap.revision <= prev.snap.revision) return;
-  // While the video plays the timeline shows what plays, so an edit then is not acted out.
-  if (!agentRun(s.aiRun) || !active() || s.playing) {
+  // While the video plays the timeline shows what plays, and while media is dragged it shows where it would land, so an
+  // edit then is not acted out.
+  if (!agentRun(s.aiRun) || !active() || s.playing || s.fileDrag || s.assetDrag) {
     if (useAgentCursor.getState().held) flush();
     return;
   }
@@ -641,6 +642,7 @@ usePreview.subscribe((s, prev) => s.full && !prev.full && (present || useAgentCu
 
 // Once the run is over, the person's first click or key shows everything at once. A click on a timeline that still
 // draws the project before the last change only does that, so it never acts on a clip where it was.
+let swallowing = 0;
 for (const type of ["pointerdown", "contextmenu", "keydown"] as const) {
   window.addEventListener(
     type,
@@ -651,7 +653,21 @@ for (const type of ["pointerdown", "contextmenu", "keydown"] as const) {
       if (stale) {
         e.stopPropagation();
         e.preventDefault();
+        swallowing = performance.now() + 500;
       }
+    },
+    true,
+  );
+}
+// The rest of that same click, its release and a right-click's menu, goes with it.
+for (const type of ["pointerup", "click", "contextmenu"] as const) {
+  window.addEventListener(
+    type,
+    (e) => {
+      if (performance.now() > swallowing) return;
+      if (type !== "pointerup") swallowing = 0;
+      e.stopPropagation();
+      e.preventDefault();
     },
     true,
   );
