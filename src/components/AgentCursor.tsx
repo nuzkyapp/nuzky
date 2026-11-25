@@ -62,14 +62,13 @@ export function AgentCursor() {
   const { shown, name, color, step, glyph, label: place } = useAgentCursor();
   const fx = useRef<HTMLDivElement>(null);
   const root = useRef<HTMLDivElement>(null);
-  const drift = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
   const pointer = useRef<HTMLDivElement>(null);
   const label = useRef<HTMLDivElement>(null);
   const text = useRef<HTMLSpanElement>(null);
 
   useLayoutEffect(() => {
-    attachCursor({ root: root.current!, drift: drift.current!, body: body.current!, glyph: pointer.current!, fx: fx.current! });
+    attachCursor({ root: root.current!, body: body.current!, glyph: pointer.current!, fx: fx.current! });
     return () => attachCursor(null);
   }, []);
 
@@ -82,26 +81,24 @@ export function AgentCursor() {
     <div aria-hidden className="pointer-events-none fixed inset-0 z-[82]" style={{ visibility: shown ? "visible" : "hidden" }} data-agent-cursor={shown ? name : undefined}>
       <div ref={fx} className="absolute inset-0" />
       <div ref={root} className="absolute left-0 top-0 will-change-transform">
-        <div ref={drift}>
-          <div ref={body} className="origin-top-left">
-            <div ref={pointer} className="agent-pointer">
-              <Pointer kind={glyph} color={color} />
-            </div>
-            <div
-              ref={label}
-              className="agent-label"
-              style={{ left: place.left ? -6 : 15, top: place.dy, transform: place.left ? "translateX(-100%)" : undefined }}
-            >
-              <span ref={text} className="inline-flex items-center gap-1.5">
-                <Logo name={name} />
-                <span className="font-medium text-fg">{name}</span>
-                {step && (
-                  <span key={step} className="agent-step text-muted">
-                    · {step}
-                  </span>
-                )}
-              </span>
-            </div>
+        <div ref={body} className="origin-top-left">
+          <div ref={pointer} className="agent-pointer">
+            <Pointer kind={glyph} color={color} />
+          </div>
+          <div
+            ref={label}
+            className="agent-label"
+            style={{ left: place.left ? -6 : 15, top: place.dy, transform: place.left ? "translateX(-100%)" : undefined }}
+          >
+            <span ref={text} className="inline-flex items-center gap-1.5">
+              <Logo name={name} />
+              <span className="font-medium text-fg">{name}</span>
+              {step && (
+                <span key={step} className="agent-step text-muted">
+                  · {step}
+                </span>
+              )}
+            </span>
           </div>
         </div>
       </div>

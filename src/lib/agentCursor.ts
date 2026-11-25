@@ -93,7 +93,6 @@ function who(client: string | null): { name: string; color: string } {
 
 interface Nodes {
   root: HTMLElement;
-  drift: HTMLElement;
   body: HTMLElement;
   glyph: HTMLElement;
   fx: HTMLElement;
@@ -199,10 +198,6 @@ async function pause(ms: number) {
 
 const frame = () => new Promise((r) => requestAnimationFrame(() => r(null)));
 
-function idle(on: boolean) {
-  nodes?.drift.classList.toggle("agent-idle", on && !reducedMotion.matches);
-}
-
 const minJerk = (t: number) => t * t * t * (10 - 15 * t + 6 * t * t);
 
 /** Moves the pointer as a hand does: along a slight arc, fast in the middle, a few pixels past the target and back. */
@@ -213,7 +208,6 @@ async function glide(to: { x: number; y: number }) {
   const dy = to.y - from.y;
   const d = Math.hypot(dx, dy);
   if (d < 1) return;
-  idle(false);
   if (reducedMotion.matches) {
     await run(n.body, [{ opacity: 1 }, { opacity: 0 }], 80);
     place(to);
@@ -240,7 +234,6 @@ async function glide(to: { x: number; y: number }) {
 
 /** Drags in step with what it drags, on the same curve. */
 async function drag(to: { x: number; y: number }, ms: number) {
-  idle(false);
   await run(nodes!.root, [{ transform: tr(pos) }, { transform: tr(to) }], ms, SLIDE);
   place(to);
 }
@@ -475,7 +468,6 @@ async function perform(before: Project, after: Project) {
   else if (first.kind === "split") await split(first, before, after, view);
   else if (first.kind === "add") await add(first, before, after, view);
   else await change(first, before, after, view);
-  idle(true);
   stepTimer = window.setTimeout(() => useAgentCursor.setState({ step: null }), 800);
 }
 
@@ -525,7 +517,6 @@ async function enter() {
   present = true;
   await run(nodes.body, scaled(0, 1), 220, "ease-out");
   await glide(to);
-  idle(true);
 }
 
 async function leave() {
@@ -538,7 +529,6 @@ async function leave() {
 
 function hide() {
   present = false;
-  idle(false);
   window.clearTimeout(stepTimer);
   useAgentCursor.setState({ shown: false, step: null, glyph: "arrow" });
 }
