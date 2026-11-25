@@ -22,6 +22,8 @@ export interface Plan {
 
 /** Times within this many µs are the same, as speeds round source times. */
 const SAME = 2_000;
+/** About a frame: a clip on a ramp that still plays the frames it did within this many µs plays the same frames. */
+const FRAME = 40_000;
 /** A clip that went this far off where the main track's ripple took it was moved. */
 const MOVED = 20_000;
 
@@ -153,12 +155,15 @@ export function plan(before: Project, after: Project): Plan | null {
     const ca = a.content;
     const cb = b.content;
     // Another file, or the same one played backwards, at another speed or newly on a ramp (or off it), is a change of
-    // the clip, not a trim; a trim of a clip on a ramp works the ramp and its average speed out again, which stays a trim.
+    // the clip, not a trim. A clip on a ramp has its average speed as its speed: a trim works it out again over fewer
+    // frames, so only a new speed over the same frames is a change.
+    const sameFrames = (x: typeof ca, y: typeof cb) =>
+      x.type === "media" && y.type === "media" && Math.abs(x.sourceInUs - y.sourceInUs) < FRAME && Math.abs(x.sourceInUs + a.durationUs * x.speed - (y.sourceInUs + b.durationUs * y.speed)) < FRAME;
     const swapped =
       ca.type !== cb.type ||
       (ca.type === "media" &&
         cb.type === "media" &&
-        (ca.assetId !== cb.assetId || !!ca.reverse !== !!cb.reverse || !!ca.ramp?.length !== !!cb.ramp?.length || (!ca.ramp?.length && ca.speed !== cb.speed)));
+        (ca.assetId !== cb.assetId || !!ca.reverse !== !!cb.reverse || !!ca.ramp?.length !== !!cb.ramp?.length || (ca.speed !== cb.speed && (!ca.ramp?.length || sameFrames(ca, cb)))));
     if (swapped && ta.id === tb.id) {
       changes.push({ kind: "change", clipId: id, trackId: ta.id, atUs: a.startUs, durationUs: a.durationUs });
       continue;

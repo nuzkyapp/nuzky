@@ -260,6 +260,8 @@ function useCutMotion(lanes: RefObject<HTMLElement | null>, project: Project | u
     const quiet = at - heldAt < 1500 || at - peekedAt < 400;
     // The agent's pointer let the timeline draw its change: the clips go along with the pointer instead.
     if (release && lanes.current && before.project === release.from && project === release.to && before.zoom === zoom) return playRelease(lanes.current, release, zoom);
+    // Shown at once, the clips are where a press or right-click lands, not on their way there.
+    if (before.project && before.project === useAgentCursor.getState().jumped) return;
     if (!before.project || !project || before.project === project || before.zoom !== zoom || quiet || reducedMotion.matches) return;
     const place = (p: Project) => new Map(p.tracks.flatMap((t) => t.clips.map((c) => [c.id, { track: t.id, startUs: c.startUs }] as const)));
     const then = place(before.project);

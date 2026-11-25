@@ -35,6 +35,8 @@ interface AgentCursorState {
   enabled: boolean;
   /** The project the timeline draws while the pointer is on its way to a change. */
   held: Project | null;
+  /** The project the timeline held when everything was shown at once, so it jumps from it without sliding. */
+  jumped: Project | null;
   release: Release | null;
   shown: boolean;
   name: string;
@@ -56,6 +58,7 @@ const WHITE = "#f2f2f5";
 export const useAgentCursor = create<AgentCursorState>(() => ({
   enabled: localStorage.getItem(KEY) !== "0",
   held: null,
+  jumped: null,
   release: null,
   shown: false,
   name: "",
@@ -586,7 +589,7 @@ export function flush() {
   nodes?.fx.replaceChildren();
   if (nodes) for (const a of nodes.body.getAnimations()) a.cancel();
   hide();
-  useAgentCursor.setState({ held: null, release: null });
+  useAgentCursor.setState({ held: null, jumped: useAgentCursor.getState().held, release: null });
 }
 
 useEditor.subscribe((s, prev) => {
