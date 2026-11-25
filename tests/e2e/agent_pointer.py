@@ -98,9 +98,20 @@ def agent_pointer(r):
         r.s.run('window.__nuzky.store.getState().togglePlay()')
         r.check('while the video plays the timeline never waits for the pointer', not any(e['held'] for e in log), [e for e in log if e['held']][:2])
 
+        # The run ends right after its last edit, while the pointer still acts it out; a press on the timeline then shows
+        # the timeline as it is and starts no drag from the clips as drawn.
+        wait(lambda: not r.s.run('return window.__nuzky.store.getState().playing'), 5)
+        main = r.track()
+        bridge.call('apply_edits', {'run_id': run, 'request_id': 'last', 'edits': [{'type': 'splitClip', 'clipId': main[-1]['id'], 'atUs': main[-1]['startUs'] + 400_000}]})
         bridge.call('end_run', {'run_id': run, 'action': 'keep'})
+        held = wait(lambda: r.s.run('return !!window.__nuzky.agentCursor.getState().held && !window.__nuzky.store.getState().aiRun'), 3, 0.05)
+        pressed = r.s.run("""const clip = document.querySelector('[data-timeline] [data-clip-id]');
+            const e = new PointerEvent('pointerdown', {bubbles: true, cancelable: true, button: 0, pointerId: 1, clientX: clip.getBoundingClientRect().left + 5, clientY: clip.getBoundingClientRect().top + 5});
+            clip.dispatchEvent(e);
+            return {stopped: e.defaultPrevented, held: !!window.__nuzky.agentCursor.getState().held};""")
+        r.check('a press on the timeline right after the run shows it as it is and starts nothing', held and pressed['stopped'] and not pressed['held'], {'held': held, **pressed})
         r.check('the pointer goes away when the run ends', wait(lambda: r.s.run(LABEL) is None, 5), r.s.run(LABEL))
-        r.check('the timeline shows the whole run', len(r.track()) == 3 and not r.s.run('return window.__nuzky.agentCursor.getState().held'), r.track())
+        r.check('the timeline shows the whole run', len(r.track()) == 4 and not r.s.run('return window.__nuzky.agentCursor.getState().held'), r.track())
         r.s.run('document.activeElement?.blur()')
         r.key('z', ctrlKey=True)
         r.check('one undo still takes back the whole run', wait(lambda: len(r.track()) == 1, 10), r.track())
