@@ -54,7 +54,7 @@ jobs:
             echo "::error::These folders are not readable by everyone"
             exit 1
           fi
-          for file in usr/bin/nuzky-app opt/nuzky/AppRun opt/nuzky/usr/bin/nuzky-app opt/nuzky/usr/lib/Nuzky/libonnxruntime.so.1 \
+          for file in usr/bin/nuzky-app opt/nuzky/AppRun opt/nuzky/usr/bin/nuzky-app opt/nuzky/usr/lib/Nuzky/libonnxruntime.so.1 opt/nuzky/usr/lib/Nuzky/libwhisper.so.1 \
             usr/share/applications/nuzky-app.desktop; do
             grep -q " $file\$" contents.txt || { echo "::error::$file is missing from the package"; exit 1; }
           done

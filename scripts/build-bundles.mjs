@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { COMMIT as ORT_COMMIT, VERSION as ORT_VERSION, fetchOnnxRuntime } from './fetch-onnxruntime.mjs';
@@ -53,7 +53,9 @@ const rpmHost = process.platform === 'linux' && !debianLike() && hasCommand('rpm
 switch (process.platform) {
   case 'linux': {
     if (rpmHost) {
-      bundles = 'rpm';
+      // `node scripts/build-bundles.mjs appimage` builds a local AppImage instead (docs/BUILDING.md).
+      bundles = process.argv[2] === 'appimage' ? 'appimage' : 'rpm';
+      if (bundles === 'appimage') process.env.APPIMAGE_EXTRACT_AND_RUN = '1';
       // Requirements by SONAME, which rpm-based distributions provide whatever their packages are called, so the
       // package installs only where the FFmpeg it was linked against is present. Tauri adds WebKitGTK and GTK itself.
       const sonames = ['libasound.so.2', 'libvulkan.so.1'];
@@ -64,7 +66,8 @@ switch (process.platform) {
       config.bundle.linux = { rpm: { depends: sonames.map((name) => `${name}()(64bit)`) } };
       const libdir = output('pkg-config', ['--variable=libdir', 'libavcodec']);
       const avcodec = path.join(libdir, sonames.find((name) => name.startsWith('libavcodec')));
-      ffmpegSource = `The .rpm bundles no FFmpeg; it uses the system's, here ${output('rpm', ['-qf', avcodec])} from ${output('rpm', ['-qf', '--qf', '%{SOURCERPM}', avcodec])}.`;
+      const system = `${output('rpm', ['-qf', avcodec])} from ${output('rpm', ['-qf', '--qf', '%{SOURCERPM}', avcodec])}`;
+      ffmpegSource = bundles === 'rpm' ? `The .rpm bundles no FFmpeg; it uses the system's, here ${system}.` : `FFmpeg in the AppImage: ${system}.`;
       // Resources land in usr/lib/Nuzky, where the app looks.
       config.bundle.resources = { [ort.library]: path.basename(ort.library), ...notices };
       break;
@@ -118,13 +121,51 @@ switch (process.platform) {
   }
   default: throw new Error(`Unsupported platform: ${process.platform}`);
 }
-// ggml builds whisper.cpp for the CPU of the machine it builds on, and GitHub's runners differ: a release built on one
-// with AVX-512 crashed speech recognition on every CPU without it. Off, it uses AVX2, FMA, F16C and BMI2.
-if (process.arch === 'x64') process.env.GGML_NATIVE = 'OFF';
 const configPath = path.join(target, 'bundle-config.json');
-writeFileSync(configPath, JSON.stringify(config, null, 2));
-// Call the installed CLI with Node to avoid Windows .cmd quoting/shell differences.
-run(process.execPath, ['node_modules/@tauri-apps/cli/tauri.js', 'build', '--bundles', bundles, '--config', configPath, '--', '--locked']);
+const tauri = (...args) => {
+  writeFileSync(configPath, JSON.stringify(config, null, 2));
+  // Call the installed CLI with Node to avoid Windows .cmd quoting/shell differences.
+  run(process.execPath, ['node_modules/@tauri-apps/cli/tauri.js', ...args, '--config', configPath,
+    ...(args[0] === 'build' ? ['--', '--locked'] : [])]);
+};
+if (process.platform === 'darwin') {
+  tauri('build', '--bundles', bundles);
+} else {
+  // whisper.cpp and ggml are shared libraries here, which whisper-rs-sys installs in its build directory
+  // (crates/analysis/src/ggml.rs), so the bundles are made once the app is built, from the newest such directory
+  // with the app's Vulkan backend.
+  tauri('build', '--no-bundle');
+  const whisper = process.platform === 'win32' ? 'whisper.dll' : 'libwhisper.so.1';
+  const vulkan = process.platform === 'win32' ? 'ggml-vulkan.dll' : 'libggml-vulkan.so';
+  const found = readdirSync(path.join(target, 'release'), { recursive: true })
+    .filter((file) => path.basename(file) === whisper && path.basename(path.dirname(file)) === 'lib'
+      && file.split(path.sep).some((part) => part.startsWith('whisper-rs-sys'))
+      && existsSync(path.join(target, 'release', path.dirname(file), vulkan)))
+    .map((file) => path.join(target, 'release', file))
+    .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
+  if (!found.length) throw new Error(`No ${whisper} in ${path.join(target, 'release')}`);
+  const ggml = path.dirname(found[0]);
+  // scripts/verify-linux-bundle.sh checks these libraries.
+  writeFileSync(path.join(target, 'release', 'nuzky-ggml-dir.txt'), ggml);
+  const libraries = readdirSync(ggml).filter((name) => process.platform === 'win32'
+    ? name.endsWith('.dll')
+    : /^lib(whisper|ggml|ggml-base)\.so\.\d+$/.test(name) || /^libggml-(?!base\.)[\w-]+\.so$/.test(name));
+  for (const kind of ['whisper', 'ggml-base', 'ggml-cpu-x64', 'ggml-vulkan']) {
+    if (!libraries.some((name) => name.replace(/^lib/, '').startsWith(`${kind}.`))) throw new Error(`${kind} missing from ${ggml}`);
+  }
+  // Copied as files, not the links CMake installs, and named relative to src-tauri for the reason given above.
+  const stage = path.join(target, 'bundle-ggml');
+  rmSync(stage, { recursive: true, force: true });
+  mkdirSync(stage, { recursive: true });
+  for (const [from, to] of [...libraries.map((name) => [path.join(ggml, name), name]),
+    [path.join(ggml, '..', 'whisper.cpp', 'LICENSE'), 'licenses/whisper.cpp/LICENSE']]) {
+    const copy = path.join(stage, to);
+    mkdirSync(path.dirname(copy), { recursive: true });
+    copyFileSync(from, copy);
+    config.bundle.resources[path.relative('src-tauri', copy)] = to;
+  }
+  tauri('bundle', '--bundles', bundles);
+}
 
 if (process.platform === 'darwin') {
   const app = path.join(bundle, 'macos', 'Nuzky.app');
@@ -157,8 +198,11 @@ if (rpmHost) {
 } else if (process.platform === 'linux') {
   // linuxdeploy copied these libraries from Ubuntu's packages; docs/BUILDING.md fetches their source by this list.
   const appdir = path.join(bundle, 'appimage', 'Nuzky.AppDir');
-  const libs = output('find', [appdir, '-type', 'f', '-name', '*.so*', '-not', '-path', '*/usr/lib/Nuzky/*', '-printf', '%f\n']);
-  const owners = output('dpkg', ['-S', ...new Set(libs.split('\n').map((name) => `*/${name}`))]).split('\n')
+  // linuxdeploy also copies whisper.cpp's libraries, which Nuzky itself builds, from usr/lib/Nuzky into usr/lib.
+  const own = new Set(readdirSync(path.join(appdir, 'usr', 'lib', 'Nuzky')));
+  const libs = output('find', [appdir, '-type', 'f', '-name', '*.so*', '-not', '-path', '*/usr/lib/Nuzky/*', '-printf', '%f\n'])
+    .split('\n').filter((name) => !own.has(name));
+  const owners = output('dpkg', ['-S', ...new Set(libs.map((name) => `*/${name}`))]).split('\n')
     .flatMap((line) => line.slice(0, line.lastIndexOf(': ')).split(', '));
   const sources = output('dpkg-query', ['-W', '-f=${source:Package} ${source:Version}\n', ...new Set(owners)]);
   info.push(`Ubuntu source packages of the libraries in the AppImage:\n${[...new Set(sources.split('\n'))].sort().join('\n')}`);
