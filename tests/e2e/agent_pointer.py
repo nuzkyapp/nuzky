@@ -84,9 +84,12 @@ def agent_pointer(r):
         r.check('once done the label names only the agent', r.s.run(LABEL) == 'Claude Code', r.s.run(LABEL))
 
         main = r.track()
+        moved_x = r.s.run(X_AT, main[-1]['startUs'] + main[-1]['durationUs'] // 2)
         log = act(r, bridge, run, 'reorder', [{'type': 'moveClip', 'clipId': main[-1]['id'], 'trackId': 'main', 'startUs': 0}], f"(e) => e.first === '{main[-1]['id']}'")
-        r.check('a clip moved before another on the main track is grabbed and carried there', any(e['glyph'] == 'grab' and e['first'] == main[0]['id'] for e in log)
-                and any(e['label'] == 'Claude Code · Moving talk.mp4' for e in log), [(e['glyph'], e['first']) for e in log][::20])
+        grabbed = first(log, lambda e: e['glyph'] == 'grab')
+        r.check('the short clip put before the long one on the main track is the one grabbed and carried there',
+                grabbed is not None and log[grabbed]['first'] == main[0]['id'] and abs(log[grabbed]['x'] - moved_x) < 14
+                and any(e['label'] == 'Claude Code · Moving talk.mp4' for e in log), grabbed is not None and {**log[grabbed], 'moved_x': moved_x})
 
         r.s.run('window.__nuzky.store.getState().togglePlay()')
         r.check('the video plays', wait(lambda: r.s.run('return window.__nuzky.store.getState().playing'), 5))

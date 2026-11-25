@@ -594,7 +594,8 @@ useEditor.subscribe((s, prev) => {
   if (s.snap && prev.snap && s.snap.sessionEpoch !== prev.snap.sessionEpoch) return flush();
   // Playing, moving the playhead or dragging media in needs the timeline as it is.
   const busy = (s.playing && !prev.playing) || s.seeks !== prev.seeks || (!!s.fileDrag && !prev.fileDrag) || (!!s.assetDrag && !prev.assetDrag);
-  if (useAgentCursor.getState().held && busy) return flush();
+  // Clips the pointer has yet to put in wait hidden even once the timeline holds nothing back.
+  if (busy && (present || useAgentCursor.getState().held)) return flush();
   // The home screen or the launcher covers the timeline, so the pointer goes with it.
   if ((present || useAgentCursor.getState().held) && (s.view !== prev.view || s.launcherOpen !== prev.launcherOpen) && !lanes()) return flush();
   if (started && active()) {
@@ -640,12 +641,12 @@ usePreview.subscribe((s, prev) => s.full && !prev.full && (present || useAgentCu
 
 // Once the run is over, the person's first click or key shows everything at once. A click on a timeline that still
 // draws the project before the last change only does that, so it never acts on a clip where it was.
-for (const type of ["pointerdown", "keydown"] as const) {
+for (const type of ["pointerdown", "contextmenu", "keydown"] as const) {
   window.addEventListener(
     type,
     (e) => {
       if (useEditor.getState().aiRun || !(present || useAgentCursor.getState().held)) return;
-      const stale = !!useAgentCursor.getState().held && e.type === "pointerdown" && !!(e.target as Element | null)?.closest?.("[data-timeline]");
+      const stale = !!useAgentCursor.getState().held && e.type !== "keydown" && !!(e.target as Element | null)?.closest?.("[data-timeline]");
       flush();
       if (stale) {
         e.stopPropagation();
