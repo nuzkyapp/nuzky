@@ -4,6 +4,7 @@ import { usePreview } from "../lib/preview";
 import { useReels } from "../lib/reels";
 import { useEditor } from "../lib/store";
 import { DockDragLayer, DockedAiPanel, FloatingAiPanel } from "./ai/AiDock";
+import { AgentCursor } from "./AgentCursor";
 import { Inspector } from "./inspector/Inspector";
 import { LeftPanel } from "./panel/LeftPanel";
 import { Preview } from "./preview/Preview";
@@ -95,6 +96,7 @@ export default function Editor({ panes, dock }: { panes: ReturnType<typeof paneL
       )}
       <DockDragLayer />
       <DragChip />
+      <AgentCursor />
     </div>
   );
 }

@@ -32,6 +32,9 @@ pub struct Stamp {
 pub struct RunInfo {
     pub run_id: String,
     pub label: String,
+    /// The name the agent's MCP client gave when it connected, such as `claude-code`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]

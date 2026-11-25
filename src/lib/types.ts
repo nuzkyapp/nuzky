@@ -1809,6 +1809,10 @@ export type Snapshot = {
    * Label of the AI run editing the project.
    */
   openRunLabel: string | null,
+  /**
+   * The MCP client name of the agent editing the project, when it gave one.
+   */
+  openRunAgent: string | null,
   recovery: boolean,
   canUndo: boolean,
   canRedo: boolean,

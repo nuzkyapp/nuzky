@@ -225,6 +225,7 @@ function AiToggle() {
     <Button
       variant="bar"
       pill
+      data-ai-toggle
       aria-pressed={open}
       title={open ? withKey("Close AI", "aiPanel") : working ? `${withKey("Open AI", "aiPanel")}. It is still working.` : withKey("Open AI", "aiPanel")}
       onClick={togglePanel}

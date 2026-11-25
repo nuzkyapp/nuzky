@@ -881,8 +881,9 @@ class win32:
 class Bridge:
     """The agent's side: `nuzky mcp` attached to the open app over its local socket."""
 
-    def __init__(self, r, project=None, command=None):
-        """`command`: what an agent's config runs instead, such as `nuzky-app mcp --current`."""
+    def __init__(self, r, project=None, command=None, client='repro'):
+        """`command`: what an agent's config runs instead, such as `nuzky-app mcp --current`. `client`: the name the
+        agent's MCP client gives, which the agent's pointer shows."""
         command = command or [str(CLI), 'mcp', '--project', str(project), '--allow-write']
         self.process = subprocess.Popen(command, env=r.launch_env(),
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=open(r.work / 'bridge.log', 'w'),
@@ -890,7 +891,7 @@ class Bridge:
         self.lines, self.id = queue.Queue(), 0
         threading.Thread(target=lambda: [self.lines.put(line) for line in self.process.stdout], daemon=True).start()
         try:
-            self.rpc('initialize', {'protocolVersion': '2025-03-26', 'capabilities': {}, 'clientInfo': {'name': 'repro', 'version': '1'}})
+            self.rpc('initialize', {'protocolVersion': '2025-03-26', 'capabilities': {}, 'clientInfo': {'name': client, 'version': '1'}})
             self.send({'jsonrpc': '2.0', 'method': 'notifications/initialized'})
         except BaseException:
             stop(self.process)

@@ -46,6 +46,11 @@ impl ProjectSession {
     }
 
     pub fn begin_run(&self, label: String) -> Result<RunResult> {
+        self.begin_run_as(label, None)
+    }
+
+    /// `agent`: the name of the agent's MCP client, which the editor shows on the agent's pointer.
+    pub fn begin_run_as(&self, label: String, agent: Option<String>) -> Result<RunResult> {
         let mut inner = self.inner.lock().unwrap();
         inner.expire()?;
         inner.writable()?;
@@ -68,7 +73,7 @@ impl ProjectSession {
             .as_ref()
             .context("READ_ONLY: no writer")?
             .checkpoint(serde_json::to_value(checkpoint).context("Serializing checkpoint")?)?;
-        let info = RunInfo { run_id: run_id.clone(), label };
+        let info = RunInfo { run_id: run_id.clone(), label, agent };
         let before = inner.editor.project.clone();
         inner.run = Some(Run { info: info.clone(), touched: Instant::now(), ending: None, before });
         log::info!(target: "action", "ai run started");

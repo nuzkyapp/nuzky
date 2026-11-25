@@ -28,6 +28,7 @@ import { US, formatDuration, formatTime } from "../../lib/time";
 import type { Clip, EditCmd, Project, Track } from "../../lib/types";
 import { candidateReason, thumbnailOf, useCandidates, useCover } from "../../lib/cover";
 import { describePeek } from "../../lib/peek";
+import { playRelease, useAgentCursor } from "../../lib/agentCursor";
 import { usePlugins } from "../../lib/plugins";
 import { usePreview } from "../../lib/preview";
 import { addDropResolver, type DropMedia } from "../panel/assets";
@@ -251,11 +252,14 @@ function useCutMotion(lanes: RefObject<HTMLElement | null>, project: Project | u
   useLayoutEffect(() => {
     const before = was.current;
     const at = performance.now();
+    const release = useAgentCursor.getState().release;
     // Until it is let go, however long the pointer rests.
     const heldAt = held || before.held ? at : before.heldAt;
     const peekedAt = peeking || before.peeking ? at : before.peekedAt;
     was.current = { project, zoom, held, heldAt, peeking, peekedAt };
     const quiet = at - heldAt < 1500 || at - peekedAt < 400;
+    // The agent's pointer let the timeline draw its change: the clips go along with the pointer instead.
+    if (release && lanes.current && before.project === release.from && project === release.to && before.zoom === zoom) return playRelease(lanes.current, release, zoom);
     if (!before.project || !project || before.project === project || before.zoom !== zoom || quiet || reducedMotion.matches) return;
     const place = (p: Project) => new Map(p.tracks.flatMap((t) => t.clips.map((c) => [c.id, { track: t.id, startUs: c.startUs }] as const)));
     const then = place(before.project);
@@ -335,6 +339,9 @@ export function Timeline({ height }: { height: number }) {
   const { withKey } = useKeyLabels();
   const snap0 = useEditor((s) => s.snap);
   const project = snap0?.project;
+  // While the agent's pointer is on its way to a change, the lanes draw the project before it.
+  const agentHeld = useAgentCursor((s) => s.held);
+  const shownProject = agentHeld ?? project;
   const selection = useEditor((s) => s.selection);
   const cut = useEditor((s) => s.cut);
   // A string or null, so playback re-renders the timeline only when it changes.
@@ -349,7 +356,7 @@ export function Timeline({ height }: { height: number }) {
       return asset ? { kind: asset.kind, hasAudio: asset.hasAudio, durationUs: asset.durationUs } : s.fileDrag?.kind ? { kind: s.fileDrag.kind, several: s.fileDrag.several } : null;
     }),
   );
-  const locked = useAiLocked();
+  const locked = useAiLocked() || !!agentHeld;
   // In the cover editor the timeline chooses the cover's frame: clicks and drags move the playhead, which is the frame.
   const cover = useCover((s) => s.open);
   const chapterBand = useChapterBandShown() && !cover;
@@ -400,7 +407,7 @@ export function Timeline({ height }: { height: number }) {
   const [peek, setPeek] = useState<Peek | null>(null);
   const peekShown = peek && !locked && !box && project && peek.revision === snap0?.revision ? peek : null;
   const described = useMemo(() => (peekShown && project ? describePeek(project, peekShown.project) : null), [peekShown, project]);
-  const drawn = peekShown && described?.draw === "then" ? peekShown.project : project;
+  const drawn = peekShown && described?.draw === "then" ? peekShown.project : shownProject;
   // While a plugin is open, the clips its run would change are marked where they are now; editing goes on.
   const pluginPreview = usePlugins((s) => s.preview);
   const pluginMarks = useMemo(
@@ -422,7 +429,7 @@ export function Timeline({ height }: { height: number }) {
   // Media dropped on the middle of a clip that can show or play it goes in that clip; its ends insert beside it.
   // While Undo or Redo is hovered the clips are drawn where they were, so nothing is offered.
   const peeking = !!peekShown;
-  useCutMotion(scroller, project, zoom, !!gesture || !!box, peeking);
+  useCutMotion(scroller, shownProject, zoom, !!gesture || !!box, peeking);
   const replaceTarget = useCallback(
     (x: number, y: number, media: DropMedia | null) => {
       const el = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-clip-id]");
@@ -603,7 +610,7 @@ export function Timeline({ height }: { height: number }) {
         })();
   const emptyTimeline = allClips(drawn).length === 0;
   // Until something sits over the video, an empty lane above it shows where a picture over it goes.
-  const overlayLaneShown = !!project && !emptyTimeline && !cover && !peekShown && !project.tracks.some((t) => t.kind === "video" && t.id !== MAIN_TRACK);
+  const overlayLaneShown = !!drawn && !emptyTimeline && !cover && !peekShown && !drawn.tracks.some((t) => t.kind === "video" && t.id !== MAIN_TRACK);
   const dragTrack = drag ? project.tracks.find((t) => t.id === drag.trackId) : undefined;
   const dragKind = dragTrack?.kind ?? null;
   // The lane keeps its room so nothing jumps under the pointer, but says something only while it could take the drag.
@@ -840,6 +847,8 @@ export function Timeline({ height }: { height: number }) {
       */}
       <div
         ref={scroller}
+        data-timeline
+        data-header={HEADER_W}
         className="relative mx-px mb-px min-h-0 flex-1 overflow-auto overscroll-none"
         onScroll={(e) => setView({ left: e.currentTarget.scrollLeft, width: e.currentTarget.clientWidth })}
       >
@@ -911,6 +920,7 @@ export function Timeline({ height }: { height: number }) {
                       else rows.current.delete(track.id);
                     }}
                     data-lane
+                    data-track-id={track.id}
                     role="listbox"
                     aria-label={`${track.name || track.kind} track`}
                     aria-multiselectable
@@ -966,7 +976,7 @@ export function Timeline({ height }: { height: number }) {
                         <div className="pointer-events-none absolute -top-0.5 -bottom-0.5 z-20 w-0.5 -translate-x-1/2 rounded-full bg-accent" style={{ left: (layout.slotUs / US) * zoom }} />
                       </>
                     )}
-                    {isMain && !drag?.moved && !peekShown && <CutMarkers project={project} zoom={zoom} locked={locked} />}
+                    {isMain && !drag?.moved && !peekShown && <CutMarkers project={drawn} zoom={zoom} locked={locked} />}
                     {drag?.moved && ghostTiming && ghostTrackId === track.id && (
                       <ClipView clip={drag.clip} track={track} project={project} zoom={zoom} height={h} visible={visible} selected ghost timing={ghostTiming} />
                     )}
