@@ -640,34 +640,20 @@ window.addEventListener("resize", () => {
 
 usePreview.subscribe((s, prev) => s.full && !prev.full && (present || useAgentCursor.getState().held) && flush());
 
-// Once the run is over, the person's first click or key shows everything at once. A click on a timeline that still
-// draws the project before the last change only does that, so it never acts on a clip where it was.
-let swallowing = 0;
-for (const type of ["pointerdown", "contextmenu", "keydown"] as const) {
+// Once the run is over, the person's first press or key shows everything at once. A press on a timeline that still
+// draws the project before the last change would start a drag or a box from the clips as drawn, so it does only that;
+// React draws the timeline as it is before the click or menu of the same press arrives, so those act on what is there.
+for (const type of ["pointerdown", "keydown"] as const) {
   window.addEventListener(
     type,
     (e) => {
       if (useEditor.getState().aiRun || !(present || useAgentCursor.getState().held)) return;
-      const stale = !!useAgentCursor.getState().held && e.type !== "keydown" && !!(e.target as Element | null)?.closest?.("[data-timeline]");
+      const stale = !!useAgentCursor.getState().held && e.type === "pointerdown" && !!(e.target as Element | null)?.closest?.("[data-timeline]");
       flush();
       if (stale) {
         e.stopPropagation();
         e.preventDefault();
-        swallowing = performance.now() + 500;
       }
-    },
-    true,
-  );
-}
-// The rest of that same click, its release and a right-click's menu, goes with it.
-for (const type of ["pointerup", "click", "contextmenu"] as const) {
-  window.addEventListener(
-    type,
-    (e) => {
-      if (performance.now() > swallowing) return;
-      if (type !== "pointerup") swallowing = 0;
-      e.stopPropagation();
-      e.preventDefault();
     },
     true,
   );

@@ -153,10 +153,12 @@ export function plan(before: Project, after: Project): Plan | null {
     const ca = a.content;
     const cb = b.content;
     // Another file, or the same one played backwards, at another speed or newly on a ramp (or off it), is a change of
-    // the clip, not a trim; a trim of a clip on a ramp works the ramp out again, which stays a trim.
+    // the clip, not a trim; a trim of a clip on a ramp works the ramp and its average speed out again, which stays a trim.
     const swapped =
       ca.type !== cb.type ||
-      (ca.type === "media" && cb.type === "media" && (ca.assetId !== cb.assetId || !!ca.reverse !== !!cb.reverse || ca.speed !== cb.speed || !!ca.ramp?.length !== !!cb.ramp?.length));
+      (ca.type === "media" &&
+        cb.type === "media" &&
+        (ca.assetId !== cb.assetId || !!ca.reverse !== !!cb.reverse || !!ca.ramp?.length !== !!cb.ramp?.length || (!ca.ramp?.length && ca.speed !== cb.speed)));
     if (swapped && ta.id === tb.id) {
       changes.push({ kind: "change", clipId: id, trackId: ta.id, atUs: a.startUs, durationUs: a.durationUs });
       continue;
