@@ -16,6 +16,10 @@ pub struct State {
 #[serde(deny_unknown_fields)]
 pub struct Begin {
     pub label: String,
+    /// Filled in by the server from the MCP client's name, never by the agent.
+    #[serde(default)]
+    #[schemars(skip)]
+    pub agent: Option<String>,
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

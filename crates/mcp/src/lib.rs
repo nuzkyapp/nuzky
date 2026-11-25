@@ -350,14 +350,17 @@ impl ServerHandler for Server {
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
-        _: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
-        Ok(self
-            .target
-            .clone()
-            .call(request.name.to_string(), Value::Object(request.arguments.unwrap_or_default()))
-            .await
-            .into())
+        let mut arguments = request.arguments.unwrap_or_default();
+        if request.name == "begin_run" {
+            let client = context.peer.peer_info().map(|info| info.client_info.name.clone());
+            match client {
+                Some(name) => arguments.insert("agent".into(), Value::String(name)),
+                None => arguments.remove("agent"),
+            };
+        }
+        Ok(self.target.clone().call(request.name.to_string(), Value::Object(arguments)).await.into())
     }
 
     async fn list_resources(

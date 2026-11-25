@@ -1,6 +1,7 @@
+import { setAgentPointer, useAgentCursor } from "../../lib/agentCursor";
 import { closeSettings } from "../../lib/settings";
 import { openStyle, useStyle } from "../../lib/style";
-import { Button } from "../ui";
+import { Button, Switch } from "../ui";
 import { AgentsSection } from "./AgentsSection";
 import { ChatGptSection } from "./ChatGptSection";
 import { LearnSwitch } from "./LearnSwitch";
@@ -10,6 +11,7 @@ import { Group, Item } from "./parts";
 export function AiPane() {
   const rules = useStyle((s) => (s.view ? s.view.own.length + s.view.rules.length : null));
   const suggestions = useStyle((s) => s.view?.suggestions.length ?? 0);
+  const pointer = useAgentCursor((s) => s.enabled);
   return (
     <div className="flex flex-col gap-6">
       <section data-setting="chatgpt" aria-label="ChatGPT account" className="flex flex-col gap-2 rounded-[14px]">
@@ -20,6 +22,11 @@ export function AiPane() {
         <h3 className="text-[13px] font-semibold text-fg">Agents outside Nuzky</h3>
         <AgentsSection />
       </section>
+      <Group title="While an agent edits" id="agent-pointer">
+        <Item title="Show the agent's pointer" detail="A pointer with the agent's name acts out each change on the timeline">
+          <Switch label="Show the agent's pointer" checked={pointer} onChange={setAgentPointer} />
+        </Item>
+      </Group>
       <Group title="Your style">
         <LearnSwitch />
         <Item

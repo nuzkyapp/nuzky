@@ -129,6 +129,8 @@ pub struct Snapshot {
     session_epoch: String,
     /// Label of the AI run editing the project.
     open_run_label: Option<String>,
+    /// The MCP client name of the agent editing the project, when it gave one.
+    open_run_agent: Option<String>,
     recovery: bool,
     can_undo: bool,
     can_redo: bool,
@@ -276,6 +278,7 @@ impl OpenSession {
             project: state.project,
             revision: state.stamp.revision,
             session_epoch: state.stamp.session_epoch,
+            open_run_agent: state.open_run.as_ref().and_then(|run| run.agent.clone()),
             open_run_label: state.open_run.map(|run| run.label),
             recovery: state.recovery_checkpoint.is_some(),
             can_undo,

@@ -524,6 +524,79 @@ button:focus-visible .pv {
   transform-origin: 100% 50%;
 }
 
+/* The agent's pointer (src/components/AgentCursor.tsx): its glyph, its label, and the marks it leaves on the timeline.
+   One small element moves, by transform; nothing on the timeline repaints for it. */
+.agent-pointer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+.agent-pointer svg {
+  position: absolute;
+  overflow: visible;
+  filter: drop-shadow(0 1px 1.5px rgb(0 0 0 / 0.55));
+}
+.agent-label {
+  position: absolute;
+  overflow: hidden;
+  white-space: nowrap;
+  border-radius: 8px;
+  padding: 4px 9px 4px 7px;
+  font-size: 12px;
+  line-height: 16px;
+  background: var(--color-raised);
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 0.1),
+    0 2px 6px rgb(0 0 0 / 0.5);
+  transition: width 240ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+@keyframes agent-step-in {
+  from {
+    opacity: 0;
+  }
+}
+.agent-step {
+  animation: agent-step-in 160ms ease-out 80ms backwards;
+}
+.agent-ring {
+  position: absolute;
+  width: 34px;
+  height: 34px;
+  margin: -17px 0 0 -17px;
+  border: 2px solid;
+  border-radius: 9999px;
+}
+.agent-flash {
+  position: absolute;
+  border: 2px solid;
+  border-radius: 8px;
+  /* Lined in dark on both sides, so it never reads as the focus ring or a selection. */
+  box-shadow:
+    0 0 0 1px #0a0a0b,
+    inset 0 0 0 1px #0a0a0b;
+}
+.agent-band-box {
+  position: absolute;
+  overflow: hidden;
+}
+.agent-band {
+  position: absolute;
+  border-left: 2px solid;
+  border-right: 2px solid;
+  /* A dark line outside each edge, as the snap guides have, so the edges hold over bright footage. */
+  box-shadow:
+    -1px 0 #0a0a0b,
+    1px 0 #0a0a0b;
+}
+.agent-blade {
+  position: absolute;
+  width: 2px;
+  border-radius: 1px;
+  transform-origin: top;
+  box-shadow: 0 0 0 1px #0a0a0b;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

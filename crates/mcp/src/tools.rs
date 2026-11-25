@@ -229,7 +229,7 @@ impl Backend {
             }
             "begin_run" => {
                 let a: Begin = parse(arguments)?;
-                Ok(serde_json::to_value(self.host.session.begin_run(a.label)?)?)
+                Ok(serde_json::to_value(self.host.session.begin_run_as(a.label, a.agent)?)?)
             }
             "resolve_recovery" => {
                 let a: Recovery = parse(arguments)?;
