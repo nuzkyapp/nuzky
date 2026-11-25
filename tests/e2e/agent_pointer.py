@@ -10,8 +10,9 @@ const tick = () => {
   const s = window.__nuzky.store.getState(), c = window.__nuzky.agentCursor.getState();
   const row = document.querySelector('[data-timeline] [data-track-id="main"]');
   const tip = document.querySelector('.agent-pointer').getBoundingClientRect();
+  const clips = row ? [...row.querySelectorAll('[data-clip-id]')].map((e) => [e.getBoundingClientRect().left, e.dataset.clipId]).sort((a, b) => a[0] - b[0]) : [];
   window.__pointerLog.push({stored: s.snap.project.tracks.find((t) => t.id === 'main').clips.length,
-    drawn: row ? row.querySelectorAll('[data-clip-id]').length : -1, tracks: document.querySelectorAll('[data-timeline] [data-track-id]').length,
+    drawn: row ? row.querySelectorAll('[data-clip-id]').length : -1, first: clips[0]?.[1] ?? null, tracks: document.querySelectorAll('[data-timeline] [data-track-id]').length,
     held: !!c.held, shown: c.shown, glyph: c.glyph, label: c.step ? `${c.name} · ${c.step}` : c.name, band: !!document.querySelector('.agent-band'), x: tip.left, y: tip.top});
   requestAnimationFrame(tick);
 };
@@ -79,12 +80,24 @@ def agent_pointer(r):
         r.check('the pointer grabs the clip before it moves', grabbed is not None and log[grabbed]['tracks'] == rows, grabbed is not None and log[grabbed])
         r.check('the clip goes to its new track with the pointer', log[-1]['tracks'] == rows + 1 and any(e['label'] == 'Claude Code · Moving talk.mp4' for e in log), [log[-1], {e['label'] for e in log}])
         r.shot('moved')
-
-        bridge.call('end_run', {'run_id': run, 'action': 'keep'})
         time.sleep(1)
         r.check('once done the label names only the agent', r.s.run(LABEL) == 'Claude Code', r.s.run(LABEL))
+
+        main = r.track()
+        log = act(r, bridge, run, 'reorder', [{'type': 'moveClip', 'clipId': main[-1]['id'], 'trackId': 'main', 'startUs': 0}], f"(e) => e.first === '{main[-1]['id']}'")
+        r.check('a clip moved before another on the main track is grabbed and carried there', any(e['glyph'] == 'grab' and e['first'] == main[0]['id'] for e in log)
+                and any(e['label'] == 'Claude Code · Moving talk.mp4' for e in log), [(e['glyph'], e['first']) for e in log][::20])
+
+        r.s.run('window.__nuzky.store.getState().togglePlay()')
+        r.check('the video plays', wait(lambda: r.s.run('return window.__nuzky.store.getState().playing'), 5))
+        main = r.track()
+        log = act(r, bridge, run, 'playing', [{'type': 'splitClip', 'clipId': main[0]['id'], 'atUs': main[0]['startUs'] + 500_000}], f'(e) => e.drawn === {len(main) + 1}')
+        r.s.run('window.__nuzky.store.getState().togglePlay()')
+        r.check('while the video plays the timeline never waits for the pointer', not any(e['held'] for e in log), [e for e in log if e['held']][:2])
+
+        bridge.call('end_run', {'run_id': run, 'action': 'keep'})
         r.check('the pointer goes away when the run ends', wait(lambda: r.s.run(LABEL) is None, 5), r.s.run(LABEL))
-        r.check('the timeline shows the whole run', len(r.track()) == 2 and not r.s.run('return window.__nuzky.agentCursor.getState().held'))
+        r.check('the timeline shows the whole run', len(r.track()) == 3 and not r.s.run('return window.__nuzky.agentCursor.getState().held'), r.track())
         r.s.run('document.activeElement?.blur()')
         r.key('z', ctrlKey=True)
         r.check('one undo still takes back the whole run', wait(lambda: len(r.track()) == 1, 10), r.track())

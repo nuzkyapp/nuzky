@@ -73,9 +73,11 @@ export function plan(before: Project, after: Project): Plan | null {
   /** Clips that lost frames to a cut or a trim. */
   const cutFrom = new Set<string>();
   for (const s of beforeSpans) {
+    const survives = now.get(s.clip.id);
+    // A clip that now shows another file, or plays its own backwards or on a ramp, changed; nothing of it was cut.
+    if (survives && !afterSpans.some((o) => o.clip.id === s.clip.id && o.assetId === s.assetId)) continue;
     // A clip moved to another track keeps its frames.
     const kept = afterSpans.filter((o) => o.assetId === s.assetId && (o.track.id === s.track.id || o.clip.id === s.clip.id));
-    const survives = now.get(s.clip.id);
     for (const [u0, u1] of subtract(s.inUs, s.outUs, kept.map((k) => [k.inUs, k.outUs]))) {
       const fromUs = s.clip.startUs + (u0 - s.inUs) / s.speed;
       const toUs = s.clip.startUs + (u1 - s.inUs) / s.speed;
@@ -130,6 +132,9 @@ export function plan(before: Project, after: Project): Plan | null {
     }
   }
 
+  const reordered = reorderedOnMain(before, after);
+  // Everything about a clip but where it sits, as the history's preview compares it.
+  const rest = (c: Clip) => JSON.stringify({ ...c, startUs: 0, durationUs: 0 });
   const moves: Action[] = [];
   const changes: Action[] = [];
   for (const [id, { clip: a, track: ta }] of was) {
@@ -138,6 +143,13 @@ export function plan(before: Project, after: Project): Plan | null {
     const { clip: b, track: tb } = found;
     if (continued.has(id) || trims.some((t) => t.kind === "trim" && t.clipId === id)) continue;
     const sameLength = Math.abs(a.durationUs - b.durationUs) < SAME;
+    const ca = a.content;
+    const cb = b.content;
+    const swapped = ca.type !== cb.type || (ca.type === "media" && cb.type === "media" && (ca.assetId !== cb.assetId || !!ca.reverse !== !!cb.reverse));
+    if (swapped && ta.id === tb.id) {
+      changes.push({ kind: "change", clipId: id, trackId: ta.id, atUs: a.startUs, durationUs: a.durationUs });
+      continue;
+    }
     // Made longer, or a text or a clip without frames to follow made shorter.
     if (!sameLength && ta.id === tb.id && !cutFrom.has(id)) {
       const edge = Math.abs(b.startUs - a.startUs - (ta.id === MAIN_TRACK ? 0 : ripple(a.startUs))) < SAME ? "end" : "start";
@@ -146,9 +158,9 @@ export function plan(before: Project, after: Project): Plan | null {
     }
     const shift = b.startUs - a.startUs;
     const carried = ta.id === MAIN_TRACK || tb.keepInPlace ? 0 : ripple(a.startUs);
-    if (sameLength && (ta.id !== tb.id || (ta.id !== MAIN_TRACK && Math.abs(shift - carried) > MOVED))) {
+    if (sameLength && (ta.id !== tb.id || reordered.has(id) || (ta.id !== MAIN_TRACK && Math.abs(shift - carried) > MOVED))) {
       moves.push({ kind: "move", clipId: id, trackId: ta.id, fromUs: a.startUs, toUs: b.startUs, durationUs: a.durationUs });
-    } else if (sameLength && ta.id === tb.id && JSON.stringify(a.content) !== JSON.stringify(b.content)) {
+    } else if (sameLength && ta.id === tb.id && rest(a) !== rest(b)) {
       changes.push({ kind: "change", clipId: id, trackId: ta.id, atUs: a.startUs, durationUs: a.durationUs });
     }
   }
@@ -187,6 +199,21 @@ export function plan(before: Project, after: Project): Plan | null {
   }
   if (changes.length) return { actions: byTime(changes), step: count(changes.length, `Changing ${name((changes[0] as { clipId: string }).clipId)}`, "Changing # clips") };
   return null;
+}
+
+/** Main-track clips that changed places with others: those off the longest run that kept its order. */
+function reorderedOnMain(before: Project, after: Project): Set<string> {
+  const order = (p: Project) => (p.tracks.find((t) => t.id === MAIN_TRACK)?.clips ?? []).toSorted((x, y) => x.startUs - y.startUs).map((c) => c.id);
+  const then = order(before);
+  const now = order(after).filter((id) => then.includes(id));
+  const at = now.map((id) => then.indexOf(id));
+  const best: number[][] = [];
+  for (let i = 0; i < at.length; i++) {
+    const longest = best.filter((run, j) => at[j] < at[i] && run.length).reduce<number[]>((a, b) => (b.length > a.length ? b : a), []);
+    best.push([...longest, i]);
+  }
+  const kept = new Set(best.reduce<number[]>((a, b) => (b.length > a.length ? b : a), []).map((i) => now[i]));
+  return new Set(now.filter((id) => !kept.has(id)));
 }
 
 function start(a: Action) {

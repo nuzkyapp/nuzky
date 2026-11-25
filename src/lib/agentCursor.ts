@@ -280,7 +280,7 @@ function release(before: Project, after: Project, ms: number, opts: { widths?: b
   const more = queue.length > 0;
   const to = more ? after : (useEditor.getState().snap?.project ?? after);
   useAgentCursor.setState({ release: { from: before, to, ms, widths: !!opts.widths, hideAdded: !!opts.hideAdded, rects: opts.rects, bands: opts.bands }, held: more ? after : null });
-  armWatchdog();
+  if (!more) window.clearTimeout(watchdog);
 }
 
 /** Puts in the clips that waited hidden for the pointer, left to right. */
@@ -566,10 +566,10 @@ async function pump() {
   if (gen === generation && (queue.length || (ending && present))) void pump();
 }
 
+/** A hold lasts at most 5 s from its start, however many edits follow it or however an animation stalls. */
 function armWatchdog() {
   window.clearTimeout(watchdog);
-  // A hold never outlasts a stalled animation, as in a window the system stopped drawing.
-  if (useAgentCursor.getState().held) watchdog = window.setTimeout(flush, 5000);
+  watchdog = window.setTimeout(flush, 5000);
 }
 
 /** Shows the project as it is now and puts the pointer away at once. */
@@ -592,8 +592,11 @@ export function flush() {
 useEditor.subscribe((s, prev) => {
   const started = agentRun(s.aiRun) && !agentRun(prev.aiRun);
   if (s.snap && prev.snap && s.snap.sessionEpoch !== prev.snap.sessionEpoch) return flush();
-  // Playing or moving the playhead needs the timeline to show what plays.
-  if (useAgentCursor.getState().held && ((s.playing && !prev.playing) || s.seeks !== prev.seeks)) return flush();
+  // Playing, moving the playhead or dragging media in needs the timeline as it is.
+  const busy = (s.playing && !prev.playing) || s.seeks !== prev.seeks || (!!s.fileDrag && !prev.fileDrag) || (!!s.assetDrag && !prev.assetDrag);
+  if (useAgentCursor.getState().held && busy) return flush();
+  // The home screen or the launcher covers the timeline, so the pointer goes with it.
+  if ((present || useAgentCursor.getState().held) && (s.view !== prev.view || s.launcherOpen !== prev.launcherOpen) && !lanes()) return flush();
   if (started && active()) {
     ending = false;
     useAgentCursor.setState({ ...who(s.snap?.openRunAgent ?? null), glyph: "arrow" });
@@ -611,7 +614,8 @@ useEditor.subscribe((s, prev) => {
     void pump();
   }
   if (!s.snap || !prev.snap || s.snap === prev.snap || s.snap.revision <= prev.snap.revision) return;
-  if (!agentRun(s.aiRun) || !active()) {
+  // While the video plays the timeline shows what plays, so an edit then is not acted out.
+  if (!agentRun(s.aiRun) || !active() || s.playing) {
     if (useAgentCursor.getState().held) flush();
     return;
   }
@@ -632,9 +636,24 @@ window.addEventListener("resize", () => {
   place(to);
 });
 
-// Once the run is over, the person's first click or key shows everything at once.
+usePreview.subscribe((s, prev) => s.full && !prev.full && (present || useAgentCursor.getState().held) && flush());
+
+// Once the run is over, the person's first click or key shows everything at once. A click on a timeline that still
+// draws the project before the last change only does that, so it never acts on a clip where it was.
 for (const type of ["pointerdown", "keydown"] as const) {
-  window.addEventListener(type, () => !useEditor.getState().aiRun && (present || useAgentCursor.getState().held) && flush(), true);
+  window.addEventListener(
+    type,
+    (e) => {
+      if (useEditor.getState().aiRun || !(present || useAgentCursor.getState().held)) return;
+      const stale = !!useAgentCursor.getState().held && e.type === "pointerdown" && !!(e.target as Element | null)?.closest?.("[data-timeline]");
+      flush();
+      if (stale) {
+        e.stopPropagation();
+        e.preventDefault();
+      }
+    },
+    true,
+  );
 }
 
 /** For the timeline: where a new clip's frames were in the held project, so it slides from there. */
