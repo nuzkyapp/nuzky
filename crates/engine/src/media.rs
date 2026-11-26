@@ -311,9 +311,9 @@ fn unplayable(input: &ff::format::context::Input) -> Option<&'static str> {
     sound.peek()?;
     let apac = u32::from_le_bytes(*b"apac");
     Some(if sound.any(|s| unsafe { (*s.parameters().as_ptr()).codec_tag } == apac) {
-        "Nuzky cannot play Apple spatial audio, the only sound in this file. Export it with stereo sound from the app it came from"
+        "Nuzky cannot play Apple spatial audio and there is no other sound. Export again with stereo sound"
     } else {
-        "Nuzky cannot play the sound in this file. Export it with AAC sound from the app it came from"
+        "Nuzky cannot play this kind of sound. Export again with AAC sound"
     })
 }
 

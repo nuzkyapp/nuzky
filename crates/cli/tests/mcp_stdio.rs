@@ -1061,7 +1061,20 @@ fn a_video_whose_only_sound_is_spatial_audio_imports_without_sound_and_says_why_
     let both = spatial(
         "both.mov",
         &["sine=frequency=440:sample_rate=48000:duration=2"],
-        &["-map", "0:v", "-map", "2:a", "-map", "1:a", "-c:a:0", "aac", "-c:a:1", "pcm_s16le", "-disposition:a:1", "default"],
+        &[
+            "-map",
+            "0:v",
+            "-map",
+            "2:a",
+            "-map",
+            "1:a",
+            "-c:a:0",
+            "aac",
+            "-c:a:1",
+            "pcm_s16le",
+            "-disposition:a:1",
+            "default",
+        ],
     );
     let only = spatial("only.mov", &[], &["-map", "0:v", "-map", "1:a", "-c:a", "pcm_s16le"]);
     let run = c.call("begin_run", json!({"label": "Spatial audio"}))["run_id"].clone();
@@ -1069,11 +1082,15 @@ fn a_video_whose_only_sound_is_spatial_audio_imports_without_sound_and_says_why_
     let ids = imported["asset_ids"].as_array().unwrap().clone();
     assert_eq!(
         imported["without_sound"],
-        json!([{"asset_id": ids[1], "reason": "Nuzky cannot play Apple spatial audio, the only sound in this file. Export it with stereo sound from the app it came from"}]),
+        json!([{"asset_id": ids[1], "reason": "Nuzky cannot play Apple spatial audio and there is no other sound. Export again with stereo sound"}]),
         "{imported}"
     );
     let state = c.call("get_state", json!({}));
-    assert_eq!((&state["assets"][0]["hasAudio"], &state["assets"][1]["hasAudio"]), (&json!(true), &json!(false)), "{state}");
+    assert_eq!(
+        (&state["assets"][0]["hasAudio"], &state["assets"][1]["hasAudio"]),
+        (&json!(true), &json!(false)),
+        "{state}"
+    );
     c.call("end_run", json!({"run_id": run, "action": "keep"}));
     c.finish();
 }

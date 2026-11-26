@@ -39,7 +39,10 @@ export function importFailures(failed: { path: string; error: string }[]) {
 export function toastImport(res: { failed: { path: string; error: string }[]; silent: { path: string; error: string }[] }) {
   const { toast } = useEditor.getState();
   if (res.failed.length > 0) toast({ kind: "error", text: importFailures(res.failed) });
-  for (const f of res.silent) toast({ kind: "warning", text: `${fileName(f.path)} is added without sound. ${f.error}.` });
+  for (const reason of new Set(res.silent.map((f) => f.error))) {
+    const names = res.silent.filter((f) => f.error === reason).map((f) => fileName(f.path));
+    toast({ kind: "warning", text: `${names.join(", ")} ${names.length === 1 ? "is" : "are"} added without sound. ${reason}.` });
+  }
 }
 
 /**

@@ -95,14 +95,16 @@ def spatial_audio(r):
         r.check('the exported sound starts where FFmpeg decodes it in the source, within 1 ms',
                 abs(onset(exported) - onset(reference)) <= RATE // 1000, f'{onset(exported)} vs {onset(reference)} samples')
 
-    only = iphone_video(r.work / 'IMG_0421.MOV', stereo=False)
-    r.import_media(only)
-    asset = r.s.run(ASSET, only.name)
-    r.check('a video whose only sound is spatial is added without sound', asset and not asset['hasAudio'], asset)
-    warning = wait(lambda: next((t['text'] for t in r.state()['toasts'] if t['kind'] == 'warning'), None), 10)
-    r.check('a toast says it is added without sound and why',
-            warning == 'IMG_0421.MOV is added without sound. Nuzky cannot play Apple spatial audio, the only sound in '
-                       'this file. Export it with stereo sound from the app it came from.', warning)
+    only = [iphone_video(r.work / f'IMG_042{n}.MOV', stereo=False) for n in range(1, 6)]
+    r.import_media(*only)
+    assets = [r.s.run(ASSET, p.name) for p in only]
+    r.check('videos whose only sound is spatial are added without sound', all(a and not a['hasAudio'] for a in assets), assets)
+    wait(lambda: any(t['kind'] == 'warning' for t in r.state()['toasts']), 10)
+    warnings = [t['text'] for t in r.state()['toasts'] if t['kind'] == 'warning']
+    r.check('one toast names all five, says they are added without sound and why',
+            warnings == ['IMG_0421.MOV, IMG_0422.MOV, IMG_0423.MOV, IMG_0424.MOV, IMG_0425.MOV are added without sound. '
+                         'Nuzky cannot play Apple spatial audio and there is no other sound. Export again with stereo '
+                         'sound.'], warnings)
     r.check('and no error toast', not r.errors(), r.errors())
     r.check('the toast is on screen', wait(lambda: r.s.run(SHOWN, 'added without sound'), 5))
     r.shot('spatial-only')
