@@ -1758,16 +1758,20 @@ impl Backend {
         let (edit, from) =
             caption_plan(&args, &state.project, &media, (&self.host.transcripts, &self.host.cache_dir), &|| false)?;
         let warnings = crate::fonts::warnings(crate::fonts::edit_families(&edit));
+        let named = untitled_name(&state.project, args.project_name.as_deref())?;
+        let mut edits = vec![edit];
+        edits.extend(named.map(|name| EditCmd::RenameProject { name: name.into() }));
         let result = self.host.session.apply_edits(
             &args.run_id,
             &new_id(),
-            vec![edit],
+            edits,
             Expect { revision: Some(state.stamp.revision), speech_layout_key: None },
         )?;
-        Ok(from.note(with_warnings(
-            json!({"revision": result.stamp.revision, "session_epoch": result.stamp.session_epoch, "caption_count": result.outcome.created.len(), "created": result.outcome.created, "removed": result.outcome.removed}),
-            warnings,
-        )))
+        let mut answer = json!({"revision": result.stamp.revision, "session_epoch": result.stamp.session_epoch, "caption_count": result.outcome.created.len(), "created": result.outcome.created, "removed": result.outcome.removed});
+        if let Some(name) = named {
+            answer["project_named"] = json!(name);
+        }
+        Ok(from.note(with_warnings(answer, warnings)))
     }
 
     /// The speech captions as sentences to translate, or, with translations, their captions in that language.
@@ -2365,6 +2369,16 @@ impl Backend {
         }
         project
     }
+}
+
+/// The name build_captions gives the project: the one asked for, only while the project has its first name.
+fn untitled_name<'a>(project: &Project, asked: Option<&'a str>) -> Result<Option<&'a str>> {
+    let Some(name) = asked.map(str::trim).filter(|name| !name.is_empty()) else { return Ok(None) };
+    if project.name != nuzky_engine::model::UNTITLED_PROJECT {
+        return Ok(None);
+    }
+    ensure!(name.chars().count() <= 80, "INVALID_ARGUMENTS: project_name is at most 80 characters");
+    Ok(Some(name))
 }
 
 /// The captions build_captions makes from the stored words of `project` (`media` is the same with full paths), and

@@ -993,6 +993,12 @@ fn a_plugin_calls_only_the_tools_it_declares_and_never_transcribes() {
     tool_plugin("run-id", json!(["build_captions"]), &script("build_captions", "{run_id: 'other'}")).unwrap();
     let run_id = error_of(&f, "run-id");
     assert!(run_id.starts_with("PLUGIN_BAD_TOOL: tools[0] (build_captions): leave out run_id"), "{run_id}");
+    tool_plugin("named", json!(["build_captions"]), &script("build_captions", "{project_name: 'Bike'}")).unwrap();
+    let named = error_of(&f, "named");
+    assert!(named.starts_with("PLUGIN_BAD_TOOL: tools[0] (build_captions): a plugin does not name"), "{named}");
+    tool_plugin("named-null", json!(["build_captions"]), &script("build_captions", "{project_name: null}")).unwrap();
+    let null = error_of(&f, "named-null");
+    assert!(null.starts_with("PLUGIN_BAD_TOOL: tools[0] (build_captions): a plugin does not name"), "{null}");
     // A caption style is copied into every caption, so its texts stay short.
     let font = format!("{{style: {{fontFamily: '{}', fontSize: 80, color: '#FFFFFF'}}}}", "x".repeat(300));
     tool_plugin("long-font", json!(["build_captions"]), &script("build_captions", &font)).unwrap();

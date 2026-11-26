@@ -491,6 +491,7 @@ fn finish_reel(
             max_words: None,
             max_chars: None,
             transform: None,
+            project_name: None,
         };
         Ok(Some(crate::tools::caption_plan(&args, media, media, (transcripts, cache), cancelled)?.0))
     })?;

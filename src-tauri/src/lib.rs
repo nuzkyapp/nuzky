@@ -1071,7 +1071,7 @@ fn new_project(
     log::info!(target: "action", "new project");
     // The panel's agent works on the open project only.
     panel.stop();
-    let mut project = Project::new("Untitled project");
+    let mut project = Project::new(library::UNTITLED);
     project.canvas.width = width & !1;
     project.canvas.height = height & !1;
     let path = store::new_project_path();
@@ -1329,7 +1329,7 @@ fn initial_project() -> anyhow::Result<(OpenSession, Receiver<SessionEvent>, Opt
         Some(opened) => opened,
         None => {
             let path = store::new_project_path();
-            store::create(&path, &Project::new("Untitled project"))?;
+            store::create(&path, &Project::new(library::UNTITLED))?;
             OpenSession::open(path)?
         }
     };

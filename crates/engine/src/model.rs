@@ -1434,6 +1434,9 @@ fn black() -> String {
     "#000000".into()
 }
 
+/// The name New project, the first start and new projects from media give, until someone names it.
+pub const UNTITLED_PROJECT: &str = "Untitled project";
+
 impl Project {
     pub fn new(name: impl Into<String>) -> Self {
         Self {

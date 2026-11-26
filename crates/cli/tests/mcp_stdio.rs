@@ -1628,6 +1628,79 @@ fn an_agent_pastes_a_hook_later_and_its_look_onto_another_title_over_stdio() {
     c.finish();
 }
 
+/// An agent that captions a video also names it from what is said, but only while it is still "Untitled project":
+/// a name the user gave stays, the name saves with the captions and undoing the run brings "Untitled project" back.
+#[test]
+fn build_captions_names_only_an_untitled_project_over_stdio() {
+    use nuzky_session::transcripts::{Record, TranscriptStore, VERSION};
+
+    let mut c = Client::start(true, None, Some(None));
+    let video = c.dir.join("talk.mp4");
+    assert!(
+        Command::new("ffmpeg")
+            .args(["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=s=16x16:r=30:d=3"])
+            .args(["-f", "lavfi", "-i", "sine=frequency=330:duration=3", "-c:v", "libx264", "-preset", "ultrafast"])
+            .args(["-c:a", "aac"])
+            .arg(&video)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let asset = nuzky_engine::media::probe(&video, "take".into()).unwrap();
+    let store = TranscriptStore::at(c.dir.join("data/nuzky/transcripts")).unwrap();
+    let words = ["My", "new", "bike."]
+        .iter()
+        .enumerate()
+        .map(|(i, text)| nuzky_engine::speech::Word {
+            start_us: 200_000 + i as i64 * 800_000,
+            end_us: 700_000 + i as i64 * 800_000,
+            text: (*text).into(),
+            probability: 0.9,
+        })
+        .collect();
+    let record = Record {
+        version: VERSION,
+        fingerprint: store.fingerprint(&asset).unwrap(),
+        duration_us: asset.duration_us,
+        model: "fixture".into(),
+        language: "en".into(),
+        words,
+        segments: vec![],
+        alignment: None,
+    };
+    store.put(&asset, &record).unwrap();
+    let saved_name = |c: &Client| {
+        let disk: Value = serde_json::from_slice(&std::fs::read(c.dir.join("project.nuzky")).unwrap()).unwrap();
+        disk["name"].as_str().unwrap().to_string()
+    };
+
+    let run = c.call("begin_run", json!({"label": "captions"}));
+    let place = json!([{"type": "addAssets", "assets": [asset]}, {"type": "addClip", "assetId": "take"}]);
+    c.call("apply_edits", json!({"run_id": run["run_id"], "request_id": "place", "edits": place}));
+    let kept = c.call("build_captions", json!({"run_id": run["run_id"], "project_name": "My new bike"}));
+    assert!(kept.get("project_named").is_none(), "{kept}");
+    assert_eq!(saved_name(&c), "Original", "a name the user gave was replaced");
+    c.call("end_run", json!({"run_id": run["run_id"], "action": "keep"}));
+
+    let run = c.call("begin_run", json!({"label": "untitled"}));
+    let untitled = json!([{"type": "renameProject", "name": "Untitled project"}]);
+    c.call("apply_edits", json!({"run_id": run["run_id"], "request_id": "untitled", "edits": untitled}));
+    c.call("end_run", json!({"run_id": run["run_id"], "action": "keep"}));
+
+    let run = c.call("begin_run", json!({"label": "captions again"}));
+    let long = c.error("build_captions", json!({"run_id": run["run_id"], "project_name": "a".repeat(81)}));
+    assert!(long.contains("project_name"), "{long}");
+    assert_eq!(saved_name(&c), "Untitled project");
+    let named = c.call("build_captions", json!({"run_id": run["run_id"], "project_name": "  My new bike  "}));
+    assert_eq!(named["project_named"], "My new bike", "{named}");
+    assert!(named["caption_count"].as_u64().unwrap() > 0, "{named}");
+    assert_eq!(saved_name(&c), "My new bike");
+    c.call("end_run", json!({"run_id": run["run_id"], "action": "keep"}));
+    c.call("undo_run", json!({"run_id": run["run_id"]}));
+    assert_eq!(saved_name(&c), "Untitled project", "undoing the captions left the name");
+    c.finish();
+}
+
 /// The Reel agent's restyle: captions built where it wants them, one rewritten by hand, then made bigger and moved
 /// with one command that keeps every caption, its id and its text; undoing that run brings the look back.
 #[test]

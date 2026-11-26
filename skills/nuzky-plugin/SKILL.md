@@ -260,7 +260,7 @@ A plugin can use three of the tools you have, so it need not work out captions o
 - `apply_zooms`: punch-ins on word ranges of `ctx.words`, with `transcript_key: ctx.transcriptKey`.
 - `apply_motion`: a push-in, pull-out or Ken Burns move on a clip or a range.
 
-Name them in the manifest's `tools`, then return the calls in `tools`, each `{tool, args}` with the same arguments as the MCP tool, but without `run_id` and `request_id`: the calls join the plugin's run. Nuzky makes them after the plugin's edits, in order, each on the project the ones before left, and applies everything as one batch, so the user undoes it in one step. When any call fails, nothing applies, the plugin's own edits included. At most 20 calls.
+Name them in the manifest's `tools`, then return the calls in `tools`, each `{tool, args}` with the same arguments as the MCP tool, but without `run_id` and `request_id`, which join the calls to the plugin's run, and without `project_name`, since a plugin does not name the project. Nuzky makes them after the plugin's edits, in order, each on the project the ones before left, and applies everything as one batch, so the user undoes it in one step. When any call fails, nothing applies, the plugin's own edits included. At most 20 calls.
 
 - None of them transcribes, downloads or prepares sound. Without a transcript, a plugin that needs words fails with TRANSCRIPT_MISSING before it runs, so the user transcribes first.
 - Word numbers are those of `ctx.words`, so `apply_zooms` needs the plugin's own edits to leave the words where they are. After a cut on the main track it fails with SPEECH_CHANGED.

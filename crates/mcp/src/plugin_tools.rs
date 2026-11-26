@@ -119,6 +119,10 @@ fn check(declared: &[String], calls: &[Call]) -> Result<Vec<Checked>> {
                 "PLUGIN_BAD_TOOL: tools[{i}] ({tool}): its arguments are at most {} KB, each text at most {MAX_ARG_CHARS} characters",
                 MAX_ARGS_BYTES >> 10
             );
+            ensure!(
+                !call.args.contains_key("project_name"),
+                "PLUGIN_BAD_TOOL: tools[{i}] ({tool}): a plugin does not name the project; leave out project_name"
+            );
             let mut args = call.args.clone();
             args.insert("run_id".into(), json!(""));
             let args = Value::Object(args);
