@@ -1,6 +1,6 @@
 import json, subprocess, time
 
-from e2e.harness import CLI, FIXTURES, LINUX, _windows, flow, preview_crop, title_centred, title_place, wait, webdriver
+from e2e.harness import CLI, FIXTURES, LINUX, _windows, flow, preview_crop, title_centred, title_place, unfold, wait, webdriver
 
 # Nulls while the editor is still drawing after a reload.
 SIZES = """const width = (e) => e ? Math.round(e.getBoundingClientRect().width) : null;
@@ -207,6 +207,7 @@ def layout(r):
     r.check("every segmented control in the Video tab has its plate under the chosen segment", groups and all(g is not None and g <= 1 for g in groups), groups)
     moved = slide(r, INSPECTOR_TABS, 'Adjust')
     r.check("choosing Adjust slides the inspector tabs' plate from Video to Adjust, where it settles", slid(moved), moved)
+    unfold(r, 'Finish')
     sliders = wait(lambda: (lambda s: s if len(s) == 10 else None)(r.s.run(SLIDERS)), 5) or r.s.run(SLIDERS)
     r.check('every Adjust slider has its short name on its own row, beside it, in full, as in CapCut',
             len(sliders) == 10 and all(s['beside'] and s['whole'] for s in sliders), sliders)
