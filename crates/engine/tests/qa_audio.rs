@@ -247,6 +247,105 @@ fn mp3_attached_picture_remains_audio_asset() {
     assert!((n as i64 - 48000).abs() <= 1024, "frames={n}");
 }
 
+/// An iPhone from the 16 on records Apple spatial audio, which FFmpeg cannot decode, beside stereo AAC, and can mark
+/// the spatial track as the default. The AAC plays: its cache and the export are FFmpeg's own decoding of it, with the
+/// sound starting where it starts there. A video whose only sound is spatial opens and exports without sound, and says
+/// why. The spatial track here is a 4-channel PCM track whose sample entry is renamed to `apac`, so FFmpeg reads it
+/// as a sound it has no decoder for. At 96 kHz, FFmpeg 6 as well as later writes it as `lpcm`.
+#[test]
+fn iphone_spatial_audio_plays_the_stereo_track_beside_it() {
+    use nuzky_engine::export::{ExportOptions, export};
+    use nuzky_engine::media::unplayable_sound;
+    use std::sync::atomic::AtomicBool;
+    if !available() {
+        return;
+    }
+    let d = dir("spatial-audio");
+    let cache = d.join("cache");
+    let tone = "if(lt(t\\,0.5)\\,0\\,0.25*sin(2*PI*440*t))";
+    let stereo = format!("aevalsrc={tone}|{tone}:s=48000:d=2");
+    let spatial = "aevalsrc=0.25*sin(2*PI*880*t)|0.25*sin(2*PI*880*t)|0|0:s=96000:d=2";
+    let make = |name: &str, with_stereo: bool| {
+        let made = d.join(format!("{name}-pcm.mov"));
+        let mut args = vec!["-f", "lavfi", "-i", "testsrc2=s=320x240:r=30:d=2", "-f", "lavfi", "-i", spatial];
+        if with_stereo {
+            args.extend(["-f", "lavfi", "-i", &stereo, "-map", "0:v", "-map", "2:a", "-map", "1:a"]);
+            args.extend([
+                "-c:a:0",
+                "aac",
+                "-c:a:1",
+                "pcm_s16le",
+                "-disposition:a:0",
+                "0",
+                "-disposition:a:1",
+                "default",
+            ]);
+        } else {
+            args.extend(["-map", "0:v", "-map", "1:a", "-c:a", "pcm_s16le"]);
+        }
+        ff(&[&args[..], &["-c:v", "libx264", "-pix_fmt", "yuv420p"]].concat(), &made);
+        let mut bytes = std::fs::read(&made).unwrap();
+        let entries: Vec<_> = bytes.windows(4).enumerate().filter(|(_, w)| w == b"lpcm").map(|(at, _)| at).collect();
+        assert_eq!(entries.len(), 1, "the 4-channel track should be the only lpcm sample entry in {name}");
+        bytes[entries[0]..entries[0] + 4].copy_from_slice(b"apac");
+        let path = d.join(format!("{name}.mov"));
+        std::fs::write(&path, bytes).unwrap();
+        path
+    };
+    let decoded = |path: &std::path::Path, map: &str| -> Vec<f32> {
+        let raw = run(Command::new("ffmpeg")
+            .args(["-v", "error", "-i"])
+            .arg(path)
+            .args(["-map", map, "-f", "f32le", "-ac", "2", "-ar", "48000", "-"]))
+        .stdout;
+        raw.as_chunks::<4>().0.iter().map(|&b| f32::from_le_bytes(b)).collect()
+    };
+    let onset = |samples: &[f32]| samples.as_chunks::<2>().0.iter().position(|s| s[0].abs() > 0.02).unwrap() as i64;
+
+    let both = make("stereo-and-spatial", true);
+    let asset = probe(&both, "spatial-qa".into()).unwrap();
+    assert!(asset.has_audio, "the stereo track of an iPhone video is its sound");
+    assert_eq!(unplayable_sound(&both).unwrap(), None);
+    let cached = nuzky_engine::audio::pcm_path(&cache, &asset);
+    let _ = std::fs::remove_file(&cached);
+    let samples = pcm(&ensure_pcm(&cache, &asset, |_| Ok(())).unwrap());
+    let reference = decoded(&both, "0:a:0");
+    let shared = samples.len().min(reference.len());
+    let error = samples[..shared].iter().zip(&reference[..shared]).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+    eprintln!(
+        "QA spatial audio cache: {} frames, FFmpeg {} frames, onset {} vs {}, largest difference {error}",
+        samples.len() / 2,
+        reference.len() / 2,
+        onset(&samples),
+        onset(&reference)
+    );
+    assert!((samples.len() as i64 - reference.len() as i64).abs() <= 2048, "the cache is not as long as the sound");
+    assert!(error < 0.001, "the cache differs from FFmpeg's decoding of the stereo track by {error}");
+
+    let out = d.join("stereo-and-spatial.mp4");
+    let options = ExportOptions { replace_existing: true, ..ExportOptions::default() };
+    export(&project(&both, 2_000_000), &cache, &out, &options, &AtomicBool::new(false), |_| {}).unwrap();
+    let exported = decoded(&out, "0:a");
+    let (heard, spatial_heard) = (tone_db(&exported, 440.0, 1.0, 0.5), tone_db(&exported, 880.0, 1.0, 0.5));
+    eprintln!(
+        "QA spatial audio export: onset {} vs {}, 440 Hz {heard:.2} dBFS, 880 Hz {spatial_heard:.2} dBFS",
+        onset(&exported),
+        onset(&reference)
+    );
+    assert!((onset(&exported) - onset(&reference)).abs() <= 48, "the exported sound is out of step with the picture");
+    assert!((heard + 12.0).abs() < 0.5 && spatial_heard < -60.0, "the export does not play the stereo track");
+
+    let only = make("spatial-only", false);
+    let asset = probe(&only, "spatial-only-qa".into()).unwrap();
+    assert!(!asset.has_audio, "a video whose only sound cannot play opens without sound");
+    let why = unplayable_sound(&only).unwrap().expect("the reason it has no sound");
+    assert!(why.contains("Apple spatial audio"), "{why}");
+    let error = extract_pcm(&only, &d.join("spatial-only.f32"), |_| Ok(())).unwrap_err();
+    assert!(error.to_string().contains("Apple spatial audio"), "{error}");
+    let out = d.join("spatial-only.mp4");
+    export(&project(&only, 2_000_000), &cache, &out, &options, &AtomicBool::new(false), |_| {}).unwrap();
+}
+
 /// A long phone recording (AAC, 44.1 kHz mono, so it is resampled and doubled to stereo): the waveform
 /// of its start can be read while the rest still decodes, and it is the waveform of the finished cache.
 /// A cache extracted before peaks were written gets the same peaks from its samples.

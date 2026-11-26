@@ -5,7 +5,7 @@ import { api, errorText, plainError } from "./api";
 import { runAutomatically } from "./plugins";
 import { allClips, blobUrl, stopAiRun, switchProject, useEditor } from "./store";
 import type { Collection, Library, LibraryProject, Project, Said, Snapshot } from "./types";
-import { MEDIA_EXTENSIONS, VIDEO_EXTENSIONS, importFailures } from "../components/panel/assets";
+import { MEDIA_EXTENSIONS, VIDEO_EXTENSIONS, toastImport } from "../components/panel/assets";
 
 type Sort = "opened" | "name";
 const SORT_KEY = "nuzky.homeSort";
@@ -318,7 +318,7 @@ export function newProjectFromMedia(paths: string[], then?: () => void) {
     verb: "start",
     run: async () => {
       const result = await api.newProjectFromMedia(paths);
-      if (result.failed.length > 0) toast({ kind: "error", text: importFailures(result.failed) });
+      toastImport(result);
       return result.snapshot;
     },
     then: () => {
@@ -335,7 +335,7 @@ export function newSampleProject(then?: () => void) {
     verb: "open",
     run: async () => {
       const result = await api.openSample();
-      if (result.failed.length > 0) toast({ kind: "error", text: importFailures(result.failed) });
+      toastImport(result);
       return result.snapshot;
     },
     then,

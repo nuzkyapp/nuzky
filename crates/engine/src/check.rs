@@ -14,7 +14,7 @@ use crate::audio::{has_audio, samples_to_us, us_to_samples};
 use crate::edit::MAIN_TRACK;
 use crate::effects::{source_time, transform_at, transition_at, transition_window};
 use crate::export::{frame_count, frame_time_us};
-use crate::media::{VideoDecoder, open_input, origin_us};
+use crate::media::{VideoDecoder, audio_stream, open_input, origin_us};
 use crate::model::{Asset, AssetKind, CHANNELS, Clip, ClipContent, Crop, Project, TrackKind, TransitionKind};
 use crate::render::visible_clips;
 
@@ -721,7 +721,7 @@ struct Heard {
 fn hear(path: &Path, from: i64, to: i64, cancelled: &dyn Fn() -> bool) -> Result<Heard> {
     use ff::util::mathematics::{Rescale, Rounding};
     let mut input = open_input(path)?;
-    let Some(stream) = input.streams().best(ff::media::Type::Audio) else {
+    let Some(stream) = audio_stream(&input) else {
         return Ok(Heard { loudest_db: None, ended: true });
     };
     let (index, time_base) = (stream.index(), stream.time_base());

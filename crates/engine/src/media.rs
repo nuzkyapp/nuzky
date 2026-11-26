@@ -292,6 +292,36 @@ pub(crate) fn video_stream(input: &ff::format::context::Input) -> Option<ff::for
         .find(|s| !s.disposition().contains(Disposition::ATTACHED_PIC))
 }
 
+/// The sound that plays: the stream FFmpeg finds best among those it can decode. An iPhone from the 16 on records
+/// Apple spatial audio, which FFmpeg cannot decode, beside stereo AAC, and can mark the spatial one as the default.
+pub(crate) fn audio_stream(input: &ff::format::context::Input) -> Option<ff::format::stream::Stream<'_>> {
+    let mut decoder = std::ptr::null();
+    let index = unsafe {
+        ff::ffi::av_find_best_stream(input.as_ptr().cast_mut(), ff::media::Type::Audio.into(), -1, -1, &mut decoder, 0)
+    };
+    usize::try_from(index).ok().and_then(|index| input.stream(index))
+}
+
+/// Why the file's sound cannot play, when it has sound and FFmpeg can decode none of it.
+fn unplayable(input: &ff::format::context::Input) -> Option<&'static str> {
+    if audio_stream(input).is_some() {
+        return None;
+    }
+    let mut sound = input.streams().filter(|s| s.parameters().medium() == ff::media::Type::Audio).peekable();
+    sound.peek()?;
+    let apac = u32::from_le_bytes(*b"apac");
+    Some(if sound.any(|s| unsafe { (*s.parameters().as_ptr()).codec_tag } == apac) {
+        "Nuzky cannot play Apple spatial audio and there is no other sound. Export again with stereo sound"
+    } else {
+        "Nuzky cannot play this kind of sound. Export again with AAC sound"
+    })
+}
+
+/// Why the file has sound that Nuzky cannot play, so it is added without sound; None when it plays or there is none.
+pub fn unplayable_sound(path: &Path) -> Result<Option<&'static str>> {
+    Ok(unplayable(&open_input(path)?))
+}
+
 /// How to show the stored picture: rotated clockwise by 0/90/180/270 degrees, then mirrored left
 /// to right when `.1` is set.
 type Orientation = (u32, bool);
@@ -396,7 +426,7 @@ pub fn describe(path: &Path) -> Result<String> {
         }
     }
     if !image {
-        if let Some(stream) = input.streams().best(ff::media::Type::Audio) {
+        if let Some(stream) = audio_stream(&input).or_else(|| input.streams().best(ff::media::Type::Audio)) {
             let params = stream.parameters();
             let codec = unsafe { &*params.as_ptr() };
             let mut audio = vec![params.id().name().to_owned()];
@@ -458,9 +488,12 @@ pub fn probe(path: &Path, id: String) -> Result<Asset> {
     let mut input = open_input(path)?;
     let is_image = is_image_format(&input);
     let video = video_stream(&input);
-    let audio = input.streams().best(ff::media::Type::Audio);
+    let audio = audio_stream(&input);
     if video.is_none() && audio.is_none() {
-        bail!("{} has no video or audio", path.display());
+        match unplayable(&input) {
+            Some(why) => bail!("{}: {why}", path.display()),
+            None => bail!("{} has no video or audio", path.display()),
+        }
     }
 
     let mut asset = Asset {
@@ -1232,7 +1265,7 @@ pub fn extract_pcm_with_peaks(
 
 fn extract(path: &Path, out: &Path, peaks: Option<&Path>, mut progress: impl FnMut(f32) -> Result<()>) -> Result<u64> {
     let mut input = open_input(path)?;
-    let stream = input.streams().best(ff::media::Type::Audio).ok_or_else(|| anyhow!("No audio stream"))?;
+    let stream = audio_stream(&input).ok_or_else(|| anyhow!(unplayable(&input).unwrap_or("No audio stream")))?;
     let stream_index = stream.index();
     let time_base = f64::from(stream.time_base());
     // Cover art (an MP3's attached picture) is a video stream of one frame, not a picture track.

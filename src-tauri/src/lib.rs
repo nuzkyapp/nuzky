@@ -58,7 +58,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use nuzky_engine::Project;
 use nuzky_engine::edit::{EditCmd, new_id};
-use nuzky_engine::media::probe;
+use nuzky_engine::media::{probe, unplayable_sound};
 use nuzky_session::{Expect, Origin, RecoveryAction, SessionEvent, host::Host};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -177,6 +177,8 @@ pub struct ImportResult {
     snapshot: Snapshot,
     added: Vec<String>,
     failed: Vec<ImportFailure>,
+    /// Videos added without sound, and why their sound cannot play.
+    silent: Vec<ImportFailure>,
 }
 
 #[derive(Serialize)]
@@ -761,8 +763,11 @@ fn resolve_recovery(state: State<'_, AppState>, action: String, expected_epoch: 
     current.snapshot(Vec::new())
 }
 
-/// The media files that open, in the given order, and why the others do not.
-async fn probe_media(paths: Vec<String>) -> CmdResult<(Vec<nuzky_engine::model::Asset>, Vec<ImportFailure>)> {
+/// The media files that open, in the given order, why the others do not, and why videos among them open without
+/// their sound.
+async fn probe_media(
+    paths: Vec<String>,
+) -> CmdResult<(Vec<nuzky_engine::model::Asset>, Vec<ImportFailure>, Vec<ImportFailure>)> {
     let probed = tauri::async_runtime::spawn_blocking(move || {
         paths
             .into_iter()
@@ -773,27 +778,35 @@ async fn probe_media(paths: Vec<String>) -> CmdResult<(Vec<nuzky_engine::model::
                     Ok(())
                 });
                 let result = local.and_then(|()| probe(Path::new(&p), new_id()));
-                (p, result)
+                let silent = match &result {
+                    Ok(a) if a.kind == nuzky_engine::model::AssetKind::Video && !a.has_audio => {
+                        unplayable_sound(Path::new(&p)).ok().flatten()
+                    }
+                    _ => None,
+                };
+                (p, result, silent)
             })
             .collect::<Vec<_>>()
     })
     .await
     .map_err(err)?;
-    let mut assets = Vec::new();
-    let mut failed = Vec::new();
-    for (path, result) in probed {
+    let (mut assets, mut failed, mut silent) = (Vec::new(), Vec::new(), Vec::new());
+    for (path, result, why) in probed {
+        if let Some(why) = why {
+            silent.push(ImportFailure { path: path.clone(), error: why.into() });
+        }
         match result {
             Ok(a) => assets.push(a),
             Err(e) => failed.push(ImportFailure { path, error: format!("{e:#}") }),
         }
     }
-    Ok((assets, failed))
+    Ok((assets, failed, silent))
 }
 
 #[tauri::command]
 async fn import_media(app: AppHandle, paths: Vec<String>, expected_epoch: Option<String>) -> CmdResult<ImportResult> {
     log::info!(target: "action", "import {} files", paths.len());
-    let (assets, failed) = probe_media(paths).await?;
+    let (assets, failed, silent) = probe_media(paths).await?;
     let state = app.state::<AppState>();
     let added: Vec<String> = assets.iter().map(|a| a.id.clone()).collect();
     let snapshot = if assets.is_empty() {
@@ -808,7 +821,7 @@ async fn import_media(app: AppHandle, paths: Vec<String>, expected_epoch: Option
         jobs::prepare_media(&state, &snap.project);
         snap
     };
-    Ok(ImportResult { snapshot, added, failed })
+    Ok(ImportResult { snapshot, added, failed, silent })
 }
 
 #[tauri::command]
@@ -1069,12 +1082,12 @@ fn new_project(
 #[tauri::command]
 async fn new_project_from_media(app: AppHandle, paths: Vec<String>) -> CmdResult<ImportResult> {
     log::info!(target: "action", "new project from {} files", paths.len());
-    let (assets, failed) = probe_media(paths).await?;
+    let (assets, failed, silent) = probe_media(paths).await?;
     if assets.is_empty() {
         let reasons: Vec<String> = failed.iter().map(|f| f.error.clone()).collect();
         return Err(format!("None of those files could be opened: {}", reasons.join("; ")));
     }
-    open_new_project(&app, store::new_project_path(), library::UNTITLED, assets, failed)
+    open_new_project(&app, store::new_project_path(), library::UNTITLED, assets, failed, silent)
 }
 
 /// Opens a new project at `path` named `name` with the media on its timeline.
@@ -1084,6 +1097,7 @@ fn open_new_project(
     name: &str,
     assets: Vec<nuzky_engine::model::Asset>,
     failed: Vec<ImportFailure>,
+    silent: Vec<ImportFailure>,
 ) -> CmdResult<ImportResult> {
     let added: Vec<String> = assets.iter().map(|a| a.id.clone()).collect();
     let project = project_from_media(name, assets).map_err(err)?;
@@ -1092,7 +1106,7 @@ fn open_new_project(
     app.state::<agent_panel::AgentPanel>().stop();
     let state = app.state::<AppState>();
     let snapshot = state.replace_project(&mut state.session.lock().unwrap(), path)?;
-    Ok(ImportResult { snapshot, added, failed })
+    Ok(ImportResult { snapshot, added, failed, silent })
 }
 
 /// A project with the media on its timeline in the given order, in the format of the first picture: the

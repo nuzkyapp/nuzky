@@ -13,7 +13,7 @@ use nuzky_engine::{
     edit::{EditCmd, TimeRange, new_id},
     export::{ExportOptions, ExportPhase, Quality, check_options, export},
     layout::Layout,
-    media::probe,
+    media::{probe, unplayable_sound},
     model::{ClipContent, ReelStatus, Thumbnail, ThumbnailFormat},
     thumbnail::ImageKind,
 };
@@ -822,13 +822,24 @@ impl Backend {
             }
         };
         let ids: Vec<_> = prepared.assets.iter().map(|a| a.id.clone()).collect();
+        let without_sound: Vec<_> = prepared
+            .assets
+            .iter()
+            .filter(|a| a.kind == nuzky_engine::model::AssetKind::Video && !a.has_audio)
+            .filter_map(|a| Some(json!({"asset_id": a.id, "reason": unplayable_sound(Path::new(&a.path)).ok()??})))
+            .collect();
         let result = self.host.session.apply_edits(
             &args.run_id,
             &request_id,
             vec![EditCmd::AddAssets { assets: prepared.assets.clone() }],
             prepared.expect.clone(),
         )?;
-        Ok(json!({"revision": result.stamp.revision, "session_epoch": result.stamp.session_epoch, "asset_ids": ids}))
+        Ok(json!({
+            "revision": result.stamp.revision,
+            "session_epoch": result.stamp.session_epoch,
+            "asset_ids": ids,
+            "without_sound": without_sound,
+        }))
     }
 
     /// Downloads the sound when needed, then adds it and its clip as one edit of the run.

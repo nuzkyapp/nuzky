@@ -10,7 +10,7 @@ use ff::util::mathematics::{Rescale, Rounding};
 use ffmpeg_next as ff;
 
 use crate::export::{check_cancel, write_beside};
-use crate::media::{open_input, origin_us, video_stream};
+use crate::media::{audio_stream, open_input, origin_us, video_stream};
 use crate::model::Part;
 
 /// Footage kept on each side of a chosen part, so its clip's edges can be dragged out a little.
@@ -37,7 +37,7 @@ pub fn join(
     // Output stream `o` copies stream `map[o].1` of input `map[o].0`; the picture is output stream 0.
     let mut map = vec![(0, v)];
     let sound = inputs.len() - 1;
-    match inputs[sound].streams().best(ff::media::Type::Audio) {
+    match audio_stream(&inputs[sound]) {
         Some(stream) => map.push((sound, stream.index())),
         None if audio.is_some() => bail!("{} has no sound", audio.unwrap().display()),
         None => {}

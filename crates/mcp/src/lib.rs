@@ -150,7 +150,7 @@ fn catalog() -> Result<Vec<Tool>> {
         )?,
         tool::<params::Import>(
             "import_media",
-            "Probe existing local file paths and add assets through the owning run. Relative paths resolve beside the project. Optional request_id: reuse it with the same paths after a save failure to finish the original import without adding the assets twice. Returns asset_ids; follow with addClip edits to place them in the video, or put an image such as a logo on a cover with setThumbnail overlays, which leaves the video as it is. No uploads, downloads or automatic insertion. For a picture on the web, use import_web_image.",
+            "Probe existing local file paths and add assets through the owning run. Relative paths resolve beside the project. Optional request_id: reuse it with the same paths after a save failure to finish the original import without adding the assets twice. Returns asset_ids, and without_sound [{asset_id, reason}] for videos added without sound because Nuzky cannot play theirs; tell the user the reason. Follow with addClip edits to place them in the video, or put an image such as a logo on a cover with setThumbnail overlays, which leaves the video as it is. No uploads, downloads or automatic insertion. For a picture on the web, use import_web_image.",
         )?,
         tool::<params::SearchSounds>(
             "search_sounds",

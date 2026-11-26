@@ -77,7 +77,7 @@ pub async fn open_sample(app: AppHandle) -> CmdResult<ImportResult> {
     .await
     .map_err(err)?
     .map_err(err)?;
-    crate::open_new_project(&app, path, PROJECT, vec![asset], Vec::new())
+    crate::open_new_project(&app, path, PROJECT, vec![asset], Vec::new(), Vec::new())
 }
 
 /// Whether `path` is a tour's own project, `<id>.nuzky` in the tour folder; reels made of it sit beside it as

@@ -36,7 +36,7 @@ export const api = {
   /** Paths of files whose clips with a background still wait for the person to be found. */
   mattesMissing: () => invoke<string[]>("mattes_missing"),
   importMedia: (paths: string[], epoch: Epoch) =>
-    invoke<{ snapshot: Snapshot; added: string[]; failed: { path: string; error: string }[] }>("import_media", { paths, expectedEpoch: epoch }),
+    invoke<{ snapshot: Snapshot; added: string[]; failed: { path: string; error: string }[]; silent: { path: string; error: string }[] }>("import_media", { paths, expectedEpoch: epoch }),
   thumbnail: (assetId: string) => invoke<string | null>("thumbnail", { assetId }),
   /** The asset's thumbnail picture in each look, as PNG data URLs; `null` for a look whose LUT is not in the library. */
   colorPreviews: (assetId: string, looks: ColorLook[]) => invoke<(string | null)[] | null>("color_previews", { assetId, looks }),
@@ -110,9 +110,9 @@ export const api = {
   openProject: (path: string) => invoke<Snapshot>("open_project", { path }),
   /** A new project with the media on its timeline, in the format of the first picture. */
   newProjectFromMedia: (paths: string[]) =>
-    invoke<{ snapshot: Snapshot; added: string[]; failed: { path: string; error: string }[] }>("new_project_from_media", { paths }),
+    invoke<{ snapshot: Snapshot; added: string[]; failed: { path: string; error: string }[]; silent: { path: string; error: string }[] }>("new_project_from_media", { paths }),
   /** A new, uncut project of the tour's sample video, opened at once. */
-  openSample: () => invoke<{ snapshot: Snapshot; added: string[]; failed: { path: string; error: string }[] }>("open_sample"),
+  openSample: () => invoke<{ snapshot: Snapshot; added: string[]; failed: { path: string; error: string }[]; silent: { path: string; error: string }[] }>("open_sample"),
   /** The tour's AI edit of the open sample, as one run; CANCELLED when Stop ended it. */
   sampleRun: (epoch: Epoch) => invoke<SampleRun>("sample_run", { expectedEpoch: epoch }),
   /** The CapCut draft in that folder as a new project, opened at once; the draft stays as it was. */
