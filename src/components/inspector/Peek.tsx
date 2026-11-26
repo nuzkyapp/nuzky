@@ -15,10 +15,12 @@ const STEP_KEYS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "P
 /** The preview's canvas, which shows the frame the engine drew last, with the time of that frame. */
 const previewCanvas = () => document.querySelector<HTMLCanvasElement>("canvas[data-preview-frame]");
 
-/** The last frame the canvas showed split by Compare; frames after it show the whole picture. */
-let splitUntil = 0;
+/** How long after Compare turns off a frame drawn split may still arrive. */
+const SPLIT_SETTLE_MS = 500;
+/** The last frame the canvas showed when Compare turned off, and when; Before waits for a later frame after that. */
+let split = { n: 0, at: 0 };
 usePreview.subscribe((s, prev) => {
-  if (prev.compare !== null && s.compare === null) splitUntil = Number(previewCanvas()?.dataset.n ?? 0);
+  if (prev.compare !== null && s.compare === null) split = { n: Number(previewCanvas()?.dataset.n ?? 0), at: performance.now() };
 });
 
 /**
@@ -27,7 +29,8 @@ usePreview.subscribe((s, prev) => {
  */
 function still(source: HTMLCanvasElement) {
   const { playing, timeUs } = useEditor.getState();
-  return !playing && usePreview.getState().compare === null && Number(source.dataset.n) > splitUntil && Number(source.dataset.us) === timeUs;
+  const settled = Number(source.dataset.n) > split.n && performance.now() - split.at > SPLIT_SETTLE_MS;
+  return !playing && usePreview.getState().compare === null && settled && Number(source.dataset.us) === timeUs;
 }
 
 /**
