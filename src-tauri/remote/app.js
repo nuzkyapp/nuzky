@@ -562,7 +562,18 @@ function lastLine(items) {
   if (it.kind === "steps" && it.steps.length) return { text: it.steps[it.steps.length - 1].title, error: false };
   if (it.kind === "options") return { text: it.question || "Choose an option", error: false };
   if (it.kind === "run") return { text: it.label, error: false };
-  return { text: it.text ?? "", error: it.kind === "error" };
+  return { text: it.kind === "agent" ? plain(it.text) : (it.text ?? ""), error: it.kind === "error" };
+}
+
+/** An answer's text without its Markdown: a file on the computer by its link's text only, a web link with its address. */
+function plain(text) {
+  return text
+    .replace(/\[([^\]\n]+)\]\((<[^>\n]+>|(?:[^()\n]|\([^()\n]*\))+)\)/g, (_, label, dest) => {
+      const address = dest.replace(/^<(.*)>$/, "$1");
+      return /^(file:|\/|[A-Za-z]:[\\/])/.test(address) ? label : `${label} (${address})`;
+    })
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/`([^`]+)`/g, "$1");
 }
 
 function openChat() {
@@ -619,7 +630,7 @@ function item(it) {
     case "user":
       return el("div", "user", it.text);
     case "agent":
-      return el("div", "agent-text", it.text.replace(/\*\*(.+?)\*\*/g, "$1").replace(/`([^`]+)`/g, "$1"));
+      return el("div", "agent-text", plain(it.text));
     case "steps": {
       const box = el("div", "steps");
       for (const s of it.steps) {

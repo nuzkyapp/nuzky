@@ -1,10 +1,13 @@
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { useEditor } from "../../lib/store";
 
 const ITEM = /^\s*([-*•]|\d+[.)])\s+/;
 
 /**
- * The little Markdown agents write: paragraphs, lists, code blocks, headings, bold, italics and
- * inline code. Everything is drawn as React text, so nothing the agent writes becomes HTML.
+ * The little Markdown agents write: paragraphs, lists, code blocks, headings, bold, italics, inline
+ * code and links. A link to a file on this computer shows the file in its folder; any other shows its
+ * address after the text. Everything is drawn as React text, so nothing the agent writes becomes HTML.
  */
 export function Markdown({ text }: { text: string }) {
   const blocks: ReactNode[] = [];
@@ -73,14 +76,45 @@ export function Markdown({ text }: { text: string }) {
   return <div className="flex flex-col gap-2">{blocks}</div>;
 }
 
+/** The file a link's destination names on this computer: an absolute path, in angle brackets when it has spaces, or a file:// URL. */
+function localFile(dest: string): string | null {
+  let path = dest.replace(/^<(.*)>$/, "$1");
+  if (path.startsWith("file:")) {
+    try {
+      const url = new URL(path);
+      if (url.hostname && url.hostname !== "localhost") return null;
+      path = decodeURIComponent(url.pathname).replace(/^\/([A-Za-z]:)/, "$1");
+    } catch {
+      return null;
+    }
+  }
+  // Two slashes at the start are a network share on Windows, which revealing would reach.
+  return /^(\/(?![\\/])|[A-Za-z]:[\\/])/.test(path) ? path : null;
+}
+
+function showFile(path: string) {
+  revealItemInDir(path).catch(() =>
+    useEditor.getState().toast({ kind: "error", text: `Can't find ${path.split(/[\\/]/).pop()}. Ask the AI where it saved it.` }),
+  );
+}
+
 function inline(text: string): ReactNode[] {
   const out: ReactNode[] = [];
-  const re = /(`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|\*[^*\s][^*]*\*|_[^_\s][^_]*_)/g;
+  const re = /(\[[^\]\n]+\]\((?:<[^>\n]+>|(?:[^()\n]|\([^()\n]*\))+)\)|`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|\*[^*\s][^*]*\*|_[^_\s][^_]*_)/g;
   let last = 0;
   for (const m of text.matchAll(re)) {
     if (m.index! > last) out.push(text.slice(last, m.index));
     const t = m[0];
-    if (t.startsWith("`")) out.push(<code key={out.length} className="rounded bg-white/[.08] px-1 text-[12px]">{t.slice(1, -1)}</code>);
+    const link = t.startsWith("[") ? /^\[([^\]\n]+)\]\((.+)\)$/.exec(t)! : null;
+    const file = link && localFile(link[2]);
+    if (link && file)
+      out.push(
+        <button key={out.length} type="button" title={file} onClick={() => showFile(file)} className="text-left text-accent *:text-inherit hover:underline">
+          {inline(link[1])}
+        </button>,
+      );
+    else if (link) out.push(<Fragment key={out.length}>{inline(link[1])} ({link[2].replace(/^<(.*)>$/, "$1")})</Fragment>);
+    else if (t.startsWith("`")) out.push(<code key={out.length} className="rounded bg-white/[.08] px-1 text-[12px]">{t.slice(1, -1)}</code>);
     else if (t.startsWith("**") || t.startsWith("__")) out.push(<strong key={out.length} className="font-semibold text-fg">{t.slice(2, -2)}</strong>);
     else out.push(<em key={out.length}>{t.slice(1, -1)}</em>);
     last = m.index! + t.length;
