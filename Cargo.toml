@@ -46,8 +46,19 @@ opt-level = 0
 [profile.dev.build-override]
 debug = "line-tables-only"
 
+# wgpu 30.0.1 with gfx-rs/wgpu#10124, which no wgpu release has yet (docs/BUILDING.md, Patched wgpu).
 # whisper-rs 0.16.0 and whisper-rs-sys 0.15.0 with whisper.cpp and ggml as shared libraries and ggml's CPU code built
 # once per instruction set, which no whisper-rs release offers yet (docs/BUILDING.md, Patched whisper-rs).
 [patch.crates-io]
+naga = { git = "https://github.com/nuzkyapp/wgpu", rev = "16923b98656308c7dcd34b35b41c52677ba19724" }
+naga-types = { git = "https://github.com/nuzkyapp/wgpu", rev = "16923b98656308c7dcd34b35b41c52677ba19724" }
+wgpu = { git = "https://github.com/nuzkyapp/wgpu", rev = "16923b98656308c7dcd34b35b41c52677ba19724" }
+wgpu-core = { git = "https://github.com/nuzkyapp/wgpu", rev = "16923b98656308c7dcd34b35b41c52677ba19724" }
+wgpu-core-deps-apple = { git = "https://github.com/nuzkyapp/wgpu", rev = "16923b98656308c7dcd34b35b41c52677ba19724" }
+wgpu-core-deps-emscripten = { git = "https://github.com/nuzkyapp/wgpu", rev = "16923b98656308c7dcd34b35b41c52677ba19724" }
+wgpu-core-deps-windows-linux-android = { git = "https://github.com/nuzkyapp/wgpu", rev = "16923b98656308c7dcd34b35b41c52677ba19724" }
+wgpu-hal = { git = "https://github.com/nuzkyapp/wgpu", rev = "16923b98656308c7dcd34b35b41c52677ba19724" }
+wgpu-naga-bridge = { git = "https://github.com/nuzkyapp/wgpu", rev = "16923b98656308c7dcd34b35b41c52677ba19724" }
+wgpu-types = { git = "https://github.com/nuzkyapp/wgpu", rev = "16923b98656308c7dcd34b35b41c52677ba19724" }
 whisper-rs = { git = "https://github.com/nuzkyapp/whisper-rs", rev = "36c36405b3a65d480c2d2f1040a990be8c8da55f" }
 whisper-rs-sys = { git = "https://github.com/nuzkyapp/whisper-rs", rev = "36c36405b3a65d480c2d2f1040a990be8c8da55f" }
