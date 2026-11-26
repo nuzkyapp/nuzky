@@ -29,6 +29,18 @@ const OWN: &str = "Nuzky";
 static TARGET: OnceLock<Target> = OnceLock::new();
 static CRASHED: AtomicBool = AtomicBool::new(false);
 static OUT_OF_MEMORY: AtomicBool = AtomicBool::new(false);
+static NOTED: AtomicBool = AtomicBool::new(false);
+
+/// Where a record is put together. Each has one writer, which its flag lets in once, so a crash handler needs little
+/// of the stack it runs on: Rust's alternate signal stack is 8 KB on x86-64 Linux, and the signal frame takes part.
+struct Buffer(std::cell::UnsafeCell<[u8; 512]>);
+
+// SAFETY: CRASHED, OUT_OF_MEMORY and NOTED each let one writer into their buffer.
+unsafe impl Sync for Buffer {}
+
+static CRASH: Buffer = Buffer(std::cell::UnsafeCell::new([0; 512]));
+static MEMORY: Buffer = Buffer(std::cell::UnsafeCell::new([0; 512]));
+static NOTE: Buffer = Buffer(std::cell::UnsafeCell::new([0; 512]));
 
 /// Writes how this Nuzky crashes into `marker`, which it holds open until it quits.
 pub fn install(marker: &std::fs::File) {
@@ -51,21 +63,26 @@ pub fn install(marker: &std::fs::File) {
 
 /// Why whisper.cpp stops the app, which it says just before it aborts.
 fn note(message: &str) {
-    let mut line = Line::new();
+    if NOTED.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    // SAFETY: NOTED lets one writer in.
+    let mut line = unsafe { Line::on(&NOTE) };
     line.push("note: ");
     line.value(message);
-    line.write();
+    line.flush();
 }
 
-/// The record, or a line of it, on the stack and cut at its size.
+/// A line of the record, cut at its buffer's size.
 struct Line {
-    bytes: [u8; 512],
+    bytes: &'static mut [u8; 512],
     len: usize,
 }
 
 impl Line {
-    fn new() -> Self {
-        Self { bytes: [0; 512], len: 0 }
+    /// SAFETY: nothing else uses `buffer` while the line lives.
+    unsafe fn on(buffer: &'static Buffer) -> Self {
+        Self { bytes: unsafe { &mut *buffer.0.get() }, len: 0 }
     }
 
     fn push(&mut self, text: &str) {
@@ -77,10 +94,6 @@ impl Line {
         self.len += n;
     }
 
-    fn text(&self) -> &str {
-        std::str::from_utf8(&self.bytes[..self.len]).unwrap_or_default()
-    }
-
     /// Text from elsewhere, kept on its line.
     fn value(&mut self, text: &str) {
         for c in text.chars() {
@@ -89,11 +102,13 @@ impl Line {
         }
     }
 
-    fn write(mut self) {
+    /// Writes the line and starts the next one in the same buffer.
+    fn flush(&mut self) {
         self.push("\n");
         if let Some(target) = TARGET.get() {
             platform::write(target, &self.bytes[..self.len]);
         }
+        self.len = 0;
     }
 }
 
@@ -107,30 +122,32 @@ impl std::fmt::Write for Line {
 /// The crash and how long Nuzky had run, then the library it happened in and the thread. Finding the library can
 /// wait on a lock of the system's loader, which a crashed thread may hold, so it comes after what is surely known,
 /// within a limit past which the app ends rather than hangs.
+/// `place` writes the library's name and returns the offset into it.
 fn record(
     crash: impl FnOnce(&mut Line),
-    place: impl FnOnce() -> Option<(Line, usize)>,
+    place: impl FnOnce(&mut Line) -> Option<usize>,
     thread: impl FnOnce(&mut Line),
 ) {
-    let mut line = Line::new();
+    // SAFETY: CRASHED lets one crash in.
+    let mut line = unsafe { Line::on(&CRASH) };
     line.push("crash: ");
     crash(&mut line);
     if let Some(target) = TARGET.get() {
         write!(line, "\nafter: {}", target.started.elapsed().as_secs()).ok();
     }
-    line.write();
+    line.flush();
     platform::within_limit(|| {
-        if let Some((name, offset)) = place() {
-            let mut line = Line::new();
-            line.push("in: ");
-            line.push(name.text());
-            write!(line, " +0x{offset:x}").ok();
-            line.write();
+        line.push("in: ");
+        match place(&mut line) {
+            Some(offset) => {
+                write!(line, " +0x{offset:x}").ok();
+                line.flush();
+            }
+            None => line.len = 0,
         }
-        let mut line = Line::new();
         line.push("thread: ");
         thread(&mut line);
-        line.write();
+        line.flush();
     });
 }
 
@@ -246,9 +263,10 @@ static ALLOCATOR: Allocator = Allocator;
 
 fn checked(memory: *mut u8, bytes: usize) -> *mut u8 {
     if memory.is_null() && !OUT_OF_MEMORY.swap(true, Ordering::AcqRel) {
-        let mut line = Line::new();
+        // SAFETY: OUT_OF_MEMORY lets one writer in.
+        let mut line = unsafe { Line::on(&MEMORY) };
         write!(line, "memory: {bytes}").ok();
-        line.write();
+        line.flush();
     }
     memory
 }
@@ -375,7 +393,9 @@ mod platform {
     unsafe fn note_signal(signal: c_int, name: &str, context: *mut c_void) {
         let kind = |line: &mut Line| line.push(name);
         // An abort's instruction is in the C library; who called it is not known here.
-        let place = || (signal != libc::SIGABRT).then(|| unsafe { library_of(instruction(context)) }).flatten();
+        let place = |line: &mut Line| {
+            (signal != libc::SIGABRT).then(|| unsafe { library_of(instruction(context), line) }).flatten()
+        };
         record(kind, place, |line| unsafe { thread_name(line) });
     }
 
@@ -406,8 +426,8 @@ mod platform {
         0
     }
 
-    /// The file name of the library `address` is in, and how far into it.
-    unsafe fn library_of(address: usize) -> Option<(Line, usize)> {
+    /// Writes the file name of the library `address` is in, and returns how far into it.
+    unsafe fn library_of(address: usize, line: &mut Line) -> Option<usize> {
         if address == 0 {
             return None;
         }
@@ -418,13 +438,12 @@ mod platform {
         }
         let path = unsafe { CStr::from_ptr(info.dli_fname) }.to_bytes();
         let file = path.rsplit(|b| *b == b'/').next().unwrap_or(path);
-        let mut name = Line::new();
         if TARGET.get().is_some_and(|target| target.exe_base == info.dli_fbase as usize) {
-            name.push(OWN);
+            line.push(OWN);
         } else {
-            name.value(std::str::from_utf8(file).unwrap_or("a library"));
+            line.value(std::str::from_utf8(file).unwrap_or("a library"));
         }
-        Some((name, address.wrapping_sub(info.dli_fbase as usize)))
+        Some(address.wrapping_sub(info.dli_fbase as usize))
     }
 
     unsafe fn thread_name(line: &mut Line) {
@@ -518,7 +537,7 @@ mod platform {
 
     extern "C" fn on_abort(_: i32) {
         if !CRASHED.swap(true, Ordering::AcqRel) {
-            record(|line| line.push("abort"), || None, |line| unsafe { thread_name(line) });
+            record(|line| line.push("abort"), |_| None, |line| unsafe { thread_name(line) });
         }
     }
 
@@ -548,12 +567,12 @@ mod platform {
             },
         };
         let address = exception.ExceptionAddress as usize;
-        record(kind, || unsafe { library_of(address) }, |line| unsafe { thread_name(line) });
+        record(kind, |line| unsafe { library_of(address, line) }, |line| unsafe { thread_name(line) });
     }
 
-    /// The file name of the module `address` is in, from its export table, and how far into it. The lookup is the one
-    /// Windows made to dispatch the exception, and reading the name takes no lock.
-    unsafe fn library_of(address: usize) -> Option<(Line, usize)> {
+    /// Writes the file name of the module `address` is in, from its export table, and returns how far into it. The
+    /// lookup is the one Windows made to dispatch the exception, and reading the name takes no lock.
+    unsafe fn library_of(address: usize, line: &mut Line) -> Option<usize> {
         let target = TARGET.get()?;
         let mut base: *mut c_void = std::ptr::null_mut();
         // SAFETY: looks the address up among the loaded modules.
@@ -561,17 +580,16 @@ mod platform {
             return None;
         }
         let base = base as usize;
-        let mut name = Line::new();
         if base == target.exe_base {
-            name.push(OWN);
+            line.push(OWN);
         } else if let Some(exported) =
             unsafe { export_name(base as *const u8) }.and_then(|n| std::str::from_utf8(n).ok())
         {
-            name.value(exported);
+            line.value(exported);
         } else {
-            name.push("a library without a name");
+            line.push("a library without a name");
         }
-        Some((name, address - base))
+        Some(address - base)
     }
 
     /// The name a loaded DLL gives itself in its export table.
