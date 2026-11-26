@@ -96,10 +96,10 @@ def no_browser(r):
     said = wait(lambda: r.s.run(CARD_ALERT, BOX), 5)
     r.check("in Get set up, the card says the browser didn't open, names the page and offers Copy link, with no toast under the dialog",
             said == FAILED.format('code.claude.com/docs/en/setup') + ' Copy link' and r.s.run(TOASTS) == [], (said, r.s.run(TOASTS)))
-    r.s.run("document.querySelector(arguments[0] + ' [data-copy-link]').scrollIntoView({block: 'nearest'})", BOX)
+    r.s.run("document.querySelector(arguments[0] + ' [data-copy-link]')?.scrollIntoView({block: 'nearest'})", BOX)
     time.sleep(0.3)
     r.shot('browser-failed-setup')
-    r.check('a click on Copy link in the open dialog', hands.click(f'{BOX} [data-copy-link]'))
+    r.check('a click on Copy link in the open dialog', said and hands.click(f'{BOX} [data-copy-link]'))
     r.check("puts the guide's address on the clipboard and says Copied", wait(lambda: clipboard() == CLAUDE_CODE, 3)
             and wait(lambda: r.s.run(CARD_ALERT, BOX).endswith(' Copied'), 3), (clipboard(), r.s.run(CARD_ALERT, BOX)))
 
