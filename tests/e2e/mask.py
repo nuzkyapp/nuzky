@@ -6,7 +6,7 @@ import json, subprocess, time
 
 from PIL import Image, ImageStat
 
-from e2e.harness import CLI, FIXTURES, changed_share, export, flow, preview_crop, preview_rect, press, wait, webdriver
+from e2e.harness import CLI, FIXTURES, changed_share, export, flow, preview_crop, preview_rect, press, unfold, wait, webdriver
 
 AT_US = 1_000_000
 LATER_US = 2_500_000
@@ -83,6 +83,7 @@ def masks(r):
 
     # Circle in the Mask section: round, half the picture's shorter side across, in the middle.
     select(r, [talk['id']])
+    unfold(r, 'Mask')
     if not r.check('the inspector has a Mask section', wait(lambda: r.s.run(f'return !!document.querySelector("{MASK}")'), 5)):
         r.shot('inspector-missing')
         return

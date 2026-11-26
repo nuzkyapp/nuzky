@@ -16,7 +16,7 @@ PRESSED = f"""const b = [...{SECTION}.querySelectorAll('button[aria-pressed]')].
 return b ? b.getAttribute('aria-pressed') === 'true' : null"""
 SHOW_ALL = f"const b = [...{SECTION}.querySelectorAll('button')].find((b) => /^Show (all|fewer)/.test(b.textContent.trim())); const t = b.textContent.trim(); b.click(); return t"
 ALERT = f"const a = {SECTION}.querySelector('[role=alert]'); return a ? a.textContent : null"
-INSPECTOR = "const s = [...document.querySelectorAll('aside[aria-label=Inspector] section')].find((s) => s.querySelector('h3')?.textContent === 'Colour'); return s ? s.innerText : null"
+INSPECTOR = "const s = [...document.querySelectorAll('aside[aria-label=Inspector] section')].find((s) => s.querySelector('h3')?.textContent === 'Log and LUT'); return s ? s.innerText : null"
 TOGGLE = """const b = [...document.querySelectorAll('section[aria-label=Preview] button')].find((b) => b.querySelector('.lucide-square-split-horizontal'));
 if (!b) return null; if (arguments[0]) b.click(); return b.getAttribute('aria-pressed') === 'true'"""
 # The tile's picture, inside its border.

@@ -330,6 +330,28 @@ input[type="range"].range:disabled {
 .range.range-locked:disabled::-webkit-slider-thumb {
   background: #8e8e93;
 }
+/* A slider that draws what it changes (Saturation, Temperature, Tint): the colour from min to max, full from 0 to the thumb and half under the panel elsewhere. */
+.range.range-tint::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background:
+    linear-gradient(
+      to right,
+      rgb(24 24 27 / 0.5) var(--fill-from),
+      transparent var(--fill-from),
+      transparent var(--fill-to),
+      rgb(24 24 27 / 0.5) var(--fill-to)
+    ),
+    var(--tint);
+}
+.range.range-tint::-webkit-slider-thumb {
+  margin-top: -4px;
+}
+.range.range-tint:disabled::-webkit-slider-runnable-track {
+  background:
+    linear-gradient(rgb(24 24 27 / 0.6), rgb(24 24 27 / 0.6)),
+    var(--tint);
+}
 
 @keyframes skeleton {
   from {

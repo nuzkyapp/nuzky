@@ -324,7 +324,7 @@ export function Preview() {
             {/* Square corners and no blurred shadow: a rounded clip would cost a mask on every frame, and in
                 WebKitGTK a blurred shadow on this box left the canvas black. */}
             <div className="absolute inset-0 overflow-hidden bg-black shadow-[0_0_0_1px_rgb(255_255_255/.07)]">
-              <canvas ref={canvasRef} className="h-full w-full" style={{ imageRendering: "auto" }} />
+              <canvas ref={canvasRef} data-preview-frame className="h-full w-full" style={{ imageRendering: "auto" }} />
               {showSafe && area && canvas && !reels && <SafeZone area={area} width={canvas.width} height={canvas.height} />}
               {reels && crop && canvas && picture > 0 && <CropGuide width={canvas.width} height={canvas.height} picture={picture} />}
               {empty && !engineError && (

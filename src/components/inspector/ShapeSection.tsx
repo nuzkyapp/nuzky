@@ -4,7 +4,8 @@ import { RotateCcw } from "lucide-react";
 import { NO_CROP, NO_SHAPE } from "../../lib/presets";
 import { editClip, readoutTime, setClipTransform, transformAtPlayhead, transformEdit, useCanvasUnit, useEditor } from "../../lib/store";
 import type { Asset, Canvas, Clip, Crop, EditCmd, Shape, Transform } from "../../lib/types";
-import { ColorInput, IconButton, Section, Segmented, Slider } from "../ui";
+import { ColorInput, IconButton, NumberInput, Section, Segmented, Slider } from "../ui";
+import { summaryOf, useFold } from "./folds";
 import { QUIET } from "./Header";
 
 type Media = Extract<Clip["content"], { type: "media" }>;
@@ -53,10 +54,10 @@ export function withEdge(crop: Crop, edge: keyof Crop, value: number): Crop {
 }
 
 const EDGES: { key: keyof Crop; label: string }[] = [
-  { key: "left", label: "Crop left" },
-  { key: "right", label: "Crop right" },
-  { key: "top", label: "Crop top" },
-  { key: "bottom", label: "Crop bottom" },
+  { key: "left", label: "Left" },
+  { key: "right", label: "Right" },
+  { key: "top", label: "Top" },
+  { key: "bottom", label: "Bottom" },
 ];
 
 export function ShapeSection({ clip, content, asset }: { clip: Clip; content: Media; asset?: Asset }) {
@@ -90,16 +91,34 @@ export function ShapeSection({ clip, content, asset }: { clip: Clip; content: Me
       return cmds;
     });
   const kind = kindOf(shape.radius);
+  const cropped = Object.values(crop).some((v) => v > 0) || clip.keyframes.some((k) => k.transform.crop && Object.values(k.transform.crop).some((v) => v > 0));
+  const said = summaryOf([kind !== "rectangle" && kind, cropped && "cropped", shape.borderWidth > 0 && "border", shape.shadow > 0 && "shadow"].filter((p): p is string => !!p));
+  const fold = useFold("shape", said, said !== "None");
 
   return (
     <Section
       title="Crop and shape"
+      fold={fold}
       actions={
         <IconButton label="Reset crop and shape" className={QUIET} disabled={plain} onClick={reset}>
           <RotateCcw size={14} />
         </IconButton>
       }
     >
+      {keyed && <p className="text-[12px] text-muted">The crop follows the transform keyframes</p>}
+      <div className="grid grid-cols-2 gap-2" role="group" aria-label="Crop">
+        {EDGES.map((e) => (
+          <span key={e.key} className="relative flex items-center">
+            <span aria-hidden className={`pointer-events-none absolute left-2 text-[12px] ${crop[e.key] > 0 ? "text-fg" : "text-muted"}`}>
+              {e.label}
+            </span>
+            <NumberInput label={`Crop ${e.key}`} value={crop[e.key] * 100} min={0} max={95} step={0.5} format={pct} onChange={(v) => setEdge(e.key, v)} className="h-7 w-full pr-[18px] pl-14" />
+            <span aria-hidden className="pointer-events-none absolute right-1.5 text-[11px] text-muted">
+              %
+            </span>
+          </span>
+        ))}
+      </div>
       <Segmented
         label="Shape"
         value={kind}
@@ -113,13 +132,9 @@ export function ShapeSection({ clip, content, asset }: { clip: Clip; content: Me
       {kind === "rounded" && (
         <Slider label="Corners" value={shape.radius * 100} min={1} max={99} step={1} unit="%" format={pct} onChange={(v) => setShape({ radius: v / 100 }, "radius")} />
       )}
-      {keyed && <p className="text-[12px] text-muted">The crop follows the transform keyframes</p>}
-      {EDGES.map((e) => (
-        <Slider key={e.key} label={e.label} value={crop[e.key] * 100} min={0} max={95} step={0.5} unit="%" format={pct} onChange={(v) => setEdge(e.key, v)} />
-      ))}
-      <Slider label="Border" value={shape.borderWidth} min={0} max={40 * unit} step={1} unit="px" format={pct} onChange={(v) => setShape({ borderWidth: v }, "border")} />
+      <Slider label="Border" neutral={0} value={shape.borderWidth} min={0} max={40 * unit} step={1} unit="px" format={pct} onChange={(v) => setShape({ borderWidth: v }, "border")} />
       {shape.borderWidth > 0 && <ColorInput label="Border color" value={shape.borderColor} onChange={(v) => setShape({ borderColor: v }, "borderColor")} />}
-      <Slider label="Shadow" value={shape.shadow * 100} min={0} max={100} step={1} unit="%" format={pct} onChange={(v) => setShape({ shadow: v / 100 }, "shadow")} />
+      <Slider label="Shadow" neutral={0} value={shape.shadow * 100} min={0} max={100} step={1} unit="%" format={pct} onChange={(v) => setShape({ shadow: v / 100 }, "shadow")} />
     </Section>
   );
 }

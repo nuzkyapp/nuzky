@@ -7,6 +7,7 @@ import { editClip, undoAction, useEditor } from "../../lib/store";
 import { US } from "../../lib/time";
 import type { Clip, EditCmd, MotionKind, TimeRange } from "../../lib/types";
 import { PresetTile, Section, Segmented } from "../ui";
+import { useFold } from "./folds";
 
 const MOTIONS: { kind: MotionKind; label: string; title: string; icon: LucideIcon }[] = [
   { kind: "pushIn", label: "Push in", title: "Slowly zoom in", icon: ZoomIn },
@@ -102,8 +103,10 @@ export function MotionSection({ clip }: { clip: Clip }) {
     if (shown !== undefined) lastStrength = shown;
   }, [shown]);
 
+  const fold = useFold("motion", motion ? `${MOTIONS.find((m) => m.kind === motion.kind)?.label ?? "Motion"} · ${Math.round(motion.strength * 100)}%` : "None", !!motion);
+
   return (
-    <Section title="Motion">
+    <Section title="Motion" fold={fold}>
       <div className="grid grid-cols-4 gap-2">
         <PresetTile label="None" selected={ks.length === 0} title="No motion" onClick={() => applyMotion(clip, null, strength, range)}>
           <span className="absolute inset-0 flex items-center justify-center text-muted">

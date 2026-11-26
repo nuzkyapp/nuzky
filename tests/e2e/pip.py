@@ -6,7 +6,7 @@ import json, subprocess, time
 
 from PIL import Image, ImageStat
 
-from e2e.harness import CLI, FIXTURES, changed_share, flow, press, preview_crop, preview_rect, preview_redraw, wait, webdriver
+from e2e.harness import CLI, FIXTURES, FOLD, changed_share, flow, press, preview_crop, preview_rect, preview_redraw, unfold, wait, webdriver
 
 AT_US = 1_000_000
 PROJECT = 'return window.__nuzky.store.getState().snap.project'
@@ -124,6 +124,7 @@ def pip(r):
             f"return [...document.querySelectorAll('{SECTION} h3')].some((h) => h.textContent === 'Crop and shape')"), 5)):
         r.shot('inspector-missing')
         return
+    unfold(r, 'Crop and shape')
     click_button(r, 'Circle')
     crop = lambda: (pip_clip(r, wide)[1]['content']['transform'].get('crop') or {})
     squared = wait(lambda: abs(crop().get('left', 0) - 0.21875) < 1e-3 and crop(), 5)
@@ -140,6 +141,11 @@ def pip(r):
     border = wait(lambda: (pip_clip(r, wide)[1]['content']['shape']['borderWidth'] == 6) or None, 5)
     r.check('the arrow keys on Border widen it to 6 px', border, pip_clip(r, wide)[1]['content']['shape'])
     r.shot('inspector-circle')
+    # Folded, the row says what the section holds, so it can be skipped without opening it.
+    r.s.run(FOLD + ' b.click()', 'Crop and shape')
+    said = wait(lambda: r.s.run(FOLD + " return b.getAttribute('aria-expanded') === 'false' && b.innerText.replace(/\\s+/g, ' ').trim()", 'Crop and shape'), 5)
+    r.check('folded, Crop and shape says Circle, cropped, border, shadow', said == 'Crop and shape Circle, cropped, border, shadow', said)
+    unfold(r, 'Crop and shape')
 
     # The preview: the talking head shows again in the corners of the circle's square.
     select(r, [])

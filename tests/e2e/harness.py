@@ -441,6 +441,18 @@ def settled(r):
     return wait(lambda: r.s.run("return ![...document.querySelectorAll('[data-clip-id]')].some((c) => c.getAnimations().some((a) => a.playState === 'running'))"), 2, 0.05)
 
 
+FOLD = ("const b = [...document.querySelectorAll('aside[aria-label=Inspector] section button[aria-expanded]')]"
+        ".find((b) => b.querySelector('h3')?.textContent === arguments[0]);")
+
+
+def unfold(r, title):
+    """Opens the inspector's folded section `title`, such as Crop and shape, and says whether it is open."""
+    if not wait(lambda: r.s.run(FOLD + ' return !!b', title), 10):
+        return False
+    r.s.run(FOLD + " if (b.getAttribute('aria-expanded') === 'false') b.click()", title)
+    return wait(lambda: r.s.run(FOLD + " return b?.getAttribute('aria-expanded') === 'true'", title), 5)
+
+
 def preview_rect(r):
     return r.s.run("""const b = document.querySelector('section[aria-label=Preview] canvas').getBoundingClientRect();
         return {left: b.left, top: b.top, width: b.width, height: b.height, viewport: window.innerWidth};""")

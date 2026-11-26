@@ -501,6 +501,7 @@ export function RangeInput({
   onChange,
   disabled,
   valueText,
+  tint,
   className = "",
 }: {
   label: string;
@@ -512,6 +513,8 @@ export function RangeInput({
   disabled?: boolean;
   /** What the value means to a person, for sliders whose position is not the value, such as logarithmic ones. */
   valueText?: string;
+  /** A CSS gradient of what the slider changes, from min to max, drawn as the track in place of the accent fill. */
+  tint?: string;
   className?: string;
 }) {
   const lock = useLockReason();
@@ -523,7 +526,8 @@ export function RangeInput({
   const [lo, hi] = [Math.min(origin, frac(value)), Math.max(origin, frac(value))];
   return (
     <span className={`relative flex h-4 items-center ${className}`}>
-      {twoSided && <span aria-hidden className={`pointer-events-none absolute top-1 h-2 w-0.5 -translate-x-1/2 rounded-full ${disabled ? "bg-white/15" : "bg-white/30"}`} style={{ left: at(origin) }} />}
+      {/* Taller than the thumb, so 0 shows beside it even when the value is close to 0. */}
+      {twoSided && <span aria-hidden className={`pointer-events-none absolute -top-px h-[18px] w-0.5 -translate-x-1/2 rounded-full ${disabled ? "bg-white/15" : "bg-white/30"}`} style={{ left: at(origin) }} />}
       <input
         type="range"
         aria-label={label}
@@ -534,8 +538,8 @@ export function RangeInput({
         aria-valuetext={valueText}
         disabled={disabled}
         onChange={(e) => onChange(Number(e.target.value))}
-        className={`range relative w-full ${lock ? "range-locked" : ""}`}
-        style={{ "--fill-from": twoSided ? at(lo) : "0px", "--fill-to": at(hi) } as CSSProperties}
+        className={`range relative w-full ${lock ? "range-locked" : ""} ${tint ? "range-tint" : ""}`}
+        style={{ "--fill-from": twoSided ? at(lo) : "0px", "--fill-to": at(hi), ...(tint ? { "--tint": tint } : {}) } as CSSProperties}
       />
     </span>
   );
@@ -560,8 +564,14 @@ export function Slider({
   mixed,
   title,
   narrow = false,
+  neutral,
+  tint,
 }: {
   label: string;
+  /** The value that changes nothing; the label is `fg` while the value differs from it, so a glance shows what was changed. */
+  neutral?: number;
+  /** As RangeInput's. */
+  tint?: string;
   /** What screen readers call it, when the row it sits in names the rest ("Shadow blur" under Shadow). */
   name?: string;
   /** A narrower value field, for two property rows side by side. */
@@ -582,9 +592,10 @@ export function Slider({
   const lock = useLockReason();
   disabled = disabled || !!lock;
   const inline = !narrow && label.length <= INLINE_LABEL;
+  const changed = !disabled && neutral !== undefined && (mixed || format(value) !== format(neutral));
   return (
-    <div className={inline ? "flex min-h-7 items-center gap-2" : "flex flex-col gap-0.5"} title={lock ?? title}>
-      <span className={`truncate text-[12px] leading-4 ${inline ? "w-20 shrink-0" : ""} ${disabled && !lock ? "text-subtle" : "text-muted"}`}>{label}</span>
+    <div data-peek-row className={inline ? "flex min-h-7 items-center gap-2" : "flex flex-col gap-0.5"} title={lock ?? title}>
+      <span className={`truncate text-[12px] leading-4 ${inline ? "w-20 shrink-0" : ""} ${disabled && !lock ? "text-subtle" : changed ? "text-fg" : "text-muted"}`}>{label}</span>
       <div className={`flex items-center gap-2 ${inline ? "min-w-0 flex-1" : ""}`}>
         <RangeInput
           label={name}
@@ -595,6 +606,7 @@ export function Slider({
           onChange={onChange}
           disabled={disabled}
           valueText={mixed ? "Mixed" : `${format(value)}${unit && ` ${unit}`}`}
+          tint={tint}
           className="min-w-0 flex-1"
         />
         {/* The unit sits inside the field, after the number, so the column of fields ends on one edge. */}
@@ -610,17 +622,47 @@ export function Slider({
 /** A section's controls sit straight on the pane: the section's title and the hairline between sections group them. */
 export const GROUP = "flex flex-col gap-2";
 
-/** The title above the controls; without one, for controls the inspector's header already names. */
-export function Section({ title, children, actions, ref }: { title?: string; children: ReactNode; actions?: ReactNode; /** One quiet control under its title, such as Format's menu; it looks as any other section now. */ bare?: boolean; ref?: Ref<HTMLElement> }) {
+/** A section that folds to its title and what is set in it: `summary` in `fg` while something is (`set`), else `muted`. */
+export interface Fold {
+  open: boolean;
+  onToggle: () => void;
+  summary: string;
+  set: boolean;
+}
+
+/**
+ * The title above the controls; without one, for controls the inspector's header already names. With `fold`, the
+ * title folds the section, and its actions show only while it is open.
+ */
+export function Section({ title, children, actions, ref, fold }: { title?: string; children: ReactNode; actions?: ReactNode; /** One quiet control under its title, such as Format's menu; it looks as any other section now. */ bare?: boolean; ref?: Ref<HTMLElement>; fold?: Fold }) {
+  const closed = fold && !fold.open;
   return (
-    <section ref={ref} className="flex flex-col gap-2 px-4 pt-3 pb-3.5 [&+&]:border-t [&+&]:border-white/[.06] last:pb-7 [@media(max-height:720px)]:pt-2.5 [@media(max-height:720px)]:pb-3">
+    <section
+      ref={ref}
+      className={`flex flex-col gap-2 px-4 [&+&]:border-t [&+&]:border-white/[.06] last:pb-7 ${
+        !fold ? "pt-3 pb-3.5 [@media(max-height:720px)]:pt-2.5 [@media(max-height:720px)]:pb-3" : closed ? "py-2" : "pt-2 pb-3.5 [@media(max-height:720px)]:pb-3"
+      }`}
+    >
       {title && (
         <div className="flex min-h-6 items-center justify-between gap-2">
-          <h3 className="text-[13px] font-semibold text-fg">{title}</h3>
-          {actions && <div className="-mr-1 flex items-center gap-0.5">{actions}</div>}
+          {fold ? (
+            <button
+              type="button"
+              aria-expanded={fold.open}
+              onClick={fold.onToggle}
+              className="-mx-2 flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 text-left transition-colors duration-[120ms] ease-out hover:bg-white/[.05]"
+            >
+              {fold.open ? <ChevronDown size={14} className="shrink-0 text-muted" /> : <ChevronRight size={14} className="shrink-0 text-muted" />}
+              <h3 className="shrink-0 text-[13px] font-semibold text-fg">{title}</h3>
+              {!fold.open && <span className={`tabular truncate text-[12px] ${fold.set ? "text-fg" : "text-muted"}`}>{fold.summary}</span>}
+            </button>
+          ) : (
+            <h3 className="text-[13px] font-semibold text-fg">{title}</h3>
+          )}
+          {actions && !closed && <div className="-mr-1 flex items-center gap-0.5">{actions}</div>}
         </div>
       )}
-      <div className={GROUP}>{children}</div>
+      {!closed && <div className={GROUP}>{children}</div>}
     </section>
   );
 }

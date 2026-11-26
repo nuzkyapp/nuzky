@@ -8,6 +8,15 @@ WIDTH, HEIGHT = 360, 640
 PHOTO = ROOT / 'site/public/media/ugc.jpg'
 PUNCH = {'contrast': 0.5, 'saturation': 0.1, 'vignette': 0.25}
 ADJUST = "return window.__nuzky.store.getState().snap.project.tracks.flatMap((t) => t.clips).find((c) => c.id === arguments[0]).content.adjust"
+LABELS = """return Object.fromEntries([...document.querySelectorAll('aside[aria-label=Inspector] [data-peek-row]')]
+  .map((row) => row.firstElementChild).map((l) => [l.textContent, getComputedStyle(l).color]))"""
+COUNT = """return [...document.querySelectorAll('aside[aria-label=Inspector] section span')].find((s) => s.textContent.endsWith(' changed'))?.textContent ?? null"""
+# The mean colour of the skin, the bottom right quarter, in each of the two pictures, and their captions.
+PAIR = """const p = document.querySelector('[data-peek]'); if (!p) return null;
+const skin = (c) => { const d = c.getContext('2d').getImageData(c.width * 0.6, c.height * 0.6, c.width * 0.3, c.height * 0.3).data;
+  const m = [0, 0, 0]; for (let i = 0; i < d.length; i += 4) for (let k = 0; k < 3; k++) m[k] += d[i + k]; return m.map((v) => Math.round(v / (d.length / 4))); };
+const [before, after] = p.querySelectorAll('canvas');
+return {labels: [...p.querySelectorAll('figcaption')].map((f) => f.textContent), before: skin(before), after: skin(after)}"""
 TAB = ("const t = [...document.querySelectorAll(arguments[0] + ' [role=tab]')].find((t) => t.textContent.trim() === arguments[1]);"
        'if (!t) return false; t.click(); return true')
 
@@ -131,7 +140,22 @@ def adjust(r):
     rendered = patches(Image.open(rendered_png).convert('RGB'))
     off = max(abs(a - b) for name in PATCHES for a, b in zip(contrast[name], rendered[name]))
     r.check('the preview shows the same colours as the renderer the export uses', off <= 8, f'{off} levels apart')
+    labels = r.s.run(LABELS)
+    r.check('a changed value has a white label and an unchanged one a grey label',
+            labels.get('Contrast') == 'rgb(242, 242, 245)' and labels.get('Brightness') == 'rgb(161, 161, 169)', labels)
+    r.check('the Adjust header counts what is changed', r.s.run(COUNT) == '1 changed', r.s.run(COUNT))
     r.shot('adjust-inspector')
+
+    # Before and After: the keys on Contrast show the preview before the change beside the preview now.
+    r.s.run("document.querySelector('aside[aria-label=Inspector] input[type=range][aria-label=Contrast]').focus()")
+    press('End')
+    r.check('End takes Contrast to 100', wait(lambda: value('contrast') == 1, 5), value('contrast'))
+    apart = lambda a, b: max(abs(x - y) for x, y in zip(a, b))
+    pair = wait(lambda: (p := r.s.run(PAIR)) and apart(p['after'], p['before']) >= 5 and p, 3, 0.05)
+    r.check('Before and After show over Contrast, After with the skin as the preview draws it now',
+            pair and pair['labels'] == ['Before', 'After'] and apart(pair['before'], contrast['skin']) <= 8, pair or r.s.run(PAIR))
+    r.shot('adjust-before-after')
+    r.check('Before and After go a moment after the last key', wait(lambda: not r.s.run('return !!document.querySelector("[data-peek]")'), 3))
 
     r.import_media(PHOTO)
     r.add_clip(PHOTO.name)

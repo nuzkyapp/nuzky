@@ -3,6 +3,7 @@ import { ownTransform } from "../../lib/keyframes";
 import { editClip, readoutTime, setClipTransform, transformAtPlayhead, useEditor } from "../../lib/store";
 import type { Asset, Clip, EditCmd, Mask, MaskKind, Transform } from "../../lib/types";
 import { Checkbox, Section, Segmented, Slider } from "../ui";
+import { summaryOf, useFold } from "./folds";
 
 type Choice = MaskKind | "none";
 type Value = "x" | "y" | "width" | "height" | "rotation" | "feather";
@@ -48,9 +49,11 @@ export function MaskSection({ clip, asset }: { clip: Clip; asset: Asset }) {
   // Built from the transform at the playhead when the edit is sent, so a second slider never overwrites the first.
   const set = (key: Value, value: number) =>
     setClipTransform(clip.id, (t) => (t.mask ? { mask: { ...t.mask, [key]: value } } : {}), `${clip.id}:mask:${key}`);
+  const said = summaryOf(mask ? [mask.kind, ...(mask.feather > 0 ? [`feather ${Math.round(mask.feather * 100)} %`] : []), ...(mask.invert ? ["inverted"] : [])] : []);
+  const fold = useFold("mask", said, !!mask);
 
   return (
-    <Section title="Mask">
+    <Section title="Mask" fold={fold}>
       <Segmented
         label="Mask"
         value={mask?.kind ?? "none"}

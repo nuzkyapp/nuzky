@@ -16,11 +16,11 @@ TAB = (f"const t = [...document.querySelectorAll('{INSPECTOR} [role=tab]')]"
        ".find((t) => t.textContent.trim() === arguments[0]); if (!t) return false; t.click(); return true")
 ADD = f"document.querySelector('{INSPECTOR} button[aria-label^=\"Add effect\"]')"
 MENU_ITEM = "[...document.querySelectorAll('[role=menuitem]')].find((b) => b.textContent.trim() === arguments[0])"
-CURVE = f"document.querySelector('{INSPECTOR} [role=group][aria-label=\"Curve to next keyframe\"]')"
-CURVE_STATE = f"""const g = {CURVE}; if (!g) return null;
-return {{pressed: g.querySelector('button[aria-pressed=true]')?.textContent.trim() ?? null,
-  disabled: [...g.querySelectorAll('button')].every((b) => b.disabled || b.getAttribute('aria-disabled') === 'true')}};"""
-CURVE_CLICK = f"""const b = [...{CURVE}.querySelectorAll('button')].find((b) => b.textContent.trim() === arguments[0]);
+CURVE = f"[...document.querySelectorAll('{INSPECTOR} button[aria-haspopup=menu]')].find((b) => b.getAttribute('aria-label')?.startsWith('Curve'))"
+CURVE_STATE = f"""const b = {CURVE}; if (!b) return null;
+return {{label: b.innerText.replace(/\\s+/g, ' ').trim(), disabled: b.getAttribute('aria-disabled') === 'true'}};"""
+CURVE_CLICK = f"""{CURVE}.click();"""
+CURVE_PICK = """const b = [...document.querySelectorAll('[role=menuitemradio]')].find((b) => b.textContent.trim() === arguments[0]);
 if (!b) return false; b.click(); return true;"""
 
 
@@ -139,16 +139,17 @@ def looks(r):
     r.seek(second["startUs"] + 1_200_000)
     r.check('past the last keyframe the curve is disabled', wait(lambda: (c := r.s.run(CURVE_STATE)) and c['disabled'], 5), r.s.run(CURVE_STATE))
     r.seek(second['startUs'] + 400_000)
-    r.check('between the two keyframes Curve to next keyframe shows Linear',
-            wait(lambda: r.s.run(CURVE_STATE) == {'pressed': 'Linear', 'disabled': False}, 5), r.s.run(CURVE_STATE))
+    r.check('between the two keyframes the curve menu names them and shows Linear',
+            wait(lambda: r.s.run(CURVE_STATE) == {'label': '1 → 2 Linear', 'disabled': False}, 5), r.s.run(CURVE_STATE))
     linear = picture(r, 'curve-linear')
-    r.check('clicking Ease out sets the curve of the first keyframe', r.s.run(CURVE_CLICK, 'Ease out')
+    r.s.run(CURVE_CLICK)
+    r.check('choosing Ease out in the menu sets the curve of the first keyframe', wait(lambda: r.s.run(CURVE_PICK, 'Ease out'), 5)
             and wait(lambda: [k['ease'] for k in clips(r)[1]['keyframes']] == ['easeOut', 'linear'], 5),
             [k['ease'] for k in clips(r)[1]['keyframes']])
     eased = redrawn(r, 'curve-ease-out', linear)
     r.check('Ease out moves the picture elsewhere than Linear at the same time', difference(eased, linear) > 4, difference(eased, linear))
-    r.check('and Ease out shows as chosen', r.s.run(CURVE_STATE) == {'pressed': 'Ease out', 'disabled': False}, r.s.run(CURVE_STATE))
-    both_sizes(r, 'curve-section', f'{INSPECTOR} [role=group][aria-label="Curve to next keyframe"]')
+    r.check('and Ease out shows as chosen', wait(lambda: r.s.run(CURVE_STATE) == {'label': '1 → 2 Ease out', 'disabled': False}, 5), r.s.run(CURVE_STATE))
+    both_sizes(r, 'curve-section', f'{INSPECTOR} section')
 
     saved = lambda: json.loads(r.saved_project().read_text())['tracks'][0]['clips']
     kept = wait(lambda: (c := saved()) and c[1].get('transitionIn', {}).get('kind') == 'spin'
