@@ -185,6 +185,18 @@ class ChatGptPanelServer:
             return [{'type': 'response.output_text.delta', 'delta': 'Checking your plan now.'},
                     {'type': 'response.failed', 'response': {'error': {
                         'code': 'subscription_sharing_usage_limit_exceeded', 'message': 'The plan usage limit was reached.'}}}], 0
+        # A streamed error as OpenAI sends it, its problem in a nested object.
+        if 'refuse' in message:
+            return [{'type': 'error', 'sequence_number': 1, 'error': {
+                'type': 'invalid_request_error', 'code': 'invalid_prompt', 'message': 'The prompt is not valid.'}}], 0
+        if 'too long' in message:
+            if not any(item['type'] == 'function_call_output' for item in items[last + 1:]):
+                return [{'type': 'response.output_item.done', 'item': {'type': 'function_call', 'id': 'item-long', 'call_id': 'call-long',
+                                                                       'namespace': 'nuzky', 'name': 'get_state', 'arguments': '{}'}},
+                        {'type': 'response.completed', 'response': {'id': 'response-long'}}], 0
+            return [{'type': 'error', 'sequence_number': 1, 'error': {
+                'type': 'invalid_request_error', 'code': 'context_length_exceeded', 'param': 'input',
+                'message': 'Your input exceeds the context window of this model. Please adjust your input and try again.'}}], 0
         if 'lose the connection' in message:
             # The stream breaks off while a search runs: it began, but neither it nor the answer completes.
             return [{'type': 'response.output_item.added', 'item': {'type': 'web_search_call', 'id': 'ws-lost', 'status': 'in_progress'}}], 0
@@ -262,7 +274,7 @@ def setup_chatgpt(r):
 
 
 @flow('ai_panel_chatgpt', 'ChatGPT on the signed-in plan streams a split through local tools, shows its run and Undo, '
-      'lists account models and recovers from a usage limit and a missing sign-in', before=setup_chatgpt)
+      'lists account models, says why ChatGPT refused, and recovers from a usage limit, a chat too long and a missing sign-in', before=setup_chatgpt)
 def ai_panel_chatgpt(r):
     server = r.chatgpt
 
@@ -336,6 +348,26 @@ def ai_panel_chatgpt(r):
               and r.s.run("return [...document.querySelectorAll('aside[aria-label=AI] button')].filter((b) => b.textContent.trim() === 'Manage usage').length") == 2
               and 'subscription_sharing_usage_limit_exceeded' not in text and 'USAGE_LIMIT' not in text, text)
         r.shot('chatgpt-usage-limit')
+        send(r, 'Please refuse this')
+        idle(r)
+        text = panel(r)['text']
+        check("a streamed error says ChatGPT's own reason and Try again, and gives the message back to the field",
+              'ChatGPT stopped with an error.' in text and 'The prompt is not valid.' in text and 'Try again' in text
+              and agent(r)['draft'] == 'Please refuse this', text)
+        click(r, 'Details')
+        check('its Details name the code', wait(lambda: 'Code: invalid_prompt' in panel(r)['text'], 3), panel(r)['text'])
+        r.shot('chatgpt-refused')
+        sent = len(server.requests)
+        send(r, 'Too long now')
+        idle(r)
+        text = panel(r)['text']
+        check('a chat past the model\'s context window after a step says so and offers New chat with this message',
+              all(s in text for s in ('This chat is too long for ChatGPT', 'Start a new chat with your message', 'New chat with this message'))
+              and len(server.requests) == sent + 2, text)
+        r.shot('chatgpt-too-long')
+        click(r, 'New chat with this message')
+        check('New chat with this message opens an empty chat with the message in the field, without sending it',
+              wait(lambda: not agent(r)['kinds'] and agent(r)['draft'] == 'Too long now', 5) and len(server.requests) == sent + 2, agent(r))
         (r.work / 'keychain.json').unlink()
         send(r, 'Hello after sign-out')
         idle(r)
@@ -374,7 +406,7 @@ def ai_panel_chatgpt(r):
         requests = server.requests
         bodies = [request['body'] for request in requests]
         check("all requests use the selected model, bearer token, preview fields, guide, namespaced Nuzky tools and only OpenAI's own web search",
-              len(bodies) == 6 and not server.errors and all(
+              len(bodies) == 9 and not server.errors and all(
                   request['authorization'] == 'Bearer e2e-access' and body.get('model') == 'gpt-e2e-luna'
                   and body.get('reasoning') == {'effort': 'high'}
                   and body.get('store') is False and body.get('stream') is True and not unsupported.intersection(body)
@@ -387,13 +419,15 @@ def ai_panel_chatgpt(r):
         check("ChatGPT reads the creator's style before the guide and that it decides how to cut, caption and zoom",
               all(style_first(body.get('instructions', '')) and 'decides how you cut, caption and zoom' in body['instructions']
                   for body in bodies), bodies[0].get('instructions', '')[:2000])
-        calls = [i for i in bodies[-1]['input'] if i['type'] == 'function_call']
+        # The usage-limit message, the first after the split, carries the whole split before it.
+        talk = bodies[5]['input']
+        calls = [i for i in talk if i['type'] == 'function_call']
         check('the first prompt carries the playhead and later inputs pair calls without item ids with their outputs',
               any('[Nuzky] Playhead' in p['text'] for i in bodies[0]['input'] if i.get('role') == 'user' for p in i['content'])
               and [call['name'] for call in calls] == ['get_state', 'begin_run', 'apply_edits', 'end_run']
               and all('id' not in i for body in bodies[1:] for i in body['input'] if i['type'] == 'function_call')
               and all(any(i['type'] == 'function_call_output' and i['call_id'] == call['call_id'] and isinstance(i['output'], str)
-                          for i in bodies[-1]['input']) for call in calls), bodies[-1]['input'])
+                          for i in talk) for call in calls), talk)
 
     finally:
         server.http.shutdown()

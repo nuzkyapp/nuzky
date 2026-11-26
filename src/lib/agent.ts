@@ -26,7 +26,7 @@ export interface AgentInfo {
 }
 
 /** What went wrong with a turn, so the panel can say what to do next. */
-/** `SESSION_GONE`: Claude Code, Codex or OpenCode no longer has the conversation a reopened chat would continue. */
+/** `SESSION_GONE`: the chat can't go on. Claude Code, Codex or OpenCode no longer has the conversation a reopened chat would continue, or it grew longer than ChatGPT can read. */
 export type AgentErrorCode = "NOT_INSTALLED" | "NOT_SIGNED_IN" | "USAGE_LIMIT" | "PLAN_UNAVAILABLE" | "AGENT_FAILED" | "SESSION_GONE";
 
 /** Events from the backend for one chat, in order. */

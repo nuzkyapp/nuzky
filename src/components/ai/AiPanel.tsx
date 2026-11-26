@@ -546,10 +546,12 @@ function ErrorNotice({ code, message, retryText, retryAttachments, last = false 
     code === "SESSION_GONE"
       ? [
           <AlertTriangle size={16} className="text-warn" />,
-          `${name} no longer has this chat`,
-          "It clears old chats after a while, so it can't pick this one up. Start a new chat with your message; this one stays here to read.",
+          agent === "chatgpt" ? "This chat is too long for ChatGPT" : `${name} no longer has this chat`,
+          agent === "chatgpt" ? message : "It clears old chats after a while, so it can't pick this one up. Start a new chat with your message; this one stays here to read.",
           button("New chat with this message", () => {
             newChat();
+            // A message ChatGPT began answering stays in the old chat, so the new one starts with it in the field.
+            if (retryText !== undefined && !useAgent.getState().draft) useAgent.setState({ draft: retryText, attachments: retryAttachments ?? [] });
             document.querySelector<HTMLTextAreaElement>('aside[aria-label="AI"] textarea')?.focus();
           }),
         ]
@@ -605,7 +607,7 @@ function Failure({ message, cmd }: { message: string; cmd?: ReactNode }) {
   const [first, ...rest] = message.trim().split("\n");
   return (
     <>
-      <span className="line-clamp-2">{first}</span> {cmd ? <>Try again; if it keeps failing, run {cmd} in a terminal to see why.</> : "Try again."}
+      <span className={open ? undefined : "line-clamp-2"}>{first}</span> {cmd ? <>Try again; if it keeps failing, run {cmd} in a terminal to see why.</> : "Try again."}
       {rest.length > 0 &&
         (open ? (
           <pre className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-white/[.06] px-2 py-1.5 text-[11px] leading-[16px] text-muted">{rest.join("\n")}</pre>
