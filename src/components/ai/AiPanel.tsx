@@ -551,7 +551,10 @@ function ErrorNotice({ code, message, retryText, retryAttachments, last = false 
           button("New chat with this message", () => {
             newChat();
             // A message ChatGPT began answering stays in the old chat, so the new one starts with it in the field.
-            if (retryText !== undefined && !useAgent.getState().draft) useAgent.setState({ draft: retryText, attachments: retryAttachments ?? [] });
+            if (retryText !== undefined) {
+              const { draft, attachments } = useAgent.getState();
+              useAgent.setState({ draft: [retryText, draft].filter(Boolean).join("\n"), attachments: [...(retryAttachments ?? []), ...attachments] });
+            }
             document.querySelector<HTMLTextAreaElement>('aside[aria-label="AI"] textarea')?.focus();
           }),
         ]

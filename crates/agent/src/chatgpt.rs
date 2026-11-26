@@ -286,7 +286,8 @@ fn respond(
             "response.failed" => return Err(problem(None, &event["response"]["error"], id)),
             // OpenAI's own clients read the problem from a nested `error`; the API reference puts it on the event.
             "error" => {
-                let error = if event["error"].is_object() { &event["error"] } else { &event };
+                let nested = event["error"]["code"].is_string() || event["error"]["message"].is_string();
+                let error = if nested { &event["error"] } else { &event };
                 return Err(problem(None, error, id));
             }
             "response.incomplete" => {
@@ -552,12 +553,15 @@ fn problem(status: Option<u16>, error: &Value, request: Option<&str>) -> AgentEv
     let code = error["code"].as_str().unwrap_or_default();
     let message = error["message"].as_str().unwrap_or_default().split_whitespace().collect::<Vec<_>>().join(" ");
     // A problem in a shape Nuzky doesn't know still says what ChatGPT sent.
-    let sent = (code.is_empty() && message.is_empty() && error.as_object().is_some_and(|e| !e.is_empty()))
-        .then(|| error.to_string().chars().take(MAX_SENT_CHARS).collect::<String>());
+    let unknown = error.as_object().filter(|e| code.is_empty() && message.is_empty() && !e.is_empty());
+    let sent = unknown.map(|_| error.to_string().chars().take(MAX_SENT_CHARS).collect::<String>());
+    let fields = unknown.map(|e| format!(", fields {}", e.keys().map(|key| logged(key)).collect::<Vec<_>>().join(" ")));
     log::warn!(
-        "ChatGPT refused a request: status {status:?}, code {code:?}, param {:?}, request {request:?}: {}",
-        error["param"],
-        sent.as_deref().unwrap_or(&message)
+        "ChatGPT refused a request: status {}, code {}, param {}{}",
+        status.map_or_else(|| "none".to_owned(), |status| status.to_string()),
+        logged(code),
+        logged(error["param"].as_str().unwrap_or_default()),
+        fields.unwrap_or_default()
     );
     let (kind, text) = match (code, status) {
         ("subscription_sharing_usage_limit_exceeded" | "usage_limit_reached", _) | (_, Some(429)) => {
@@ -602,6 +606,17 @@ fn problem(status: Option<u16>, error: &Value, request: Option<&str>) -> AgentEv
     ];
     let details: Vec<String> = details.into_iter().flatten().collect();
     failure(kind, &format!("{first}\n{}", details.join("\n")))
+}
+
+/// An identifier of OpenAI's as the log, which a bug report sends, takes it: bare, as the log hides quoted text, and
+/// only when it is one, so no text, path or secret gets there this way.
+fn logged(value: &str) -> &str {
+    let identifier = value.len() <= 64 && value.bytes().all(|c| c.is_ascii_alphanumeric() || b"_.[]-".contains(&c));
+    match value {
+        "" => "none",
+        _ if identifier => value,
+        _ => "other",
+    }
 }
 
 fn http() -> ureq::Agent {

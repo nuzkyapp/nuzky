@@ -478,8 +478,22 @@ fn streamed_errors_say_why_and_what_next() {
     let events = f.finish();
     assert_eq!(
         error(&events[0], ErrorCode::AgentFailed),
-        "ChatGPT refused the request without saying why.\nChatGPT sent: {\"type\":\"server_error\"}\nRequest: req-test"
+        "ChatGPT refused the request without saying why.\nChatGPT sent: {\"error\":{\"type\":\"server_error\"},\"type\":\"error\"}\nRequest: req-test"
     );
+}
+
+#[test]
+fn the_log_takes_only_openais_identifiers() {
+    for (value, kept) in [
+        ("context_length_exceeded", "context_length_exceeded"),
+        ("input[3].content", "input[3].content"),
+        ("", "none"),
+        ("Cut where Jana says hello", "other"),
+        ("/Users/jana/Movies/wedding.mov", "other"),
+        ("\"input\"", "other"),
+    ] {
+        assert_eq!(logged(value), kept, "{value}");
+    }
 }
 
 #[test]

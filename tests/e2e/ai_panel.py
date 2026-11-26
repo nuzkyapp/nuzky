@@ -365,6 +365,10 @@ def ai_panel_chatgpt(r):
               all(s in text for s in ('This chat is too long for ChatGPT', 'Start a new chat with your message', 'New chat with this message'))
               and len(server.requests) == sent + 2, text)
         r.shot('chatgpt-too-long')
+        log = (r.work / 'data/nuzky/logs/nuzky.log').read_text(encoding='utf-8')
+        check("the log a bug report sends names each of OpenAI's codes and leaves ChatGPT's words out",
+              all(f'code {code}' in log for code in ('subscription_sharing_usage_limit_exceeded', 'invalid_prompt', 'context_length_exceeded'))
+              and 'The prompt is not valid' not in log, [line for line in log.splitlines() if 'ChatGPT refused' in line])
         click(r, 'New chat with this message')
         check('New chat with this message opens an empty chat with the message in the field, without sending it',
               wait(lambda: not agent(r)['kinds'] and agent(r)['draft'] == 'Too long now', 5) and len(server.requests) == sent + 2, agent(r))
