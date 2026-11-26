@@ -619,7 +619,15 @@ function item(it) {
     case "user":
       return el("div", "user", it.text);
     case "agent":
-      return el("div", "agent-text", it.text.replace(/\*\*(.+?)\*\*/g, "$1").replace(/`([^`]+)`/g, "$1"));
+      return el(
+        "div",
+        "agent-text",
+        it.text
+          .replace(/\[([^\]\n]+)\]\((?:<[^>\n]+>|\/[^)\n]*|file:[^)\n]*|[A-Za-z]:[\\/][^)\n]*)\)/g, "$1")
+          .replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, "$1 ($2)")
+          .replace(/\*\*(.+?)\*\*/g, "$1")
+          .replace(/`([^`]+)`/g, "$1"),
+      );
     case "steps": {
       const box = el("div", "steps");
       for (const s of it.steps) {

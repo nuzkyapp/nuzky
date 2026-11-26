@@ -1393,3 +1393,30 @@ def ai_panel(r):
     r.shot('small-window')
     webdriver('POST', r.s.path + '/window/rect', {'width': 1440, 'height': 900})
     r.check('back in a wide window it is a column at the right edge again', wait(lambda: panel(r)['right'] == 6 and panel(r)['inspector'], 5), panel(r))
+
+
+LINKS = """const p = [...document.querySelectorAll('aside[aria-label=AI] p')].find((p) => p.textContent.startsWith('Na náhledu'));
+return p && {text: [...p.parentElement.children].map((e) => e.textContent),
+             links: [...p.parentElement.querySelectorAll('button')].map((b) => [b.textContent, b.title, [b, ...b.querySelectorAll('*')].map((e) => getComputedStyle(e).color)])};"""
+
+
+@flow('ai_panel_links', "A file the agent links in its answer shows as the link's text, which shows the file in its folder, "
+      'and a missing one says so', before=setup)
+def ai_panel_links(r):
+    saved, gone = r.work / 'fake/Astra - náhled v4.png', r.work / 'fake/gone.png'
+    r.s.run('document.body.focus()')
+    r.key('j', ctrlKey=True)
+    wait(lambda: panel(r) and r.s.run('return window.__nuzky.agent.getState().agents'), 10)
+    # Claude Code links a file it saved with its absolute path, in angle brackets for the spaces; the panel once
+    # showed the brackets, the path and all.
+    send(r, 'Change the text and link the file')
+    shown = wait(lambda: idle(r) and r.s.run(LINKS), 15)
+    r.check('a link to a file shows only its text, bold too in the accent colour, as a button that names the file, and a web link its address after the text',
+            shown and shown['text'] == ['Na náhledu teď stojí "Limit ti dojde o 40 % rychleji".', 'Stáhnout aktualizovaný náhled v PNG',
+                                        'Starší verze: v3', 'Web: Nuzky (https://nuzky.app).']
+            and [l[:2] for l in shown['links']] == [['Stáhnout aktualizovaný náhled v PNG', str(saved)], ['v3', str(gone)]]
+            and all(c == 'rgb(41, 151, 255)' for l in shown['links'] for c in l[2]), shown)
+    r.shot('file-link')
+    r.s.run("[...document.querySelectorAll('aside[aria-label=AI] button')].find((b) => b.textContent === 'v3').click()")
+    r.check("a link to a file that is gone says so in a toast and opens nothing",
+            wait(lambda: "Can't find gone.png. Ask the AI where it saved it." in r.errors(), 5), r.state()['toasts'])
