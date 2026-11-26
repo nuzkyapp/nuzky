@@ -35,6 +35,13 @@ export function importFailures(failed: { path: string; error: string }[]) {
   return [lead, ...other].filter(Boolean).join(". ");
 }
 
+/** Says which files did not open, and which videos opened without their sound and why. */
+export function toastImport(res: { failed: { path: string; error: string }[]; silent: { path: string; error: string }[] }) {
+  const { toast } = useEditor.getState();
+  if (res.failed.length > 0) toast({ kind: "error", text: importFailures(res.failed) });
+  for (const f of res.silent) toast({ kind: "warning", text: `${fileName(f.path)} is added without sound. ${f.error}.` });
+}
+
 /**
  * Imports files; optionally places them on the timeline one after another, or puts the first in a clip. Resolves to the ids of the new assets.
  * Then the plugins the user turned on for imports run, unless the file is for a clip, a background or a cover, which `plugins: false` says.
@@ -51,7 +58,7 @@ export async function importPaths(paths: string[], place?: DropTarget | { replac
     const res = await api.importMedia(paths, epoch);
     setSnap(res.snapshot);
     done();
-    if (res.failed.length > 0) toast({ kind: "error", text: importFailures(res.failed) });
+    toastImport(res);
     // Placing waits for the import; another project may have opened meanwhile.
     if (place && "replaceId" in place && place.replaceId) {
       if (currentEpoch() === epoch && res.added[0]) await edit({ type: "replaceClip", clipId: place.replaceId, assetId: res.added[0] });
