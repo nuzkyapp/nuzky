@@ -945,6 +945,14 @@ impl Gpu {
         .context("No GPU adapter found")?;
         let info = adapter.get_info();
         let adapter_name = format!("{} ({})", info.name, info.backend);
+        // Before the device opens, where a driver can crash, so the log of a Nuzky that ended there names it.
+        static NAMED: AtomicBool = AtomicBool::new(false);
+        if !NAMED.swap(true, Ordering::Relaxed) {
+            let driver: Vec<&str> =
+                [info.driver.trim(), info.driver_info.trim()].into_iter().filter(|s| !s.is_empty()).collect();
+            let driver = if driver.is_empty() { String::new() } else { format!(", driver {}", driver.join(" ")) };
+            log::info!("Opening the GPU {adapter_name}{driver}");
+        }
         let (device, queue) = pollster::block_on(
             adapter.request_device(&wgpu::DeviceDescriptor { label: Some("nuzky"), ..Default::default() }),
         )
@@ -958,6 +966,9 @@ impl Gpu {
         let lost = Arc::new(Mutex::new(None));
         let gone = lost.clone();
         device.set_device_lost_callback(move |reason, message| {
+            if reason == wgpu::DeviceLostReason::Unknown {
+                log::error!("The GPU device was lost: {message}");
+            }
             *gone.lock().unwrap() = Some(format!("{reason:?}: {message}"));
         });
 

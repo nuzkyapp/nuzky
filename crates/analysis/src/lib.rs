@@ -26,7 +26,7 @@ pub use boundaries::{align_to_sound, align_words};
 pub use captions::{CaptionGrouping, group_words};
 pub use emphasis::{Energy, Zoom, emphasis, key_words, prepared_word_energy, word_energy};
 pub use fillers::{HESITATION_US, filler_words, hesitations};
-pub use ggml::check_language;
+pub use ggml::{check_language, on_abort};
 pub use restarts::align_transcript;
 pub use retakes::{Attempt, Filler, RetakeGroup, Retakes, Review, retakes, token as word_token};
 pub use scenes::{SceneCut, SceneParams, picture_difference, scene_cuts, scene_cuts_cancellable, scene_cuts_in};

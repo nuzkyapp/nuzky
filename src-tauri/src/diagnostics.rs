@@ -8,7 +8,7 @@
 //! the terminal.
 
 use std::fs::{File, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock, PoisonError};
@@ -135,6 +135,8 @@ fn source_file(path: &str) -> String {
 }
 
 static CRASHED: AtomicBool = AtomicBool::new(false);
+/// Where the Nuzky before this one crashed, when it could note it (crash.rs).
+static LAST_CRASH: Mutex<Option<crate::crash::Crash>> = Mutex::new(None);
 
 /// Whether a Nuzky that ran before this one ended without quitting: it crashed, hung and was killed, or the
 /// computer lost power.
@@ -142,9 +144,20 @@ pub fn crashed_before() -> bool {
     CRASHED.load(Ordering::Relaxed)
 }
 
+/// What the report says of how the Nuzky before this one ended.
+fn how_it_ended() -> String {
+    match &*LAST_CRASH.lock().unwrap_or_else(PoisonError::into_inner) {
+        Some(crash) => crash.sentence(),
+        None => "No crash was noted: something outside Nuzky ended it, such as Task Manager or a shutdown, the \
+                 computer stopped, or the crash ended it before Nuzky could note it."
+            .into(),
+    }
+}
+
 /// The Nuzky before this one restarted to update; on Windows its installer ended it without quitting.
 pub fn ended_for_update() {
     CRASHED.store(false, Ordering::Relaxed);
+    *LAST_CRASH.lock().unwrap_or_else(PoisonError::into_inner) = None;
 }
 
 /// The file this app holds locked while it runs and removes when it quits.
@@ -152,20 +165,34 @@ static MARKER: OnceLock<(PathBuf, File)> = OnceLock::new();
 
 /// Every running Nuzky holds a lock on a file of its own in `dir`. A file nobody holds was left by one that never
 /// quit; files another open Nuzky window holds stay. A file shows under `RUNNING` only once it is locked, so a Nuzky
-/// starting at the same moment never takes it for a crash.
+/// starting at the same moment never takes it for a crash. A crash writes where it happened into the file.
 fn watch_for_crashes(dir: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
+    let mut newest: Option<(std::time::SystemTime, crate::crash::Crash)> = None;
     for entry in std::fs::read_dir(dir)?.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
         if !name.starts_with(RUNNING) && !name.starts_with(STARTING) {
             continue;
         }
-        let left = File::open(entry.path()).is_ok_and(|file| file.try_lock().is_ok());
-        if left {
-            CRASHED.fetch_or(name.starts_with(RUNNING), Ordering::Relaxed);
-            std::fs::remove_file(entry.path()).ok();
+        let Ok(mut file) = File::open(entry.path()) else { continue };
+        if file.try_lock().is_err() {
+            continue;
         }
+        if name.starts_with(RUNNING) {
+            CRASHED.store(true, Ordering::Relaxed);
+            let mut text = String::new();
+            std::io::Read::take(&mut file, 64 * 1024).read_to_string(&mut text).ok();
+            let at = file.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+            if let Some(crash) =
+                crate::crash::Crash::read(&text).filter(|_| newest.as_ref().is_none_or(|(t, _)| at > *t))
+            {
+                newest = Some((at, crash));
+            }
+        }
+        drop(file);
+        std::fs::remove_file(entry.path()).ok();
     }
+    *LAST_CRASH.lock().unwrap_or_else(PoisonError::into_inner) = newest.map(|(_, crash)| crash);
     let starting = dir.join(format!("{STARTING}{}", std::process::id()));
     let file = File::create(&starting)?;
     file.lock()?;
@@ -173,6 +200,7 @@ fn watch_for_crashes(dir: &Path) -> std::io::Result<()> {
     std::fs::rename(&starting, &path)?;
     #[cfg(unix)]
     quit_on_signals(&path);
+    crate::crash::install(&file);
     MARKER.set((path, file)).ok();
     Ok(())
 }
@@ -207,6 +235,63 @@ fn quit_on_signals(path: &Path) {
     }
 }
 
+/// A WebView2 process that ends leaves the window empty or unresponsive while Nuzky runs on, so the log says which
+/// one ended and why; a person who then ends Nuzky from Task Manager leaves no crash record of its own.
+#[cfg(windows)]
+pub fn watch_webview(app: &AppHandle) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        COREWEBVIEW2_PROCESS_FAILED_KIND, COREWEBVIEW2_PROCESS_FAILED_REASON, ICoreWebView2ProcessFailedEventArgs2,
+    };
+    use windows_core::Interface;
+    let Some(window) = app.get_webview_window("main") else { return };
+    let watched = window.with_webview(|webview| {
+        let handler = webview2_com::ProcessFailedEventHandler::create(Box::new(|_, args| {
+            let Some(args) = args else { return Ok(()) };
+            let (mut kind, mut reason, mut code) =
+                (COREWEBVIEW2_PROCESS_FAILED_KIND::default(), COREWEBVIEW2_PROCESS_FAILED_REASON(-1), 0);
+            // SAFETY: WebView2 passes the event's arguments for the length of the call.
+            unsafe {
+                args.ProcessFailedKind(&mut kind)?;
+                if let Ok(more) = args.cast::<ICoreWebView2ProcessFailedEventArgs2>() {
+                    more.Reason(&mut reason).ok();
+                    more.ExitCode(&mut code).ok();
+                }
+            }
+            let process = match kind.0 {
+                0 => "browser process",
+                1 | 2 => "page's process",
+                3 => "frame's process",
+                4 => "utility process",
+                5 => "sandbox helper",
+                6 => "GPU process",
+                _ => "process",
+            };
+            let why = match (kind.0, reason.0) {
+                (2, _) | (_, 1) => "stopped responding",
+                (_, 2) => "was ended by another program",
+                (_, 3) => "crashed",
+                (_, 4) => "failed to start",
+                (_, 5) => "ran out of memory",
+                (_, 6) => "lost its profile folder",
+                _ => "ended",
+            };
+            log::error!(target: "webview", "WebView2's {process} {why} (exit code {code:#x})");
+            Ok(())
+        }));
+        let mut token = 0;
+        // SAFETY: the handler stays registered for the life of the webview, which owns it from here.
+        let added = unsafe {
+            webview.controller().CoreWebView2().and_then(|core| core.add_ProcessFailed(&handler, &mut token))
+        };
+        if let Err(error) = added {
+            log::warn!("Not watching WebView2's processes: {error}");
+        }
+    });
+    if let Err(error) = watched {
+        log::warn!("Not watching WebView2's processes: {error}");
+    }
+}
+
 static GRAPHICS: Mutex<Option<String>> = Mutex::new(None);
 
 /// The GPU and graphics backend the preview draws with.
@@ -236,6 +321,7 @@ fn about(version: &str) -> Vec<String> {
     lines.push(format!("Face and subject models: {}", if vision { "installed" } else { "not installed" }));
     if crashed_before() {
         lines.push("The Nuzky before this one closed unexpectedly.".into());
+        lines.push(how_it_ended());
     }
     lines
 }
@@ -251,6 +337,7 @@ pub(crate) fn facts() -> serde_json::Value {
         "speechModels": speech,
         "faceModels": faces,
         "crashedBefore": crashed_before(),
+        "crash": LAST_CRASH.lock().unwrap_or_else(PoisonError::into_inner).as_ref().map(crate::crash::Crash::facts),
     })
 }
 
@@ -893,9 +980,16 @@ mod tests {
         // Another Nuzky that is still open holds its file; one that crashed left its file unheld.
         let open = File::create(dir.join(format!("{RUNNING}1"))).unwrap();
         open.lock().unwrap();
-        File::create(dir.join(format!("{RUNNING}2"))).unwrap();
+        let record =
+            "crash: access violation writing memory\nin: igvk64.dll +0x64ea72\nafter: 5\nthread: preview-engine\n";
+        std::fs::write(dir.join(format!("{RUNNING}2")), record).unwrap();
         watch_for_crashes(&dir).unwrap();
         assert!(crashed_before());
+        assert_eq!(
+            how_it_ended(),
+            "It crashed in igvk64.dll at +0x64ea72 on the preview-engine thread, 5 s after starting: access violation \
+             writing memory."
+        );
         assert!(dir.join(format!("{RUNNING}1")).exists(), "the open window's file stays");
         assert!(!dir.join(format!("{RUNNING}2")).exists(), "the crashed one's file is gone");
         let own = dir.join(format!("{RUNNING}{}", std::process::id()));

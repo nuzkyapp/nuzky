@@ -4,6 +4,20 @@
 //! own too, which does not load without a Vulkan driver; speech then runs on the processor. macOS links them in.
 use anyhow::Result;
 
+static ON_ABORT: std::sync::OnceLock<fn(&str)> = std::sync::OnceLock::new();
+
+/// Gives `hook` why ggml stops the app, just before it aborts, as a failed `GGML_ASSERT` in its Vulkan backend does.
+pub fn on_abort(hook: fn(&str)) {
+    ON_ABORT.set(hook).ok();
+}
+
+unsafe extern "C" fn aborting(message: *const std::ffi::c_char) {
+    if let (Some(hook), false) = (ON_ABORT.get(), message.is_null()) {
+        // SAFETY: ggml passes its message as a C string on its stack.
+        hook(&unsafe { std::ffi::CStr::from_ptr(message) }.to_string_lossy());
+    }
+}
+
 /// Loads ggml's backends once, before anything calls into whisper.cpp; every later call answers from that attempt.
 pub(crate) fn ready() -> Result<()> {
     #[cfg(any(target_os = "linux", windows))]
@@ -13,6 +27,11 @@ pub(crate) fn ready() -> Result<()> {
             return Err(anyhow::anyhow!("Speech recognition cannot start: {reason}"));
         }
     }
+    static WATCHED: std::sync::Once = std::sync::Once::new();
+    // SAFETY: ggml keeps the function, which lives as long as the app.
+    WATCHED.call_once(|| unsafe {
+        whisper_rs::whisper_rs_sys::ggml_set_abort_callback(Some(aborting));
+    });
     Ok(())
 }
 
