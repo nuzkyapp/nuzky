@@ -2,7 +2,8 @@
 folder it may not write to fails with Open logs folder and a way to export again, which works once the folder is
 writable; the log names the failure without the folders. Copy diagnostics gives the version, system, graphics, the format of the project's files, the last actions and the end of the log. After the app is killed, the
 next start says it closed unexpectedly with Send crash report, which says when it cannot reach the server and offers Report
-a bug…, which opens the report, which still holds what was done before the crash; after a normal quit it says nothing. A bug while drawing the window shows Reload instead of an empty window, and
+a bug…, which opens the report, which still holds what was done before the crash and says no crash was noted, as the app
+was ended from outside; after a normal quit it says nothing. A bug while drawing the window shows Reload instead of an empty window, and
 Report a bug… there saves the report and opens the bug form. Nothing leaves the computer: the flow records the pages and folders the app would open, and the
 clipboard is the page's own, never the system's."""
 import re, subprocess, time, urllib.parse
@@ -190,6 +191,10 @@ def diagnostics(r):
     r.check('its report says the last run closed unexpectedly and still holds what was done before the crash',
             '\nThe Nuzky before this one closed unexpectedly.\n' in report and re.search(r'^  \S+Z user addClip', report, re.M)
             and re.search(r'^  \S+Z job export done$', report, re.M), report[:1500])
+    r.check('and that the run, ended from outside, noted no crash of its own, while the log names the GPU and its driver',
+            '\nNo crash was noted: something outside Nuzky ended it, such as Task Manager or a shutdown,' in report
+            and re.search(r'^  \S+Z INFO nuzky_engine::gpu: Opening the GPU .+\((metal|vulkan|dx12|gl)\)(, driver .+)?$', report, re.M),
+            report[:1500])
     r.s.run(CLICK, REPORT_DIALOG, 'Continue on GitHub')
     wait(lambda: len(opened(r)) > before, 15)
     url = urllib.parse.urlsplit(opened(r)[-1] if len(opened(r)) > before else '')

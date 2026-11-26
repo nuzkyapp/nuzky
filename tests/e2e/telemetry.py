@@ -152,6 +152,10 @@ def telemetry(r):
             and not any('closed unexpectedly' in t for t in r.s.run(TOASTS)), r.s.run(TOASTS))
     report = events(r, 'report')[0]['data']['text']
     r.check('the report holds the version and the files\' formats', 'Nuzky' in report and 'File 1 (video' in report, report[:400])
+    start = events(r, 'start')[0]['data']
+    r.check('the report and the start event say how the run before ended, here without a crash it noted',
+            '\nThe Nuzky before this one closed unexpectedly.\nNo crash was noted: ' in report
+            and start['crashedBefore'] is True and 'crash' in start and start['crash'] is None, (report[:600], start))
 
     r.s.run("window.__nuzky.store.setState({view: 'editor'})")
     r.s.run("window.__nuzky.openSettings('privacy')")

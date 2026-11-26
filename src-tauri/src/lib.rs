@@ -12,6 +12,7 @@ mod chatgpt;
 mod commands;
 mod connect;
 mod cover;
+mod crash;
 mod diagnostics;
 mod engine;
 #[cfg(target_os = "macos")]
@@ -1457,6 +1458,8 @@ pub fn run() {
             sync::start(app.handle().clone(), account::account);
             plugins::watch(app.handle().clone());
             telemetry::start(app.handle());
+            #[cfg(windows)]
+            diagnostics::watch_webview(app.handle());
             app.emit("ready", ()).ok();
             #[cfg(target_os = "macos")]
             if let Err(error) = file_dialogs::watch(app) {
