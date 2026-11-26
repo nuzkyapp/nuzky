@@ -251,7 +251,7 @@ fn mp3_attached_picture_remains_audio_asset() {
 /// the spatial track as the default. The AAC plays: its cache and the export are FFmpeg's own decoding of it, with the
 /// sound starting where it starts there. A video whose only sound is spatial opens and exports without sound, and says
 /// why. The spatial track here is a 4-channel PCM track whose sample entry is renamed to `apac`, so FFmpeg reads it
-/// as a sound it has no decoder for.
+/// as a sound it has no decoder for. At 96 kHz, FFmpeg 6 as well as later writes it as `lpcm`.
 #[test]
 fn iphone_spatial_audio_plays_the_stereo_track_beside_it() {
     use nuzky_engine::export::{ExportOptions, export};
@@ -264,7 +264,7 @@ fn iphone_spatial_audio_plays_the_stereo_track_beside_it() {
     let cache = d.join("cache");
     let tone = "if(lt(t\\,0.5)\\,0\\,0.25*sin(2*PI*440*t))";
     let stereo = format!("aevalsrc={tone}|{tone}:s=48000:d=2");
-    let spatial = "aevalsrc=0.25*sin(2*PI*880*t)|0.25*sin(2*PI*880*t)|0|0:s=48000:d=2";
+    let spatial = "aevalsrc=0.25*sin(2*PI*880*t)|0.25*sin(2*PI*880*t)|0|0:s=96000:d=2";
     let make = |name: &str, with_stereo: bool| {
         let made = d.join(format!("{name}-pcm.mov"));
         let mut args = vec!["-f", "lavfi", "-i", "testsrc2=s=320x240:r=30:d=2", "-f", "lavfi", "-i", spatial];

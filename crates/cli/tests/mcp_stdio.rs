@@ -1044,12 +1044,12 @@ fn a_recording_on_one_side_is_named_and_plays_mono_over_stdio() {
 
 /// An iPhone video with Apple spatial audio, which FFmpeg cannot decode, beside its stereo sound imports with sound;
 /// one whose only sound is spatial imports without, and import_media tells the agent why. The spatial track is a
-/// 4-channel PCM track whose sample entry is renamed to `apac`.
+/// 4-channel PCM track whose sample entry is renamed to `apac`; at 96 kHz, FFmpeg 6 as well as later writes it as `lpcm`.
 #[test]
 fn a_video_whose_only_sound_is_spatial_audio_imports_without_sound_and_says_why_over_stdio() {
     let mut c = Client::new(true);
     let spatial = |name: &str, extra: &[&str], output: &[&str]| {
-        let mut inputs = vec!["testsrc2=s=360x640:r=30:d=2", "aevalsrc=0.25*sin(2*PI*880*t)|0|0|0:s=48000:d=2"];
+        let mut inputs = vec!["testsrc2=s=360x640:r=30:d=2", "aevalsrc=0.25*sin(2*PI*880*t)|0|0|0:s=96000:d=2"];
         inputs.extend(extra);
         let path = ffmpeg_media(&c, name, &inputs, &[output, &["-c:v", "libx264", "-preset", "ultrafast"]].concat());
         let mut bytes = std::fs::read(&path).unwrap();

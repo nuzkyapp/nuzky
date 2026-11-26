@@ -2,7 +2,7 @@
 the spatial track as the default. Such a video imports with its stereo sound prepared, without an error, draws its
 waveform, and exports that sound where FFmpeg's own decoding of it has it. A video whose only sound is spatial is
 added without sound, and a toast says why. The spatial track is a 4-channel PCM track whose sample entry is renamed
-to `apac`, so FFmpeg reads it as a sound it has no decoder for."""
+to `apac`, so FFmpeg reads it as a sound it has no decoder for. At 96 kHz, FFmpeg 6 as well as later writes it as `lpcm`."""
 import subprocess
 
 import numpy as np
@@ -35,7 +35,7 @@ def iphone_video(path, stereo):
     """A portrait video with a 4-channel spatial track marked as the default, after a stereo AAC track that is not."""
     made = path.with_suffix('.pcm.mov')
     args = ['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=360x640:r=30:d=4',
-            '-f', 'lavfi', '-i', f'aevalsrc=0.25*sin(2*PI*880*t)|0.25*sin(2*PI*880*t)|0|0:s={RATE}:d=4']
+            '-f', 'lavfi', '-i', f'aevalsrc=0.25*sin(2*PI*880*t)|0.25*sin(2*PI*880*t)|0|0:s=96000:d=4']
     if stereo:
         args += ['-f', 'lavfi', '-i', f'aevalsrc={TONE}|{TONE}:s={RATE}:d=4', '-map', '0:v', '-map', '2:a', '-map', '1:a',
                  '-c:a:0', 'aac', '-c:a:1', 'pcm_s16le', '-disposition:a:0', '0', '-disposition:a:1', 'default']
