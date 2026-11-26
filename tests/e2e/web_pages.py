@@ -1,9 +1,10 @@
 """Buttons that open a web page: Install beside Claude Code, Codex and OpenCode in the AI panel and Install guide in
 Get set up's Connect your AI open the agent's own guide in the browser. When the browser cannot open, an error toast
-says so and Copy link puts the address on the clipboard. The flow records the pages the app would open instead of a
-browser."""
+says so and names the page, readable under Get set up, and once Get set up is closed a click on Copy link puts the
+address on the clipboard. The flow records the pages the app would open instead of a browser."""
 import time
 
+from e2e.corrections import Hands
 from e2e.harness import LINUX, clipboard, flow, press, set_clipboard, wait
 from e2e.setup import BOX, dialog
 from e2e.setup_ai import cards, press_button
@@ -17,9 +18,9 @@ CLICK_INSTALL = """const b = [...document.querySelectorAll('aside[aria-label=AI]
   .find((b) => b.textContent.trim() === 'Install' && b.parentElement.firstChild.textContent.trim() === arguments[0]);
 if (!b) return false; b.click(); return true;"""
 TOASTS = "return window.__nuzky.store.getState().toasts.map((t) => ({kind: t.kind, text: t.text, action: t.action?.label ?? null}));"
-CLICK_TOAST = """const b = [...document.querySelectorAll('[data-toast] button')].find((b) => b.textContent.trim() === arguments[0]);
-if (!b) return false; b.click(); return true;"""
-FAILED = "Couldn't open your browser. Copy the link and open it there."
+MARK_COPY = """const b = [...document.querySelectorAll('[data-toast] button')].find((b) => b.textContent.trim() === 'Copy link');
+if (!b) return false; b.dataset.copyLink = ''; return true;"""
+FAILED = "Couldn't open your browser. Go to code.claude.com/docs/en/setup in it."
 
 
 def before(r):
@@ -83,11 +84,13 @@ def get_set_up(r):
     r.opened.mkdir()
     press_button(r, 'Install guide', f'{BOX} [role=group][aria-label="Claude Code"]')
     toast = wait(lambda: next((t for t in r.s.run(TOASTS) if t['text'] == FAILED), None), 5)
-    r.check('when the browser does not open, an error toast says so and offers Copy link',
+    r.check('when the browser does not open, an error toast says so, names the page and offers Copy link',
             toast and toast['kind'] == 'error' and toast['action'] == 'Copy link', r.s.run(TOASTS))
     time.sleep(0.3)
     r.shot('browser-failed')
-    r.check('Copy link', r.s.run(CLICK_TOAST, 'Copy link'))
+    press('Escape')
+    r.check('Esc closes Get set up and the toast stays', wait(lambda: not dialog(r), 3) and any(t['text'] == FAILED for t in r.s.run(TOASTS)), r.s.run(TOASTS))
+    r.check('a click on Copy link', r.s.run(MARK_COPY) and Hands(r).click('[data-copy-link]'))
     r.check("puts the guide's address on the clipboard", wait(lambda: clipboard() == CLAUDE_CODE, 3), clipboard())
     r.check('and says it was copied', wait(lambda: any(t['text'] == 'Link copied. Paste it into your browser.' and t['kind'] == 'success'
                                                        for t in r.s.run(TOASTS)), 3), r.s.run(TOASTS))

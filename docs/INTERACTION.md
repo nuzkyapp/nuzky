@@ -445,7 +445,7 @@ Projects in the editor's top bar, or `Ctrl+K`, opens the launcher over the edito
 ### Errors
 An error says in plain words what happened and what to do next; an error toast stays until it is dismissed. The engine's coded errors (`READ_ONLY: …`, `EDIT_REJECTED: …` and the like) are translated where they are shown; an error without a known code is shown as it came.
 
-When a button that opens a web page (Install guide, Install, Manage usage) cannot open the browser, an error toast says "Couldn't open your browser. Copy the link and open it there." with Copy link, which puts the page's address on the clipboard and says so. The page asks the app for one of these pages by name, never by address, so nothing in a project or from an agent can open another site this way.
+When a button that opens a web page (Install guide, Install, Manage usage) cannot open the browser, an error toast says "Couldn't open your browser. Go to code.claude.com/docs/en/setup in it." with the page's address, readable also under a dialog, and Copy link, which puts the address on the clipboard and says so. The page asks the app for one of these pages by name, never by address, so nothing in a project or from an agent can open another site this way.
 
 On macOS a file dialog (Export…, Import media, Open file…) that the window darkened for but macOS did not show within 3 s, while the window itself is on the screen, is closed again, as Cancel would, and an error toast says to quit Nuzky, open it again and try once more. macOS 27 once stopped showing them in a window that had been open a while; a newly started Nuzky showed them again.
 
