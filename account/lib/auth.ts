@@ -60,7 +60,7 @@ export function createAuth(config: Config, database: DatabaseSync, mail: Mailer)
     rateLimit: {
       enabled: true,
       storage: "database",
-      customRules: { "/sign-in/email": { window: 60, max: 5 } },
+      customRules: { "/sign-in/email": { window: 60, max: 5 }, "/jwks": false },
     },
     advanced: { ipAddress: { ipAddressHeaders: ["x-forwarded-for"] } },
     onAPIError: { errorURL: `${config.baseURL}/error` },

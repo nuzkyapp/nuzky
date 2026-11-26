@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { startStack } from "./harness.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -59,4 +61,16 @@ test("production refuses to start without a secret", async () => {
   const { code, output } = await start({ BASE_URL: "https://account.nuzky.app" });
   assert.equal(code, 1);
   assert.match(output, /AUTH_SECRET is not set/);
+});
+
+test("the container's health check writes nothing to the database", async () => {
+  const stack = await startStack();
+  try {
+    for (let i = 0; i < 3; i++) assert.equal((await fetch(`${stack.url}/api/auth/jwks`)).status, 200);
+    const database = new DatabaseSync(path.join(path.dirname(stack.mail), "account.db"), { readOnly: true });
+    assert.deepEqual(database.prepare("SELECT key FROM rateLimit WHERE key LIKE '%|/jwks'").all(), []);
+    database.close();
+  } finally {
+    await stack.stop();
+  }
 });
