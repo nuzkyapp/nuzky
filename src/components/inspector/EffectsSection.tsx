@@ -43,9 +43,16 @@ export function EffectsSection({ clip }: { clip: Clip }) {
     <Section
       title="Effects"
       actions={
-        <IconButton label={blocked ? `Add effect: ${blocked}` : "Add effect"} className={QUIET} disabled={!!blocked} onClick={showMenu}>
-          <Plus size={14} />
-        </IconButton>
+        <Button
+          variant="ghost"
+          aria-label={blocked ? `Add effect: ${blocked}` : "Add effect"}
+          disabled={!!blocked}
+          disabledReason={blocked ? `Add effect: ${blocked}` : undefined}
+          className="h-6 gap-1 px-1.5 text-[12px] text-accent! hover:text-accent!"
+          onClick={showMenu}
+        >
+          <Plus size={13} /> Add effect
+        </Button>
       }
     >
       {effects.map((effect, index) => {

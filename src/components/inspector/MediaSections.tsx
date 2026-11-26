@@ -9,7 +9,9 @@ import { api, plainError } from "../../lib/api";
 import { detachAudio, detachBlocker, editClip, editClips, findClip, maxFadeUs, setVoice, useEditor, useJobs, type VoiceChange } from "../../lib/store";
 import { US, formatDuration } from "../../lib/time";
 import type { Adjust, Asset, Clip, Mono, SpeedPoint } from "../../lib/types";
-import { Button, Checkbox, IconButton, PresetTile, ProgressBar, Section, Segmented, Slider } from "../ui";
+import { Button, Checkbox, GROUP, IconButton, PresetTile, ProgressBar, Section, Segmented, Slider } from "../ui";
+import { useFold } from "./folds";
+import { PeekBeforeAfter } from "./Peek";
 import { QUIET } from "./Header";
 
 type Media = Extract<Clip["content"], { type: "media" }>;
@@ -36,7 +38,7 @@ export function ColorSection({ clip, content }: { clip: Clip; content: Graded })
     </div>
   );
   return (
-    <Section title="Colour">
+    <Section title="Log and LUT">
       {profile && (
         <div className="flex flex-col gap-0.5" data-log={profile.id}>
           {row(profile.name, `Show the clip as recorded, without ${profile.name}`, () => edit({ type: "updateClip", clipId: clip.id, log: "none" }))}
@@ -79,25 +81,73 @@ export function ColorSection({ clip, content }: { clip: Clip; content: Graded })
   );
 }
 
+/** What Saturation, Temperature and Tint change, from their min to their max, drawn as their tracks. */
+const TINTS: Partial<Record<keyof Adjust, string>> = {
+  saturation: "linear-gradient(to right, #8a8a90, #e5533f)",
+  temperature: "linear-gradient(to right, #4c8fe8, #9a9aa0 50%, #f0a43a)",
+  tint: "linear-gradient(to right, #46b866, #9a9aa0 50%, #d660c4)",
+};
+const GROUPS: { name: string; keys: (keyof Adjust)[] }[] = [
+  { name: "Light", keys: ["exposure", "brightness", "contrast", "highlights", "shadows"] },
+  { name: "Colour", keys: ["saturation", "temperature", "tint"] },
+];
+const FINISH: (keyof Adjust)[] = ["fade", "vignette"];
+const changedIn = (adjust: Adjust, keys: (keyof Adjust)[]) => keys.filter((k) => Math.round(adjust[k] * 100) !== 0);
+
+function AdjustRow({ clip, adjust, k }: { clip: Clip; adjust: Adjust; k: keyof Adjust }) {
+  const row = ADJUST_ROWS.find((r) => r.key === k)!;
+  // Built from the latest confirmed values, so a second slider never overwrites the first.
+  const set = (v: number) =>
+    editClip(clip.id, (c) => (c.content.type !== "text" ? { type: "updateClip", clipId: c.id, adjust: { ...c.content.adjust, [k]: v / 100 } } : null), `${clip.id}:adjust:${k}`);
+  return <Slider label={row.label} neutral={0} tint={TINTS[k]} value={adjust[k] * 100} min={row.min} max={100} step={1} format={(v) => String(Math.round(v))} onChange={set} />;
+}
+
+/**
+ * Light and Colour of a clip's Adjust, then Finish (Fade, Vignette) folded under them. While a slider moves, the
+ * preview before the change shows beside the preview now.
+ */
 export function AdjustSection({ clip, content }: { clip: Clip; content: Graded }) {
   const edit = useEditor((s) => s.edit);
   const adjust = content.adjust;
-  // Built from the latest confirmed values, so a second slider never overwrites the first.
-  const set = (key: keyof Adjust, v: number) =>
-    editClip(clip.id, (c) => (c.content.type !== "text" ? { type: "updateClip", clipId: c.id, adjust: { ...c.content.adjust, [key]: v / 100 } } : null), `${clip.id}:adjust:${key}`);
+  const changed = changedIn(adjust, ADJUST_ROWS.map((r) => r.key)).length;
+  const finish = changedIn(adjust, FINISH);
+  const fold = useFold(
+    "finish",
+    finish.length === 0 ? "Fade and vignette off" : finish.map((k) => `${ADJUST_ROWS.find((r) => r.key === k)!.label} ${Math.round(adjust[k] * 100)}`).join(", "),
+    finish.length > 0,
+  );
   return (
-    <Section
-      title="Adjust"
-      actions={
-        <IconButton label="Reset adjustments" className={QUIET} disabled={sameAdjust(adjust, NO_ADJUST)} onClick={() => edit({ type: "updateClip", clipId: clip.id, adjust: NO_ADJUST })}>
-          <RotateCcw size={14} />
-        </IconButton>
-      }
-    >
-      {ADJUST_ROWS.map((r) => (
-        <Slider key={r.key} label={r.label} value={adjust[r.key] * 100} min={r.min} max={100} step={1} format={(v) => String(Math.round(v))} onChange={(v) => set(r.key, v)} />
-      ))}
-    </Section>
+    <>
+      <Section
+        title="Adjust"
+        actions={
+          <>
+            {changed > 0 && <span className="tabular mr-1 text-[12px] text-muted">{changed} changed</span>}
+            <IconButton label="Reset adjustments" className={QUIET} disabled={sameAdjust(adjust, NO_ADJUST)} onClick={() => edit({ type: "updateClip", clipId: clip.id, adjust: NO_ADJUST })}>
+              <RotateCcw size={14} />
+            </IconButton>
+          </>
+        }
+      >
+        <PeekBeforeAfter clip={clip}>
+          {GROUPS.map((g, i) => (
+            <div key={g.name} role="group" aria-label={g.name} className={`${GROUP} ${i > 0 ? "mt-1" : ""}`}>
+              <span className="text-[12px] text-muted">{g.name}</span>
+              {g.keys.map((k) => (
+                <AdjustRow key={k} clip={clip} adjust={adjust} k={k} />
+              ))}
+            </div>
+          ))}
+        </PeekBeforeAfter>
+      </Section>
+      <Section title="Finish" fold={fold}>
+        <PeekBeforeAfter clip={clip}>
+          {FINISH.map((k) => (
+            <AdjustRow key={k} clip={clip} adjust={adjust} k={k} />
+          ))}
+        </PeekBeforeAfter>
+      </Section>
+    </>
   );
 }
 

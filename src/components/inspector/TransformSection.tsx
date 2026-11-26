@@ -1,12 +1,14 @@
-import type { ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { ChevronLeft, ChevronRight, Diamond, Maximize, Minimize, RotateCcw } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Diamond, Maximize, Minimize, RotateCcw } from "lucide-react";
 import { clipOffset, cropAndMask, curveIndex, keyframeIndexAt, keyframeTolerance, ownTransform, transformAt, upsertKeyframe } from "../../lib/keyframes";
 import { LIMITS } from "../../lib/limits";
 import { DEFAULT_TRANSFORM } from "../../lib/presets";
 import { editClip, isCaptionTrack, readoutTime, setClipTransform, transformAtPlayhead, useEditor } from "../../lib/store";
 import type { Asset, Clip, Ease, EditCmd, Transform } from "../../lib/types";
-import { IconButton, Section, Segmented, Slider } from "../ui";
+import { Button, IconButton, Menu, Section, Segmented, Slider } from "../ui";
+import { FollowButton } from "./FollowButton";
+import { summaryOf, useFold } from "./folds";
 import { QUIET } from "./Header";
 
 function KeyframeControls({ clip, at }: { clip: Clip; at: AtPlayhead }) {
@@ -49,35 +51,66 @@ function KeyframeControls({ clip, at }: { clip: Clip; at: AtPlayhead }) {
   );
 }
 
-const CURVES: { id: Ease; label: string; title: string }[] = [
-  { id: "linear", label: "Linear", title: "At an even pace" },
-  { id: "easeIn", label: "Ease in", title: "Starts slowly and speeds up" },
-  { id: "easeOut", label: "Ease out", title: "Starts fast and slows down into the next keyframe" },
-  { id: "smooth", label: "Smooth", title: "Starts and ends gently" },
+const CURVES: { id: Ease; label: string }[] = [
+  { id: "linear", label: "Linear" },
+  { id: "easeIn", label: "Ease in" },
+  { id: "easeOut", label: "Ease out" },
+  { id: "smooth", label: "Smooth" },
 ];
 
-/** How the values move from the keyframe at or before the playhead on to the next one. */
-function CurveControl({ clip, index }: { clip: Clip; index: number }) {
-  const fps = useEditor((s) => s.snap!.project.canvas.fps);
-  // Built from the latest confirmed keyframes and the playhead at the click, as the diamond is.
-  const set = (ease: Ease) =>
+/**
+ * How the values move from the keyframe at or before the playhead on to the next one: a menu that names the two
+ * keyframes, so it is clear which part of the clip it changes.
+ */
+function CurveMenu({ clip, index: at, last }: { clip: Clip; index: number; /** The playhead is on the last keyframe. */ last: boolean }) {
+  const button = useRef<HTMLButtonElement>(null);
+  // The keyframe the menu was opened for, so a playhead that moves on while it is open cannot change another one.
+  const [menu, setMenu] = useState<{ x: number; y: number; keyboard: boolean; tUs: number } | null>(null);
+  // Built from the latest confirmed keyframes, as the diamond is.
+  const set = (ease: Ease, tUs: number) =>
     editClip(clip.id, (c) => {
-      const i = curveIndex(c, clipOffset(c, useEditor.getState().timeUs), keyframeTolerance(fps));
-      return i < 0 ? null : { type: "setKeyframes", clipId: c.id, keyframes: c.keyframes.map((k, j) => (j === i ? { ...k, ease } : k)) };
+      const i = c.keyframes.findIndex((k) => k.tUs === tUs);
+      return i < 0 || i >= c.keyframes.length - 1 ? null : { type: "setKeyframes", clipId: c.id, keyframes: c.keyframes.map((k, j) => (j === i ? { ...k, ease } : k)) };
     });
+  // While the menu is open it stays on the keyframes it was opened for, though the playhead may move on.
+  const index = menu ? clip.keyframes.findIndex((k) => k.tUs === menu.tUs) : at;
+  const ease = index >= 0 ? CURVES.find((c) => c.id === clip.keyframes[index].ease) : undefined;
+  const why = last ? "No keyframe after this one to curve to" : "Move the playhead to a keyframe or between two";
   return (
-    <div className="flex flex-col gap-1.5">
-      <span className="text-[12px] text-muted">Curve to next keyframe</span>
-      <Segmented
-        label="Curve to next keyframe"
-        compact
-        value={index >= 0 ? clip.keyframes[index].ease : null}
-        onChange={set}
+    <>
+      <Button
+        variant="ghost"
+        aria-haspopup="menu"
+        aria-expanded={!!menu}
+        aria-label={ease ? `Curve from keyframe ${index + 1} to ${index + 2}: ${ease.label}` : "Curve to next keyframe"}
+        title={ease ? `How the picture moves from keyframe ${index + 1} to ${index + 2}` : undefined}
         disabled={index < 0}
-        disabledReason="Move the playhead to a keyframe or between two"
-        options={CURVES}
-      />
-    </div>
+        disabledReason={why}
+        className="-mr-1.5 h-6 gap-1 px-1.5 text-[12px]"
+        onClick={(e) => {
+          button.current = e.currentTarget;
+          const r = e.currentTarget.getBoundingClientRect();
+          setMenu({ x: r.right, y: r.bottom + 4, keyboard: e.detail === 0, tUs: clip.keyframes[index].tUs });
+        }}
+      >
+        {ease && <span className="tabular text-muted">{`${index + 1} → ${index + 2}`}</span>}
+        <span>{ease?.label ?? "Curve"}</span>
+        <ChevronDown size={13} className="text-muted" />
+      </Button>
+      {menu && (
+        <Menu
+          label="Curve to next keyframe"
+          at={{ x: menu.x, y: menu.y, align: "end" }}
+          keyboard={menu.keyboard}
+          minWidth={160}
+          onClose={() => {
+            setMenu(null);
+            requestAnimationFrame(() => button.current?.focus());
+          }}
+          items={CURVES.map((c) => ({ label: c.label, checked: c.id === ease?.id, run: () => set(c.id, menu.tUs) }))}
+        />
+      )}
+    </>
   );
 }
 
@@ -105,8 +138,23 @@ function atPlayhead(clip: Clip, timeUs: number, fps: number): AtPlayhead {
   };
 }
 
-/** `caption`: says that this moves the one caption, since its style can go to every caption. */
-export function TransformSection({ clip, asset, caption = false }: { clip: Clip; asset?: Asset; caption?: boolean }) {
+/** What the folded Transform says is set: "Scale 116 % · moved · 2 keyframes". */
+function summary(t: Transform, keyframes: number) {
+  const parts = [
+    Math.abs(t.scale - 1) > 1e-4 && `scale ${Math.round(t.scale * 100)} %`,
+    (Math.abs(t.x) > 1e-4 || Math.abs(t.y) > 1e-4) && "moved",
+    Math.abs(t.rotation) > 1e-4 && `rotated ${Math.round(t.rotation)}°`,
+    t.opacity < 1 - 1e-4 && `opacity ${Math.round(t.opacity * 100)} %`,
+    keyframes > 0 && `${keyframes} keyframe${keyframes === 1 ? "" : "s"}`,
+  ].filter((p): p is string => !!p);
+  return summaryOf(parts).replace(/, /g, " · ");
+}
+
+/**
+ * `caption`: says that this moves the one caption, since its style can go to every caption. `fold`: the section
+ * folds, as in a video's or image's tab with other sections under it. `follow`: offers Follow under Fit and Fill.
+ */
+export function TransformSection({ clip, asset, caption = false, fold = false, follow = false }: { clip: Clip; asset?: Asset; caption?: boolean; fold?: boolean; follow?: boolean }) {
   const canvas = useEditor((s) => s.snap!.project.canvas);
   // Plain values, so playback re-renders the section only when a keyframed value moves or a keyframe is passed.
   const at = useEditor(useShallow((s) => atPlayhead(clip, readoutTime(s), canvas.fps)));
@@ -123,6 +171,8 @@ export function TransformSection({ clip, asset, caption = false }: { clip: Clip;
   // Which of the two the clip shows now, so the segmented control marks it; any other framing marks neither.
   const centred = Math.abs(transform.x) < 1e-4 && Math.abs(transform.y) < 1e-4;
   const framing = !centred ? null : Math.abs(transform.scale - 1) < 1e-4 ? "fit" : Math.abs(transform.scale - fillScale) < 1e-4 ? "fill" : null;
+  const said = summary(transform, clip.keyframes.length);
+  const folding = useFold("transform", said, said !== "None");
 
   // New text is centred; captions sit low in the frame, where the engine puts them.
   // The crop at the playhead stays: it has its own section and reset.
@@ -139,6 +189,7 @@ export function TransformSection({ clip, asset, caption = false }: { clip: Clip;
   return (
     <Section
       title="Transform"
+      fold={fold ? folding : undefined}
       actions={
         <>
           <KeyframeControls clip={clip} at={at} />
@@ -151,11 +202,16 @@ export function TransformSection({ clip, asset, caption = false }: { clip: Clip;
     >
       {caption && <p className="-mt-1 text-[12px] text-muted">Moves this caption only. Position of all captions, in the Text tab, moves every caption.</p>}
       {keyed && (
-        <p className="tabular -mt-1 text-[12px] text-muted">
-          {clip.keyframes.length} keyframe{clip.keyframes.length === 1 ? "" : "s"} · edits {atIndex >= 0 ? "update this keyframe" : "add a keyframe here"}
-        </p>
+        <div className="-mt-1 flex min-h-6 items-center justify-between gap-2">
+          <p className="tabular text-[12px] text-muted">{atIndex >= 0 ? `Edits change keyframe ${atIndex + 1}` : "Edits add a keyframe"}</p>
+          {clip.keyframes.length > 1 && <CurveMenu clip={clip} index={at.curve} last={atIndex === clip.keyframes.length - 1} />}
+        </div>
       )}
-      {clip.keyframes.length > 1 && <CurveControl clip={clip} index={at.curve} />}
+      <Slider label="Scale" neutral={100} value={transform.scale * 100} min={10} max={400} step={1} unit="%" format={(v) => String(Math.round(v))} onChange={(v) => set({ scale: v / 100 }, "scale")} />
+      <Slider label="Position X" neutral={0} value={transform.x * 100} min={-100} max={100} step={0.5} unit="%" format={(v) => v.toFixed(1)} onChange={(v) => set({ x: v / 100 }, "x")} />
+      <Slider label="Position Y" neutral={0} value={transform.y * 100} min={-100} max={100} step={0.5} unit="%" format={(v) => v.toFixed(1)} onChange={(v) => set({ y: v / 100 }, "y")} />
+      <Slider label="Rotation" neutral={0} value={transform.rotation} min={-180} max={180} step={1} unit="°" format={(v) => String(Math.round(v))} onChange={(v) => set({ rotation: v }, "rot")} />
+      <Slider label="Opacity" neutral={100} value={transform.opacity * 100} min={0} max={100} step={1} unit="%" format={(v) => String(Math.round(v))} onChange={(v) => set({ opacity: v / 100 }, "opacity")} />
       {asset && asset.kind !== "audio" && (
         <Segmented
           label="Fit or fill"
@@ -167,11 +223,7 @@ export function TransformSection({ clip, asset, caption = false }: { clip: Clip;
           ]}
         />
       )}
-      <Slider label="Scale" value={transform.scale * 100} min={10} max={400} step={1} unit="%" format={(v) => String(Math.round(v))} onChange={(v) => set({ scale: v / 100 }, "scale")} />
-      <Slider label="Position X" value={transform.x * 100} min={-100} max={100} step={0.5} unit="%" format={(v) => v.toFixed(1)} onChange={(v) => set({ x: v / 100 }, "x")} />
-      <Slider label="Position Y" value={transform.y * 100} min={-100} max={100} step={0.5} unit="%" format={(v) => v.toFixed(1)} onChange={(v) => set({ y: v / 100 }, "y")} />
-      <Slider label="Rotation" value={transform.rotation} min={-180} max={180} step={1} unit="°" format={(v) => String(Math.round(v))} onChange={(v) => set({ rotation: v }, "rot")} />
-      <Slider label="Opacity" value={transform.opacity * 100} min={0} max={100} step={1} unit="%" format={(v) => String(Math.round(v))} onChange={(v) => set({ opacity: v / 100 }, "opacity")} />
+      {follow && asset && <FollowButton clip={clip} asset={asset} />}
     </Section>
   );
 }

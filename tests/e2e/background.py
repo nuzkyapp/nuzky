@@ -6,7 +6,7 @@ import json, os, shutil, subprocess, time
 
 import numpy as np
 
-from e2e.harness import CLI, FIXTURES, MODELS, Bridge, changed_share, comma_locale, export, flow, press, preview_crop, preview_rect, wait, webdriver
+from e2e.harness import CLI, FIXTURES, MODELS, Bridge, changed_share, comma_locale, export, flow, press, preview_crop, preview_rect, unfold, wait, webdriver
 
 SOURCE = FIXTURES / 'talking-head.mov'
 JOB = "return window.__nuzky.store.getState().jobs[arguments[0]] ?? null"
@@ -104,6 +104,9 @@ def background(r):
 
     # Keyboard: the Background group in the Video tab, Tab from None onto Blur, then Enter (Space plays).
     r.focus_clip(clip['id'])
+    r.check('Background is folded in the Video tab and says None', wait(lambda: r.s.run(f"""return [...document.querySelectorAll('{SECTION} section button[aria-expanded=false]')]
+        .find((b) => b.querySelector('h3')?.textContent === 'Background')?.innerText.replace(/\\s+/g, ' ').trim()""") == 'Background None', 10))
+    unfold(r, 'Background')
     none = f"document.querySelector('{SECTION} [role=group][aria-label=Background] button')"
     if not wait(lambda: r.s.run(f'return !!{none}'), 10):
         raise RuntimeError('the inspector shows no Background section for the video')

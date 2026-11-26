@@ -6,7 +6,7 @@ already moves alone."""
 import json, subprocess, time
 from collections import Counter
 
-from e2e.harness import AI_EDITING, CLI, FIXTURES, Bridge, flow, link_models, preview_crop, preview_rect, wait
+from e2e.harness import AI_EDITING, CLI, FIXTURES, Bridge, flow, link_models, preview_crop, preview_rect, unfold, wait
 from e2e.home import resize
 from e2e.zooms import GRID, SQUARE, poll
 
@@ -112,6 +112,8 @@ def presets(r, bridge):
     clip = r.s.run(CLIP)
     duration = clip['durationUs']
     r.focus_clip(clip['id'])
+    r.check('Motion is folded and says None', wait(lambda: r.s.run(f"""{MOTION} return s?.querySelector('button[aria-expanded=false]')?.innerText.replace(/\\s+/g, ' ').trim()""") == 'Motion None', 10))
+    unfold(r, 'Motion')
     r.check('the Video tab offers Motion with None marked',
             wait(lambda: pressed(r) == ['None', '10%', 'Whole clip'], 10), pressed(r))
     reason = r.s.run(f"""const b = [...document.querySelectorAll('{INSPECTOR} button')].find((b) => b.textContent.trim() === '15%');
@@ -132,7 +134,9 @@ def presets(r, bridge):
             pushed)
     r.check('the section marks Push in at 10 % over the whole clip', wait(lambda: pressed(r) == ['Push in', '10%', 'Whole clip'], 5),
             pressed(r))
-    r.check('the Transform section counts the keyframes', r.s.run(f"return document.querySelector('{INSPECTOR}').innerText.includes('2 keyframes')"))
+    curve = r.s.run(f"""return [...document.querySelectorAll('{INSPECTOR} button[aria-haspopup=menu]')]
+        .find((b) => b.getAttribute('aria-label')?.startsWith('Curve'))?.innerText.replace(/\\s+/g, ' ').trim() ?? null""")
+    r.check('Transform edits the two keyframes, its curve menu says 1 → 2 Smooth', curve == '1 → 2 Smooth', curve)
     show_motion(r)
     r.shot('motion-inspector')
 

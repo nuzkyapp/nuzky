@@ -6,6 +6,7 @@ import { aiLocked, setBackground, useEditor, useJobs } from "../../lib/store";
 import type { Background, Clip } from "../../lib/types";
 import { IMAGE_EXTENSIONS, importPaths } from "../panel/assets";
 import { Button, ColorInput, Menu, ProgressBar, Section, Segmented, Slider, lockedProps, useLockReason } from "../ui";
+import { useFold } from "./folds";
 
 type Kind = Background["type"];
 
@@ -15,11 +16,14 @@ const NONE: Background = { type: "none" };
 
 const backgroundOf = (clip: Clip): Background => (clip.content.type === "media" ? (clip.content.background ?? NONE) : NONE);
 
+const NAMES: Record<Kind, string> = { none: "None", blur: "Blur", color: "Color", image: "Image" };
+
 /**
  * Blur or replace what is behind the person in one or more video and image clips. The person is found once per
  * file in the background; meanwhile the preview shows the clips as recorded and the section says how far it is.
+ * `fold`: the section folds, as in a clip's Video tab, and says while folded how far finding the person is.
  */
-export function BackgroundSection({ clips }: { clips: Clip[] }) {
+export function BackgroundSection({ clips, fold = false }: { clips: Clip[]; fold?: boolean }) {
   const lock = useLockReason();
   const project = useEditor((s) => s.snap!.project);
   const toast = useEditor((s) => s.toast);
@@ -69,9 +73,24 @@ export function BackgroundSection({ clips }: { clips: Clip[] }) {
   };
   const unavailable = models?.unavailable ? plainError(models.unavailable) : null;
   const thumb = useEditor((s) => (picture ? s.thumbs[picture.id] : null));
+  // Folded, the row still says what keeps the background from showing.
+  const finding =
+    job?.progress != null
+      ? `finding the person${job.progress > 0 ? ` ${Math.round(job.progress * 100)}%` : ""}`
+      : job?.failed != null
+        ? "person not found"
+        : on && unavailable
+          ? "can't run here"
+          : on && models && !models.downloaded
+            ? "needs the person model"
+            : waiting
+              ? "waiting"
+              : null;
+  const said = kind === null ? "Mixed" : first.type === "blur" && kind === "blur" ? `Blur ${Math.round(first.strength * 100)} %` : NAMES[kind];
+  const folding = useFold("background", [said, finding].filter(Boolean).join(" · "), on);
 
   return (
-    <Section title="Background">
+    <Section title="Background" fold={fold ? folding : undefined}>
       <Segmented
         label="Background"
         value={kind}

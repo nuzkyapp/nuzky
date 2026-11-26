@@ -18,7 +18,6 @@ import { BeatsSection } from "./BeatsSection";
 import { EffectsSection } from "./EffectsSection";
 import { InspectorHeader } from "./Header";
 import { AdjustSection, AudioSection, ColorSection, SpeedSection, VoiceSection } from "./MediaSections";
-import { FollowSection } from "./FollowSection";
 import { MaskSection } from "./MaskSection";
 import { MotionSection } from "./MotionSection";
 import { MultiInspector } from "./MultiInspector";
@@ -85,14 +84,13 @@ function ClipInspector({ clip, kind, asset, music, chosen, onChoose }: { clip: C
       <TabBar group="clip" label="Clip settings" className="mx-3 mb-1" tabs={tabs} value={tab} onChange={(id) => onChoose({ ...chosen, [kind]: id })} />
       <TabPanel group="clip" id={tab} className="scroll-shown min-h-0 flex-1 overflow-y-auto">
         <AiLock>
-          {(tab === "video" || tab === "transform") && <TransformSection clip={clip} asset={asset} caption={kind === "caption"} />}
+          {(tab === "video" || tab === "transform") && <TransformSection clip={clip} asset={asset} caption={kind === "caption"} fold={tab === "video"} follow={asset?.kind === "video"} />}
           {tab === "video" && c.type === "media" && (
             <>
               <ShapeSection clip={clip} content={c} asset={asset} />
               {asset && <MaskSection clip={clip} asset={asset} />}
-              <BackgroundSection clips={[clip]} />
+              <BackgroundSection clips={[clip]} fold />
               <MotionSection clip={clip} />
-              {asset?.kind === "video" && <FollowSection clip={clip} asset={asset} />}
             </>
           )}
           {tab === "text" && c.type === "text" && <TextSection clip={clip} text={c.text} style={c.style} caption={kind === "caption"} />}
