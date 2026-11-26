@@ -16,6 +16,8 @@ const MIN_VISIBLE = 0.05;
 /** The corners of a new picture in picture, so Rounded brings that look back. */
 const ROUNDED = 0.15;
 const pct = (v: number) => String(Math.round(v));
+/** Crop edges move in steps of 0.5 %, so the field shows the half. */
+const half = (v: number) => String(Math.round(v * 2) / 2);
 
 const kindOf = (radius: number): Kind => (radius <= 0 ? "rectangle" : radius >= 1 ? "circle" : "rounded");
 
@@ -112,7 +114,7 @@ export function ShapeSection({ clip, content, asset }: { clip: Clip; content: Me
             <span aria-hidden className={`pointer-events-none absolute left-2 text-[12px] ${crop[e.key] > 0 ? "text-fg" : "text-muted"}`}>
               {e.label}
             </span>
-            <NumberInput label={`Crop ${e.key}`} value={crop[e.key] * 100} min={0} max={95} step={0.5} format={pct} onChange={(v) => setEdge(e.key, v)} className="h-7 w-full pr-[18px] pl-14" />
+            <NumberInput label={`Crop ${e.key}`} value={crop[e.key] * 100} min={0} max={95} step={0.5} format={half} onChange={(v) => setEdge(e.key, v)} className="h-7 w-full pr-[18px] pl-14" />
             <span aria-hidden className="pointer-events-none absolute right-1.5 text-[11px] text-muted">
               %
             </span>

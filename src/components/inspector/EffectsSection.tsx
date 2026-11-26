@@ -48,7 +48,7 @@ export function EffectsSection({ clip }: { clip: Clip }) {
           aria-label={blocked ? `Add effect: ${blocked}` : "Add effect"}
           disabled={!!blocked}
           disabledReason={blocked ? `Add effect: ${blocked}` : undefined}
-          className="-mr-1.5 h-6 gap-1 px-1.5 text-[12px] text-accent! hover:text-accent!"
+          className="h-6 gap-1 px-1.5 text-[12px] text-accent! hover:text-accent!"
           onClick={showMenu}
         >
           <Plus size={13} /> Add effect

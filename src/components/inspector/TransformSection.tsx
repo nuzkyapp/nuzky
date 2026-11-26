@@ -63,14 +63,14 @@ const CURVES: { id: Ease; label: string }[] = [
  * keyframes, so it is clear which part of the clip it changes.
  */
 function CurveMenu({ clip, index, last }: { clip: Clip; index: number; /** The playhead is on the last keyframe. */ last: boolean }) {
-  const fps = useEditor((s) => s.snap!.project.canvas.fps);
   const button = useRef<HTMLButtonElement>(null);
-  const [menu, setMenu] = useState<{ x: number; y: number; keyboard: boolean } | null>(null);
-  // Built from the latest confirmed keyframes and the playhead at the click, as the diamond is.
-  const set = (ease: Ease) =>
+  // The keyframe the menu was opened for, so a playhead that moves on while it is open cannot change another one.
+  const [menu, setMenu] = useState<{ x: number; y: number; keyboard: boolean; tUs: number } | null>(null);
+  // Built from the latest confirmed keyframes, as the diamond is.
+  const set = (ease: Ease, tUs: number) =>
     editClip(clip.id, (c) => {
-      const i = curveIndex(c, clipOffset(c, useEditor.getState().timeUs), keyframeTolerance(fps));
-      return i < 0 ? null : { type: "setKeyframes", clipId: c.id, keyframes: c.keyframes.map((k, j) => (j === i ? { ...k, ease } : k)) };
+      const i = c.keyframes.findIndex((k) => k.tUs === tUs);
+      return i < 0 || i >= c.keyframes.length - 1 ? null : { type: "setKeyframes", clipId: c.id, keyframes: c.keyframes.map((k, j) => (j === i ? { ...k, ease } : k)) };
     });
   const ease = index >= 0 ? CURVES.find((c) => c.id === clip.keyframes[index].ease) : undefined;
   const why = last ? "No keyframe after this one to curve to" : "Move the playhead to a keyframe or between two";
@@ -88,7 +88,7 @@ function CurveMenu({ clip, index, last }: { clip: Clip; index: number; /** The p
         onClick={(e) => {
           button.current = e.currentTarget;
           const r = e.currentTarget.getBoundingClientRect();
-          setMenu({ x: r.right, y: r.bottom + 4, keyboard: e.detail === 0 });
+          setMenu({ x: r.right, y: r.bottom + 4, keyboard: e.detail === 0, tUs: clip.keyframes[index].tUs });
         }}
       >
         {ease && <span className="tabular text-muted">{`${index + 1} → ${index + 2}`}</span>}
@@ -105,7 +105,7 @@ function CurveMenu({ clip, index, last }: { clip: Clip; index: number; /** The p
             setMenu(null);
             requestAnimationFrame(() => button.current?.focus());
           }}
-          items={CURVES.map((c) => ({ label: c.label, checked: c.id === ease?.id, run: () => set(c.id) }))}
+          items={CURVES.map((c) => ({ label: c.label, checked: c.id === ease?.id, run: () => set(c.id, menu.tUs) }))}
         />
       )}
     </>

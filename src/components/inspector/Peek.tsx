@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
+import { usePreview } from "../../lib/preview";
+import { US } from "../../lib/time";
 import { useEditor } from "../../lib/store";
 import type { Clip } from "../../lib/types";
 import { useLockReason } from "../ui";
@@ -11,8 +13,18 @@ const PAD = 8;
 const MAX_TILE_H = 120;
 const STEP_KEYS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"]);
 
-/** The preview's canvas, which shows the frame the engine drew last. */
+/** The preview's canvas, which shows the frame the engine drew last, with the time of that frame. */
 const previewCanvas = () => document.querySelector<HTMLCanvasElement>("canvas[data-preview-frame]");
+
+/**
+ * Whether the preview shows the paused frame at the playhead, as Before needs: not while playing, comparing (the
+ * canvas is split then) or before the frame of a new playhead position has arrived.
+ */
+function still(source: HTMLCanvasElement) {
+  const { playing, timeUs, snap } = useEditor.getState();
+  const frame = US / (snap?.project.canvas.fps || 30);
+  return !playing && usePreview.getState().compare === null && Math.abs(Number(source.dataset.us) - timeUs) < frame;
+}
 
 /**
  * While a slider among `children` is dragged or stepped with the keys, shows over it the preview as it was when the
@@ -21,7 +33,7 @@ const previewCanvas = () => document.querySelector<HTMLCanvasElement>("canvas[da
  */
 export function PeekBeforeAfter({ clip, children }: { clip: Clip; children: ReactNode }) {
   const lock = useLockReason();
-  const [peek, setPeek] = useState<{ row: HTMLElement; shot: HTMLCanvasElement } | null>(null);
+  const [peek, setPeek] = useState<{ row: HTMLElement; shot: HTMLCanvasElement; us: string } | null>(null);
   const before = useRef<HTMLCanvasElement>(null);
   const after = useRef<HTMLCanvasElement>(null);
   const hide = useRef(0);
@@ -30,20 +42,21 @@ export function PeekBeforeAfter({ clip, children }: { clip: Clip; children: Reac
     window.clearTimeout(hide.current);
     hide.current = window.setTimeout(() => setPeek(null), LINGER_MS);
   }, []);
-  const begin = (target: EventTarget) => {
+  /** `fresh`: a new drag, which compares with the frame as it is now, while key steps in a row keep their Before. */
+  const begin = (target: EventTarget, fresh: boolean) => {
     const el = target as HTMLElement;
     if (lock || !(el instanceof HTMLInputElement) || el.disabled) return;
     const row = el.closest<HTMLElement>("[data-peek-row]");
     const source = previewCanvas();
     const t = useEditor.getState().timeUs;
-    if (!row || !source || source.width === 0 || t < clip.startUs || t >= clip.startUs + clip.durationUs) return;
+    if (!row || !source || source.width === 0 || t < clip.startUs || t >= clip.startUs + clip.durationUs || !still(source)) return;
     window.clearTimeout(hide.current);
-    if (peek?.row === row) return;
+    if (peek?.row === row && !fresh) return;
     // The frame before this change, at the preview's size, until the pair is drawn.
     const shot = document.createElement("canvas");
     [shot.width, shot.height] = [source.width, source.height];
     shot.getContext("2d")?.drawImage(source, 0, 0);
-    setPeek({ row, shot });
+    setPeek({ row, shot, us: source.dataset.us ?? "" });
   };
 
   useEffect(() => () => window.clearTimeout(hide.current), []);
@@ -56,8 +69,10 @@ export function PeekBeforeAfter({ clip, children }: { clip: Clip; children: Reac
     let raf = 0;
     const draw = () => {
       const source = previewCanvas();
+      // Playing, comparing or another frame would set two different pictures side by side.
+      if (!source || source.dataset.us !== peek.us || !still(source)) return setPeek(null);
       const ctx = after.current?.getContext("2d");
-      if (source && ctx && source.width > 0) ctx.drawImage(source, 0, 0, ctx.canvas.width, ctx.canvas.height);
+      ctx?.drawImage(source, 0, 0, ctx.canvas.width, ctx.canvas.height);
       raf = requestAnimationFrame(draw);
     };
     raf = requestAnimationFrame(draw);
@@ -67,10 +82,10 @@ export function PeekBeforeAfter({ clip, children }: { clip: Clip; children: Reac
     };
   }, [peek, linger]);
 
-  const onPointerDown = (e: PointerEvent) => e.button === 0 && begin(e.target);
+  const onPointerDown = (e: PointerEvent) => e.button === 0 && begin(e.target, true);
   const onKeyDown = (e: KeyboardEvent) => {
     if (!STEP_KEYS.has(e.key)) return;
-    begin(e.target);
+    begin(e.target, false);
     linger();
   };
 
@@ -84,7 +99,8 @@ export function PeekBeforeAfter({ clip, children }: { clip: Clip; children: Reac
 
 function Pair({ row, aspect, before, after }: { row: HTMLElement; aspect: number; before: RefObject<HTMLCanvasElement | null>; after: RefObject<HTMLCanvasElement | null> }) {
   const r = row.getBoundingClientRect();
-  const pane = row.closest("aside")?.getBoundingClientRect();
+  // Room above is counted from the top of the inspector's scrolling part, so the pair never covers its tabs.
+  const pane = (row.closest("[role=tabpanel]") ?? row.closest("aside"))?.getBoundingClientRect();
   // Over the slider and its value, clear of the label, as wide as they are.
   const left = r.left + 88;
   const width = Math.max(160, r.right - left);
