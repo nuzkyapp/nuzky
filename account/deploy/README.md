@@ -41,8 +41,10 @@ Check it from your computer: `https://account.nuzky.app/api/auth/.well-known/ope
 ## Updating
 
 ```sh
-cd nuzky && git pull && cd account/deploy && docker compose up -d --build
+cd nuzky && git pull && cd account/deploy && docker compose up -d --build --force-recreate
 ```
+
+`--force-recreate` starts Caddy and Litestream anew too. Without it they keep the `Caddyfile` and `litestream.yml` they started with: a single file mounted into a container stays the one from before the pull. Every new container starts with an empty log.
 
 Migrations run at start. The `AUTH_SECRET` must stay the same: it encrypts the signing keys and Google's tokens, and a new one signs everyone out of the browser and the app.
 
@@ -63,5 +65,5 @@ docker compose start account litestream
 ## What runs where
 
 - `Caddyfile`: TLS for `account.nuzky.app`, HSTS, compression and an access log on stdout without query strings, redirect targets, cookies, `Authorization` or `Referer`, since those carry codes and tokens. Requests to `/api/telemetry*` are not logged at all.
-- `compose.yml`: the account server runs as an unprivileged user on a read-only filesystem; only `/data`, `/tmp` and Next's cache are writable. Litestream runs as the same user on the same volume.
-- `litestream.yml`: one replica of `account.db`; `telemetry.db` is not backed up, `s3` with path-style addresses and signed payloads for OCI's S3 API. Replication and the restore steps above were tried with a local file replica, not yet against OCI; after the first start check that `docker compose exec litestream litestream ltx -config /etc/litestream.yml /data/account.db` lists files.
+- `compose.yml`: the account server runs as an unprivileged user on a read-only filesystem; only `/data`, `/tmp` and Next's cache are writable. Litestream runs as the same user on the same volume. Docker keeps at most 3 × 10 MB of each container's log.
+- `litestream.yml`: one replica of `account.db`; `telemetry.db` is not backed up, `s3` with path-style addresses and signed payloads for OCI's S3 API. A restore from OCI into a separate file was checked on the running server; the in-place restore steps above were tried with a local file replica. `docker compose exec litestream litestream ltx -config /etc/litestream.yml /data/account.db` lists what the bucket holds.

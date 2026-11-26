@@ -1,5 +1,11 @@
 name: nuzky-account
 
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
 services:
   account:
     build:
@@ -7,6 +13,7 @@ services:
       dockerfile: deploy/Dockerfile
     image: nuzky-account
     restart: unless-stopped
+    logging: *logging
     env_file: .env
     environment:
       DATA_DIR: /data
@@ -23,6 +30,7 @@ services:
   caddy:
     image: caddy:2.11
     restart: unless-stopped
+    logging: *logging
     depends_on: [account]
     environment:
       ACME_EMAIL: ${ACME_EMAIL}
@@ -38,6 +46,7 @@ services:
   litestream:
     image: litestream/litestream:0.5.18
     restart: unless-stopped
+    logging: *logging
     depends_on: [account]
     user: "1000:1000"
     command: ["replicate", "-config", "/etc/litestream.yml"]
