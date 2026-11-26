@@ -4,12 +4,12 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
-use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use nuzky_engine::{Pending, Project, Renderer, Wait};
+use nuzky_engine::{DecodeStalled, FramePending, Pending, Project, Renderer, Wait};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
@@ -207,6 +207,8 @@ struct State {
     window_box: Option<(u32, u32)>,
     audio: Option<AudioOut>,
     dirty: bool,
+    /// The last paused frame was still decoding, so it is asked for again.
+    decoding: bool,
     compare: Option<f32>,
 }
 
@@ -250,6 +252,7 @@ fn run<F: Frames>(
         window_box: None,
         audio: None,
         dirty: true,
+        decoding: false,
         compare: None,
     };
 
@@ -274,6 +277,13 @@ fn run<F: Frames>(
                 Ok(m) => Some(m),
                 Err(RecvTimeoutError::Timeout) => None,
                 Err(RecvTimeoutError::Disconnected) => return,
+            }
+        } else if st.decoding {
+            // The last frame was still decoding: take what came meanwhile and ask for it again.
+            match rx.try_recv() {
+                Ok(m) => Some(m),
+                Err(TryRecvError::Empty) => None,
+                Err(TryRecvError::Disconnected) => return,
             }
         } else {
             match rx.recv() {
@@ -375,8 +385,9 @@ fn run<F: Frames>(
             let playing = st.audio.is_some();
             if playing || st.dirty {
                 let (w, h) = render_size(&st.project, st.box_size, st.window_box);
-                let wait = if playing { Wait::Ready } else { Wait::Exact };
+                let wait = if playing { Wait::Ready } else { Wait::Within(PATIENCE) };
                 let started = Instant::now();
+                st.decoding = false;
                 renderer.compare(st.compare);
                 match renderer.frame(&st.project, last_frame_at_end(&st.project, st.t_us), w, h, wait, playing) {
                     Ok(rgba) => {
@@ -392,10 +403,18 @@ fn run<F: Frames>(
                         if took > Duration::from_millis(40) {
                             log::debug!("Slow preview frame: {took:?}");
                         }
+                        st.dirty = false;
                     }
-                    Err(e) => log::error!("Preview render failed: {e:#}"),
+                    // The picture shown stays until the frame is decoded; the next turn asks for it again.
+                    Err(e) if e.is::<FramePending>() => st.decoding = true,
+                    Err(e) => {
+                        log::error!("Preview render failed: {e:#}");
+                        if let Some(stalled) = e.downcast_ref::<DecodeStalled>() {
+                            report(Some(stalled.to_string()));
+                        }
+                        st.dirty = false;
+                    }
                 }
-                st.dirty = false;
             }
         }));
         if let Err(panic) = step {
@@ -409,11 +428,14 @@ fn run<F: Frames>(
             let Ok(fresh) = renderer_or_report() else { return };
             renderer = fresh;
             st.audio = None;
-            st.dirty = false;
+            (st.dirty, st.decoding) = (false, false);
             emit(&st);
         }
     }
 }
+
+/// How long a paused frame waits for its video before the preview handles what came meanwhile and waits again.
+const PATIENCE: Duration = Duration::from_millis(500);
 
 /// The preview's playback speed stays within these, as faster sound cannot be followed and slower barely moves.
 const MAX_RATE: f64 = 4.0;

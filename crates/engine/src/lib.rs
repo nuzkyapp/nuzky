@@ -34,7 +34,7 @@ pub mod voice;
 pub mod worker;
 
 pub use model::Project;
-pub use render::{Pending, Renderer, Wait};
+pub use render::{DecodeStalled, FramePending, Pending, Renderer, Wait};
 pub use stretch::Tempo;
 
 /// Nuzky's own data folder: projects, models, transcripts, styles and sounds. `NUZKY_DATA_DIR` moves it,

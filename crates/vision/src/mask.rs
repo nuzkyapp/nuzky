@@ -64,7 +64,7 @@ pub fn segment_subject(
     let size = (picture.canvas.width, picture.canvas.height);
     let mut renderer = Renderer::new().context("Starting frame renderer")?;
     renderer.use_mattes(cache_dir.to_path_buf(), nuzky_engine::Pending::Fail);
-    let frame = timeline::render(&mut renderer, &picture, t_us, size)?;
+    let frame = timeline::render(&mut renderer, &picture, t_us, size, cancel)?;
     drop(renderer);
     segment(frame, models_dir, cache_dir, cancel, progress)
 }
