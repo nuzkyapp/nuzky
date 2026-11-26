@@ -578,6 +578,9 @@ pub struct Captions {
     /// canvas centre as a fraction of its width and height. Captions start at x 0, y 0.15, scale 1; rebuilt
     /// captions start where the captions they replace were.
     pub transform: Option<TransformPatch>,
+    /// A short title of the video from what is said in it, in its language, at most 80 characters. Nuzky names
+    /// the project so in the same step only while it is still called "Untitled project"; a name someone gave stays.
+    pub project_name: Option<String>,
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

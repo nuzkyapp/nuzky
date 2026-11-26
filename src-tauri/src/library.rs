@@ -27,8 +27,7 @@ use unicode_normalization::UnicodeNormalization;
 use crate::store::sidecar;
 use crate::{AppState, CmdResult, err, store};
 
-/// Name of the projects that New project and the first start create.
-pub const UNTITLED: &str = "Untitled project";
+pub use nuzky_engine::model::UNTITLED_PROJECT as UNTITLED;
 /// Undo in the toast brings a project back until it really goes to the Trash.
 const TRASH_DELAY: Duration = Duration::from_secs(30);
 /// Longest side of a poster in pixels: sharp on a 2× screen at the size of a card.
