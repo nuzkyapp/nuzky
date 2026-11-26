@@ -6,7 +6,7 @@ changes."""
 import json, os, subprocess, time
 from pathlib import Path
 
-from e2e.harness import CLI, FIXTURES, LINUX, Bridge, changed_share, close_window, deny, flow, link_models, wait, webdriver
+from e2e.harness import CLI, FIXTURES, LINUX, MACOS, Bridge, changed_share, close_window, deny, flow, link_models, wait, webdriver
 
 DAY = 86_400
 CARDS = """return [...document.querySelectorAll('[role=listbox][aria-label=Projects] [role=option][data-path]')].map((c) => ({
@@ -47,6 +47,9 @@ CLICK_TEXT = """const scope = arguments[1] ? document.querySelector(arguments[1]
 const el = [...scope.querySelectorAll('button, [role=menuitem], [role=menuitemradio], [role=option]')]
   .find((b) => b.textContent.trim().startsWith(arguments[0]));
 if (!el) return false; el.click(); return true;"""
+# Where the top bar's first control starts. On macOS 27 the window's zoom button ends 76 px in, its buttons 23 px apart.
+BAR_START = "return Math.round(document.querySelector(arguments[0]).getBoundingClientRect().left);"
+AFTER_WINDOW_BUTTONS = 92
 VIEW = "const s = window.__nuzky.store.getState(); return {view: s.view, launcher: s.launcherOpen, name: s.snap.project.name, path: s.snap.path, timeUs: s.timeUs, tab: s.panelTab, aiRun: s.aiRun, canvas: [s.snap.project.canvas.width, s.snap.project.canvas.height]};"
 
 
@@ -198,6 +201,9 @@ def home(r):
             and all(order[name] is not None and order[name] > order['paint'] for name in ('editor', 'dialogs')), order)
     r.check('the back button names the open project',
             r.s.run("return [...document.querySelectorAll('header button')].some((b) => b.textContent.includes('Talk to camera'))"))
+    if MACOS:
+        start = r.s.run(BAR_START, '[aria-label="Projects"] > header > button')
+        r.check("the home screen's bar starts 16 px after the window's buttons", start == AFTER_WINDOW_BUTTONS, start)
     wait_library(r)
     names = sorted(c['name'] for c in cards(r))
     r.check('every project shows, the damaged one by its file name', names == ['Croatia day 2', 'Morning reel', 'Talk to camera', 'broken.nuzky'], names)
@@ -557,6 +563,9 @@ def launcher_seed(r):
       before=launcher_seed)
 def launcher(r):
     r.check('the flow starts in the editor of the newest project', view(r)['view'] == 'editor' and view(r)['name'] == 'Talk to camera', view(r))
+    if MACOS:
+        start = r.s.run(BAR_START, 'header button[title^="Projects"]')
+        r.check("Projects starts 16 px after the window's buttons", start == AFTER_WINDOW_BUTTONS, start)
     r.s.run(MAXIMIZED)
     r.s.run('document.activeElement?.blur()')
     r.key('k', ctrlKey=True)
