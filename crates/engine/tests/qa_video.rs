@@ -783,6 +783,8 @@ fn waiting_through_a_long_seek_gives_way_to_stop_and_to_a_caller_that_asks_again
     assert_eq!(worker.get(t, size, false, Some(soon), false).map(|_| ()), Err(Missed::Pending));
     let frame = worker.get(t, size, false, until_decoded(), false).unwrap().unwrap();
     assert!(worker.exact && frame.t_us == t, "got the frame at {} for {t}", frame.t_us);
+    // Used until the frame came, so a renderer does not drop it as idle after a long wait and seek all over again.
+    assert!(worker.last_used.elapsed() < Duration::from_millis(50), "last used {:?} ago", worker.last_used.elapsed());
     let truth = raw(&path, &["-vf", &format!("select=eq(n\\,{index})"), "-frames:v", "1"]);
     assert!(mae(&frame.data, &truth) < 1.0, "differs from FFmpeg's frame by {}", mae(&frame.data, &truth));
 

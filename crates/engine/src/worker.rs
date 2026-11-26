@@ -215,7 +215,20 @@ impl VideoWorker {
         wait: Option<Patience>,
         backward: bool,
     ) -> Result<Option<RgbaFrame>, Missed> {
+        let got = self.wait_for(t_us, size, playing, wait, backward);
+        // Used until the wait ended, so a long one does not leave it looking idle to `Renderer::drop_stale_workers`.
         self.last_used = Instant::now();
+        got
+    }
+
+    fn wait_for(
+        &mut self,
+        t_us: i64,
+        size: (u32, u32),
+        playing: bool,
+        wait: Option<Patience>,
+        backward: bool,
+    ) -> Result<Option<RgbaFrame>, Missed> {
         self.exact = false;
         let started = Instant::now();
         let mut st = self.shared.state.lock().unwrap();
@@ -295,9 +308,9 @@ impl VideoWorker {
 
 impl Drop for VideoWorker {
     fn drop(&mut self) {
+        self.shared.state.lock().unwrap().shutdown = true;
         // A thread in the middle of a long seek stops at its next packet, so a cancelled export ends soon.
         self.activity.abandon();
-        self.shared.state.lock().unwrap().shutdown = true;
         self.shared.cv.notify_all();
         if let Some(t) = self.thread.take() {
             match self.ended.recv_timeout(LET_GO) {
@@ -370,6 +383,10 @@ fn run(shared: Arc<Shared>, activity: Arc<Activity>, path: PathBuf, proxy: bool,
             continue;
         }
         match result {
+            // A seek that found no picture before the end decoded from the file's start, so none of it decodes.
+            Ok(Step::Seeked { frames, .. } | Step::Piece { frames, .. }) if frames.is_empty() => {
+                st.error = Some("No picture in the video decodes".into());
+            }
             Ok(Step::Seeked { frames, eof }) => {
                 st.frames = frames.into();
                 st.base_us = want;

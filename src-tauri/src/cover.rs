@@ -535,7 +535,7 @@ pub fn start_cover_export(
         rep.progress(0.0, Some("Rendering"));
         let mut renderer = Renderer::new().context("Starting the cover renderer")?;
         renderer.use_mattes(cache.clone(), Pending::Fail);
-        let frame = renderer.thumbnail_frame(&project, &thumbnail)?;
+        let frame = renderer.thumbnail_frame_until(&project, &thumbnail, cancel)?;
         let mask = if thumbnail.needs_mask() {
             download_models(models::MASK, false, "Downloading cover models", cancel, rep)?;
             let size = (frame.width, frame.height);

@@ -225,3 +225,45 @@ fn a_video_that_stops_coming_ends_with_what_to_do() {
     );
     std::fs::remove_dir_all(&dir).ok();
 }
+
+/// A video whose every picture is marked never to be shown, so decoding it reads every packet and gives no picture,
+/// fails at once with that, instead of seeking through it again for ever.
+#[test]
+fn a_video_without_a_picture_to_show_fails_at_once() {
+    let encoders = Command::new("ffmpeg").args(["-hide_banner", "-encoders"]).output();
+    if !encoders.is_ok_and(|out| String::from_utf8_lossy(&out.stdout).contains("libvpx")) {
+        eprintln!("SKIP: ffmpeg with libvpx is required");
+        return;
+    }
+    let dir = scratch();
+    let clip = dir.join("hidden.ivf");
+    ffmpeg(&["-f", "lavfi", "-i", "testsrc2=s=320x180:r=10:d=1", "-c:v", "libvpx", clip.to_str().unwrap()]);
+    // IVF: a 32 byte header, then each frame after a 12 byte header whose first 4 bytes are its size; bit 4 of a VP8
+    // frame's first byte says whether it is shown.
+    let mut data = std::fs::read(&clip).unwrap();
+    let mut at = 32;
+    while at + 12 < data.len() {
+        let size = u32::from_le_bytes(data[at..at + 4].try_into().unwrap()) as usize;
+        data[at + 12] &= !0x10;
+        at += 12 + size;
+    }
+    std::fs::write(&clip, data).unwrap();
+    let project = new_project(&dir, &clip);
+
+    let started = Instant::now();
+    let out = dir.join("frame.png");
+    let mut child = nuzky(&dir, &["frame", project.to_str().unwrap(), "0.5", out.to_str().unwrap(), "160"])
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    while child.try_wait().unwrap().is_none() && started.elapsed() < Duration::from_secs(60) {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let waited = started.elapsed();
+    child.kill().ok();
+    let finished = child.wait_with_output().unwrap();
+    let said = String::from_utf8_lossy(&finished.stderr);
+    assert!(waited < Duration::from_secs(10), "the frame was still waiting after {waited:?}: {said}");
+    assert!(!finished.status.success() && said.contains("No picture in the video decodes"), "{said}");
+    std::fs::remove_dir_all(&dir).ok();
+}

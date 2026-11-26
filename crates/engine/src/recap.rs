@@ -400,7 +400,7 @@ fn encode(
         &[("preset", "veryfast")],
         false,
     )?;
-    let mut painter = Painter::new(recap, cache_dir, sections)?;
+    let mut painter = Painter::new(recap, cache_dir, sections, cancel)?;
     let mut sound = Sound::new(recap, cache_dir, sections);
     for i in 0..frames {
         check_cancel(cancel)?;
@@ -606,6 +606,7 @@ fn outline(x: f32, y: f32, w: f32, h: f32, width: f32, color: &str) -> Draw {
 struct Painter<'a> {
     recap: &'a Recap,
     renderer: Renderer,
+    cancel: &'a AtomicBool,
     recording: Project,
     sections: [i64; 5],
     totals: RecapTotals,
@@ -618,12 +619,13 @@ struct Painter<'a> {
 }
 
 impl<'a> Painter<'a> {
-    fn new(recap: &'a Recap, cache_dir: &Path, sections: [i64; 5]) -> Result<Self> {
+    fn new(recap: &'a Recap, cache_dir: &Path, sections: [i64; 5], cancel: &'a AtomicBool) -> Result<Self> {
         let mut renderer = Renderer::new()?;
         renderer.use_mattes(cache_dir.to_path_buf(), Pending::Fail);
         Ok(Self {
             recap,
             renderer,
+            cancel,
             recording: recording(&recap.before),
             sections,
             totals: recap.totals(),
@@ -696,7 +698,7 @@ impl<'a> Painter<'a> {
         let image = match &self.last {
             Some((was_after, at, image)) if *was_after == after && *at == time => image.clone(),
             _ => {
-                let rgba = self.renderer.render(project, time, w, h, Wait::Exact, after)?;
+                let rgba = self.renderer.render_until(project, time, w, h, Wait::Exact, after, self.cancel)?;
                 let image = Image::new(w, h, Arc::new(rgba));
                 self.last = Some((after, time, image.clone()));
                 image

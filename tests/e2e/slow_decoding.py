@@ -2,28 +2,58 @@ import os
 import signal
 import subprocess
 import time
+from pathlib import Path
 
-from e2e.harness import APP, CLI, WINDOWS, changed_share, flow, preview_crop, preview_rect, wait
+from e2e.harness import APP, CLI, MACOS, WINDOWS, changed_share, flow, preview_crop, preview_rect, wait
 
 # The frame just before the second keyframe, so the preview decodes almost ten seconds of video to show it.
 TARGET_US = 9_900_000
 
 
 def footage(path):
-    """Full HD with a keyframe every ten seconds, which no preview copy replaces; grain makes each frame real work."""
-    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=1920x1080:r=60:d=12,noise=alls=4:allf=t',
-                    '-c:v', 'libx264', '-preset', 'veryfast', '-g', '600', '-keyint_min', '600', '-sc_threshold', '0',
-                    '-pix_fmt', 'yuv420p', str(path)], check=True)
+    """Full HD with a keyframe every ten seconds, which no preview copy replaces; grain makes each frame real work, and
+    the picture brightens through the clip, so the frame at 9.9 s looks nothing like the first."""
+    picture = "testsrc2=s=1920x1080:r=60:d=12,noise=alls=4:allf=t,eq=brightness='0.05*t-0.3':eval=frame"
+    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', picture, '-c:v', 'libx264', '-preset', 'veryfast',
+                    '-g', '600', '-keyint_min', '600', '-sc_threshold', '0', '-pix_fmt', 'yuv420p', str(path)], check=True)
 
 
 def app_pid(r):
-    """The app's process: started by the harness on macOS and Windows, by the WebDriver on Linux."""
+    """The app's process: started by the harness on macOS and Windows, on Linux by this run's own WebDriver."""
     if r.app:
         return r.app.pid
-    found = subprocess.run(['pgrep', '-n', '-f', str(APP)], capture_output=True, text=True).stdout.split()
+    found, queue = None, [r.driver.pid]
+    while queue and not found:
+        pid = queue.pop()
+        children = subprocess.run(['pgrep', '-P', str(pid)], capture_output=True, text=True).stdout.split()
+        for child in map(int, children):
+            if Path(f'/proc/{child}/exe').resolve() == APP.resolve():
+                found = child
+            queue.append(child)
     if not found:
-        raise RuntimeError('the app process is gone')
-    return int(found[0])
+        raise RuntimeError('the app process of this run is gone')
+    return found
+
+
+def cpu_seconds(pid):
+    """CPU time the process has used so far."""
+    if WINDOWS:
+        import ctypes
+        from ctypes import wintypes
+        kernel = ctypes.windll.kernel32
+        handle = kernel.OpenProcess(0x1000, False, pid)
+        times = [wintypes.FILETIME() for _ in range(4)]
+        ok = handle and kernel.GetProcessTimes(handle, *[ctypes.byref(t) for t in times])
+        kernel.CloseHandle(handle)
+        if not ok:
+            raise RuntimeError(f'cannot read the CPU time of {pid}')
+        return sum((t.dwHighDateTime << 32 | t.dwLowDateTime) / 1e7 for t in times[2:])
+    if MACOS:
+        minutes, seconds = subprocess.run(['ps', '-o', 'cputime=', '-p', str(pid)], capture_output=True,
+                                          text=True).stdout.strip().split(':')[-2:]
+        return int(minutes) * 60 + float(seconds)
+    fields = Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()
+    return (int(fields[11]) + int(fields[12])) / os.sysconf('SC_CLK_TCK')
 
 
 def suspended(pid, seconds):
@@ -32,10 +62,13 @@ def suspended(pid, seconds):
         import ctypes
         kernel, ntdll = ctypes.windll.kernel32, ctypes.windll.ntdll
         handle = kernel.OpenProcess(0x0800, False, pid)
-        ntdll.NtSuspendProcess(handle)
-        time.sleep(seconds)
-        ntdll.NtResumeProcess(handle)
-        kernel.CloseHandle(handle)
+        if not handle or ntdll.NtSuspendProcess(handle) != 0:
+            raise RuntimeError(f'cannot suspend {pid}')
+        try:
+            time.sleep(seconds)
+        finally:
+            ntdll.NtResumeProcess(handle)
+            kernel.CloseHandle(handle)
         return
     os.kill(pid, signal.SIGSTOP)
     try:
@@ -61,14 +94,17 @@ def slow_decoding(r):
     subprocess.run([str(CLI), 'frame', str(r.saved_project()), str(TARGET_US / 1e6), str(reference), '360'], env=r.env,
                    check=True, capture_output=True)
     first = shown(r, 'first-frame', (360, 640))
-    r.check('the preview shows the clip before the jump', changed_share(first, reference) > 0.005,
-            f'{changed_share(first, reference):.2%} of pixels differ from the frame at 9.9 s')
+    r.check('the preview shows the clip before the jump, nothing like the frame at 9.9 s',
+            changed_share(first, reference) > 0.5, f'{changed_share(first, reference):.2%} of pixels differ')
 
-    # The preview starts decoding as soon as it reports the new playhead; the app stops in the middle of it.
+    # Once the app works on the jump, which is what spends its CPU while the preview is paused, it stops in the
+    # middle of decoding.
+    pid = app_pid(r)
+    idle = cpu_seconds(pid)
     r.seek(TARGET_US)
-    reported = wait(lambda: r.s.run('return window.__nuzky.store.getState().timeUs') == TARGET_US, 5, 0.01)
-    r.check('the preview took the jump to 9.9 s', reported)
-    suspended(app_pid(r), 10)
+    decoding = wait(lambda: cpu_seconds(pid) - idle >= 0.1, 5, 0.01)
+    r.check('the app started decoding the jump to 9.9 s', decoding, f'{cpu_seconds(pid) - idle:.2f} s of CPU')
+    suspended(pid, 10)
 
     drawn = wait(lambda: changed_share(shown(r, 'after-pause', (360, 640)), reference) < 0.02, 20, 0.5)
     changed = changed_share(shown(r, 'after-pause', (360, 640)), reference)

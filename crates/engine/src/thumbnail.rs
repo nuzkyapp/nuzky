@@ -73,6 +73,16 @@ impl Renderer {
     /// The thumbnail's frame at canvas resolution, as exported without text, or its image: what its mask is
     /// made from.
     pub fn thumbnail_frame(&mut self, project: &Project, thumbnail: &Thumbnail) -> Result<Image> {
+        self.thumbnail_frame_until(project, thumbnail, &AtomicBool::new(false))
+    }
+
+    /// `thumbnail_frame` that stops soon after `stop`, even while its video is still decoding.
+    pub fn thumbnail_frame_until(
+        &mut self,
+        project: &Project,
+        thumbnail: &Thumbnail,
+        stop: &AtomicBool,
+    ) -> Result<Image> {
         if let Some(id) = &thumbnail.image {
             return self.still(project, id);
         }
@@ -82,7 +92,7 @@ impl Renderer {
             thumbnail.time_us as f64 / 1e6
         );
         let (width, height) = (project.canvas.width, project.canvas.height);
-        let rgba = self.render(&picture(project), thumbnail.time_us, width, height, Wait::Exact, false)?;
+        let rgba = self.render_until(&picture(project), thumbnail.time_us, width, height, Wait::Exact, false, stop)?;
         Ok(Image::new(width, height, Arc::new(rgba)))
     }
 

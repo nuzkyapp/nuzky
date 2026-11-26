@@ -689,9 +689,17 @@ impl Renderer {
                 ClipContent::Text { .. } | ClipContent::Adjustment { .. } => None,
             })
             .collect();
-        self.workers.retain(|(clip_id, path), w| {
-            w.last_used.elapsed() < IDLE_WORKER && current.contains(&(clip_id.as_str(), path.as_str()))
-        });
+        let stale: Vec<VideoWorker> = self
+            .workers
+            .extract_if(|(clip_id, path), w| {
+                w.last_used.elapsed() >= IDLE_WORKER || !current.contains(&(clip_id.as_str(), path.as_str()))
+            })
+            .map(|(_, worker)| worker)
+            .collect();
+        // One stuck reading a file that stopped answering takes seconds to let go; the frame does not wait for it.
+        if !stale.is_empty() {
+            std::thread::Builder::new().name("video-decode-end".into()).spawn(move || drop(stale)).ok();
+        }
     }
 
     fn background(&mut self, layer: &Layer, strength: f32, w: u32, h: u32, used: &mut Vec<(usize, usize)>) -> Layer {
