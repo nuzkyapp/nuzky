@@ -21,7 +21,7 @@ import {
   Magnet,
   Maximize,
   Maximize2,
-  MessageSquare,
+  Megaphone,
   Minimize,
   MonitorDot,
   Music,
@@ -175,7 +175,7 @@ function TopBar({ focus }: { focus: EditorFocus }) {
             Projects
           </span>
           <span className="app-bar flex items-center rounded-full">
-            <IconBtn i={MessageSquare} />
+            <IconBtn i={Megaphone} />
             <IconBtn i={QrCode} />
           </span>
         </>

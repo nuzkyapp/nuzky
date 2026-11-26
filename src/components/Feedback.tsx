@@ -1,5 +1,5 @@
 import { useState, type MouseEvent } from "react";
-import { AtSign, Bug, ClipboardCopy, FolderOpen, Lightbulb, MessageSquare } from "lucide-react";
+import { AtSign, Bug, ClipboardCopy, FolderOpen, Lightbulb, Megaphone } from "lucide-react";
 import { api, errorText, type FeedbackKind } from "../lib/api";
 import { copyDiagnostics, openLogs, reportBug } from "../lib/diagnostics";
 import { useEditor } from "../lib/store";
@@ -38,7 +38,7 @@ export function FeedbackRow({ showMenu }: { showMenu: ShowMenu }) {
       onClick={openMenu}
       className="flex h-8 w-full shrink-0 items-center gap-2.5 rounded-lg px-2.5 text-left text-[13px] text-muted transition-colors duration-[120ms] ease-out hover:bg-white/[.05] hover:text-fg"
     >
-      <MessageSquare size={16} className="shrink-0" /> Send feedback
+      <Megaphone size={16} className="shrink-0" /> Send feedback
     </button>
   );
 }
@@ -60,7 +60,7 @@ export function FeedbackButton() {
         }}
         className={menu ? "bg-white/[.13]" : ""}
       >
-        <MessageSquare size={16} />
+        <Megaphone size={16} />
       </IconButton>
       {menu && (
         <Menu
