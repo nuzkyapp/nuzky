@@ -339,7 +339,7 @@ export function TopBar() {
     // The middle column centres the name on the window; the side columns are equal until one side needs more room, and
     // only then does the name move away from it.
     <header data-tauri-drag-region="deep" className="grid h-12 shrink-0 grid-cols-[1fr_minmax(0,auto)_1fr] items-center gap-x-5 px-1.5">
-      <div className={`flex items-center gap-2 ${buttonsInBar ? "pl-[72px]" : ""}`}>
+      <div className={`flex items-center gap-2 ${buttonsInBar ? "pl-[86px]" : ""}`}>
         {/* The cover editor takes over the panes, so its way back is where the eye starts. */}
         {cover ? (
           <Button variant="bar" pill title="Back to the video (Esc)" onClick={closeCover}>
