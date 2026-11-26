@@ -58,7 +58,7 @@ The first captions or transcript download the speech model once. Nuzky tells you
 
 ## Report a bug
 
-In Nuzky, open Send feedback (the speech bubble next to Projects, or at the bottom of the home screen's sidebar) and choose Report a bug…. It opens the bug report form on GitHub with your version and system filled in and copies the diagnostics for you to paste into it: the version, system, graphics and the end of Nuzky's log, without folder names, typed text or secrets. Nothing is sent until you submit the form. Copy diagnostics and Open logs folder in the same menu give you the same information again. After a crash, the next start offers Report a bug… as well.
+In Nuzky, open Send feedback (the megaphone next to Projects, or at the bottom of the home screen's sidebar) and choose Report a bug…. It opens the bug report form on GitHub with your version and system filled in and copies the diagnostics for you to paste into it: the version, system, graphics and the end of Nuzky's log, without folder names, typed text or secrets. Nothing is sent until you submit the form. Copy diagnostics and Open logs folder in the same menu give you the same information again. After a crash, the next start offers Report a bug… as well.
 
 Say what you did and what happened, and please don't attach a private video. No GitHub account? Write to [@mach_builds](https://x.com/mach_builds) on X. Report security problems privately, as [SECURITY.md](SECURITY.md) describes.
 

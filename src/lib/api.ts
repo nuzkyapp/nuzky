@@ -457,7 +457,7 @@ const PLAIN: Record<string, string | ((detail: string) => string)> = {
   NOT_INSTALLED: (detail) => sentence(detail.replace(/\.$/, "")) + ". Install it and sign in from a terminal.",
   APP_CLOSED: "Nuzky is closing, so this stopped.",
   JOB_FAILED: "The task stopped unexpectedly. Try again.",
-  CRASHED: "Nuzky hit a bug and stopped. Try again, and if it happens again, report it with Send feedback, the speech bubble next to Projects.",
+  CRASHED: "Nuzky hit a bug and stopped. Try again, and if it happens again, report it with Send feedback, the megaphone next to Projects.",
   DOWNLOAD_FAILED: (detail) => `The ${detail.split(":")[0]} could not be downloaded. Check the internet connection and free disk space, then try again.`,
   MODEL_INVALID: "The model did not download completely. Try again to download it anew.",
   NO_SPACE: (detail) => `There isn't enough free space for the download. Free up ${detail} more on this computer, then try again.`,
