@@ -14,9 +14,7 @@ pub fn on_abort(hook: fn(&str)) {
 unsafe extern "C" fn aborting(message: *const std::ffi::c_char) {
     if let (Some(hook), false) = (ON_ABORT.get(), message.is_null()) {
         // SAFETY: ggml passes its message as a C string on its stack.
-        let message = unsafe { std::ffi::CStr::from_ptr(message) }.to_string_lossy();
-        eprintln!("{message}");
-        hook(&message);
+        hook(&unsafe { std::ffi::CStr::from_ptr(message) }.to_string_lossy());
     }
 }
 
