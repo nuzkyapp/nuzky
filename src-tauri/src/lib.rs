@@ -1672,6 +1672,7 @@ pub fn run() {
             updates::restart_to_update,
             updates::cancel_update,
             updates::open_feedback,
+            updates::open_web_page,
             diagnostics::diagnostics,
             diagnostics::open_logs,
             diagnostics::report_bug,

@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { Check, ExternalLink, RefreshCw } from "lucide-react";
 import { loadGemini, useAgent } from "../../lib/agent";
 import { api, errorText, plainError } from "../../lib/api";
 import { useEditor } from "../../lib/store";
 import type { AgentAccess } from "../../lib/types";
+import { openWebPage } from "../WebPage";
 import { Button } from "../ui";
 import { AskGemini, Command, ConnectRows, GUIDE, GeminiWhy, INSTALL, MAC, PASTE, TERMINAL, connectAgent, type Run } from "../setup/agentConnect";
 
@@ -133,7 +133,7 @@ export function GeminiGuide() {
             current={!installed}
             action={
               !installed && (
-                <button type="button" onClick={() => void openUrl(GUIDE.antigravity)} className="-mr-2 flex h-7 shrink-0 items-center gap-1 rounded-lg px-2 text-[12px] font-medium text-accent hover:bg-white/[.06]">
+                <button type="button" onClick={() => openWebPage(GUIDE.antigravity)} className="-mr-2 flex h-7 shrink-0 items-center gap-1 rounded-lg px-2 text-[12px] font-medium text-accent hover:bg-white/[.06]">
                   Install guide <ExternalLink size={12} />
                 </button>
               )

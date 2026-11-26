@@ -258,7 +258,7 @@ def setup_chatgpt(r):
         'expires_at': int(time.time()) + 3600, 'scopes': SCOPES.split()}))
     r.chatgpt = ChatGptPanelServer()
     # Signing in again only has to start: no browser opens.
-    r.env.update(NUZKY_CHATGPT_ISSUER=r.chatgpt.url, NUZKY_TEST_BROWSER='/usr/bin/true')
+    r.env.update(NUZKY_CHATGPT_ISSUER=r.chatgpt.url, NUZKY_TEST_BROWSER='/usr/bin/true', NUZKY_OPENED_URLS=str(r.work / 'opened.txt'))
 
 
 @flow('ai_panel_chatgpt', 'ChatGPT on the signed-in plan streams a split through local tools, shows its run and Undo, '
@@ -279,6 +279,11 @@ def ai_panel_chatgpt(r):
         check('Ctrl+J opens the panel using ChatGPT, its plan, usage link and first model',
               r.s.run("return window.__nuzky.agent.getState().agent === 'chatgpt'")
               and all(s in text for s in ('Using ChatGPT plan', 'Manage usage', 'GPT E2E Sol')), text)
+        click(r, 'Manage usage')
+        opened = r.work / 'opened.txt'
+        check("Manage usage opens ChatGPT's usage settings in the browser",
+              wait(lambda: opened.is_file() and opened.read_text().splitlines() == ['https://chatgpt.com/settings/usage'], 5) and not r.errors(),
+              (opened.is_file() and opened.read_text(), r.errors()))
         click(r, 'GPT E2E Sol')
         menu = '[role=menu][aria-label=Model]'
         listed = r.s.run("return [...document.querySelectorAll(arguments[0] + ' [role^=menuitem]')].map((b) => b.textContent.trim())", menu)

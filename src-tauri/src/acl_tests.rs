@@ -46,6 +46,18 @@ fn main_webview_may_call_every_command() {
 }
 
 #[test]
+fn the_editor_opens_only_pages_the_app_names() {
+    let app = app();
+    let main = WebviewWindowBuilder::new(&app, "main", WebviewUrl::default()).build().unwrap();
+    for url in LOCAL_URLS {
+        for command in ["plugin:opener|open_url", "plugin:opener|open_path"] {
+            let refused = call(&main, command, url);
+            assert!(refused.as_ref().is_err_and(|e| e.contains("not allowed")), "{command} from {url}: {refused:?}");
+        }
+    }
+}
+
+#[test]
 fn other_webviews_and_remote_pages_get_nothing() {
     const PROBES: [&str; 5] = ["run_plugin", "allow_plugin_access", "apply_edit", "boot", "plugin:event|listen"];
     let app = app();

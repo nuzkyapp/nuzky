@@ -1,11 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertCircle, AlertTriangle, Check, ExternalLink, Loader2 } from "lucide-react";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { cancelSignIn, check, signIn, signOut, useChatGpt } from "../../lib/chatgpt";
+import { BrowserFailed, openWebPage } from "../WebPage";
 import { ChatGptLogo } from "../ChatGptLogo";
 import { Button } from "../ui";
 
-export const USAGE_PAGE = "https://chatgpt.com/settings/usage";
 const CARD = "rounded-xl bg-white/[.055] shadow-[inset_0_0_0_1px_rgb(255_255_255/.06)]";
 
 /** OpenAI's approved Continue with ChatGPT button, in its white format. */
@@ -60,7 +59,7 @@ function SignedOut() {
   );
 }
 
-function SignedIn({ email, plan }: { email: string | null; plan: boolean }) {
+function SignedIn({ email, plan, openUsage }: { email: string | null; plan: boolean; openUsage: () => void }) {
   const action = useChatGpt((s) => s.action);
   const signOutButton = (
     <Button pill variant="ghost" disabled={action !== null} disabledReason={action === "signingOut" ? "Signing out…" : "Finish signing in first"} onClick={() => void signOut()}>
@@ -94,7 +93,7 @@ function SignedIn({ email, plan }: { email: string | null; plan: boolean }) {
         <Waiting />
       ) : plan ? (
         <div className="flex gap-2">
-          <Button pill onClick={() => void openUrl(USAGE_PAGE)}>
+          <Button pill onClick={openUsage}>
             Manage usage <ExternalLink size={12} />
           </Button>
           {signOutButton}
@@ -140,6 +139,8 @@ export function ChatGptSection() {
   }, [shown]);
 
   const notice = status?.state === "signedOut" ? status.notice : null;
+  const [browserFailed, setBrowserFailed] = useState<string | null>(null);
+  const openUsage = () => openWebPage("chatGptUsage", setBrowserFailed);
   return (
     <div ref={section} className="flex flex-col gap-3">
       {checking && !status ? (
@@ -148,7 +149,7 @@ export function ChatGptSection() {
           Checking your ChatGPT sign-in…
         </p>
       ) : status?.state === "signedIn" ? (
-        <SignedIn email={status.email} plan={status.plan} />
+        <SignedIn email={status.email} plan={status.plan} openUsage={openUsage} />
       ) : (
         <>
           {notice && (
@@ -159,7 +160,7 @@ export function ChatGptSection() {
               ) : (
                 <span>
                   Signed out here, but Nuzky couldn't reach ChatGPT to end the sign-in there. You can disconnect Nuzky in{" "}
-                  <button type="button" onClick={() => void openUrl(USAGE_PAGE)} className="text-accent hover:underline">
+                  <button type="button" onClick={openUsage} className="text-accent hover:underline">
                     ChatGPT settings
                   </button>
                   .
@@ -170,6 +171,7 @@ export function ChatGptSection() {
           <SignedOut />
         </>
       )}
+      {browserFailed && <BrowserFailed url={browserFailed} />}
       {error && (
         <p className="flex items-start gap-1.5 text-[12px] leading-[18px] text-fg" role="alert">
           <AlertCircle size={14} className="mt-0.5 shrink-0 text-danger" />

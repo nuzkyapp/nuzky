@@ -653,6 +653,38 @@ pub fn open_feedback(app: AppHandle, kind: FeedbackKind) -> CmdResult<()> {
     open(&app, &feedback_url(kind, &app.package_info().version.to_string()))
 }
 
+#[derive(Deserialize, Clone, Copy)]
+#[serde(rename_all = "camelCase")]
+pub enum WebPage {
+    ChatGptUsage,
+    ClaudeCodeSetup,
+    CodexSetup,
+    OpenCodeSetup,
+    AntigravitySetup,
+}
+
+fn web_page_url(page: WebPage) -> &'static str {
+    match page {
+        WebPage::ChatGptUsage => "https://chatgpt.com/settings/usage",
+        WebPage::ClaudeCodeSetup => "https://code.claude.com/docs/en/setup",
+        WebPage::CodexSetup => "https://learn.chatgpt.com/docs/codex/cli",
+        WebPage::OpenCodeSetup => "https://opencode.ai/docs",
+        WebPage::AntigravitySetup => "https://antigravity.google/docs/getting-started",
+    }
+}
+
+/// Opens one of the pages Nuzky's buttons name in the browser. The page asks by name, never by address, so nothing a
+/// project or an agent puts on the page can open another site. When the browser does not open, the error is the
+/// page's address, for the person to open themselves.
+#[tauri::command]
+pub fn open_web_page(app: AppHandle, page: WebPage) -> Result<(), &'static str> {
+    let url = web_page_url(page);
+    open(&app, url).map_err(|error| {
+        log::warn!("Opening {url}: {error}");
+        url
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
