@@ -4,7 +4,7 @@ import { loadGemini, useAgent } from "../../lib/agent";
 import { api, errorText, plainError } from "../../lib/api";
 import { useEditor } from "../../lib/store";
 import type { AgentAccess } from "../../lib/types";
-import { openWebPage } from "../../lib/webPages";
+import { openWebPage } from "../WebPage";
 import { Button } from "../ui";
 import { AskGemini, Command, ConnectRows, GUIDE, GeminiWhy, INSTALL, MAC, PASTE, TERMINAL, connectAgent, type Run } from "../setup/agentConnect";
 

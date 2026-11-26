@@ -80,7 +80,7 @@ import { Markdown } from "./Markdown";
 import { IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from "../panel/assets";
 import { ChatGptLogo } from "../ChatGptLogo";
 import { ContinueButton } from "../settings/ChatGptSection";
-import { openWebPage } from "../../lib/webPages";
+import { openWebPage } from "../WebPage";
 import { continueWithChatGpt, openChatGpt, planReady, useChatGpt } from "../../lib/chatgpt";
 import { EFFORTS, chooseEffort, chooseModel, effortLabel, loadModels, ownDefault, resolved, useModels } from "../../lib/models";
 import { moveFloatBy, startMove } from "./AiDock";
