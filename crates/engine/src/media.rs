@@ -6,6 +6,7 @@
 use std::fs::File;
 use std::io::{BufWriter, Read, Write};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Once, OnceLock};
 
 use anyhow::{Context as _, Result, anyhow, bail};
@@ -820,6 +821,30 @@ fn u16_to_half(bytes: &mut [u8]) {
 
 pub type DecodedFrame = (i64, frame::Video);
 
+/// What a decoder has done so far and whether its owner still wants it, read and set from other threads: a waiter
+/// tells a slow decoder from a stuck one by `steps`, and `abandon` ends a long seek between two packets.
+#[derive(Default)]
+pub struct Activity {
+    steps: AtomicU64,
+    abandon: AtomicBool,
+}
+
+impl Activity {
+    /// Packets read and pictures decoded so far.
+    pub fn steps(&self) -> u64 {
+        self.steps.load(Ordering::Relaxed)
+    }
+
+    /// Makes the decoder's next packet fail, so a thread decoding through a long seek stops soon.
+    pub fn abandon(&self) {
+        self.abandon.store(true, Ordering::Relaxed);
+    }
+
+    fn step(&self) {
+        self.steps.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
 /// Sequential decoder with exact seeking. Picks the last frame whose real timestamp is
 /// at or before the requested time, so variable frame rate footage stays exact.
 pub struct VideoDecoder {
@@ -842,6 +867,7 @@ pub struct VideoDecoder {
     pub frame_duration_us: i64,
     /// `convert` gives HDR frames in 16-bit floats, for an HDR export.
     pub deep: bool,
+    pub activity: Arc<Activity>,
 }
 
 unsafe impl Send for VideoDecoder {}
@@ -914,6 +940,7 @@ impl VideoDecoder {
             rotation,
             frame_duration_us: (1_000_000.0 / fps.clamp(1.0, 240.0)) as i64,
             deep: false,
+            activity: Arc::default(),
         })
     }
 
@@ -1052,6 +1079,7 @@ impl VideoDecoder {
         loop {
             match self.decoder.receive_frame(&mut f) {
                 Ok(()) => {
+                    self.activity.step();
                     if self.is_hardware() {
                         f = from_hardware(&f, (self.decoder.width(), self.decoder.height()))?;
                     }
@@ -1077,9 +1105,13 @@ impl VideoDecoder {
                 self.eof = true;
                 return Ok(None);
             }
+            if self.activity.abandon.load(Ordering::Relaxed) {
+                bail!("Decoding was abandoned");
+            }
             loop {
                 match self.input.packets().next() {
                     Some((stream, packet)) if stream.index() == self.stream_index => {
+                        self.activity.step();
                         match self.decoder.send_packet(&packet) {
                             Err(e) if self.is_hardware() => bail!("The hardware decoder failed: {e}"),
                             Err(e) => log::warn!("Skipping corrupt packet: {e}"),

@@ -3,10 +3,15 @@ use nuzky_engine::{
     Renderer, Wait,
     media::{VideoDecoder, decode_size, probe},
     model::*,
-    worker::VideoWorker,
+    worker::{Missed, Patience, VideoWorker},
 };
 use qa_support::*;
-use std::{path::Path, process::Command, time::Instant};
+use std::{
+    path::Path,
+    process::Command,
+    sync::atomic::{AtomicBool, Ordering},
+    time::{Duration, Instant},
+};
 
 fn check_seek(path: &Path, extra_times: &[i64]) {
     let timestamps = pts(path);
@@ -43,7 +48,7 @@ fn check_seek(path: &Path, extra_times: &[i64]) {
         } else {
             failures.push(format!("decoder t={t}: no candidate"));
         }
-        let rgba = worker.get(t, (a.width, a.height), false, true, false).expect("worker frame");
+        let rgba = worker.get(t, (a.width, a.height), false, until_decoded(), false).unwrap().expect("worker frame");
         let error = mae(&rgba.data, &truth[expected * frame_len..(expected + 1) * frame_len]);
         if !worker.exact || rgba.t_us != timestamps[expected] || error > 1.0 {
             failures.push(format!(
@@ -728,7 +733,7 @@ fn cold_seek_immediately_before_keyframe_uses_previous_frame() {
         decoder.seek(t).unwrap();
         let first = decoder.next_frame().unwrap().unwrap().0;
         let mut worker = VideoWorker::spawn(path.clone());
-        let frame = worker.get(t, (96, 64), false, true, false).unwrap();
+        let frame = worker.get(t, (96, 64), false, until_decoded(), false).unwrap().unwrap();
         let error = mae(&frame.data, &truth[expected * 96 * 64 * 4..(expected + 1) * 96 * 64 * 4]);
         eprintln!(
             "QA keyframe boundary want={t} first_after_seek={first} worker={} expected={} exact={} MAE={error}",
@@ -755,6 +760,50 @@ fn cold_seek_immediately_before_keyframe_uses_previous_frame() {
     eprintln!("QA stream-tick diagnostic: time_base={tb}, floor_tick={tick}, first_packet_pts={first}");
     assert!(first <= tick);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// A frame deep into a long keyframe interval takes its decoder a while. A caller that asks again gets `Pending` and
+/// later the exact frame, Stop ends the wait at once, and the decoder's thread stops its seek at the next packet, so a
+/// cancelled export or cover ends within seconds instead of after the seek.
+#[test]
+fn waiting_through_a_long_seek_gives_way_to_stop_and_to_a_caller_that_asks_again() {
+    assert!(available(), "ffmpeg is required for this test");
+    let path = dir("long-seek").join("long-gop.mp4");
+    let grain = "testsrc2=s=1920x1080:r=60:d=12,noise=alls=4:allf=t";
+    let gop = ["-g", "600", "-keyint_min", "600", "-sc_threshold", "0", "-pix_fmt", "yuv420p", "-colorspace", "bt709"];
+    ff(&[&["-f", "lavfi", "-i", grain, "-c:v", "libx264", "-preset", "veryfast"][..], &gop].concat(), &path);
+    let timestamps = pts(&path);
+    let index = timestamps.iter().rposition(|&p| p < 10_000_000).unwrap();
+    let t = timestamps[index];
+    let size = (1920, 1080);
+
+    let mut worker = VideoWorker::spawn(path.clone());
+    let stop = AtomicBool::new(false);
+    let soon = Patience { stop: &stop, within: Some(Duration::from_millis(1)) };
+    assert_eq!(worker.get(t, size, false, Some(soon), false).map(|_| ()), Err(Missed::Pending));
+    let frame = worker.get(t, size, false, until_decoded(), false).unwrap().unwrap();
+    assert!(worker.exact && frame.t_us == t, "got the frame at {} for {t}", frame.t_us);
+    // Used until the frame came, so a renderer does not drop it as idle after a long wait and seek all over again.
+    assert!(worker.last_used.elapsed() < Duration::from_millis(50), "last used {:?} ago", worker.last_used.elapsed());
+    let truth = raw(&path, &["-vf", &format!("select=eq(n\\,{index})"), "-frames:v", "1"]);
+    assert!(mae(&frame.data, &truth) < 1.0, "differs from FFmpeg's frame by {}", mae(&frame.data, &truth));
+
+    let mut worker = VideoWorker::spawn(path);
+    let started = Instant::now();
+    let waited = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            std::thread::sleep(Duration::from_millis(100));
+            stop.store(true, Ordering::Relaxed);
+        });
+        worker.get(t, size, false, Some(Patience { stop: &stop, within: None }), false).map(|_| ())
+    });
+    let stopped = started.elapsed();
+    let dropping = Instant::now();
+    drop(worker);
+    let dropped = dropping.elapsed();
+    assert_eq!(waited, Err(Missed::Stopped), "the seek ended before Stop");
+    assert!(stopped < Duration::from_millis(400), "Stop ended the wait after {stopped:?}");
+    assert!(dropped < Duration::from_millis(60), "the decoder finished its seek before letting go: {dropped:?}");
 }
 
 /// Inserts a big-endian EXIF APP1 segment with only an Orientation tag after the JPEG SOI marker.

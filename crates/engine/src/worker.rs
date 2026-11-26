@@ -3,16 +3,28 @@
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use crate::media::{DecodedFrame, RgbaFrame, VideoDecoder};
+use crate::media::{Activity, DecodedFrame, RgbaFrame, VideoDecoder};
 
 const LOOKAHEAD_PLAYING: usize = 4;
 /// Jumping further ahead than this seeks instead of decoding through.
 const FORWARD_SEEK_US: i64 = 1_000_000;
-const BLOCKING_TIMEOUT: Duration = Duration::from_secs(8);
+/// A decoder that reads no packet and gives no picture for this long while a frame is awaited is stuck. A slow one,
+/// seeking through a long keyframe interval of 4K on a busy computer, reads and decodes several frames a second.
+pub const STALL: Duration = Duration::from_secs(30);
+/// How often a wait looks at the decoder's progress and its caller's stop. Time it slept longer, while the computer
+/// or the app was suspended, counts as one tick: Windows' clock goes on through sleep.
+const TICK: Duration = Duration::from_millis(100);
+/// A wait longer than this is worth a line in the log.
+const SLOW_WAIT: Duration = Duration::from_secs(8);
+/// A decoder thread that has not ended this long after it was told to is stuck reading, as on a drive that stopped
+/// answering, and is left to end by itself so the caller can say so.
+const LET_GO: Duration = Duration::from_secs(2);
 /// A clip played backwards decodes its file forwards in pieces of about this many bytes of converted frames, at least
 /// 4 frames, and keeps about two pieces, so playback neither seeks for every frame nor holds a whole file's frames.
 const BACKWARD_BYTES: usize = 48 << 20;
@@ -109,10 +121,35 @@ struct Shared {
 pub struct VideoWorker {
     shared: Arc<Shared>,
     thread: Option<JoinHandle<()>>,
+    /// Disconnects when the decoder thread ends.
+    ended: Receiver<()>,
+    activity: Arc<Activity>,
+    /// The decoder's steps when a wait last looked, and how long waits have seen them unchanged since.
+    seen_steps: u64,
+    idle: Duration,
     pub last_used: Instant,
     pub exact: bool,
     /// The preview proxy it decodes instead of the original file, if any.
     pub proxy: Option<PathBuf>,
+}
+
+/// How `VideoWorker::get` waits for the exact frame.
+#[derive(Clone, Copy)]
+pub struct Patience<'a> {
+    /// Waiting ends at once when it is set, as an export's Cancel does.
+    pub stop: &'a AtomicBool,
+    /// Waiting ends after this long while decoding goes on, for a caller that asks again.
+    pub within: Option<Duration>,
+}
+
+/// Why a waiting `VideoWorker::get` returned without the exact frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Missed {
+    Stopped,
+    /// `Patience::within` passed while the decoder was still working on it.
+    Pending,
+    /// The decoder did nothing for `STALL`.
+    Stalled,
 }
 
 impl VideoWorker {
@@ -139,32 +176,61 @@ impl VideoWorker {
         let state = State { deep, ..State::default() };
         let shared = Arc::new(Shared { state: Mutex::new(state), cv: Condvar::new() });
         let s = shared.clone();
+        let activity = Arc::new(Activity::default());
+        let a = activity.clone();
         let is_proxy = proxy.is_some();
+        let (ending, ended) = channel();
         let thread = std::thread::Builder::new()
             .name("video-decode".into())
-            .spawn(move || run(s, path, is_proxy, seeking, deep))
+            .spawn(move || {
+                let _ending = ending;
+                run(s, a, path, is_proxy, seeking, deep)
+            })
             .expect("spawn decoder thread");
-        Self { shared, thread: Some(thread), last_used: Instant::now(), exact: false, proxy }
+        Self {
+            shared,
+            thread: Some(thread),
+            ended,
+            activity,
+            seen_steps: 0,
+            idle: Duration::ZERO,
+            last_used: Instant::now(),
+            exact: false,
+            proxy,
+        }
     }
 
     pub fn error(&self) -> Option<String> {
         self.shared.state.lock().unwrap().error.clone()
     }
 
-    /// Returns the frame to show at `t_us`. With `blocking`, waits for the exact frame;
-    /// otherwise returns the nearest ready frame or `None` and lets decoding catch up. `backward` when the clip
-    /// plays its file backwards.
+    /// Returns the frame to show at `t_us`. With `wait`, waits for the exact frame as long as the decoder works on it;
+    /// otherwise returns the nearest ready frame or `None` and lets decoding catch up. After a decoding error it gives
+    /// the nearest frame and `error` tells why. `backward` when the clip plays its file backwards.
     pub fn get(
         &mut self,
         t_us: i64,
         size: (u32, u32),
         playing: bool,
-        blocking: bool,
+        wait: Option<Patience>,
         backward: bool,
-    ) -> Option<RgbaFrame> {
+    ) -> Result<Option<RgbaFrame>, Missed> {
+        let got = self.wait_for(t_us, size, playing, wait, backward);
+        // Used until the wait ended, so a long one does not leave it looking idle to `Renderer::drop_stale_workers`.
         self.last_used = Instant::now();
+        got
+    }
+
+    fn wait_for(
+        &mut self,
+        t_us: i64,
+        size: (u32, u32),
+        playing: bool,
+        wait: Option<Patience>,
+        backward: bool,
+    ) -> Result<Option<RgbaFrame>, Missed> {
         self.exact = false;
-        let deadline = Instant::now() + BLOCKING_TIMEOUT;
+        let started = Instant::now();
         let mut st = self.shared.state.lock().unwrap();
         if st.size != size {
             st.size = size;
@@ -195,10 +261,17 @@ impl VideoWorker {
                     0
                 };
                 let frame = st.frames[shown].clone();
-                if exact || !blocking {
+                if exact || wait.is_none() {
                     self.exact = exact;
                     self.shared.cv.notify_all();
-                    return Some(frame);
+                    if wait.is_some() {
+                        self.idle = Duration::ZERO;
+                        let waited = started.elapsed();
+                        if waited > SLOW_WAIT {
+                            log::info!("Decoding took {:.1} s to give the frame at {t_us} us", waited.as_secs_f64());
+                        }
+                    }
+                    return Ok(Some(frame));
                 }
             }
             self.shared.cv.notify_all();
@@ -206,15 +279,29 @@ impl VideoWorker {
                 true => st.frames.back().cloned(),
                 false => st.frames.front().cloned(),
             };
-            if !blocking || st.error.is_some() {
-                return nearest(&st);
+            let Some(wait) = wait.filter(|_| st.error.is_none()) else { return Ok(nearest(&st)) };
+            if wait.stop.load(Ordering::Relaxed) {
+                return Err(Missed::Stopped);
             }
-            let now = Instant::now();
-            if now >= deadline {
-                log::warn!("Timed out waiting for frame at {t_us} us");
-                return nearest(&st);
+            let left = wait.within.map(|within| within.saturating_sub(started.elapsed()));
+            if left == Some(Duration::ZERO) {
+                return Err(Missed::Pending);
             }
-            st = self.shared.cv.wait_timeout(st, deadline - now).unwrap().0;
+            let steps = self.activity.steps();
+            if steps != self.seen_steps {
+                (self.seen_steps, self.idle) = (steps, Duration::ZERO);
+            }
+            if self.idle >= STALL {
+                log::warn!(
+                    "The decoder gave nothing for {} s while the frame at {t_us} us was awaited",
+                    STALL.as_secs()
+                );
+                return Err(Missed::Stalled);
+            }
+            let tick = left.map_or(TICK, |left| left.min(TICK));
+            let asleep = Instant::now();
+            st = self.shared.cv.wait_timeout(st, tick).unwrap().0;
+            self.idle += asleep.elapsed().min(tick);
         }
     }
 }
@@ -222,14 +309,19 @@ impl VideoWorker {
 impl Drop for VideoWorker {
     fn drop(&mut self) {
         self.shared.state.lock().unwrap().shutdown = true;
+        // A thread in the middle of a long seek stops at its next packet, so a cancelled export ends soon.
+        self.activity.abandon();
         self.shared.cv.notify_all();
         if let Some(t) = self.thread.take() {
-            t.join().ok();
+            match self.ended.recv_timeout(LET_GO) {
+                Err(RecvTimeoutError::Timeout) => log::warn!("A video decoder did not stop; it ends by itself"),
+                _ => drop(t.join()),
+            }
         }
     }
 }
 
-fn run(shared: Arc<Shared>, path: PathBuf, proxy: bool, seeking: bool, deep: bool) {
+fn run(shared: Arc<Shared>, activity: Arc<Activity>, path: PathBuf, proxy: bool, seeking: bool, deep: bool) {
     let opened = match (proxy, seeking) {
         (true, _) => VideoDecoder::open_proxy(&path),
         (false, true) => VideoDecoder::open_for_seeking(&path),
@@ -238,6 +330,7 @@ fn run(shared: Arc<Shared>, path: PathBuf, proxy: bool, seeking: bool, deep: boo
     let mut decoder = match opened {
         Ok(mut d) => {
             d.deep = deep;
+            d.activity = activity;
             d
         }
         Err(e) => {
@@ -283,10 +376,17 @@ fn run(shared: Arc<Shared>, path: PathBuf, proxy: bool, seeking: bool, deep: boo
             (false, _, _) => decode_next(&mut decoder, size),
         };
         let mut st = shared.state.lock().unwrap();
+        if st.shutdown {
+            return;
+        }
         if st.epoch != epoch {
             continue;
         }
         match result {
+            // A seek that found no picture before the end decoded from the file's start, so none of it decodes.
+            Ok(Step::Seeked { frames, .. } | Step::Piece { frames, .. }) if frames.is_empty() => {
+                st.error = Some("No picture in the video decodes".into());
+            }
             Ok(Step::Seeked { frames, eof }) => {
                 st.frames = frames.into();
                 st.base_us = want;

@@ -415,7 +415,7 @@ pub fn start_cover_pick(app: AppHandle, format: ThumbnailFormat, expected_epoch:
             let mut candidates = Vec::with_capacity(found.len());
             for candidate in &found {
                 check_cancelled(cancel)?;
-                let rgba = renderer.render(&shown, candidate.time_us, w, h, Wait::Exact, false)?;
+                let rgba = renderer.render_until(&shown, candidate.time_us, w, h, Wait::Exact, false, cancel)?;
                 candidates.push(CoverCandidate {
                     time_us: candidate.time_us,
                     score: candidate.score,
@@ -535,7 +535,7 @@ pub fn start_cover_export(
         rep.progress(0.0, Some("Rendering"));
         let mut renderer = Renderer::new().context("Starting the cover renderer")?;
         renderer.use_mattes(cache.clone(), Pending::Fail);
-        let frame = renderer.thumbnail_frame(&project, &thumbnail)?;
+        let frame = renderer.thumbnail_frame_until(&project, &thumbnail, cancel)?;
         let mask = if thumbnail.needs_mask() {
             download_models(models::MASK, false, "Downloading cover models", cancel, rep)?;
             let size = (frame.width, frame.height);

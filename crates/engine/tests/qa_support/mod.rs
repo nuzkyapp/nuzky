@@ -1,9 +1,16 @@
 #![allow(dead_code)]
-use nuzky_engine::{media::probe, model::*};
+use nuzky_engine::{media::probe, model::*, worker::Patience};
 use std::{
     path::{Path, PathBuf},
     process::{Command, Output},
+    sync::atomic::AtomicBool,
 };
+
+/// `VideoWorker::get` waits for the exact frame as long as decoding goes on.
+pub fn until_decoded() -> Option<Patience<'static>> {
+    static NEVER: AtomicBool = AtomicBool::new(false);
+    Some(Patience { stop: &NEVER, within: None })
+}
 
 pub fn dir(name: &str) -> PathBuf {
     let p = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tmp-test/qa").join(name);

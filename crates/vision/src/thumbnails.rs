@@ -211,7 +211,7 @@ pub fn thumbnail_frames(
         &mut |done| progress(Phase::Looking, done),
         || Ok((Renderer::new().context("Starting frame renderer")?, Yunet::load(models_dir)?)),
         |(renderer, yunet), &t, cancel| {
-            let frame = timeline::render(renderer, &picture, t, look_size)?;
+            let frame = timeline::render(renderer, &picture, t, look_size, cancel)?;
             let luma = frame.luma();
             let whole = [0.0, 0.0, frame.width as f32, frame.height as f32];
             let mut faces = yunet.detect(&frame, cancel)?;
@@ -257,7 +257,7 @@ pub fn thumbnail_frames(
             ))
         },
         |(renderer, yunet, mesh, blend, selfie), look, cancel| {
-            let frame = timeline::render(renderer, &picture, look.t, detail_size)?;
+            let frame = timeline::render(renderer, &picture, look.t, detail_size, cancel)?;
             let small = frame.fit(DETECT_SIDE);
             let k = frame.width as f32 / small.width as f32;
             let mut faces: Vec<Detection> = yunet.detect(&small, cancel)?.iter().map(|f| f.scaled(k)).collect();

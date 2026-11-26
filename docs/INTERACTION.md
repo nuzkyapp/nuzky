@@ -15,10 +15,10 @@ The library, the inspector and the timeline start close to CapCut's proportions 
 | Action | Feedback |
 |---|---|
 | Click, toggle, select | Visual state change in the same frame |
-| Seek or scrub | Last frame stays on screen until the new one arrives, so the preview never flashes |
+| Seek or scrub | Last frame stays on screen until the new one arrives, so the preview never flashes, however long its video takes to decode: a jump deep into a long keyframe interval of 4K on a busy computer, or a laptop asleep in the middle of it, can take many seconds. Meanwhile Play, Pause and seeking still answer within half a second. A video that gives no picture for 30 s replaces the preview with what happened and what to do |
 | Import | Item appears at once with a skeleton thumbnail; audio preparation shows a thin progress bar on the item |
 | Import of video that decodes slowly (HEVC from phones, AV1, VP9, larger than 1080p) | A lighter copy for the preview is made in the background, one file at a time: "Preparing preview of IMG_0042.MOV 42%" with Stop in the top bar. Until it is ready the preview plays the original; from the next pause on it plays the copy, which has the same frames at the same times. Thumbnails made after that come from it too. Export always reads the original. If making the copy on the GPU fails partway, the copy is made again in software and its percentage starts again from 0. A copy made by an earlier version of Nuzky is made again once. A failed copy says so in a toast and the preview keeps the original |
-| Export, captions, transcript | Background job with percentage and phase in the top bar; the user keeps editing; a toast reports the result |
+| Export, captions, transcript | Background job with percentage and phase in the top bar; the user keeps editing; a toast reports the result. Export and choosing a cover wait for video that decodes slowly instead of failing, and Stop still ends them within seconds |
 | Long work an AI agent started (transcription, export, finding the person, scanning) | The same top bar capsule: what it does and its percentage, measured as it goes (a transcription counts the speech recognised, then the words timed), with Stop. Stop cancels only that work within seconds; the agent sees it stopped and says so |
 | Sound library search, preview, add | Searching shows skeleton rows at once; a sound that has to download shows a spinner on its picture (preview) or the percentage on its + (add), and the panel stays usable |
 

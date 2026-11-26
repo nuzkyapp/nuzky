@@ -188,7 +188,7 @@ fn backwards_playback_that_jumps_or_pauses_shows_the_frame_there() {
     let mut worker = VideoWorker::spawn(source);
     let mut failures = Vec::new();
     let mut ask = |t: i64, playing: bool| {
-        let got = worker.get(t, (96, 64), playing, true, true).unwrap();
+        let got = worker.get(t, (96, 64), playing, until_decoded(), true).unwrap().unwrap();
         if got.t_us != frame_of(t) || !worker.exact {
             failures.push(format!(
                 "at {t} µs playing {playing}: frame {} exact {}, not {}",

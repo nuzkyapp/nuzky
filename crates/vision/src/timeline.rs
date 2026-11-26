@@ -1,5 +1,7 @@
 //! The timeline as a still is taken from it: rendered as exported, with colours, zooms and
 //! overlays, but without text, and away from cuts, transitions and clip animations.
+use std::sync::atomic::AtomicBool;
+
 use anyhow::{Context, Result, ensure};
 use nuzky_engine::{
     Project, Renderer, Wait,
@@ -66,8 +68,17 @@ pub fn size(project: &Project, side: u32) -> (u32, u32) {
     (((w * k).round() as u32).max(16), ((h * k).round() as u32).max(16))
 }
 
-pub fn render(renderer: &mut Renderer, project: &Project, t: i64, (width, height): (u32, u32)) -> Result<Frame> {
+/// Stops soon after `cancel`, even while a video is still decoding.
+pub fn render(
+    renderer: &mut Renderer,
+    project: &Project,
+    t: i64,
+    (width, height): (u32, u32),
+    cancel: &AtomicBool,
+) -> Result<Frame> {
     ensure!(t >= 0 && t < project.duration_us(), "INVALID_RANGE: time is outside the timeline");
-    let rgba = renderer.render(project, t, width, height, Wait::Exact, false).context("Rendering the timeline")?;
+    let rgba = renderer
+        .render_until(project, t, width, height, Wait::Exact, false, cancel)
+        .context("Rendering the timeline")?;
     Ok(Frame { width, height, rgba })
 }

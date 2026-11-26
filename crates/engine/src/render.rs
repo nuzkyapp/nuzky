@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
 
@@ -19,7 +19,7 @@ use crate::model::{
 };
 use crate::plugin_effects::{self, Lookup};
 use crate::text::{TextRenderer, TextStats};
-use crate::worker::VideoWorker;
+use crate::worker::{Missed, Patience, STALL, VideoWorker};
 
 const BACKGROUND_SIZE: f32 = 96.0;
 /// Samples per block side when shrinking a frame for the background blur.
@@ -50,9 +50,36 @@ pub(crate) type Quad = [[f32; 2]; 4];
 pub enum Wait {
     /// Use whatever frames are ready (playback).
     Ready,
-    /// Wait for the exact frame of every layer (paused preview, export).
+    /// Wait for the exact frame of every layer as long as its decoder works on it (export, stills).
     Exact,
+    /// As `Exact`, but fail with `FramePending` after this long, so the caller can do other work and ask again
+    /// (the paused preview).
+    Within(Duration),
 }
+
+/// A frame drawn with `Wait::Within` whose video is still decoding; asked again, it comes as soon as it is decoded.
+#[derive(Debug)]
+pub struct FramePending;
+
+impl std::fmt::Display for FramePending {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the picture is still decoding")
+    }
+}
+
+impl std::error::Error for FramePending {}
+
+/// A video's decoder gave nothing for `worker::STALL`, with what the person can do about it.
+#[derive(Debug)]
+pub struct DecodeStalled(pub String);
+
+impl std::fmt::Display for DecodeStalled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for DecodeStalled {}
 
 pub struct Renderer {
     pub(crate) gpu: Gpu,
@@ -591,7 +618,7 @@ impl Renderer {
                 let p = transition.progress;
                 let mut pair = [None, None];
                 for (index, visible) in std::iter::once(first).chain(visible).enumerate() {
-                    let mut layer = self.layer_for(project, visible, t_us, k, wait, playing)?;
+                    let mut layer = self.layer_for(project, visible, t_us, k, wait, playing, stop)?;
                     if let (Some(layer), Some(role)) = (&mut layer, visible.transition) {
                         apply_transition(layer, role.kind, role.progress, role.incoming, out_w, out_h);
                     }
@@ -617,7 +644,7 @@ impl Renderer {
                 if let Some(layer) = self.adjustment_for(project, first.clip, t_us, k, out_w, out_h) {
                     draws.push(Draw::Adjustment(layer));
                 }
-            } else if let Some(layer) = self.layer_for(project, first, t_us, k, wait, playing)? {
+            } else if let Some(layer) = self.layer_for(project, first, t_us, k, wait, playing, stop)? {
                 if track.id == crate::edit::MAIN_TRACK && canvas.background_blur > 0.0 {
                     draws.push(Draw::Layer(self.background(
                         &layer,
@@ -628,6 +655,13 @@ impl Renderer {
                     )));
                 }
                 draws.push(Draw::Layer(layer));
+            }
+        }
+        // The decoders of this frame stay in use however long another of its layers took to decode.
+        let drawn = Instant::now();
+        for ((clip_id, _), worker) in &mut self.workers {
+            if self.needed.contains(clip_id) {
+                worker.last_used = drawn;
             }
         }
         if playing {
@@ -662,9 +696,17 @@ impl Renderer {
                 ClipContent::Text { .. } | ClipContent::Adjustment { .. } => None,
             })
             .collect();
-        self.workers.retain(|(clip_id, path), w| {
-            w.last_used.elapsed() < IDLE_WORKER && current.contains(&(clip_id.as_str(), path.as_str()))
-        });
+        let stale: Vec<VideoWorker> = self
+            .workers
+            .extract_if(|(clip_id, path), w| {
+                w.last_used.elapsed() >= IDLE_WORKER || !current.contains(&(clip_id.as_str(), path.as_str()))
+            })
+            .map(|(_, worker)| worker)
+            .collect();
+        // One stuck reading a file that stopped answering takes seconds to let go; the frame does not wait for it.
+        if !stale.is_empty() {
+            std::thread::Builder::new().name("video-decode-end".into()).spawn(move || drop(stale)).ok();
+        }
     }
 
     fn background(&mut self, layer: &Layer, strength: f32, w: u32, h: u32, used: &mut Vec<(usize, usize)>) -> Layer {
@@ -727,13 +769,9 @@ impl Renderer {
             };
             let size = decode_resolution(project, clip, asset, k, self.gpu.max_texture_dimension());
             let backward = crate::retime::Retime::of(clip).is_some_and(|map| map.reverse()) != reverse;
-            self.worker(&clip.id, &asset.path, false).get(
-                source_time(clip, first).min((asset.duration_us - 1).max(0)),
-                size,
-                false,
-                false,
-                backward,
-            );
+            self.worker(&clip.id, &asset.path, false)
+                .get(source_time(clip, first).min((asset.duration_us - 1).max(0)), size, false, None, backward)
+                .ok();
         }
     }
 
@@ -795,6 +833,7 @@ impl Renderer {
         Some(layer)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn layer_for(
         &mut self,
         project: &Project,
@@ -803,6 +842,7 @@ impl Renderer {
         k: f32,
         wait: Wait,
         playing: bool,
+        stop: &AtomicBool,
     ) -> Result<Option<Layer>> {
         let clip = visible.clip;
         let Some(place) = placement(project, visible, t_us, k, &mut self.text) else { return Ok(None) };
@@ -821,19 +861,36 @@ impl Renderer {
                     source_time(clip, t_us).min((asset.duration_us - 1).max(0))
                 };
                 let backward = crate::retime::Retime::of(clip).is_some_and(|map| map.reverse()) != self.reverse;
-                let worker = self.worker(&clip.id, &asset.path, wait == Wait::Exact);
-                let frame = worker.get(source_t, size, playing, wait == Wait::Exact, backward);
-                if wait == Wait::Exact {
-                    if let Some(error) = worker.error() {
-                        if matches!(self.mattes, Some((_, Pending::Original))) {
-                            return Ok(None);
-                        }
-                        bail!("Cannot decode {}: {error}", asset.path);
+                let patience = match wait {
+                    Wait::Ready => None,
+                    Wait::Exact => Some(Patience { stop, within: None }),
+                    Wait::Within(within) => Some(Patience { stop, within: Some(within) }),
+                };
+                let worker = self.worker(&clip.id, &asset.path, patience.is_some());
+                let got = worker.get(source_t, size, playing, patience, backward);
+                if patience.is_some()
+                    && let Some(error) = worker.error()
+                {
+                    if matches!(self.mattes, Some((_, Pending::Original))) {
+                        return Ok(None);
                     }
-                    if !worker.exact || frame.is_none() {
-                        bail!("Timed out waiting for frame at {source_t} us in {}", asset.path);
-                    }
+                    bail!("Cannot decode {}: {error}", asset.path);
                 }
+                let frame = match got {
+                    Ok(frame) => frame,
+                    Err(Missed::Stopped) => bail!("CANCELLED: stopped while {} was decoding", asset.name),
+                    Err(Missed::Pending) => return Err(FramePending.into()),
+                    Err(Missed::Stalled) => {
+                        return Err(DecodeStalled(format!(
+                            "{} stopped decoding at {:.2} s: no picture came for {} s. If the file is on an external, \
+                             network or cloud drive, copy it to this computer, then try again.",
+                            asset.name,
+                            source_t as f64 / 1e6,
+                            STALL.as_secs()
+                        ))
+                        .into());
+                    }
+                };
                 if playing && !worker.exact {
                     self.late_layers += 1;
                 }
@@ -1618,6 +1675,7 @@ mod tests {
                 0.5,
                 Wait::Exact,
                 false,
+                &AtomicBool::new(false),
             )
             .unwrap()
             .unwrap();
