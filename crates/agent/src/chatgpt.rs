@@ -35,6 +35,9 @@ const NAMESPACE: &str = "nuzky";
 const HERE: &str = "Nuzky's tools are the functions in the nuzky namespace. MCP resources and prompts are not available here: the guide and the creator's style are below, and the parameters of apply_edits describe every edit.";
 const LIMIT: &str = "You've reached a usage limit of your ChatGPT plan, or one set for Nuzky in ChatGPT's settings.";
 const NO_PLAN: &str = "ChatGPT hasn't allowed Nuzky to use your plan yet. Open ChatGPT account… and allow it.";
+const TOO_LONG: &str = "ChatGPT can read only so much of one chat, and this one is past it. Start a new chat with your message; this one stays here to read, and your edits stay in the project.";
+/// How much of a problem in an unknown shape the panel and the log show.
+const MAX_SENT_CHARS: usize = 500;
 /// What a call the turn stopped before it finished answers, as ChatGPT needs an answer to every call.
 const STOPPED: &str =
     "RUN_STOPPED: the user stopped you before this call finished. Read get_state before changing anything.";
@@ -204,7 +207,9 @@ fn converse(
 /// What one request's thread reports.
 enum Wire {
     /// The answer streams; its events follow.
-    Open,
+    Open {
+        request: Option<String>,
+    },
     Refused {
         status: u16,
         body: String,
@@ -228,11 +233,11 @@ fn respond(
 ) -> Result<Vec<Value>, AgentEvent> {
     let mut renewed = false;
     let mut pauses = BACKOFF.iter().copied();
-    let events = loop {
+    let (events, request) = loop {
         let url = format!("{}/responses", req.api);
         let wire = post(http.clone(), url, req.token.clone(), renewed, body.to_owned(), stop.clone());
         match next(&wire, stop)? {
-            Wire::Open => break wire,
+            Wire::Open { request } => break (wire, request),
             // An access token can stop working before it expires, e.g. once another window renewed it.
             Wire::Refused { status: 401, .. } if !renewed => renewed = true,
             Wire::Refused { status: 503, body, request } => match pauses.next() {
@@ -257,7 +262,7 @@ fn respond(
             Wire::Broken(error) => return Err(interrupted(&error)),
             _ => return Err(interrupted("The stream ended without response.completed")),
         };
-        let id = event["response"]["id"].as_str();
+        let id = request.as_deref().or(event["response"]["id"].as_str());
         match event["type"].as_str().unwrap_or_default() {
             "response.output_text.delta" => {
                 if let Some(text) = event["delta"].as_str().filter(|text| !text.is_empty()) {
@@ -279,7 +284,12 @@ fn respond(
             "response.completed" => return Ok(output),
             // A usage limit can come this way after the answer began.
             "response.failed" => return Err(problem(None, &event["response"]["error"], id)),
-            "error" => return Err(problem(None, &event, id)),
+            // OpenAI's own clients read the problem from a nested `error`; the API reference puts it on the event.
+            "error" => {
+                let nested = event["error"]["code"].is_string() || event["error"]["message"].is_string();
+                let error = if nested { &event["error"] } else { &event };
+                return Err(problem(None, error, id));
+            }
             "response.incomplete" => {
                 let reason = event["response"]["incomplete_details"]["reason"].as_str().unwrap_or("unknown");
                 return Err(failure(
@@ -332,12 +342,12 @@ fn post(
             Err(error) => return drop(tx.send(Wire::Broken(error.to_string()))),
         };
         let status = response.status().as_u16();
+        let request = response.headers().get("x-request-id").and_then(|v| v.to_str().ok()).map(str::to_owned);
         if status != 200 {
-            let request = response.headers().get("x-request-id").and_then(|v| v.to_str().ok()).map(str::to_owned);
             let body = response.body_mut().with_config().limit(MAX_ERROR_BYTES).read_to_string().unwrap_or_default();
             return drop(tx.send(Wire::Refused { status, body, request }));
         }
-        if tx.send(Wire::Open).is_err() {
+        if tx.send(Wire::Open { request }).is_err() {
             return;
         }
         // Server-sent events: `data:` lines, each event ended by an empty line.
@@ -538,20 +548,29 @@ fn refused(status: u16, body: &str, request: Option<&str>) -> AgentEvent {
 }
 
 /// What a refusal means for the user, by OpenAI's documented codes
-/// (https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery).
+/// (https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery) and those Codex reads on the same plan.
 fn problem(status: Option<u16>, error: &Value, request: Option<&str>) -> AgentEvent {
     let code = error["code"].as_str().unwrap_or_default();
-    let message = error["message"].as_str().unwrap_or_default();
+    let message = error["message"].as_str().unwrap_or_default().split_whitespace().collect::<Vec<_>>().join(" ");
+    // A problem in a shape Nuzky doesn't know still says what ChatGPT sent.
+    let unknown = error.as_object().filter(|e| code.is_empty() && message.is_empty() && !e.is_empty());
+    let sent = unknown.map(|_| error.to_string().chars().take(MAX_SENT_CHARS).collect::<String>());
+    let fields = unknown.map(|e| format!(", fields {}", e.keys().map(|key| logged(key)).collect::<Vec<_>>().join(" ")));
     log::warn!(
-        "ChatGPT refused a request: status {status:?}, code {code:?}, param {:?}, request {request:?}: {message}",
-        error["param"]
+        "ChatGPT refused a request: status {}, code {}, param {}{}",
+        status.map_or_else(|| "none".to_owned(), |status| status.to_string()),
+        logged(code),
+        logged(error["param"].as_str().unwrap_or_default()),
+        fields.unwrap_or_default()
     );
     let (kind, text) = match (code, status) {
-        ("subscription_sharing_usage_limit_exceeded", _) | (_, Some(429)) => (ErrorCode::UsageLimit, LIMIT),
+        ("subscription_sharing_usage_limit_exceeded" | "usage_limit_reached", _) | (_, Some(429)) => {
+            (ErrorCode::UsageLimit, LIMIT)
+        }
         ("subscription_sharing_usage_unavailable", _) => {
             (ErrorCode::UsageLimit, "ChatGPT couldn't check your plan's usage just now. Try again in a few minutes.")
         }
-        ("subscription_sharing_user_not_eligible", _) => (
+        ("subscription_sharing_user_not_eligible" | "usage_not_included", _) => (
             ErrorCode::PlanUnavailable,
             "This ChatGPT account can't use its plan in Nuzky. It takes a plan such as Plus or Pro, in a workspace that allows it.",
         ),
@@ -561,21 +580,43 @@ fn problem(status: Option<u16>, error: &Value, request: Option<&str>) -> AgentEv
         ("subscription_sharing_invalid_user", _) | (_, Some(401)) => {
             (ErrorCode::NotSignedIn, "ChatGPT didn't accept the sign-in. Sign in again.")
         }
-        (_, Some(500..)) => (ErrorCode::AgentFailed, "ChatGPT isn't available just now. Try again in a few minutes."),
-        _ => (ErrorCode::AgentFailed, "ChatGPT refused the request."),
+        // Every message sends the whole chat, so once it is too long, no later one gets through either.
+        ("context_length_exceeded", _) => (ErrorCode::SessionGone, TOO_LONG),
+        ("model_not_found", _) => {
+            (ErrorCode::AgentFailed, "ChatGPT doesn't offer this model on your plan. Choose another model.")
+        }
+        ("server_is_overloaded" | "policy_capacity_unavailable", _) | (_, Some(500..)) => {
+            (ErrorCode::AgentFailed, "ChatGPT isn't available just now. Try again in a few minutes.")
+        }
+        _ if message.is_empty() => (ErrorCode::AgentFailed, "ChatGPT refused the request without saying why."),
+        // The panel's title already says ChatGPT stopped, so its own reason comes first.
+        _ => (ErrorCode::AgentFailed, ""),
     };
     if kind != ErrorCode::AgentFailed {
         return failure(kind, text);
     }
+    let first = if text.is_empty() { message.clone() } else { text.to_owned() };
     let details = [
-        (!message.is_empty()).then(|| message.to_owned()),
+        (!text.is_empty() && !message.is_empty()).then_some(message.clone()),
         (!code.is_empty()).then(|| format!("Code: {code}")),
         error["param"].as_str().map(|param| format!("Parameter: {param}")),
+        sent.map(|sent| format!("ChatGPT sent: {sent}")),
         status.map(|status| format!("HTTP {status}")),
         request.map(|request| format!("Request: {request}")),
     ];
     let details: Vec<String> = details.into_iter().flatten().collect();
-    failure(kind, &format!("{text}\n{}", details.join("\n")))
+    failure(kind, &format!("{first}\n{}", details.join("\n")))
+}
+
+/// An identifier of OpenAI's as the log, which a bug report sends, takes it: bare, as the log hides quoted text, and
+/// only when it is one, so no text, path or secret gets there this way.
+fn logged(value: &str) -> &str {
+    let identifier = value.len() <= 64 && value.bytes().all(|c| c.is_ascii_alphanumeric() || b"_.[]-".contains(&c));
+    match value {
+        "" => "none",
+        _ if identifier => value,
+        _ => "other",
+    }
 }
 
 fn http() -> ureq::Agent {

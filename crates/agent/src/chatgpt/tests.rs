@@ -54,8 +54,9 @@ impl Server {
                 reader.read_exact(&mut body).unwrap();
                 recorded.lock().unwrap().push(serde_json::from_slice(&body).unwrap());
                 let (status, body) = replies.next().expect("unexpected request");
-                let headers =
-                    format!("HTTP/1.1 {status} Test\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n");
+                let headers = format!(
+                    "HTTP/1.1 {status} Test\r\nContent-Type: text/event-stream\r\nx-request-id: req-test\r\nConnection: close\r\n\r\n"
+                );
                 socket.write_all(headers.as_bytes()).unwrap();
                 if let Some(release) = wait.lock().unwrap().take() {
                     let (first, rest) = body.split_once("\n\n").unwrap();
@@ -414,7 +415,9 @@ fn another_hosted_tool_ends_the_turn() {
 
 #[test]
 fn usage_limits_preserve_prior_history() {
-    for code in ["subscription_sharing_usage_limit_exceeded", "subscription_sharing_usage_unavailable"] {
+    for code in
+        ["subscription_sharing_usage_limit_exceeded", "subscription_sharing_usage_unavailable", "usage_limit_reached"]
+    {
         for streaming in [true, false] {
             let problem = json!({"code": code, "message": format!("Private detail: {code}")});
             let reply = if streaming {
@@ -434,6 +437,62 @@ fn usage_limits_preserve_prior_history() {
             assert!(!detail.contains("Private detail"));
             assert_eq!(*f.history.lock().unwrap(), vec![message()]);
         }
+    }
+}
+
+#[test]
+fn streamed_errors_say_why_and_what_next() {
+    let problem = json!({"type": "invalid_request_error", "code": "invalid_prompt", "message": "Invalid prompt:\nthe input is malformed.", "param": "input"});
+    // OpenAI's own clients read the problem from a nested `error`; the API reference puts it on the event.
+    let mut flat = problem.clone();
+    flat["type"] = json!("error");
+    for event in [json!({"type": "error", "sequence_number": 2, "error": problem}), flat] {
+        let server = Server::new(vec![sse(vec![event])]);
+        let f = Fixture::start(&server, tool_reply(), None, None, vec![]);
+        let events = f.finish();
+        let message = error(&events[0], ErrorCode::AgentFailed);
+        assert_eq!(
+            message,
+            "Invalid prompt: the input is malformed.\nCode: invalid_prompt\nParameter: input\nRequest: req-test"
+        );
+    }
+
+    let limit =
+        json!({"type": "error", "error": {"code": "subscription_sharing_usage_limit_exceeded", "message": "Limit"}});
+    let server = Server::new(vec![sse(vec![delta("Partial"), limit])]);
+    let f = Fixture::start(&server, tool_reply(), None, None, vec![message()]);
+    let events = f.finish();
+    assert_eq!(error(&events[1], ErrorCode::UsageLimit), LIMIT);
+    assert_eq!(*f.history.lock().unwrap(), vec![message()]);
+
+    // Past the context window after a round of tools: no message can go on in this chat.
+    let long = json!({"type": "error", "error": {"code": "context_length_exceeded", "message": "Your input exceeds the context window of this model."}});
+    let server = Server::new(vec![sse(vec![item(call()), completed()]), sse(vec![long])]);
+    let f = Fixture::start(&server, tool_reply(), None, None, vec![]);
+    let events = f.finish();
+    assert_eq!(error(events.last().unwrap(), ErrorCode::SessionGone), TOO_LONG);
+
+    let unknown = json!({"type": "error", "error": {"type": "server_error"}});
+    let server = Server::new(vec![sse(vec![unknown])]);
+    let f = Fixture::start(&server, tool_reply(), None, None, vec![]);
+    let events = f.finish();
+    assert_eq!(
+        error(&events[0], ErrorCode::AgentFailed),
+        "ChatGPT refused the request without saying why.\nChatGPT sent: {\"error\":{\"type\":\"server_error\"},\"type\":\"error\"}\nRequest: req-test"
+    );
+}
+
+#[test]
+fn the_log_takes_only_openais_identifiers() {
+    for (value, kept) in [
+        ("context_length_exceeded", "context_length_exceeded"),
+        ("input[3].content", "input[3].content"),
+        ("", "none"),
+        ("Cut where Jana says hello", "other"),
+        ("/Users/jana/Movies/wedding.mov", "other"),
+        ("\"input\"", "other"),
+    ] {
+        assert_eq!(logged(value), kept, "{value}");
     }
 }
 
