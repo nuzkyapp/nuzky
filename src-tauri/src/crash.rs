@@ -17,14 +17,14 @@ struct Target {
     #[cfg(windows)]
     handle: usize,
     started: Instant,
-    /// This executable's file name, which has no export table to read it from.
-    #[cfg(windows)]
-    exe: String,
-    #[cfg(windows)]
+    /// Where Nuzky's own executable is loaded. A crash in it names Nuzky, never the file, which a person may rename.
     exe_base: usize,
     #[cfg(windows)]
     main_thread: u32,
 }
+
+/// What a crash in Nuzky's own executable names as its library.
+const OWN: &str = "Nuzky";
 
 static TARGET: OnceLock<Target> = OnceLock::new();
 static CRASHED: AtomicBool = AtomicBool::new(false);
@@ -38,14 +38,7 @@ pub fn install(marker: &std::fs::File) {
         #[cfg(windows)]
         handle: std::os::windows::io::AsRawHandle::as_raw_handle(marker) as usize,
         started: Instant::now(),
-        #[cfg(windows)]
-        exe: std::env::current_exe()
-            .ok()
-            .and_then(|exe| exe.file_name().map(|name| name.to_string_lossy().into_owned()))
-            .unwrap_or_else(|| "nuzky-app.exe".into()),
-        #[cfg(windows)]
-        // SAFETY: the module handle of this executable, which stays loaded.
-        exe_base: unsafe { windows_sys::Win32::System::LibraryLoader::GetModuleHandleW(std::ptr::null()) } as usize,
+        exe_base: platform::exe_base(),
         #[cfg(windows)]
         // SAFETY: takes no arguments.
         main_thread: unsafe { windows_sys::Win32::System::Threading::GetCurrentThreadId() },
@@ -76,9 +69,16 @@ impl Line {
     }
 
     fn push(&mut self, text: &str) {
-        let n = text.len().min(self.bytes.len() - 1 - self.len);
+        let mut n = text.len().min(self.bytes.len() - 1 - self.len);
+        while !text.is_char_boundary(n) {
+            n -= 1;
+        }
         self.bytes[self.len..self.len + n].copy_from_slice(&text.as_bytes()[..n]);
         self.len += n;
+    }
+
+    fn text(&self) -> &str {
+        std::str::from_utf8(&self.bytes[..self.len]).unwrap_or_default()
     }
 
     /// Text from elsewhere, kept on its line.
@@ -104,25 +104,34 @@ impl std::fmt::Write for Line {
     }
 }
 
-/// The crash, the library it happened in and how long Nuzky had run, then the thread, whose name Windows gives only
-/// in memory it allocates, which a crash in the heap may not survive.
-fn record(crash: impl FnOnce(&mut Line), place: Option<(&[u8], usize)>, thread: impl FnOnce(&mut Line)) {
+/// The crash and how long Nuzky had run, then the library it happened in and the thread. Finding the library can
+/// wait on a lock of the system's loader, which a crashed thread may hold, so it comes after what is surely known,
+/// within a limit past which the app ends rather than hangs.
+fn record(
+    crash: impl FnOnce(&mut Line),
+    place: impl FnOnce() -> Option<(Line, usize)>,
+    thread: impl FnOnce(&mut Line),
+) {
     let mut line = Line::new();
     line.push("crash: ");
     crash(&mut line);
-    if let Some((name, offset)) = place {
-        line.push("\nin: ");
-        line.value(std::str::from_utf8(name).unwrap_or("a library"));
-        write!(line, " +0x{offset:x}").ok();
-    }
     if let Some(target) = TARGET.get() {
         write!(line, "\nafter: {}", target.started.elapsed().as_secs()).ok();
     }
     line.write();
-    let mut line = Line::new();
-    line.push("thread: ");
-    thread(&mut line);
-    line.write();
+    platform::within_limit(|| {
+        if let Some((name, offset)) = place() {
+            let mut line = Line::new();
+            line.push("in: ");
+            line.push(name.text());
+            write!(line, " +0x{offset:x}").ok();
+            line.write();
+        }
+        let mut line = Line::new();
+        line.push("thread: ");
+        thread(&mut line);
+        line.write();
+    });
 }
 
 /// The record a crashed Nuzky left, as a report and Help improve Nuzky tell it.
@@ -269,7 +278,7 @@ mod platform {
     use std::sync::OnceLock;
     use std::sync::atomic::Ordering;
 
-    use super::{CRASHED, Line, Target, record};
+    use super::{CRASHED, Line, OWN, TARGET, Target, record};
 
     const SIGNALS: [(c_int, &str); 6] = [
         (libc::SIGSEGV, "SIGSEGV"),
@@ -286,6 +295,25 @@ mod platform {
     pub fn write(target: &Target, bytes: &[u8]) {
         // SAFETY: write is async-signal-safe and the file stays open while the app runs.
         unsafe { libc::write(target.fd, bytes.as_ptr().cast(), bytes.len()) };
+    }
+
+    pub fn exe_base() -> usize {
+        // SAFETY: an all-zero Dl_info is valid; dladdr fills it in for a function of this executable.
+        let mut info: libc::Dl_info = unsafe { std::mem::zeroed() };
+        unsafe { libc::dladdr(exe_base as *const c_void, &mut info) };
+        info.dli_fbase as usize
+    }
+
+    /// Runs `f`, which a SIGALRM after two seconds ends together with the app.
+    pub fn within_limit(f: impl FnOnce()) {
+        // SAFETY: signal and alarm are async-signal-safe; SIGALRM's default action ends the app.
+        unsafe {
+            libc::signal(libc::SIGALRM, libc::SIG_DFL);
+            libc::alarm(2);
+        }
+        f();
+        // SAFETY: as above.
+        unsafe { libc::alarm(0) };
     }
 
     pub fn install() {
@@ -347,8 +375,7 @@ mod platform {
     unsafe fn note_signal(signal: c_int, name: &str, context: *mut c_void) {
         let kind = |line: &mut Line| line.push(name);
         // An abort's instruction is in the C library; who called it is not known here.
-        let place = (signal != libc::SIGABRT).then(|| unsafe { library_of(instruction(context)) }).flatten();
-        let place = place.as_ref().map(|(name, offset)| (&name.bytes[..name.len], *offset));
+        let place = || (signal != libc::SIGABRT).then(|| unsafe { library_of(instruction(context)) }).flatten();
         record(kind, place, |line| unsafe { thread_name(line) });
     }
 
@@ -392,7 +419,11 @@ mod platform {
         let path = unsafe { CStr::from_ptr(info.dli_fname) }.to_bytes();
         let file = path.rsplit(|b| *b == b'/').next().unwrap_or(path);
         let mut name = Line::new();
-        name.push(std::str::from_utf8(file).unwrap_or("a library"));
+        if TARGET.get().is_some_and(|target| target.exe_base == info.dli_fbase as usize) {
+            name.push(OWN);
+        } else {
+            name.value(std::str::from_utf8(file).unwrap_or("a library"));
+        }
         Some((name, address.wrapping_sub(info.dli_fbase as usize)))
     }
 
@@ -426,14 +457,15 @@ mod platform {
     use std::sync::OnceLock;
     use std::sync::atomic::Ordering;
 
-    use windows_sys::Win32::Foundation::{EXCEPTION_ACCESS_VIOLATION, LocalFree};
+    use windows_sys::Wdk::System::Threading::{NtQueryInformationThread, ThreadNameInformation};
+    use windows_sys::Win32::Foundation::{EXCEPTION_ACCESS_VIOLATION, UNICODE_STRING};
     use windows_sys::Win32::Storage::FileSystem::WriteFile;
     use windows_sys::Win32::System::Diagnostics::Debug::{
         EXCEPTION_POINTERS, LPTOP_LEVEL_EXCEPTION_FILTER, RtlPcToFileHeader, SetUnhandledExceptionFilter,
     };
-    use windows_sys::Win32::System::Threading::{GetCurrentThread, GetCurrentThreadId, GetThreadDescription};
+    use windows_sys::Win32::System::Threading::{GetCurrentThread, GetCurrentThreadId};
 
-    use super::{CRASHED, Line, TARGET, Target, record};
+    use super::{CRASHED, Line, OWN, TARGET, Target, record};
 
     const EXCEPTION_CONTINUE_SEARCH: i32 = 0;
     const SIGABRT: i32 = 22;
@@ -451,6 +483,17 @@ mod platform {
         unsafe {
             WriteFile(target.handle as _, bytes.as_ptr(), bytes.len() as u32, &mut written, std::ptr::null_mut())
         };
+    }
+
+    pub fn exe_base() -> usize {
+        // SAFETY: the module handle of this executable, which stays loaded.
+        unsafe { windows_sys::Win32::System::LibraryLoader::GetModuleHandleW(std::ptr::null()) as usize }
+    }
+
+    /// Runs `f`. Windows looks the library up the way it did to dispatch the exception, and the thread's name is read
+    /// into the stack, so nothing here waits on the heap.
+    pub fn within_limit(f: impl FnOnce()) {
+        f();
     }
 
     pub fn install() {
@@ -475,7 +518,7 @@ mod platform {
 
     extern "C" fn on_abort(_: i32) {
         if !CRASHED.swap(true, Ordering::AcqRel) {
-            record(|line| line.push("abort"), None, |line| unsafe { thread_name(line) });
+            record(|line| line.push("abort"), || None, |line| unsafe { thread_name(line) });
         }
     }
 
@@ -494,7 +537,6 @@ mod platform {
                 0xC0000094 => line.push("integer division by zero"),
                 0xC0000006 => line.push("a file it was reading became unreadable"),
                 0xC0000374 => line.push("heap corruption"),
-                0xC0000409 => line.push("stack buffer overrun"),
                 0xC06D007E => line.push("a library it needed did not load"),
                 0xC06D007F => line.push("a function it needed is missing from a library"),
                 0xE06D7363 => line.push("an unhandled C++ exception"),
@@ -506,9 +548,7 @@ mod platform {
             },
         };
         let address = exception.ExceptionAddress as usize;
-        let place = unsafe { library_of(address) };
-        let place = place.as_ref().map(|(name, offset)| (&name.bytes[..name.len], *offset));
-        record(kind, place, |line| unsafe { thread_name(line) });
+        record(kind, || unsafe { library_of(address) }, |line| unsafe { thread_name(line) });
     }
 
     /// The file name of the module `address` is in, from its export table, and how far into it. The lookup is the one
@@ -523,7 +563,7 @@ mod platform {
         let base = base as usize;
         let mut name = Line::new();
         if base == target.exe_base {
-            name.push(&target.exe);
+            name.push(OWN);
         } else if let Some(exported) =
             unsafe { export_name(base as *const u8) }.and_then(|n| std::str::from_utf8(n).ok())
         {
@@ -557,13 +597,27 @@ mod platform {
         (len > 0).then(|| unsafe { std::slice::from_raw_parts(name, len) })
     }
 
+    /// The thread's description, which Rust sets for the threads it starts. Windows writes it into `buffer` as a
+    /// UNICODE_STRING followed by its text; GetThreadDescription would copy it into memory from the heap.
     unsafe fn thread_name(line: &mut Line) {
-        let mut name: *mut u16 = std::ptr::null_mut();
-        // SAFETY: Windows allocates the description, freed below.
-        let described = unsafe { GetThreadDescription(GetCurrentThread(), &mut name) } >= 0 && !name.is_null();
-        let len = if described { (0..64).take_while(|&i| unsafe { *name.add(i) } != 0).count() } else { 0 };
-        if len > 0 {
-            let units = unsafe { std::slice::from_raw_parts(name, len) };
+        let mut buffer = [0u64; 48];
+        let mut length = 0;
+        // SAFETY: the buffer is aligned for a UNICODE_STRING and its size is given.
+        let read = unsafe {
+            NtQueryInformationThread(
+                GetCurrentThread(),
+                ThreadNameInformation,
+                buffer.as_mut_ptr().cast(),
+                std::mem::size_of_val(&buffer) as u32,
+                &mut length,
+            )
+        } >= 0;
+        // SAFETY: on success the buffer starts with the UNICODE_STRING, whose text lies in the rest of it.
+        let name = read.then(|| unsafe { *buffer.as_ptr().cast::<UNICODE_STRING>() });
+        let units = name
+            .filter(|name| !name.Buffer.is_null() && name.Length > 0)
+            .map(|name| unsafe { std::slice::from_raw_parts(name.Buffer, usize::from(name.Length / 2)) });
+        if let Some(units) = units {
             for c in char::decode_utf16(units.iter().copied()) {
                 let mut utf8 = [0; 4];
                 line.value(c.unwrap_or('?').encode_utf8(&mut utf8));
@@ -572,9 +626,6 @@ mod platform {
             line.push("main");
         } else {
             line.push("unnamed");
-        }
-        if described {
-            unsafe { LocalFree(name as _) };
         }
     }
 }

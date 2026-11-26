@@ -14,7 +14,9 @@ pub fn on_abort(hook: fn(&str)) {
 unsafe extern "C" fn aborting(message: *const std::ffi::c_char) {
     if let (Some(hook), false) = (ON_ABORT.get(), message.is_null()) {
         // SAFETY: ggml passes its message as a C string on its stack.
-        hook(&unsafe { std::ffi::CStr::from_ptr(message) }.to_string_lossy());
+        let message = unsafe { std::ffi::CStr::from_ptr(message) }.to_string_lossy();
+        eprintln!("{message}");
+        hook(&message);
     }
 }
 
@@ -27,11 +29,14 @@ pub(crate) fn ready() -> Result<()> {
             return Err(anyhow::anyhow!("Speech recognition cannot start: {reason}"));
         }
     }
+    // Only where a hook listens, such as the app; elsewhere ggml prints its message and backtrace itself.
     static WATCHED: std::sync::Once = std::sync::Once::new();
-    // SAFETY: ggml keeps the function, which lives as long as the app.
-    WATCHED.call_once(|| unsafe {
-        whisper_rs::whisper_rs_sys::ggml_set_abort_callback(Some(aborting));
-    });
+    if ON_ABORT.get().is_some() {
+        // SAFETY: ggml keeps the function, which lives as long as the app.
+        WATCHED.call_once(|| unsafe {
+            whisper_rs::whisper_rs_sys::ggml_set_abort_callback(Some(aborting));
+        });
+    }
     Ok(())
 }
 
