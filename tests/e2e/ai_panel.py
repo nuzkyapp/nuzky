@@ -1400,6 +1400,10 @@ return p && {text: [...p.parentElement.children].map((e) => e.textContent),
              links: [...p.parentElement.querySelectorAll('button')].map((b) => [b.textContent, b.title, [b, ...b.querySelectorAll('*')].map((e) => getComputedStyle(e).color)])};"""
 
 
+ODD = """const p = [...document.querySelectorAll('aside[aria-label=AI] p')].find((p) => p.textContent.startsWith('Sdílená'));
+return p && {text: p.textContent, links: [...p.querySelectorAll('button')].map((b) => [b.textContent, b.title])};"""
+
+
 @flow('ai_panel_links', "A file the agent links in its answer shows as the link's text, which shows the file in its folder, "
       'and a missing one says so', before=setup)
 def ai_panel_links(r):
@@ -1420,3 +1424,9 @@ def ai_panel_links(r):
     r.s.run("[...document.querySelectorAll('aside[aria-label=AI] button')].find((b) => b.textContent === 'v3').click()")
     r.check("a link to a file that is gone says so in a toast and opens nothing",
             wait(lambda: "Can't find gone.png. Ask the AI where it saved it." in r.errors(), 5), r.state()['toasts'])
+    # Windows reaches a network share for a path that starts with two slashes, so such a link only shows its address.
+    send(r, 'Show me the odd links')
+    odd = wait(lambda: idle(r) and r.s.run(ODD), 15)
+    r.check('a link to a network share shows its address and is no button, and brackets in a file name stay in its path',
+            odd == {'text': 'Sdílená: share (//server/share/cover.png), remote (file://server/share/cover.png), kopie.',
+                    'links': [['kopie', '/tmp/Astra(v4).png']]}, odd)

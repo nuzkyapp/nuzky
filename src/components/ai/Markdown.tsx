@@ -78,15 +78,18 @@ export function Markdown({ text }: { text: string }) {
 
 /** The file a link's destination names on this computer: an absolute path, in angle brackets when it has spaces, or a file:// URL. */
 function localFile(dest: string): string | null {
-  const plain = dest.startsWith("<") ? dest.slice(1, -1) : dest;
-  if (plain.startsWith("file://")) {
+  let path = dest.replace(/^<(.*)>$/, "$1");
+  if (path.startsWith("file:")) {
     try {
-      return decodeURIComponent(new URL(plain).pathname).replace(/^\/([A-Za-z]:)/, "$1");
+      const url = new URL(path);
+      if (url.hostname && url.hostname !== "localhost") return null;
+      path = decodeURIComponent(url.pathname).replace(/^\/([A-Za-z]:)/, "$1");
     } catch {
       return null;
     }
   }
-  return /^(\/|[A-Za-z]:[\\/])/.test(plain) ? plain : null;
+  // Two slashes at the start are a network share on Windows, which revealing would reach.
+  return /^(\/(?![\\/])|[A-Za-z]:[\\/])/.test(path) ? path : null;
 }
 
 function showFile(path: string) {
@@ -97,12 +100,12 @@ function showFile(path: string) {
 
 function inline(text: string): ReactNode[] {
   const out: ReactNode[] = [];
-  const re = /(\[[^\]\n]+\]\((?:<[^>\n]+>|[^)\n]+)\)|`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|\*[^*\s][^*]*\*|_[^_\s][^_]*_)/g;
+  const re = /(\[[^\]\n]+\]\((?:<[^>\n]+>|(?:[^()\n]|\([^()\n]*\))+)\)|`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|\*[^*\s][^*]*\*|_[^_\s][^_]*_)/g;
   let last = 0;
   for (const m of text.matchAll(re)) {
     if (m.index! > last) out.push(text.slice(last, m.index));
     const t = m[0];
-    const link = t.startsWith("[") ? /^\[(.+)\]\((.+)\)$/.exec(t)! : null;
+    const link = t.startsWith("[") ? /^\[([^\]\n]+)\]\((.+)\)$/.exec(t)! : null;
     const file = link && localFile(link[2]);
     if (link && file)
       out.push(

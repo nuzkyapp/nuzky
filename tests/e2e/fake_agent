@@ -17,6 +17,7 @@ stream-json user messages from stdin while it works; Codex and OpenCode read one
              with inspect_image, puts the logo in from 2 s for 3 s and recolours the Captions track in one run
   "numbered list"  answers with loose Markdown lists: numbered from 1, numbered on from 4, and bullets
   "link the file"  answers with Markdown links to a file with spaces in its name, to a missing file and to a web page
+  "odd links"  answers with links to a network share, as a path and as a file:// URL, and to a file with brackets in its name
   "work as reels"  (Find reels) proposes four reels of at least 15 s from the transcript
   "youtube chapters"  (Suggest chapters) proposes three chapters at the sentences nearest the start, a third and two
              thirds of the transcript, and answers with the list Nuzky timed
@@ -792,6 +793,8 @@ elif 'link the file' in message:
     # As Claude links a file it saved: the absolute path, in angle brackets when it has spaces.
     say(f'Na náhledu teď stojí "Limit ti dojde o 40 % rychleji".\n\n[Stáhnout aktualizovaný náhled v PNG](<{LOG / "Astra - náhled v4.png"}>)\n\n'
         f'Starší verze: [**v3**]({LOG / "gone.png"})\n\nWeb: [Nuzky](https://nuzky.app).')
+elif 'odd links' in message:
+    say('Sdílená: [share](//server/share/cover.png), [remote](file://server/share/cover.png), [kopie](/tmp/Astra(v4).png).')
 elif 'numbered list' in message:
     # Loose lists as Claude and Codex write them: a blank line between items, bold first words, a wrapped line, a command under an item.
     say('Here is what went wrong:\n\n'

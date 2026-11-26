@@ -568,8 +568,10 @@ function lastLine(items) {
 /** An answer's text without its Markdown: a file on the computer by its link's text only, a web link with its address. */
 function plain(text) {
   return text
-    .replace(/\[([^\]\n]+)\]\((?:<[^>\n]+>|\/[^)\n]*|file:[^)\n]*|[A-Za-z]:[\\/][^)\n]*)\)/g, "$1")
-    .replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, "$1 ($2)")
+    .replace(/\[([^\]\n]+)\]\((<[^>\n]+>|(?:[^()\n]|\([^()\n]*\))+)\)/g, (_, label, dest) => {
+      const address = dest.replace(/^<(.*)>$/, "$1");
+      return /^(file:|\/|[A-Za-z]:[\\/])/.test(address) ? label : `${label} (${address})`;
+    })
     .replace(/\*\*(.+?)\*\*/g, "$1")
     .replace(/`([^`]+)`/g, "$1");
 }
