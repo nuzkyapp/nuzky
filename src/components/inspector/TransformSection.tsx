@@ -62,7 +62,7 @@ const CURVES: { id: Ease; label: string }[] = [
  * How the values move from the keyframe at or before the playhead on to the next one: a menu that names the two
  * keyframes, so it is clear which part of the clip it changes.
  */
-function CurveMenu({ clip, index, last }: { clip: Clip; index: number; /** The playhead is on the last keyframe. */ last: boolean }) {
+function CurveMenu({ clip, index: at, last }: { clip: Clip; index: number; /** The playhead is on the last keyframe. */ last: boolean }) {
   const button = useRef<HTMLButtonElement>(null);
   // The keyframe the menu was opened for, so a playhead that moves on while it is open cannot change another one.
   const [menu, setMenu] = useState<{ x: number; y: number; keyboard: boolean; tUs: number } | null>(null);
@@ -72,6 +72,8 @@ function CurveMenu({ clip, index, last }: { clip: Clip; index: number; /** The p
       const i = c.keyframes.findIndex((k) => k.tUs === tUs);
       return i < 0 || i >= c.keyframes.length - 1 ? null : { type: "setKeyframes", clipId: c.id, keyframes: c.keyframes.map((k, j) => (j === i ? { ...k, ease } : k)) };
     });
+  // While the menu is open it stays on the keyframes it was opened for, though the playhead may move on.
+  const index = menu ? clip.keyframes.findIndex((k) => k.tUs === menu.tUs) : at;
   const ease = index >= 0 ? CURVES.find((c) => c.id === clip.keyframes[index].ease) : undefined;
   const why = last ? "No keyframe after this one to curve to" : "Move the playhead to a keyframe or between two";
   return (

@@ -14,6 +14,7 @@ export function useFrameStream(url: string, canvas: React.RefObject<HTMLCanvasEl
     let latest: ArrayBuffer | null = null;
     let raf = 0;
     let retry = 0;
+    let painted = 0;
 
     const draw = () => {
       raf = 0;
@@ -35,6 +36,8 @@ export function useFrameStream(url: string, canvas: React.RefObject<HTMLCanvasEl
       el.getContext("2d", { alpha: false })?.putImageData(new ImageData(new Uint8ClampedArray(buf, HEADER, w * h * 4), w, h), 0, 0);
       // The time of the frame on screen. After a seek the previous frame stays a moment; the UI flows wait for this.
       el.dataset.us = String(t);
+      // How many frames this canvas has shown, so a frame drawn after a change can be told from one drawn before it.
+      el.dataset.n = String(++painted);
       frame.current(t, playing);
     };
 

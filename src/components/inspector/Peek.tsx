@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { usePreview } from "../../lib/preview";
-import { US } from "../../lib/time";
 import { useEditor } from "../../lib/store";
 import type { Clip } from "../../lib/types";
 import { useLockReason } from "../ui";
@@ -16,14 +15,19 @@ const STEP_KEYS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "P
 /** The preview's canvas, which shows the frame the engine drew last, with the time of that frame. */
 const previewCanvas = () => document.querySelector<HTMLCanvasElement>("canvas[data-preview-frame]");
 
+/** The last frame the canvas showed split by Compare; frames after it show the whole picture. */
+let splitUntil = 0;
+usePreview.subscribe((s, prev) => {
+  if (prev.compare !== null && s.compare === null) splitUntil = Number(previewCanvas()?.dataset.n ?? 0);
+});
+
 /**
  * Whether the preview shows the paused frame at the playhead, as Before needs: not while playing, comparing (the
- * canvas is split then) or before the frame of a new playhead position has arrived.
+ * canvas is split then, and until the next frame after it), or before the frame of a new playhead position arrives.
  */
 function still(source: HTMLCanvasElement) {
-  const { playing, timeUs, snap } = useEditor.getState();
-  const frame = US / (snap?.project.canvas.fps || 30);
-  return !playing && usePreview.getState().compare === null && Math.abs(Number(source.dataset.us) - timeUs) < frame;
+  const { playing, timeUs } = useEditor.getState();
+  return !playing && usePreview.getState().compare === null && Number(source.dataset.n) > splitUntil && Number(source.dataset.us) === timeUs;
 }
 
 /**
