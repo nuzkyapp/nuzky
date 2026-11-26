@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { AlertTriangle, Check, ExternalLink } from "lucide-react";
 import { api, errorText, plainError } from "../../../lib/api";
 import { pickOneVideo } from "../../../lib/library";
 import { useSetup } from "../../../lib/setup";
 import { useEditor } from "../../../lib/store";
 import { useTour } from "../../../lib/tour";
+import { openWebPage } from "../../../lib/webPages";
 import type { AgentKind, AgentStatus } from "../../../lib/types";
 import { Button } from "../../ui";
 import { StepActions } from "../StepActions";
@@ -205,7 +205,7 @@ function AgentCard({
           </span>
         </div>
         {status && !status.installed && (
-          <button type="button" onClick={() => void openUrl(GUIDE[agent])} className="-mr-2 flex h-7 shrink-0 items-center gap-1 rounded-lg px-2 text-[12px] font-medium text-accent hover:bg-white/[.06]">
+          <button type="button" onClick={() => openWebPage(GUIDE[agent])} className="-mr-2 flex h-7 shrink-0 items-center gap-1 rounded-lg px-2 text-[12px] font-medium text-accent hover:bg-white/[.06]">
             Install guide <ExternalLink size={12} />
           </button>
         )}

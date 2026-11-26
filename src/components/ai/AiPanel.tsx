@@ -34,7 +34,6 @@ import {
   Undo2,
   X,
 } from "lucide-react";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { open as openFiles } from "@tauri-apps/plugin-dialog";
 import {
   agentName,
@@ -66,7 +65,7 @@ import {
 } from "../../lib/agent";
 import { demoBlocked, sendDemo, stopDemo } from "../../lib/demo";
 import { DOCK_LABELS, TOO_NARROW, useDock, useDockLayout, type DockMode } from "../../lib/dock";
-import { api } from "../../lib/api";
+import { api, type WebPage } from "../../lib/api";
 import { copyText } from "../../lib/clipboard";
 import { FINISH_DRAFT } from "../../lib/capcut";
 import { downloadModels, useCover } from "../../lib/cover";
@@ -80,18 +79,15 @@ import { MODEL_QUESTION, answerModelQuestion } from "../ModelQuestionDialog";
 import { Markdown } from "./Markdown";
 import { IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from "../panel/assets";
 import { ChatGptLogo } from "../ChatGptLogo";
-import { ContinueButton, USAGE_PAGE } from "../settings/ChatGptSection";
+import { ContinueButton } from "../settings/ChatGptSection";
+import { openWebPage } from "../../lib/webPages";
 import { continueWithChatGpt, openChatGpt, planReady, useChatGpt } from "../../lib/chatgpt";
 import { EFFORTS, chooseEffort, chooseModel, effortLabel, loadModels, ownDefault, resolved, useModels } from "../../lib/models";
 import { moveFloatBy, startMove } from "./AiDock";
 import { GeminiGuide } from "./GeminiGuide";
 import { useKeyLabels } from "../../lib/keys";
 
-const INSTALL: Record<CliAgentId, string> = {
-  claude: "https://docs.claude.com/en/docs/claude-code/setup",
-  codex: "https://developers.openai.com/codex/cli",
-  opencode: "https://opencode.ai/docs",
-};
+const INSTALL: Record<CliAgentId, WebPage> = { claude: "claudeCodeSetup", codex: "codexSetup", opencode: "openCodeSetup" };
 const COMMAND: Record<CliAgentId, string> = { claude: "claude", codex: "codex", opencode: "opencode" };
 
 /** A small menu under a trigger (`up`: above it): ↑/↓ move, Esc closes back to the trigger, no key reaches the editor. */
@@ -566,7 +562,7 @@ function ErrorNotice({ code, message, retryText, retryAttachments, last = false 
               <ChatGptLogo size={16} className="text-warn" />,
               "ChatGPT can't run on your plan right now.",
               kept,
-              <>{button(<>Manage usage <ExternalLink size={12} /></>, () => void openUrl(USAGE_PAGE))}{retry}{switchTo}</>,
+              <>{button(<>Manage usage <ExternalLink size={12} /></>, () => openWebPage("chatGptUsage"))}{retry}{switchTo}</>,
             ]
           : code === "PLAN_UNAVAILABLE"
             ? [<AlertTriangle size={16} className="text-warn" />, "Nuzky can't use your ChatGPT plan.", kept, <>{button("ChatGPT account…", openChatGpt)}{switchTo}</>]
@@ -580,7 +576,7 @@ function ErrorNotice({ code, message, retryText, retryAttachments, last = false 
               <AlertCircle size={16} className="text-danger" />,
               `${name} isn't installed.`,
               <>Install it and sign in from a terminal. Your message is still here.</>,
-              <Button className="h-7 px-2.5 text-[12px]" onClick={() => void openUrl(INSTALL[agent as CliAgentId])}>
+              <Button className="h-7 px-2.5 text-[12px]" onClick={() => openWebPage(INSTALL[agent as CliAgentId])}>
                 Install <ExternalLink size={12} />
               </Button>,
             ]
@@ -660,7 +656,7 @@ function ChatGptSignIn() {
           {agents.map((a) => (
             <div key={a.id} className="flex h-9 items-center justify-between border-t border-white/[.07] text-[13px]">
               {a.name}
-              <Button variant="ghost" className="h-7 px-2 text-[12px] text-accent" onClick={() => void openUrl(INSTALL[a.id])}>
+              <Button variant="ghost" className="h-7 px-2 text-[12px] text-accent" onClick={() => openWebPage(INSTALL[a.id])}>
                 Install <ExternalLink size={12} />
               </Button>
             </div>
@@ -1304,7 +1300,7 @@ function Composer() {
           <ChatGptLogo size={12} className="shrink-0" />
           Using ChatGPT plan
           <span aria-hidden>·</span>
-          <button type="button" title="Review and limit what Nuzky uses, in ChatGPT's settings" onClick={() => void openUrl(USAGE_PAGE)} className="text-accent hover:underline">
+          <button type="button" title="Review and limit what Nuzky uses, in ChatGPT's settings" onClick={() => openWebPage("chatGptUsage")} className="text-accent hover:underline">
             Manage usage
           </button>
         </div>

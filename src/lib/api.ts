@@ -12,6 +12,7 @@ import type { AccountProvider, AccountStatus, AgentAccess, ImportedKeys, AgentCo
 type Epoch = string | undefined;
 
 export type FeedbackKind = "idea" | "message";
+export type WebPage = "chatGptUsage" | "claudeCodeSetup" | "codexSetup" | "openCodeSetup" | "antigravitySetup";
 
 export const api = {
   setUiContext: (selection: string[], playheadUs: number) => invoke<void>("set_ui_context", { selection, playheadUs: Math.round(playheadUs) }),
@@ -337,6 +338,8 @@ export const api = {
   openReleasePage: () => invoke<void>("open_release_page"),
   /** The idea form with this version filled in, or the author's X profile, in the browser. */
   openFeedback: (kind: FeedbackKind) => invoke<void>("open_feedback", { kind }),
+  /** Rejects with the page's address when the browser does not open. */
+  openWebPage: (page: WebPage) => invoke<void>("open_web_page", { page }),
   /** The bug report: version, system, graphics, the project's files, the last actions and the end of the log, without file names, folders, typed text or secrets. */
   diagnostics: () => invoke<string>("diagnostics"),
   /** Saves the report in the logs folder and opens the bug report form with `description` and a summary filled in; the saved file's name, and why the browser did not open. */

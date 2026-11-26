@@ -1,11 +1,10 @@
 import { useEffect, useRef } from "react";
 import { AlertCircle, AlertTriangle, Check, ExternalLink, Loader2 } from "lucide-react";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { cancelSignIn, check, signIn, signOut, useChatGpt } from "../../lib/chatgpt";
+import { openWebPage } from "../../lib/webPages";
 import { ChatGptLogo } from "../ChatGptLogo";
 import { Button } from "../ui";
 
-export const USAGE_PAGE = "https://chatgpt.com/settings/usage";
 const CARD = "rounded-xl bg-white/[.055] shadow-[inset_0_0_0_1px_rgb(255_255_255/.06)]";
 
 /** OpenAI's approved Continue with ChatGPT button, in its white format. */
@@ -94,7 +93,7 @@ function SignedIn({ email, plan }: { email: string | null; plan: boolean }) {
         <Waiting />
       ) : plan ? (
         <div className="flex gap-2">
-          <Button pill onClick={() => void openUrl(USAGE_PAGE)}>
+          <Button pill onClick={() => openWebPage("chatGptUsage")}>
             Manage usage <ExternalLink size={12} />
           </Button>
           {signOutButton}
@@ -159,7 +158,7 @@ export function ChatGptSection() {
               ) : (
                 <span>
                   Signed out here, but Nuzky couldn't reach ChatGPT to end the sign-in there. You can disconnect Nuzky in{" "}
-                  <button type="button" onClick={() => void openUrl(USAGE_PAGE)} className="text-accent hover:underline">
+                  <button type="button" onClick={() => openWebPage("chatGptUsage")} className="text-accent hover:underline">
                     ChatGPT settings
                   </button>
                   .

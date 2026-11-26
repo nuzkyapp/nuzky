@@ -93,6 +93,7 @@ pub const COMMANDS: &[&str] = &[
     "open_release_page",
     "open_sample",
     "open_sound_page",
+    "open_web_page",
     "pause",
     "peek_history",
     "play",

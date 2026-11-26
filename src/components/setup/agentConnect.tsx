@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, Check, Copy, Loader2 } from "lucide-react";
-import { api, errorText } from "../../lib/api";
+import { api, errorText, type WebPage } from "../../lib/api";
 import { copyText } from "../../lib/clipboard";
 import { useEditor } from "../../lib/store";
 import type { AgentKind } from "../../lib/types";
@@ -14,11 +14,7 @@ export const RETURN = MAC ? "Return" : "Enter";
 /** A terminal on Linux pastes with Ctrl+Shift+V, which someone new to it would not guess. */
 export const PASTE = MAC ? "paste this" : WINDOWS ? "paste this (Ctrl+V)" : "paste this (Ctrl+Shift+V)";
 
-export const GUIDE: Record<AgentKind, string> = {
-  claudeCode: "https://code.claude.com/docs/en/setup",
-  codex: "https://learn.chatgpt.com/docs/codex/cli",
-  antigravity: "https://antigravity.google/docs/getting-started",
-};
+export const GUIDE: Record<AgentKind, WebPage> = { claudeCode: "claudeCodeSetup", codex: "codexSetup", antigravity: "antigravitySetup" };
 /** The official commands for macOS and Linux, and for PowerShell on Windows, in the parts a narrow column may wrap between. */
 export const INSTALL: Record<AgentKind, string[]> = WINDOWS
   ? {
