@@ -82,6 +82,13 @@ def shown(r, name, size):
     return preview_crop(r.work / f'{name}.png', preview_rect(r)).resize(size)
 
 
+def clip_part(picture):
+    """The middle of the wide clip in the 360×640 portrait frame, without the black bars above and below it."""
+    from PIL import Image
+    picture = Image.open(picture) if isinstance(picture, Path) else picture
+    return picture.crop((0, 240, 360, 400))
+
+
 @flow('slow_decoding', 'A paused frame that takes longer than 8 s to decode, here because the app is suspended in the '
       'middle of it as on a sleeping laptop, still shows once decoded, without an error')
 def slow_decoding(r):
@@ -93,7 +100,8 @@ def slow_decoding(r):
     reference = r.work / 'reference.png'
     subprocess.run([str(CLI), 'frame', str(r.saved_project()), str(TARGET_US / 1e6), str(reference), '360'], env=r.env,
                    check=True, capture_output=True)
-    first = shown(r, 'first-frame', (360, 640))
+    first = clip_part(shown(r, 'first-frame', (360, 640)))
+    reference = clip_part(reference)
     r.check('the preview shows the clip before the jump, nothing like the frame at 9.9 s',
             changed_share(first, reference) > 0.5, f'{changed_share(first, reference):.2%} of pixels differ')
 
@@ -106,8 +114,8 @@ def slow_decoding(r):
     r.check('the app started decoding the jump to 9.9 s', decoding, f'{cpu_seconds(pid) - idle:.2f} s of CPU')
     suspended(pid, 10)
 
-    drawn = wait(lambda: changed_share(shown(r, 'after-pause', (360, 640)), reference) < 0.02, 20, 0.5)
-    changed = changed_share(shown(r, 'after-pause', (360, 640)), reference)
+    drawn = wait(lambda: changed_share(clip_part(shown(r, 'after-pause', (360, 640))), reference) < 0.02, 20, 0.5)
+    changed = changed_share(clip_part(shown(r, 'after-pause', (360, 640))), reference)
     r.check('once the app runs again the preview shows the frame at 9.9 s, as export draws it', drawn,
             f'{changed:.2%} of pixels differ')
     r.check('the preview shows no error', r.s.run('return window.__nuzky.store.getState().engineError') is None,

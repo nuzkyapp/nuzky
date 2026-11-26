@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
 
@@ -655,6 +655,13 @@ impl Renderer {
                     )));
                 }
                 draws.push(Draw::Layer(layer));
+            }
+        }
+        // The decoders of this frame stay in use however long another of its layers took to decode.
+        let drawn = Instant::now();
+        for ((clip_id, _), worker) in &mut self.workers {
+            if self.needed.contains(clip_id) {
+                worker.last_used = drawn;
             }
         }
         if playing {
