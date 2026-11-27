@@ -15,6 +15,7 @@ const useWindow = create(() => ({
   url: "",
   playing: false,
   timeUs: 0,
+  generation: 0,
   // No frame box until the window knows the project's shape, so it never shows the wrong one first.
   project: { durationUs: 0, width: 0, height: 0 } as PreviewProject,
   engineError: null as string | null,
@@ -31,8 +32,9 @@ async function toggleFull() {
 }
 
 /** The playing frames carry their time; a frame drawn just before a pause can arrive after it. */
-const followFrames = (t: number, playing: boolean) => {
-  if (playing && useWindow.getState().playing) useWindow.setState({ timeUs: t });
+const followFrames = (t: number, playing: boolean, generation: number) => {
+  const s = useWindow.getState();
+  if (playing && s.playing && generation >= s.generation) useWindow.setState({ timeUs: t });
 };
 
 function Timecode() {
@@ -94,10 +96,10 @@ export default function PreviewWindow() {
 
   useEffect(() => {
     void api.previewWindowBoot().then((boot) =>
-      useWindow.setState({ url: boot.previewUrl, playing: boot.transport.playing, timeUs: boot.transport.tUs, project: boot.project, engineError: boot.engineError }),
+      useWindow.setState({ url: boot.previewUrl, playing: boot.transport.playing, timeUs: boot.transport.tUs, generation: boot.transport.generation, project: boot.project, engineError: boot.engineError }),
     );
     const offs = [
-      listen<Transport>("transport", (e) => useWindow.setState({ playing: e.payload.playing, timeUs: e.payload.tUs })),
+      listen<Transport>("transport", (e) => useWindow.setState({ playing: e.payload.playing, timeUs: e.payload.tUs, generation: e.payload.generation })),
       listen<string | null>("engine-error", (e) => useWindow.setState({ engineError: e.payload })),
       listen<PreviewProject>("preview-window-project", (e) => useWindow.setState({ project: e.payload })),
       win.onResized(async () => useWindow.setState({ full: await win.isFullscreen() })),

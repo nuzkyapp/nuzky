@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
+use nuzky_engine::export::frame_time_us;
 use nuzky_engine::{DecodeStalled, FramePending, Pending, Project, Renderer, Wait};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
@@ -44,6 +45,8 @@ pub struct Transport {
     pub t_us: i64,
     /// The speed it plays at, below zero backwards; 1 when paused.
     pub rate: f64,
+    /// Counts the changes of playing and position; frames carry it, so a frame drawn before a change can be told.
+    pub generation: u32,
 }
 
 /// Where the preview thread reports playback and errors: the webview in the app.
@@ -57,7 +60,7 @@ trait Events: Send + 'static {
 
 impl Default for Transport {
     fn default() -> Self {
-        Self { playing: false, t_us: 0, rate: 1.0 }
+        Self { playing: false, t_us: 0, rate: 1.0, generation: 0 }
     }
 }
 
@@ -210,6 +213,12 @@ struct State {
     /// The last paused frame was still decoding, so it is asked for again.
     decoding: bool,
     compare: Option<f32>,
+    /// The timeline time of the last frame drawn while playing, which may be ahead of the sound.
+    drawn: Option<i64>,
+    /// Microseconds since `PACE_START` minus the sound's time over the speed, smoothed over the frames drawn while
+    /// playing.
+    pace: Option<f64>,
+    generation: u32,
 }
 
 fn panic_message(panic: &(dyn std::any::Any + Send)) -> &str {
@@ -254,6 +263,9 @@ fn run<F: Frames>(
         dirty: true,
         decoding: false,
         compare: None,
+        drawn: None,
+        pace: None,
+        generation: 0,
     };
 
     let emit = |st: &State| {
@@ -261,18 +273,19 @@ fn run<F: Frames>(
             playing: st.audio.is_some(),
             t_us: st.t_us,
             rate: st.audio.as_ref().map_or(1.0, AudioOut::rate),
+            generation: st.generation,
         };
         *transport.lock().unwrap() = tr;
         events.transport(tr);
     };
 
     loop {
-        // While playing, wake up for the next frame; otherwise sleep until a message.
+        // While playing, wake up to draw the next frame a little before it is due; otherwise sleep until a message.
         let msg = if let Some(audio) = &st.audio {
-            let frame = st.project.frame_duration_us();
-            let next = ((st.t_us as f64 / frame).floor() + 1.0) * frame;
-            let now = audio.now_us();
-            let wait = Duration::from_micros((next - now as f64).clamp(0.0, 50_000.0) as u64);
+            let wait = match next_frame(&st, audio) {
+                Some((_, due)) => until(due, audio).saturating_sub(AHEAD).min(Duration::from_millis(50)),
+                None => Duration::from_millis(4),
+            };
             match rx.recv_timeout(wait) {
                 Ok(m) => Some(m),
                 Err(RecvTimeoutError::Timeout) => None,
@@ -379,19 +392,38 @@ fn run<F: Frames>(
             }
             renderer.reverse(st.audio.as_ref().is_some_and(|a| a.rate() < 0.0));
             if state_changed {
+                st.generation = st.generation.wrapping_add(1);
+                (st.drawn, st.pace) = (None, None);
                 emit(&st);
             }
 
             let playing = st.audio.is_some();
+            // Playing draws each frame once, ahead of its time, and the webview shows it when it is due.
+            let ahead = match &st.audio {
+                Some(audio) => match next_frame(&st, audio) {
+                    Some(next) if until(next.1, audio) <= AHEAD => Some(next),
+                    _ => return,
+                },
+                None => None,
+            };
+            let due = match (ahead, &st.audio) {
+                (Some((_, due_us)), Some(audio)) => due_at(&mut st.pace, audio, due_us),
+                _ => Instant::now(),
+            };
             if playing || st.dirty {
                 let (w, h) = render_size(&st.project, st.box_size, st.window_box);
+                let t_us = ahead.map_or(st.t_us, |(t, _)| t);
+                if playing {
+                    st.drawn = Some(t_us);
+                }
                 let wait = if playing { Wait::Ready } else { Wait::Within(PATIENCE) };
                 let started = Instant::now();
                 st.decoding = false;
                 renderer.compare(st.compare);
-                match renderer.frame(&st.project, last_frame_at_end(&st.project, st.t_us), w, h, wait, playing) {
+                match renderer.frame(&st.project, last_frame_at_end(&st.project, t_us), w, h, wait, playing) {
                     Ok(rgba) => {
-                        server.publish(w, h, if playing { FLAG_PLAYING } else { 0 }, st.t_us, &rgba);
+                        let flags = if playing { FLAG_PLAYING } else { 0 };
+                        server.publish(w, h, flags, t_us, due, st.generation, &rgba);
                         if renderer.skipped_effects() != skipped.as_slice() {
                             skipped = renderer.skipped_effects().to_vec();
                             events.effects_skipped(&skipped);
@@ -432,6 +464,58 @@ fn run<F: Frames>(
             emit(&st);
         }
     }
+}
+
+/// How long before a frame is due the preview draws it while playing: longer than drawing a frame usually takes, so it
+/// reaches the webview in time, and not much longer, so an edit or a seek shows soon.
+const AHEAD: Duration = Duration::from_millis(40);
+
+/// The next frame to draw while playing and when the sound reaches it, both in timeline time: the frame after the last
+/// one drawn, or the frame at the sound's time when that one is due already or nothing was drawn yet. `None` while the
+/// sound has not started moving after the first frame, and backwards after the first frame of the timeline.
+fn next_frame(st: &State, audio: &AudioOut) -> Option<(i64, i64)> {
+    let now = audio.now_us();
+    let Some(drawn) = st.drawn else { return Some((now, now)) };
+    if !audio.moving() {
+        return None;
+    }
+    let (t, due) = frame_after(drawn, st.project.canvas.fps, audio.rate() > 0.0)?;
+    Some(if (due - now) as f64 * audio.rate().signum() < 0.0 { (now, now) } else { (t, due) })
+}
+
+/// The frame after the one at `t_us`, or before it backwards, at `fps`, and when it is due. Frames are drawn at the
+/// times export draws them, so the preview shows the same pictures. Backwards the frame before is due as soon as the
+/// sound leaves the start of the one at `t_us`. `None` backwards from the first frame.
+fn frame_after(t_us: i64, fps: u32, forward: bool) -> Option<(i64, i64)> {
+    let fps = fps.max(1);
+    let at = |index: i64| frame_time_us(index as u64, fps);
+    let index = ((2 * t_us + 1) * i64::from(fps) - 1).div_euclid(2_000_000);
+    match forward {
+        true => Some((at(index + 1), at(index + 1))),
+        false if index > 0 => Some((at(index - 1), at(index))),
+        false => None,
+    }
+}
+
+/// How long until the sound reaches timeline time `t_us`.
+fn until(t_us: i64, audio: &AudioOut) -> Duration {
+    Duration::from_micros(((t_us - audio.now_us()) as f64 / audio.rate()).max(0.0) as u64)
+}
+
+static PACE_START: std::sync::LazyLock<Instant> = std::sync::LazyLock::new(Instant::now);
+
+/// When the sound reaches timeline time `t_us`. The sound's clock moves in steps of its buffers and, on a busy
+/// computer, now and then runs a buffer ahead for a moment, which would show a frame a refresh early; smoothed over the
+/// last frames, it follows only lasting changes, and at once one larger than a frame or two, as when the sound
+/// stalled.
+fn due_at(pace: &mut Option<f64>, audio: &AudioOut, t_us: i64) -> Instant {
+    let offset = PACE_START.elapsed().as_micros() as f64 - audio.now_us() as f64 / audio.rate();
+    let smooth = match *pace {
+        Some(was) if (offset - was).abs() < 40_000.0 => was + (offset - was) * 0.05,
+        _ => offset,
+    };
+    *pace = Some(smooth);
+    *PACE_START + Duration::from_micros((t_us as f64 / audio.rate() + smooth).max(0.0) as u64)
 }
 
 /// How long a paused frame waits for its video before the preview handles what came meanwhile and waits again.
@@ -486,6 +570,29 @@ mod tests {
         fn frame(&mut self, project: &Project, _: i64, w: u32, h: u32, _: Wait, _: bool) -> Result<Vec<u8>> {
             assert_ne!(project.name, "broken", "bad project");
             Ok(vec![0; (w * h * 4) as usize])
+        }
+    }
+
+    #[test]
+    fn playing_draws_every_frame_at_the_time_export_draws_it_both_ways() {
+        for fps in [24, 25, 30, 60] {
+            let mut index = 0;
+            while let Some((t, due)) =
+                frame_after(frame_time_us(index, fps), fps, true).filter(|(t, _)| *t < 10_000_000)
+            {
+                index += 1;
+                assert_eq!((t, due), (frame_time_us(index, fps), t), "{fps} fps forwards to frame {index}");
+            }
+            assert_eq!(index, 10 * fps as u64 - 1);
+            while let Some((t, due)) = frame_after(frame_time_us(index, fps), fps, false) {
+                assert_eq!(
+                    (t, due),
+                    (frame_time_us(index - 1, fps), frame_time_us(index, fps)),
+                    "{fps} fps back from {index}"
+                );
+                index -= 1;
+            }
+            assert_eq!(index, 0, "{fps} fps backwards stops at the first frame");
         }
     }
 

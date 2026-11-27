@@ -111,6 +111,11 @@ impl AudioOut {
         self.rate
     }
 
+    /// Whether the sound heard has moved from where playback started, which takes the output's latency.
+    pub fn moving(&self) -> bool {
+        self.now_us() != self.start_us
+    }
+
     /// Where on the timeline the sound now heard plays.
     pub fn now_us(&self) -> i64 {
         let along = |played_us: i64| self.start_us + (played_us as f64 * self.rate).round() as i64;

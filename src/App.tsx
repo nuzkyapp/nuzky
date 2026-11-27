@@ -252,11 +252,13 @@ function useBackendEvents() {
       listen<Transport>("transport", (e) => {
         // The timeline playing, from the phone or the AI panel, shows the timeline again.
         if (e.payload.playing) closeSource();
-        useEditor.setState({ playing: e.payload.playing, timeUs: e.payload.tUs });
+        useEditor.setState({ playing: e.payload.playing, timeUs: e.payload.tUs, generation: e.payload.generation });
         usePreview.setState({ rate: e.payload.rate });
       }),
     );
-    offs.push(listen<Transport>("source-transport", (e) => useSource.setState({ playing: e.payload.playing, timeUs: e.payload.tUs })));
+    offs.push(
+      listen<Transport>("source-transport", (e) => useSource.setState({ playing: e.payload.playing, timeUs: e.payload.tUs, generation: e.payload.generation })),
+    );
     offs.push(listen<string | null>("source-preview-error", (e) => useSource.setState({ error: e.payload })));
     offs.push(
       listen<{ revision: number; error: string | null }>("saved", (e) => {

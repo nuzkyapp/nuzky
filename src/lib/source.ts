@@ -3,11 +3,12 @@ import { api, errorText, plainError } from "./api";
 import type { Asset, VideoPreview } from "./types";
 
 /** A media item played in the preview in place of the timeline, as CapCut's player does; the project stays as it is. */
-export const useSource = create<{ asset: Asset | null; preview: VideoPreview | null; timeUs: number; playing: boolean; error: string | null }>(() => ({
+export const useSource = create<{ asset: Asset | null; preview: VideoPreview | null; timeUs: number; playing: boolean; generation: number; error: string | null }>(() => ({
   asset: null,
   preview: null,
   timeUs: 0,
   playing: false,
+  generation: 0,
   error: null,
 }));
 
@@ -45,7 +46,7 @@ export const sourceDuration = (s: { asset: Asset | null; preview: VideoPreview |
 export function seekSource(tUs: number) {
   const s = useSource.getState();
   const t = Math.max(0, Math.min(sourceDuration(s), Math.round(tUs)));
-  useSource.setState({ timeUs: t });
+  useSource.setState({ timeUs: t, generation: Infinity });
   void api.sourcePreviewSeek(t);
 }
 
