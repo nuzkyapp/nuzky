@@ -383,7 +383,7 @@ function LearnedFrom({ view }: { view: StyleView }) {
 
 function VersionsButton({ view, onReset }: { view: StyleView; onReset: () => void }) {
   const [menu, setMenu] = useState<{ at: { x: number; y: number; align: "end" }; keyboard: boolean; back: HTMLElement } | null>(null);
-  const signedIn = useAccount((s) => s.available && s.status?.state === "signedIn");
+  const signedIn = useAccount((s) => s.status?.state === "signedIn");
   return (
     <>
       <IconButton

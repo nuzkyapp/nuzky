@@ -1705,7 +1705,6 @@ pub fn run() {
             chatgpt::chatgpt_sign_in,
             chatgpt::chatgpt_cancel_sign_in,
             chatgpt::chatgpt_sign_out,
-            account::account_available,
             account::account_status,
             account::account_sign_in,
             account::account_cancel_sign_in,

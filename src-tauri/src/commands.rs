@@ -1,6 +1,5 @@
 // Exactly what `generate_handler!` in lib.rs registers: Tauri refuses a command missing here.
 pub const COMMANDS: &[&str] = &[
-    "account_available",
     "account_cancel_sign_in",
     "account_manage",
     "account_sign_in",

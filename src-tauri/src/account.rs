@@ -30,13 +30,6 @@ pub(crate) fn account() -> Account {
     Account::new(dir)
 }
 
-/// Whether Settings shows the account. Only debug builds do, until the account keeps something
-/// for the user.
-#[tauri::command]
-pub fn account_available() -> bool {
-    cfg!(debug_assertions)
-}
-
 /// The account; with `renew`, its tokens renewed when they are about to expire, and then synced.
 #[tauri::command]
 pub async fn account_status(renew: bool) -> CmdResult<Status> {

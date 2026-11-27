@@ -80,7 +80,6 @@ export const api = {
   chatgptSignIn: (anotherAccount: boolean) => invoke<ChatGptStatus>("chatgpt_sign_in", { anotherAccount }),
   chatgptCancelSignIn: () => invoke<void>("chatgpt_cancel_sign_in"),
   chatgptSignOut: () => invoke<ChatGptStatus>("chatgpt_sign_out"),
-  accountAvailable: () => invoke<boolean>("account_available"),
   /** `renew`: renews the sign-in first when it is about to expire. */
   accountStatus: (renew: boolean) => invoke<AccountStatus>("account_status", { renew }),
   /** Opens the browser and answers once it came back, was cancelled or waited 5 minutes. */
