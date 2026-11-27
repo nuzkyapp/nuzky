@@ -49,9 +49,10 @@ function SafeZone({ area, width, height }: { area: SafeArea; width: number; heig
 }
 
 /** The project's playhead follows the frames while playing. */
-const followPlayhead = (t: number, playing: boolean) => {
-  // A frame rendered just before a pause can arrive after it; the pause already set the time.
-  if (playing && useEditor.getState().playing) useEditor.setState({ timeUs: t });
+const followPlayhead = (t: number, playing: boolean, generation: number) => {
+  // A frame drawn before a pause or a seek can arrive after it; the pause or the seek already set the time.
+  const s = useEditor.getState();
+  if (playing && s.playing && generation >= s.generation) useEditor.setState({ timeUs: t });
 };
 
 /** Playhead time and length; the only part of the preview that follows playback frame by frame. */
@@ -190,8 +191,9 @@ export function Preview() {
   const sourceError = useSource((s) => s.error);
   const source = sourceAsset && !cover && !reels ? sourceAsset : null;
   const sourceCanvasRef = useRef<HTMLCanvasElement>(null);
-  const sourceConnected = useFrameStream(sourcePreview?.url ?? "", sourceCanvasRef, (t, framePlaying) => {
-    if (framePlaying && useSource.getState().playing) useSource.setState({ timeUs: t });
+  const sourceConnected = useFrameStream(sourcePreview?.url ?? "", sourceCanvasRef, (t, framePlaying, generation) => {
+    const s = useSource.getState();
+    if (framePlaying && s.playing && generation >= s.generation) useSource.setState({ timeUs: t });
   });
   const assetGone = useEditor((s) => !!sourceAsset && !s.snap?.project.assets.some((a) => a.id === sourceAsset.id && a.path === sourceAsset.path));
   useEffect(() => {

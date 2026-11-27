@@ -21,9 +21,9 @@ fn allowed_origin(origin: &str) -> bool {
     ALLOWED_ORIGINS.contains(&origin) || (cfg!(debug_assertions) && origin == DEV_ORIGIN)
 }
 
-/// Header layout (little endian): magic "CPF2", width u32, height u32, flags u32, time i64, then the microseconds
-/// on this process's clock when the frame was sent and when it is due on screen, each i64.
-pub const HEADER_LEN: usize = 40;
+/// Header layout (little endian): magic "CPF2", width u32, height u32, flags u32, time i64, the microseconds on this
+/// process's clock when the frame was sent and when it is due on screen, each i64, and the transport's generation u32.
+pub const HEADER_LEN: usize = 44;
 pub const FLAG_PLAYING: u32 = 1;
 
 static CLOCK: LazyLock<Instant> = LazyLock::new(Instant::now);
@@ -71,7 +71,8 @@ impl PreviewServer {
 
     /// Replaces the pending frame. Slow clients skip straight to the newest one. A frame played ahead of time
     /// says when it is `due`, so the webview shows it then rather than when it arrives.
-    pub fn publish(&self, width: u32, height: u32, flags: u32, t_us: i64, due: Instant, rgba: &[u8]) {
+    #[allow(clippy::too_many_arguments)]
+    pub fn publish(&self, width: u32, height: u32, flags: u32, t_us: i64, due: Instant, generation: u32, rgba: &[u8]) {
         let sent = Instant::now();
         let mut buf = Vec::with_capacity(HEADER_LEN + rgba.len());
         buf.extend_from_slice(b"CPF2");
@@ -81,6 +82,7 @@ impl PreviewServer {
         buf.extend_from_slice(&t_us.to_le_bytes());
         buf.extend_from_slice(&clock_us(sent).to_le_bytes());
         buf.extend_from_slice(&clock_us(due.max(sent)).to_le_bytes());
+        buf.extend_from_slice(&generation.to_le_bytes());
         buf.extend_from_slice(rgba);
         let mut f = self.slot.frame.lock().unwrap();
         f.0 += 1;

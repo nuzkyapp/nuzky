@@ -4,9 +4,9 @@ import { AlertCircle, Link2, Pause, Play, WifiOff, X } from "lucide-react";
 import { api, errorText, plainError } from "../lib/api";
 import { AI_EDITING, useAiLocked, useEditor } from "../lib/store";
 import { formatLength, US } from "../lib/time";
-import type { Filmstrip, Part, VideoPreview, YoutubeVideo } from "../lib/types";
+import type { Filmstrip, Part, Transport, VideoPreview, YoutubeVideo } from "../lib/types";
 import { addYoutubeVideo, useYoutube } from "../lib/youtube";
-import { dropWaitingFrames, useFrameStream } from "../lib/frameStream";
+import { useFrameStream } from "../lib/frameStream";
 import { Button, IconButton, NumberInput, ProgressBar, trapTab } from "./ui";
 
 /** Footage kept hidden around the part is the backend's business; the dialog only ever shows the part. */
@@ -386,6 +386,8 @@ function Chooser({ url, video, preview, onImport, onCancel }: { url: string; vid
   const [box, setBox] = useState({ w: 0, h: 0 });
   // Playback that starts inside a chosen part stops at its end, so the user hears exactly the cut.
   const stopAt = useRef<number | null>(null);
+  // The preview engine's `Transport.generation`, Infinity from a seek here until the engine reports it.
+  const generation = useRef(0);
   const whole = part.startUs === 0 && part.endUs === duration;
   const locked = useAiLocked();
   const root = useRef<HTMLDivElement>(null);
@@ -395,6 +397,7 @@ function Chooser({ url, video, preview, onImport, onCancel }: { url: string; vid
   const seek = (t: number) => {
     t = Math.max(0, Math.min(duration, Math.round(t)));
     stopAt.current = null;
+    generation.current = Infinity;
     setTime(t);
     api.youtubePreviewSeek(t);
   };
@@ -428,8 +431,9 @@ function Chooser({ url, video, preview, onImport, onCancel }: { url: string; vid
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useFrameStream(preview.url, canvas, (t, framePlaying) => {
-    if (!framePlaying) return;
+  useFrameStream(preview.url, canvas, (t, framePlaying, drawnIn) => {
+    // A frame drawn before a seek or a pause can arrive after it.
+    if (!framePlaying || drawnIn < generation.current) return;
     if (stopAt.current !== null && t >= stopAt.current) {
       const end = stopAt.current;
       api.youtubePreviewPause();
@@ -442,8 +446,8 @@ function Chooser({ url, video, preview, onImport, onCancel }: { url: string; vid
   const [previewError, setPreviewError] = useState<string | null>(null);
   useEffect(() => {
     const offs = [
-      listen<{ playing: boolean; tUs: number }>("youtube-transport", (e) => {
-        dropWaitingFrames();
+      listen<Transport>("youtube-transport", (e) => {
+        generation.current = e.payload.generation;
         setPlaying(e.payload.playing);
         if (!e.payload.playing && stopAt.current === null) setTime(e.payload.tUs);
       }),

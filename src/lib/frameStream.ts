@@ -1,22 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 
-const HEADER = 40;
+const HEADER = 44;
 /** A frame due this much later or earlier than it arrives shows clocks that no longer agree, as after the computer slept. */
 const MAX_WAIT_MS = 250;
 
 type Frame = { buf: ArrayBuffer; due: number; playing: boolean };
 
-const streams = new Set<() => void>();
-
-/** Forgets the frames drawn ahead while playing, which a seek, a pause or another speed makes wrong. */
-export const dropWaitingFrames = () => streams.forEach((drop) => drop());
-
 /**
- * Receives rendered frames from an engine and paints them; `onFrame` gets each one's time. A paused frame paints on
+ * Receives rendered frames from an engine and paints them; `onFrame` gets each one's time and the generation of the
+ * transport it was drawn in (`Transport.generation`), which a seek, pause or play changes. A paused frame paints on
  * the next display frame. A playing frame comes ahead of its time and paints on the display frame nearest to when it
  * is due, so frames stay on screen equally long however unevenly they took to draw and arrive.
  */
-export function useFrameStream(url: string, canvas: React.RefObject<HTMLCanvasElement | null>, onFrame: (t: number, playing: boolean) => void) {
+export function useFrameStream(url: string, canvas: React.RefObject<HTMLCanvasElement | null>, onFrame: (t: number, playing: boolean, generation: number) => void) {
   const frame = useRef(onFrame);
   frame.current = onFrame;
   const [connected, setConnected] = useState(false);
@@ -35,6 +31,7 @@ export function useFrameStream(url: string, canvas: React.RefObject<HTMLCanvasEl
     let refresh = 1000 / 60;
     // The display frame the last playing frame was painted on, and when that frame was due.
     let anchor: { at: number; due: number } | null = null;
+    let generation = -1;
 
     const paint = (buf: ArrayBuffer) => {
       const el = canvas.current;
@@ -44,6 +41,7 @@ export function useFrameStream(url: string, canvas: React.RefObject<HTMLCanvasEl
       const h = view.getUint32(8, true);
       const playing = (view.getUint32(12, true) & 1) === 1;
       const t = Number(view.getBigInt64(16, true));
+      const drawnIn = view.getUint32(40, true);
       if (el.width !== w || el.height !== h) {
         el.width = w;
         el.height = h;
@@ -54,7 +52,7 @@ export function useFrameStream(url: string, canvas: React.RefObject<HTMLCanvasEl
       el.dataset.us = String(t);
       // How many frames this canvas has shown, so a frame drawn after a change can be told from one drawn before it.
       el.dataset.n = String(++painted);
-      frame.current(t, playing);
+      frame.current(t, playing, drawnIn);
     };
 
     // What is painted now is on screen from the next refresh on. A frame shows by its time, and while playing it
@@ -92,16 +90,18 @@ export function useFrameStream(url: string, canvas: React.RefObject<HTMLCanvasEl
       offset = Math.max(offset, sent - arrived);
       const due = dueThere - offset;
       const playing = (view.getUint32(12, true) & 1) === 1;
+      // Frames waiting from before a seek, a pause or a change of speed no longer show.
+      if (view.getUint32(40, true) !== generation) {
+        generation = view.getUint32(40, true);
+        queue = [];
+        anchor = null;
+      }
       const lost = Math.abs(due - arrived) > MAX_WAIT_MS;
       if (lost) offset = sent - arrived;
-      // Frames waiting that are due after this one were drawn before a seek, so they no longer show.
       if (!playing || lost) queue = [{ buf, due: arrived, playing: false }];
-      else queue = [...queue.filter((f) => f.due < due), { buf, due, playing }];
+      else queue.push({ buf, due, playing });
       if (!raf) raf = requestAnimationFrame(tick);
     };
-
-    const drop = () => (queue = queue.filter((f) => !f.playing));
-    streams.add(drop);
 
     const connect = () => {
       ws = new WebSocket(url);
@@ -119,7 +119,6 @@ export function useFrameStream(url: string, canvas: React.RefObject<HTMLCanvasEl
     connect();
     return () => {
       closed = true;
-      streams.delete(drop);
       ws?.close();
       cancelAnimationFrame(raf);
     };

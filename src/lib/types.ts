@@ -2735,6 +2735,10 @@ export type Transport = {
    * The speed it plays at, below zero backwards; 1 when paused.
    */
   rate: number,
+  /**
+   * Counts the changes of playing and position; frames carry it, so a frame drawn before a change can be told.
+   */
+  generation: number,
 };
 
 export type VideoPreview = {

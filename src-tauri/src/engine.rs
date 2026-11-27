@@ -45,6 +45,8 @@ pub struct Transport {
     pub t_us: i64,
     /// The speed it plays at, below zero backwards; 1 when paused.
     pub rate: f64,
+    /// Counts the changes of playing and position; frames carry it, so a frame drawn before a change can be told.
+    pub generation: u32,
 }
 
 /// Where the preview thread reports playback and errors: the webview in the app.
@@ -58,7 +60,7 @@ trait Events: Send + 'static {
 
 impl Default for Transport {
     fn default() -> Self {
-        Self { playing: false, t_us: 0, rate: 1.0 }
+        Self { playing: false, t_us: 0, rate: 1.0, generation: 0 }
     }
 }
 
@@ -216,6 +218,7 @@ struct State {
     /// Microseconds since `PACE_START` minus the sound's time over the speed, smoothed over the frames drawn while
     /// playing.
     pace: Option<f64>,
+    generation: u32,
 }
 
 fn panic_message(panic: &(dyn std::any::Any + Send)) -> &str {
@@ -262,6 +265,7 @@ fn run<F: Frames>(
         compare: None,
         drawn: None,
         pace: None,
+        generation: 0,
     };
 
     let emit = |st: &State| {
@@ -269,6 +273,7 @@ fn run<F: Frames>(
             playing: st.audio.is_some(),
             t_us: st.t_us,
             rate: st.audio.as_ref().map_or(1.0, AudioOut::rate),
+            generation: st.generation,
         };
         *transport.lock().unwrap() = tr;
         events.transport(tr);
@@ -305,9 +310,6 @@ fn run<F: Frames>(
         // A panic must not end the preview: one bad frame or project would otherwise need a restart.
         let step = catch_unwind(AssertUnwindSafe(|| {
             let mut state_changed = false;
-            if pending.iter().any(|m| matches!(m, Msg::Seek(_) | Msg::Play | Msg::PlayAt(_) | Msg::Pause)) {
-                (st.drawn, st.pace) = (None, None);
-            }
             for m in pending {
                 match m {
                     Msg::Project(p) => {
@@ -390,6 +392,8 @@ fn run<F: Frames>(
             }
             renderer.reverse(st.audio.as_ref().is_some_and(|a| a.rate() < 0.0));
             if state_changed {
+                st.generation = st.generation.wrapping_add(1);
+                (st.drawn, st.pace) = (None, None);
                 emit(&st);
             }
 
@@ -418,7 +422,8 @@ fn run<F: Frames>(
                 renderer.compare(st.compare);
                 match renderer.frame(&st.project, last_frame_at_end(&st.project, t_us), w, h, wait, playing) {
                     Ok(rgba) => {
-                        server.publish(w, h, if playing { FLAG_PLAYING } else { 0 }, t_us, due, &rgba);
+                        let flags = if playing { FLAG_PLAYING } else { 0 };
+                        server.publish(w, h, flags, t_us, due, st.generation, &rgba);
                         if renderer.skipped_effects() != skipped.as_slice() {
                             skipped = renderer.skipped_effects().to_vec();
                             events.effects_skipped(&skipped);

@@ -43,6 +43,8 @@ interface EditorState {
   timeUs: number;
   /** How often the playhead was moved by hand or by a command, so a voiceover take knows when it no longer matches the picture. */
   seeks: number;
+  /** The engine's `Transport.generation`; Infinity from a seek here until the engine reports it, so no frame drawn before moves the playhead back. */
+  generation: number;
   /** Timeline zoom in pixels per second. */
   zoom: number;
   jobs: Record<string, JobEvent>;
@@ -441,6 +443,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   playing: false,
   timeUs: 0,
   seeks: 0,
+  generation: 0,
   zoom: 60,
   jobs: {},
   toasts: [],
@@ -542,7 +545,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     const t = Math.max(0, Math.min(end, tUs));
     // Moving the playhead shows the timeline again.
     closeSource();
-    set({ timeUs: t, seeks: get().seeks + 1 });
+    set({ timeUs: t, seeks: get().seeks + 1, generation: Infinity });
     api.seek(t);
   },
 
