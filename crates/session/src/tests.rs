@@ -236,13 +236,13 @@ fn only_the_run_owner_postpones_idle_auto_keep() {
         s.stamp();
         let _ = s.edit(rename("User"), None, Expect::default());
         let _ = s.apply_edits("someone-else", &new_id(), rename("Other"), Expect::default());
-        s.touch_run(|_| false).unwrap();
+        s.touch_run(None, |_| false).unwrap();
         std::thread::sleep(Duration::from_millis(20));
     }
     let run = s.begin_run("active".into()).unwrap().run_id;
     let began = Instant::now();
     while began.elapsed() < timeout * 3 {
-        s.touch_run(|id| id == run).unwrap();
+        s.touch_run(None, |id| id == run).unwrap();
         std::thread::sleep(Duration::from_millis(20));
     }
     assert_eq!(s.state().unwrap().open_run.map(|r| r.run_id), Some(run.clone()));

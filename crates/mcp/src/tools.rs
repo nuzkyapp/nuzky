@@ -155,10 +155,10 @@ impl Backend {
         ensure!(!self.closed.load(Ordering::Acquire), "CLIENT_CLOSED: client disconnected");
         // Reads never hold this client's run lock while the session is locked.
         let owned = match &runs {
-            Some(runs) => self.host.session.touch_run(|run| runs.contains(run)),
+            Some(runs) => self.host.session.touch_run(Some(name), |run| runs.contains(run)),
             None => {
                 let runs = self.runs.lock().unwrap().clone();
-                self.host.session.touch_run(|run| runs.contains(run))
+                self.host.session.touch_run(Some(name), |run| runs.contains(run))
             }
         };
         owned?;
@@ -949,7 +949,7 @@ impl Backend {
                                     anyhow::bail!("CANCELLED: the download stopped");
                                 }
                                 // A long download is work of the run, not idleness that ends it.
-                                self.host.session.touch_run(|run| run == args.run_id)?;
+                                self.host.session.touch_run(None, |run| run == args.run_id)?;
                             }
                             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                                 anyhow::bail!("SOURCE_FAILED: the download stopped unexpectedly");

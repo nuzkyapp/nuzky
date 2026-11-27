@@ -1,4 +1,5 @@
 import time
+from itertools import groupby
 
 from e2e.agent import agent_project
 from e2e.harness import Bridge, flow, wait
@@ -13,7 +14,7 @@ const tick = () => {
   const clips = row ? [...row.querySelectorAll('[data-clip-id]')].map((e) => [e.getBoundingClientRect().left, e.dataset.clipId]).sort((a, b) => a[0] - b[0]) : [];
   window.__pointerLog.push({stored: s.snap.project.tracks.find((t) => t.id === 'main').clips.length,
     drawn: row ? row.querySelectorAll('[data-clip-id]').length : -1, first: clips[0]?.[1] ?? null, tracks: document.querySelectorAll('[data-timeline] [data-track-id]').length,
-    held: !!c.held, shown: c.shown, glyph: c.glyph, label: c.step ? `${c.name} · ${c.step}` : c.name, band: !!document.querySelector('.agent-band'), x: tip.left, y: tip.top});
+    t: performance.now(), tab: s.panelTab, clips: document.querySelectorAll('[data-timeline] [data-clip-id]').length, held: !!c.held, shown: c.shown, glyph: c.glyph, label: c.step ? `${c.name} · ${c.step}` : c.name, band: !!document.querySelector('.agent-band'), x: tip.left, y: tip.top});
   requestAnimationFrame(tick);
 };
 requestAnimationFrame(tick);"""
@@ -21,6 +22,8 @@ LOG = 'const log = window.__pointerLog; window.__pointerLog = null; return log;'
 # Where a time on the main track is on screen.
 X_AT = """const row = document.querySelector('[data-timeline] [data-track-id="main"]').getBoundingClientRect();
 return row.left + arguments[0] / 1e6 * window.__nuzky.store.getState().zoom;"""
+RECT = "const b = document.querySelector(arguments[0]).getBoundingClientRect(); return [b.left, b.top, b.right, b.bottom];"
+PANEL_TAB = 'return window.__nuzky.store.getState().panelTab'
 LABEL = """const label = document.querySelector('[data-agent-cursor] .agent-label');
 return label ? [...label.querySelectorAll('span span')].map((e) => e.textContent.trim()).join(' ') : null;"""
 
@@ -35,13 +38,19 @@ def act(r, bridge, run, request, edits, done):
     return r.s.run(LOG)
 
 
+def on(log, rect):
+    """The frames in which the pointer's tip was over `rect`."""
+    return [e for e in log if rect[0] <= e['x'] <= rect[2] and rect[1] <= e['y'] <= rect[3]]
+
+
 def first(log, test):
     return next((i for i, e in enumerate(log) if test(e)), None)
 
 
 @flow('agent_pointer', "While an AI agent edits, a pointer with its name acts each change out on the timeline: the timeline "
       "shows the change as the pointer gets there, it snips a split and a cut out, drags a clip to a new track, goes back "
-      "to the AI button when the run ends, and Settings › AI turns it off", before=agent_project)
+      "to the AI button when the run ends, and Settings › AI turns it off. It opens the Transcript tab while the agent reads "
+      "the transcript, the inspector's tab of a setting it changed and the Text tab a new text comes from, and stays over the Cover tile when the agent makes a thumbnail", before=agent_project)
 def agent_pointer(r):
     clip = r.track()[0]
     bridge = Bridge(r, r.saved_project(), client='claude-code')
@@ -49,10 +58,22 @@ def agent_pointer(r):
         run = bridge.call('begin_run', {'label': 'Tighten the intro'})['run_id']
         r.check("the agent's pointer comes out with its name", wait(lambda: r.s.run(LABEL) == 'Claude Code', 5), r.s.run(LABEL))
         time.sleep(1)
-        r.shot('resting')
-        tip = r.s.run("const t = document.querySelector('.agent-pointer').getBoundingClientRect(); return [t.left, t.top];")
+        r.s.run(SAMPLE)
+        time.sleep(5)
+        r.shot('looking')
+        log = r.s.run(LOG)
+        lanes = r.s.run("const b = document.querySelector('[data-timeline]').getBoundingClientRect(); return [b.left, b.top, b.right, b.bottom];")
         clips = r.s.run("return [...document.querySelectorAll('[data-timeline] [data-clip-id]')].map((e) => { const b = e.getBoundingClientRect(); return [b.left, b.top, b.right, b.bottom]; })")
-        r.check('it waits off the clips', not any(a <= tip[0] <= c and b <= tip[1] <= d for a, b, c, d in clips), {'tip': tip, 'clips': clips})
+        over = [e for e in log if any(a - 4 <= e['x'] <= c + 4 and b <= e['y'] <= d for a, b, c, d in clips)]
+        path = sum(abs(a['x'] - b['x']) + abs(a['y'] - b['y']) for a, b in zip(log, log[1:]))
+        stops = [list(run) for moved, run in groupby(zip(log, log[1:]), lambda p: abs(p[0]['x'] - p[1]['x']) + abs(p[0]['y'] - p[1]['y']) > 0.1) if not moved]
+        still = max((run[-1][1]['t'] - run[0][0]['t'] for run in stops), default=0)
+        r.check('while the agent thinks the pointer looks through the clips', len(over) > len(log) / 2 and path > 100,
+                {'over': len(over), 'frames': len(log), 'path': round(path), 'xs': [round(e['x']) for e in log[::20]]})
+        r.check('it never stands still for long', still < 2600, {'longest_stop_ms': still})
+        r.check('it stays over the timeline, presses nothing and holds nothing back',
+                all(lanes[0] <= e['x'] <= lanes[2] and lanes[1] <= e['y'] <= lanes[3] and e['glyph'] == 'arrow' and not e['held'] and e['label'] == 'Claude Code' for e in log),
+                next((e for e in log if not (lanes[0] <= e['x'] <= lanes[2] and lanes[1] <= e['y'] <= lanes[3]) or e['glyph'] != 'arrow' or e['held']), None))
 
         split_x = r.s.run(X_AT, 3_000_000)
         log = act(r, bridge, run, 'split', [{'type': 'splitClip', 'clipId': clip['id'], 'atUs': 3_000_000}], '(e) => e.drawn === 2')
@@ -91,6 +112,56 @@ def agent_pointer(r):
                 grabbed is not None and log[grabbed]['first'] == main[0]['id'] and abs(log[grabbed]['x'] - moved_x) < 14
                 and any(e['label'] == 'Claude Code · Moving talk.mp4' for e in log), grabbed is not None and {**log[grabbed], 'moved_x': moved_x})
 
+        time.sleep(1.5)
+        tab = r.s.run(RECT, '[data-tour="library"] [data-tab="transcript"]')
+        r.s.run(SAMPLE)
+        bridge.rpc('tools/call', {'name': 'get_transcript', 'arguments': {}})
+        opened = wait(lambda: r.s.run(PANEL_TAB) == 'transcript', 5)
+        time.sleep(0.6)
+        log = r.s.run(LOG)
+        r.shot('transcript')
+        r.check('while the agent reads the transcript the pointer opens the Transcript tab and says so',
+                opened and on(log, tab) and any(e['label'] == 'Claude Code · Reading the transcript' for e in on(log, tab)),
+                {'tab': r.s.run(PANEL_TAB), 'on': len(on(log, tab)), 'labels': sorted({e['label'] for e in log})})
+
+        main = r.track()
+        audio = '[role="tablist"][aria-label="Clip settings"] [data-tab="audio"]'
+        r.s.run(SAMPLE)
+        bridge.call('apply_edits', {'run_id': run, 'request_id': 'volume', 'edits': [{'type': 'updateClip', 'clipId': main[0]['id'], 'volume': 0.5}]})
+        opened = wait(lambda: r.s.run("return document.querySelector(arguments[0])?.getAttribute('aria-selected')", audio) == 'true', 6)
+        time.sleep(0.6)
+        log = r.s.run(LOG)
+        r.shot('setting-changed')
+        selection = r.s.run('return window.__nuzky.store.getState().selection')
+        inspected = r.s.run('return window.__nuzky.agentCursor.getState().inspected')
+        r.check("after a changed volume the pointer clicks the clip, the inspector shows it on its Audio tab, and the selection stays the user's",
+                opened and inspected == main[0]['id'] and selection == [] and on(log, r.s.run(RECT, audio)), {'opened': opened, 'inspected': inspected, 'selection': selection, 'clip': main[0]['id']})
+
+        tab = r.s.run(RECT, '[data-tour="library"] [data-tab="text"]')
+        r.s.run(SAMPLE)
+        bridge.call('apply_edits', {'run_id': run, 'request_id': 'text', 'edits': [{'type': 'addText', 'startUs': 1_000_000, 'text': 'Hello', 'style': {'fontSize': 80, 'color': '#ffffff'}}]})
+        opened = wait(lambda: r.s.run(PANEL_TAB) == 'text', 5)
+        wait(lambda: not r.s.run('return !!window.__nuzky.agentCursor.getState().held'), 6)
+        time.sleep(0.5)
+        log = r.s.run(LOG)
+        tabbed = first(log, lambda e: e['tab'] == 'text')
+        drawn = first(log, lambda e: e['clips'] > log[0]['clips'])
+        r.check('a new text comes from the Text tab, which the pointer opens before it puts the text in',
+                opened and tabbed is not None and drawn is not None and tabbed < drawn and any(e['held'] for e in on(log, tab)),
+                {'tab': r.s.run(PANEL_TAB), 'tabbed': tabbed, 'drawn': drawn, 'on': len(on(log, tab)), 'labels': sorted({e['label'] for e in log})})
+
+        time.sleep(1.5)
+        tile = r.s.run(RECT, '[data-testid="cover-tile"]')
+        r.s.run(SAMPLE)
+        bridge.call('apply_edits', {'run_id': run, 'request_id': 'cover', 'edits': [{'type': 'setThumbnail', 'thumbnail': {'format': 'cover_9x16', 'timeUs': 1_000_000}}]})
+        wait(lambda: r.s.run("const e = window.__pointerLog.at(-1); return !!e && e.x >= arguments[0] && e.x <= arguments[2] && e.y >= arguments[1] && e.y <= arguments[3]", *tile), 5, 0.1)
+        time.sleep(0.5)
+        log = r.s.run(LOG)
+        r.shot('cover')
+        r.check('when the agent makes a thumbnail the pointer stays over the Cover tile, says so and opens nothing',
+                any(e['label'] == 'Claude Code · Making the thumbnail' for e in on(log, tile)) and not r.s.run('return !!window.__nuzky.cover.getState().open'),
+                {'on': len(on(log, tile)), 'labels': sorted({e['label'] for e in log}), 'cover': r.s.run('return window.__nuzky.cover.getState().open')})
+
         r.s.run('window.__nuzky.store.getState().togglePlay()')
         r.check('the video plays', wait(lambda: r.s.run('return window.__nuzky.store.getState().playing'), 5))
         main = r.track()
@@ -115,6 +186,18 @@ def agent_pointer(r):
         r.s.run('document.activeElement?.blur()')
         r.key('z', ctrlKey=True)
         r.check('one undo still takes back the whole run', wait(lambda: len(r.track()) == 1, 10), r.track())
+
+        # The run ends right after a change of a setting: the pointer still opens the setting's tab before it goes back.
+        run = bridge.call('begin_run', {'label': 'Faster'})['run_id']
+        r.check('the pointer comes out for the next run', wait(lambda: r.s.run(LABEL) == 'Claude Code', 5), r.s.run(LABEL))
+        speed = '[role="tablist"][aria-label="Clip settings"] [data-tab="speed"]'
+        bridge.call('apply_edits', {'run_id': run, 'request_id': 'speed', 'edits': [{'type': 'updateClip', 'clipId': r.track()[0]['id'], 'speed': 1.25}]})
+        bridge.call('end_run', {'run_id': run, 'action': 'keep'})
+        opened = wait(lambda: r.s.run("return document.querySelector(arguments[0])?.getAttribute('aria-selected')", speed) == 'true', 6, 0.05)
+        gone = wait(lambda: r.s.run(LABEL) is None, 6)
+        r.check("the last change of a run still opens its tab, and once the pointer is gone the inspector shows the user's selection again",
+                opened and gone and r.s.run('return window.__nuzky.agentCursor.getState().inspected') is None and not r.s.run('return !!document.querySelector(arguments[0])', speed),
+                {'opened': opened, 'gone': gone, 'inspected': r.s.run('return window.__nuzky.agentCursor.getState().inspected')})
 
         r.s.run("window.__nuzky.openSettings('ai')")
         switch = "return document.querySelector('[role=switch][aria-label=\"Show the agent\\'s pointer\"]')"

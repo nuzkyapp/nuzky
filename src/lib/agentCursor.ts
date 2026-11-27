@@ -2,14 +2,16 @@ import { create } from "zustand";
 import { agentName, useAgent } from "./agent";
 import { type Action, plan } from "./agentPlan";
 import { usePreview } from "./preview";
-import { MAIN_TRACK, PLUGIN_RUN, findClip, useEditor } from "./store";
+import { MAIN_TRACK, PLUGIN_RUN, type PanelTab, findClip, isCaptionTrack, useEditor } from "./store";
 import { US } from "./time";
 import type { Clip, Project } from "./types";
 
 /**
- * The agent's pointer: while an AI agent edits, a pointer with its name acts out each change on the timeline. The
- * timeline keeps drawing the project as it was until the pointer gets there, at most a second or two; the project,
- * the preview and the export have the change at once. Settings › AI turns it off.
+ * The agent's pointer: while an AI agent edits, a pointer with its name acts out each change on the timeline and
+ * looks through the clips between them. It also goes where the rest of the work happens: to the library tab a
+ * change comes from, to the inspector tab of a setting it changed, and to the transcript, the preview or Export
+ * while the agent reads there. The timeline keeps drawing the project as it was until the pointer gets there, at
+ * most a second or two; the project, the preview and the export have the change at once. Settings › AI turns it off.
  */
 
 const KEY = "nuzky.agentPointer";
@@ -45,6 +47,8 @@ interface AgentCursorState {
   glyph: Glyph;
   /** Where the label sits from the tip: left of it near the window's right edge, and under or over the row it works on. */
   label: { left: boolean; dy: number };
+  /** The clip the pointer clicked, which the inspector shows while the agent works; the user's selection stays theirs. */
+  inspected: string | null;
 }
 
 /** The label's place under the tip, and its height. */
@@ -66,6 +70,7 @@ export const useAgentCursor = create<AgentCursorState>(() => ({
   step: null,
   glyph: "arrow",
   label: { left: false, dy: LABEL_DY },
+  inspected: null,
 }));
 
 export function setAgentPointer(on: boolean) {
@@ -117,8 +122,61 @@ const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 let queue: { before: Project; after: Project }[] = [];
 let playing = false;
 let present = false;
+/** Whether the pointer only looks through the clips, which an edit or the run's end cuts short where it is. */
+let looking = false;
 let ending = false;
 let generation = 0;
+
+/** Where in the window a tool's work belongs: a library tab, the preview, Export, the Cover tile, or the timeline itself. */
+type Place = PanelTab | "preview" | "export" | "cover" | "timeline";
+
+/** The tools whose work shows nowhere on the timeline, with what the label says meanwhile. A tool that edits it is acted out by its change. */
+const READS: Record<string, { step: string; place: Place }> = {
+  get_state: { step: "Reading the timeline", place: "timeline" },
+  get_transcript: { step: "Reading the transcript", place: "transcript" },
+  transcribe: { step: "Transcribing", place: "transcript" },
+  analyze: { step: "Listening to the sound", place: "timeline" },
+  activity: { step: "Scanning picture and sound", place: "timeline" },
+  get_waveform: { step: "Listening to the sound", place: "timeline" },
+  quiet_point: { step: "Finding a quiet spot to cut", place: "timeline" },
+  audio_spectrum: { step: "Listening for hum and whine", place: "timeline" },
+  inspect_frames: { step: "Checking frames", place: "preview" },
+  frame_sheet: { step: "Looking through a clip", place: "preview" },
+  describe_clip: { step: "Describing a clip", place: "preview" },
+  track_object: { step: "Following an object", place: "preview" },
+  inspect_image: { step: "Looking at a picture", place: "preview" },
+  text_styles: { step: "Looking through text styles", place: "text" },
+  search_sounds: { step: "Looking for a sound", place: "audio" },
+  add_sound: { step: "Getting a sound", place: "audio" },
+  find_broll: { step: "Looking for B-roll", place: "media" },
+  import_media: { step: "Importing media", place: "media" },
+  import_web_image: { step: "Getting a picture from the web", place: "media" },
+  add_youtube_video: { step: "Getting a video from YouTube", place: "media" },
+  inspect_thumbnail: { step: "Checking the thumbnail", place: "cover" },
+  export_thumbnail: { step: "Exporting the thumbnail", place: "cover" },
+  export_video: { step: "Exporting", place: "export" },
+};
+/** Where the pointer only stays over a control: pressing Export or the Cover tile would open it over the agent's work. */
+const HOVERED: Partial<Record<Place, string>> = { export: '[data-tour="export"]', cover: '[data-testid="cover-tile"]' };
+/** The library tab the changes of a tool come from. */
+const EDITS: Record<string, PanelTab> = { edit_transcript: "transcript", correct_words: "transcript", add_sticker: "text" };
+
+/** The tool that reads now, until the pointer went where it reads. */
+let reading: { step: string; place: Place; at: number } | null = null;
+/** The tab the next change comes from, as its tool said just before it; the pointer opens it after acting the change out. */
+let editing: { tab: PanelTab; at: number } | null = null;
+/** What the pointer does once a change is acted out, which only the next change cuts short. */
+let follow: (() => Promise<void>) | null = null;
+let following = false;
+/** When it last went to each place, so it does not go back and forth for every call. */
+const visited = new Map<string, number>();
+const AGAIN_MS = 8000;
+
+const recent = (place: string) => performance.now() - (visited.get(place) ?? -AGAIN_MS) < AGAIN_MS;
+/** Counted as the pointer gets there, so a visit cut short on the way is made again. */
+const went = (place: string) => void visited.set(place, performance.now());
+/** Where the pointer is on its way to for a tool; another call of a tool that works there changes nothing. */
+let visiting: Place | null = null;
 let pos = { x: 0, y: 0 };
 const running = new Set<Animation>();
 let watchdog = 0;
@@ -239,6 +297,52 @@ async function glide(to: { x: number; y: number }) {
 async function drag(to: { x: number; y: number }, ms: number) {
   await run(nodes!.root, [{ transform: tr(pos) }, { transform: tr(to) }], ms, SLIDE);
   place(to);
+}
+
+/** Stays where it is for a moment while it only looks. */
+const linger = (ms: number) => run(nodes!.root, [{ transform: tr(pos) }, { transform: tr(pos) }], ms);
+
+/** Stops the pointer where it is while it only looks, as it gets work. */
+function interrupt() {
+  // What follows a change is finished even as the run ends or the agent reads on.
+  if (!looking || !nodes || (following && !queue.length)) return;
+  const m = new DOMMatrixReadOnly(getComputedStyle(nodes.root).transform);
+  place({ x: m.m41, y: m.m42 });
+  for (const a of [...running]) a.cancel();
+  nodes.glyph.style.transform = "";
+}
+
+const libraryTab = (tab: PanelTab) => document.querySelector<HTMLElement>(`[data-tour="library"] [role="tab"][data-tab="${tab}"]`);
+
+/** Where a control is, when the window shows all of it. */
+function shown(el: HTMLElement | null) {
+  const r = el?.getBoundingClientRect();
+  return r && r.width >= 4 && r.height >= 4 && r.left >= 0 && r.top >= 0 && r.right <= window.innerWidth && r.bottom <= window.innerHeight ? r : null;
+}
+
+/** A dialog the user answers; a tab opened under it could take away what it belongs to. */
+const dialogOpen = () => !!document.querySelector("dialog[open], [aria-modal='true']");
+
+/**
+ * Goes to a control and presses it, which counts as going to `place`. A tab that is not the one shown opens, as a
+ * click on it does. False when it did not press: the control is not on screen, or went, or a dialog opened meanwhile.
+ * The check, the count and the click come with nothing awaited between them, so no interruption or dialog can fall
+ * between them: cut short before, nothing happened and it goes again; after, all of it did.
+ */
+async function click(el: HTMLElement | null, place: string) {
+  const r = shown(el);
+  if (!el || !r || dialogOpen()) return false;
+  const to = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  aim(to, r);
+  await glide(to);
+  await down();
+  const ok = el.isConnected && !dialogOpen();
+  if (ok) {
+    went(place);
+    if (el.getAttribute("aria-selected") === "false") el.click();
+  }
+  await up();
+  return ok;
 }
 
 function ring() {
@@ -455,23 +559,94 @@ async function change(a: Extract<Action, { kind: "change" }>, before: Project, a
   await glide({ x: p.x, y: p.y });
   await down();
   release(before, after, 0);
+  // The inspector shows the clip it clicked, with the settings that changed.
+  useAgentCursor.setState({ inspected: a.clipId });
   flash(a.clipId);
   await up();
+  const [was, now] = [findClip(before, a.clipId)?.clip, findClip(after, a.clipId)?.clip];
+  if (was && now) follow = () => settings(was, now);
 }
+
+const AUDIO = ["volume", "fadeInUs", "fadeOutUs", "cleanVoice", "dereverb", "normalize", "leveler", "duckDb", "mono"];
+const SPEED = ["speed", "keepPitch", "reverse", "ramp"];
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+/** The inspector's tab that shows what changed on a clip. */
+function settingsTab(a: Clip, b: Clip) {
+  const [ca, cb] = [a.content as Record<string, unknown>, b.content as Record<string, unknown>];
+  const differs = (keys: string[]) => keys.some((k) => !same(ca[k], cb[k]));
+  if (!same([a.animIn, a.animOut], [b.animIn, b.animOut])) return "animation";
+  if (differs(["text", "style"])) return "text";
+  if (differs(AUDIO)) return "audio";
+  if (differs(SPEED)) return "speed";
+  if (differs(["adjust", "lut", "log"]) || !same(a.effects, b.effects)) return "adjust";
+  return cb.type === "text" ? "transform" : "video";
+}
+
+/** After a click on a changed clip: the pointer opens the inspector's tab of the setting that changed. */
+async function settings(was: Clip, now: Clip) {
+  const gen = generation;
+  await frame();
+  await frame();
+  if (gen !== generation) throw new Stopped();
+  if (queue.length) return;
+  const tab = settingsTab(was, now);
+  const inspector = (id: string) => document.querySelector<HTMLElement>(`[role="tablist"][aria-label="Clip settings"] [data-tab="${id}"]`);
+  // A sound on its own has its speed in Audio. A transition is no setting of the clip: no tab shows the cut it is on.
+  const el = !same(was.transitionIn, now.transitionIn) ? null : (inspector(tab) ?? (tab === "speed" ? inspector("audio") : null));
+  const place = `${now.id} ${tab}`;
+  if (recent(place) || !(await click(el, place))) return linger(ending ? 300 : 1000);
+  // The run is over: the pointer has little time left to go back.
+  await linger(ending ? 300 : between(600, 900));
+}
+
+/** The library tab that has what was added. */
+function source(first: Action, after: Project): PanelTab | null {
+  if (first.kind !== "add") return null;
+  const track = after.tracks.find((t) => t.id === first.trackId);
+  const content = track?.clips.find((c) => first.clipIds.includes(c.id))?.content;
+  if (!track || !content) return null;
+  return isCaptionTrack(track) ? "captions" : content.type === "text" ? "text" : track.kind === "audio" ? "audio" : content.type === "media" ? "media" : null;
+}
+
+/** The label says only the agent's name again, a moment after what it did. */
+const done = (ms: number) => (stepTimer = window.setTimeout(() => useAgentCursor.setState({ step: null }), ms));
 
 async function perform(before: Project, after: Project) {
   const view = lanes();
   const p = view && plan(before, after);
-  if (!view || !p) return release(before, after, 0);
+  // The tab the change comes from, as its tool said just before it.
+  const said = editing && performance.now() - editing.at < 2000 ? editing.tab : null;
+  editing = follow = null;
+  if (!view || !p) {
+    // A thumbnail the agent made or changed is nowhere on the timeline but on the Cover tile.
+    if (view && !same(before.thumbnails, after.thumbnails)) {
+      follow = async () => {
+        say("Making the thumbnail");
+        try {
+          if (recent("cover") || !(await hover(HOVERED.cover!, "cover"))) await linger(ending ? 300 : 1000);
+        } finally {
+          done(800);
+        }
+      };
+    }
+    return release(before, after, 0);
+  }
   say(p.step);
   const first = p.actions[0];
+  // What is added comes out of its library tab, opened first. The tab of a cut by the transcript opens after the cut,
+  // so the timeline never waits for it.
+  // A sticker is a picture on the timeline, but it comes from Text, as its tool says.
+  const from = first.kind === "add" ? (said ?? source(first, after)) : null;
+  if (from && !recent(from) && (await click(libraryTab(from), from))) await pause(160);
+  if (said && !from) follow = async () => linger(recent(said) || !(await click(libraryTab(said), said)) || ending ? 300 : 700);
   if (first.kind === "cut") await cuts(p.actions as Cut[], before, after, view);
   else if (first.kind === "move") await move(first, before, after, view);
   else if (first.kind === "trim") await trim(first, before, after, view);
   else if (first.kind === "split") await split(first, before, after, view);
   else if (first.kind === "add") await add(first, before, after, view);
   else await change(first, before, after, view);
-  stepTimer = window.setTimeout(() => useAgentCursor.setState({ step: null }), 800);
+  done(800);
 }
 
 /** With reduced motion the pointer only appears where the change is, after it. */
@@ -499,12 +674,123 @@ function home() {
   return r ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
 }
 
-/** Where the pointer waits while the agent thinks: in the empty lane under the tracks, off the clips, when there is room. */
+/** Where the pointer lands as it comes out: in the empty lane under the tracks, off the clips, when there is room. */
 function rest(view: View) {
   const rows = [...document.querySelectorAll("[data-timeline] [data-track-id]")].map((row) => row.getBoundingClientRect());
   const below = rows.length ? Math.max(...rows.map((row) => row.bottom)) : view.top;
   const x = view.left + (view.right - view.left) * 0.62;
   return { x, y: view.bottom - below >= 12 + LABEL_DY + LABEL_H ? below + 12 : view.top + Math.min(60, (view.bottom - view.top) / 2) };
+}
+
+/** How far along a clip from where it is the pointer looks next, so it works its way along the timeline. */
+const REACH = 260;
+/** Clips this near are the ones it looks through; now and then it goes to one further off, so it never stays on one for good. */
+const NEAR = 400;
+/** How fast it reads along a clip, in px per ms. */
+const READ = 0.16;
+const between = (a: number, b: number) => a + Math.random() * (b - a);
+
+/** The parts of clips the timeline shows, each with its ends that are on screen. */
+function clipsInView(view: View) {
+  const { snap, zoom } = useEditor.getState();
+  const [left, right] = [view.left + 8, view.right - 8];
+  const seen: { from: number; to: number; y: number; top: number; bottom: number; ends: number[] }[] = [];
+  for (const track of snap?.project.tracks ?? []) {
+    const row = at(track.id, 0);
+    if (!row || row.y < view.top || row.y > view.bottom) continue;
+    for (const clip of track.clips) {
+      const start = row.x + (clip.startUs / US) * zoom;
+      const end = start + (clip.durationUs / US) * zoom;
+      const [from, to] = [Math.max(left, start), Math.min(right, end)];
+      if (to - from >= 12) seen.push({ from, to, y: row.y, top: row.top, bottom: row.bottom, ends: [start, end].filter((x) => x >= left && x <= right) });
+    }
+  }
+  return seen;
+}
+
+/**
+ * What the pointer does while the agent thinks: it looks through the clips near it as an editor does before a cut,
+ * reading along one, going back over a part of it, stopping on a cut. It presses nothing and leaves no marks.
+ */
+async function look(view: View) {
+  const nearest = clipsInView(view)
+    .map((c) => ({ ...c, far: Math.hypot(Math.min(Math.max(pos.x, c.from), c.to) - pos.x, c.y - pos.y) }))
+    .sort((a, b) => a.far - b.far)
+    .slice(0, 4);
+  const near = Math.random() < 0.15 ? nearest : nearest.filter((c, i) => i === 0 || c.far <= NEAR);
+  const c = near[Math.floor(Math.random() * near.length)];
+  if (!c) return linger(600);
+  const x = Math.min(Math.max(pos.x + between(-REACH, REACH), c.from), c.to);
+  const cut = c.ends.sort((a, b) => Math.abs(a - x) - Math.abs(b - x))[0];
+  if (cut !== undefined && Math.abs(cut - pos.x) > 20 && Math.random() < 0.3) {
+    aim({ x: cut, y: c.y }, c);
+    await glide({ x: cut, y: c.y });
+    return linger(between(450, 950));
+  }
+  aim({ x, y: c.y }, c);
+  // Already there, as after stopping on a cut, it reads on at once.
+  const there = Math.hypot(x - pos.x, c.y - pos.y) < 8;
+  await glide({ x, y: c.y });
+  if (!there) await linger(between(150, 400));
+  // Mostly forwards, as the video plays; the other way where the clip ends.
+  const ahead = (Math.random() < 0.75 ? 1 : -1) * between(70, 240);
+  const along = (by: number) => Math.min(Math.max(x + by, c.from), c.to);
+  const to = Math.abs(along(ahead) - x) >= 30 ? along(ahead) : along(-ahead);
+  if (Math.abs(to - x) >= 12) {
+    await drag({ x: to, y: c.y }, Math.max(300, Math.abs(to - x) / READ));
+    if (Math.random() < 0.35) {
+      await linger(between(120, 260));
+      await drag({ x: to + (x - to) * between(0.3, 0.6), y: c.y }, Math.max(220, Math.abs(to - x) / READ / 2));
+    }
+  }
+  await linger(Math.random() < 0.2 ? between(1000, 1600) : between(350, 900));
+}
+
+/** Goes over a control and stays a moment without pressing it, which counts as going to `place`. */
+async function hover(selector: string, place: string) {
+  const r = shown(document.querySelector<HTMLElement>(selector));
+  if (!r) return false;
+  const to = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  aim(to, r);
+  await glide(to);
+  if (!shown(document.querySelector<HTMLElement>(selector))) return false;
+  went(place);
+  await linger(between(900, 1400));
+  return true;
+}
+
+/** Goes where a tool works and stays a moment; on the timeline it looks through the clips. */
+async function visit(tool: { step: string; place: Place }, view: View) {
+  say(tool.step);
+  const hovered = HOVERED[tool.place];
+  const el = tool.place === "timeline" ? null : tool.place === "preview" ? document.querySelector<HTMLElement>("canvas[data-preview-frame]") : hovered ? document.querySelector<HTMLElement>(hovered) : libraryTab(tool.place as PanelTab);
+  const r = shown(el);
+  if (!r || recent(tool.place)) return look(view);
+  visiting = tool.place;
+  if (tool.place === "preview") {
+    const inside = () => ({ x: r.left + r.width * between(0.3, 0.7), y: r.top + r.height * between(0.3, 0.7) });
+    const to = inside();
+    aim(to);
+    await glide(to);
+    went(tool.place);
+    await linger(between(500, 900));
+    await glide(inside());
+    return linger(between(600, 1000));
+  }
+  if (hovered) return void (await hover(hovered, tool.place));
+  await click(el, tool.place);
+  await linger(between(700, 1100));
+}
+
+/** The agent that owns the run called a tool: the pointer goes where that work happens. */
+export function agentUsed(name: string) {
+  if (!present || reducedMotion.matches || !agentRun(useEditor.getState().aiRun)) return;
+  if (EDITS[name]) return void (editing = { tab: EDITS[name], at: performance.now() });
+  const tool = READS[name];
+  if (!tool) return;
+  if (visiting === tool.place) return say(tool.step);
+  reading = { ...tool, at: performance.now() };
+  void pump();
 }
 
 const scaled = (from: number, to: number): Keyframe[] =>
@@ -533,30 +819,62 @@ async function leave() {
 function hide() {
   present = false;
   window.clearTimeout(stepTimer);
-  useAgentCursor.setState({ shown: false, step: null, glyph: "arrow" });
+  useAgentCursor.setState({ shown: false, step: null, glyph: "arrow", inspected: null });
 }
 
 async function pump() {
-  if (playing) return;
+  if (playing) return interrupt();
   playing = true;
   const gen = generation;
   try {
     if (!present && (agentRun(useEditor.getState().aiRun) || queue.length)) await enter();
-    while (queue.length) {
-      const before = queue[0].before;
-      const after = queue.at(-1)!.after;
-      queue = [];
-      if (reducedMotion.matches) {
-        release(before, after, 0);
-        await jump(before, after);
-        continue;
+    for (;;) {
+      const acted = queue.length > 0;
+      while (queue.length) {
+        const before = queue[0].before;
+        const after = queue.at(-1)!.after;
+        queue = [];
+        if (reducedMotion.matches) {
+          release(before, after, 0);
+          await jump(before, after);
+          continue;
+        }
+        await perform(before, after);
       }
-      await perform(before, after);
-    }
-    if (ending) {
-      await leave();
-      ending = false;
-      window.clearTimeout(endCap);
+      // The last change of a run still gets what follows it, as the tab of a setting, before the pointer goes back.
+      const after = present ? follow : null;
+      follow = null;
+      if (ending && !after) {
+        await leave();
+        ending = false;
+        window.clearTimeout(endCap);
+        break;
+      }
+      if (!ending && (!present || reducedMotion.matches || !agentRun(useEditor.getState().aiRun))) break;
+      const view = lanes();
+      const tool = reading && performance.now() - reading.at < 3000 ? reading : null;
+      looking = true;
+      try {
+        // A change it acted out stays under it for a moment, so it reads before the pointer moves on. While the video
+        // plays the timeline moves under the pointer, so it waits.
+        if (after) {
+          following = true;
+          await after();
+        } else if (acted || !view || useEditor.getState().playing) await linger(1000);
+        else if (tool) {
+          reading = null;
+          try {
+            await visit(tool, view);
+          } finally {
+            visiting = null;
+            done(2500);
+          }
+        } else await look(view);
+      } catch (e) {
+        if (!(e instanceof Stopped) || gen !== generation) throw e;
+      } finally {
+        if (gen === generation) looking = following = false;
+      }
     }
   } catch (e) {
     if (!(e instanceof Stopped)) {
@@ -581,6 +899,10 @@ export function flush() {
   queue = [];
   playing = false;
   ending = false;
+  looking = false;
+  reading = editing = follow = visiting = null;
+  following = false;
+  visited.clear();
   for (const a of [...running]) a.cancel();
   running.clear();
   window.clearTimeout(watchdog);
@@ -588,11 +910,19 @@ export function flush() {
   reveal(true);
   nodes?.fx.replaceChildren();
   if (nodes) for (const a of nodes.body.getAnimations()) a.cancel();
+  // A press cut short would leave the pointer small for the next run.
+  if (nodes) nodes.glyph.style.transform = "";
   hide();
   useAgentCursor.setState({ held: null, jumped: useAgentCursor.getState().held, release: null });
 }
 
 useEditor.subscribe((s, prev) => {
+  // What the user selects themselves is what the inspector shows again.
+  // A snapshot makes the selection's list anew, so it counts only when it holds something else; a click on the clip
+  // already selected counts too.
+  if (useAgentCursor.getState().inspected && (s.cut !== prev.cut || (s.selection !== prev.selection && (s.snap === prev.snap || !same(s.selection, prev.selection))))) {
+    useAgentCursor.setState({ inspected: null });
+  }
   const started = agentRun(s.aiRun) && !agentRun(prev.aiRun);
   if (s.snap && prev.snap && s.snap.sessionEpoch !== prev.snap.sessionEpoch) return flush();
   // Playing, moving the playhead or dragging media in needs the timeline as it is.

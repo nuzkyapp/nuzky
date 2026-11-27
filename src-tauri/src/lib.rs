@@ -409,6 +409,9 @@ impl OpenSession {
                             .ok();
                         });
                     }
+                    SessionEvent::Tool { name } => {
+                        app.emit("agent-tool", name).ok();
+                    }
                     SessionEvent::Run(run) => {
                         app.emit("run-changed", run.map(|run| run.label)).ok();
                         if let Ok(snap) = current.snapshot(Vec::new()) {
