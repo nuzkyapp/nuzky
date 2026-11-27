@@ -341,6 +341,11 @@ def ai_panel_chatgpt(r):
               and main[-1]['startUs'] + main[-1]['durationUs'] == before[0]['durationUs']
               and not r.errors(), {'panel': panel(r)['text'], 'clips': main, 'errors': r.errors()})
         r.shot('chatgpt-run-done')
+        r.s.run(UNFOLD)
+        check('the done run lists reading the guide before the project and the edit',
+              wait(lambda: (t := panel(r)['text']) and 'Reading the guide' in t and 'Read the project' in t
+                   and t.index('Reading the guide') < t.index('Read the project') < t.index('Editing'), 5), panel(r)['text'])
+        r.shot('chatgpt-steps')
         click(r, 'Undo')
         check('Undo on the card restores the original single clip', wait(lambda: r.track() == before, 10), r.track())
 
