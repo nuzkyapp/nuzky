@@ -1,8 +1,24 @@
-The thirteenth alpha of Nuzky, a free, open-source video editor for your computer. It's early, so expect rough edges. Nuzky never changes or deletes your original videos.
+The fourteenth alpha of Nuzky, a free, open-source video editor for your computer. It's early, so expect rough edges. Nuzky never changes or deletes your original videos.
 
 ## What's new
 
-- **Preview speed.** Watch the preview at 0.5x, 1.5x, 2x or 3x to get through a long recording faster and still hear what's said. Pick the speed from the button beside the time; the sound keeps its pitch, and Nuzky remembers the speed. J, K and L work as in Premiere, Final Cut and CapCut: L plays forwards and goes faster with each press, K stops, and J plays backwards. The speed changes only how the preview plays, never the video you export.
+- **Nuzky account.** Sign in with an optional Nuzky account to keep Your style and your caption styles on every computer. Nuzky syncs only those, never your videos, projects or transcripts. You don't need an account for anything else, and without one Nuzky doesn't contact the account server at all. Find it at the top of Settings.
+- **See the agent at work.** While an AI agent edits your project, a pointer with its name acts out each change on the timeline: it snips at a split, drags the edge of a trim and carries a clip to its new place. Turn it off in Settings › AI.
+- **A clearer inspector.** The sections of the Video tab fold and say what's set in them. Adjust groups its sliders under Light and Colour, and while you drag one, the preview shows the frame before the change beside the frame after it.
+- **Smoother playback.** The preview no longer stutters now and then while a video plays.
+- **Project names.** When the AI panel's agent makes captions, it names an untitled project after what the video is about.
+- **Clearer ChatGPT errors.** When ChatGPT refuses a message, the AI panel says why. When a chat gets too long, it offers to continue in a new one.
+
+## Fixes
+
+- Nuzky no longer closes a few seconds after starting on Windows PCs with older Intel graphics.
+- Nuzky no longer closes when it sets up captions on processors without AVX2, on Windows and Linux.
+- Videos from an iPhone 16 or newer that record Apple spatial audio play their stereo sound. A video with only spatial audio is added without sound, and Nuzky says why.
+- A slow video, a busy computer or a laptop that went to sleep no longer makes an export or the preview fail with "Timed out waiting for frame".
+- Install guides and Manage usage open in your browser. Before, the buttons did nothing.
+- A link the agent writes in the AI panel shows as its text, and a linked file shows in its folder when you click it.
+- On macOS, the top bar leaves room after the window buttons.
+- After an unexpected close, the next bug report says where Nuzky crashed, so we can fix it.
 
 ## Not yet
 
@@ -30,4 +46,4 @@ Open an issue at https://github.com/nuzkyapp/nuzky/issues, or use Send feedback 
 
 ## Source
 
-Nuzky is GPL-3.0-or-later, and its source is the Source code archive below. The installers include FFmpeg, ONNX Runtime and other libraries. Their source, and what each installer was built from, is in [Third-party source for Nuzky v0.1.13-alpha](https://github.com/nuzkyapp/nuzky/releases/tag/third-party-source-0.1.13-alpha).
+Nuzky is GPL-3.0-or-later, and its source is the Source code archive below. The installers include FFmpeg, ONNX Runtime and other libraries. Their source, and what each installer was built from, is in [Third-party source for Nuzky v0.1.14-alpha](https://github.com/nuzkyapp/nuzky/releases/tag/third-party-source-0.1.14-alpha).
