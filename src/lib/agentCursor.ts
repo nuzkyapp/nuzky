@@ -326,6 +326,8 @@ const dialogOpen = () => !!document.querySelector("dialog[open], [aria-modal='tr
 /**
  * Goes to a control and presses it, which counts as going to `place`. A tab that is not the one shown opens, as a
  * click on it does. False when it did not press: the control is not on screen, or went, or a dialog opened meanwhile.
+ * The check, the count and the click come with nothing awaited between them, so no interruption or dialog can fall
+ * between them: cut short before, nothing happened and it goes again; after, all of it did.
  */
 async function click(el: HTMLElement | null, place: string) {
   const r = shown(el);
@@ -333,12 +335,14 @@ async function click(el: HTMLElement | null, place: string) {
   const to = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
   aim(to, r);
   await glide(to);
-  if (!el.isConnected || dialogOpen()) return false;
-  went(place);
   await down();
-  if (el.getAttribute("aria-selected") === "false") el.click();
+  const ok = el.isConnected && !dialogOpen();
+  if (ok) {
+    went(place);
+    if (el.getAttribute("aria-selected") === "false") el.click();
+  }
   await up();
-  return true;
+  return ok;
 }
 
 function ring() {
@@ -748,6 +752,7 @@ async function hover(selector: string, place: string) {
   const to = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
   aim(to, r);
   await glide(to);
+  if (!shown(document.querySelector<HTMLElement>(selector))) return false;
   went(place);
   await linger(between(900, 1400));
   return true;
@@ -904,6 +909,8 @@ export function flush() {
   reveal(true);
   nodes?.fx.replaceChildren();
   if (nodes) for (const a of nodes.body.getAnimations()) a.cancel();
+  // A press cut short would leave the pointer small for the next run.
+  if (nodes) nodes.glyph.style.transform = "";
   hide();
   useAgentCursor.setState({ held: null, jumped: useAgentCursor.getState().held, release: null });
 }
