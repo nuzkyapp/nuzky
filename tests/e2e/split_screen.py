@@ -16,6 +16,7 @@ CLICK = "const b = document.querySelector(arguments[0]); if (!b || b.disabled ||
 PRESS = """const b = document.querySelector(arguments[0]); if (!b) return false;
   const r = b.getBoundingClientRect(), at = {bubbles: true, cancelable: true, button: 0, pointerType: 'mouse', isPrimary: true,
     clientX: r.left + r.width / 2, clientY: r.top + r.height / 2};
+  if (!document.elementFromPoint(at.clientX, at.clientY)?.closest(arguments[0])) return false;
   b.dispatchEvent(new PointerEvent('pointerdown', at)); b.dispatchEvent(new PointerEvent('pointerup', at));
   b.dispatchEvent(new MouseEvent('click', at)); return true"""
 OVERLAY = """(() => { const st = window.__nuzky.store.getState();
