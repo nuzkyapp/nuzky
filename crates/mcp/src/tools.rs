@@ -2503,19 +2503,15 @@ pub(crate) fn state_value(state: &SessionState, args: State) -> Result<Value> {
     Ok(value)
 }
 
-/// Clips of the unfiltered state leave out what says nothing: a field that is null, an empty list and an Adjust
-/// that changes nothing. A reel's hundred captions are then a third shorter.
+/// Clips of the unfiltered state leave out what says nothing, a field that is null and an empty list. A reel's
+/// hundred captions are then a third shorter.
 fn compact_clips(value: &mut Value) {
     let says_nothing = |value: &Value| value.is_null() || value.as_array().is_some_and(Vec::is_empty);
     let clips = value["tracks"].as_array_mut().into_iter().flatten().flat_map(|track| track["clips"].as_array_mut());
     for clip in clips.flatten().filter_map(Value::as_object_mut) {
         clip.retain(|_, value| !says_nothing(value));
         if let Some(content) = clip.get_mut("content").and_then(Value::as_object_mut) {
-            content.retain(|key, value| {
-                let neutral = key == "adjust"
-                    && value.as_object().is_some_and(|adjust| adjust.values().all(|v| v.as_f64() == Some(0.0)));
-                !says_nothing(value) && !neutral
-            });
+            content.retain(|_, value| !says_nothing(value));
         }
     }
 }
