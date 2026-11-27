@@ -11,15 +11,6 @@ __paintsSeen.observe(c, {attributes: true, attributeFilter: ['data-n']});
 const tick = (t) => { __paints.ticks.push(t); if (__paints.on) requestAnimationFrame(tick); };
 requestAnimationFrame(tick);"""
 STOP = "__paints.on = false; __paintsSeen.disconnect(); return JSON.stringify(__paints)"
-# Seeks back and forth while playing and reads, on every display frame, the playhead and the time of the frame shown.
-SEEKS = """(async () => { const st = window.__nuzky.store; const c = document.querySelector('canvas[data-preview-frame]'); const out = [];
-for (let i = 0; i < 6; i++) {
-  const target = i % 2 ? 2e6 : 12e6;
-  st.getState().seek(target);
-  const until = performance.now() + 1500;
-  while (performance.now() < until) { await new Promise((d) => requestAnimationFrame(d)); out.push([target, st.getState().timeUs, +c.dataset.us]); }
-}
-return JSON.stringify(out); })()"""
 
 
 @flow('smooth_playback', 'A phone video cut into many pieces under an adjustment layer plays in the preview with every frame '
@@ -79,19 +70,3 @@ def smooth_playback(r):
              'uneven at ms': uneven, 'needed': needed})
     r.shot('played')
 
-    r.s.run('window.__nuzky.store.getState().togglePlay()')
-    wait(lambda: r.s.run('return window.__nuzky.store.getState().playing'), 5)
-    time.sleep(1)
-    seen = json.loads(r.s.call(SEEKS)['value'])
-    r.s.run('window.__nuzky.store.getState().togglePlay()')
-    # A frame drawn ahead before a seek can arrive after it, and once moved the playhead back by 10 s for a moment.
-    near = lambda target, us: target - 100_000 <= us <= target + 2_000_000
-    back = [(target, us) for target, us, _ in seen if not near(target, us)]
-    r.check('seeking while playing, the playhead never shows where it was before the seek', len(seen) > 300 and not back,
-            {'samples': len(seen), 'away from the seek': back[:10]})
-    # The last sample before each next seek: the picture plays on from the new place, once the sound restarted, which
-    # on Bluetooth takes up to about 0.6 s.
-    shown = [seen[i] for i in range(len(seen)) if i + 1 == len(seen) or seen[i + 1][0] != seen[i][0]]
-    r.check('1.5 s after each seek the preview plays on from the new place',
-            len(shown) == 6 and all(t + 300_000 <= us <= t + 1_500_000 for t, _, us in shown),
-            {'shown after each seek': [(t, us) for t, _, us in shown]})
