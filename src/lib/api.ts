@@ -1,4 +1,5 @@
 import { invoke, type Channel } from "@tauri-apps/api/core";
+import { dropWaitingFrames } from "./frameStream";
 import type { GalleryPlugin, GalleryState } from "./gallery";
 import type { StorageUsage, StyleSettings, TelemetryStatus } from "./types";
 import type { EffectIssue, ListedPlugin, PluginRow, PluginValues } from "./plugins";
@@ -52,9 +53,9 @@ export const api = {
   soundOnlyIn: (assetId: string) => invoke<Mono | null>("sound_only_in", { assetId }),
   play: () => invoke<void>("play"),
   /** Plays at `rate` times the speed, below zero backwards, on this computer only; the project and the export keep theirs. */
-  playAt: (rate: number) => invoke<void>("play_at", { rate }),
-  pause: () => invoke<void>("pause"),
-  seek: (tUs: number) => invoke<void>("seek", { tUs: Math.round(tUs) }),
+  playAt: (rate: number) => (dropWaitingFrames(), invoke<void>("play_at", { rate })),
+  pause: () => (dropWaitingFrames(), invoke<void>("pause")),
+  seek: (tUs: number) => (dropWaitingFrames(), invoke<void>("seek", { tUs: Math.round(tUs) })),
   setPreviewBox: (width: number, height: number) => invoke<void>("set_preview_box", { width, height }),
   setPreviewCompare: (split: number | null) => invoke<void>("set_preview_compare", { split }),
   setPreviewMuted: (muted: boolean) => invoke<void>("set_preview_muted", { muted }),

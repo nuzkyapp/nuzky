@@ -276,7 +276,10 @@ fn run<F: Frames>(
     loop {
         // While playing, wake up to draw the next frame a little before it is due; otherwise sleep until a message.
         let msg = if let Some(audio) = &st.audio {
-            let wait = until_due(&st, audio).saturating_sub(AHEAD).min(Duration::from_millis(50));
+            let wait = match next_frame(&st, audio) {
+                Some((_, due)) => until(due, audio).saturating_sub(AHEAD).min(Duration::from_millis(50)),
+                None => Duration::from_millis(4),
+            };
             match rx.recv_timeout(wait) {
                 Ok(m) => Some(m),
                 Err(RecvTimeoutError::Timeout) => None,
@@ -391,17 +394,20 @@ fn run<F: Frames>(
 
             let playing = st.audio.is_some();
             // Playing draws each frame once, ahead of its time, and the webview shows it when it is due.
-            let ahead = st.audio.as_ref().map(|audio| (next_frame(&st, audio), until_due(&st, audio)));
-            if ahead.is_some_and(|(_, until)| until > AHEAD) {
-                return;
-            }
+            let ahead = match &st.audio {
+                Some(audio) => match next_frame(&st, audio) {
+                    Some(next) if until(next.1, audio) <= AHEAD => Some(next),
+                    _ => return,
+                },
+                None => None,
+            };
             let due = match (ahead, &st.audio) {
-                (Some(((_, due_us), _)), Some(audio)) => due_at(&mut st.pace, audio, due_us),
+                (Some((_, due_us)), Some(audio)) => due_at(&mut st.pace, audio, due_us),
                 _ => Instant::now(),
             };
             if playing || st.dirty {
                 let (w, h) = render_size(&st.project, st.box_size, st.window_box);
-                let t_us = ahead.map_or(st.t_us, |((t, _), _)| t);
+                let t_us = ahead.map_or(st.t_us, |(t, _)| t);
                 if playing {
                     st.drawn = Some(t_us);
                 }
@@ -459,28 +465,35 @@ fn run<F: Frames>(
 const AHEAD: Duration = Duration::from_millis(40);
 
 /// The next frame to draw while playing and when the sound reaches it, both in timeline time: the frame after the last
-/// one drawn, or the frame at the sound's time when that one is due already or nothing was drawn yet.
-fn next_frame(st: &State, audio: &AudioOut) -> (i64, i64) {
+/// one drawn, or the frame at the sound's time when that one is due already or nothing was drawn yet. `None` while the
+/// sound has not started moving after the first frame, and backwards after the first frame of the timeline.
+fn next_frame(st: &State, audio: &AudioOut) -> Option<(i64, i64)> {
     let now = audio.now_us();
-    let Some(drawn) = st.drawn else { return (now, now) };
-    let frame = st.project.frame_duration_us();
-    // Frames start on whole microseconds rounded up, which can land a hair before the boundary in floating point.
-    let index = ((drawn as f64 + 0.5) / frame).floor();
-    let (t, due) = if audio.rate() > 0.0 {
-        let start = ((index + 1.0) * frame).ceil() as i64;
-        (start, start)
-    } else {
-        // Backwards the frame before is due as soon as the sound leaves the start of the one drawn.
-        let start = (index * frame).ceil() as i64;
-        (start - 1, start)
-    };
-    if (due - now) as f64 * audio.rate().signum() < 0.0 { (now, now) } else { (t, due) }
+    let Some(drawn) = st.drawn else { return Some((now, now)) };
+    if !audio.moving() {
+        return None;
+    }
+    let (t, due) = frame_after(drawn, st.project.canvas.fps, audio.rate() > 0.0)?;
+    Some(if (due - now) as f64 * audio.rate().signum() < 0.0 { (now, now) } else { (t, due) })
 }
 
-/// How long until the sound reaches the next frame to draw.
-fn until_due(st: &State, audio: &AudioOut) -> Duration {
-    let (_, due) = next_frame(st, audio);
-    Duration::from_micros(((due - audio.now_us()) as f64 / audio.rate()).max(0.0) as u64)
+/// The frame after the one at `t_us`, or before it backwards, at `fps`, and when it is due: frames start on the
+/// microsecond at or after their exact start. Backwards the frame before is due as soon as the sound leaves the start
+/// of the one at `t_us`. `None` backwards from the first frame.
+fn frame_after(t_us: i64, fps: u32, forward: bool) -> Option<(i64, i64)> {
+    let fps = i64::from(fps.max(1));
+    let start = |index: i64| (index * 1_000_000 + fps - 1).div_euclid(fps);
+    let index = (t_us * fps).div_euclid(1_000_000);
+    match forward {
+        true => Some((start(index + 1), start(index + 1))),
+        false if index > 0 => Some((start(index) - 1, start(index))),
+        false => None,
+    }
+}
+
+/// How long until the sound reaches timeline time `t_us`.
+fn until(t_us: i64, audio: &AudioOut) -> Duration {
+    Duration::from_micros(((t_us - audio.now_us()) as f64 / audio.rate()).max(0.0) as u64)
 }
 
 static PACE_START: std::sync::LazyLock<Instant> = std::sync::LazyLock::new(Instant::now);
@@ -551,6 +564,25 @@ mod tests {
         fn frame(&mut self, project: &Project, _: i64, w: u32, h: u32, _: Wait, _: bool) -> Result<Vec<u8>> {
             assert_ne!(project.name, "broken", "bad project");
             Ok(vec![0; (w * h * 4) as usize])
+        }
+    }
+
+    #[test]
+    fn playing_steps_one_frame_at_a_time_both_ways() {
+        for fps in [24, 25, 30, 60] {
+            let index = |t: i64| t * fps as i64 / 1_000_000;
+            let (mut t, mut frames) = (0, 0);
+            while let Some((next, due)) = frame_after(t, fps, true).filter(|(next, _)| *next < 10_000_000) {
+                assert_eq!((index(next), due), (index(t) + 1, next), "{fps} fps forwards from {t}");
+                (t, frames) = (next, frames + 1);
+            }
+            assert_eq!(frames, 10 * fps - 1);
+            while let Some((before, due)) = frame_after(t, fps, false) {
+                assert_eq!(index(before), index(t) - 1, "{fps} fps backwards from {t}");
+                assert_eq!(index(due), index(t), "{fps} fps backwards from {t}: due when the sound leaves {t}");
+                (t, frames) = (before, frames - 1);
+            }
+            assert_eq!((index(t), frames), (0, 0), "{fps} fps backwards stops at the first frame");
         }
     }
 

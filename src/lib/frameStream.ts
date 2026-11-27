@@ -6,6 +6,11 @@ const MAX_WAIT_MS = 250;
 
 type Frame = { buf: ArrayBuffer; due: number; playing: boolean };
 
+const streams = new Set<() => void>();
+
+/** Forgets the frames drawn ahead while playing, which a seek, a pause or another speed makes wrong. */
+export const dropWaitingFrames = () => streams.forEach((drop) => drop());
+
 /**
  * Receives rendered frames from an engine and paints them; `onFrame` gets each one's time. A paused frame paints on
  * the next display frame. A playing frame comes ahead of its time and paints on the display frame nearest to when it
@@ -95,6 +100,9 @@ export function useFrameStream(url: string, canvas: React.RefObject<HTMLCanvasEl
       if (!raf) raf = requestAnimationFrame(tick);
     };
 
+    const drop = () => (queue = queue.filter((f) => !f.playing));
+    streams.add(drop);
+
     const connect = () => {
       ws = new WebSocket(url);
       ws.binaryType = "arraybuffer";
@@ -111,6 +119,7 @@ export function useFrameStream(url: string, canvas: React.RefObject<HTMLCanvasEl
     connect();
     return () => {
       closed = true;
+      streams.delete(drop);
       ws?.close();
       cancelAnimationFrame(raf);
     };
