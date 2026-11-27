@@ -631,22 +631,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "candle-nn"
-version = "0.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "437fabe77547c2447c7bdf3cc946e19db29a2832440176b419f77c80b0a9a05e"
-dependencies = [
- "candle-core",
- "half",
- "libc",
- "num-traits",
- "rayon",
- "safetensors",
- "serde",
- "thiserror 2.0.21",
-]
-
-[[package]]
 name = "cargo-platform"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3734,8 +3718,8 @@ version = "0.1.14-alpha"
 dependencies = [
  "anyhow",
  "candle-core",
- "candle-nn",
  "dunce",
+ "gemm",
  "libm",
  "nuzky-engine",
  "nuzky-interchange",
