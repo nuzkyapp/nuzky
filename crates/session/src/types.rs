@@ -111,6 +111,10 @@ pub enum SessionEvent {
         origin: Origin,
     },
     Run(Option<RunInfo>),
+    /// The agent that owns the open run called this tool, so the editor's pointer goes where that work happens.
+    Tool {
+        name: String,
+    },
     /// What the run that is ending changed, sent just before `Run(None)`.
     RunSummary {
         run_id: String,

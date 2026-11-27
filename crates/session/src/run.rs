@@ -36,11 +36,15 @@ impl ProjectSession {
         self.inner.lock().unwrap().owns_run(run_id)
     }
 
-    /// A call from the client that owns the open run postpones its idle auto-keep.
-    pub fn touch_run(&self, owns: impl FnOnce(&str) -> bool) -> Result<()> {
+    /// A call from the client that owns the open run postpones its idle auto-keep. `tool`: the tool it calls, which
+    /// the editor is told; none while it only waits for a job.
+    pub fn touch_run(&self, tool: Option<&str>, owns: impl FnOnce(&str) -> bool) -> Result<()> {
         let mut inner = self.inner.lock().unwrap();
         if inner.run.as_ref().is_some_and(|run| owns(&run.info.run_id)) {
             inner.touch()?;
+            if let Some(name) = tool {
+                inner.emit(SessionEvent::Tool { name: name.to_owned() });
+            }
         }
         Ok(())
     }

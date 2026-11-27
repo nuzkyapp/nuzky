@@ -24,7 +24,7 @@ import { MEDIA_EXTENSIONS, importPaths, mediaKind, resolveDrop } from "./compone
 import { Toasts } from "./components/Toasts";
 import { Tour } from "./components/Tour";
 import { listenAgentEvents, panelRunEnded, useAgent } from "./lib/agent";
-import { useAgentCursor } from "./lib/agentCursor";
+import { agentUsed, useAgentCursor } from "./lib/agentCursor";
 import { listenRemote, useRemote } from "./lib/remote";
 import { listenPreviewWindow, usePreviewWindow } from "./lib/previewWindow";
 import { togglePanel, useDock, useDockLayout, useWindowSize } from "./lib/dock";
@@ -268,6 +268,7 @@ function useBackendEvents() {
       }),
     );
     offs.push(listen<JobEvent>("job", (e) => onJob(e.payload)));
+    offs.push(listen<string>("agent-tool", (e) => agentUsed(e.payload)));
     offs.push(listen<ModelQuestion | null>("speech-model-question", (e) => useEditor.setState({ speechModelQuestion: e.payload })));
     offs.push(listen<ModelQuestion | null>("vision-model-question", (e) => useEditor.setState({ visionModelQuestion: e.payload })));
     offs.push(listen<ModelQuestion | null>("scene-model-question", (e) => useEditor.setState({ sceneModelQuestion: e.payload })));
