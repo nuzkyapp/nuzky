@@ -14,7 +14,7 @@ const tick = () => {
   const clips = row ? [...row.querySelectorAll('[data-clip-id]')].map((e) => [e.getBoundingClientRect().left, e.dataset.clipId]).sort((a, b) => a[0] - b[0]) : [];
   window.__pointerLog.push({stored: s.snap.project.tracks.find((t) => t.id === 'main').clips.length,
     drawn: row ? row.querySelectorAll('[data-clip-id]').length : -1, first: clips[0]?.[1] ?? null, tracks: document.querySelectorAll('[data-timeline] [data-track-id]').length,
-    t: performance.now(), held: !!c.held, shown: c.shown, glyph: c.glyph, label: c.step ? `${c.name} · ${c.step}` : c.name, band: !!document.querySelector('.agent-band'), x: tip.left, y: tip.top});
+    t: performance.now(), tab: s.panelTab, clips: document.querySelectorAll('[data-timeline] [data-clip-id]').length, held: !!c.held, shown: c.shown, glyph: c.glyph, label: c.step ? `${c.name} · ${c.step}` : c.name, band: !!document.querySelector('.agent-band'), x: tip.left, y: tip.top});
   requestAnimationFrame(tick);
 };
 requestAnimationFrame(tick);"""
@@ -50,7 +50,7 @@ def first(log, test):
 @flow('agent_pointer', "While an AI agent edits, a pointer with its name acts each change out on the timeline: the timeline "
       "shows the change as the pointer gets there, it snips a split and a cut out, drags a clip to a new track, goes back "
       "to the AI button when the run ends, and Settings › AI turns it off. It opens the Transcript tab while the agent reads "
-      "the transcript, the inspector's tab of a setting it changed and the Text tab a new text comes from, and stays over the Cover tile while it checks the thumbnail", before=agent_project)
+      "the transcript, the inspector's tab of a setting it changed and the Text tab a new text comes from, and stays over the Cover tile when the agent makes a thumbnail", before=agent_project)
 def agent_pointer(r):
     clip = r.track()[0]
     bridge = Bridge(r, r.saved_project(), client='claude-code')
@@ -144,19 +144,22 @@ def agent_pointer(r):
         wait(lambda: not r.s.run('return !!window.__nuzky.agentCursor.getState().held'), 6)
         time.sleep(0.5)
         log = r.s.run(LOG)
+        tabbed = first(log, lambda e: e['tab'] == 'text')
+        drawn = first(log, lambda e: e['clips'] > log[0]['clips'])
         r.check('a new text comes from the Text tab, which the pointer opens before it puts the text in',
-                opened and any(e['held'] for e in on(log, tab)), {'tab': r.s.run(PANEL_TAB), 'on': len(on(log, tab)), 'labels': sorted({e['label'] for e in log})})
+                opened and tabbed is not None and drawn is not None and tabbed < drawn and any(e['held'] for e in on(log, tab)),
+                {'tab': r.s.run(PANEL_TAB), 'tabbed': tabbed, 'drawn': drawn, 'on': len(on(log, tab)), 'labels': sorted({e['label'] for e in log})})
 
         time.sleep(1.5)
         tile = r.s.run(RECT, '[data-testid="cover-tile"]')
         r.s.run(SAMPLE)
-        bridge.rpc('tools/call', {'name': 'inspect_thumbnail', 'arguments': {}})
+        bridge.call('apply_edits', {'run_id': run, 'request_id': 'cover', 'edits': [{'type': 'setThumbnail', 'thumbnail': {'format': 'cover_9x16', 'timeUs': 1_000_000}}]})
         wait(lambda: r.s.run("const e = window.__pointerLog.at(-1); return !!e && e.x >= arguments[0] && e.x <= arguments[2] && e.y >= arguments[1] && e.y <= arguments[3]", *tile), 5, 0.1)
         time.sleep(0.5)
         log = r.s.run(LOG)
         r.shot('cover')
-        r.check('while the agent checks the thumbnail the pointer stays over the Cover tile, says so and opens nothing',
-                any(e['label'] == 'Claude Code · Checking the thumbnail' for e in on(log, tile)) and not r.s.run('return !!window.__nuzky.cover.getState().open'),
+        r.check('when the agent makes a thumbnail the pointer stays over the Cover tile, says so and opens nothing',
+                any(e['label'] == 'Claude Code · Making the thumbnail' for e in on(log, tile)) and not r.s.run('return !!window.__nuzky.cover.getState().open'),
                 {'on': len(on(log, tile)), 'labels': sorted({e['label'] for e in log}), 'cover': r.s.run('return window.__nuzky.cover.getState().open')})
 
         r.s.run('window.__nuzky.store.getState().togglePlay()')
