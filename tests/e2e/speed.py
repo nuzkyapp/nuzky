@@ -1,9 +1,10 @@
 """Keep pitch on a Czech talking head sped up to 1.25x in the inspector: the voice in the export is as high as in the
 recording, 1.25 times shorter, and every phrase starts where speed puts it, which is where captions and cuts land.
 Turned off by keyboard, the voice rises with the speed again, and it stays off when the speed changes."""
-import array, json, math, statistics, subprocess
+import array, json, math, statistics, subprocess, time
 
-from e2e.harness import FIXTURES, export, flow, press, wait
+from e2e.harness import FIXTURES, export, ffprobe, flow, press, wait
+from e2e.split_screen import smallest
 
 SOURCE = FIXTURES / 'reel-1.mp4'
 RATE = 16_000
@@ -118,4 +119,58 @@ def speed(r):
     r.key('z', ctrlKey=True)
     r.check('two Ctrl+Z bring back 1.25x with Keep pitch on',
             wait(lambda: content()['speed'] == 1.25 and content().get('keepPitch') is True, 5), content())
+    r.check('no error toast', not r.errors(), r.errors())
+
+
+GROUP = "aside[aria-label=Inspector] [role=group][aria-label='Speed presets']"
+
+
+@flow('multi_speed', 'Two selected talking-head chunks share a Speed section: a typed 2x and a preset change both, back to back, '
+      'as one undo step, and the export is as long as both at that speed')
+def multi_speed(r):
+    r.import_media(FIXTURES / 'talk.mp4')
+    r.add_clip('talk.mp4')
+    r.add_clip('talk.mp4')
+    first, second = (c['id'] for c in r.track())
+    source_us = r.track()[0]['durationUs']
+    r.s.call("window.__nuzky.store.getState().edit({type: 'updateClip', clipId: arguments[0], speed: 1.5})", first)
+    main = lambda: r.s.run("return window.__nuzky.store.getState().snap.project.tracks[0].clips.map((c) => ({speed: c.content.speed, startUs: c.startUs, durationUs: c.durationUs}))")
+    wait(lambda: main()[0]['speed'] == 1.5, 5)
+    r.s.run('window.__nuzky.store.getState().select(arguments[0])', [first, second])
+
+    field = 'aside[aria-label=Inspector] input[aria-label="Speed value"]'
+    r.check('two selected video clips show Speed in the inspector', wait(lambda: r.s.run(f"return !!document.querySelector('{field}')"), 5))
+    r.check('their different speeds show a dash and no preset',
+            r.s.run(f"return document.querySelector('{field}')?.value ?? null") == '—'
+            and r.s.run(f'return document.querySelectorAll("{GROUP} [aria-pressed=true]").length') == 0)
+    r.s.run(f"document.querySelector('{field}').scrollIntoView({{block: 'center'}})")
+    smallest(r, 'multi-speed-mixed')
+
+    speeds = lambda: [c['speed'] for c in main()]
+    r.s.run(TYPE, field, '2')
+    r.check('typing 2 sets both clips to 2x', wait(lambda: speeds() == [2, 2], 5), speeds())
+    clips = main()
+    half = source_us / 2
+    r.check('each lasts half its source and they stay back to back',
+            all(abs(c['durationUs'] - half) < 40_000 for c in clips) and clips[1]['startUs'] == clips[0]['startUs'] + clips[0]['durationUs'],
+            [(c['startUs'], c['durationUs']) for c in clips])
+    r.check('the 2x preset shows chosen', wait(lambda: r.s.run(f'return document.querySelector("{GROUP} [data-seg=\'2\']").getAttribute("aria-pressed")') == 'true', 5))
+    r.s.run(f"document.querySelector('{field}').scrollIntoView({{block: 'center'}})")
+    time.sleep(1)
+    r.shot('multi-speed-2x')
+
+    r.s.run(f'document.querySelector("{GROUP} [data-seg=\'0.5\']").click()')
+    r.check('the 0.5x preset slows both down', wait(lambda: speeds() == [0.5, 0.5], 5), speeds())
+    r.s.call('window.__nuzky.store.getState().undo()')
+    r.check('one Undo brings both back to 2x', wait(lambda: speeds() == [2, 2], 5), speeds())
+
+    saved = lambda: [c['content']['speed'] for t in json.loads(r.saved_project().read_text())['tracks'] for c in t['clips']]
+    r.check('the project file on disk has both at 2x', wait(lambda: saved() == [2, 2], 10), saved())
+    length, _ = ffprobe(export(r, 'both-2x.mp4'))
+    r.check('the export is as long as both chunks at 2x', abs(length - source_us / 1e6) < 0.1, f'{length:.3f} s, source {source_us / 1e6:.3f} s')
+
+    r.s.call("window.__nuzky.store.getState().edit({type: 'updateClip', clipId: arguments[0], ramp: [{at: 0, speed: 1}, {at: 1, speed: 3}]})", first)
+    r.check('with a clip on a speed ramp selected, the shared Speed does not show',
+            wait(lambda: r.s.run(f"return !document.querySelector('{field}')"), 5)
+            and r.s.run("return document.querySelector('aside[aria-label=Inspector]').textContent.includes('2 clips selected')"))
     r.check('no error toast', not r.errors(), r.errors())

@@ -2,13 +2,13 @@ import { useShallow } from "zustand/react/shallow";
 import { Copy, Layers, Repeat2, RotateCcw, Trash2 } from "lucide-react";
 import { cropAndMask, ownTransform } from "../../lib/keyframes";
 import { LIMITS } from "../../lib/limits";
-import { ADJUST_ROWS, DEFAULT_TRANSFORM, NO_ADJUST, SPLIT_LAYOUTS, sameAdjust } from "../../lib/presets";
+import { ADJUST_ROWS, DEFAULT_TRANSFORM, NO_ADJUST, SPEED_PRESETS, SPLIT_LAYOUTS, sameAdjust } from "../../lib/presets";
 import { deleteSelection, duplicateSelection, editClips, findClip, isCaptionTrack, patched, readoutTime, transformAtPlayhead, useCanvasUnit, useEditor, type StylePatch } from "../../lib/store";
 import type { Adjust, Clip, EditCmd, Project, Track, Transform } from "../../lib/types";
-import { Button, IconButton, PresetTile, Section, Slider } from "../ui";
+import { Button, IconButton, PresetTile, Section, Segmented, Slider } from "../ui";
 import { InspectorHeader, QUIET } from "./Header";
 import { BackgroundSection } from "./BackgroundSection";
-import { DuckingRow, MonoRow, VoiceSection } from "./MediaSections";
+import { DuckingRow, MonoRow, VoiceSection, speedSlider } from "./MediaSections";
 import { StyleSection } from "./TextSection";
 import { useKeyLabels } from "../../lib/keys";
 
@@ -23,6 +23,7 @@ function facts(project: Project, { clip, track }: Found) {
     transform: !onAudioTrack && c.type !== "adjustment",
     adjust: c.type === "media" && !onAudioTrack && asset?.kind !== "audio",
     sound: c.type === "media" && c.speed !== 0 && (onAudioTrack || !!asset?.hasAudio),
+    speed: c.type === "media" && c.speed !== 0 && !c.ramp?.length && asset?.kind !== "image",
     text: c.type === "text",
     kind: c.type === "text" ? (isCaptionTrack(track) ? "caption" : "text") : c.type === "adjustment" ? "adjustment" : onAudioTrack ? "audio" : (asset?.kind ?? "video"),
   };
@@ -199,6 +200,31 @@ function AdjustRows({ found, coalesce }: { found: Found[]; coalesce: string }) {
   );
 }
 
+const speedOf = (clip: Clip) => (clip.content.type === "media" ? clip.content.speed : 1);
+
+function SpeedRows({ found, coalesce }: { found: Found[]; coalesce: string }) {
+  const ids = found.map((f) => f.clip.id);
+  const s = shared(found.map((f) => speedOf(f.clip)));
+  const edit = useEditor((st) => st.edit);
+  const speed = (v: number) => Math.round(v * 100) / 100;
+  const set = (v: number, key: string) =>
+    edit((project) => {
+      const now = ids.map((id) => findClip(project, id));
+      return now.every((f) => f && facts(project, f).speed) ? ids.map((clipId): EditCmd => ({ type: "updateClip", clipId, speed: speed(v) })) : null;
+    }, `${coalesce}:${key}`);
+  return (
+    <Section title="Speed">
+      <Segmented
+        label="Speed presets"
+        value={s.mixed ? null : (SPEED_PRESETS.find((p) => Math.abs(p - s.value) < 0.005) ?? null)}
+        onChange={(p) => set(p, `speed-preset:${Date.now()}`)}
+        options={SPEED_PRESETS.map((p) => ({ id: p, label: `${p}x` }))}
+      />
+      <Slider label="Speed" mixed={s.mixed} value={Math.log10(s.value)} {...speedSlider} onChange={(v) => set(10 ** v, "speed")} />
+    </Section>
+  );
+}
+
 function VolumeRow({ found, coalesce }: { found: Found[]; coalesce: string }) {
   const ids = found.map((f) => f.clip.id);
   const s = shared(found.map((f) => (f.clip.content.type === "media" ? f.clip.content.volume : 0)));
@@ -236,7 +262,7 @@ export function MultiInspector({ ids }: { ids: string[] }) {
   const project = useEditor((s) => s.snap!.project);
   const found = ids.map((id) => findClip(project, id)).filter((f): f is Found => !!f);
   const info = found.map((f) => facts(project, f));
-  const all = (k: "transform" | "adjust" | "sound" | "text") => found.length > 0 && info.every((i) => i[k]);
+  const all = (k: "transform" | "adjust" | "sound" | "speed" | "text") => found.length > 0 && info.every((i) => i[k]);
   const counts = new Map<string, number>();
   for (const i of info) counts.set(i.kind, (counts.get(i.kind) ?? 0) + 1);
   const detail = [...counts].map(([kind, n]) => plural(n, KIND_NOUNS[kind] ?? kind)).join(" · ");
@@ -259,6 +285,7 @@ export function MultiInspector({ ids }: { ids: string[] }) {
         {all("text") && <StyleRows found={found} coalesce={coalesce} />}
         {all("adjust") && <BackgroundSection clips={found.map((f) => f.clip)} />}
         {all("adjust") && <AdjustRows found={found} coalesce={coalesce} />}
+        {all("speed") && <SpeedRows found={found} coalesce={coalesce} />}
         {all("sound") && <VolumeRow found={found} coalesce={coalesce} />}
         {all("sound") && <VoiceSection clips={found.map((f) => f.clip)} coalesce={coalesce} />}
       </div>
