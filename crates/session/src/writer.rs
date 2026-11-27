@@ -22,6 +22,7 @@ enum Message {
     Flush(Snapshot, Sender<Result<()>>),
     Checkpoint(serde_json::Value, Sender<Result<()>>),
     History(Write),
+    MarkOpened(Sender<Result<()>>),
     Stop,
 }
 
@@ -63,6 +64,12 @@ impl Writer {
         self.tx
             .send(Message::Schedule(Snapshot { project: project.clone(), revision }))
             .context("SAVE_FAILED: project writer stopped")
+    }
+
+    pub(crate) fn mark_opened(&self) -> Result<()> {
+        let (tx, rx) = mpsc::channel();
+        self.tx.send(Message::MarkOpened(tx)).context("project writer stopped")?;
+        rx.recv().context("project writer stopped")?
     }
 
     pub(crate) fn flush(&self, project: &Project, revision: u64) -> Result<()> {
@@ -135,6 +142,14 @@ fn write_loop(
                 }
                 let _ = reply.send(result);
             }
+            Some(Message::MarkOpened(reply)) => {
+                let unchanged = saved.is_some_and(|(_, file)| on_disk(&path) == Some(file));
+                let result = mark_opened(&path);
+                if result.is_ok() && unchanged {
+                    saved = saved.zip(on_disk(&path)).map(|((revision, _), file)| (revision, file));
+                }
+                let _ = reply.send(result);
+            }
             Some(Message::Checkpoint(value, reply)) => {
                 let result = storage::save_waiting(&storage::sidecar(&path, ".checkpoint.json"), &value)
                     .context("SAVE_FAILED: saving checkpoint");
@@ -191,6 +206,12 @@ fn append(path: &Path, text: &str) -> Result<()> {
     }
     let mut file = std::fs::OpenOptions::new().append(true).create(true).open(path).context("Opening versions")?;
     file.write_all(text.as_bytes()).context("Writing versions")
+}
+
+/// Moves the file's modification time to now without writing it.
+fn mark_opened(path: &Path) -> Result<()> {
+    std::fs::File::options().write(true).open(path)?.set_modified(std::time::SystemTime::now())?;
+    Ok(())
 }
 
 /// The file's size and modification time, to notice it changed or went away since the last save.

@@ -522,7 +522,7 @@ impl AppState {
         *current = next;
         self.source_preview.lock().unwrap().take();
         // The home screen and the startup picker list projects by modification time, so opening one is a change too.
-        if let Err(error) = store::mark_opened(&current.path) {
+        if let Err(error) = current.host.session.mark_opened() {
             log::error!("Cannot mark the project opened: {error:#}");
         }
         self.thumbs.lock().unwrap().clear();

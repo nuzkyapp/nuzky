@@ -598,9 +598,17 @@ def launcher(r):
     r.check('switching projects in the editor leaves the window as it is', r.s.run('return window.__maximized') == [])
     r.check('opening a project counts as opening it: it is first in the list next time',
             wait(lambda: r.s.call('window.__nuzky.api.library().then((l) => l.projects[0].name)')['value'] == 'Croatia day 2', 5))
+    croatia = r.work / 'data/nuzky/projects/croatia.nuzky'
+    opened_at = croatia.stat().st_mtime
+    time.sleep(1.1)
+    r.s.run("window.__nuzky.openProject({path: arguments[0], name: 'Morning reel'})", str(projects_dir(r) / 'reel.nuzky'))
+    wait(lambda: view(r)['name'] == 'Morning reel', 10)
+    r.check('closed without an edit, a project keeps the time it was opened instead of the time it was closed',
+            croatia.stat().st_mtime == opened_at, {'opened': opened_at, 'now': croatia.stat().st_mtime})
+    r.s.run("window.__nuzky.openProject({path: arguments[0], name: 'Croatia day 2'})", str(croatia))
+    wait(lambda: view(r)['name'] == 'Croatia day 2', 10)
 
     # An agent edits the open project; opening another one asks what happens to its changes.
-    croatia = r.work / 'data/nuzky/projects/croatia.nuzky'
     bridge = Bridge(r, croatia)
     try:
         # The user's own change, then the agent's. Undo changes while the new project cannot start

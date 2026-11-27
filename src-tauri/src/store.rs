@@ -70,12 +70,6 @@ pub fn save(path: &Path, project: &Project) -> Result<()> {
     nuzky_session::write_json_atomic(path, project)
 }
 
-/// Moves the project's modification time to now without writing it.
-pub fn mark_opened(path: &Path) -> Result<()> {
-    std::fs::File::options().write(true).open(path)?.set_modified(SystemTime::now())?;
-    Ok(())
-}
-
 pub fn new_project_path() -> PathBuf {
     projects_dir().join(format!("{}.{EXTENSION}", nuzky_engine::edit::new_id()))
 }

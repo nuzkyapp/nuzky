@@ -259,6 +259,11 @@ impl ProjectSession {
         Ok(inner.path.clone())
     }
 
+    /// Moves the project's modification time to now, which the home screen lists it by, without writing it.
+    pub fn mark_opened(&self) -> Result<()> {
+        self.inner.lock().unwrap().writer.as_ref().context("READ_ONLY: no writer")?.mark_opened()
+    }
+
     /// A clean transport disconnect keeps edits as one undoable run and drains autosave.
     pub fn disconnect(&self) -> Result<()> {
         let mut inner = self.inner.lock().unwrap();
