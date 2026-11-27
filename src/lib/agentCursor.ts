@@ -173,7 +173,7 @@ const visited = new Map<string, number>();
 const AGAIN_MS = 8000;
 
 const recent = (place: string) => performance.now() - (visited.get(place) ?? -AGAIN_MS) < AGAIN_MS;
-/** Counted once the pointer got there, so a visit cut short on the way is made again. */
+/** Counted as the pointer gets there, so a visit cut short on the way is made again. */
 const went = (place: string) => void visited.set(place, performance.now());
 /** Where the pointer is on its way to for a tool; another call of a tool that works there changes nothing. */
 let visiting: Place | null = null;
@@ -323,15 +323,20 @@ function shown(el: HTMLElement | null) {
 /** A dialog the user answers; a tab opened under it could take away what it belongs to. */
 const dialogOpen = () => !!document.querySelector("dialog[open], [aria-modal='true']");
 
-/** Goes to a control and presses it. A tab that is not the one shown opens, as a click on it does. */
-async function click(el: HTMLElement | null) {
+/**
+ * Goes to a control and presses it, which counts as going to `place`. A tab that is not the one shown opens, as a
+ * click on it does. False when it did not press: the control is not on screen, or went, or a dialog opened meanwhile.
+ */
+async function click(el: HTMLElement | null, place: string) {
   const r = shown(el);
   if (!el || !r || dialogOpen()) return false;
   const to = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
   aim(to, r);
   await glide(to);
+  if (!el.isConnected || dialogOpen()) return false;
+  went(place);
   await down();
-  if (el.isConnected && !dialogOpen() && el.getAttribute("aria-selected") === "false") el.click();
+  if (el.getAttribute("aria-selected") === "false") el.click();
   await up();
   return true;
 }
@@ -574,7 +579,7 @@ function settingsTab(a: Clip, b: Clip) {
   return cb.type === "text" ? "transform" : "video";
 }
 
-/** After a click on a changed clip: the pointer opens the tab of the setting that changed, in the inspector or the library. */
+/** After a click on a changed clip: the pointer opens the inspector's tab of the setting that changed. */
 async function settings(was: Clip, now: Clip) {
   const gen = generation;
   await frame();
@@ -583,11 +588,10 @@ async function settings(was: Clip, now: Clip) {
   if (queue.length) return;
   const tab = settingsTab(was, now);
   const inspector = (id: string) => document.querySelector<HTMLElement>(`[role="tablist"][aria-label="Clip settings"] [data-tab="${id}"]`);
-  // A sound on its own has its speed in Audio.
-  const el = !same(was.transitionIn, now.transitionIn) ? libraryTab("transitions") : (inspector(tab) ?? (tab === "speed" ? inspector("audio") : null));
+  // A sound on its own has its speed in Audio. A transition is no setting of the clip: no tab shows the cut it is on.
+  const el = !same(was.transitionIn, now.transitionIn) ? null : (inspector(tab) ?? (tab === "speed" ? inspector("audio") : null));
   const place = `${now.id} ${tab}`;
-  if (recent(place) || !(await click(el))) return linger(ending ? 300 : 1000);
-  went(place);
+  if (recent(place) || !(await click(el, place))) return linger(ending ? 300 : 1000);
   // The run is over: the pointer has little time left to go back.
   await linger(ending ? 300 : between(600, 900));
 }
@@ -616,8 +620,7 @@ async function perform(before: Project, after: Project) {
       follow = async () => {
         say("Making the thumbnail");
         try {
-          if (recent("cover") || !(await hover(HOVERED.cover!))) await linger(ending ? 300 : 1000);
-          else went("cover");
+          if (recent("cover") || !(await hover(HOVERED.cover!, "cover"))) await linger(ending ? 300 : 1000);
         } finally {
           done(800);
         }
@@ -630,17 +633,8 @@ async function perform(before: Project, after: Project) {
   // What is added comes out of its library tab, opened first. The tab of a cut by the transcript opens after the cut,
   // so the timeline never waits for it.
   const from = source(first, after);
-  if (from && !recent(from) && (await click(libraryTab(from)))) {
-    went(from);
-    await pause(160);
-  }
-  if (said && !from) {
-    follow = async () => {
-      if (recent(said) || !(await click(libraryTab(said)))) return linger(ending ? 300 : 1000);
-      went(said);
-      await linger(ending ? 300 : 700);
-    };
-  }
+  if (from && !recent(from) && (await click(libraryTab(from), from))) await pause(160);
+  if (said && !from) follow = async () => linger(recent(said) || !(await click(libraryTab(said), said)) || ending ? 300 : 700);
   if (first.kind === "cut") await cuts(p.actions as Cut[], before, after, view);
   else if (first.kind === "move") await move(first, before, after, view);
   else if (first.kind === "trim") await trim(first, before, after, view);
@@ -747,13 +741,14 @@ async function look(view: View) {
   await linger(Math.random() < 0.2 ? between(1000, 1600) : between(350, 900));
 }
 
-/** Goes over a control and stays a moment without pressing it. */
-async function hover(selector: string) {
+/** Goes over a control and stays a moment without pressing it, which counts as going to `place`. */
+async function hover(selector: string, place: string) {
   const r = shown(document.querySelector<HTMLElement>(selector));
   if (!r) return false;
   const to = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
   aim(to, r);
   await glide(to);
+  went(place);
   await linger(between(900, 1400));
   return true;
 }
@@ -776,8 +771,9 @@ async function visit(tool: { step: string; place: Place }, view: View) {
     await glide(inside());
     return linger(between(600, 1000));
   }
-  if (hovered ? await hover(hovered) : await click(el)) went(tool.place);
-  if (!hovered) await linger(between(700, 1100));
+  if (hovered) return void (await hover(hovered, tool.place));
+  await click(el, tool.place);
+  await linger(between(700, 1100));
 }
 
 /** The agent that owns the run called a tool: the pointer goes where that work happens. */
@@ -914,8 +910,11 @@ export function flush() {
 
 useEditor.subscribe((s, prev) => {
   // What the user selects themselves is what the inspector shows again.
-  // A snapshot makes the selection's list anew, so they compare by what they hold.
-  if (useAgentCursor.getState().inspected && (s.cut !== prev.cut || (s.selection !== prev.selection && !same(s.selection, prev.selection)))) useAgentCursor.setState({ inspected: null });
+  // A snapshot makes the selection's list anew, so it counts only when it holds something else; a click on the clip
+  // already selected counts too.
+  if (useAgentCursor.getState().inspected && (s.cut !== prev.cut || (s.selection !== prev.selection && (s.snap === prev.snap || !same(s.selection, prev.selection))))) {
+    useAgentCursor.setState({ inspected: null });
+  }
   const started = agentRun(s.aiRun) && !agentRun(prev.aiRun);
   if (s.snap && prev.snap && s.snap.sessionEpoch !== prev.snap.sessionEpoch) return flush();
   // Playing, moving the playhead or dragging media in needs the timeline as it is.
