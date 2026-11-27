@@ -126,6 +126,13 @@ class Hands:
         return self.r.s.run('const [x, y] = window.__pointerAt;'
                             'return !!document.elementFromPoint(x, y)?.closest(arguments[0]);', css)
 
+    def button(self, kind):
+        """The left button `down` or `up` where the pointer is, held between the two."""
+        if not LINUX:
+            return pointer(kind, *self.at)
+        from Xlib import X
+        self.fake(X.ButtonPress if kind == 'down' else X.ButtonRelease, 1)
+
     def double_click(self, css):
         return self.click(css, times=2)
 
