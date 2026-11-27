@@ -99,7 +99,7 @@ def behind(path, background):
 
 def seed(r):
     link_models(r, ('ggml-small.bin', 'ggml-silero-v5.1.2.bin', *VISION))
-    make(r, 'talk.nuzky', 'Talk to camera', [FIXTURES / 'talk.mp4'], 0)
+    make(r, 'talk.nuzky', 'Talk to camera', [FIXTURES / 'talk.mp4'], 2)
     croatia = make(r, 'croatia.nuzky', 'Croatia day 2', [FIXTURES / 'wide-head.mp4'], 3)
     reel = make(r, 'reel.nuzky', 'Morning reel', [FIXTURES / 'portrait.mp4'], 40)
     # The reel, on a 16:9 canvas, has a 9:16 cover made from a generated image. The landscape interview, on a 16:9
@@ -408,6 +408,7 @@ def home(r):
         agent.close()
     r.check('the videos it used are untouched', (FIXTURES / 'wide-head.mp4').exists())
     open_card = card(r, 'Talk to camera')['path']
+    changed = os.stat(open_card).st_mtime
     r.s.run("""const c = document.querySelector(`[data-path="${CSS.escape(arguments[0])}"]`); const b = c.getBoundingClientRect();
         c.dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, clientX: b.left + 60, clientY: b.top + 80}));""", open_card)
     wait(lambda: r.s.run("return !!document.querySelector('[role=menu]')"), 3)
@@ -423,6 +424,12 @@ def home(r):
     r.shot('trash-open-project')
     r.s.run("[...document.querySelectorAll('[data-toast]')].find((t) => t.textContent.includes('“Talk to camera” to the Trash')).querySelector('button').click()")
     r.check('Undo brings it back', wait(lambda: card(r, 'Talk to camera'), 5))
+    # Nuzky opened it on start and it was closed unchanged, so it keeps the day it last changed instead of moving to Today.
+    talk_card = card(r, 'Talk to camera') or {}
+    r.check('a project opened on start and closed unchanged keeps the day it last changed',
+            os.stat(open_card).st_mtime == changed and not any(w in talk_card.get('meta', '') for w in ('ago', 'Just now')),
+            {'changed': changed, 'now': os.stat(open_card).st_mtime, 'card': talk_card})
+    r.shot('closed-unchanged')
     r.s.run("window.__nuzky.openProject({path: arguments[0], name: 'Talk to camera'})", open_card)
     wait(lambda: opened() == open_card and view(r)['view'] == 'editor', 10)
     r.s.run("window.__nuzky.store.setState({view: 'home'})")
