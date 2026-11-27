@@ -160,7 +160,7 @@ const EDITS: Record<string, PanelTab> = { edit_transcript: "transcript", correct
 
 /** The tool that reads now, until the pointer went where it reads. */
 let reading: { step: string; place: Place; at: number } | null = null;
-/** The tab the next change comes from, as its tool said just before it. */
+/** The tab the next change comes from, as its tool said just before it; the pointer opens it after acting the change out. */
 let editing: { tab: PanelTab; at: number } | null = null;
 /** What the pointer does once a change is acted out, which the next change cuts short. */
 let follow: (() => Promise<void>) | null = null;
@@ -573,48 +573,59 @@ async function settings(was: Clip, now: Clip) {
   await frame();
   await frame();
   if (gen !== generation) throw new Stopped();
+  if (queue.length || ending) return;
   const tab = settingsTab(was, now);
   const el = same(was.transitionIn, now.transitionIn) ? document.querySelector<HTMLElement>(`[role="tablist"][aria-label="Clip settings"] [data-tab="${tab}"]`) : libraryTab("transitions");
   if (!shown(el) || !due(`${now.id} ${tab}`) || !(await click(el))) return linger(1000);
   await linger(between(600, 900));
 }
 
-/** The library tab a change comes from: the one its tool works in, or the one that has what was added. */
+/** The library tab that has what was added. */
 function source(first: Action, after: Project): PanelTab | null {
-  const said = editing && performance.now() - editing.at < 2000 ? editing.tab : null;
-  editing = null;
-  if (said || first.kind !== "add") return said;
+  if (first.kind !== "add") return null;
   const track = after.tracks.find((t) => t.id === first.trackId);
   const content = track?.clips.find((c) => first.clipIds.includes(c.id))?.content;
   if (!track || !content) return null;
   return isCaptionTrack(track) ? "captions" : content.type === "text" ? "text" : track.kind === "audio" ? "audio" : content.type === "media" ? "media" : null;
 }
 
+/** The label says only the agent's name again, a moment after what it did. */
+const done = (ms: number) => (stepTimer = window.setTimeout(() => useAgentCursor.setState({ step: null }), ms));
+
 async function perform(before: Project, after: Project) {
   const view = lanes();
   const p = view && plan(before, after);
+  // The tab the change comes from, as its tool said just before it.
+  const said = editing && performance.now() - editing.at < 2000 ? editing.tab : null;
+  editing = follow = null;
   if (!view || !p) {
     // A thumbnail the agent made or changed is nowhere on the timeline but on the Cover tile.
     if (view && !same(before.thumbnails, after.thumbnails)) {
       follow = async () => {
         say("Making the thumbnail");
-        if (!due("cover") || !(await hover(HOVERED.cover!))) await linger(1000);
-        stepTimer = window.setTimeout(() => useAgentCursor.setState({ step: null }), 800);
+        try {
+          if (!due("cover") || !(await hover(HOVERED.cover!))) await linger(1000);
+        } finally {
+          done(800);
+        }
       };
     }
     return release(before, after, 0);
   }
   say(p.step);
   const first = p.actions[0];
+  // What is added comes out of its library tab, opened first. The tab of a cut by the transcript opens after the cut,
+  // so the timeline never waits for it.
   const from = source(first, after);
   if (from && shown(libraryTab(from)) && due(from) && (await click(libraryTab(from)))) await pause(160);
+  if (said && !from) follow = async () => linger(due(said) && (await click(libraryTab(said))) ? 700 : 1000);
   if (first.kind === "cut") await cuts(p.actions as Cut[], before, after, view);
   else if (first.kind === "move") await move(first, before, after, view);
   else if (first.kind === "trim") await trim(first, before, after, view);
   else if (first.kind === "split") await split(first, before, after, view);
   else if (first.kind === "add") await add(first, before, after, view);
   else await change(first, before, after, view);
-  stepTimer = window.setTimeout(() => useAgentCursor.setState({ step: null }), 800);
+  done(800);
 }
 
 /** With reduced motion the pointer only appears where the change is, after it. */
@@ -822,8 +833,11 @@ async function pump() {
         else if (acted || !view || useEditor.getState().playing) await linger(1000);
         else if (tool) {
           reading = null;
-          await visit(tool, view);
-          stepTimer = window.setTimeout(() => useAgentCursor.setState({ step: null }), 2500);
+          try {
+            await visit(tool, view);
+          } finally {
+            done(2500);
+          }
         } else await look(view);
       } catch (e) {
         if (!(e instanceof Stopped) || gen !== generation) throw e;
