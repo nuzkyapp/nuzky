@@ -1,4 +1,5 @@
 import time
+from itertools import groupby
 
 from e2e.agent import agent_project
 from e2e.harness import Bridge, flow, wait
@@ -13,7 +14,7 @@ const tick = () => {
   const clips = row ? [...row.querySelectorAll('[data-clip-id]')].map((e) => [e.getBoundingClientRect().left, e.dataset.clipId]).sort((a, b) => a[0] - b[0]) : [];
   window.__pointerLog.push({stored: s.snap.project.tracks.find((t) => t.id === 'main').clips.length,
     drawn: row ? row.querySelectorAll('[data-clip-id]').length : -1, first: clips[0]?.[1] ?? null, tracks: document.querySelectorAll('[data-timeline] [data-track-id]').length,
-    held: !!c.held, shown: c.shown, glyph: c.glyph, label: c.step ? `${c.name} · ${c.step}` : c.name, band: !!document.querySelector('.agent-band'), x: tip.left, y: tip.top});
+    t: performance.now(), held: !!c.held, shown: c.shown, glyph: c.glyph, label: c.step ? `${c.name} · ${c.step}` : c.name, band: !!document.querySelector('.agent-band'), x: tip.left, y: tip.top});
   requestAnimationFrame(tick);
 };
 requestAnimationFrame(tick);"""
@@ -48,11 +49,21 @@ def agent_pointer(r):
     try:
         run = bridge.call('begin_run', {'label': 'Tighten the intro'})['run_id']
         r.check("the agent's pointer comes out with its name", wait(lambda: r.s.run(LABEL) == 'Claude Code', 5), r.s.run(LABEL))
-        time.sleep(1)
-        r.shot('resting')
-        tip = r.s.run("const t = document.querySelector('.agent-pointer').getBoundingClientRect(); return [t.left, t.top];")
+        r.s.run(SAMPLE)
+        time.sleep(4)
+        r.shot('looking')
+        log = r.s.run(LOG)
+        lanes = r.s.run("const b = document.querySelector('[data-timeline]').getBoundingClientRect(); return [b.left, b.top, b.right, b.bottom];")
         clips = r.s.run("return [...document.querySelectorAll('[data-timeline] [data-clip-id]')].map((e) => { const b = e.getBoundingClientRect(); return [b.left, b.top, b.right, b.bottom]; })")
-        r.check('it waits off the clips', not any(a <= tip[0] <= c and b <= tip[1] <= d for a, b, c, d in clips), {'tip': tip, 'clips': clips})
+        over = [e for e in log if any(a <= e['x'] <= c and b <= e['y'] <= d for a, b, c, d in clips)]
+        stops = [list(run) for moved, run in groupby(zip(log, log[1:]), lambda p: abs(p[0]['x'] - p[1]['x']) + abs(p[0]['y'] - p[1]['y']) > 0.1) if not moved]
+        still = max((run[-1][1]['t'] - run[0][0]['t'] for run in stops), default=0)
+        r.check('while the agent thinks the pointer looks through the clips', len(over) > len(log) / 2 and max(e['x'] for e in log) - min(e['x'] for e in log) > 60,
+                {'over': len(over), 'frames': len(log), 'xs': [round(e['x']) for e in log[::20]]})
+        r.check('it never stands still for long', still < 2600, {'longest_stop_ms': still})
+        r.check('it stays over the timeline, presses nothing and holds nothing back',
+                all(lanes[0] <= e['x'] <= lanes[2] and lanes[1] <= e['y'] <= lanes[3] and e['glyph'] == 'arrow' and not e['held'] and e['label'] == 'Claude Code' for e in log[len(log) // 4:]),
+                next((e for e in log[len(log) // 4:] if not (lanes[0] <= e['x'] <= lanes[2] and lanes[1] <= e['y'] <= lanes[3]) or e['glyph'] != 'arrow' or e['held']), None))
 
         split_x = r.s.run(X_AT, 3_000_000)
         log = act(r, bridge, run, 'split', [{'type': 'splitClip', 'clipId': clip['id'], 'atUs': 3_000_000}], '(e) => e.drawn === 2')

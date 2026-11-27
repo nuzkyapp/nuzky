@@ -7,9 +7,10 @@ import { US } from "./time";
 import type { Clip, Project } from "./types";
 
 /**
- * The agent's pointer: while an AI agent edits, a pointer with its name acts out each change on the timeline. The
- * timeline keeps drawing the project as it was until the pointer gets there, at most a second or two; the project,
- * the preview and the export have the change at once. Settings › AI turns it off.
+ * The agent's pointer: while an AI agent edits, a pointer with its name acts out each change on the timeline and
+ * looks through the clips between them. The timeline keeps drawing the project as it was until the pointer gets
+ * there, at most a second or two; the project, the preview and the export have the change at once. Settings › AI
+ * turns it off.
  */
 
 const KEY = "nuzky.agentPointer";
@@ -117,6 +118,8 @@ const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 let queue: { before: Project; after: Project }[] = [];
 let playing = false;
 let present = false;
+/** Whether the pointer only looks through the clips, which an edit or the run's end cuts short where it is. */
+let looking = false;
 let ending = false;
 let generation = 0;
 let pos = { x: 0, y: 0 };
@@ -239,6 +242,17 @@ async function glide(to: { x: number; y: number }) {
 async function drag(to: { x: number; y: number }, ms: number) {
   await run(nodes!.root, [{ transform: tr(pos) }, { transform: tr(to) }], ms, SLIDE);
   place(to);
+}
+
+/** Stays where it is for a moment while it only looks. */
+const linger = (ms: number) => run(nodes!.root, [{ transform: tr(pos) }, { transform: tr(pos) }], ms);
+
+/** Stops the pointer where it is while it only looks, as it gets work. */
+function interrupt() {
+  if (!looking || !nodes) return;
+  const m = new DOMMatrixReadOnly(getComputedStyle(nodes.root).transform);
+  place({ x: m.m41, y: m.m42 });
+  for (const a of [...running]) a.cancel();
 }
 
 function ring() {
@@ -499,12 +513,74 @@ function home() {
   return r ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
 }
 
-/** Where the pointer waits while the agent thinks: in the empty lane under the tracks, off the clips, when there is room. */
+/** Where the pointer lands as it comes out: in the empty lane under the tracks, off the clips, when there is room. */
 function rest(view: View) {
   const rows = [...document.querySelectorAll("[data-timeline] [data-track-id]")].map((row) => row.getBoundingClientRect());
   const below = rows.length ? Math.max(...rows.map((row) => row.bottom)) : view.top;
   const x = view.left + (view.right - view.left) * 0.62;
   return { x, y: view.bottom - below >= 12 + LABEL_DY + LABEL_H ? below + 12 : view.top + Math.min(60, (view.bottom - view.top) / 2) };
+}
+
+/** How far along a clip from where it is the pointer looks next, so it works its way along the timeline. */
+const REACH = 260;
+/** Clips this near are the ones it looks through; now and then it goes to one further off, so it never stays on one for good. */
+const NEAR = 400;
+/** How fast it reads along a clip, in px per ms. */
+const READ = 0.16;
+const between = (a: number, b: number) => a + Math.random() * (b - a);
+
+/** The parts of clips the timeline shows, each with its ends that are on screen. */
+function clipsInView(view: View) {
+  const { snap, zoom } = useEditor.getState();
+  const [left, right] = [view.left + 8, view.right - 8];
+  const seen: { from: number; to: number; y: number; top: number; bottom: number; ends: number[] }[] = [];
+  for (const track of snap?.project.tracks ?? []) {
+    const row = at(track.id, 0);
+    if (!row || row.y < view.top || row.y > view.bottom) continue;
+    for (const clip of track.clips) {
+      const start = row.x + (clip.startUs / US) * zoom;
+      const end = start + (clip.durationUs / US) * zoom;
+      const [from, to] = [Math.max(left, start), Math.min(right, end)];
+      if (to - from >= 12) seen.push({ from, to, y: row.y, top: row.top, bottom: row.bottom, ends: [start, end].filter((x) => x >= left && x <= right) });
+    }
+  }
+  return seen;
+}
+
+/**
+ * What the pointer does while the agent thinks: it looks through the clips near it as an editor does before a cut,
+ * reading along one, going back over a part of it, stopping on a cut. It presses nothing and leaves no marks.
+ */
+async function look(view: View) {
+  const nearest = clipsInView(view)
+    .map((c) => ({ ...c, far: Math.hypot(Math.min(Math.max(pos.x, c.from), c.to) - pos.x, c.y - pos.y) }))
+    .sort((a, b) => a.far - b.far)
+    .slice(0, 4);
+  const near = Math.random() < 0.15 ? nearest : nearest.filter((c, i) => i === 0 || c.far <= NEAR);
+  const c = near[Math.floor(Math.random() * near.length)];
+  if (!c) return linger(600);
+  const x = Math.min(Math.max(pos.x + between(-REACH, REACH), c.from), c.to);
+  const cut = c.ends.sort((a, b) => Math.abs(a - x) - Math.abs(b - x))[0];
+  if (cut !== undefined && Math.abs(cut - pos.x) > 20 && Math.random() < 0.3) {
+    aim({ x: cut, y: c.y }, c);
+    await glide({ x: cut, y: c.y });
+    return linger(between(450, 950));
+  }
+  aim({ x, y: c.y }, c);
+  await glide({ x, y: c.y });
+  await linger(between(150, 400));
+  // Mostly forwards, as the video plays; the other way where the clip ends.
+  const ahead = (Math.random() < 0.75 ? 1 : -1) * between(70, 240);
+  const along = (by: number) => Math.min(Math.max(x + by, c.from), c.to);
+  const to = Math.abs(along(ahead) - x) >= 30 ? along(ahead) : along(-ahead);
+  if (Math.abs(to - x) >= 12) {
+    await drag({ x: to, y: c.y }, Math.max(300, Math.abs(to - x) / READ));
+    if (Math.random() < 0.35) {
+      await linger(between(120, 260));
+      await drag({ x: to + (x - to) * between(0.3, 0.6), y: c.y }, Math.max(220, Math.abs(to - x) / READ / 2));
+    }
+  }
+  await linger(Math.random() < 0.2 ? between(1000, 1600) : between(350, 900));
 }
 
 const scaled = (from: number, to: number): Keyframe[] =>
@@ -537,26 +613,42 @@ function hide() {
 }
 
 async function pump() {
-  if (playing) return;
+  if (playing) return interrupt();
   playing = true;
   const gen = generation;
   try {
     if (!present && (agentRun(useEditor.getState().aiRun) || queue.length)) await enter();
-    while (queue.length) {
-      const before = queue[0].before;
-      const after = queue.at(-1)!.after;
-      queue = [];
-      if (reducedMotion.matches) {
-        release(before, after, 0);
-        await jump(before, after);
-        continue;
+    for (;;) {
+      const acted = queue.length > 0;
+      while (queue.length) {
+        const before = queue[0].before;
+        const after = queue.at(-1)!.after;
+        queue = [];
+        if (reducedMotion.matches) {
+          release(before, after, 0);
+          await jump(before, after);
+          continue;
+        }
+        await perform(before, after);
       }
-      await perform(before, after);
-    }
-    if (ending) {
-      await leave();
-      ending = false;
-      window.clearTimeout(endCap);
+      if (ending) {
+        await leave();
+        ending = false;
+        window.clearTimeout(endCap);
+        break;
+      }
+      if (!present || reducedMotion.matches || !agentRun(useEditor.getState().aiRun)) break;
+      const view = lanes();
+      looking = true;
+      try {
+        // A change it acted out stays under it for a moment, so it reads before the pointer moves on. While the video
+        // plays the timeline moves under the pointer, so it waits.
+        await (acted || !view || useEditor.getState().playing ? linger(1000) : look(view));
+      } catch (e) {
+        if (!(e instanceof Stopped) || gen !== generation) throw e;
+      } finally {
+        if (gen === generation) looking = false;
+      }
     }
   } catch (e) {
     if (!(e instanceof Stopped)) {
@@ -581,6 +673,7 @@ export function flush() {
   queue = [];
   playing = false;
   ending = false;
+  looking = false;
   for (const a of [...running]) a.cancel();
   running.clear();
   window.clearTimeout(watchdog);
