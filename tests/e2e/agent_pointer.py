@@ -133,8 +133,9 @@ def agent_pointer(r):
         log = r.s.run(LOG)
         r.shot('setting-changed')
         selection = r.s.run('return window.__nuzky.store.getState().selection')
-        r.check("after a changed volume the pointer clicks the clip, which selects it, and opens the inspector's Audio tab",
-                opened and selection == [main[0]['id']] and on(log, r.s.run(RECT, audio)), {'opened': opened, 'selection': selection, 'clip': main[0]['id']})
+        inspected = r.s.run('return window.__nuzky.agentCursor.getState().inspected')
+        r.check("after a changed volume the pointer clicks the clip, the inspector shows it on its Audio tab, and the selection stays the user's",
+                opened and inspected == main[0]['id'] and selection == [] and on(log, r.s.run(RECT, audio)), {'opened': opened, 'inspected': inspected, 'selection': selection, 'clip': main[0]['id']})
 
         tab = r.s.run(RECT, '[data-tour="library"] [data-tab="text"]')
         r.s.run(SAMPLE)
@@ -182,6 +183,18 @@ def agent_pointer(r):
         r.s.run('document.activeElement?.blur()')
         r.key('z', ctrlKey=True)
         r.check('one undo still takes back the whole run', wait(lambda: len(r.track()) == 1, 10), r.track())
+
+        # The run ends right after a change of a setting: the pointer still opens the setting's tab before it goes back.
+        run = bridge.call('begin_run', {'label': 'Faster'})['run_id']
+        r.check('the pointer comes out for the next run', wait(lambda: r.s.run(LABEL) == 'Claude Code', 5), r.s.run(LABEL))
+        speed = '[role="tablist"][aria-label="Clip settings"] [data-tab="speed"]'
+        bridge.call('apply_edits', {'run_id': run, 'request_id': 'speed', 'edits': [{'type': 'updateClip', 'clipId': r.track()[0]['id'], 'speed': 1.25}]})
+        bridge.call('end_run', {'run_id': run, 'action': 'keep'})
+        opened = wait(lambda: r.s.run("return document.querySelector(arguments[0])?.getAttribute('aria-selected')", speed) == 'true', 6, 0.05)
+        gone = wait(lambda: r.s.run(LABEL) is None, 6)
+        r.check("the last change of a run still opens its tab, and once the pointer is gone the inspector shows the user's selection again",
+                opened and gone and r.s.run('return window.__nuzky.agentCursor.getState().inspected') is None and not r.s.run('return !!document.querySelector(arguments[0])', speed),
+                {'opened': opened, 'gone': gone, 'inspected': r.s.run('return window.__nuzky.agentCursor.getState().inspected')})
 
         r.s.run("window.__nuzky.openSettings('ai')")
         switch = "return document.querySelector('[role=switch][aria-label=\"Show the agent\\'s pointer\"]')"

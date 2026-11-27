@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { AudioLines, Blend, Captions, Film, Image as ImageIcon, SlidersHorizontal, Type } from "lucide-react";
 import { TRANSITIONS } from "../../lib/presets";
+import { useAgentCursor } from "../../lib/agentCursor";
 import { useCover } from "../../lib/cover";
 import { useGallery } from "../../lib/gallery";
 import { usePlugins } from "../../lib/plugins";
@@ -140,8 +141,11 @@ function CutInspector({ clipId }: { clipId: string }) {
 
 export function Inspector({ width }: { width: number }) {
   const project = useEditor((s) => s.snap?.project);
-  const selection = useEditor((s) => s.selection);
-  const cut = useEditor((s) => s.cut);
+  // While an agent works, the clip its pointer clicked shows here; the selection stays the user's.
+  const pointed = useAgentCursor((s) => s.inspected);
+  const own = useEditor((s) => s.selection);
+  const selection = pointed ? [pointed] : own;
+  const cut = useEditor((s) => (pointed ? null : s.cut));
   const cover = useCover((s) => s.open);
   const plugin = usePlugins((s) => s.list?.find((p) => p.id === s.open));
   const shared = useGallery((s) => s.list?.find((p) => p.id === s.open));
