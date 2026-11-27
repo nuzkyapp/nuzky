@@ -13,6 +13,7 @@ import {
   duplicateSelection,
   editClip,
   findClip,
+  isCaptionTrack,
   mainClips,
   projectDuration,
   rotateSelection,
@@ -467,7 +468,7 @@ export function Timeline({ height }: { height: number }) {
       const lane = overlayLane.current?.getBoundingClientRect();
       const over = lane && y >= lane.top && y <= lane.bottom ? ("overlay" as const) : undefined;
       const t = timeAt(x);
-      const edges = [0, ...(playing ? [] : [useEditor.getState().timeUs]), ...allClips(project).flatMap((c) => [c.startUs, c.startUs + c.durationUs])];
+      const edges = [0, ...(playing ? [] : [useEditor.getState().timeUs]), ...project.tracks.flatMap((tr) => (isCaptionTrack(tr) ? [] : tr.clips.flatMap((c) => [c.startUs, c.startUs + c.durationUs])))];
       const snapped = snapping && (over || (trackId && trackId !== MAIN_TRACK)) ? snap(t, edges, (SNAP_PX / zoom) * US) : null;
       return { trackId, startUs: Math.round(snapped ?? t), over };
     },
