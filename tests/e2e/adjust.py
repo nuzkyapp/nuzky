@@ -1,5 +1,6 @@
 import json, subprocess, time
 
+from e2e.corrections import Hands
 from e2e.harness import CLI, ROOT, flow, preview_crop, preview_rect, press, wait, webdriver
 
 # What adjustments must not spoil, in a 2 x 2 grid: black hair, a white wall, mid grey and lit skin.
@@ -12,7 +13,7 @@ LABELS = """return Object.fromEntries([...document.querySelectorAll('aside[aria-
   .map((row) => row.firstElementChild).map((l) => [l.textContent, getComputedStyle(l).color]))"""
 COUNT = """return [...document.querySelectorAll('aside[aria-label=Inspector] section span')].find((s) => s.textContent.endsWith(' changed'))?.textContent ?? null"""
 # The mean colour of the skin, the bottom right quarter, in each of the two pictures, and their captions.
-PAIR = """const p = document.querySelector('[data-peek]'); if (!p) return null;
+PAIR = """const p = document.querySelector('body > [data-peek]'); if (!p) return null;
 const skin = (c) => { const d = c.getContext('2d').getImageData(c.width * 0.6, c.height * 0.6, c.width * 0.3, c.height * 0.3).data;
   const m = [0, 0, 0]; for (let i = 0; i < d.length; i += 4) for (let k = 0; k < 3; k++) m[k] += d[i + k]; return m.map((v) => Math.round(v / (d.length / 4))); };
 const [before, after] = p.querySelectorAll('canvas');
@@ -155,7 +156,20 @@ def adjust(r):
     r.check('Before and After show over Contrast, After with the skin as the preview draws it now',
             pair and pair['labels'] == ['Before', 'After'] and apart(pair['before'], contrast['skin']) <= 8, pair or r.s.run(PAIR))
     r.shot('adjust-before-after')
-    r.check('Before and After go a moment after the last key', wait(lambda: not r.s.run('return !!document.querySelector("[data-peek]")'), 3))
+    r.check('Before and After go a moment after the last key', wait(lambda: not r.s.run('return !!document.querySelector("body > [data-peek]")'), 3))
+
+    # A drag shows them only while the button is held.
+    hands = Hands(r)
+    slider = 'aside[aria-label=Inspector] input[type=range][aria-label=Saturation]'
+    peeking = lambda: r.s.run('return !!document.querySelector("body > [data-peek]")')
+    r.check('the pointer reaches the Saturation slider', hands.over(slider, 0.8))
+    hands.button('down')
+    r.check('Before and After show while the slider is held', wait(peeking, 3, 0.05))
+    time.sleep(1.5)
+    r.check('Before and After stay while the slider is still held', peeking())
+    r.shot('adjust-held')
+    hands.button('up')
+    r.check('Before and After go as the slider is let go', wait(lambda: not peeking(), 0.3, 0.02))
 
     r.import_media(PHOTO)
     r.add_clip(PHOTO.name)

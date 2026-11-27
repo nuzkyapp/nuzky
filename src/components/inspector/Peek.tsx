@@ -5,7 +5,7 @@ import { useEditor } from "../../lib/store";
 import type { Clip } from "../../lib/types";
 import { useLockReason } from "../ui";
 
-/** How long the pair stays after the last change. */
+/** How long the pair stays after the last key step; a drag hides it as the button is let go. */
 const LINGER_MS = 1000;
 const GAP = 8;
 const PAD = 8;
@@ -36,7 +36,8 @@ function still(source: HTMLCanvasElement) {
 /**
  * While a slider among `children` is dragged or stepped with the keys, shows over it the preview as it was when the
  * change began (Before) beside the preview now (After), so the two can be told apart without looking away. Both are
- * copies of the preview's own frame, so the engine draws nothing more. It shows only while the playhead is over `clip`.
+ * copies of the preview's own frame, so the engine draws nothing more. It shows only while the playhead is over `clip`,
+ * and only while the slider is held, or a moment after the last key step.
  */
 export function PeekBeforeAfter({ clip, children }: { clip: Clip; children: ReactNode }) {
   const lock = useLockReason();
@@ -44,32 +45,44 @@ export function PeekBeforeAfter({ clip, children }: { clip: Clip; children: Reac
   const before = useRef<HTMLCanvasElement>(null);
   const after = useRef<HTMLCanvasElement>(null);
   const hide = useRef(0);
+  const held = useRef<AbortController | null>(null);
 
   const linger = useCallback(() => {
     window.clearTimeout(hide.current);
     hide.current = window.setTimeout(() => setPeek(null), LINGER_MS);
   }, []);
+  const close = useCallback(() => {
+    held.current?.abort();
+    window.clearTimeout(hide.current);
+    setPeek(null);
+  }, []);
   /** `fresh`: a new drag, which compares with the frame as it is now, while key steps in a row keep their Before. */
   const begin = (target: EventTarget, fresh: boolean) => {
     const el = target as HTMLElement;
-    if (lock || !(el instanceof HTMLInputElement) || el.disabled) return;
+    if (lock || !(el instanceof HTMLInputElement) || el.disabled) return false;
     const row = el.closest<HTMLElement>("[data-peek-row]");
     const source = previewCanvas();
     const t = useEditor.getState().timeUs;
-    if (!row || !source || source.width === 0 || t < clip.startUs || t >= clip.startUs + clip.durationUs || !still(source)) return;
+    if (!row || !source || source.width === 0 || t < clip.startUs || t >= clip.startUs + clip.durationUs || !still(source)) return false;
     window.clearTimeout(hide.current);
-    if (peek?.row === row && !fresh) return;
+    if (peek?.row === row && !fresh) return true;
     // The frame before this change, at the preview's size, until the pair is drawn.
     const shot = document.createElement("canvas");
     [shot.width, shot.height] = [source.width, source.height];
     shot.getContext("2d")?.drawImage(source, 0, 0);
     setPeek({ row, shot, us: source.dataset.us ?? "" });
+    return true;
   };
 
-  useEffect(() => () => window.clearTimeout(hide.current), []);
+  useEffect(
+    () => () => {
+      held.current?.abort();
+      window.clearTimeout(hide.current);
+    },
+    [],
+  );
   useEffect(() => {
     if (!peek) return;
-    window.addEventListener("pointerup", linger);
     const shown = before.current?.getContext("2d");
     shown?.drawImage(peek.shot, 0, 0, shown.canvas.width, shown.canvas.height);
     // After follows the preview, frame by frame, only while the pair shows.
@@ -83,13 +96,16 @@ export function PeekBeforeAfter({ clip, children }: { clip: Clip; children: Reac
       raf = requestAnimationFrame(draw);
     };
     raf = requestAnimationFrame(draw);
-    return () => {
-      window.removeEventListener("pointerup", linger);
-      cancelAnimationFrame(raf);
-    };
-  }, [peek, linger]);
+    return () => cancelAnimationFrame(raf);
+  }, [peek]);
 
-  const onPointerDown = (e: PointerEvent) => e.button === 0 && begin(e.target, true);
+  const onPointerDown = (e: PointerEvent) => {
+    if (e.button !== 0 || !begin(e.target, true)) return;
+    held.current?.abort();
+    held.current = new AbortController();
+    window.addEventListener("pointerup", close, { signal: held.current.signal });
+    window.addEventListener("pointercancel", close, { signal: held.current.signal });
+  };
   const onKeyDown = (e: KeyboardEvent) => {
     if (!STEP_KEYS.has(e.key)) return;
     begin(e.target, false);
