@@ -64,9 +64,9 @@ that preserves both size and mtime is not detected; this is not a content hash.
 - `align_to_sound` measures word times in the sound after recognition. With an `Aligner`
   (`align_model(language)`: Czech `wav2vec2-xls-r-300m-cs-250` quantised to 8 bits, 373 MB,
   and English `wav2vec2-base-960h`, 207 MB, both Apache-2.0 GGUF files run on the CPU,
-  each layer as one matrix product on all cores), a wav2vec2 CTC model hears which letter
-  is spoken in every 20 ms frame and a
-  Viterbi path spells the words through those frames. Words a second apart in Whisper's
+  where each convolution of the feature encoder is one matrix product that reads its
+  input in place), a wav2vec2 CTC model hears which letter is spoken in every 20 ms frame
+  and a Viterbi path spells the words through those frames. Words a second apart in Whisper's
   times are aligned separately; a stretch over 20 s runs in windows with 2 s of context. A
   word the model cannot spell (digits, acronyms, `např.`, letters outside its alphabet) is
   one placeholder per character, and with words the model hears too faintly it shares the

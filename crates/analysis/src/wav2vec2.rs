@@ -3,8 +3,8 @@
 //! `align` reads the words' times from that.
 //!
 //! Sound and every layer's result are frames × channels, one frame after another. A convolution's window over
-//! several frames is then a run of neighbouring values, so each layer is one matrix product (gemm, on all cores)
-//! that reads its input where it lies.
+//! several frames is then a run of neighbouring values, so each convolution is one matrix product (gemm, on all
+//! cores) that reads its input where it lies.
 
 use std::{fs::File, io::BufReader, path::Path};
 
