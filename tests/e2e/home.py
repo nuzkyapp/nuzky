@@ -602,9 +602,9 @@ def launcher(r):
     opened_at = croatia.stat().st_mtime
     time.sleep(1.1)
     r.s.run("window.__nuzky.openProject({path: arguments[0], name: 'Morning reel'})", str(projects_dir(r) / 'reel.nuzky'))
-    wait(lambda: view(r)['name'] == 'Morning reel', 10)
+    switched = wait(lambda: view(r)['name'] == 'Morning reel', 10)
     r.check('closed without an edit, a project keeps the time it was opened instead of the time it was closed',
-            croatia.stat().st_mtime == opened_at, {'opened': opened_at, 'now': croatia.stat().st_mtime})
+            switched and croatia.stat().st_mtime == opened_at, {'opened': opened_at, 'now': croatia.stat().st_mtime, 'view': view(r)})
     r.s.run("window.__nuzky.openProject({path: arguments[0], name: 'Croatia day 2'})", str(croatia))
     wait(lambda: view(r)['name'] == 'Croatia day 2', 10)
 
