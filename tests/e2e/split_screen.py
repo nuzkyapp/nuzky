@@ -13,6 +13,11 @@ AT_US = 1_000_000
 TAB = ("const t = [...document.querySelectorAll(arguments[0] + ' [role=tab]')].find((t) => t.textContent.trim() === arguments[1]);"
        'if (!t) return false; t.click(); return true')
 CLICK = "const b = document.querySelector(arguments[0]); if (!b || b.disabled || b.getAttribute('aria-disabled') === 'true') return false; b.click(); return true"
+PRESS = """const b = document.querySelector(arguments[0]); if (!b) return false;
+  const r = b.getBoundingClientRect(), at = {bubbles: true, cancelable: true, button: 0, pointerType: 'mouse', isPrimary: true,
+    clientX: r.left + r.width / 2, clientY: r.top + r.height / 2};
+  b.dispatchEvent(new PointerEvent('pointerdown', at)); b.dispatchEvent(new PointerEvent('pointerup', at));
+  b.dispatchEvent(new MouseEvent('click', at)); return true"""
 OVERLAY = """(() => { const st = window.__nuzky.store.getState();
   const asset = st.snap.project.assets.find((a) => a.name === arguments[0]);
   return st.edit({type: 'addOverlay', assetId: asset.id, startUs: 0, durationUs: 3000000}); })()"""
@@ -144,7 +149,7 @@ def split_screen(r):
     time.sleep(0.5)
     r.shot('adjustment-timeline')
     layer_track = next(t['id'] for t in r.state()['tracks'] if any(c['id'] == layer for c in t['clips']))
-    r.check("clicking the adjustment track's tile selects its layer", r.s.run(CLICK, f'[data-track-tile="{layer_track}"]')
+    r.check("clicking the adjustment track's tile selects its layer", r.s.run(PRESS, f'[data-track-tile="{layer_track}"]')
             and wait(lambda: r.s.run('return window.__nuzky.store.getState().selection') == [layer], 5))
     r.check('and the inspector shows the layer again',
             wait(lambda: r.s.run("return document.querySelector('aside[aria-label=Inspector]').textContent.includes('Adjustment layer')"), 5))
