@@ -284,8 +284,8 @@ function useCutMotion(lanes: RefObject<HTMLElement | null>, project: Project | u
  * The playhead line, the one part of the timeline that follows playback frame by frame; it keeps itself in view while playing,
  * except while `follow` is off: a box select scrolls the timeline itself.
  */
-function Playhead({ zoom, scroller, follow }: { zoom: number; scroller: RefObject<HTMLDivElement | null>; follow: boolean }) {
-  const timeUs = useEditor((s) => s.timeUs);
+function Playhead({ zoom, scroller, follow, atUs }: { zoom: number; scroller: RefObject<HTMLDivElement | null>; follow: boolean; atUs: number | null }) {
+  const timeUs = useEditor((s) => atUs ?? s.timeUs);
   const playing = useEditor((s) => s.playing);
   const line = useRef<HTMLDivElement>(null);
   // While playing, the time arrives with each frame the engine draws, 30 times a second for most phone videos, so the
@@ -1053,7 +1053,7 @@ export function Timeline({ height }: { height: number }) {
           {/* Drop position for media dragged from the panel */}
           {dropTime !== null && !place?.over && <div data-testid="drop-line" className="pointer-events-none absolute bottom-0 top-0 z-30 w-0.5 bg-accent" style={{ left: HEADER_W + (dropTime / US) * zoom }} />}
 
-          <Playhead zoom={zoom} scroller={scroller} follow={!box} />
+          <Playhead zoom={zoom} scroller={scroller} follow={!box} atUs={drag?.moved && drag.mode === "trimL" && drag.trackId === MAIN_TRACK && ghostTiming && !locked && !playing ? ghostTiming.startUs : null} />
 
           {drag?.moved && ghostTiming && (
             // Pinned to the edge being dragged: the start for a move or left trim, the end for a right trim.

@@ -194,7 +194,7 @@ def edit(r):
     # Without the selection's frame over the preview, which the drag did not show.
     r.s.run('window.__nuzky.store.getState().select([])')
     r.seek(edge_us)
-    landed = wait(lambda: (share := shown_as(r, 'trim-right-landed', edge_frame)) < 0.003 and share, 6) or shown_as(r, 'trim-right-landed', edge_frame)
+    landed = (wait(lambda: (share := shown_as(r, 'trim-right-landed', edge_frame)) < 0.003 and (share,), 6) or (shown_as(r, 'trim-right-landed', edge_frame),))[0]
     r.check('the frame the drag showed is the trimmed clip\'s frame at that time', landed < 0.003, landed)
     r.seek(0)
     r.s.run('window.__nuzky.store.getState().setZoom(40)')
@@ -232,6 +232,9 @@ def edit(r):
     first_frame, first_shown = preview_redraw(r, 'trim-left-edge', at_zero)
     r.check('while the left edge is dragged, the preview shows the clip\'s new first frame at its start',
             first_shown and r.s.run(PLAYHEAD) == undone[0]['startUs'], r.s.run(PLAYHEAD))
+    line = r.s.run("return document.querySelector('[data-playhead]').getBoundingClientRect().left")
+    r.check('the playhead line stays on the dragged edge', during['ghost'] is not None and abs(line - during['ghost']) < 2,
+            {'line': line, 'ghost': during['ghost']})
     r.check('dragging the first clip\'s left edge 50 px in leaves the next clip where it was',
             during['next'] == before['next'], {'before': before, 'during': during})
     r.check('the trimmed clip\'s left edge follows the pointer', during['ghost'] is not None and abs(during['ghost'] - before['next'] + 150) < 2,
@@ -244,7 +247,7 @@ def edit(r):
             cut and cut[0]['startUs'] == undone[0]['startUs'] and cut[1]['startUs'] == cut[0]['startUs'] + cut[0]['durationUs']
             and cut[0]['durationUs'] == undone[0]['durationUs'] - 500_000, cut)
     r.s.run('window.__nuzky.store.getState().select([])')
-    kept = wait(lambda: (share := shown_as(r, 'trim-left-landed', first_frame)) < 0.003 and share, 6) or shown_as(r, 'trim-left-landed', first_frame)
+    kept = (wait(lambda: (share := shown_as(r, 'trim-left-landed', first_frame)) < 0.003 and (share,), 6) or (shown_as(r, 'trim-left-landed', first_frame),))[0]
     r.check('the first frame the drag showed is the one the clip starts with on release', kept < 0.003, kept)
     r.check('the clip loses the first 0.5 s of its footage', r.s.run(SOURCE_IN, undone[0]['id']) == source_in + 500_000,
             [source_in, r.s.run(SOURCE_IN, undone[0]['id'])])

@@ -66,7 +66,7 @@ export function dragResult(d: Drag, minUs: number): { startUs: number; durationU
 
 const trimCmd = (d: Drag, r: ReturnType<typeof dragResult>): EditCmd => ({ type: "trimClip", clipId: d.clip.id, startUs: r.startUs, durationUs: r.durationUs, sourceInUs: r.sourceInUs ?? null });
 
-/** Rounds half away from zero, as Rust's `f64::round` in the engine. */
+/** Rounds half away from zero, as Rust's `f64::round` in the engine, which keeps a clip's speed as an `f32`. */
 const roundAway = (v: number) => Math.sign(v) * Math.round(Math.abs(v));
 
 /**
@@ -77,7 +77,7 @@ function trimEdge(d: Drag, r: ReturnType<typeof dragResult>, fps: number): numbe
   if (d.mode === "trimR") return Math.max(r.startUs, stepFrame(r.startUs + r.durationUs, -1, fps));
   if (d.trackId === MAIN_TRACK) return d.clip.startUs;
   if (d.sourceInUs === null || r.sourceInUs === undefined) return r.startUs;
-  return Math.max(0, d.clip.startUs + roundAway((r.sourceInUs - d.sourceInUs) / d.speed));
+  return Math.max(0, d.clip.startUs + roundAway((r.sourceInUs - d.sourceInUs) / Math.fround(d.speed)));
 }
 
 /** The fade a fade drag sets: the fade-in handle lengthens it to the right, the fade-out handle to the left. */
