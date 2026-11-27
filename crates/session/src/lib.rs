@@ -104,7 +104,7 @@ impl ProjectSession {
         ensure!(!timeout.is_zero(), "Idle timeout must be positive");
         let path = dunce::canonicalize(path.as_ref()).context("Resolving project path")?;
         let lock = if mode == Mode::Write { Some(lock_project(&path, true)?) } else { None };
-        let project = load(&path)?;
+        let editor = Editor::new(load(&path)?);
         let checkpoint = storage::sidecar(&path, ".checkpoint.json");
         let mut history = History::default();
         let mut writer = None;
@@ -112,14 +112,14 @@ impl ProjectSession {
             history = History::load(&storage::sidecar(&path, HISTORY_SUFFIX));
             // The project as it opens is a version, unless it already is the newest one.
             history.tip = Some(Tip::user("Opened"));
-            writer = Some(Writer::start(path.clone(), events.clone(), history.broken.clone())?);
+            writer = Some(Writer::start(path.clone(), editor.revision, events.clone(), history.broken.clone())?);
         }
         let mut inner = Inner {
             writer,
             _lock: lock,
             path,
             mode,
-            editor: Editor::new(project),
+            editor,
             epoch: format!("{}{}", new_id(), new_id()),
             run: None,
             history,
@@ -257,6 +257,11 @@ impl ProjectSession {
         let inner = self.inner.lock().unwrap();
         ensure!(inner._lock.is_some(), "READ_ONLY: IPC listener requires project ownership");
         Ok(inner.path.clone())
+    }
+
+    /// Moves the project's modification time to now, which the home screen lists it by, without writing it.
+    pub fn mark_opened(&self) -> Result<()> {
+        self.inner.lock().unwrap().writer.as_ref().context("READ_ONLY: no writer")?.mark_opened()
     }
 
     /// A clean transport disconnect keeps edits as one undoable run and drains autosave.

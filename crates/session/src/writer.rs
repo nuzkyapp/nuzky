@@ -22,6 +22,7 @@ enum Message {
     Flush(Snapshot, Sender<Result<()>>),
     Checkpoint(serde_json::Value, Sender<Result<()>>),
     History(Write),
+    MarkOpened(Sender<Result<()>>),
     Stop,
 }
 
@@ -32,11 +33,18 @@ pub(crate) struct Writer {
 
 impl Writer {
     /// A failed write of the versions sets `broken`, so the next one replaces the file whole.
-    pub(crate) fn start(path: PathBuf, events: Option<Sender<SessionEvent>>, broken: Arc<AtomicBool>) -> Result<Self> {
+    /// The file on disk holds the project at `revision`, as it was opened.
+    pub(crate) fn start(
+        path: PathBuf,
+        revision: u64,
+        events: Option<Sender<SessionEvent>>,
+        broken: Arc<AtomicBool>,
+    ) -> Result<Self> {
+        let saved = on_disk(&path).map(|file| (revision, file));
         let (tx, rx) = mpsc::channel();
         let worker = std::thread::Builder::new()
             .name("nuzky-session-writer".into())
-            .spawn(move || write_loop(path, events, broken, rx))
+            .spawn(move || write_loop(path, saved, events, broken, rx))
             .context("Starting project writer")?;
         Ok(Self { tx, worker: Some(worker) })
     }
@@ -58,6 +66,12 @@ impl Writer {
             .context("SAVE_FAILED: project writer stopped")
     }
 
+    pub(crate) fn mark_opened(&self) -> Result<()> {
+        let (tx, rx) = mpsc::channel();
+        self.tx.send(Message::MarkOpened(tx)).context("project writer stopped")?;
+        rx.recv().context("project writer stopped")?
+    }
+
     pub(crate) fn flush(&self, project: &Project, revision: u64) -> Result<()> {
         let (tx, rx) = mpsc::channel();
         self.tx
@@ -67,13 +81,20 @@ impl Writer {
     }
 }
 
-fn write_loop(path: PathBuf, events: Option<Sender<SessionEvent>>, broken: Arc<AtomicBool>, rx: Receiver<Message>) {
+type OnDisk = Option<(u64, (u64, std::time::SystemTime))>;
+
+fn write_loop(
+    path: PathBuf,
+    mut saved: OnDisk,
+    events: Option<Sender<SessionEvent>>,
+    broken: Arc<AtomicBool>,
+    rx: Receiver<Message>,
+) {
     let mut pending: Option<Snapshot> = None;
     let mut oldest = Instant::now();
-    // The revision this writer put on disk, with the file it left. Flushing it again while the file
-    // is unchanged would only move its modification time, which the home screen reads as when the
-    // project was last opened: a project closed after another one opened would look newer than it.
-    let mut saved = None;
+    // `saved`: the revision on disk, with the file it is in. Flushing it again while the file is
+    // unchanged would only move its modification time, which the home screen reads as when the project
+    // was last opened: the project Nuzky reopens on start would jump to Today every time it is closed.
     // Why the versions could not be written, shown as the save state until a write succeeds.
     let mut versions_error: Option<String> = None;
     let mut latest = 0;
@@ -118,6 +139,14 @@ fn write_loop(path: PathBuf, events: Option<Sender<SessionEvent>>, broken: Arc<A
                 let result = save(&path, &events, snapshot, &versions_error);
                 if result.is_ok() {
                     saved = on_disk(&path).map(|file| (revision, file));
+                }
+                let _ = reply.send(result);
+            }
+            Some(Message::MarkOpened(reply)) => {
+                let unchanged = saved.is_some_and(|(_, file)| on_disk(&path) == Some(file));
+                let result = mark_opened(&path);
+                if result.is_ok() && unchanged {
+                    saved = saved.zip(on_disk(&path)).map(|((revision, _), file)| (revision, file));
                 }
                 let _ = reply.send(result);
             }
@@ -177,6 +206,12 @@ fn append(path: &Path, text: &str) -> Result<()> {
     }
     let mut file = std::fs::OpenOptions::new().append(true).create(true).open(path).context("Opening versions")?;
     file.write_all(text.as_bytes()).context("Writing versions")
+}
+
+/// Moves the file's modification time to now without writing it.
+fn mark_opened(path: &Path) -> Result<()> {
+    std::fs::File::options().write(true).open(path)?.set_modified(std::time::SystemTime::now())?;
+    Ok(())
 }
 
 /// The file's size and modification time, to notice it changed or went away since the last save.
