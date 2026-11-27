@@ -102,7 +102,7 @@ export function PrivacyPane() {
   const updates = useUpdates((s) => s.enabled);
   const auto = useUpdates((s) => s.enabled && s.auto);
   const chatgpt = useChatGpt((s) => s.status);
-  const account = useAccount((s) => (s.available ? s.status : undefined));
+  const account = useAccount((s) => s.status);
   const sharing = useRemote((s) => !!s.sharing);
   const full = usePlugins((s) => s.list?.filter((p) => p.fullAccess && p.allowed).length ?? 0);
   const [access, setAccess] = useState<AgentAccess | null>(null);
@@ -123,18 +123,14 @@ export function PrivacyPane() {
       pane: "ai",
       target: "chatgpt",
     },
-    ...(account === undefined
-      ? []
-      : [
-          {
-            title: "Nuzky account",
-            detail: "account.nuzky.app, while you sign in or out, when the sign-in is renewed and to sync Your style and your caption styles.",
-            state: account?.state === "signedIn" ? "Signed in" : "Signed out",
-            on: account?.state === "signedIn",
-            pane: "account" as const,
-            target: "account",
-          },
-        ]),
+    {
+      title: "Nuzky account",
+      detail: "account.nuzky.app, while you sign in or out, when the sign-in is renewed and to sync Your style and your caption styles.",
+      state: account?.state === "signedIn" ? "Signed in" : "Signed out",
+      on: account?.state === "signedIn",
+      pane: "account" as const,
+      target: "account",
+    },
     { title: "Claude Code, Codex and Gemini", detail: "In the AI panel they send the conversation to their own provider, as they do in a terminal.", state: "When you send" },
     { title: "Plugin gallery", detail: "GitHub, only while the Gallery in the Plugins tab is open.", state: "When open" },
     { title: "Edit from your phone", detail: "Only your local network, while sharing is on. Turn it on or off with the QR code button in the top bar.", state: sharing ? "On" : "Off", on: sharing },

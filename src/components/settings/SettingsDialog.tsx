@@ -73,12 +73,12 @@ const fold = (text: string) =>
 
 type Result = { label: string; pane: Pane; target: string; keys?: string[] };
 
-function search(query: string, updates: boolean, account: boolean): Result[] {
+function search(query: string, updates: boolean): Result[] {
   const words = fold(query).split(/\s+/).filter(Boolean);
   if (!words.length) return [];
   const hit = (text: string) => words.every((w) => fold(text).includes(w));
   // A copy that doesn't update itself has no update settings to find.
-  const settings = ENTRIES.filter((e) => (updates || (e.target !== "updates" && e.target !== "auto-update")) && (account || e.pane !== "account") && hit(`${e.label} ${PANE_TITLES[e.pane]} ${e.words ?? ""}`));
+  const settings = ENTRIES.filter((e) => (updates || (e.target !== "updates" && e.target !== "auto-update")) && hit(`${e.label} ${PANE_TITLES[e.pane]} ${e.words ?? ""}`));
   const keys = ACTIONS.filter((a) => hit(`${a.label} ${keysOf(a.id).join(" ")} shortcut key`)).map((a) => ({
     label: a.label,
     pane: "keyboard" as const,
@@ -117,9 +117,7 @@ function AccountTab({ on }: { on: boolean }) {
 
 function Dialog() {
   const asked = useSettings((s) => s.pane);
-  const account = useAccount((s) => s.available);
-  const panes: readonly Pane[] = account ? PANES : PANES.filter((p) => p !== "account");
-  const pane = panes.includes(asked) ? asked : "general";
+  const pane = PANES.includes(asked) ? asked : "general";
   const target = useSettings((s) => s.target);
   useKeys();
   const [query, setQuery] = useState("");
@@ -127,7 +125,7 @@ function Dialog() {
   const updates = useUpdates((s) => s.enabled);
   const dialog = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
-  const results = search(query, updates, account);
+  const results = search(query, updates);
   const Body = BODIES[pane];
 
   useEffect(() => {
@@ -190,11 +188,11 @@ function Dialog() {
       dialog.current?.querySelector<HTMLElement>("input[type=search]")?.focus();
       return;
     }
-    const i = panes.indexOf(pane);
-    const to = { ArrowUp: i - 1, ArrowDown: i + 1, Home: 0, End: panes.length - 1 }[e.key];
+    const i = PANES.indexOf(pane);
+    const to = { ArrowUp: i - 1, ArrowDown: i + 1, Home: 0, End: PANES.length - 1 }[e.key];
     if (to === undefined) return;
     e.preventDefault();
-    const next = panes[Math.max(0, Math.min(panes.length - 1, to))];
+    const next = PANES[Math.max(0, Math.min(PANES.length - 1, to))];
     show(next);
     e.currentTarget.querySelector<HTMLElement>(`#settings-tab-${next}`)?.focus();
   };
@@ -276,7 +274,7 @@ function Dialog() {
             </div>
           ) : (
             <div role="tablist" aria-orientation="vertical" aria-label="Settings" onKeyDown={railKeys} className="-mx-1 -my-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-1 py-1">
-              {panes.map((id) => {
+              {PANES.map((id) => {
                 const Icon = ICONS[id];
                 const on = id === pane;
                 return (

@@ -7,13 +7,13 @@ import { Button, IconButton } from "../ui";
 const KEY = "nuzky.styleSignIn";
 
 /**
- * Your style's offer of the Nuzky account, where keeping the style on every computer means something: while the
- * build offers the account and nobody is signed in, until the creator closes it for good.
+ * Your style's offer of the Nuzky account, where keeping the style on every computer means something: while
+ * nobody is signed in, until the creator closes it for good.
  */
 export function SignInCard() {
-  const { available, status, action, error } = useAccount();
+  const { status, action, error } = useAccount();
   const [closed, setClosed] = useState(() => localStorage.getItem(KEY) === "closed");
-  if (!available || closed || status?.state !== "signedOut") return null;
+  if (closed || status?.state !== "signedOut") return null;
   const close = () => {
     localStorage.setItem(KEY, "closed");
     setClosed(true);

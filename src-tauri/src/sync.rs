@@ -294,11 +294,8 @@ fn restorable(body: &Value) -> Vec<CaptionPreset> {
     styles
 }
 
-/// Syncs on its own thread from now on, first at once, in builds that offer the account.
+/// Syncs on its own thread from now on, first at once.
 pub fn start(app: AppHandle, account: impl Fn() -> Account + Send + 'static) {
-    if !crate::account::account_available() {
-        return;
-    }
     let spawned = std::thread::Builder::new().name("account-sync".into()).spawn(move || {
         nudge();
         loop {

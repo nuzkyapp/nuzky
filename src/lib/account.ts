@@ -10,8 +10,6 @@ import type { AccountProvider, AccountStatus, SyncStatus } from "./types";
  * only who is signed in. A sign-in goes on while Settings is closed and reports in a toast then.
  */
 type Account = {
-  /** Whether Settings offers the account at all (`account_available`). */
-  available: boolean;
   /** Null until the first check answers. */
   status: AccountStatus | null;
   checking: boolean;
@@ -23,25 +21,12 @@ type Account = {
 };
 
 export const useAccount = create<Account>(() => ({
-  available: false,
   status: null,
   checking: false,
   action: null,
   error: null,
   sync: null,
 }));
-
-void api
-  .accountAvailable()
-  .then((available) => {
-    useAccount.setState({ available });
-    // The rail shows who is signed in, so it reads what is stored, without the network.
-    if (!available) return;
-    void check(false);
-    void listen<SyncStatus>("sync-changed", (e) => useAccount.setState({ sync: e.payload }));
-    void api.syncStatus().then((sync) => useAccount.setState({ sync }));
-  })
-  .catch(() => {});
 
 /** The account's words for what the shared sign-in code reports; the rest reads as anywhere else. */
 const WORDS: Record<string, string> = {
@@ -135,3 +120,8 @@ export function syncNow() {
 
 /** The letter in the account's circle: the name's first, else the email's. */
 export const initial = (status: Extract<AccountStatus, { state: "signedIn" }>) => [...(status.name || status.email).trim()][0]?.toUpperCase() ?? "";
+
+// The rail shows who is signed in, so it reads what is stored, without the network.
+void check(false);
+void listen<SyncStatus>("sync-changed", (e) => useAccount.setState({ sync: e.payload }));
+void api.syncStatus().then((sync) => useAccount.setState({ sync }), () => {});
