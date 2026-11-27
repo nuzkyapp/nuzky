@@ -34,6 +34,10 @@ const PREVIEW_CHARS: usize = 400;
 /// apply_edits leaves out clips longer than this: restyling 117 captions once answered 64 thousand characters,
 /// more than the agent could read.
 const MAX_CLIPS_CHARS: usize = 8_000;
+/// Claude Code keeps a text result over 50,000 characters in a file, which an agent with only Nuzky's tools cannot
+/// read, so the unfiltered state and a page of the transcript stay under it.
+const MAX_STATE_CHARS: usize = 45_000;
+const MAX_TRANSCRIPT_CHARS: usize = 45_000;
 /// How long activity waits for its job before handing it over to the client.
 const ANSWER_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
@@ -149,6 +153,9 @@ impl Backend {
     }
 
     fn call_inner(&self, name: &str, arguments: Value) -> Result<CallToolResult> {
+        if name == "get_guide" {
+            return guide_text(arguments);
+        }
         let rules = crate::rules::find(name);
         let read = rules.is_some_and(|rules| rules.reads(&arguments));
         let mut runs = (!read).then(|| self.runs.lock().unwrap());
@@ -215,6 +222,7 @@ impl Backend {
                 let mut value = state_value(state, args)?;
                 if unfiltered {
                     share_text_defaults(&mut value);
+                    compact_clips(&mut value);
                 }
                 // Files whose sound is prepared and was recorded on one side say which, so a clip of one can play it in
                 // both ears with mono.
@@ -224,6 +232,9 @@ impl Backend {
                             json["soundOnlyIn"] = json!(side);
                         }
                     }
+                }
+                if unfiltered {
+                    omit_clips_over(&mut value, MAX_STATE_CHARS);
                 }
                 Ok(value)
             }
@@ -1583,8 +1594,14 @@ impl Backend {
         let derived = transcript::derive(&self.media_project(&state.project), &self.host.transcripts)?;
         let key = transcript::word_key(&state.project, &derived.words);
         let mut result = transcript::summary(&derived, args.range_us)?;
-        if args.limit.is_some() || args.cursor.is_some() {
-            let from = if let Some(cursor) = &args.cursor {
+        let full = !matches!(args.detail, Some(TranscriptDetail::Sentences));
+        for word in result["words"].as_array_mut().unwrap() {
+            if let Some(p) = word["p"].as_f64() {
+                word["p"] = json!((p * 100.0).round() / 100.0);
+            }
+        }
+        let from = match &args.cursor {
+            Some(cursor) => {
                 let (word, cursor_key) = cursor
                     .split_once('.')
                     .and_then(|(word, key)| word.parse::<usize>().ok().map(|word| (word, key)))
@@ -1593,26 +1610,45 @@ impl Backend {
                     cursor_key == key,
                     "SPEECH_CHANGED: the transcript changed since this cursor; start again without cursor"
                 );
-                word
-            } else {
-                0
-            };
-            let sentences = result["sentences"].as_array_mut().unwrap();
-            sentences.retain(|sentence| sentence["from"].as_u64().unwrap() >= from as u64);
-            let next = sentences.get(limit).map(|sentence| format!("{}.{}", sentence["from"], key));
-            sentences.truncate(limit);
-            let span = sentences
-                .first()
-                .zip(sentences.last())
-                .map(|(first, last)| (first["from"].as_u64().unwrap(), last["to"].as_u64().unwrap()));
-            for (field, index) in [("words", "i"), ("pauses", "after_word")] {
+                word as u64
+            }
+            None => 0,
+        };
+        let index = |entry: &Value, field: &str| entry[field].as_u64().unwrap();
+        let mut sizes = std::collections::BTreeMap::new();
+        if full {
+            for (field, number) in [("words", "i"), ("pauses", "after_word")] {
+                for entry in result[field].as_array().unwrap() {
+                    *sizes.entry(index(entry, number)).or_insert(0) += entry.to_string().len() + 1;
+                }
+            }
+        }
+        let sentences = result["sentences"].as_array_mut().unwrap();
+        sentences.retain(|sentence| index(sentence, "from") >= from);
+        let (mut fits, mut size) = (0, 0);
+        for sentence in sentences.iter() {
+            size += sentence.to_string().len() + 1;
+            size += sizes.range(index(sentence, "from")..=index(sentence, "to")).map(|(_, size)| size).sum::<usize>();
+            if fits > 0 && size > MAX_TRANSCRIPT_CHARS {
+                break;
+            }
+            fits += 1;
+        }
+        let paged = args.limit.is_some() || args.cursor.is_some();
+        let count = if paged { fits.min(limit) } else { fits };
+        let next = sentences.get(count).map(|sentence| format!("{}.{}", sentence["from"], key));
+        if paged || next.is_some() {
+            sentences.truncate(count);
+            let span =
+                sentences.first().zip(sentences.last()).map(|(first, last)| (index(first, "from"), index(last, "to")));
+            for (field, number) in [("words", "i"), ("pauses", "after_word")] {
                 result[field]
                     .as_array_mut()
                     .unwrap()
-                    .retain(|entry| span.is_some_and(|(a, b)| (a..=b).contains(&entry[index].as_u64().unwrap())));
+                    .retain(|entry| span.is_some_and(|(a, b)| (a..=b).contains(&index(entry, number))));
             }
-            result["next_cursor"] = json!(next);
         }
+        result["next_cursor"] = json!(next);
         if matches!(args.detail, Some(TranscriptDetail::Sentences)) {
             let object = result.as_object_mut().unwrap();
             object.remove("words");
@@ -2413,6 +2449,17 @@ pub(crate) fn caption_plan(
     Ok((edit, from))
 }
 
+fn guide_text(arguments: Value) -> Result<CallToolResult> {
+    let args: GetGuide = parse(arguments)?;
+    Ok(CallToolResult::success(vec![ContentBlock::text(crate::guide::read(&args.topics)?)]))
+}
+
+/// The guide needs no project, so the server answers it itself, also while no app has one open.
+pub(crate) fn guide(arguments: Value) -> CallToolResult {
+    guide_text(arguments)
+        .unwrap_or_else(|e| CallToolResult::error(vec![ContentBlock::text(error_message(format!("{e:#}")))]))
+}
+
 /// get_state's answer, which is also the project a plugin reads.
 pub(crate) fn state_value(state: &SessionState, args: State) -> Result<Value> {
     if let Some(range) = args.range {
@@ -2454,6 +2501,42 @@ pub(crate) fn state_value(state: &SessionState, args: State) -> Result<Value> {
     }
     object.insert("filtered".into(), json!(args.range.is_some() || args.clip_ids.is_some()));
     Ok(value)
+}
+
+/// Clips of the unfiltered state leave out what says nothing: a field that is null, an empty list and an Adjust
+/// that changes nothing. A reel's hundred captions are then a third shorter.
+fn compact_clips(value: &mut Value) {
+    let says_nothing = |value: &Value| value.is_null() || value.as_array().is_some_and(Vec::is_empty);
+    let clips = value["tracks"].as_array_mut().into_iter().flatten().flat_map(|track| track["clips"].as_array_mut());
+    for clip in clips.flatten().filter_map(Value::as_object_mut) {
+        clip.retain(|_, value| !says_nothing(value));
+        if let Some(content) = clip.get_mut("content").and_then(Value::as_object_mut) {
+            content.retain(|key, value| {
+                let neutral = key == "adjust"
+                    && value.as_object().is_some_and(|adjust| adjust.values().all(|v| v.as_f64() == Some(0.0)));
+                !says_nothing(value) && !neutral
+            });
+        }
+    }
+}
+
+/// While the state is longer than `max`, the track with the longest clips gives their count in `clips_omitted`
+/// instead, text tracks first, so a long video's state still answers; `get_state(range)` reads those clips.
+fn omit_clips_over(value: &mut Value, max: usize) {
+    while value.to_string().len() > max {
+        let longest = value["tracks"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .enumerate()
+            .filter(|(_, track)| track["clips"].as_array().is_some_and(|clips| !clips.is_empty()))
+            .max_by_key(|(_, track)| (track["kind"] == "text", track["clips"].to_string().len()))
+            .map(|(index, _)| index);
+        let Some(index) = longest else { return };
+        let track = &mut value["tracks"][index];
+        track["clips_omitted"] = json!(track["clips"].as_array().map_or(0, Vec::len));
+        track["clips"] = json!([]);
+    }
 }
 
 /// Unfiltered state of a reel with karaoke captions overflows an agent's tool result, mostly through the same style

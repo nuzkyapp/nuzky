@@ -748,7 +748,7 @@ fn send(
             api: chatgpt::chatgpt().api().to_owned(),
             model: model.ok_or("Choose a ChatGPT model first.")?,
             effort,
-            guide: nuzky_mcp::guide(),
+            guide: nuzky_mcp::instructions(),
             tools: nuzky_mcp::tool_list().map_err(err)?,
             prompt: message(text, context, &project)?,
             history,

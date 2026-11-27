@@ -161,7 +161,7 @@ pub fn setup(setup: Setup, command: &Command) -> Result<String> {
          1. Add it to {place}. If the file already has \"{key}\", add only the \"nuzky\" entry:\n\n{}\n\n\
          2. Then tell {agent}:\n\n\
          Nuzky is the video editor open on this computer, and its MCP server nuzky edits the project open in it. \
-         Start by reading the resource nuzky://guide and follow it. Change the video only through Nuzky's tools, \
+         Start by calling its get_guide tool and follow the guide. Change the video only through Nuzky's tools, \
          never its project file. Open a run with begin_run before you change anything and close it with end_run: \
          the whole run is one undo step for the user.\n",
         serde_json::to_string_pretty(&serde_json::json!({key: {NAME: server}}))?

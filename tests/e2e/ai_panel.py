@@ -204,29 +204,33 @@ class ChatGptPanelServer:
             return self.search(items[last + 1:])
         if 'split' not in message:
             raise ValueError(f'unexpected user message: {message}')
-        outputs = [json.loads(item['output']) for item in items[last + 1:] if item['type'] == 'function_call_output']
+        # The guide's topic comes back as text, every other tool's answer as JSON.
+        outputs = [json.loads(item['output']) if item['output'].startswith('{') else item['output']
+                   for item in items[last + 1:] if item['type'] == 'function_call_output']
         count, events = len(outputs), []
-        if count in (0, 4):
+        if count in (0, 5):
             text = 'I will split the clip at 2 s.' if count == 0 else 'The clip is split at 2 s.'
             events += [{'type': 'response.output_text.delta', 'delta': text},
                        {'type': 'response.output_item.done', 'item': {'type': 'message', 'id': f'msg-{count}',
                         'role': 'assistant', 'content': [{'type': 'output_text', 'text': text}]}}]
-        if count < 4:
-            name = ['get_state', 'begin_run', 'apply_edits', 'end_run'][count]
+        if count < 5:
+            name = ['get_guide', 'get_state', 'begin_run', 'apply_edits', 'end_run'][count]
             arguments = {}
-            if count == 1:
+            if count == 0:
+                arguments = {'topics': ['edits']}
+            elif count == 2:
                 arguments = {'label': 'Split the clip at 2 s'}
-            elif count >= 2:
-                arguments = {'run_id': outputs[1]['run_id']}
-                if count == 2:
-                    clip = next(t['clips'][0] for t in outputs[0]['tracks'] if t['id'] == 'main')
+            elif count >= 3:
+                arguments = {'run_id': outputs[2]['run_id']}
+                if count == 3:
+                    clip = next(t['clips'][0] for t in outputs[1]['tracks'] if t['id'] == 'main')
                     arguments.update(request_id='e2e-split', edits=[{'type': 'splitClip', 'clipId': clip['id'], 'atUs': 2_000_000}])
                 else:
                     arguments['action'] = 'keep'
             events.append({'type': 'response.output_item.done', 'item': {'type': 'function_call', 'id': f'item-{count}',
                            'call_id': f'call-{count}', 'namespace': 'nuzky', 'name': name, 'arguments': json.dumps(arguments)}})
         events.append({'type': 'response.completed', 'response': {'id': f'response-{count}'}})
-        return events, 1 if count in (1, 2, 3) else 0
+        return events, 1 if count in (2, 3, 4) else 0
 
     @staticmethod
     def search(after):
@@ -325,9 +329,9 @@ def ai_panel_chatgpt(r):
 
         before = r.track()
         send(r, 'Split the clip at 2 s')
-        check('the editor locks and the live steps show Read the project and Editing',
+        check('the editor locks and the live steps show Reading the guide, Read the project and Editing',
               wait(lambda: r.state()['aiRun'], 15)
-              and wait(lambda: all(s in panel(r)['text'] for s in ('Read the project', 'Editing')) and r.state()['aiRun'], 10), panel(r)['text'])
+              and wait(lambda: all(s in panel(r)['text'] for s in ('Reading the guide', 'Read the project', 'Editing')) and r.state()['aiRun'], 10), panel(r)['text'])
         wait(lambda: agent(r)['status'] == 'idle' and 'run' in agent(r)['kinds'], 20)
         saved = json.loads(r.saved_project().read_text())
         main = next(t['clips'] for t in saved['tracks'] if t['id'] == 'main')
@@ -410,28 +414,35 @@ def ai_panel_chatgpt(r):
         requests = server.requests
         bodies = [request['body'] for request in requests]
         check("all requests use the selected model, bearer token, preview fields, guide, namespaced Nuzky tools and only OpenAI's own web search",
-              len(bodies) == 9 and not server.errors and all(
+              len(bodies) == 10 and not server.errors and all(
                   request['authorization'] == 'Bearer e2e-access' and body.get('model') == 'gpt-e2e-luna'
                   and body.get('reasoning') == {'effort': 'high'}
                   and body.get('store') is False and body.get('stream') is True and not unsupported.intersection(body)
                   and 'You are the AI panel inside Nuzky' in body.get('instructions', '') and heading in body['instructions']
                   and len(body.get('tools', [])) == 2 and body['tools'][0].get('type') == 'namespace' and body['tools'][1] == SEARCH_TOOL
                   and body['tools'][0].get('name') == 'nuzky' and all(t.get('type') == 'function' for t in body['tools'][0]['tools'])
-                  and {'get_state', 'begin_run', 'apply_edits', 'end_run'} <= {t['name'] for t in body['tools'][0]['tools']}
+                  and {'get_guide', 'get_state', 'begin_run', 'apply_edits', 'end_run'} <= {t['name'] for t in body['tools'][0]['tools']}
                   for request, body in zip(requests, bodies)), {'requests': len(bodies), 'server_errors': server.errors})
-        style_first = lambda text: STYLE in text and heading in text and text.index(STYLE) < text.index(heading)
-        check("ChatGPT reads the creator's style before the guide and that it decides how to cut, caption and zoom",
-              all(style_first(body.get('instructions', '')) and 'decides how you cut, caption and zoom' in body['instructions']
-                  for body in bodies), bodies[0].get('instructions', '')[:2000])
+        # The instructions are short: that there is a style, the guide's rules and its topics, then the style; no section.
+        note, topics, style = 'This creator has their own editing style', 'get_guide(topics)', STYLE.strip()
+        styled = lambda text: (all(part in text for part in (note, heading, topics, style))
+                               and text.index(note) < text.index(heading) < text.index(topics) < text.index(style)
+                               and '\n## ' not in text and len(text) < 6000)
+        check("ChatGPT reads that the creator has a style, the guide's rules and topics and the style, and that it decides how to cut, caption and zoom",
+              all(styled(body.get('instructions', '')) and 'decides how you cut, caption and zoom' in body['instructions']
+                  for body in bodies), bodies[0].get('instructions', '')[:6000])
         # The usage-limit message, the first after the split, carries the whole split before it.
-        talk = bodies[5]['input']
+        talk = bodies[6]['input']
         calls = [i for i in talk if i['type'] == 'function_call']
         check('the first prompt carries the playhead and later inputs pair calls without item ids with their outputs',
               any('[Nuzky] Playhead' in p['text'] for i in bodies[0]['input'] if i.get('role') == 'user' for p in i['content'])
-              and [call['name'] for call in calls] == ['get_state', 'begin_run', 'apply_edits', 'end_run']
+              and [call['name'] for call in calls] == ['get_guide', 'get_state', 'begin_run', 'apply_edits', 'end_run']
               and all('id' not in i for body in bodies[1:] for i in body['input'] if i['type'] == 'function_call')
               and all(any(i['type'] == 'function_call_output' and i['call_id'] == call['call_id'] and isinstance(i['output'], str)
                           for i in talk) for call in calls), talk)
+        topic = next((i['output'] for i in talk if i['type'] == 'function_call_output' and i['call_id'] == 'call-0'), '')
+        edits = guide[guide.index('## Runs and low-level edits'):guide.index('## Plugins')].strip()
+        check("get_guide answers ChatGPT with the topic's section of the guide, as text", topic == edits, topic[:600])
 
     finally:
         server.http.shutdown()

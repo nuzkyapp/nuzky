@@ -1205,6 +1205,30 @@ fn get_state_shares_caption_defaults_and_keeps_filtered_clips_full_over_stdio() 
     assert_eq!(full["filtered"], true);
     assert_eq!(original["clips"][0]["content"]["words"].as_array().unwrap().len(), 2);
     assert!(original.get("shared_style").is_none() && original.get("words_omitted").is_none());
+    // Unfiltered clips leave out what says nothing; a filtered clip keeps every field, as pasteClips takes it.
+    let (short, whole) = (track["clips"][1].as_object().unwrap(), original["clips"][1].as_object().unwrap());
+    assert!(whole.contains_key("animIn") && whole.contains_key("keyframes") && whole.contains_key("transitionIn"));
+    assert_eq!(short.keys().collect::<Vec<_>>(), ["content", "durationUs", "id", "startUs"]);
+
+    // A long video's captions would pass what Claude Code hands its model, so the longest track gives its count.
+    let many: Vec<Value> = (0..1500i64)
+        .map(|i| json!({"startUs":i * 500_000,"endUs":(i + 1) * 500_000,"text":format!("caption {i}")}))
+        .collect();
+    c.call(
+        "apply_edits",
+        json!({"run_id":run,"request_id":"many","edits":[{"type":"addCaptions","segments":many,"style":{"fontSize":64.0}}]}),
+    );
+    let long = c.call("get_state", json!({}));
+    assert!(long.to_string().len() <= 45_000, "{} characters", long.to_string().len());
+    let tracks = long["tracks"].as_array().unwrap();
+    let omitted: Vec<_> = tracks.iter().filter(|track| !track["clips_omitted"].is_null()).collect();
+    assert_eq!(omitted.len(), 1, "{long}");
+    assert_eq!((&omitted[0]["clips_omitted"], &omitted[0]["clips"]), (&json!(1500), &json!([])));
+    assert!(tracks.iter().any(|track| track["clips"].as_array().unwrap().len() == 150));
+    assert_eq!(long["caption_stats"]["count"], 1650);
+    let part = c.call("get_state", json!({"range":{"startUs":0,"endUs":5_000_000}}));
+    let read = part["tracks"].as_array().unwrap().iter().find(|track| track["id"] == omitted[0]["id"]).unwrap();
+    assert_eq!(read["clips"].as_array().unwrap().len(), 10);
     c.call("end_run", json!({"run_id":run,"action":"keep"}));
     c.finish();
 }
@@ -1966,7 +1990,12 @@ fn an_agent_reads_the_style_and_keeps_what_the_creator_agreed_to() {
 fn a_creator_style_reaches_the_agent_and_without_one_nothing_changes() {
     let guide = include_str!("../../../skills/nuzky-edit/SKILL.md");
     let mut plain = Client::with_style(None);
-    assert_eq!(plain.init["result"]["instructions"], guide);
+    // Claude Code keeps 4,096 characters of a server's instructions: the rules of every request and where the
+    // rest of the guide is, not the 77,000 characters of the guide.
+    let rules = plain.init["result"]["instructions"].as_str().unwrap().to_owned();
+    assert!(rules.starts_with("# Edit with Nuzky\n") && rules.len() <= 4096 && !rules.contains("\n## "), "{rules}");
+    assert!(rules.contains("`begin_run` once per request") && rules.contains("MODEL_DECLINED"), "{rules}");
+    assert!(rules.ends_with("read it with get_guide(topics), several in one call: cut, translate, capcut, footage, clips, reframe, cover, reels, chapters, hooks, zoom, titles, transitions, broll, layout, brand, music, beats, headless, voiceover, edits, plugins, style, ask, copy, sound, look, speed."), "{rules}");
     assert_eq!(plain.rpc("resources/list", json!({}))["result"]["resources"].as_array().unwrap().len(), 3);
     assert_eq!(plain.rpc("resources/read", json!({"uri":"nuzky://guide"}))["result"]["contents"][0]["text"], guide);
     assert!(
@@ -1979,29 +2008,88 @@ fn a_creator_style_reaches_the_agent_and_without_one_nothing_changes() {
 
     let style = "# Editing style\n\nKeep pauses under 120 ms.\n";
     let mut styled = Client::with_style(Some(style));
-    // The style comes before the whole guide, so its rules are the first thing the agent reads.
-    let style_first = |text: &str| {
-        let at = |part: &str| text.find(part).unwrap_or_else(|| panic!("{part:?} is missing from {text}"));
-        assert!(at(style) < at("# Edit with Nuzky"), "{text}");
-        assert!(text.contains(guide), "{text}");
-    };
+    let at = |text: &str, part: &str| text.find(part).unwrap_or_else(|| panic!("{part:?} is missing from {text}"));
+    // What a client that cuts instructions short keeps: that there is a style and how to read it whole, the
+    // rules and the topics. The style's own text follows them.
     let instructions = styled.init["result"]["instructions"].as_str().unwrap().to_owned();
     assert!(instructions.starts_with("This creator has their own editing style"), "{instructions}");
-    style_first(&instructions);
+    assert!(at(&instructions, "read it whole with get_style") < at(&instructions, "# Edit with Nuzky"));
+    assert!(at(&instructions, "look, speed.") < at(&instructions, style) && at(&instructions, style) < 4096);
+    assert!(instructions.ends_with(style.trim_end()) && !instructions.contains("\n## "), "{instructions}");
     let resources = styled.rpc("resources/list", json!({}));
     let uris: Vec<&str> =
         resources["result"]["resources"].as_array().unwrap().iter().map(|r| r["uri"].as_str().unwrap()).collect();
     assert_eq!(uris, ["nuzky://guide", "nuzky://schema", "nuzky://plugin-guide", "nuzky://style"]);
     assert_eq!(styled.rpc("resources/read", json!({"uri":"nuzky://style"}))["result"]["contents"][0]["text"], style);
+    // The resource is the style before the whole guide.
     let read = styled.rpc("resources/read", json!({"uri":"nuzky://guide"}));
-    assert_eq!(read["result"]["contents"][0]["text"], instructions);
-    for (name, arguments) in
-        [("edit_selected", json!({"goal":"Make a reel"})), ("rough_cut", json!({})), ("thumbnail", json!({}))]
-    {
+    let whole = read["result"]["contents"][0]["text"].as_str().unwrap();
+    assert!(at(whole, style) < at(whole, "# Edit with Nuzky") && whole.contains(guide), "{whole}");
+    // A prompt carries the style and only the sections it works by, each once.
+    for (name, arguments, sections, without) in [
+        ("edit_selected", json!({"goal":"Make a reel"}), vec![], "\n## "),
+        (
+            "rough_cut",
+            json!({}),
+            vec!["## Cut slips and pauses, then caption\n", "## Make it dynamic, when asked or the style zooms\n"],
+            "## Beat cuts",
+        ),
+        ("thumbnail", json!({}), vec!["## Pick a cover frame\n"], "## Cut slips and pauses"),
+    ] {
         let prompt = styled.rpc("prompts/get", json!({"name": name, "arguments": arguments}));
-        style_first(prompt["result"]["messages"][0]["content"]["text"].as_str().unwrap());
+        let text = prompt["result"]["messages"][0]["content"]["text"].as_str().unwrap();
+        assert!(text.contains(style.trim_end()) && !text.contains(without), "{name}: {text}");
+        for section in sections {
+            assert!(at(text, style) < at(text, section) && text.matches(section).count() == 1, "{name}: {text}");
+        }
+        assert!(text.len() < 30_000, "{name} is {} characters", text.len());
     }
     styled.finish();
+}
+
+#[test]
+fn the_guide_is_read_by_topic_and_every_description_fits_a_client() {
+    let mut c = Client::new(false);
+    let guide = include_str!("../../../skills/nuzky-edit/SKILL.md");
+    let mut read = |arguments: Value| {
+        let result = c.rpc("tools/call", json!({"name":"get_guide","arguments":arguments}));
+        (result["result"]["isError"] == true, result["result"]["content"][0]["text"].as_str().unwrap().to_owned())
+    };
+    let section = |heading: &str| {
+        let from = guide.find(&format!("\n## {heading}\n")).unwrap() + 1;
+        let rest = &guide[from..];
+        rest[3..].find("\n## ").map_or(rest, |end| &rest[..end + 3]).trim_end().to_owned()
+    };
+    // A topic is its whole section of the guide and nothing else, as text and not as JSON.
+    let (failed, cut) = read(json!({"topics":["cut"]}));
+    assert!(!failed && cut == section("Cut slips and pauses, then caption"), "{cut}");
+    assert!(cut.contains("`edit_transcript(transcript_key, delete: [[from,to],...]") && !cut.contains("\\n"));
+    // Several come in one call, in the guide's order.
+    let (_, two) = read(json!({"topics":["speed", "beats"]}));
+    assert_eq!(two, format!("{}\n\n{}", section("Beat cuts"), section("Freeze, speed, slow motion and reverse")));
+    // Without topics: the rules of every request and what there is to read.
+    let (failed, list) = read(json!({}));
+    assert!(!failed && list.starts_with("# Edit with Nuzky\n") && list.contains("\n- beats: cutting to the beat\n"));
+    let (failed, unknown) = read(json!({"topics":["cuts"]}));
+    assert!(failed && unknown.starts_with("INVALID_ARGUMENTS: no topic \"cuts\"; the topics are cut, "), "{unknown}");
+
+    let listed = c.rpc("tools/list", json!({}));
+    let tools = listed["result"]["tools"].as_array().unwrap();
+    let described = tools.iter().find(|tool| tool["name"] == "get_guide").unwrap();
+    assert_eq!(described["annotations"]["readOnlyHint"], true);
+    // Every section of the guide is a topic an agent can find in the tool's description.
+    let topics = described["description"].as_str().unwrap();
+    assert_eq!(topics.matches("\n- ").count(), guide.matches("\n## ").count(), "{topics}");
+    for tool in tools {
+        // Claude Code cuts a description it loads at the start at 4,096 characters.
+        let length = tool["description"].as_str().unwrap().len();
+        assert!(length <= 4096, "{} is described in {length} characters", tool["name"]);
+        assert_eq!(tool["_meta"]["anthropic/maxResultSizeChars"], 200_000);
+        let schema = tool["inputSchema"].to_string();
+        assert!(!schema.contains("\"$schema\"") && !schema.contains("\"format\":\"int64\""), "{schema}");
+        assert!(tool["inputSchema"].get("title").is_none() && tool["inputSchema"]["type"] == "object");
+    }
+    c.finish();
 }
 
 #[test]
@@ -4667,28 +4755,56 @@ fn long_talk(c: &mut Client) -> Vec<Value> {
 fn transcript_sentences_and_pages_preserve_long_talk_over_stdio() {
     let mut c = Client::start(true, None, Some(None));
     let stored = long_talk(&mut c);
-    let full = c.call("get_transcript", json!({}));
+    // 2200 words are 170,000 characters, more than Claude Code hands its model: they come in pages under 45,000.
+    let first = c.call("get_transcript", json!({}));
     assert_eq!(
-        full.as_object().unwrap().keys().map(String::as_str).collect::<Vec<_>>(),
-        ["names", "pauses", "revision", "sentences", "session_epoch", "transcript_key", "untranscribed", "words"]
+        first.as_object().unwrap().keys().map(String::as_str).collect::<Vec<_>>(),
+        [
+            "names",
+            "next_cursor",
+            "pauses",
+            "revision",
+            "sentences",
+            "session_epoch",
+            "transcript_key",
+            "untranscribed",
+            "words"
+        ]
     );
+    assert_eq!(c.call("get_transcript", json!({"detail": "full"})), first);
+    let mut full = json!({"words": [], "sentences": [], "pauses": []});
+    let (mut page, mut pages, mut full_bytes) = (first, 0, 0);
+    loop {
+        let bytes = serde_json::to_vec(&page).unwrap().len();
+        assert!(bytes <= 46_000, "a page of {bytes} bytes");
+        (pages, full_bytes) = (pages + 1, full_bytes + bytes);
+        let last = page["sentences"].as_array().unwrap().last().unwrap()["to"].clone();
+        assert_eq!(page["words"].as_array().unwrap().last().unwrap()["i"], last);
+        for field in ["words", "sentences", "pauses"] {
+            full[field].as_array_mut().unwrap().extend(page[field].as_array().unwrap().iter().cloned());
+        }
+        if page["next_cursor"].is_null() {
+            break;
+        }
+        page = c.call("get_transcript", json!({"cursor": page["next_cursor"], "limit": 500}));
+    }
+    assert!((4..=6).contains(&pages), "{pages} pages");
     assert_eq!(full["words"].as_array().unwrap().len(), 2200);
     for (i, word) in full["words"].as_array().unwrap().iter().enumerate() {
         assert_eq!(word["i"], i);
         assert_eq!(word["text"], stored[i]["text"]);
         assert_eq!(word["start_us"], stored[i]["start_us"]);
         assert_eq!(word["end_us"], stored[i]["end_us"]);
-        assert_eq!(word["p"], json!(stored[i]["probability"].as_f64().unwrap() as f32));
+        let p = f64::from(stored[i]["probability"].as_f64().unwrap() as f32);
+        assert_eq!(word["p"], json!((p * 100.0).round() / 100.0));
     }
     assert_eq!(full["sentences"].as_array().unwrap().len(), 220);
-    assert_eq!(c.call("get_transcript", json!({"detail": "full"})), full);
     let sentences = c.call("get_transcript", json!({"detail": "sentences"}));
     assert_eq!(sentences["sentences"], full["sentences"]);
     assert!(sentences.get("words").is_none() && sentences.get("pauses").is_none());
-    assert!(sentences.get("next_cursor").is_none());
-    let full_bytes = serde_json::to_vec(&full).unwrap().len();
+    assert!(sentences["next_cursor"].is_null());
     let sentence_bytes = serde_json::to_vec(&sentences).unwrap().len();
-    eprintln!("Transcript JSON bytes: full={full_bytes}, sentences={sentence_bytes}");
+    eprintln!("Transcript JSON bytes: full={full_bytes} in {pages} pages, sentences={sentence_bytes}");
     assert!(sentence_bytes * 3 <= full_bytes);
 
     let mut collected = Vec::new();

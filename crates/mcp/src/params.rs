@@ -8,6 +8,13 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct GetGuide {
+    /// Topic ids from the tool's description; left out, the list of topics.
+    #[serde(default)]
+    pub topics: Vec<String>,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct State {
     pub range: Option<TimeRange>,
     pub clip_ids: Option<Vec<String>>,
@@ -373,7 +380,7 @@ pub struct GetTranscript {
     pub range_us: Option<[i64; 2]>,
     /// sentences leaves out words and pauses, to read a long video cheaply.
     pub detail: Option<TranscriptDetail>,
-    /// Sentences per page, 1-500; with limit or cursor the result is a page with next_cursor.
+    /// Sentences per page, 1-500 (100 with a cursor); a page also ends before 45000 characters.
     pub limit: Option<usize>,
     /// next_cursor of the page before.
     pub cursor: Option<String>,

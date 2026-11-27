@@ -234,6 +234,7 @@ const OFFER = "suggest_options";
 export const SEARCHING = "Searching the web";
 
 const TITLES: Record<string, string> = {
+  get_guide: "Reading the guide",
   get_state: "Read the project",
   get_transcript: "Read the transcript",
   transcribe: "Transcribing",

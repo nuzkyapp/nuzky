@@ -91,9 +91,9 @@ def connect(r):
         server = server_of(text) if text and '{' in text else {}
         r.check('Other agent copies a server that runs this app attached to the open project',
                 server.get('args') == ['mcp', '--current', '--allow-write'] and Path(server.get('command', '')).stem == 'nuzky-app', text)
-        r.check('it says to add only the nuzky entry to a file that has servers, then gives a first message: read nuzky://guide, '
+        r.check('it says to add only the nuzky entry to a file that has servers, then gives a first message: call get_guide, '
                 'edit only through the tools, a run is one undo step',
-                'add only the "nuzky" entry' in text and 'nuzky://guide' in text and 'begin_run' in text and 'one undo step' in text, text)
+                'add only the "nuzky" entry' in text and 'get_guide' in text and 'begin_run' in text and 'one undo step' in text, text)
         r.check('the toast says what was copied and that Agent access is off',
                 toast.get('kind') == 'success' and 'Turn on Agent access' in toast.get('text', ''), toast)
         for label, place in (('Claude Desktop', 'Claude Desktop config (Settings, Developer, Edit Config)'), ('Cursor', '~/.cursor/mcp.json')):
