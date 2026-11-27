@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent, type RefObject } from "react";
 import { followPointer } from "../../lib/drag";
 import { isRetimed, retime } from "../../lib/retime";
-import { FADE_STEP_US, MAIN_TRACK, allClips, clipEdges, maxFadeUs, projectDuration, useEditor } from "../../lib/store";
+import { FADE_STEP_US, MAIN_TRACK, clipEdges, isCaptionTrack, maxFadeUs, projectDuration, useEditor } from "../../lib/store";
 import { US, lastFrame, nearestFrame } from "../../lib/time";
 import type { Clip, Project, Track } from "../../lib/types";
 import { EDGE, clipAsset } from "./ClipView";
@@ -255,7 +255,8 @@ export function useTimelineGestures({
           ? project.tracks.flatMap((t) => (t.id === MAIN_TRACK ? [] : t.clips.filter((c) => c.id !== clip.id && selection.includes(c.id))))
           : null;
       const candidates = [0, useEditor.getState().timeUs];
-      for (const c of allClips(project)) if (c.id !== clip.id && !group?.includes(c)) candidates.push(c.startUs, c.startUs + c.durationUs);
+      for (const t of project.tracks)
+        if (isCaptionTrack(track) || !isCaptionTrack(t)) for (const c of t.clips) if (c.id !== clip.id && !group?.includes(c)) candidates.push(c.startUs, c.startUs + c.durationUs);
       // While the AI edits, pressing a clip only selects it.
       const locked = !!useEditor.getState().aiRun;
       let d: Drag = { clip, trackId: track.id, mode, startX: e.clientX, startY: e.clientY, moved: false, toggle: e.shiftKey || (MAC ? e.metaKey : e.ctrlKey), dxUs: 0, target: undefined, snapUs: null, candidates, maxDurUs, minLeftUs, sourceInUs, speed: media?.speed ?? 1, fadeUs: (mode === "fadeIn" ? media?.fadeInUs : media?.fadeOutUs) ?? 0, maxFadeUs: maxFadeUs(clip.durationUs), group };

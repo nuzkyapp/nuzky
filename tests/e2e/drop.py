@@ -120,3 +120,56 @@ def insert_flow(r):
             wait(lambda: outros() == [talk['durationUs'] - 3_000_000, talk['durationUs']], 5)
             and r.track()[1]['startUs'] == talk['durationUs'], (outros(), r.track()))
     r.check('no error toast', not r.errors(), r.errors())
+
+
+CAPTION_END_US = 4_500_000
+# Presses the middle of a clip and drags it `arguments[1]` px to the right, without letting go.
+DRAG_RIGHT = """const el = document.querySelector(`[data-clip-id='${arguments[0]}']`);
+const b = el.getBoundingClientRect();
+const at = (type, dx) => new PointerEvent(type, {bubbles: true, button: 0, pointerId: 1,
+  clientX: b.left + b.width / 2 + dx, clientY: b.top + b.height / 2});
+el.dispatchEvent(at('pointerdown', 0));
+window.dispatchEvent(at('pointermove', 10));
+window.dispatchEvent(at('pointermove', arguments[1]));
+return [b.left + b.width / 2 + arguments[1], b.top + b.height / 2];"""
+
+
+@flow('snap-captions', 'Media dropped and a clip moved a few pixels after the end of a caption stay under the pointer instead '
+      'of snapping to the caption')
+def snap_captions_flow(r):
+    Image.new('RGB', (1280, 720), (230, 30, 30)).save(r.work / 'red.png')
+    r.import_media(FIXTURES / 'talk.mp4', r.work / 'red.png')
+    r.add_clip('talk.mp4')
+    r.s.call(PIP, 'red.png', PIP_US)
+    r.s.call("window.__nuzky.store.getState().edit({type: 'addCaptions', segments: [{startUs: 4000000, endUs: arguments[0],"
+             " text: 'Hello', words: []}], style: {fontSize: 60, color: '#ffffff'}})", CAPTION_END_US)
+    overlay = lambda: next((t for t in r.state()['tracks'][1:] if t['kind'] == 'video'), {'clips': []})
+    captions = lambda: [c for t in r.state()['tracks'] if t['kind'] == 'text' for c in t['clips']]
+    r.check('a picture in picture and a caption sit over the video',
+            wait(lambda: len(overlay()['clips']) == 1 and len(captions()) == 1, 10), r.state()['tracks'])
+    pip = overlay()['clips'][0]['id']
+    r.s.run('const st = window.__nuzky.store.getState(); st.select([]); st.seek(0); st.setZoom(arguments[0])', ZOOM)
+    clock.sleep(0.5)
+    free_us = CAPTION_END_US + 5 / ZOOM * 1e6
+
+    left, top, _, bottom = r.s.run(RECT, pip)
+    x = left + free_us / 1e6 * ZOOM
+    r.s.run(DRAG_TILE, 'red.png', x, (top + bottom) / 2)
+    line = wait(lambda: r.s.run(LINE), 5)
+    clock.sleep(0.5)
+    r.shot('drop-after-caption')
+    r.s.run(RELEASE, x, (top + bottom) / 2)
+    r.check('while dragged 5 px after the caption\'s end, the drop line stays under the pointer', line is not None and abs(line - x) < 2, [line, x])
+    wait(lambda: len(overlay()['clips']) == 2, 10)
+    added = [c['startUs'] for c in overlay()['clips'] if c['id'] != pip]
+    r.check('dropped, the new clip starts under the pointer, not on the caption\'s end', added and abs(added[0] - free_us) < 20_000, added)
+    r.s.call('window.__nuzky.store.getState().undo()')
+    wait(lambda: len(overlay()['clips']) == 1, 10)
+
+    x, y = r.s.run(DRAG_RIGHT, pip, free_us / 1e6 * ZOOM)
+    clock.sleep(0.5)
+    r.shot('move-after-caption')
+    r.s.run(RELEASE, x, y)
+    moved = wait(lambda: (s := overlay()['clips'][0]['startUs']) > 0 and s, 10)
+    r.check('a clip moved to 5 px after the caption\'s end starts there, not on the caption\'s end', moved and abs(moved - free_us) < 20_000, moved)
+    r.check('no error toast', not r.errors(), r.errors())
