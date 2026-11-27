@@ -114,8 +114,10 @@ function CurveMenu({ clip, index: at, last }: { clip: Clip; index: number; /** T
   );
 }
 
+type Moves = Pick<Transform, "x" | "y" | "scale" | "rotation" | "opacity">;
+
 /** What the playhead decides in the Transform section, as plain values. */
-interface AtPlayhead extends Transform {
+interface AtPlayhead extends Moves {
   inside: boolean;
   atIndex: number;
   /** The keyframe whose curve the playhead is on (`curveIndex`), or -1. */
@@ -128,8 +130,13 @@ function atPlayhead(clip: Clip, timeUs: number, fps: number): AtPlayhead {
   const offset = clipOffset(clip, timeUs);
   const tol = keyframeTolerance(fps);
   const inside = timeUs >= clip.startUs && timeUs <= clip.startUs + clip.durationUs;
+  const { x, y, scale, rotation, opacity } = transformAt(clip, ownTransform(clip), offset);
   return {
-    ...transformAt(clip, ownTransform(clip), offset),
+    x,
+    y,
+    scale,
+    rotation,
+    opacity,
     inside,
     atIndex: inside ? keyframeIndexAt(clip, offset, tol) : -1,
     curve: inside ? curveIndex(clip, offset, tol) : -1,
@@ -139,7 +146,7 @@ function atPlayhead(clip: Clip, timeUs: number, fps: number): AtPlayhead {
 }
 
 /** What the folded Transform says is set: "Scale 116 % · moved · 2 keyframes". */
-function summary(t: Transform, keyframes: number) {
+function summary(t: Moves, keyframes: number) {
   const parts = [
     Math.abs(t.scale - 1) > 1e-4 && `scale ${Math.round(t.scale * 100)} %`,
     (Math.abs(t.x) > 1e-4 || Math.abs(t.y) > 1e-4) && "moved",
