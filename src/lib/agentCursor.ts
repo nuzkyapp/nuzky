@@ -159,7 +159,7 @@ const READS: Record<string, { step: string; place: Place }> = {
 /** Where the pointer only stays over a control: pressing Export or the Cover tile would open it over the agent's work. */
 const HOVERED: Partial<Record<Place, string>> = { export: '[data-tour="export"]', cover: '[data-testid="cover-tile"]' };
 /** The library tab the changes of a tool come from. */
-const EDITS: Record<string, PanelTab> = { edit_transcript: "transcript", correct_words: "transcript" };
+const EDITS: Record<string, PanelTab> = { edit_transcript: "transcript", correct_words: "transcript", add_sticker: "text" };
 
 /** The tool that reads now, until the pointer went where it reads. */
 let reading: { step: string; place: Place; at: number } | null = null;
@@ -636,7 +636,8 @@ async function perform(before: Project, after: Project) {
   const first = p.actions[0];
   // What is added comes out of its library tab, opened first. The tab of a cut by the transcript opens after the cut,
   // so the timeline never waits for it.
-  const from = source(first, after);
+  // A sticker is a picture on the timeline, but it comes from Text, as its tool says.
+  const from = first.kind === "add" ? (said ?? source(first, after)) : null;
   if (from && !recent(from) && (await click(libraryTab(from), from))) await pause(160);
   if (said && !from) follow = async () => linger(recent(said) || !(await click(libraryTab(said), said)) || ending ? 300 : 700);
   if (first.kind === "cut") await cuts(p.actions as Cut[], before, after, view);
