@@ -195,7 +195,7 @@ const WEEKDAY = new Intl.DateTimeFormat("en", { weekday: "long" });
 const SHORT = new Intl.DateTimeFormat("en", { month: "short", day: "numeric" });
 const SHORT_YEAR = new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" });
 
-/** The group a project falls in when sorted by when it last changed, as Finder groups files. */
+/** The group a project falls in when sorted by when it was last opened or changed, as Finder groups files. */
 export function periodOf(ms: number, now = Date.now()): string {
   const days = Math.round((startOfDay(now) - startOfDay(ms)) / DAY);
   if (days <= 0) return "Today";
@@ -204,7 +204,7 @@ export function periodOf(ms: number, now = Date.now()): string {
   return new Date(ms).getFullYear() === new Date(now).getFullYear() ? MONTH.format(ms) : MONTH_YEAR.format(ms);
 }
 
-/** When a project last changed: "12 min ago", "Yesterday", "Monday", "Sep 28". */
+/** When a project was last opened or changed: "12 min ago", "Yesterday", "Monday", "Sep 28". */
 export function whenLabel(ms: number, now = Date.now()): string {
   const days = Math.round((startOfDay(now) - startOfDay(ms)) / DAY);
   if (days <= 0) {

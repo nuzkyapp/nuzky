@@ -521,9 +521,9 @@ impl AppState {
         jobs::stop_project_work(self, &snap.project);
         *current = next;
         self.source_preview.lock().unwrap().take();
-        // The startup picker uses modification time, including projects opened without edits.
-        if let Err(error) = current.host.session.disconnect() {
-            log::error!("Cannot save opened project: {error:#}");
+        // The home screen and the startup picker list projects by modification time, so opening one is a change too.
+        if let Err(error) = store::mark_opened(&current.path) {
+            log::error!("Cannot mark the project opened: {error:#}");
         }
         self.thumbs.lock().unwrap().clear();
         self.filmstrips.lock().unwrap().clear();

@@ -87,7 +87,7 @@ fn write_loop(
     let mut oldest = Instant::now();
     // `saved`: the revision on disk, with the file it is in. Flushing it again while the file is
     // unchanged would only move its modification time, which the home screen reads as when the project
-    // last changed: the project Nuzky reopens on start would jump to Today every time it is closed.
+    // was last opened: the project Nuzky reopens on start would jump to Today every time it is closed.
     // Why the versions could not be written, shown as the save state until a write succeeds.
     let mut versions_error: Option<String> = None;
     let mut latest = 0;

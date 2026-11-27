@@ -389,7 +389,7 @@ export function Home() {
 
   const title = filter === "all" ? "All projects" : (collectionOf(filter)?.name ?? "All projects");
   const sections = useMemo(() => {
-    // A few projects need no groups: each card says when it last changed.
+    // A few projects need no groups: each card says when it was opened.
     if (searching || sort === "name" || found.length < 12) return [{ title: null as string | null, items: found }];
     const groups: { title: string | null; items: LibraryProject[] }[] = [];
     for (const p of found) {
