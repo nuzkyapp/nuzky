@@ -1222,6 +1222,16 @@ export function previewEdit(input: EditInput) {
   }, PREVIEW_DELAY_MS);
 }
 
+/** Draws the project with `cmds` applied in the preview at once, until `endPreview`: what a clip edge being dragged would leave. */
+export function showEdit(cmds: EditCmd[]) {
+  window.clearTimeout(previewTimer);
+  window.clearTimeout(endTimer);
+  const snap = useEditor.getState().snap;
+  if (!snap) return;
+  previewing = true;
+  api.previewEdits(++previewId, cmds, snap.sessionEpoch).catch((e) => console.error("preview_edits", e));
+}
+
 /** Keeps what the preview draws but drops a preview still waiting: a tile's click applies the change it previews. */
 export function settlePreview() {
   window.clearTimeout(previewTimer);
