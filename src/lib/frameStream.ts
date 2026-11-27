@@ -99,7 +99,8 @@ export function useFrameStream(url: string, canvas: React.RefObject<HTMLCanvasEl
       const lost = Math.abs(due - arrived) > MAX_WAIT_MS;
       if (lost) offset = sent - arrived;
       if (!playing || lost) queue = [{ buf, due: arrived, playing: false }];
-      else queue.push({ buf, due, playing });
+      // A better guess of how the clocks differ can make this frame due before ones already waiting.
+      else queue = [...queue.filter((f) => f.due < due), { buf, due, playing }];
       if (!raf) raf = requestAnimationFrame(tick);
     };
 
