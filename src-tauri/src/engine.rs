@@ -210,6 +210,11 @@ struct State {
     /// The last paused frame was still decoding, so it is asked for again.
     decoding: bool,
     compare: Option<f32>,
+    /// The timeline time of the last frame drawn while playing, which may be ahead of the sound.
+    drawn: Option<i64>,
+    /// Microseconds since `PACE_START` minus the sound's time over the speed, smoothed over the frames drawn while
+    /// playing.
+    pace: Option<f64>,
 }
 
 fn panic_message(panic: &(dyn std::any::Any + Send)) -> &str {
@@ -254,6 +259,8 @@ fn run<F: Frames>(
         dirty: true,
         decoding: false,
         compare: None,
+        drawn: None,
+        pace: None,
     };
 
     let emit = |st: &State| {
@@ -267,12 +274,9 @@ fn run<F: Frames>(
     };
 
     loop {
-        // While playing, wake up for the next frame; otherwise sleep until a message.
+        // While playing, wake up to draw the next frame a little before it is due; otherwise sleep until a message.
         let msg = if let Some(audio) = &st.audio {
-            let frame = st.project.frame_duration_us();
-            let next = ((st.t_us as f64 / frame).floor() + 1.0) * frame;
-            let now = audio.now_us();
-            let wait = Duration::from_micros((next - now as f64).clamp(0.0, 50_000.0) as u64);
+            let wait = until_due(&st, audio).saturating_sub(AHEAD).min(Duration::from_millis(50));
             match rx.recv_timeout(wait) {
                 Ok(m) => Some(m),
                 Err(RecvTimeoutError::Timeout) => None,
@@ -297,6 +301,9 @@ fn run<F: Frames>(
         // A panic must not end the preview: one bad frame or project would otherwise need a restart.
         let step = catch_unwind(AssertUnwindSafe(|| {
             let mut state_changed = false;
+            if pending.iter().any(|m| matches!(m, Msg::Seek(_) | Msg::Play | Msg::PlayAt(_) | Msg::Pause)) {
+                (st.drawn, st.pace) = (None, None);
+            }
             for m in pending {
                 match m {
                     Msg::Project(p) => {
@@ -383,15 +390,28 @@ fn run<F: Frames>(
             }
 
             let playing = st.audio.is_some();
+            // Playing draws each frame once, ahead of its time, and the webview shows it when it is due.
+            let ahead = st.audio.as_ref().map(|audio| (next_frame(&st, audio), until_due(&st, audio)));
+            if ahead.is_some_and(|(_, until)| until > AHEAD) {
+                return;
+            }
+            let due = match (ahead, &st.audio) {
+                (Some(((_, due_us), _)), Some(audio)) => due_at(&mut st.pace, audio, due_us),
+                _ => Instant::now(),
+            };
             if playing || st.dirty {
                 let (w, h) = render_size(&st.project, st.box_size, st.window_box);
+                let t_us = ahead.map_or(st.t_us, |((t, _), _)| t);
+                if playing {
+                    st.drawn = Some(t_us);
+                }
                 let wait = if playing { Wait::Ready } else { Wait::Within(PATIENCE) };
                 let started = Instant::now();
                 st.decoding = false;
                 renderer.compare(st.compare);
-                match renderer.frame(&st.project, last_frame_at_end(&st.project, st.t_us), w, h, wait, playing) {
+                match renderer.frame(&st.project, last_frame_at_end(&st.project, t_us), w, h, wait, playing) {
                     Ok(rgba) => {
-                        server.publish(w, h, if playing { FLAG_PLAYING } else { 0 }, st.t_us, &rgba);
+                        server.publish(w, h, if playing { FLAG_PLAYING } else { 0 }, t_us, due, &rgba);
                         if renderer.skipped_effects() != skipped.as_slice() {
                             skipped = renderer.skipped_effects().to_vec();
                             events.effects_skipped(&skipped);
@@ -432,6 +452,51 @@ fn run<F: Frames>(
             emit(&st);
         }
     }
+}
+
+/// How long before a frame is due the preview draws it while playing: longer than drawing a frame usually takes, so it
+/// reaches the webview in time, and not much longer, so an edit or a seek shows soon.
+const AHEAD: Duration = Duration::from_millis(40);
+
+/// The next frame to draw while playing and when the sound reaches it, both in timeline time: the frame after the last
+/// one drawn, or the frame at the sound's time when that one is due already or nothing was drawn yet.
+fn next_frame(st: &State, audio: &AudioOut) -> (i64, i64) {
+    let now = audio.now_us();
+    let Some(drawn) = st.drawn else { return (now, now) };
+    let frame = st.project.frame_duration_us();
+    // Frames start on whole microseconds rounded up, which can land a hair before the boundary in floating point.
+    let index = ((drawn as f64 + 0.5) / frame).floor();
+    let (t, due) = if audio.rate() > 0.0 {
+        let start = ((index + 1.0) * frame).ceil() as i64;
+        (start, start)
+    } else {
+        // Backwards the frame before is due as soon as the sound leaves the start of the one drawn.
+        let start = (index * frame).ceil() as i64;
+        (start - 1, start)
+    };
+    if (due - now) as f64 * audio.rate().signum() < 0.0 { (now, now) } else { (t, due) }
+}
+
+/// How long until the sound reaches the next frame to draw.
+fn until_due(st: &State, audio: &AudioOut) -> Duration {
+    let (_, due) = next_frame(st, audio);
+    Duration::from_micros(((due - audio.now_us()) as f64 / audio.rate()).max(0.0) as u64)
+}
+
+static PACE_START: std::sync::LazyLock<Instant> = std::sync::LazyLock::new(Instant::now);
+
+/// When the sound reaches timeline time `t_us`. The sound's clock moves in steps of its buffers and, on a busy
+/// computer, now and then runs a buffer ahead for a moment, which would show a frame a refresh early; smoothed over the
+/// last frames, it follows only lasting changes, and at once one larger than a frame or two, as when the sound
+/// stalled.
+fn due_at(pace: &mut Option<f64>, audio: &AudioOut, t_us: i64) -> Instant {
+    let offset = PACE_START.elapsed().as_micros() as f64 - audio.now_us() as f64 / audio.rate();
+    let smooth = match *pace {
+        Some(was) if (offset - was).abs() < 40_000.0 => was + (offset - was) * 0.05,
+        _ => offset,
+    };
+    *pace = Some(smooth);
+    *PACE_START + Duration::from_micros((t_us as f64 / audio.rate() + smooth).max(0.0) as u64)
 }
 
 /// How long a paused frame waits for its video before the preview handles what came meanwhile and waits again.
