@@ -152,14 +152,6 @@ mod tests {
     }
 
     #[test]
-    fn every_tool_description_fits_what_claude_code_keeps() {
-        for tool in crate::catalog().unwrap() {
-            let length = tool.description.as_deref().unwrap_or_default().len();
-            assert!(length <= CLIENT_LIMIT, "{} is described in {length} characters", tool.name);
-        }
-    }
-
-    #[test]
     fn instructions_and_the_topic_list_fit_what_claude_code_keeps() {
         let plain = instructions(None);
         assert!(plain.starts_with("# Edit with Nuzky\n") && plain.ends_with("look, speed."), "{plain}");

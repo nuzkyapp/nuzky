@@ -380,7 +380,7 @@ pub struct GetTranscript {
     pub range_us: Option<[i64; 2]>,
     /// sentences leaves out words and pauses, to read a long video cheaply.
     pub detail: Option<TranscriptDetail>,
-    /// Sentences per page, 1-500 (100 with a cursor); a page also ends before 45000 characters.
+    /// Sentences per page, 1-500 (100 with a cursor); a page also ends at about 45000 characters.
     pub limit: Option<usize>,
     /// next_cursor of the page before.
     pub cursor: Option<String>,
