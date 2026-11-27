@@ -143,6 +143,13 @@ def split_screen(r):
     r.s.run('window.__nuzky.store.getState().select([])')
     time.sleep(0.5)
     r.shot('adjustment-timeline')
+    layer_track = next(t['id'] for t in r.state()['tracks'] if any(c['id'] == layer for c in t['clips']))
+    r.check("clicking the adjustment track's tile selects its layer", r.s.run(CLICK, f'[data-track-tile="{layer_track}"]')
+            and wait(lambda: r.s.run('return window.__nuzky.store.getState().selection') == [layer], 5))
+    r.check('and the inspector shows the layer again',
+            wait(lambda: r.s.run("return document.querySelector('aside[aria-label=Inspector]').textContent.includes('Adjustment layer')"), 5))
+    r.shot('adjustment-from-tile')
+    r.s.run('window.__nuzky.store.getState().select([])')
 
     out = export(r, 'graded.mp4')
     frame = r.work / 'graded-1s.png'

@@ -29,7 +29,7 @@ function TrackToggle({ off, label, onIcon, offIcon, onClick, locked }: { off: bo
  * stays unbroken and nothing scrolled under it shows through.
  */
 export const TrackHeader = memo(function TrackHeader({ track, width, locked }: { track: Track; width: number; locked: boolean }) {
-  const { edit } = useEditor.getState();
+  const { edit, select } = useEditor.getState();
   // A video track holding only adjustment layers says so, in their colour.
   const adjusting = track.kind === "video" && track.clips.length > 0 && track.clips.every((c) => c.content.type === "adjustment");
   const KindIcon = track.kind === "audio" ? AudioLines : track.kind === "text" ? (isCaptionTrack(track) ? Captions : Type) : adjusting ? SlidersHorizontal : Film;
@@ -54,9 +54,16 @@ export const TrackHeader = memo(function TrackHeader({ track, width, locked }: {
         </span>
       ) : (
         <>
-          <span aria-hidden className={`mr-1.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] text-fg shadow-[inset_0_1px_0_rgb(255_255_255/.18)] ${tone}`}>
+          <button
+            type="button"
+            data-track-tile={track.id}
+            aria-label={`Select all on ${name}`}
+            title={`Select all on ${name}`}
+            onClick={() => select(track.clips.map((c) => c.id))}
+            className={`mr-1.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] text-fg shadow-[inset_0_1px_0_rgb(255_255_255/.18)] transition-[filter] duration-[120ms] ease-out hover:brightness-125 ${tone}`}
+          >
             <KindIcon size={13} />
-          </span>
+          </button>
           <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-fg">{name}</span>
         </>
       )}
