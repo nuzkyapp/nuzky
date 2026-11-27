@@ -12,6 +12,7 @@ import { canRetrySpeech, retrySpeech, useSpeech } from "./lib/speech";
 import { useNames } from "./lib/names";
 import { reportBug } from "./lib/diagnostics";
 import { CRASHED, sendReport, startTelemetry, useTelemetry } from "./lib/telemetry";
+import { dropWaitingFrames } from "./lib/frameStream";
 import { currentEpoch, leftBehind, PLUGIN_RUN, runWasDiscarded, undoAction, useEditor } from "./lib/store";
 import { formatDuration } from "./lib/time";
 import { MOVES_SOURCE, RESTS_IN_COVER, RESTS_IN_FULL, WORKS_IN_REELS, isClipboard, runAction } from "./lib/actions";
@@ -250,13 +251,19 @@ function useBackendEvents() {
     const offs: Promise<() => void>[] = [];
     offs.push(
       listen<Transport>("transport", (e) => {
+        dropWaitingFrames();
         // The timeline playing, from the phone or the AI panel, shows the timeline again.
         if (e.payload.playing) closeSource();
         useEditor.setState({ playing: e.payload.playing, timeUs: e.payload.tUs });
         usePreview.setState({ rate: e.payload.rate });
       }),
     );
-    offs.push(listen<Transport>("source-transport", (e) => useSource.setState({ playing: e.payload.playing, timeUs: e.payload.tUs })));
+    offs.push(
+      listen<Transport>("source-transport", (e) => {
+        dropWaitingFrames();
+        useSource.setState({ playing: e.payload.playing, timeUs: e.payload.tUs });
+      }),
+    );
     offs.push(listen<string | null>("source-preview-error", (e) => useSource.setState({ error: e.payload })));
     offs.push(
       listen<{ revision: number; error: string | null }>("saved", (e) => {

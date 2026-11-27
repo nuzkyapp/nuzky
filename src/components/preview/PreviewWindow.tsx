@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Maximize, Minimize, Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import { api } from "../../lib/api";
-import { useFrameStream } from "../../lib/frameStream";
+import { dropWaitingFrames, useFrameStream } from "../../lib/frameStream";
 import { FROM_PREVIEW_WINDOW, actionOf, chordsOf, suppressSpaceRelease, useKeyLabels, type ActionId } from "../../lib/keys";
 import { formatTime } from "../../lib/time";
 import type { PreviewProject, Transport } from "../../lib/types";
@@ -97,7 +97,10 @@ export default function PreviewWindow() {
       useWindow.setState({ url: boot.previewUrl, playing: boot.transport.playing, timeUs: boot.transport.tUs, project: boot.project, engineError: boot.engineError }),
     );
     const offs = [
-      listen<Transport>("transport", (e) => useWindow.setState({ playing: e.payload.playing, timeUs: e.payload.tUs })),
+      listen<Transport>("transport", (e) => {
+        dropWaitingFrames();
+        useWindow.setState({ playing: e.payload.playing, timeUs: e.payload.tUs });
+      }),
       listen<string | null>("engine-error", (e) => useWindow.setState({ engineError: e.payload })),
       listen<PreviewProject>("preview-window-project", (e) => useWindow.setState({ project: e.payload })),
       win.onResized(async () => useWindow.setState({ full: await win.isFullscreen() })),

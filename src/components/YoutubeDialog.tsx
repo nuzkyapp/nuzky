@@ -6,7 +6,7 @@ import { AI_EDITING, useAiLocked, useEditor } from "../lib/store";
 import { formatLength, US } from "../lib/time";
 import type { Filmstrip, Part, VideoPreview, YoutubeVideo } from "../lib/types";
 import { addYoutubeVideo, useYoutube } from "../lib/youtube";
-import { useFrameStream } from "../lib/frameStream";
+import { dropWaitingFrames, useFrameStream } from "../lib/frameStream";
 import { Button, IconButton, NumberInput, ProgressBar, trapTab } from "./ui";
 
 /** Footage kept hidden around the part is the backend's business; the dialog only ever shows the part. */
@@ -443,6 +443,7 @@ function Chooser({ url, video, preview, onImport, onCancel }: { url: string; vid
   useEffect(() => {
     const offs = [
       listen<{ playing: boolean; tUs: number }>("youtube-transport", (e) => {
+        dropWaitingFrames();
         setPlaying(e.payload.playing);
         if (!e.payload.playing && stopAt.current === null) setTime(e.payload.tUs);
       }),
