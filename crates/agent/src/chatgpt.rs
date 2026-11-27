@@ -32,7 +32,7 @@ const BACKOFF: [Duration; 2] = [Duration::from_secs(1), Duration::from_secs(3)];
 const MAX_ERROR_BYTES: u64 = 64 * 1024;
 const NAMESPACE: &str = "nuzky";
 /// What an MCP client has that this turn does not.
-const HERE: &str = "Nuzky's tools are the functions in the nuzky namespace. MCP resources and prompts are not available here: the guide and the creator's style are below, and the parameters of apply_edits describe every edit.";
+const HERE: &str = "Nuzky's tools are the functions in the nuzky namespace. MCP resources and prompts are not available here: the guide's rules and the creator's style are below, get_guide gives the guide's topics, and the parameters of apply_edits describe every edit.";
 const LIMIT: &str = "You've reached a usage limit of your ChatGPT plan, or one set for Nuzky in ChatGPT's settings.";
 const NO_PLAN: &str = "ChatGPT hasn't allowed Nuzky to use your plan yet. Open ChatGPT account… and allow it.";
 const TOO_LONG: &str = "ChatGPT can read only so much of one chat, and this one is past it. Start a new chat with your message; this one stays here to read, and your edits stay in the project.";
@@ -56,7 +56,7 @@ pub struct ChatGptRequest {
     /// The slug from the account's model list.
     pub model: String,
     pub effort: Option<String>,
-    /// Nuzky's editing guide with the creator's style, which an MCP client gets as the server's instructions.
+    /// The guide's rules and topics with the creator's style, which an MCP client gets as the server's instructions.
     pub guide: String,
     /// Nuzky's tools as MCP's `tools/list` lists them.
     pub tools: Value,

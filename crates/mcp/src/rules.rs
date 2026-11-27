@@ -26,6 +26,8 @@ const fn rules(name: &'static str, reads: Reads, destructive: bool, idempotent: 
 use Reads::{Always, Never, When};
 
 pub(crate) const TOOLS: &[Rules] = &[
+    // Only reads the guide built into Nuzky.
+    rules("get_guide", Always, false, true, false),
     rules("get_state", Always, false, true, false),
     rules("begin_run", Never, false, false, false),
     rules("resolve_recovery", Never, true, false, false),
@@ -163,6 +165,7 @@ mod tests {
         assert_eq!(
             names(|r| matches!(r.reads, Always)),
             set(&[
+                "get_guide",
                 "get_state",
                 "get_transcript",
                 "get_chapters",
@@ -210,6 +213,7 @@ mod tests {
         assert_eq!(
             names(|r| r.idempotent),
             set(&[
+                "get_guide",
                 "get_state",
                 "get_transcript",
                 "get_chapters",
