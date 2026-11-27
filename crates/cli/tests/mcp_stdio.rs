@@ -1100,7 +1100,7 @@ fn initialize_list_state_edit_end_undo_over_stdio() {
     let mut c = Client::new(true);
     let list = c.rpc("tools/list", json!({}));
     let tools = list["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 53);
+    assert_eq!(tools.len(), 54);
     let styles = tools.iter().find(|t| t["name"] == "text_styles").unwrap();
     assert_eq!(styles["annotations"]["readOnlyHint"], true);
     let beats = tools.iter().find(|t| t["name"] == "cut_to_beats").unwrap();
@@ -1216,7 +1216,8 @@ fn get_state_shares_caption_defaults_and_keeps_filtered_clips_full_over_stdio() 
         .collect();
     c.call(
         "apply_edits",
-        json!({"run_id":run,"request_id":"many","edits":[{"type":"addCaptions","segments":many,"style":{"fontSize":64.0}}]}),
+        json!({"run_id":run,"request_id":"many","edits":[
+        {"type":"addCaptions","segments":many,"style":{"fontSize":64.0,"color":"#ffffff"}}]}),
     );
     let long = c.call("get_state", json!({}));
     assert!(long.to_string().len() <= 45_000, "{} characters", long.to_string().len());
@@ -2006,8 +2007,9 @@ fn a_creator_style_reaches_the_agent_and_without_one_nothing_changes() {
     );
     plain.finish();
 
-    let style = "# Editing style\n\nKeep pauses under 120 ms.\n";
-    let mut styled = Client::with_style(Some(style));
+    let file = "# Editing style\n\nKeep pauses under 120 ms.\n";
+    let style = file.trim_end();
+    let mut styled = Client::with_style(Some(file));
     let at = |text: &str, part: &str| text.find(part).unwrap_or_else(|| panic!("{part:?} is missing from {text}"));
     // What a client that cuts instructions short keeps: that there is a style and how to read it whole, the
     // rules and the topics. The style's own text follows them.
@@ -2015,12 +2017,12 @@ fn a_creator_style_reaches_the_agent_and_without_one_nothing_changes() {
     assert!(instructions.starts_with("This creator has their own editing style"), "{instructions}");
     assert!(at(&instructions, "read it whole with get_style") < at(&instructions, "# Edit with Nuzky"));
     assert!(at(&instructions, "look, speed.") < at(&instructions, style) && at(&instructions, style) < 4096);
-    assert!(instructions.ends_with(style.trim_end()) && !instructions.contains("\n## "), "{instructions}");
+    assert!(instructions.ends_with(style) && !instructions.contains("\n## "), "{instructions}");
     let resources = styled.rpc("resources/list", json!({}));
     let uris: Vec<&str> =
         resources["result"]["resources"].as_array().unwrap().iter().map(|r| r["uri"].as_str().unwrap()).collect();
     assert_eq!(uris, ["nuzky://guide", "nuzky://schema", "nuzky://plugin-guide", "nuzky://style"]);
-    assert_eq!(styled.rpc("resources/read", json!({"uri":"nuzky://style"}))["result"]["contents"][0]["text"], style);
+    assert_eq!(styled.rpc("resources/read", json!({"uri":"nuzky://style"}))["result"]["contents"][0]["text"], file);
     // The resource is the style before the whole guide.
     let read = styled.rpc("resources/read", json!({"uri":"nuzky://guide"}));
     let whole = read["result"]["contents"][0]["text"].as_str().unwrap();
@@ -2038,7 +2040,7 @@ fn a_creator_style_reaches_the_agent_and_without_one_nothing_changes() {
     ] {
         let prompt = styled.rpc("prompts/get", json!({"name": name, "arguments": arguments}));
         let text = prompt["result"]["messages"][0]["content"]["text"].as_str().unwrap();
-        assert!(text.contains(style.trim_end()) && !text.contains(without), "{name}: {text}");
+        assert!(text.contains(style) && !text.contains(without), "{name}: {text}");
         for section in sections {
             assert!(at(text, style) < at(text, section) && text.matches(section).count() == 1, "{name}: {text}");
         }
@@ -5976,7 +5978,9 @@ fn cut_to_beats_recuts_the_main_track_on_frames_and_undoes_over_stdio() {
     apply["request_id"] = json!("cut");
     let applied = c.call("cut_to_beats", apply.clone());
     assert_eq!(applied["cut_us"], planned["cut_us"]);
-    let after = c.call("get_state", json!({}));
+    // A cut on every beat is more clips than the unfiltered state holds: it gives their count, a range gives them.
+    assert_eq!(c.call("get_state", json!({}))["tracks"][0]["clips_omitted"], expected.len());
+    let after = c.call("get_state", json!({"range":{"startUs":0,"endUs":end}}));
     let main = after["tracks"][0]["clips"].as_array().unwrap();
     assert_eq!(
         main.iter().map(|m| m["startUs"].clone()).collect::<Vec<_>>(),
