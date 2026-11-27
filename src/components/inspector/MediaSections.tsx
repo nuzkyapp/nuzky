@@ -151,7 +151,7 @@ export function AdjustSection({ clip, content }: { clip: Clip; content: Graded }
   );
 }
 
-const speedSlider = {
+export const speedSlider = {
   min: Math.log10(LIMITS.minSpeed),
   max: Math.log10(LIMITS.maxSpeed),
   step: 0.01,
