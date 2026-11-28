@@ -18,6 +18,8 @@ SA = 'aaaaaaaa-0000-4000-8000-000000000005'
 JAMENDO = 'aaaaaaaa-0000-4000-8000-000000000007'
 # Found only by id, its file answers after 15 s: a download the user stops.
 SLOW = 'aaaaaaaa-0000-4000-8000-000000000006'
+# Found by searching Long, its file arrives in pieces over 36 s, as Freesound sends a long song.
+LONG = 'aaaaaaaa-0000-4000-8000-000000000008'
 DEED = {'by': 'https://creativecommons.org/licenses/{}/4.0/', 'cc0': 'https://creativecommons.org/publicdomain/zero/1.0/'}
 
 TEXTS = """return [...document.querySelectorAll('[data-sound]')].map((row) => ({id: row.dataset.sound,
@@ -45,7 +47,7 @@ class Openverse:
 
     def __init__(self, work):
         self.requests, self.files = [], {}
-        for name, seconds, hz in (('rainy.mp3', 6, 440), ('lanterns.mp3', 3, 660), ('slow.mp3', 3, 330)):
+        for name, seconds, hz in (('rainy.mp3', 6, 440), ('lanterns.mp3', 3, 660), ('slow.mp3', 3, 330), ('long.mp3', 3, 550)):
             path = work / name
             subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', f'sine=frequency={hz}:duration={seconds}',
                             '-ac', '2', '-c:a', 'libmp3lame', '-b:a', '128k', str(path)], check=True)
@@ -59,11 +61,17 @@ class Openverse:
                 if url.path.startswith('/files/') and url.path[7:] in server.files:
                     if url.path == '/files/slow.mp3':
                         time.sleep(15)
+                    if url.path == '/files/long.mp3':
+                        return self.trickle(server.files['long.mp3'], 12, 3)
                     return self.reply(server.files[url.path[7:]], 'audio/mpeg')
                 if url.path == f'/v1/audio/{SLOW}/':
                     slow = audio(SLOW, 'Slow Song', 'Slow Band', 'by', 'slow.mp3', source='freesound')
                     slow['url'], slow['duration'] = f"{server.base}/files/{slow.pop('file')}", 3000
                     return self.reply(json.dumps(slow).encode())
+                if url.path == '/v1/audio/' and urllib.parse.parse_qs(url.query).get('q') == ['Long music']:
+                    long = audio(LONG, 'Long Song', 'Slow Band', 'by', 'long.mp3', source='freesound')
+                    long['url'], long['duration'] = f"{server.base}/files/{long.pop('file')}", 3000
+                    return self.reply(json.dumps({'result_count': 1, 'page_count': 1, 'page': 1, 'results': [long]}).encode())
                 if url.path == '/v1/audio/':
                     return self.reply(json.dumps({'result_count': 5, 'page_count': 1, 'page': 1, 'results': server.results()}).encode())
                 found = [a for a in server.results() if url.path == f"/v1/audio/{a['id']}/"]
@@ -78,6 +86,20 @@ class Openverse:
                 self.send_header('Content-Length', str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
+
+            def trickle(self, body, pieces, seconds):
+                self.send_response(200)
+                self.send_header('Content-Type', 'audio/mpeg')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                size = -(-len(body) // pieces)
+                try:
+                    for start in range(0, len(body), size):
+                        time.sleep(seconds)
+                        self.wfile.write(body[start:start + size])
+                        self.wfile.flush()
+                except OSError:
+                    pass
 
             def log_message(self, *args):
                 pass
@@ -240,6 +262,21 @@ def sounds(r):
         r.check('no part of the stopped download is left behind', kept == [], kept)
     finally:
         bridge.close()
+
+    # A long song from a slow server plays once all of it came, however long that takes while its bytes keep coming.
+    r.s.run(CLICK, '#audio-tab-music')
+    r.s.run(TYPE, 'Search free music', 'Long')
+    r.check('searching Long finds Long Song', wait(lambda: any(x['id'] == f'openverse:{LONG}' for x in rows(r)), 10), rows(r))
+    started = time.time()
+    r.s.run(CLICK, f'[data-sound="openverse:{LONG}"] button[aria-label^="Play"]')
+    playing = wait(lambda: (p := r.s.run(SOUNDS)['preview']) and not p['loading'], 60)
+    took = time.time() - started
+    r.check('Play waits for a download longer than half a minute and plays the song',
+            playing and took > 30 and not r.errors(), (round(took, 1), r.errors()))
+    shot(r, 'music-long')
+    r.check('the preview of Long Song ends by itself', wait(lambda: r.s.run(SOUNDS)['preview'] is None, 12))
+    r.s.run(TYPE, 'Search free music', 'Lofi')
+    wait(lambda: any(x['id'] == f'openverse:{RAINY}' for x in rows(r)), 10)
 
     # Built-in effects need no network.
     before = len(r.openverse.requests)
