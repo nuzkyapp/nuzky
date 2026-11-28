@@ -187,6 +187,18 @@ def transcript_range(r):
     r.check('one undo brings the whole sentence back', wait(lambda: r.s.run(LENGTH) == length and text in ' '.join(w['text'] for w in words()), 5),
             r.s.run(LENGTH))
 
+    # A triple-click inside a word opened for correcting selects its text there, as in any text field.
+    mouse.click(at(r, said[2]), times=2)
+    field = f"return document.querySelector('{LIST} input')?.value ?? null"
+    if r.check('double-clicking a word opens it for correcting', wait(lambda: r.s.run(field) == sentence[2]['text'], 3), r.s.run(field)):
+        time.sleep(1)
+        box = r.s.run(f"const b = document.querySelector('{LIST} input').getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]")
+        mouse.click(box, times=3)
+        time.sleep(0.5)
+        r.check('a later triple-click inside the field keeps it open on the word', r.s.run(field) == sentence[2]['text'], r.s.run(SELECTED))
+        press('Escape')
+        wait(lambda: r.s.run(field) is None, 3)
+
     first, last = shown[1], shown[5]
     picked = [w['t'] for w in shown if first['t'] <= w['t'] <= last['t']]
     mouse.drag([at(r, first['t'], 0.3), *(at(r, w['t']) for w in shown[2:5]), at(r, last['t'], 0.7)])

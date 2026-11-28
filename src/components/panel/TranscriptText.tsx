@@ -232,6 +232,8 @@ export function TranscriptText({
   // The word as the field opened on it: a transcript refreshed meanwhile may read it otherwise, and
   // the correction must then be refused, not land on the new text.
   const opened = useRef<Token | null>(null);
+  // Clicks in the field since it opened: only the first can end the triple-click that opened it.
+  const fieldClicks = useRef(0);
   const box = useRef<HTMLDivElement>(null);
   const bar = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
@@ -306,6 +308,7 @@ export function TranscriptText({
     setSel({ anchor: i, focus: i });
     setEditing(i);
     opened.current = tokens[i];
+    fieldClicks.current = 0;
   };
 
   // Stable, so paragraphs without the field do not re-render with each word played.
@@ -343,7 +346,9 @@ export function TranscriptText({
 
   /** The third click of a triple-click: the sentence of the word, also when the double-click opened it for correcting. */
   const onClick = (e: MouseEvent<HTMLDivElement>) => {
-    if (e.detail !== 3) return;
+    const inField = e.target instanceof HTMLInputElement;
+    if (inField) fieldClicks.current++;
+    if (e.detail !== 3 || (inField && fieldClicks.current > 1)) return;
     const i = editing ?? indexAt(e.target);
     if (i === null) return;
     setEditing(null);
