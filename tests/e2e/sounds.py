@@ -131,8 +131,9 @@ def sounds(r):
     r.import_media(FIXTURES / 'talk.mp4')
     r.add_clip('talk.mp4')
     r.s.run("window.__nuzky.store.setState({panelTab: 'audio'})")
-    r.check('the Audio panel opens on In project, as before', wait(lambda: r.s.run("return !!document.querySelector('#audio-tab-project[aria-selected=true]')"), 5))
-    r.s.run(CLICK, '#audio-tab-music')
+    r.check('with no sound in the project the Audio panel opens on Music, with search and the YouTube link field',
+            wait(lambda: r.s.run("return !!document.querySelector('#audio-tab-music[aria-selected=true]') && !!document.querySelector('input[placeholder=\"Search free music\"]')"
+                                 " && !!document.querySelector('input[aria-label=\"Paste a YouTube link\"]')"), 5))
     r.check('Music offers ideas and sends nothing before the user searches',
             wait(lambda: r.s.run("return [...document.querySelectorAll('button')].some((b) => b.textContent === 'Lofi')"), 5)
             and r.openverse.requests == [], r.openverse.requests)
@@ -183,6 +184,12 @@ def sounds(r):
     r.check('the row shows the sound is in the project', wait(lambda: r.s.run(f"""return !!document.querySelector('[data-sound="openverse:{RAINY}"] [title="In this project"]')"""), 5))
     r.check('the panel says one sound needs credit', wait(lambda: r.s.run("return document.body.innerText.includes('1 sound needs credit')"), 5))
     shot(r, 'music-added')
+    r.s.run(CLICK, '#audio-tab-project')
+    r.s.run("window.__nuzky.store.setState({panelTab: 'media'})")
+    wait(lambda: r.s.run("return !document.querySelector('#audio-tab-project')"), 5)
+    r.s.run("window.__nuzky.store.setState({panelTab: 'audio'})")
+    r.check('once the project has a sound, the Audio panel opens again on In project when it was left there',
+            wait(lambda: r.s.run("return !!document.querySelector('#audio-tab-project[aria-selected=true]')"), 5))
 
     # Credits: the same text the export writes, copied for the description.
     credits = r.s.call("window.__nuzky.api.soundCredits(window.__nuzky.store.getState().snap.sessionEpoch)")
