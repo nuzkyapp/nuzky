@@ -7,9 +7,9 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use nuzky_engine::edit::new_id;
@@ -29,6 +29,13 @@ const MAX_QUERY_CHARS: usize = 200;
 const MAX_JSON_BYTES: u64 = 4 << 20;
 /// Longer music than anyone puts under a short video.
 const MAX_FILE_BYTES: u64 = 60 << 20;
+/// A download that sends nothing for this long has stopped. One that keeps sending goes on for up to MAX_DOWNLOAD:
+/// Freesound sends a long song for over a minute.
+const STALL: Duration = if cfg!(test) { Duration::from_secs(2) } else { Duration::from_secs(30) };
+/// Bounds a whole download, and so how long the thread reading a stalled or stopped one stays blocked.
+const MAX_DOWNLOAD: Duration = Duration::from_secs(30 * 60);
+/// A stop is noticed this quickly even while the connection is silent.
+const POLL: Duration = Duration::from_millis(100);
 const CC_BY_VERSIONS: &[&str] = &["1.0", "2.0", "2.5", "3.0", "4.0"];
 /// Jamendo sells commercial use of its catalogue apart from the tracks' own licences, so its music stays
 /// out until that is settled; nearly all of Openverse's CC0 and CC BY music is from there.
@@ -731,28 +738,56 @@ pub fn publish(path: &Path, write: impl FnOnce(&mut std::fs::File) -> Result<()>
 fn download(sound: &Sound, path: &Path, cancel: &AtomicBool, mut progress: impl FnMut(f32)) -> Result<()> {
     let service = sound.provider.clone();
     ensure!(fetchable(&sound.file), "SOUND_UNAVAILABLE: {service} gave no file to download");
-    let response = agent(Duration::from_secs(30)).get(&sound.file).call().map_err(|e| request_error(&service, e))?;
+    let response = agent(MAX_DOWNLOAD).get(&sound.file).call().map_err(|e| request_error(&service, e))?;
     let total = response.headers().get("content-length").and_then(|v| v.to_str().ok()?.parse::<u64>().ok());
     ensure!(total.is_none_or(|t| t <= MAX_FILE_BYTES), "SOUND_UNAVAILABLE: this file is too big for a sound");
+    let chunks = read_chunks(response.into_body().into_reader())?;
     publish(path, |file| {
-        let mut reader = response.into_body().into_reader();
-        let mut buffer = vec![0; 1 << 16];
         let mut done = 0u64;
+        let mut heard = Instant::now();
         loop {
             check_cancel(cancel)?;
-            let read =
-                reader.read(&mut buffer).map_err(|e| anyhow!("OFFLINE: The download from {service} stopped. ({e})"))?;
-            if read == 0 {
+            let bytes = match chunks.recv_timeout(POLL) {
+                Ok(Ok(bytes)) => bytes,
+                Ok(Err(e)) => bail!("OFFLINE: The download from {service} stopped. ({e})"),
+                Err(RecvTimeoutError::Timeout) if heard.elapsed() < STALL => continue,
+                Err(RecvTimeoutError::Timeout) => {
+                    bail!("OFFLINE: {service} stopped sending the sound. Check your internet connection and try again.")
+                }
+                Err(RecvTimeoutError::Disconnected) => bail!("SOURCE_FAILED: the download stopped unexpectedly"),
+            };
+            if bytes.is_empty() {
                 return Ok(());
             }
-            done += read as u64;
+            heard = Instant::now();
+            done += bytes.len() as u64;
             ensure!(done <= MAX_FILE_BYTES, "SOUND_UNAVAILABLE: this file is too big for a sound");
-            std::io::Write::write_all(file, &buffer[..read])?;
+            std::io::Write::write_all(file, &bytes)?;
             if let Some(total) = total {
                 progress((done as f32 / total.max(1) as f32).min(1.0));
             }
         }
     })
+}
+
+/// Reads on a thread of its own, so a connection that goes silent is noticed while the read stays blocked.
+/// An empty chunk is the end.
+fn read_chunks(mut reader: impl Read + Send + 'static) -> Result<Receiver<std::io::Result<Vec<u8>>>> {
+    let (tx, rx) = mpsc::sync_channel(8);
+    std::thread::Builder::new().name("sound-download-read".into()).spawn(move || {
+        loop {
+            let mut buffer = vec![0; 1 << 16];
+            let read = reader.read(&mut buffer).map(|n| {
+                buffer.truncate(n);
+                buffer
+            });
+            let end = !matches!(&read, Ok(bytes) if !bytes.is_empty());
+            if tx.send(read).is_err() || end {
+                return;
+            }
+        }
+    })?;
+    Ok(rx)
 }
 
 /// What the download thread reports.
@@ -779,7 +814,7 @@ pub fn fetch(
         tx.send(Step::Done(Box::new(result))).ok();
     })?;
     loop {
-        match rx.recv_timeout(Duration::from_millis(100)) {
+        match rx.recv_timeout(POLL) {
             Ok(Step::Progress(p)) => progress(p),
             Ok(Step::Done(result)) => return *result,
             Err(RecvTimeoutError::Timeout) if cancelled() => {
@@ -991,6 +1026,34 @@ mod tests {
         assert!(error.to_string().starts_with("CANCELLED"), "{error:#}");
         assert!(started.elapsed() < Duration::from_secs(1), "{:?}", started.elapsed());
         std::thread::sleep(Duration::from_millis(200));
+        assert!(std::fs::read_dir(cache.join("sounds")).map_or(true, |mut d| d.next().is_none()));
+        std::fs::remove_dir_all(cache).ok();
+    }
+
+    /// A download that stops sending partway fails soon after it went quiet, and nothing is left behind.
+    #[test]
+    fn a_download_that_goes_quiet_fails() {
+        use std::io::Write;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket.read(&mut [0; 4096]).unwrap();
+            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n").unwrap();
+            socket.write_all(&[0; 100]).unwrap();
+            std::thread::sleep(Duration::from_secs(60));
+        });
+        // Only this module reads the test server's address.
+        unsafe { std::env::set_var("NUZKY_OPENVERSE_URL", format!("http://127.0.0.1:{port}/v1/")) };
+        let mut quiet = built_in("whoosh").remove(0);
+        (quiet.id, quiet.provider, quiet.file) =
+            ("openverse:quiet".into(), "Freesound".into(), format!("http://127.0.0.1:{port}/song.mp3"));
+        remember(&[quiet]);
+        let cache = std::env::temp_dir().join(format!("nuzky-quiet-{}", new_id()));
+        let started = Instant::now();
+        let error = fetch("openverse:quiet", &cache, || false, |_| {}).unwrap_err();
+        assert!(error.to_string().starts_with("OFFLINE: Freesound stopped sending"), "{error:#}");
+        assert!(started.elapsed() < STALL + Duration::from_secs(1), "{:?}", started.elapsed());
         assert!(std::fs::read_dir(cache.join("sounds")).map_or(true, |mut d| d.next().is_none()));
         std::fs::remove_dir_all(cache).ok();
     }
