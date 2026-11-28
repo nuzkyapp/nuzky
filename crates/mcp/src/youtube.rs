@@ -1,8 +1,8 @@
 //! Music from a YouTube or YouTube Music link, through yt-dlp: the one the user installed, or one
 //! Nuzky downloads from yt-dlp's own releases when the user asks; Nuzky does not ship it. yt-dlp only
-//! ever gets a watch address Nuzky built from the video's id, or what it printed for that address a moment
-//! before, so nothing else in a pasted link reaches it, and it ignores the user's yt-dlp configuration.
-use std::io::{BufRead, BufReader, Read};
+//! ever gets a watch address Nuzky built from the video's id, or on stdin what it printed for that address a
+//! moment before, so nothing else in a pasted link reaches it, and it ignores the user's yt-dlp configuration.
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -488,7 +488,9 @@ pub struct Video {
     filesize: Option<u64>,
     filesize_approx: Option<u64>,
     live_status: Option<String>,
-    /// All yt-dlp printed, which `download` can start from instead of looking the video up again.
+    webpage_url: Option<String>,
+    /// All yt-dlp printed, which `download` can start from instead of looking the video up again; empty when it
+    /// names another page than the watch address, which yt-dlp would go back to after a failed download.
     #[serde(skip)]
     pub info: Vec<u8>,
 }
@@ -536,40 +538,43 @@ pub fn video(id: &str, format: &str, max_bytes: u64, cancel: &AtomicBool) -> Res
         video.filesize.or(video.filesize_approx).is_none_or(|size| size <= max_bytes),
         "SOUND_UNAVAILABLE: this video is too long to download"
     );
-    video.info = bytes;
+    if video.webpage_url.as_deref() == Some(watch_url(id).as_str()) {
+        video.info = bytes;
+    }
     Ok(video)
 }
 
 // ---------- Downloading ----------
 
 /// Downloads the `format` of the video to `path` through a temporary file beside it. `info` is what `video`
-/// printed for it a moment ago, which saves yt-dlp looking the video up again, a second or two; when its
-/// addresses no longer work, the video is looked up anew. `cancel` stops it within 100 ms and leaves nothing
-/// behind.
+/// printed for it a moment ago, given to yt-dlp on stdin, which saves it looking the video up again, a second
+/// or two; when its addresses no longer work, the video is looked up anew. `cancel` stops it within 100 ms and
+/// leaves nothing behind.
 pub fn download(
     id: &str,
     format: &str,
     path: &Path,
-    info: Option<&Path>,
+    info: Option<&[u8]>,
     max_bytes: u64,
     cancel: &AtomicBool,
     mut progress: impl FnMut(f32),
 ) -> Result<()> {
     ensure!(valid_id(id), "INVALID_LINK: {id:?} is not a YouTube video id");
     let watch = watch_url(id);
-    if let Some(info) = info.and_then(Path::to_str) {
-        match download_from(&["--load-info-json", info], format, path, max_bytes, cancel, &mut progress) {
+    if let Some(info) = info.filter(|info| !info.is_empty()) {
+        match download_from(&["--load-info-json", "-"], Some(info), format, path, max_bytes, cancel, &mut progress) {
             Err(error) if !cancel.load(Ordering::Relaxed) => {
                 log::warn!("Downloading from the looked-up video failed, looking it up again: {error:#}")
             }
             result => return result,
         }
     }
-    download_from(&["--", &watch], format, path, max_bytes, cancel, &mut progress)
+    download_from(&["--", &watch], None, format, path, max_bytes, cancel, &mut progress)
 }
 
 fn download_from(
     source: &[&str],
+    stdin: Option<&[u8]>,
     format: &str,
     path: &Path,
     max_bytes: u64,
@@ -603,8 +608,13 @@ fn download_from(
             .chain(source.iter().copied())
             .collect::<Vec<_>>(),
         )?
+        .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
         .spawn()
         .map_err(|e| anyhow!("YTDLP_FAILED: yt-dlp could not start ({e})"))?;
+        if let (Some(bytes), Some(mut pipe)) = (stdin, child.stdin.take()) {
+            let bytes = bytes.to_vec();
+            std::thread::spawn(move || pipe.write_all(&bytes).ok());
+        }
         let stderr = collect_stderr(&mut child);
         let (tx, rx) = mpsc::channel();
         let stdout = child.stdout.take().context("yt-dlp has no output")?;
@@ -639,7 +649,13 @@ fn download_from(
         std::fs::rename(&part, path).context("Saving the download")
     })();
     if result.is_err() {
-        std::fs::remove_file(&part).ok();
+        // A download in fragments also leaves files named after the part, such as its .ytdl state.
+        let name = part.file_name().unwrap_or_default().to_string_lossy().into_owned();
+        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            if entry.file_name().to_string_lossy().starts_with(&name) {
+                std::fs::remove_file(entry.path()).ok();
+            }
+        }
     }
     result
 }

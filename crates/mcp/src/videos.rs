@@ -4,7 +4,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow, ensure};
 use nuzky_engine::edit::new_id;
@@ -20,6 +21,16 @@ const PICTURE_SHARE: f32 = 0.9;
 /// How long a lookup's addresses are used to download; YouTube keeps them working for hours.
 const INFO_LIFETIME: Duration = Duration::from_secs(30 * 60);
 
+/// What yt-dlp printed for the latest video looked up, so `fetch` downloads without asking YouTube again. It stays
+/// in memory: yt-dlp gets it on stdin, never from a file someone else could change.
+static LOOKUP: Mutex<Option<Lookup>> = Mutex::new(None);
+
+struct Lookup {
+    id: String,
+    at: Instant,
+    info: Arc<Vec<u8>>,
+}
+
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "YoutubeVideo"))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -30,13 +41,13 @@ pub struct Video {
     pub duration_us: i64,
 }
 
-/// The video a YouTube link points at. What yt-dlp found stays in the cache, so `fetch` downloads without looking
-/// it up again. `cancel` stops the lookup.
-pub fn link(url: &str, cache_dir: &Path, cancel: &AtomicBool) -> Result<Video> {
+/// The video a YouTube link points at. `cancel` stops the lookup.
+pub fn link(url: &str, cancel: &AtomicBool) -> Result<Video> {
     let id = crate::youtube::video_id(url)?;
-    let video = crate::youtube::video(&id, PICTURE, MAX_BYTES, cancel)?;
-    if let Err(error) = save_info(cache_dir, &id, &video.info) {
-        log::warn!("Keeping what yt-dlp found failed: {error:#}");
+    let mut video = crate::youtube::video(&id, PICTURE, MAX_BYTES, cancel)?;
+    if !video.info.is_empty() {
+        let info = Arc::new(std::mem::take(&mut video.info));
+        *LOOKUP.lock().unwrap() = Some(Lookup { id: id.clone(), at: Instant::now(), info });
     }
     let text =
         |t: Option<&str>| t.map(|t| t.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|t| !t.is_empty());
@@ -59,30 +70,16 @@ fn cache(cache_dir: &Path) -> PathBuf {
     cache_dir.join("youtube")
 }
 
-fn info_path(cache_dir: &Path, id: &str) -> PathBuf {
-    cache(cache_dir).join(format!("{id}.info.json"))
-}
-
-fn save_info(cache_dir: &Path, id: &str, info: &[u8]) -> Result<()> {
-    let path = info_path(cache_dir, id);
-    let dir = path.parent().unwrap();
-    std::fs::create_dir_all(dir)?;
-    let part = dir.join(format!(".nuzky-part-{}", new_id()));
-    std::fs::write(&part, info).and_then(|()| std::fs::rename(&part, &path)).inspect_err(|_| {
-        std::fs::remove_file(&part).ok();
-    })?;
-    Ok(())
-}
-
 /// What `link` found for the video, while its addresses still work.
-fn fresh_info(cache_dir: &Path, id: &str) -> Option<PathBuf> {
-    let path = info_path(cache_dir, id);
-    let age = path.metadata().and_then(|m| m.modified()).ok()?.elapsed().ok()?;
-    (age < INFO_LIFETIME).then_some(path)
+fn fresh_info(id: &str) -> Option<Arc<Vec<u8>>> {
+    let lookup = LOOKUP.lock().unwrap();
+    let lookup = lookup.as_ref()?;
+    (lookup.id == id && lookup.at.elapsed() < INFO_LIFETIME).then(|| lookup.info.clone())
 }
 
 /// Deletes the downloaded videos, as the next app start does.
 pub fn forget(cache_dir: &Path) {
+    LOOKUP.lock().unwrap().take();
     std::fs::remove_dir_all(cache(cache_dir)).ok();
 }
 
@@ -102,14 +99,14 @@ pub fn fetch(id: &str, cache_dir: &Path, cancel: &AtomicBool, mut progress: impl
             }
         }
     }
-    let info = fresh_info(cache_dir, id);
+    let info = fresh_info(id);
     // Either failing stops the other, so its error is the one told.
     let stop = AtomicBool::new(false);
     let (tx, rx) = mpsc::channel();
     let results = std::thread::scope(|scope| {
         let workers = [(PICTURE, &download.picture), (SOUND, &download.sound)].into_iter().enumerate().map(
             |(i, (format, path))| {
-                let (tx, stop, info) = (tx.clone(), &stop, info.as_deref());
+                let (tx, stop, info) = (tx.clone(), &stop, info.as_deref().map(Vec::as_slice));
                 scope.spawn(move || {
                     if path.is_file() {
                         tx.send((i, 1.0)).ok();

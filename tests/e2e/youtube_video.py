@@ -152,10 +152,9 @@ def youtube_video(r):
     r.check('the video downloads and its preview draws a frame', wait(lambda: ready(r) and picture(r) > 1000, 30), text(r))
     lines = [json.loads(line) for line in r.log.read_text().splitlines()]
     calls = [c for c in lines if isinstance(c, list)]
-    info = r.work / f'cache/nuzky/youtube/{LONG}.info.json'
     r.check('yt-dlp looks the video up once, by the watch address built from the id, and downloads both from that lookup',
             len(calls) == 3 and calls[0][calls[0].index('--') + 1:] == [f'https://www.youtube.com/watch?v={LONG}']
-            and all(c[-2] == '--load-info-json' and Path(c[-1]).resolve() == info.resolve() for c in calls[1:]), calls)
+            and all(c[-2:] == ['--load-info-json', '-'] for c in calls[1:]), calls)
     starts = [c['start'] for c in lines if 'downloading' in c]
     ends = [c['end'] for c in lines if 'downloaded' in c]
     r.check('the picture and the sound download at the same time', len(starts) == 2 and max(starts) < min(ends), lines)

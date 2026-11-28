@@ -403,15 +403,16 @@ from pathlib import Path
 args = sys.argv[1:]
 with open(os.environ['NUZKY_FAKE_YTDLP_LOG'], 'a') as out:
     out.write(json.dumps(args) + '\n')
-if args[-2] == '--load-info-json':
-    assert json.loads(Path(args[-1]).read_text())['id'] == 'ytVideo0001'
+if args[-2:] == ['--load-info-json', '-']:
+    assert json.loads(sys.stdin.read())['id'] == 'ytVideo0001'
 else:
     assert args[args.index('--') + 1:] == ['https://www.youtube.com/watch?v=ytVideo0001']
 fmt = args[args.index('-f') + 1]
 assert fmt in ('bestvideo[height<=1080][vcodec^=avc1]/bestvideo[height<=1080]', 'bestaudio[ext=m4a]/bestaudio'), fmt
 source = os.environ['NUZKY_FAKE_YTDLP_PICTURE' if fmt.startswith('bestvideo') else 'NUZKY_FAKE_YTDLP_AUDIO']
 if '--skip-download' in args:
-    print(json.dumps({'id': 'ytVideo0001', 'title': 'Test video', 'duration': 10,
+    print(json.dumps({'id': 'ytVideo0001', 'webpage_url': 'https://www.youtube.com/watch?v=ytVideo0001',
+                      'title': 'Test video', 'duration': 10,
                       'filesize': Path(source).stat().st_size, 'live_status': 'not_live'}))
 else:
     shutil.copyfile(source, args[args.index('-o') + 1])
@@ -479,8 +480,6 @@ else:
     assert_eq!(clip["startUs"], added["start_us"]);
     let calls: Vec<Vec<String>> =
         std::fs::read_to_string(&log).unwrap().lines().map(|line| serde_json::from_str(line).unwrap()).collect();
-    let info = cache.join("youtube/ytVideo0001.info.json");
-    assert!(info.is_file());
     for args in &calls {
         if args.contains(&"--skip-download".to_string()) {
             assert_eq!(
@@ -488,8 +487,7 @@ else:
                 &["https://www.youtube.com/watch?v=ytVideo0001"]
             );
         } else {
-            assert_eq!(args[args.len() - 2], "--load-info-json");
-            assert_eq!(PathBuf::from(&args[args.len() - 1]), info);
+            assert_eq!(&args[args.len() - 2..], ["--load-info-json", "-"]);
         }
     }
     assert_eq!(calls.iter().filter(|args| !args.contains(&"--skip-download".to_string())).count(), 2);

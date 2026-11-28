@@ -51,9 +51,8 @@ async fn blocking<T: Send + 'static>(work: impl FnOnce() -> anyhow::Result<T> + 
 
 /// The video a YouTube link points at: title, channel and length.
 #[tauri::command]
-pub async fn youtube_video_link(state: State<'_, AppState>, url: String) -> CmdResult<Video> {
-    let cache = state.cache_dir.clone();
-    blocking(move || videos::link(&url, &cache, &AtomicBool::new(false))).await
+pub async fn youtube_video_link(url: String) -> CmdResult<Video> {
+    blocking(move || videos::link(&url, &AtomicBool::new(false))).await
 }
 
 #[cfg_attr(test, derive(ts_rs::TS))]
