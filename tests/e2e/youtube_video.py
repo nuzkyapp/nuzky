@@ -150,9 +150,14 @@ def youtube_video(r):
     r.shot('rights')
     button(r, 'I understand')
     r.check('the video downloads and its preview draws a frame', wait(lambda: ready(r) and picture(r) > 1000, 30), text(r))
-    calls = [json.loads(line) for line in r.log.read_text().splitlines()]
-    r.check('yt-dlp only ever gets the watch address built from the id',
-            all(c[c.index('--') + 1:] == [f'https://www.youtube.com/watch?v={LONG}'] for c in calls) and len(calls) == 3, calls)
+    lines = [json.loads(line) for line in r.log.read_text().splitlines()]
+    calls = [c for c in lines if isinstance(c, list)]
+    r.check('yt-dlp looks the video up once, by the watch address built from the id, and downloads both from that lookup',
+            len(calls) == 3 and calls[0][calls[0].index('--') + 1:] == [f'https://www.youtube.com/watch?v={LONG}']
+            and all(c[-2:] == ['--load-info-json', '-'] for c in calls[1:]), calls)
+    starts = [c['start'] for c in lines if 'downloading' in c]
+    ends = [c['end'] for c in lines if 'downloaded' in c]
+    r.check('the picture and the sound download at the same time', len(starts) == 2 and max(starts) < min(ends), lines)
     r.check('title, channel and length show, and the whole video is the default',
             all(t in text(r) for t in (f'Test video {LONG}', 'Test Channel · 1:30', 'Import whole video')), text(r))
     r.check('the strip shows frames of the video', wait(lambda: strip(r), 10))
