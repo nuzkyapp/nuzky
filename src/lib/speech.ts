@@ -271,6 +271,25 @@ export function tokenize(view: TranscriptView): Token[] {
  * Token index ranges [from, to) of paragraphs, split where speech pauses for a second or more, and after a sentence once a
  * paragraph has run PARAGRAPH_WORDS words.
  */
+const SENTENCE_END = /[.!?…]["”»)]*$/;
+
+/**
+ * The first and last token of the sentence token `i` is in: from the word after the last sentence end to the next one,
+ * within its paragraph and without the pause and hesitation chips at either end. A chip is a sentence of its own.
+ */
+export function sentenceAt(tokens: Token[], i: number): [number, number] {
+  if (tokens[i].kind !== "word") return [i, i];
+  const [from, to] = paragraphs(tokens).find(([f, t]) => i >= f && i < t) ?? [0, tokens.length];
+  const ends = (k: number) => tokens[k].kind === "word" && SENTENCE_END.test(tokens[k].text);
+  let lo = i;
+  while (lo > from && !ends(lo - 1)) lo--;
+  let hi = i;
+  while (hi < to - 1 && !ends(hi)) hi++;
+  while (tokens[lo].kind !== "word") lo++;
+  while (tokens[hi].kind !== "word") hi--;
+  return [lo, hi];
+}
+
 export function paragraphs(tokens: Token[]): [number, number][] {
   const out: [number, number][] = [];
   let start = 0;
@@ -279,7 +298,7 @@ export function paragraphs(tokens: Token[]): [number, number][] {
   tokens.forEach((t, i) => {
     if (t.kind !== "word") return;
     const pause = last !== null && t.startUs - last.endUs >= PARAGRAPH_GAP_US;
-    const sentence = last !== null && words >= PARAGRAPH_WORDS && /[.!?…]["”»)]*$/.test(last.text);
+    const sentence = last !== null && words >= PARAGRAPH_WORDS && SENTENCE_END.test(last.text);
     if ((pause || sentence) && i > start) {
       out.push([start, i]);
       start = i;

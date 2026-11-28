@@ -1,8 +1,8 @@
-import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
 import { Trash2, ZoomIn } from "lucide-react";
 import { keyAsText, keyLine, markKeyWords, onKey, type CaptionWordRef } from "../../lib/keywords";
 import { followPointer } from "../../lib/drag";
-import { MAX_WORD_CHARS, paragraphs, tokenAt, tokenCounts, useWordPick, type Token } from "../../lib/speech";
+import { MAX_WORD_CHARS, paragraphs, sentenceAt, tokenAt, tokenCounts, useWordPick, type Token } from "../../lib/speech";
 import { aiLocked, useEditor } from "../../lib/store";
 import { formatDuration, formatTime } from "../../lib/time";
 import { Button, useLockReason } from "../ui";
@@ -27,6 +27,11 @@ interface Selection {
 }
 
 const optionId = (i: number) => `transcript-token-${i}`;
+
+const MORE = "Drag across words or Shift-click one to select more; triple-click selects the sentence";
+/** The hint line with its margin, and the text's height with its padding and two lines. */
+const HINT_PX = 22;
+const ROOM_PX = 36 + 2 * 22;
 
 /** Key word pressed: tinted in the key word colour with a line inside it, as a chosen chip, its label in that colour when it reads. */
 const pressedKey = (color: string): CSSProperties => ({
@@ -158,7 +163,7 @@ const Paragraph = memo(function Paragraph({
             title={t.original ? `Recognised as “${t.original}”` : undefined}
             aria-description={[mark && `Suggested zoom ${zoomLabel(mark.scale)}`, key && "Key word"].filter(Boolean).join(", ") || undefined}
             style={key ? keyLook(key, selected, playing) : undefined}
-            className={`cursor-pointer ${selected ? `${i === lo ? "rounded-l-sm" : ""} ${i === hi ? "rounded-r-sm" : ""}` : "rounded-sm hover:bg-raised"} ${mark ? MARK : t.original ? "underline decoration-muted decoration-dotted underline-offset-3" : ""} ${look}`}
+            className={`cursor-text ${selected ? `${i === lo ? "rounded-l-sm" : ""} ${i === hi ? "rounded-r-sm" : ""}` : "rounded-sm hover:bg-raised"} ${mark ? MARK : t.original ? "underline decoration-muted decoration-dotted underline-offset-3" : ""} ${look}`}
           >
             {t.text}
           </span>
@@ -204,7 +209,7 @@ const sameShape = (a: Token[], b: Token[]) => a.length === b.length && a.every((
 
 /**
  * The transcript as text. Click a word to jump there, drag or Shift-click to select a range,
- * Delete cuts it from the timeline unless `blocker` says why it cannot. ←/→ move word by word
+ * triple-click to select its sentence, Delete cuts it from the timeline unless `blocker` says why it cannot. ←/→ move word by word
  * (Shift extends), Esc clears. Double-click a word, or F2 with one word selected, to correct it.
  * K makes the selected words key words in the captions that show them, or plain again.
  */
@@ -230,6 +235,10 @@ export function TranscriptText({
   // The word as the field opened on it: a transcript refreshed meanwhile may read it otherwise, and
   // the correction must then be refused, not land on the new text.
   const opened = useRef<Token | null>(null);
+  // Clicks in the field since it opened: only the first can end the triple-click that opened it.
+  const fieldClicks = useRef(0);
+  // The token the last double-click was on: the field it opens can wrap away from under the pointer before the third click.
+  const doubled = useRef<number | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const bar = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
@@ -277,10 +286,31 @@ export function TranscriptText({
 
   // Toasts move above the Delete bar while it shows, so an Undo toast never covers Delete.
   const barShown = lo >= 0;
+  // The line on how to select more shows only while the text keeps two lines beside it, so in a short panel it never
+  // pushes Delete past the panel's edge. Measured with the line counted in, so it does not come and go.
+  const hint = useRef<HTMLParagraphElement>(null);
+  const [roomy, setRoomy] = useState(true);
   useLayoutEffect(() => {
-    if (!barShown) return;
-    useEditor.setState({ toastLift: bar.current?.offsetHeight ?? 0 });
-    return () => useEditor.setState({ toastLift: 0 });
+    const el = box.current;
+    if (!el) return;
+    const measure = () => setRoomy(el.clientHeight - (hint.current ? 0 : HINT_PX) >= ROOM_PX);
+    measure();
+    const resized = new ResizeObserver(measure);
+    resized.observe(el);
+    return () => resized.disconnect();
+  }, []);
+  const hinted = lo >= 0 && lo === hi && roomy;
+  useLayoutEffect(() => {
+    const el = bar.current;
+    if (!barShown || !el) return;
+    const lift = () => useEditor.setState({ toastLift: el.offsetHeight });
+    lift();
+    const resized = new ResizeObserver(lift);
+    resized.observe(el);
+    return () => {
+      resized.disconnect();
+      useEditor.setState({ toastLift: 0 });
+    };
   }, [barShown]);
 
   useEffect(() => {
@@ -303,6 +333,7 @@ export function TranscriptText({
     setSel({ anchor: i, focus: i });
     setEditing(i);
     opened.current = tokens[i];
+    fieldClicks.current = 0;
   };
 
   // Stable, so paragraphs without the field do not re-render with each word played.
@@ -333,9 +364,23 @@ export function TranscriptText({
   };
 
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
-    if (!dragging.current || !(e.buttons & 1) || !live) return;
+    if (!dragging.current || !live) return;
     const i = indexAt(e.target);
     if (i !== null && i !== live.focus) setSel({ anchor: live.anchor, focus: i });
+  };
+
+  /** The third click of a triple-click: the sentence of the word, also when the double-click opened it for correcting. */
+  const onClick = (e: MouseEvent<HTMLDivElement>) => {
+    const inField = e.target instanceof HTMLInputElement;
+    if (inField) fieldClicks.current++;
+    if (e.detail !== 3 || (inField && fieldClicks.current > 1)) return;
+    const i = doubled.current ?? indexAt(e.target);
+    if (i === null) return;
+    setEditing(null);
+    box.current?.focus();
+    const [from, to] = sentenceAt(tokens, i);
+    setSel({ anchor: from, focus: to });
+    seekTo(from);
   };
 
   const remove = async () => {
@@ -414,8 +459,10 @@ export function TranscriptText({
         tabIndex={0}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
+        onClick={onClick}
         onDoubleClick={(e) => {
           const i = indexAt(e.target);
+          doubled.current = i;
           if (i !== null) startEdit(i);
         }}
         onKeyDown={onKeyDown}
@@ -439,26 +486,33 @@ export function TranscriptText({
         ))}
       </div>
       {lo >= 0 && (
-        <div ref={bar} className="flex shrink-0 items-center gap-2 border-t border-white/[.07] px-3.5 py-2" onKeyDown={onDeleteKey}>
-          <span className="tabular min-w-0 flex-1 truncate text-[12px] text-muted" title={`${summary} · ${formatDuration(lengthUs)}`}>
-            {summary} · {formatDuration(lengthUs)}
-          </span>
-          {captioned && (
-            <Button
-              className="h-7 px-2.5"
-              aria-pressed={allKey}
-              disabled={under.length === 0}
-              disabledReason="No caption shows these words"
-              title={allKey ? "Show plain in the captions (K)" : "Show as key words in the captions (K)"}
-              style={allKey ? pressedKey(under[0].color) : undefined}
-              onClick={toggleKey}
-            >
-              Key word
-            </Button>
+        <div ref={bar} className="shrink-0 border-t border-white/[.07] px-3.5 py-2" onKeyDown={onDeleteKey}>
+          {hinted && (
+            <p ref={hint} className="mb-1.5 truncate text-[12px] text-muted" title={MORE}>
+              Drag or Shift-click to select more words
+            </p>
           )}
-          <Button variant="danger" className="h-7" disabled={!!blocker} disabledReason={blocker ?? undefined} title="Cut from the timeline (Delete)" onClick={remove}>
-            <Trash2 size={14} /> Delete
-          </Button>
+          <div className="flex items-center gap-2">
+            <span className="tabular min-w-0 flex-1 truncate text-[12px] text-muted" title={lo === hi ? MORE : `${summary} · ${formatDuration(lengthUs)}`}>
+              {summary} · {formatDuration(lengthUs)}
+            </span>
+            {captioned && (
+              <Button
+                className="h-7 px-2.5"
+                aria-pressed={allKey}
+                disabled={under.length === 0}
+                disabledReason="No caption shows these words"
+                title={allKey ? "Show plain in the captions (K)" : "Show as key words in the captions (K)"}
+                style={allKey ? pressedKey(under[0].color) : undefined}
+                onClick={toggleKey}
+              >
+                Key word
+              </Button>
+            )}
+            <Button variant="danger" className="h-7" disabled={!!blocker} disabledReason={blocker ?? undefined} title="Cut from the timeline (Delete)" onClick={remove}>
+              <Trash2 size={14} /> Delete
+            </Button>
+          </div>
         </div>
       )}
     </>
