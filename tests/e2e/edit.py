@@ -1,7 +1,7 @@
 import json, statistics, subprocess, time
 
 from e2e.ducking import RATE, TONE, WINDOW, decode, tone_levels
-from e2e.harness import FIXTURES, MACOS, Bridge, export, flow, preview_brightness, settled, wait, webdriver
+from e2e.harness import FIXTURES, MACOS, Bridge, changed_share, export, flow, preview_brightness, preview_crop, preview_rect, preview_redraw, settled, wait, webdriver
 
 # Presses what is under the middle of a fade dot of a clip and drags it `arguments[2]` px along the timeline, without
 # letting go.
@@ -35,6 +35,7 @@ return {next: document.querySelector(`[data-clip-id='${arguments[0]}']`).getBoun
 # The filmstrip frames drawn in the clip `arguments[0]`, or in the ghost a drag draws when it is null.
 TILES = """const el = arguments[0] ? document.querySelector(`[data-clip-id='${arguments[0]}']`) : document.querySelector('section[aria-label=Timeline] .opacity-85');
 return el ? [...el.querySelectorAll('div[style*="background-position"]')].map((d) => d.style.backgroundPosition) : [];"""
+PLAYHEAD = "return window.__nuzky.store.getState().timeUs"
 TIP = "return [...document.querySelectorAll('section[aria-label=Timeline] div')].some((d) => d.textContent === arguments[0])"
 FADES = """const c = window.__nuzky.store.getState().snap.project.tracks.flatMap((t) => t.clips).find((c) => c.id === arguments[0]);
 return [c.content.fadeInUs, c.content.fadeOutUs];"""
@@ -81,6 +82,12 @@ WATCH_MOTION = """window.__motion = {slid: []}; const end = performance.now() + 
     && !m.slid.includes(c.dataset.clipId) && m.slid.push(c.dataset.clipId));
   if (performance.now() < end) requestAnimationFrame(look); })();"""
 SEEN_MOTION = 'return window.__motion'
+
+
+def shown_as(r, name, frame):
+    """Screenshots the preview and returns the share of it that differs from `frame`, a crop of an earlier one."""
+    r.shot(name)
+    return changed_share(preview_crop(r.work / f'{name}.png', preview_rect(r)), frame)
 
 
 @flow('edit', 'Import two clips, zoom the timeline with a touchpad and a wheel, split one with S, delete a piece with Delete, undo, find the result saved, drag a clip edge '
@@ -160,13 +167,23 @@ def edit(r):
     r.check('a title starts with the wide clip', wait(lambda: (c := title()) and c['startUs'] == wide['startUs'], 5), title())
     r.seek(0)
     r.s.run('window.__nuzky.store.getState().setZoom(100)')
-    time.sleep(0.5)
+    time.sleep(1)
+    r.shot('trim-right-before')
+    at_start = preview_crop(r.work / 'trim-right-before.png', preview_rect(r))
     r.s.run(WATCH_MOTION)
     r.s.run(TRIM_RIGHT, undone[0]['id'], 100)
-    # The pointer rests on the edge for 2 s before letting go.
+    # The pointer rests on the edge for 2 s before letting go; meanwhile the preview shows the frame at the edge, as in
+    # CapCut, so the person sees where the clip will end.
     time.sleep(2)
+    edge_us = r.s.run(PLAYHEAD)
+    edge_frame, edge_shown = preview_redraw(r, 'trim-right-edge', at_start)
     r.s.run(RELEASE)
     grown = wait(lambda: (c := r.track()) and c[0]['durationUs'] > undone[0]['durationUs'] and c, 5)
+    end = grown and grown[0]['startUs'] + grown[0]['durationUs']
+    r.check('while the right edge is dragged, the playhead sits on the last frame the clip will show',
+            grown and end - 40_000 < edge_us < end, {'playhead': edge_us, 'end': end})
+    r.check('while the right edge is dragged, the preview shows that frame instead of the one under the playhead', edge_shown)
+    r.check('releasing the edge puts the playhead back where it was', wait(lambda: r.s.run(PLAYHEAD) == 0, 5), r.s.run(PLAYHEAD))
     time.sleep(0.5)
     seen = r.s.run(SEEN_MOTION)
     r.check('releasing a dragged edge after resting on it leaves the clips where the drag showed them, with no slide from their old places', seen['slid'] == [], seen)
@@ -174,6 +191,12 @@ def edit(r):
     r.check('dragging the first clip\'s right edge out moves the wide clip later', grown and moved > 0, grown)
     r.check('the title moves with the wide clip', grown and title()['startUs'] == grown[2]['startUs'],
             {'title': title(), 'wide': grown and grown[2]})
+    # Without the selection's frame over the preview, which the drag did not show.
+    r.s.run('window.__nuzky.store.getState().select([])')
+    r.seek(edge_us)
+    landed = (wait(lambda: (share := shown_as(r, 'trim-right-landed', edge_frame)) < 0.003 and (share,), 6) or (shown_as(r, 'trim-right-landed', edge_frame),))[0]
+    r.check('the frame the drag showed is the trimmed clip\'s frame at that time', landed < 0.003, landed)
+    r.seek(0)
     r.s.run('window.__nuzky.store.getState().setZoom(40)')
     time.sleep(1)
     r.shot('trim-moves-title')
@@ -200,9 +223,18 @@ def edit(r):
     before = r.s.run(LEFTS, undone[1]['id'])
     source_in = r.s.run(SOURCE_IN, undone[0]['id'])
     first_frames = wait(lambda: r.s.run(TILES, undone[0]['id']), 5)
+    r.shot('trim-left-before')
+    at_zero = preview_crop(r.work / 'trim-left-before.png', preview_rect(r))
     r.s.run(TRIM_LEFT, undone[0]['id'], 50)
     time.sleep(0.3)
     during = r.s.run(LEFTS, undone[1]['id'])
+    # The main track packs the trimmed clip where it starts, so the preview shows its new first frame there.
+    first_frame, first_shown = preview_redraw(r, 'trim-left-edge', at_zero)
+    r.check('while the left edge is dragged, the preview shows the clip\'s new first frame at its start',
+            first_shown and r.s.run(PLAYHEAD) == undone[0]['startUs'], r.s.run(PLAYHEAD))
+    line = r.s.run("return document.querySelector('[data-playhead]').getBoundingClientRect().left")
+    r.check('the playhead line stays on the dragged edge', during['ghost'] is not None and abs(line - during['ghost']) < 2,
+            {'line': line, 'ghost': during['ghost']})
     r.check('dragging the first clip\'s left edge 50 px in leaves the next clip where it was',
             during['next'] == before['next'], {'before': before, 'during': during})
     r.check('the trimmed clip\'s left edge follows the pointer', during['ghost'] is not None and abs(during['ghost'] - before['next'] + 150) < 2,
@@ -214,6 +246,9 @@ def edit(r):
     r.check('on release the clip keeps its start and the next clip closes up behind it',
             cut and cut[0]['startUs'] == undone[0]['startUs'] and cut[1]['startUs'] == cut[0]['startUs'] + cut[0]['durationUs']
             and cut[0]['durationUs'] == undone[0]['durationUs'] - 500_000, cut)
+    r.s.run('window.__nuzky.store.getState().select([])')
+    kept = (wait(lambda: (share := shown_as(r, 'trim-left-landed', first_frame)) < 0.003 and (share,), 6) or (shown_as(r, 'trim-left-landed', first_frame),))[0]
+    r.check('the first frame the drag showed is the one the clip starts with on release', kept < 0.003, kept)
     r.check('the clip loses the first 0.5 s of its footage', r.s.run(SOURCE_IN, undone[0]['id']) == source_in + 500_000,
             [source_in, r.s.run(SOURCE_IN, undone[0]['id'])])
     # The footage goes from the left: while dragging, the clip already shows the frames it keeps. It once showed its

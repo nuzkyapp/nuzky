@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent, type RefObject } from "react";
+import { api } from "../../lib/api";
 import { followPointer } from "../../lib/drag";
+import { closeSource } from "../../lib/source";
 import { isRetimed, retime } from "../../lib/retime";
-import { FADE_STEP_US, MAIN_TRACK, clipEdges, isCaptionTrack, maxFadeUs, projectDuration, useEditor } from "../../lib/store";
-import { US, lastFrame, nearestFrame } from "../../lib/time";
-import type { Clip, Project, Track } from "../../lib/types";
+import { FADE_STEP_US, MAIN_TRACK, clipEdges, isCaptionTrack, maxFadeUs, projectDuration, endPreview, showEdit, useEditor } from "../../lib/store";
+import { US, lastFrame, nearestFrame, stepFrame } from "../../lib/time";
+import type { Clip, EditCmd, Project, Track } from "../../lib/types";
 import { EDGE, clipAsset } from "./ClipView";
 
 export const SNAP_PX = 8;
@@ -60,6 +62,22 @@ export function dragResult(d: Drag, minUs: number): { startUs: number; durationU
   }
   const dur = Math.max(minUs, Math.min(clip.durationUs + d.dxUs, d.maxDurUs ?? Infinity));
   return { startUs: clip.startUs, durationUs: dur };
+}
+
+const trimCmd = (d: Drag, r: ReturnType<typeof dragResult>): EditCmd => ({ type: "trimClip", clipId: d.clip.id, startUs: r.startUs, durationUs: r.durationUs, sourceInUs: r.sourceInUs ?? null });
+
+/** Rounds half away from zero, as Rust's `f64::round` in the engine, which keeps a clip's speed as an `f32`. */
+const roundAway = (v: number) => Math.sign(v) * Math.round(Math.abs(v));
+
+/**
+ * Where the preview shows a trim's edge: the clip's first frame, where the main track packs it or where the engine
+ * puts the start from the new source start, or its last frame.
+ */
+function trimEdge(d: Drag, r: ReturnType<typeof dragResult>, fps: number): number {
+  if (d.mode === "trimR") return Math.max(r.startUs, stepFrame(r.startUs + r.durationUs, -1, fps));
+  if (d.trackId === MAIN_TRACK) return d.clip.startUs;
+  if (d.sourceInUs === null || r.sourceInUs === undefined) return r.startUs;
+  return Math.max(0, d.clip.startUs + roundAway((r.sourceInUs - d.sourceInUs) / Math.fround(d.speed)));
 }
 
 /** The fade a fade drag sets: the fade-in handle lengthens it to the right, the fade-out handle to the left. */
@@ -220,7 +238,7 @@ export function useTimelineGestures({
         edit({ type: "moveClip", clipId: d.clip.id, trackId, startUs: r.startUs });
       }
     } else {
-      edit({ type: "trimClip", clipId: d.clip.id, startUs: r.startUs, durationUs: r.durationUs, sourceInUs: r.sourceInUs ?? null });
+      edit(trimCmd(d, r));
     }
     select([d.clip.id]);
   };
@@ -266,12 +284,31 @@ export function useTimelineGestures({
       // one would re-render the timeline. The last one is applied before a release commits the drag.
       let frame = 0;
       let latest: globalThis.PointerEvent | null = null;
+      // A trim shows its edge's frame in the preview, with the playhead on it, and puts the playhead back when it ends.
+      let shown: string | null = null;
+      let playheadUs = 0;
+      const epoch = useEditor.getState().snap?.sessionEpoch;
+      const showEdge = () => {
+        const { snap, playing, aiRun, timeUs } = useEditor.getState();
+        if ((d.mode !== "trimL" && d.mode !== "trimR") || !snap || snap.sessionEpoch !== epoch || playing || aiRun) return;
+        const r = dragResult(d, live.current.minUs);
+        const key = `${r.startUs}:${r.durationUs}`;
+        if (key === shown) return;
+        if (shown === null) playheadUs = timeUs;
+        shown = key;
+        showEdit([trimCmd(d, r)]);
+        closeSource();
+        api.seek(trimEdge(d, r, snap.project.canvas.fps)).catch((e) => console.error("seek", e));
+      };
       const apply = () => {
         frame = 0;
         const ev = latest;
         latest = null;
         const next = ev && step(d, ev, track.kind);
-        if (next) setDrag((d = next));
+        if (next) {
+          setDrag((d = next));
+          showEdge();
+        }
       };
       const end = (commit: boolean) => {
         unfollow();
@@ -281,6 +318,12 @@ export function useTimelineGestures({
         stopDrag.current = null;
         setDrag(null);
         if (commit) finishRef.current(d);
+        if (shown !== null) {
+          endPreview(true);
+          // Playback started meanwhile goes on from where it is; another project keeps its own playhead.
+          const { playing, snap, seek } = useEditor.getState();
+          if (!playing && snap?.sessionEpoch === epoch) seek(playheadUs);
+        }
       };
       const onKey = (ev: KeyboardEvent) => {
         if (ev.key === "Escape") {
