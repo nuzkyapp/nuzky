@@ -1,4 +1,5 @@
 import { AudioLines, Music, Plus, Trash2 } from "lucide-react";
+import { useLayoutEffect } from "react";
 import { type AudioTab as Tab, useSounds } from "../../lib/sounds";
 import { useEditor } from "../../lib/store";
 import { formatDuration } from "../../lib/time";
@@ -104,6 +105,10 @@ function InProject() {
 
 export function AudioTab() {
   const tab = useSounds((s) => s.tab);
+  useLayoutEffect(() => {
+    const hasSound = useEditor.getState().snap?.project.assets.some((a) => a.kind === "audio");
+    if (useSounds.getState().tab === "project" && !hasSound) useSounds.setState({ tab: "music" });
+  }, []);
   return (
     <div className="flex min-h-0 flex-1 flex-col pt-3">
       <TabBar group="audio" label="Audio" tabs={TABS} value={tab} onChange={(id) => useSounds.setState({ tab: id })} />
