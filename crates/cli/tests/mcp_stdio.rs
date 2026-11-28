@@ -403,7 +403,10 @@ from pathlib import Path
 args = sys.argv[1:]
 with open(os.environ['NUZKY_FAKE_YTDLP_LOG'], 'a') as out:
     out.write(json.dumps(args) + '\n')
-assert args[args.index('--') + 1:] == ['https://www.youtube.com/watch?v=ytVideo0001']
+if args[-2] == '--load-info-json':
+    assert json.loads(Path(args[-1]).read_text())['id'] == 'ytVideo0001'
+else:
+    assert args[args.index('--') + 1:] == ['https://www.youtube.com/watch?v=ytVideo0001']
 fmt = args[args.index('-f') + 1]
 assert fmt in ('bestvideo[height<=1080][vcodec^=avc1]/bestvideo[height<=1080]', 'bestaudio[ext=m4a]/bestaudio'), fmt
 source = os.environ['NUZKY_FAKE_YTDLP_PICTURE' if fmt.startswith('bestvideo') else 'NUZKY_FAKE_YTDLP_AUDIO']
@@ -474,13 +477,22 @@ else:
     assert_eq!(clip["content"]["sourceInUs"], start);
     assert_eq!(clip["durationUs"], end - start);
     assert_eq!(clip["startUs"], added["start_us"]);
-    for line in std::fs::read_to_string(&log).unwrap().lines() {
-        let args: Vec<String> = serde_json::from_str(line).unwrap();
-        assert_eq!(
-            &args[args.iter().position(|a| a == "--").unwrap() + 1..],
-            &["https://www.youtube.com/watch?v=ytVideo0001"]
-        );
+    let calls: Vec<Vec<String>> =
+        std::fs::read_to_string(&log).unwrap().lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+    let info = cache.join("youtube/ytVideo0001.info.json");
+    assert!(info.is_file());
+    for args in &calls {
+        if args.contains(&"--skip-download".to_string()) {
+            assert_eq!(
+                &args[args.iter().position(|a| a == "--").unwrap() + 1..],
+                &["https://www.youtube.com/watch?v=ytVideo0001"]
+            );
+        } else {
+            assert_eq!(args[args.len() - 2], "--load-info-json");
+            assert_eq!(PathBuf::from(&args[args.len() - 1]), info);
+        }
     }
+    assert_eq!(calls.iter().filter(|args| !args.contains(&"--skip-download".to_string())).count(), 2);
     c.call("undo_run", json!({"run_id": run}));
     assert_eq!(c.call("get_state", json!({}))["assets"], json!([]));
     c.finish();
