@@ -1038,7 +1038,7 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         std::thread::spawn(move || {
             let (mut socket, _) = listener.accept().unwrap();
-            socket.read(&mut [0; 4096]).unwrap();
+            assert!(socket.read(&mut [0; 4096]).unwrap() > 0);
             socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n").unwrap();
             socket.write_all(&[0; 100]).unwrap();
             std::thread::sleep(Duration::from_secs(60));
