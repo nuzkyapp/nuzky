@@ -17,8 +17,12 @@ WORDS = f"""return [...document.querySelectorAll('{LIST} [role=option][data-t]')
 SELECTED = f"return [...document.querySelectorAll('{LIST} [role=option][aria-selected=true]')].map((e) => Number(e.dataset.t))"
 BAR = f"return document.querySelector('{LIST}').nextElementSibling?.querySelector('span')?.textContent ?? null"
 FITS = f"""const bar = document.querySelector('{LIST}').nextElementSibling, list = document.querySelector('{LIST}');
+if (!bar) return null;
 let panel = bar.parentElement; while (panel && getComputedStyle(panel).overflow === 'visible') panel = panel.parentElement;
 return {{bar: Math.round(bar.getBoundingClientRect().bottom), panel: Math.round(panel.getBoundingClientRect().bottom), list: Math.round(list.getBoundingClientRect().height)}};"""
+OPEN_CHAPTERS = """const b = document.querySelector('[data-chapters-toggle]');
+if (b?.getAttribute('aria-expanded') === 'false') b.click();
+return b?.getAttribute('aria-expanded') === 'true' && !!document.querySelector('[data-chapters]');"""
 HINT = f"""const p = document.querySelector('{LIST}').nextElementSibling?.querySelector('p');
 return p && p.offsetParent && {{text: p.textContent, whole: p.scrollWidth <= p.clientWidth}};"""
 LENGTH = "return window.__nuzky.store.getState().snap.project.tracks[0].clips.reduce((s, c) => Math.max(s, c.startUs + c.durationUs), 0)"
@@ -231,4 +235,17 @@ def transcript_range(r):
         r.check('there the line on how to select more gives way, so the bar with Delete stays inside the panel',
                 fits['bar'] <= fits['panel'] and not hint(), {**fits, 'hint': hint()})
         r.shot('one-word-1024')
-        resize(r, 1440, 900)
+
+    # Open chapters take the tab's height too: in a 1024 × 780 window with four of them the text is short again.
+    asset = r.state()['assets'][0]['id']
+    chapters = [{'title': t, 'assetId': asset, 'sourceUs': us} for t, us in (('Úvod', 0), ('Kamera', 4_000_000), ('Start', 8_000_000), ('Stativ', 11_000_000))]
+    r.s.run('return window.__nuzky.store.getState().edit(arguments[0]).then((s) => !!s)', {'type': 'setChapters', 'chapters': chapters})
+    if r.check('the window is 1024 × 780', resize(r, 1024, 780)) and r.check(
+            'Chapters opens above the text', wait(lambda: r.s.run(OPEN_CHAPTERS), 5, 0.5)):
+        time.sleep(0.5)
+        mouse.click(at(r, first['t']))
+        fits = wait(lambda: (lambda f: f if f and f['bar'] <= f['panel'] else None)(r.s.run(FITS)), 3) or r.s.run(FITS)
+        r.check('with chapters open a word is still there to select, and the bar with Delete stays inside the panel',
+                fits and fits['bar'] <= fits['panel'], {'fits': fits, 'hint': hint(), 'selected': r.s.run(SELECTED)})
+        r.shot('one-word-chapters')
+    resize(r, 1440, 900)

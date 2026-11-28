@@ -29,6 +29,9 @@ interface Selection {
 const optionId = (i: number) => `transcript-token-${i}`;
 
 const MORE = "Drag across words or Shift-click one to select more; triple-click selects the sentence";
+/** The hint line with its margin, and the text's height with its padding and two lines. */
+const HINT_PX = 22;
+const ROOM_PX = 36 + 2 * 22;
 
 /** Key word pressed: tinted in the key word colour with a line inside it, as a chosen chip, its label in that colour when it reads. */
 const pressedKey = (color: string): CSSProperties => ({
@@ -283,6 +286,20 @@ export function TranscriptText({
 
   // Toasts move above the Delete bar while it shows, so an Undo toast never covers Delete.
   const barShown = lo >= 0;
+  // The line on how to select more shows only while the text keeps two lines beside it, so in a short panel it never
+  // pushes Delete past the panel's edge. Measured with the line counted in, so it does not come and go.
+  const hint = useRef<HTMLParagraphElement>(null);
+  const [roomy, setRoomy] = useState(true);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const measure = () => setRoomy(el.clientHeight - (hint.current ? 0 : HINT_PX) >= ROOM_PX);
+    measure();
+    const resized = new ResizeObserver(measure);
+    resized.observe(el);
+    return () => resized.disconnect();
+  }, []);
+  const hinted = lo >= 0 && lo === hi && roomy;
   useLayoutEffect(() => {
     const el = bar.current;
     if (!barShown || !el) return;
@@ -432,8 +449,7 @@ export function TranscriptText({
   const summary = tokenCounts(picked);
 
   return (
-    // A size container, so the hint under one selected word shows only while the transcript has room for it.
-    <div className="flex min-h-0 flex-1 flex-col [container-type:size]">
+    <>
       <div
         ref={box}
         role="listbox"
@@ -471,9 +487,8 @@ export function TranscriptText({
       </div>
       {lo >= 0 && (
         <div ref={bar} className="shrink-0 border-t border-white/[.07] px-3.5 py-2" onKeyDown={onDeleteKey}>
-          {lo === hi && (
-            // Hidden where the transcript has no height to spare, so Delete never slips under the panel's edge.
-            <p className="mb-1.5 truncate text-[12px] text-muted [@container(max-height:160px)]:hidden" title={MORE}>
+          {hinted && (
+            <p ref={hint} className="mb-1.5 truncate text-[12px] text-muted" title={MORE}>
               Drag or Shift-click to select more words
             </p>
           )}
@@ -500,6 +515,6 @@ export function TranscriptText({
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }
