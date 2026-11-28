@@ -452,13 +452,15 @@ fn key_event(window: &NSWindow, kind: NSEventType, code: u16, text: &str) -> Res
     .context("making a key event")
 }
 
-/// The left mouse button `down` or `up` at a point of the page, with the click count that makes a second click a
-/// double-click. WebKit ignores pointer moves made this way, so the flows on macOS cannot hover.
+/// The left mouse button `down`, `drag` while held or `up` at a point of the page, with the click count that makes a
+/// second click a double-click. WebKit ignores pointer moves made this way without the button, so the flows on macOS
+/// cannot hover.
 fn pointer(window: &WebviewWindow, body: &Value) -> Result<Value> {
     let (x, y) = (body["x"].as_f64().context("x")?, body["y"].as_f64().context("y")?);
     let kind = match body["kind"].as_str() {
         Some("down") => NSEventType::LeftMouseDown,
         Some("up") => NSEventType::LeftMouseUp,
+        Some("drag") => NSEventType::LeftMouseDragged,
         kind => bail!("no pointer action {kind:?}"),
     };
     let clicks = body["clicks"].as_i64().unwrap_or(1) as isize;
@@ -475,7 +477,7 @@ fn pointer(window: &WebviewWindow, body: &Value) -> Result<Value> {
             None,
             0,
             clicks,
-            if kind == NSEventType::LeftMouseDown { 1.0 } else { 0.0 },
+            if kind == NSEventType::LeftMouseUp { 0.0 } else { 1.0 },
         )
         .context("making a pointer event")?;
         // Straight to the view under the pointer, as WebKitTestRunner does: the window server would not route
@@ -483,6 +485,7 @@ fn pointer(window: &WebviewWindow, body: &Value) -> Result<Value> {
         let target = content.hitTest(event.locationInWindow()).context("nothing is under the pointer")?;
         match kind {
             NSEventType::LeftMouseDown => target.mouseDown(&event),
+            NSEventType::LeftMouseDragged => target.mouseDragged(&event),
             _ => target.mouseUp(&event),
         }
         Ok(Value::Null)
