@@ -234,6 +234,8 @@ export function TranscriptText({
   const opened = useRef<Token | null>(null);
   // Clicks in the field since it opened: only the first can end the triple-click that opened it.
   const fieldClicks = useRef(0);
+  // The token the last double-click was on: the field it opens can wrap away from under the pointer before the third click.
+  const doubled = useRef<number | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const bar = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
@@ -281,12 +283,18 @@ export function TranscriptText({
 
   // Toasts move above the Delete bar while it shows, so an Undo toast never covers Delete.
   const barShown = lo >= 0;
-  const oneSelected = lo >= 0 && lo === hi;
   useLayoutEffect(() => {
-    if (!barShown) return;
-    useEditor.setState({ toastLift: bar.current?.offsetHeight ?? 0 });
-    return () => useEditor.setState({ toastLift: 0 });
-  }, [barShown, oneSelected]);
+    const el = bar.current;
+    if (!barShown || !el) return;
+    const lift = () => useEditor.setState({ toastLift: el.offsetHeight });
+    lift();
+    const resized = new ResizeObserver(lift);
+    resized.observe(el);
+    return () => {
+      resized.disconnect();
+      useEditor.setState({ toastLift: 0 });
+    };
+  }, [barShown]);
 
   useEffect(() => {
     if (playing && active >= 0) box.current?.querySelector(`[data-t="${active}"]`)?.scrollIntoView({ block: "nearest" });
@@ -349,7 +357,7 @@ export function TranscriptText({
     const inField = e.target instanceof HTMLInputElement;
     if (inField) fieldClicks.current++;
     if (e.detail !== 3 || (inField && fieldClicks.current > 1)) return;
-    const i = editing ?? indexAt(e.target);
+    const i = doubled.current ?? indexAt(e.target);
     if (i === null) return;
     setEditing(null);
     box.current?.focus();
@@ -424,7 +432,8 @@ export function TranscriptText({
   const summary = tokenCounts(picked);
 
   return (
-    <>
+    // A size container, so the hint under one selected word shows only while the transcript has room for it.
+    <div className="flex min-h-0 flex-1 flex-col [container-type:size]">
       <div
         ref={box}
         role="listbox"
@@ -437,6 +446,7 @@ export function TranscriptText({
         onClick={onClick}
         onDoubleClick={(e) => {
           const i = indexAt(e.target);
+          doubled.current = i;
           if (i !== null) startEdit(i);
         }}
         onKeyDown={onKeyDown}
@@ -461,14 +471,14 @@ export function TranscriptText({
       </div>
       {lo >= 0 && (
         <div ref={bar} className="shrink-0 border-t border-white/[.07] px-3.5 py-2" onKeyDown={onDeleteKey}>
-          {oneSelected && (
-            // Hidden where the panel has no height to spare, so Delete never slips under its edge.
-            <p className="mb-1.5 truncate text-[12px] text-muted [@media(max-height:720px)]:hidden" title={MORE}>
+          {lo === hi && (
+            // Hidden where the transcript has no height to spare, so Delete never slips under the panel's edge.
+            <p className="mb-1.5 truncate text-[12px] text-muted [@container(max-height:160px)]:hidden" title={MORE}>
               Drag or Shift-click to select more words
             </p>
           )}
           <div className="flex items-center gap-2">
-            <span className="tabular min-w-0 flex-1 truncate text-[12px] text-muted" title={oneSelected ? MORE : `${summary} · ${formatDuration(lengthUs)}`}>
+            <span className="tabular min-w-0 flex-1 truncate text-[12px] text-muted" title={lo === hi ? MORE : `${summary} · ${formatDuration(lengthUs)}`}>
               {summary} · {formatDuration(lengthUs)}
             </span>
             {captioned && (
@@ -490,6 +500,6 @@ export function TranscriptText({
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }

@@ -275,18 +275,18 @@ const SENTENCE_END = /[.!?…]["”»)]*$/;
 
 /**
  * The first and last token of the sentence token `i` is in: from the word after the last sentence end to the next one,
- * within its paragraph and without the pauses at either end. A pause chip is a sentence of its own.
+ * within its paragraph and without the pause and hesitation chips at either end. A chip is a sentence of its own.
  */
 export function sentenceAt(tokens: Token[], i: number): [number, number] {
-  if (tokens[i].kind === "pause") return [i, i];
+  if (tokens[i].kind !== "word") return [i, i];
   const [from, to] = paragraphs(tokens).find(([f, t]) => i >= f && i < t) ?? [0, tokens.length];
   const ends = (k: number) => tokens[k].kind === "word" && SENTENCE_END.test(tokens[k].text);
   let lo = i;
   while (lo > from && !ends(lo - 1)) lo--;
   let hi = i;
   while (hi < to - 1 && !ends(hi)) hi++;
-  while (lo < hi && tokens[lo].kind === "pause") lo++;
-  while (hi > lo && tokens[hi].kind === "pause") hi--;
+  while (tokens[lo].kind !== "word") lo++;
+  while (tokens[hi].kind !== "word") hi--;
   return [lo, hi];
 }
 

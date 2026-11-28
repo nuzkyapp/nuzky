@@ -187,10 +187,22 @@ def transcript_range(r):
     r.check('one undo brings the whole sentence back', wait(lambda: r.s.run(LENGTH) == length and text in ' '.join(w['text'] for w in words()), 5),
             r.s.run(LENGTH))
 
-    # A triple-click inside a word opened for correcting selects its text there, as in any text field.
+    # The field a double-click opens on a short word at the end of a line can wrap to the next line, away from the
+    # pointer: the third click then presses on the gap, which closes the field, and lands there. The page plays that
+    # third click itself, as no layout here wraps the field on cue.
     mouse.click(at(r, said[2]), times=2)
     field = f"return document.querySelector('{LIST} input')?.value ?? null"
     if r.check('double-clicking a word opens it for correcting', wait(lambda: r.s.run(field) == sentence[2]['text'], 3), r.s.run(field)):
+        r.s.run(f"document.querySelector('{LIST}').focus()")
+        wait(lambda: r.s.run(field) is None, 3)
+        r.s.run(f"document.querySelector('{LIST}').dispatchEvent(new MouseEvent('click', {{bubbles: true, detail: 3}}))")
+        selected = wait(lambda: r.s.run(SELECTED) if len(r.s.run(SELECTED)) > 1 else None, 3) or r.s.run(SELECTED)
+        r.check('a third click that lands beside the word after its field closed still selects the sentence',
+                [t for t in selected if t in said] == said and len(selected) >= len(said), selected)
+
+    # A triple-click inside a word opened for correcting selects its text there, as in any text field.
+    mouse.click(at(r, said[2]), times=2)
+    if r.check('double-clicking the word again opens it for correcting', wait(lambda: r.s.run(field) == sentence[2]['text'], 3), r.s.run(field)):
         time.sleep(1)
         box = r.s.run(f"const b = document.querySelector('{LIST} input').getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]")
         mouse.click(box, times=3)
